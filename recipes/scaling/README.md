@@ -2,8 +2,9 @@
 
 This is the operator's decision tree for "my Act application is under storage or
 throughput pressure." It starts where your pager woke you up (a symptom) and ends
-at one of four places: a close-the-books recipe, an archival recipe, a partitioning
-recipe, or an honest "you've outgrown the framework's shipped assumptions" door.
+at one of five places: a close-the-books recipe, an archival recipe, a split-stores
+recipe, a partitioning recipe, or an honest "you've outgrown the framework's
+shipped assumptions" door.
 
 Default Act is fine for most apps. The framework's defaults — global `id`
 ordering, single Postgres instance, drain-driven reactions, optimistic concurrency
@@ -39,11 +40,14 @@ follows below.
 | reducer cost rising as streams accumulate       | Gate 1                  |
 | auditors want history, business wants it gone   | Gate 2                  |
 | GDPR / retention window + cold-tier requirement | Gate 2                  |
-| VACUUM windows dominating maintenance budget    | Gate 3 (case 1)         |
-| append-only audit ledger, deletion forbidden    | Gate 3 (case 1)         |
-| one stream with millions of events, no close    | Gate 3 (case 2)         |
-| regulatory retention windows + bulk drop        | Gate 3 (case 3)         |
-| app.reset() takes too long                      | Gate 3 (case 4, caveat) |
+| one store hosting several contexts / tenants    | Gate 3                  |
+| seq contention between unrelated workloads      | Gate 3                  |
+| drain waking on another context's commits       | Gate 3                  |
+| VACUUM windows dominating maintenance budget    | Gate 4 (case 1)         |
+| append-only audit ledger, deletion forbidden    | Gate 4 (case 1)         |
+| one stream with millions of events, no close    | Gate 4 (case 2)         |
+| regulatory retention windows + bulk drop        | Gate 4 (case 3)         |
+| app.reset() takes too long                      | Gate 4 (case 4, caveat) |
 | claim() / SKIP LOCKED contention                | not partitioning;       |
 |                                                 | check reaction backoff  |
 |                                                 | + lane sizing in        |
@@ -55,7 +59,7 @@ follows below.
 |                                                 | libs/act-pg/PERFORMANCE |
 | close-cycle CPU climbing every release          | tune autocloseCycleMs / |
 |                                                 | closeBatchSize, then 1  |
-| even after Gates 1-3, the wall doesn't move     | Gate 4                  |
+| even after Gates 1-4, the wall doesn't move     | Gate 5                  |
 ```
 
 The right-hand column points into a gate, not a fix. The gate's prose explains
@@ -126,7 +130,7 @@ You're done when one of two things is true:
    deletion. A retention regime where the volume between "close-eligible" and
    "drop-eligible" is itself larger than the database can comfortably hold.
 
-If you're in case 2, continue to Gate 2 or Gate 3. If you haven't measured —
+If you're in case 2, continue to Gate 2 or beyond. If you haven't measured —
 if you're guessing close won't work — go measure first. Operators routinely
 believe their streams are "long-lived and never end" when in fact most of them
 have natural terminal events that go unused.
@@ -169,10 +173,60 @@ to verify a sampling of archives match their original streams, and how to
 restore a single archived stream if the business asks.
 
 Stay at Gate 2 if archival is the heaviest tool your workload needs. Reach
-for Gate 3 only when the hot table itself — even with `.autocloses` running —
-can't sustain the read or maintenance shape your operations team needs.
+for Gates 3 and 4 only when the hot table itself — even with `.autocloses`
+running — can't sustain the read or maintenance shape your operations team
+needs.
 
-## Gate 3: Is your workload one of the four genuine extremes?
+## Gate 3: Is one store serving more than one bounded context or tenant?
+
+The gates so far assumed the events table is full of *finished* streams.
+This gate is for the table that's already bounded and still hurts —
+because of what it contains, not how much. Every Act store maintains one
+global `id` sequence, one total order over everything in it. That order
+is load-bearing *within* a bounded context: drain dispatches by it,
+projections advance by it, causality debugging relies on it. But when one
+store hosts several bounded contexts (orders, billing, audit) or several
+tenants, the total order also covers pairs of events that no reader ever
+compares — and you pay for it anyway. Every commit serializes through the
+shared `events_id_seq`. Every cross-stream read merge-sorts the union.
+A flash sale in the orders context wakes drain scans that only care about
+audit's streams.
+
+The question this gate asks: **what actually reads across the boundary?**
+If the honest answer is "nothing" — no projection spans contexts, no
+replay crosses tenants — then the shared total order is an accident of
+deployment, and the fix is structural: one Act per context or tenant,
+each built with its own store and cache via `ActOptions.scoped`. Each
+split-off store gets its own sequence, its own watermark space, its own
+drain and close cycle. Per-schema `PostgresStore`s on a shared host is
+the gentle first step; a schema that outgrows the host later moves to
+its own instance without an application-code change.
+
+```ts
+const orders = builder.build({
+  scoped: {
+    store: new PostgresStore({ schema: "orders" }),
+    cache: new InMemoryCache({ maxSize: 5000 }),
+  },
+});
+```
+
+The costs are real and permanent: no cross-store total order,
+cross-context reactions go through a forwarded bus or an inbound
+receiver instead of the drain pipeline, and every operational surface
+(inspector, `app.reset`, `blocked_streams`, dashboards) multiplies by N.
+The recipe at [recipes/scaling/split-stores/](./split-stores/) spells
+out the symptoms, the `scoped` mechanics (store + cache together,
+per-store notify wiring, the AsyncLocalStorage boundary), and the honest
+give-up list.
+
+Run this gate before partitioning, always. Partitioning keeps the
+accidental total order and pays MergeAppend planner cost forever to
+preserve it; splitting stores removes the coupling instead. If the
+table is divisible along a context or tenant seam, split it. Continue
+to Gate 4 only when the workload is one giant *indivisible* context.
+
+## Gate 4: Is your workload one of the four genuine extremes?
 
 Partitioning is operationally heavy. It rewrites the events table, makes the
 primary key composite, adds N×K index trees instead of K, and pays MergeAppend
@@ -215,7 +269,10 @@ verbatim from [libs/act-pg/PARTITIONING.md](../../libs/act-pg/PARTITIONING.md):
 >    framework's PG benchmark (#851) reports observed vs theoretical speedup
 >    for exactly this reason.
 
-Be honest about which of these you have. Only case 1 maps cleanly to HASH
+Be honest about which of these you have — and check the Gate 3 seam
+first: several of the workloads that *look* like case 1 are really
+several contexts sharing a store, and splitting is cheaper than any
+partition scheme. Only case 1 maps cleanly to HASH
 partitioning. Case 2 needs range-on-`id` and is more documentation than
 turn-key recipe. Case 3 needs range-on-`created` and pairs with the
 partition-drop runner. Case 4 is conditional — partitioning may help your
@@ -240,16 +297,16 @@ Case 4 doesn't have a dedicated recipe because the answer is "run #851's
 parallel-rebuild benchmark on your data shape and decide from the numbers."
 The bench is the recipe.
 
-## Gate 4: You've reached the framework's limit
+## Gate 5: You've reached the framework's limit
 
-Some workloads outgrow the assumptions the framework ships with. The events
-table cannot fit on a single Postgres instance even with HASH partitioning.
-The global `id` order is itself the bottleneck — drain throughput plateaus
-because the lagging-frontier claim ordering is serialized through one
-sequence. The business needs strict per-tenant isolation that
-`ActOptions.scoped` doesn't deliver at the storage layer. Multi-region
-write-anywhere semantics that conflict with optimistic concurrency on a
-shared sequence.
+Some workloads outgrow the assumptions the framework ships with. One
+bounded context's events cannot fit on a single Postgres instance even
+with HASH partitioning. The global `id` order *within a single context*
+is itself the bottleneck — drain throughput plateaus because the
+lagging-frontier claim ordering is serialized through one sequence, and
+there's no seam left to split along (Gate 3 already gave each context
+and tenant its own store). Multi-region write-anywhere semantics that
+conflict with optimistic concurrency on a shared sequence.
 
 The framework intentionally does not ship sharding, multi-master, or
 cross-region strategies. They are not "missing features"; they are bespoke
@@ -257,11 +314,12 @@ trade-offs that depend on which invariants you're willing to give up
 (global ordering, single-writer simplicity, exact-once drain) for what gain.
 Shipping a one-size-fits-all answer would be wrong.
 
-If you're at Gate 4, the path forward is:
+If you're at Gate 5, the path forward is:
 
-1. Confirm with numbers that Gates 1-3 don't move your wall. Specifically:
+1. Confirm with numbers that Gates 1-4 don't move your wall. Specifically:
    show the close-cycle is doing what it can, archival is keeping the hot
-   table bounded, partitioning has been measured (not assumed) for your read
+   table bounded, every divisible context or tenant already has its own
+   store, partitioning has been measured (not assumed) for your read
    shape, and the wall is still there.
 
 2. Open an issue at https://github.com/Rotorsoft/act-root/issues with the
@@ -270,8 +328,7 @@ If you're at Gate 4, the path forward is:
    workers but `claim()` serializes through one sequence." Concrete.
 
 3. Expect the conversation to be bespoke. We may sketch a sharded variant,
-   suggest moving the bottleneck workload onto its own `ActOptions.scoped`
-   instance with a separate store, or conclude that your case is genuinely
+   find a split seam Gate 3 missed, or conclude that your case is genuinely
    the kind of scale where you outgrow the framework. All three are
    legitimate outcomes; "Act is wrong for this" is sometimes the right
    answer.
@@ -282,7 +339,7 @@ into a focused conversation grounded in measurements.
 ## A closing note on order
 
 The gates are ordered by how often they apply, not by how interesting they
-sound. Gate 1 is boring and answers most tickets. Gate 3 is exciting and
+sound. Gate 1 is boring and answers most tickets. Gate 4 is exciting and
 answers very few. The temptation, especially under pressure, is to skip
 straight to partitioning because it sounds like the heavyweight answer.
 Resist it. The cost of running Gate 1 first is at most a day of measurement;

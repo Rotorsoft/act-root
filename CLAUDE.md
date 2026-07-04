@@ -141,6 +141,7 @@ When an Act application hits the edges (events table growing without bound, cool
 | Scaling decision tree (symptoms → recipe) | [recipes/scaling/README.md](recipes/scaling/README.md) |
 | Close-the-books patterns (`.autocloses({...})`) | [recipes/scaling/close-the-books/README.md](recipes/scaling/close-the-books/README.md) |
 | Cold-tier archival (`.archives(...)` + S3 / JSONL) | [recipes/scaling/archival/README.md](recipes/scaling/archival/README.md) |
+| Scale-out by splitting stores (per-context/tenant `ActOptions.scoped`) | [recipes/scaling/split-stores/README.md](recipes/scaling/split-stores/README.md) |
 | Partitioning gating page (the "don't" page) | [recipes/scaling/partitioning/README.md](recipes/scaling/partitioning/README.md) |
 | HASH-on-stream partition recipe (SQL + run.sh) | [recipes/scaling/partitioning/hash-on-stream/](recipes/scaling/partitioning/hash-on-stream/README.md) |
 | RANGE-on-id (single-aggregate giants, docs only) | [recipes/scaling/partitioning/range-on-id/](recipes/scaling/partitioning/range-on-id/README.md) |

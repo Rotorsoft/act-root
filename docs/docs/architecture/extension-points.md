@@ -336,6 +336,8 @@ Concrete scenarios:
 - **Hybrid storage per bounded context.** A monolith where the "orders" context lives in Postgres but "audit" lives in SQLite (or vice versa). Each bounded context gets its own Act bound to its own backing store. Reactions across contexts go through whatever cross-process mechanism the operator wires (HTTP, message bus, or `Store.notify` if both speak the same protocol).
 - **Side-by-side store experiments.** Running an existing Act on `PostgresStore` and a candidate Act on a new adapter in parallel to compare correctness or performance under live traffic — both pinned to the same process so they see the same input stream.
 
+For the scaling angle — when to split one overloaded store into per-context or per-tenant stores, what you give up (cross-store total order, drain-carried cross-context reactions), and how the move compares to partitioning — see the [split-stores recipe](https://github.com/Rotorsoft/act-root/blob/master/recipes/scaling/split-stores/README.md).
+
 ### When *not* to use it
 
 - **Single-tenant single-store apps.** Use the singleton path. The scoped overlay is invisible against everyday work but it still adds an `AsyncLocalStorage.run()` wrap on every method call; there's no reason to opt in if you don't need isolation.
