@@ -75,6 +75,7 @@ The narrow set of workloads where `close()` genuinely can't help:
 
 Even if you fit one of the four extreme cases, partitioning isn't always the right shape. Cases where it's specifically *not* the answer:
 
+- **The table is big because it hosts several bounded contexts or tenants.** If nothing reads across them, the shared total order is an accident of deployment — split the store first (one Act per context via `ActOptions.scoped`, recipe at `recipes/scaling/split-stores/README.md`). Partitioning keeps the accidental total order and pays MergeAppend forever to preserve it; splitting removes the coupling instead.
 - **Events table under ~10M rows.** Planner overhead from partition pruning + MergeAppend costs more than the table size saves. PG documentation gives this as the rough lower bound, and our PG 17 microbenchmarks in `libs/act-pg/PERFORMANCE.md` were all run well below this threshold for the same reason — there isn't a real win to measure.
 - **Cross-stream queries dominate.** If your projections / reactions span many streams and need global id order, partitioning slows the read path. Even the rebuild win is conditional.
 - **No HA replicas.** The migration to partitioned shape rewrites the table — WAL volume is significant and a non-replicated database means the migration window is the only window. Plan downtime accordingly, or stand up a logical replica first.
