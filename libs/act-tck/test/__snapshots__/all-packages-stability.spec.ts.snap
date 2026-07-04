@@ -39928,6 +39928,34 @@ const DEFAULT_CONFIG: Config = {
   schema: "public",
   table: "events",
   notify: false,
+  // Opinionated pool defaults (#1119). node-postgres ships \`max: 10\`
+  // with no acquisition timeout and no statement timeout — a saturated
+  // pool makes every caller hang indefinitely instead of failing with
+  // a diagnosable error. Nearly every store method holds a client for
+  // a multi-statement transaction, so multi-lane drains plus API
+  // traffic can exhaust a 10-client pool quickly. All four values are
+  // plain \`pg.PoolConfig\` fields — caller config overrides any of them
+  // via the constructor spread.
+  //
+  // - \`max: 20\` — floor for the default lane's parallel handler budget
+  //   (streamLimit 10, each commit holds a client) plus API commits,
+  //   the optional LISTEN client, and headroom. Sizing rule in the
+  //   README: Σ per-lane streamLimit + API concurrency + notify + 2–4.
+  // - \`connectionTimeoutMillis: 10_000\` — fail acquisition fast (the
+  //   pg default of 0 waits forever); surfaces as StoreError via
+  //   \`_client()\` so operators see *which* operation starved.
+  // - \`idleTimeoutMillis: 30_000\` — keep idle clients warm across
+  //   drain cycles (cycleMs can exceed the pg default of 10s in
+  //   low-traffic deployments) without pinning connections for long.
+  // - \`statement_timeout: 60_000\` — per-statement (not per-transaction)
+  //   ceiling; every statement the store issues (claim CTE, seed DDL,
+  //   truncate, restore's per-event inserts) legitimately completes
+  //   orders of magnitude faster, so 60s only fires on a wedged server
+  //   or a lost lock instead of holding the client hostage.
+  max: 20,
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
+  statement_timeout: 60_000,
 };
 
 /**
@@ -39987,18 +40015,18 @@ const DEFAULT_CONFIG: Config = {
  *
  * @example Connection pooling configuration
  * \`\`\`typescript
- * // PostgresStore uses node-postgres (pg) connection pooling
- * // Pool is created automatically with default settings
- * // For custom pool config, use environment variables:
- * //   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
- * //   PGMAXCONNECTIONS, PGIDLETIMEOUT, etc.
+ * // PostgresStore uses node-postgres (pg) connection pooling with
+ * // opinionated defaults: max 20, connectionTimeoutMillis 10s,
+ * // idleTimeoutMillis 30s, statement_timeout 60s. Any pg.PoolConfig
+ * // field passed to the constructor overrides the default.
  *
  * const pgStore = new PostgresStore({
  *   host: "db.example.com",
  *   port: 5432,
  *   database: "production",
  *   user: "app_user",
- *   password: process.env.DB_PASSWORD
+ *   password: process.env.DB_PASSWORD,
+ *   max: 40  // lanes × streamLimit + API concurrency + headroom
  * });
  * \`\`\`
  *
@@ -40118,6 +40146,22 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Acquire a pooled client, translating acquisition failures into
+   * {@link StoreError} with the calling operation as context. With the
+   * default \`connectionTimeoutMillis\`, a saturated pool fails here
+   * after 10s with \`Store operation "<operation>" failed\` (driver
+   * error preserved as \`cause\`) instead of hanging indefinitely.
+   * Every method that checks out a client routes through this helper.
+   */
+  private async _client(operation: string): Promise<pg.PoolClient> {
+    try {
+      return await this._pool.connect();
+    } catch (error) {
+      throw new StoreError(operation, { cause: error });
+    }
+  }
+
+  /**
    * Dispose of the store and close all database connections.
    * Releases any active LISTEN client first so the pool can drain cleanly.
    * @returns Promise that resolves when all connections are closed
@@ -40155,7 +40199,7 @@ export class PostgresStore implements Store {
    * @throws Error if seeding fails
    */
   async seed() {
-    const client = await this._pool.connect();
+    const client = await this._client("seed");
 
     try {
       await client.query("BEGIN");
@@ -40427,7 +40471,7 @@ export class PostgresStore implements Store {
     expectedVersion?: number
   ) {
     if (msgs.length === 0) return [];
-    const client = await this._pool.connect();
+    const client = await this._client("commit");
     let version = -1;
     try {
       await client.query("BEGIN");
@@ -40548,7 +40592,7 @@ export class PostgresStore implements Store {
     millis: number,
     lane?: string
   ): Promise<Lease[]> {
-    const client = await this._pool.connect();
+    const client = await this._client("claim");
     try {
       await client.query("BEGIN");
       const lane_clause = lane !== undefined ? \`AND s.lane = $5\` : "";
@@ -40648,7 +40692,7 @@ export class PostgresStore implements Store {
       lane?: string;
     }>
   ): Promise<{ subscribed: number; watermark: number }> {
-    const client = await this._pool.connect();
+    const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
       let subscribed = 0;
@@ -40716,7 +40760,7 @@ export class PostgresStore implements Store {
    * @returns Acked leases.
    */
   async ack(leases: Lease[]): Promise<Lease[]> {
-    const client = await this._pool.connect();
+    const client = await this._client("ack");
     try {
       await client.query("BEGIN");
       const { rows } = await client.query<{
@@ -40771,7 +40815,7 @@ export class PostgresStore implements Store {
    * @returns Blocked leases.
    */
   async block(leases: BlockedLease[]): Promise<BlockedLease[]> {
-    const client = await this._pool.connect();
+    const client = await this._client("block");
     try {
       await client.query("BEGIN");
       const { rows } = await client.query<{
@@ -41046,7 +41090,7 @@ export class PostgresStore implements Store {
     values.push(limit);
     sql += \` ORDER BY stream LIMIT $\${values.length}\`;
 
-    const client = await this._pool.connect();
+    const client = await this._client("query_streams");
     try {
       const [streamsResult, maxResult] = await Promise.all([
         client.query<{
@@ -41383,7 +41427,7 @@ export class PostgresStore implements Store {
     // Close any prior subscription so callers don't silently double-listen.
     await this._teardown_listen();
 
-    const client = await this._pool.connect();
+    const client = await this._client("notify");
     const on_notification = (msg: pg.Notification) => {
       // Channel filter: this client only \`LISTEN\`s on \`this._channel\`,
       // but pg-pool can in theory deliver buffered notifications when a
@@ -41483,7 +41527,7 @@ export class PostgresStore implements Store {
   > {
     if (!targets.length) return new Map();
     const streams = targets.map((t) => t.stream);
-    const client = await this._pool.connect();
+    const client = await this._client("truncate");
     try {
       await client.query("BEGIN");
       await client.query(\`DELETE FROM \${this._fqs} WHERE stream = ANY($1)\`, [
@@ -41541,7 +41585,7 @@ export class PostgresStore implements Store {
       callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
     ) => Promise<void>
   ): Promise<void> {
-    const client = await this._pool.connect();
+    const client = await this._client("restore");
     try {
       await client.query("BEGIN");
       // RESTART IDENTITY resets the id sequence; CASCADE handles any
