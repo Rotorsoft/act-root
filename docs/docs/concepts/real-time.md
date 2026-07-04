@@ -13,6 +13,16 @@ title: Real-Time with SSE
 npm install @rotorsoft/act-sse
 ```
 
+## See it running
+
+The multi-transport calculator demo wires SSE end-to-end next to tRPC, Hono REST, and OpenAPI:
+
+- `packages/server/src/server.ts` — publishes every commit to a `BroadcastChannel` from a single `committed` lifecycle listener and mounts the generated `GET /api/sse/Calculator?stream=<id>` endpoint via `hono(app, { sse })`.
+- `packages/client/src/useSse.ts` — a small `EventSource` hook that applies `event: patch` frames with `applyPatchMessage` and reconnects on `behind` to re-seed from the server's cached `event: state` frame.
+- `packages/client/src/Calculator.tsx` — renders the SSE-fed state live under the keypad.
+
+Run `pnpm dev:http` from the repo root and press keys at [http://localhost:3000](http://localhost:3000) — the live panel updates on every commit without refetching, from either transport or another browser tab.
+
 ## Architecture
 
 ```

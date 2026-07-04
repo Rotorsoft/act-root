@@ -10,6 +10,7 @@
   "dependencies": {
     "@act/calculator": "workspace:^",
     "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-http": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
     "@tanstack/react-query": "^5.101.1",
     "@tanstack/react-query-devtools": "^5.101.1",

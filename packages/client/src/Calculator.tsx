@@ -1,13 +1,34 @@
 import type { Digits, Operators } from "@act/calculator";
 import { useState } from "react";
 import { callRestAction, type Snapshot } from "./restClient.js";
-import { trpc } from "./trpc.js";
+import { SERVER_BASE, trpc } from "./trpc.js";
+import { useSse } from "./useSse.js";
 
 type Transport = "trpc" | "rest";
+
+/** The broadcast view served by `GET /api/sse/Calculator` — the
+ * calculator state plus the `_v` stream-version contract. */
+type LiveState = {
+  _v: number;
+  left?: string;
+  right?: string;
+  operator?: string;
+};
+
+function formatState(s: LiveState): string {
+  if (s.left === undefined && s.operator === undefined) return "0";
+  return `${s.left ?? "0"} ${s.operator ?? ""} ${s.right ?? ""}`;
+}
 
 export default function Calculator() {
   const [display, setDisplay] = useState("");
   const [transport, setTransport] = useState<Transport>("trpc");
+
+  // Live state over SSE — updates on every commit (from either
+  // transport, or another browser tab) without refetching.
+  const live = useSse<LiveState>(
+    `${SERVER_BASE}/api/sse/Calculator?stream=calculator`
+  );
 
   // tRPC side — same shape as before, used when transport === "trpc".
   const trpcPressKey = trpc.PressKey.useMutation({
@@ -106,6 +127,14 @@ export default function Calculator() {
             {key}
           </button>
         ))}
+      </div>
+      <div className="sse-panel">
+        <div className="sse-label">
+          SSE live {live ? `(v${live._v})` : "— waiting for first commit"}
+        </div>
+        <div className="display sse-display">
+          {live ? formatState(live) : "–"}
+        </div>
       </div>
     </div>
   );

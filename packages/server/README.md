@@ -1,21 +1,24 @@
 # @act/server
 
-A multi-transport HTTP server that mounts **every** `@rotorsoft/act-http` transport against the same `calculatorApp` from `@act/calculator` — tRPC, Hono REST, and a live OpenAPI document, all on one port.
+A multi-transport HTTP server that mounts **every** `@rotorsoft/act-http` transport against the same `calculatorApp` from `@act/calculator` — tRPC, Hono REST, SSE, and a live OpenAPI document, all on one port.
 
 > Workspace package, not published. Run via `pnpm dev:http` from the monorepo root (which boots both server and client).
 
 ## What it does
 
-One Act instance, three transports mounted side-by-side on a single Hono root app:
+One Act instance, four transports mounted side-by-side on a single Hono root app:
 
 | URL                                    | Source                                       | Use                                          |
 | -------------------------------------- | -------------------------------------------- | -------------------------------------------- |
 | `POST /trpc/PressKey`, `/trpc/Clear`   | Hand-written `t.router({...})` in `@act/calculator` | Typed tRPC React client at :3000             |
 | `POST /api/actions/PressKey`, `/Clear` | `hono(calculatorApp, ...)` from `@rotorsoft/act-http/hono` | Plain-fetch REST clients, Vite toggle's REST mode |
+| `GET  /api/sse/Calculator?stream=<id>` | `hono(calculatorApp, { sse })` + `BroadcastChannel` from `@rotorsoft/act-http/sse` | `EventSource` live-state panel in the client |
 | `GET  /openapi.json`                   | `openapi(calculatorApp, ...)` from `@rotorsoft/act-http/openapi` | Swagger / RapiDoc / Redoc                    |
 | `GET  /`                               | Hand-rolled landing page                     | Operator orientation                         |
 
-The Vite client (`packages/client`) gains a transport toggle that swaps between the tRPC mutations and the REST routes, exercising both surfaces against the same stream.
+The Vite client (`packages/client`) gains a transport toggle that swaps between the tRPC mutations and the REST routes, exercising both surfaces against the same stream, plus a live SSE panel that updates on every commit without refetching.
+
+SSE publication is host-owned: a single `calculatorApp.on("committed", ...)` listener forwards every local commit — tRPC bridge and REST alike, both funnel through `calculatorApp.do` — to the shared `BroadcastChannel` as version-keyed domain patches. See the [Real-Time with SSE](../../docs/docs/concepts/real-time.md) concept page.
 
 ## Quickstart
 
