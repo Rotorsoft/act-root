@@ -48,8 +48,10 @@ describe("event-sourcing", () => {
     expect(snapshot.event?.name).toBe("INCREMENT");
   });
 
-  it("should not throw on snap error", async () => {
+  it("should not throw on snap error and warn with stream, reason, and hint", async () => {
     vi.spyOn(store(), "commit").mockRejectedValueOnce(new Error("fail"));
+    const { log } = await import("../src/ports.js");
+    const warnSpy = vi.spyOn(log(), "warn");
     // snap swallows errors internally — should not throw
     await expect(
       snap({
@@ -70,6 +72,39 @@ describe("event-sourcing", () => {
         replayed: 0,
       })
     ).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Snapshot write failed on stream "s": fail — cold starts will replay full history until snapshots succeed.'
+    );
+  });
+
+  it("should warn with stringified reason when snap fails with a non-error", async () => {
+    vi.spyOn(store(), "commit").mockRejectedValueOnce("wire dropped");
+    const { log } = await import("../src/ports.js");
+    const warnSpy = vi.spyOn(log(), "warn");
+    await expect(
+      snap({
+        event: {
+          id: 1,
+          stream: "s",
+          name: "INCREMENT",
+          version: 1,
+          created: new Date(),
+          data: {},
+          meta: { correlation: "c", causation: {} },
+        },
+        state: {},
+        patches: 0,
+        snaps: 0,
+        version: 1,
+        cache_hit: false,
+        replayed: 0,
+      })
+    ).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Snapshot write failed on stream "s": wire dropped'
+      )
+    );
   });
 
   it("should persist snapshot event on snap success", async () => {
@@ -185,6 +220,34 @@ describe("event-sourcing", () => {
     // first the action event, then the snap event
     expect(events.length).toBe(2);
     expect(events[1].name).toBe(SNAP_EVENT);
+  });
+
+  it("should complete the action and warn when the snapshot write fails", async () => {
+    const meWithSnap = { ...me, snap: () => true, given: undefined };
+    const s = store();
+    const original = s.commit.bind(s);
+    vi.spyOn(s, "commit").mockImplementation((...args) =>
+      args[1][0]?.name === SNAP_EVENT
+        ? Promise.reject(new Error("disk full"))
+        : original(...args)
+    );
+    const { log } = await import("../src/ports.js");
+    const warnSpy = vi.spyOn(log(), "warn");
+
+    // (a) the action still succeeds — snap failure never propagates
+    const [snapshot] = await action(
+      meWithSnap,
+      "increment",
+      { stream: "s", actor: { id: "a", name: "a" } },
+      { count: 1 }
+    );
+    expect(snapshot.event?.name).toBe("INCREMENT");
+
+    // (b) the fire-and-forget snap surfaced the operator signal
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Snapshot write failed on stream "s": disk full — cold starts will replay full history until snapshots succeed.'
+    );
   });
 
   it("should handle action that produces no event", async () => {
@@ -476,7 +539,7 @@ describe("event-sourcing", () => {
 
   it("should handle error in snap", async () => {
     vi.resetModules();
-    const fakeLogger = { error: vi.fn(), trace: vi.fn() };
+    const fakeLogger = { error: vi.fn(), warn: vi.fn(), trace: vi.fn() };
     vi.doMock("../src/ports.js", async (importOriginal) => {
       const actual = await importOriginal();
       return Object.assign({}, actual, {
@@ -502,6 +565,8 @@ describe("event-sourcing", () => {
       cache_hit: false,
       replayed: 0,
     });
-    expect(fakeLogger.error).toHaveBeenCalled();
+    expect(fakeLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Snapshot write failed on stream "s": fail')
+    );
   });
 });

@@ -27,7 +27,8 @@ backed by unit/integration specs under `libs/act/test/`.
 |---|---|---|
 | `with_snaps: true` resumes from the latest snapshot per stream; an explicit `after` overrides the floor; a stream with no snapshot returns full history | `cache-and-snapshots.md`, `Store.query` doc | `store-tck.ts` → "with_snaps resumes from the latest snapshot per stream" |
 | Cold start absorbs the snapshot event into state and resets `patches` to 0 (`snaps` increments) | `cache-and-snapshots.md` "How the two interact on cold start" | `event-sourcing.spec.ts` → "should load from a snapshot event on cold start" |
-| Snapshot writes are fire-and-forget; a snap failure does not propagate | `cache-and-snapshots.md` "Snapshot creation" | `event-sourcing.spec.ts` → "should not throw on snap error" |
+| Snapshot writes are fire-and-forget; a snap failure does not propagate | `cache-and-snapshots.md` "Snapshot creation" | `event-sourcing.spec.ts` → "should not throw on snap error and warn with stream, reason, and hint" |
+| A snapshot write failure never fails the action and is surfaced at warn level with the stream, reason, and full-replay hint | `cache-and-snapshots.md` "Snapshot creation" | `event-sourcing.spec.ts` → "should complete the action and warn when the snapshot write fails" |
 | A successful snap predicate commits a `__snapshot__` event | `cache-and-snapshots.md` | `event-sourcing.spec.ts` → "should persist snapshot event on snap success" |
 | Cache miss populates the cache; a warm hit replays nothing older | `cache-and-snapshots.md` "Read path" | `cache.spec.ts` → "cache miss populates cache on load" |
 | The cache is invalidated **only** on `ConcurrencyError` | `cache-and-snapshots.md` "Cache invalidation — narrow contract" | `cache.spec.ts` → "cache invalidated on ConcurrencyError" |

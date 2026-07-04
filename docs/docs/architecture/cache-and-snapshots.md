@@ -91,7 +91,7 @@ The user-supplied predicate decides *when* to snap. Common patterns:
 - **By time elapsed**: keep timestamp on state, snap when `Date.now() - state.lastSnapAt > 60_000`.
 - **Never**: omit `.snap()`. Streams with bounded length (single-day TTL, capped by app logic) often don't need snapshots.
 
-The actual write is fire-and-forget — `void snap(last)` doesn't block the action's return. Snapshot failures log via `snap()`'s internal try/catch but don't propagate. The cache is the immediate source of truth; the snapshot is durability for cold start.
+The actual write is fire-and-forget — `void snap(last)` doesn't block the action's return. Snapshot failures log via `snap()`'s internal try/catch but don't propagate — a **warn**-level line carries the stream, the failure reason, and the operational consequence (cold starts replay full history until snapshots succeed), so a persistently failing snapshot write is visible to operators instead of silently degrading every cold start. The cache is the immediate source of truth; the snapshot is durability for cold start.
 
 ## How the two interact on cold start
 
