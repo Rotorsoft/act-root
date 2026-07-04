@@ -29,7 +29,7 @@ store(new PostgresStore({
 
 A few production-relevant defaults to override depending on workload:
 
-- **`max` connections (PG pool).** The `pg.Pool` default is 10. For drain-heavy workloads (many parallel reaction streams), raise to match your Postgres `max_connections` budget.
+- **Connection pool.** `PostgresStore` ships opinionated pool defaults: `max: 20`, `connectionTimeoutMillis: 10000` (a saturated pool fails fast as `StoreError` with the starved operation as context, instead of hanging), `idleTimeoutMillis: 30000`, `statement_timeout: 60000`. All are plain `pg.PoolConfig` fields — override any of them in the constructor. Size `max` per process as `Σ(streamLimit per lane) + peak concurrent API commits + (notify ? 1 : 0) + headroom (2–4)`: every lane's `DrainController` drains in parallel and runs up to `streamLimit` (default 10) handlers concurrently, each holding a client during its commit; every in-flight API action holds one too. Keep the sum across all workers under your Postgres `max_connections` budget.
 - **`schema` and `table`.** Multi-tenant apps often want one schema per tenant. The store accepts both — use them rather than namespacing stream IDs.
 - **Initialize the schema.** Run `await store().seed()` once on first deploy (creates the `events` and `_streams` tables, indexes, etc.). Idempotent — safe to keep in your bootstrap.
 

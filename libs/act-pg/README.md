@@ -70,7 +70,11 @@ All fields are optional and have sensible defaults:
 | `schema` | `public` | Schema for event + streams tables |
 | `table` | `events` | Base name (`<table>` for events, `<table>_streams` for subscriptions) |
 | `notify` | `false` | Opt-in `LISTEN`/`NOTIFY` for cross-process commit wakeup (see below) |
-| `max`, `idleTimeoutMillis`, …pg.PoolConfig | (pg defaults) | Pass-through to node-postgres pool config |
+| `max` | `20` | Pool size ceiling (see [Pool tuning](#pool-tuning)) |
+| `connectionTimeoutMillis` | `10000` | Client-acquisition timeout — a saturated pool fails fast as `StoreError` instead of hanging |
+| `idleTimeoutMillis` | `30000` | Idle clients stay warm across drain cycles before being closed |
+| `statement_timeout` | `60000` | Per-statement server-side ceiling — a wedged statement releases its client instead of holding it hostage |
+| …rest of `pg.PoolConfig` | (pg defaults) | Pass-through to node-postgres pool config |
 
 ```ts
 // Production deployment via env vars
@@ -81,11 +85,29 @@ store(new PostgresStore({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   schema: process.env.DB_SCHEMA ?? "public",
-  max: 20,  // pool size — raise for drain-heavy workloads
+  max: 40,  // pool size — raise for drain-heavy workloads
 }));
 ```
 
 Multi-tenant deployments often want one schema per tenant. The store accepts both — use them rather than namespacing stream IDs.
+
+### Pool tuning
+
+Nearly every store method checks out a client for a multi-statement transaction — `commit`, `claim`, `ack`, `block`, `subscribe`, `truncate`, `restore` all hold one from `BEGIN` to `COMMIT`. Concurrency stacks up from three directions:
+
+- **Drain lanes.** Every declared lane (plus the implicit `"default"`) runs its own `DrainController`, and all controllers drain in parallel. Within a lane, up to `streamLimit` (default 10) reaction handlers run concurrently — each handler that commits (`app.do` inside a slice) holds a client for the duration of its commit transaction.
+- **API traffic.** Every in-flight action handled by your HTTP/tRPC layer holds a client during its commit.
+- **`notify: true`.** One extra dedicated long-lived LISTEN client per process.
+
+Sizing rule per process:
+
+```
+max ≥ Σ(streamLimit per lane) + peak concurrent API commits + (notify ? 1 : 0) + headroom (2–4)
+```
+
+The default `max: 20` covers the single-default-lane case (10) plus modest API concurrency and the LISTEN client. Raise it when you add lanes or expect bursty API traffic; keep the sum across all worker processes under your Postgres `max_connections` budget (minus superuser/maintenance reservations).
+
+When the pool does saturate, acquisition fails after `connectionTimeoutMillis` as a `StoreError` whose `operation` names the starved method (`"commit"`, `"claim"`, …) and whose `cause` carries the driver error — a clear signal to resize, instead of an indefinite hang.
 
 ## Common patterns
 
