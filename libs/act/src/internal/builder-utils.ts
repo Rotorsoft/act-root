@@ -14,18 +14,14 @@
 
 import { DEFAULT_LANE } from "../ports.js";
 import type {
-  Actor,
   Committed,
   EventRegister,
-  IAct,
   LaneConfig,
   Reaction,
   ReactionHandler,
   ReactionOptions,
   ReactionResolver,
-  Schema,
   Schemas,
-  Snapshot,
 } from "../types/index.js";
 import {
   assert_defer_when,
@@ -33,47 +29,6 @@ import {
   make_deferred,
 } from "./defer-config.js";
 import { _this_ } from "./merge.js";
-
-/**
- * The `.do(handler)` step, parameterized by the builder it returns (`TReturn`).
- * Identical for both builders modulo that return type.
- */
-type ReactionDo<
-  TReturn,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = (
-  handler: (
-    event: Committed<TEvents, TKey>,
-    stream: string,
-    app: IAct<TEvents, TActions, TActor>
-  ) => Promise<Snapshot<Schema, TEvents> | void>,
-  options?: Partial<ReactionOptions>
-) => TReturn & {
-  to: (resolver: ReactionResolver<TEvents, TKey, TLanes> | string) => TReturn;
-};
-
-/**
- * The object `.on(event)` returns: run immediately with `.do(...)`, or hold
- * with `.defer(when).do(...)`. Parameterized by the return builder so
- * `act()` and `slice()` share one shape.
- */
-export type ReactionOn<
-  TReturn,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = {
-  do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
-  defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => {
-    do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
-  };
-};
 
 /**
  * Validate and register a drain lane (ACT-1103): the `"default"` name is

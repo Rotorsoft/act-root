@@ -6,7 +6,6 @@
  * self-contained functional slices (vertical slice architecture).
  */
 import {
-  type ReactionOn,
   reaction_on,
   register_lane,
   register_state,
@@ -21,6 +20,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
+import type { BuilderBase } from "./builder-base.js";
 import type { Projection } from "./projection-builder.js";
 
 /**
@@ -76,7 +76,7 @@ export type Slice<
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
  */
-export type SliceBuilder<
+export interface SliceBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -84,7 +84,13 @@ export type SliceBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
-> = {
+> extends BuilderBase<
+    SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes
+  > {
   /**
    * Registers a state definition with the slice.
    *
@@ -108,17 +114,6 @@ export type SliceBuilder<
     TLanes
   >;
   /**
-   * Embeds a built Projection within this slice. The projection's events
-   * must be a subset of events from states already registered via
-   * `.withState()`. Projection handlers preserve their `(event, stream)`
-   * signature and do not receive the app interface.
-   */
-  withProjection: <TNewEvents extends Schemas>(
-    projection: [Exclude<keyof TNewEvents, keyof TEvents>] extends [never]
-      ? Projection<TNewEvents>
-      : never
-  ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
-  /**
    * Declares a drain lane on this slice (ACT-1103). Merged into the
    * parent Act's lane set by `act().withSlice(slice)`.
    */
@@ -133,31 +128,10 @@ export type SliceBuilder<
     TLanes | TConfig["name"]
   >;
   /**
-   * Begins defining a reaction scoped to this slice's events. Chain `.do(...)`
-   * to run immediately, or `.defer(when).do(...)` to hold the reaction until a
-   * schedule is due (#1091). `.to(...)` follows `.do(...)` in both cases and,
-   * for a deferred reaction, is how you route it onto its own target when you
-   * don't want the hold to stall the aggregate's other reactions.
-   */
-  on: <TKey extends keyof TEvents>(
-    event: TKey
-  ) => ReactionOn<
-    SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
-    TEvents,
-    TActions,
-    TActor,
-    TLanes,
-    TKey
-  >;
-  /**
    * Builds and returns the Slice data structure.
    */
   build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
-  /**
-   * The registered event schemas and their reaction maps.
-   */
-  readonly events: EventRegister<TEvents>;
-};
+}
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
 
