@@ -33,6 +33,10 @@ These are the surfaces enumerated in [STABILITY.md § Covered by semver](../STAB
   (`Foo` → `Foo_v2`) — these are additive by the charter's own rules and don't need
   an RFC, though one is welcome if the design is non-obvious.
 - Docs, recipes, examples, and tooling under `packages/`, `recipes/`, `docs/`, or `scripts/`.
+- Stability-snapshot growth that adds no surface — the snapshot embeds internal
+  module source text, so a longer log line or comment can trip the gate's line
+  counter. Declare `rfc-gate: exempt — <reason>` in the PR body; the gate accepts
+  the marker and the reviewer audits the claim against the snapshot diff.
 
 When in doubt, open the RFC — it's a page, and the reviewer would rather read it
 than reverse-engineer the intent later.

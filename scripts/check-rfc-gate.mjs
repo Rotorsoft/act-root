@@ -43,6 +43,12 @@ const SNAPSHOT_PATH =
 const RFC_FILE_RE = /^rfcs\/\d{4}-[^/]+\.md$/;
 // Matches "rfcs/0007", "rfcs/0007-foo.md", "RFC 7", "RFC-0007" in prose.
 const RFC_LINK_RE = /\brfcs\/\d{3,4}\b|\bRFC[-\s]?\d{1,4}\b/i;
+// Explicit false-positive escape hatch: the snapshot embeds the source text of
+// internal modules, so implementation-only growth (a longer log line, a new
+// comment) trips the line counter without adding public surface. The PR body
+// may declare the exemption with a reason — auditable in the PR itself:
+//   rfc-gate: exempt — internal-only diff, no public surface added
+const EXEMPT_RE = /^\s*rfc-gate:\s*exempt\s*[—-]+\s*\S.*$/im;
 
 const BASE_REF = process.env.BASE_REF || "origin/master";
 const HEAD_REF = process.env.HEAD_REF || "HEAD";
@@ -131,7 +137,10 @@ function fail(addedRemoved) {
       "     (use the PR or issue number for NNNN) and fill it in.",
       "  2. If an RFC already exists, link it in the PR body or a commit message",
       "     (e.g. 'rfcs/0007' or 'RFC 7').",
-      "  3. If this is a false positive (a rename/refactor the diff happened to grow,",
+      "  3. If the growth adds no public surface (internal implementation text",
+      "     embedded in the snapshot), declare it in the PR body with a reason:",
+      "     'rfc-gate: exempt — <why no public surface is added>'.",
+      "  4. If this is a false positive (a rename/refactor the diff happened to grow,",
       "     or surface the charter already exempts — new optional field, new event",
       "     version), add the RFC anyway: 'when in doubt, open the RFC' (rfcs/README.md).",
       "",
@@ -156,6 +165,14 @@ function main() {
   if (!growth.grew) {
     console.log(
       `RFC gate: snapshot changed but did not grow (${growth.added} added / ${growth.removed} removed non-blank lines) — rename/removal/refactor, no RFC required.`
+    );
+    return;
+  }
+
+  const exempt = PR_BODY.match(EXEMPT_RE);
+  if (exempt) {
+    console.log(
+      `RFC gate: snapshot grew but the PR body declares an exemption — ${exempt[0].trim()}`
     );
     return;
   }
