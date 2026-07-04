@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.10.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.10.0...@rotorsoft/act-sqlite-v1.10.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **act-sqlite:** throw on non-portable stream filter patterns ([#1114](https://github.com/rotorsoft/act-root/issues/1114)) ([14dad8b](https://github.com/rotorsoft/act-root/commit/14dad8be006d25badef426246a6ea1a2126fb5e4))
+
 # [@rotorsoft/act-sqlite-v1.10.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.9.1...@rotorsoft/act-sqlite-v1.10.0) (2026-07-01)
 
 
