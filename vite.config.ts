@@ -88,11 +88,13 @@ export default defineConfig({
         "libs/act-diagram/src/index.ts",
         "libs/act-diagram/src/vite-env.d.ts",
       ],
+      // 100% on every metric is the merge gate (CLAUDE.md); the enforced
+      // thresholds must match the stated policy (#1112).
       thresholds: {
-        branches: 90,
-        functions: 95,
-        lines: 95,
-        statements: 95,
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100,
       },
     },
   },
