@@ -115,7 +115,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 /**
  * Query options for event store queries.
  *
- * @property `stream?` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (`^foo` prefix, `foo$` suffix, `^foo$` whole-string). A plain string `foo` matches any stream containing it. Semantics are identical across all stores.
+ * @property `stream?` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (`^foo` prefix, `foo$` suffix, `^foo$` whole-string). A plain string `foo` matches any stream containing it. The portable grammar guaranteed identical across all stores is `^` / `$` anchors, `.` (any single character), `.*` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw `ValidationError` rather than silently approximate.
  * @property `stream_exact?` - When true, treat `stream` as a literal string and use fast equality instead of regex compilation.
  * @property `names?` - Filter by event names
  * @property `before?` - Filter events before this id

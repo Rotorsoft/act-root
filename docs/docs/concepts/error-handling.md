@@ -427,6 +427,8 @@ await app.unblock({});
 
 The filter form always restricts to `blocked = true` regardless of what the caller passes — there's no use case for "unblock unblocked streams." Already-unblocked streams and unknown names are silently skipped; the return count reflects only streams that were actually flipped.
 
+Filter patterns are regex-shaped, but stick to the **portable grammar** — `^` / `$` anchors, `.` (any single character), `.*` (any run), and literal characters — which matches identically on every store. Richer regex (character classes, alternation, quantifiers, escapes) either matches with full regex semantics or throws `ValidationError` on adapters that can't express it exactly (SQLite): a filter that drives bulk recovery must fail loudly rather than silently select the wrong streams. See [extension-points](../architecture/extension-points.md) for the adapter contract.
+
 Contrast with `app.reset(input)`, which is for projection rebuilds. `reset` accepts the same `string[] | StreamFilter` shape but sets the watermark back to -1 and replays every event from the start:
 
 | Use case | Method |

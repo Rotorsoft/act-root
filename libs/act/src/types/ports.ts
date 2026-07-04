@@ -157,12 +157,21 @@ export type StreamPosition = {
  *   whole-string match. A plain string `foo` is a substring match
  *   (matches any stream containing `foo`). Pass `stream_exact: true`
  *   for a fast literal-equality comparison that skips regex compilation.
+ *   **Portable grammar:** the subset guaranteed to match identically on
+ *   every adapter is `^` / `$` anchors, `.` (any single character),
+ *   `.*` (any run of characters), and literal characters. Adapters
+ *   whose native engine compiles richer regex (PG POSIX, InMemory
+ *   `RegExp`) MAY accept more; an adapter that cannot express a pattern
+ *   exactly MUST throw `ValidationError` rather than silently
+ *   approximate — a silently-wrong match is the worst failure mode when
+ *   the filter drives `reset` / `unblock`. Pinned by the TCK's
+ *   stream-filter-grammar suite.
  * @property stream_exact - Treat `stream` as a literal string instead
  *   of a regex.
- * @property source - Source-stream filter. Same anchor semantics as
- *   `stream`. Useful to isolate dynamic-reaction subscriptions tied to
- *   a particular aggregate stream. Pass `source_exact: true` for
- *   literal equality.
+ * @property source - Source-stream filter. Same anchor semantics and
+ *   portable grammar as `stream`. Useful to isolate dynamic-reaction
+ *   subscriptions tied to a particular aggregate stream. Pass
+ *   `source_exact: true` for literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   `source`.
  * @property source_matches - **Best-effort** reverse-match narrowing:
@@ -225,10 +234,14 @@ export type QueryStreamsResult = {
  * registered stream; treat as a footgun and use sparingly.
  *
  * @property stream - Stream-name filter (regex by default; `stream_exact`
- *   for equality).
+ *   for equality). Same portable grammar as {@link QueryStreams.stream}:
+ *   `^` / `$` anchors, `.`, `.*`, and literal characters are guaranteed
+ *   across adapters; anything richer either matches with full regex
+ *   semantics or throws `ValidationError` — never a silent
+ *   approximation, since these filters drive bulk `reset` / `unblock`.
  * @property stream_exact - Exact-match instead of regex.
  * @property source - Source-stream filter (regex by default;
- *   `source_exact` for equality).
+ *   `source_exact` for equality). Same portable grammar as `stream`.
  * @property source_exact - Exact-match instead of regex.
  * @property blocked - Restrict to blocked / unblocked streams. Omit
  *   for both.
