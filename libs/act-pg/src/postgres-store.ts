@@ -113,6 +113,15 @@ const PG_UNIQUE_VIOLATION = "23505";
 // surprises.
 const NOTIFY_CHANNEL_PREFIX = "act_commit";
 
+// PG caps NOTIFY payloads at 8000 bytes — `pg_notify` raises
+// "payload string too long" (SQLSTATE 54000) at or above the cap, and
+// inside the commit transaction that error would abort the whole INSERT
+// batch. `commit()` measures the serialized payload first and skips the
+// NOTIFY when it would not fit: listeners fall back to the poll path, so
+// delivery degrades to the next poll cycle but the commit never fails.
+// See: https://www.postgresql.org/docs/current/sql-notify.html
+const NOTIFY_MAX_PAYLOAD_BYTES = 8000;
+
 function notify_channel(schema: string, table: string): string {
   return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
 }
@@ -703,20 +712,23 @@ export class PostgresStore implements Store {
       // PostgresStore instances self-filter their own writes — see
       // `_subscribe_notifications()`. PG NOTIFY payloads cap at 8000
       // bytes; for typical commits (1–10 events) this is comfortably
-      // under, and the polling fallback path handles the rare overflow
-      // case correctly. Skipped entirely when `config.notify === false`
-      // (the default) so single-instance deployments pay zero
-      // per-write overhead.
+      // under. Oversize payloads (very large batches, long stream/event
+      // names) skip the NOTIFY instead of aborting the transaction —
+      // listeners fall back to the poll path, so delivery degrades to
+      // the next poll cycle but the events are never lost. Skipped
+      // entirely when `config.notify === false` (the default) so
+      // single-instance deployments pay zero per-write overhead.
       if (this.config.notify) {
         const payload = JSON.stringify({
           stream,
           events: committed.map((c) => ({ id: c.id, name: c.name as string })),
           by: this._by,
         });
-        await client.query(`SELECT pg_notify($1, $2)`, [
-          this._channel,
-          payload,
-        ]);
+        if (Buffer.byteLength(payload, "utf8") < NOTIFY_MAX_PAYLOAD_BYTES)
+          await client.query(`SELECT pg_notify($1, $2)`, [
+            this._channel,
+            payload,
+          ]);
       }
 
       await client.query("COMMIT");

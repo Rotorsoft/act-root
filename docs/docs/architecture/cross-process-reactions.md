@@ -66,6 +66,18 @@ Every store instance carries a per-instance UUID (`_by`) embedded in the NOTIFY 
 
 The alternative (broadcast everything, let the consumer filter) was rejected as messier — it pollutes the local fast path with self-echoes and forces every listener to know about the filter.
 
+## Payload cap — oversize commits degrade to poll
+
+PostgreSQL rejects NOTIFY payloads at or above 8000 bytes (`payload string
+too long`), and `pg_notify` runs inside the commit transaction — an
+unguarded oversize payload would abort the whole INSERT batch. `commit()`
+therefore measures the serialized payload first and **skips the NOTIFY when
+it would not fit** (very large batches, long stream/event names). The commit
+succeeds, no notification goes out, and listeners pick the events up on
+their next poll cycle — delivery degrades in latency, never in guarantees.
+At-least-once is preserved because NOTIFY is only ever a latency
+optimization over the poll path, not the delivery mechanism itself.
+
 ## Adapter status
 
 | Adapter | `notify` | Why |
