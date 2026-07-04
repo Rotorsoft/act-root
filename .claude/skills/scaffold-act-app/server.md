@@ -372,7 +372,7 @@ Set `LOG_LEVEL=debug` or `LOG_LEVEL=trace` for verbose framework logging (uses p
 
 These patterns apply when building apps that need live state push (SSE/WebSockets) on top of act's event sourcing. Use `@rotorsoft/act-http/sse` for incremental state broadcast.
 
-Install: `pnpm -F @my-app/app add @rotorsoft/act-http/sse`
+Install: `pnpm -F @my-app/app add @rotorsoft/act-http` (import from the `@rotorsoft/act-http/sse` subpath)
 
 ### `app.do()` Returns One Snapshot Per Event — Use the Last One
 
@@ -397,32 +397,29 @@ async function doAction(action: string, target: any, payload: any) {
 
 ### Incremental State Broadcast with `@rotorsoft/act-http/sse`
 
-Instead of sending the full aggregate state to every client after each action, `@rotorsoft/act-http/sse` computes RFC 6902 JSON Patches between consecutive states and sends only the diff — falling back to full state when the patch is too large or the client needs to resync.
+Instead of sending the full aggregate state to every client after each action, `@rotorsoft/act-http/sse` forwards the *domain patches* that event handlers already compute (deep-merge partials), keyed by event version — so subscribers apply only what changed and resync with a full refetch when they miss versions.
 
 **Version contract:** `_v` is always set from `snap.event.version` — the event store's monotonic stream version. No separate version counters.
 
 ```
-  app.do() → snap
+  app.do() → snapshots (each carries its domain patch)
       │
       ▼
   deriveState(snap)              ← app-specific (overlay presence, deadlines, etc.)
   state._v = snap.event.version  ← event store version is the single source of truth
       │
       ▼
-  broadcast.publish(streamId, state)
+  broadcast.publish(streamId, state, patches)
       │
-      ├── compare(prev, state) → RFC 6902 ops
-      ├── ops ≤ threshold  → PatchMessage  { _type: "patch", _baseV, _v, _patch }
-      ├── ops > threshold  → FullStateMessage { _type: "full", _v, ...state }
+      ├── version-key each patch: { [baseV+1]: patch1, [baseV+2]: patch2, ... }
       └── push to all SSE subscribers
       │
       ▼
   Client: applyPatchMessage(msg, cached)
       │
-      ├── full   → accept if _v ≥ cachedV
-      ├── patch  → apply if _baseV === cachedV
-      ├── stale  → skip (client ahead, mutation response arrived first)
-      └── behind → invalidate + refetch (client missed a version)
+      ├── contiguous → deep-merge patches in version order
+      ├── stale      → skip (client ahead, mutation response arrived first)
+      └── behind     → invalidate + refetch (client missed versions)
 ```
 
 ### Server-Side Setup
@@ -439,25 +436,26 @@ type MyAppState = BroadcastState & {
 
 // Create broadcast channel + presence tracker
 const broadcast = new BroadcastChannel<MyAppState>({
-  maxPatchOps: 50,   // fall back to full state above this
-  cacheSize: 50,     // LRU cache entries
+  cache_size: 50,    // LRU cache entries; default 50
 });
 const presence = new PresenceTracker();
 
 // After every app.do() — the single broadcast entry point
-function broadcastState(streamId: string, snap: Snap) {
-  const state = deriveFullState(snap);           // app-specific state derivation
-  state._v = snap.event.version;                 // MUST set from event store version
+function broadcastState(streamId: string, snaps: Snap[]) {
+  const last = snaps[snaps.length - 1];
+  const state = deriveFullState(last);           // app-specific state derivation
+  state._v = last.event.version;                 // MUST set from event store version
+  const patches = snaps.map((s) => s.patch).filter(Boolean); // one per emitted event
   const withPresence = applyPresence(state, streamId); // app-specific overlay
-  broadcast.publish(streamId, withPresence);
+  broadcast.publish(streamId, withPresence, patches);
 }
 
 // For non-event state changes (e.g. presence toggle)
 function broadcastPresenceChange(streamId: string) {
-  const cached = broadcast.getState(streamId);
+  const cached = broadcast.get_state(streamId);
   if (!cached) return;
   const withPresence = applyPresence(cached, streamId);
-  broadcast.publishOverlay(streamId, withPresence);
+  broadcast.publish_overlay(streamId, withPresence);
 }
 ```
 
@@ -467,14 +465,18 @@ function broadcastPresenceChange(streamId: string) {
 import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 
 // In SSE onData handler (React Query):
-onData: (msg) => {
+onData: (env) => {
+  if (env.kind === "snap") {
+    utils.getState.setData({ streamId }, env.state); // full state on connect
+    return;
+  }
   const cached = utils.getState.getData({ streamId });
-  const result = applyPatchMessage(msg, cached);
+  const result = applyPatchMessage(env.msg, cached);
 
   if (result.ok) {
     utils.getState.setData({ streamId }, result.state);
-  } else if (result.reason === "behind" || result.reason === "patch-failed") {
-    utils.getState.invalidate({ streamId }); // trigger full refetch
+  } else if (result.reason === "behind") {
+    utils.getState.invalidate({ streamId }); // missed versions — trigger full refetch
   }
   // "stale" → no-op (client already has newer state from mutation response)
 }
@@ -504,9 +506,9 @@ onStateChange: publicProcedure
     }
 
     try {
-      // Yield current state on connect (always full state for reconnects)
-      const cached = broadcast.getState(streamId);
-      if (cached) yield { _type: "full" as const, ...cached, serverTime: new Date().toISOString() };
+      // Yield cached state on connect (full state for first paint / reconnects)
+      const cached = broadcast.get_state(streamId);
+      if (cached) yield { kind: "snap" as const, state: cached };
 
       while (!signal?.aborted) {
         if (!pending) {
@@ -519,7 +521,7 @@ onStateChange: publicProcedure
         if (pending) {
           const msg = pending;
           pending = null;
-          yield msg;
+          yield { kind: "patch" as const, msg };
         }
       }
     } finally {
@@ -560,7 +562,7 @@ const OrderProjection = projection("orders")
 
 // Handler reads from broadcast cache (always hot after app.do())
 async function persistSummary(streamId: string): Promise<void> {
-  const state = broadcast.getState(streamId);
+  const state = broadcast.get_state(streamId);
   if (!state) return; // cold start — bootstrap will rebuild
   const summary = toSummary(state); // lightweight ~500B vs ~2KB full state
   await db.upsert(streamId, summary);
@@ -711,7 +713,7 @@ If a projection's read-modify-write falls back to the live cache on a miss, it r
 ```typescript
 // BUG — live cache holds post-event snapshots, projection double-applies
 async function upsertProjection(streamId, mutator) {
-  let state = projCache.get(streamId) ?? broadcast.getState(streamId);
+  let state = projCache.get(streamId) ?? broadcast.get_state(streamId);
   mutator(state); // patches applied twice
   await writeProjection(streamId, state);
 }

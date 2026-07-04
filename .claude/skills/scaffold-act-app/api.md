@@ -6,7 +6,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 
 **Why decompose into many small files instead of one router?** Each file has a single responsibility and a clear dependency graph. `trpc.ts` knows nothing about auth; `context.ts` knows nothing about routes; route files know nothing about each other. This prevents circular dependencies and makes it easy to find where a specific endpoint lives. When the spec adds a new domain aggregate, you add handlers to `domain.routes.ts` without touching auth or SSE logic.
 
-**The mutation sequence is always: `doAction()` → `broadcastState()` → `settle()` → return.** Every mutation follows this exact order. If you skip `broadcastState()`, SSE clients won't see the change. If you skip `settle()`, reactions and projections won't process. If you read from a projection instead of the snapshot in the response, you'll return stale data because projections are async. Always return data from the snapshot, never from a projection query in the same request.
+**The mutation sequence is always: `app.do()` → `broadcastState()` → `settle()` → return.** Every mutation follows this exact order. If you skip `broadcastState()`, SSE clients won't see the change. If you skip `settle()`, reactions and projections won't process. If you read from a projection instead of the snapshot in the response, you'll return stale data because projections are async. Always return data from the snapshot, never from a projection query in the same request.
 
 **Choosing the right procedure type:** Use `publicProcedure` for unauthenticated reads (list views, SSE subscriptions). Use `authedProcedure` for any mutation that modifies state — the middleware guarantees `ctx.actor` is non-null and typed. Use `adminProcedure` for administrative operations (role assignment, user management). Never use `publicProcedure` for mutations unless the spec explicitly allows anonymous writes.
 
@@ -163,35 +163,43 @@ export type AppState = BroadcastState & {
 export const broadcast = new BroadcastChannel<AppState>();
 export const presence = new PresenceTracker();
 
-type Snap = { state?: any; event?: { version: number; created: Date } };
+type Snap = {
+  state?: any;
+  patch?: Partial<AppState>;
+  event?: { version: number; created: Date };
+};
 
 /** Broadcast state after every app.do() — single entry point. */
-export function broadcastState(streamId: string, snap: Snap) {
-  const state = snap?.state;
+export function broadcastState(streamId: string, snaps: Snap[]) {
+  const last = snaps.at(-1);
+  const state = last?.state;
   if (!state) return;
 
   const fullState: AppState = {
     ...state,
-    _v: snap.event!.version,
+    _v: last.event!.version, // MUST come from the event store version
     // ... app-specific computed fields (deadlines, etc.)
   };
 
+  // Collect each emitted snapshot's domain patch, in commit order
+  const patches = snaps.map((s) => s.patch).filter(Boolean) as Partial<AppState>[];
+
   // Overlay presence on human players/users
   const withPresence = applyPresence(fullState, streamId);
-  broadcast.publish(streamId, withPresence);
+  broadcast.publish(streamId, withPresence, patches);
 }
 
 /** Re-broadcast with updated presence (called on connect/disconnect). */
 export function broadcastPresenceChange(streamId: string) {
-  const cached = broadcast.getState(streamId);
+  const cached = broadcast.get_state(streamId);
   if (!cached) return;
   const withPresence = applyPresence(cached, streamId);
-  broadcast.publishOverlay(streamId, withPresence);
+  broadcast.publish_overlay(streamId, withPresence);
 }
 
 function applyPresence(state: AppState, streamId: string): AppState {
   // App-specific presence overlay — e.g., set `connected` on each player/user
-  const online = presence.getOnline(streamId);
+  const online = presence.get_online(streamId);
   // ... overlay online status onto state
   return state;
 }
@@ -204,15 +212,14 @@ import { app, getItems } from "@my-app/domain";
 import { z } from "zod";
 import { t, authedProcedure, adminProcedure, publicProcedure } from "./trpc.js";
 import { broadcastState } from "./broadcast.js";
-import { doAction } from "./app.js";
 
 export const domainRouter = t.router({
   CreateItem: authedProcedure
     .input(z.object({ name: z.string() }))
     .mutation(async ({ input, ctx }) => {
       const stream = crypto.randomUUID();
-      const snap = await doAction("CreateItem", { stream, actor: ctx.actor }, input);
-      broadcastState(stream, snap);  // incremental patch to SSE subscribers
+      const snaps = await app.do("CreateItem", { stream, actor: ctx.actor }, input);
+      broadcastState(stream, snaps); // incremental patches to SSE subscribers
       app.settle();                  // non-blocking — projections + reactions
       return { success: true, id: stream };
     }),
@@ -237,7 +244,7 @@ import type { PatchMessage } from "@rotorsoft/act-http/sse";
 export const eventsRouter = t.router({
   /**
    * Real-time state broadcast — incremental patches over SSE.
-   * Uses @rotorsoft/act-http/sse for automatic RFC 6902 patch computation.
+   * Forwards version-keyed domain patch messages from @rotorsoft/act-http/sse.
    */
   onStateChange: publicProcedure
     .input(z.object({ streamId: z.string(), identityId: z.string().optional() }).optional())
@@ -260,9 +267,9 @@ export const eventsRouter = t.router({
       }
 
       try {
-        // Yield current state on connect (always full state for reconnects)
-        const cached = broadcast.getState(streamId);
-        if (cached) yield { _type: "full" as const, ...cached, serverTime: new Date().toISOString() };
+        // Yield cached state on connect (full state for first paint / reconnects)
+        const cached = broadcast.get_state(streamId);
+        if (cached) yield { kind: "snap" as const, state: cached };
 
         while (!signal?.aborted) {
           if (!pending) {
@@ -275,7 +282,7 @@ export const eventsRouter = t.router({
           if (pending) {
             const msg = pending;
             pending = null;
-            yield msg;
+            yield { kind: "patch" as const, msg };
           }
         }
       } finally {

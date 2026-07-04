@@ -4,7 +4,7 @@ React + Vite frontend in `packages/app/src/client/`.
 
 **The client has two real-time data flows — understand which to use where:**
 
-1. **State stream** (`useStateStream`) — subscribes to a *single entity's state* via `onStateChange`. The server pushes incremental JSON patches (RFC 6902) after every mutation. Use this for detail views where you're watching one entity (a game board, an order, a ticket). The hook applies patches to the React Query cache directly — no refetch needed.
+1. **State stream** (`useStateStream`) — subscribes to a *single entity's state* via `onStateChange`. The server pushes version-keyed domain patches (deep-merge partials) after every mutation. Use this for detail views where you're watching one entity (a game board, an order, a ticket). The hook applies patches to the React Query cache directly — no refetch needed.
 
 2. **Event stream** (`useEventStream`) — subscribes to the *global event log* via `onEvent`. Every event across all streams arrives here. Use this for event replay UIs, admin dashboards, and activity feeds. It triggers cache invalidation on relevant queries (e.g., invalidate the list when an item is created).
 
@@ -12,7 +12,7 @@ React + Vite frontend in `packages/app/src/client/`.
 
 **splitLink is required, not optional.** tRPC SSE subscriptions use `httpSubscriptionLink`, while mutations/queries use `httpLink`. Without `splitLink`, subscriptions will fail with HTTP errors because `httpLink` doesn't support the SSE protocol.
 
-**Version handling in useStateStream:** The hook handles 4 cases from `applyPatchMessage()`: `ok` (apply patch to cache), `behind` (client missed a version — invalidate and refetch), `patch-failed` (patch couldn't apply — invalidate and refetch), `stale` (client is ahead because the mutation response arrived before the SSE patch — ignore). Getting these wrong causes UI glitches or infinite refetch loops.
+**Version handling in useStateStream:** The hook handles 3 cases from `applyPatchMessage()`: `ok` (apply patches to cache), `behind` (client missed versions — invalidate and refetch), `stale` (client is ahead because the mutation response arrived before the SSE patch — ignore). Getting these wrong causes UI glitches or infinite refetch loops.
 
 ## Key Patterns
 
@@ -132,15 +132,20 @@ export function useStateStream(streamId: string | null, identityId?: string) {
     streamId ? { streamId, identityId } : undefined,
     {
       onStarted,
-      onData: (msg) => {
+      onData: (env) => {
         if (!streamId) return;
+        if (env.kind === "snap") {
+          // Full state on connect/reconnect — seed the cache directly
+          utils.getState.setData({ streamId }, env.state as any);
+          return;
+        }
         const cached = utils.getState.getData({ streamId }) as any;
-        const result = applyPatchMessage(msg as any, cached);
+        const result = applyPatchMessage(env.msg as any, cached);
 
         if (result.ok) {
           utils.getState.setData({ streamId }, result.state as any);
-        } else if (result.reason === "behind" || result.reason === "patch-failed") {
-          utils.getState.invalidate({ streamId });
+        } else if (result.reason === "behind") {
+          utils.getState.invalidate({ streamId }); // missed versions — refetch
         }
         // "stale" → no-op (client already has newer state from mutation response)
       },
