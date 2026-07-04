@@ -1,10 +1,12 @@
-# Act 1.0 — Release Notes (Draft)
+# Act 1.0 — Release Notes
 
-> **Status:** Draft. This file stages the 1.0.0 release narrative for ACT-901
-> (#702) to consume when the release mechanics fire. semantic-release manages
-> the per-package `CHANGELOG.md` files automatically; this document is the
-> human-written framing that lands as the GitHub Release body when 1.0.0 is
-> cut. Once the release ships, this file is archived under `docs/`.
+> **Status:** Shipped. `@rotorsoft/act@1.0.0` was released on 2026-05-21
+> (tag `@rotorsoft/act-v1.0.0`), and the packages that track core have moved
+> well into their 1.x lines since. This file was staged for ACT-901 (#702) as
+> the human-written framing of the 1.0 release and is preserved as the
+> historical release narrative; semantic-release manages the per-package
+> `CHANGELOG.md` files automatically. The stability charter described below
+> is **in effect** — see [STABILITY.md](./STABILITY.md).
 
 ---
 

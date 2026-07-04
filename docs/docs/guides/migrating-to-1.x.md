@@ -12,7 +12,7 @@ sidebar_position: 20
 
 ## TL;DR
 
-The `1.x` line is the first versioned snapshot of Act, and nothing inside it breaks. The [Stability Charter](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md) takes effect here: every covered surface — the builder DSL, the `IAct` runtime, the `Store`/`Cache`/`Logger` contracts, the lifecycle events, and the public types — is frozen against breaking changes for the life of the major. So upgrading from one `1.x` release to a newer `1.x` release is the boring kind of upgrade: bump the version, reinstall, run your tests. There is no code to rewrite, because by definition a minor or patch release cannot ask you to.
+The `1.x` line is the first versioned snapshot of Act, and nothing inside it breaks. The [Stability Charter](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md) took effect here: every covered surface — the builder DSL, the `IAct` runtime, the `Store`/`Cache`/`Logger` contracts, the lifecycle events, and the public types — is frozen against breaking changes for the life of the major. So upgrading from one `1.x` release to a newer `1.x` release is the boring kind of upgrade: bump the version, reinstall, run your tests. There is no code to rewrite, because by definition a minor or patch release cannot ask you to.
 
 This page exists for two reasons. The first is to say that plainly, so you don't go hunting for a migration you don't have to perform. The second is to prove the migration convention end to end while the stakes are zero — when the first breaking release does land, the author fills in the template below instead of inventing the format under pressure.
 
