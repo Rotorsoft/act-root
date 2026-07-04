@@ -166,19 +166,7 @@ Three counters cover most operational questions:
 | `act.commit.concurrency_error` (counter) | sustained rate above ~1% of commits |
 | `act.settle.duration_ms` (histogram) | p99 above your tolerable lag |
 
-Hook them via the lifecycle events:
-
-```typescript no-check
-app.on("blocked", (xs) => metrics.gauge("act.streams.blocked", xs.length));
-app.on("settled", (drain) => {
-  metrics.histogram("act.settle.duration_ms", performance.now() - tStart);
-  metrics.counter("act.events.processed", drain.fetched);
-});
-// Concurrency errors come up as exceptions thrown by app.do() — instrument
-// them in your tRPC/Express error middleware.
-```
-
-The `act-inspector` workspace package gives you a UI on top of the same `query_streams` primitive metrics tools query. It's not a production runtime — run it against a snapshot DB for incident analysis.
+All three hook off the lifecycle-event emitter — observability is deliberately not a framework feature, so there's no metrics client to configure, just listeners to attach. The canonical wiring lives in the [Observability guide](./observability.md): every lifecycle event mapped to a prom-client counter/histogram, a polled `app.blocked_streams()` gauge, concurrency-error instrumentation at the API edge, pino → OpenTelemetry log shipping, and which of these signals should page versus sit on a dashboard.
 
 ## 9. Restoring a store (rare, deliberate)
 

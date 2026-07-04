@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
         "guides/sensitive-data",
         "guides/pii-encryption-at-rest",
         "guides/production-checklist",
+        "guides/observability",
         "guides/contributing-new-package",
         "guides/writing-a-store",
         "guides/writing-a-cache",
