@@ -2,7 +2,7 @@
 
 Act has been used in production with a public API that hasn't regressed in months. Every breaking change has been a deliberate version-bump preface, not an accident. This document is the explicit contract: what semver protects, what it doesn't, and how we evolve in each category.
 
-> **Status:** This charter takes effect with the **1.0** release, which is gated on completion of [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1). The current 0.x line already follows it in spirit — treat anything listed under "Covered" as stable in practice today, and anything under "Not covered" as subject to change.
+> **Status:** **In effect.** This charter took effect with the **1.0** release (May 2026, closing [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)); every package in the [per-library table](#per-library-status) below is on its 1.x line or later. Anything listed under "Covered" is protected by semver today; anything under "Not covered" is subject to change in any release.
 
 ## Covered by semver
 
@@ -36,7 +36,7 @@ The signatures, return shapes, and behavioral contracts of these methods are sta
 
 The `Store`, `Cache`, and `Logger` interfaces in `libs/act/src/types/` define what an adapter must implement. The contracts are **executable** — [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck) exposes `runStoreTck`, `runCacheTck`, and `runLoggerTck` that exercise every method on each interface against any factory you point them at. If your adapter passes the TCK, it honors the contract; if the contract changes in a way that affects you, the TCK fails first.
 
-Once 1.0 ships:
+Since 1.0:
 
 - Adding a **required** method to `Store`, `Cache`, or `Logger` is a breaking change.
 - Adding an **optional** method (with a default fallback in the orchestrator) is not. Optional surface is gated behind a `Capabilities` flag in the TCK so existing adapters keep passing until they opt in. Current capability-gated additions: `notify`, `restore`, `pii_isolation` (sensitive-data epic #566 — adapters supporting the `pii` field on commit/load plus `forget_pii(stream)`).
@@ -90,7 +90,7 @@ Act is maintained by a small team. The windows below are deliberately modest —
 - **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life.
 - **Older majors (`N-2` and earlier) — unsupported.** Best-effort community help via [issues](https://github.com/rotorsoft/act-root/issues) and [discussions](https://github.com/rotorsoft/act-root/discussions), no guaranteed fixes or releases.
 
-During the current **0.x** line (pre-1.0), only the **latest published version** is supported. There are no maintenance branches before 1.0 — upgrade to the newest release to pick up fixes. The windows above take effect with the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1).
+The windows above have been in effect since the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1). For any package still on a **0.x** line (currently `@rotorsoft/act-crypto` and `@rotorsoft/act-ops`), only the **latest published version** is supported — there are no maintenance branches before a package's own 1.0; upgrade to the newest release to pick up fixes.
 
 The same window applies to every package that tracks core (see the table below): an `act-pg` or `act-sqlite` release is supported for as long as the core major it targets is.
 
@@ -119,7 +119,7 @@ The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md):
 
 ## Per-library status
 
-| Package | Tracks core 1.0? |
+| Package | Tracks core 1.x? |
 |---|---|
 | `@rotorsoft/act` | Yes — defines the charter |
 | `@rotorsoft/act-pg` | Yes — `Store` adapter, same contract |
@@ -127,9 +127,9 @@ The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md):
 | `@rotorsoft/act-patch` | Yes — stable utility, depended on by `act` reducers |
 | `@rotorsoft/act-http` | Yes — umbrella for HTTP integrations (`webhook` helper plus an `sse` subpath that hosts the surface formerly published as `@rotorsoft/act-sse`) |
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
-| `@rotorsoft/act-sse` | **Deprecated** (already past 1.0). Surface moved to `@rotorsoft/act-http/sse`; bug fixes only, scheduled for removal in a future release. Migrate by changing the import path. |
-| `@rotorsoft/act-diagram` | Goes to 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
-| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) joins the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
+| `@rotorsoft/act-sse` | **Deprecated**. Surface moved to `@rotorsoft/act-http/sse`; bug fixes only, scheduled for removal in a future release. Migrate by changing the import path. |
+| `@rotorsoft/act-diagram` | Yes — shipped 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
+| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) is on the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
 
 Each library's `README.md` carries a one-line stability note linking back to this document.
 
