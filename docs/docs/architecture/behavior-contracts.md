@@ -72,6 +72,17 @@ backed by unit/integration specs under `libs/act/test/`.
 | `claim` **skips** a stream until its `deferred_at` passes, then makes it claimable again; a defer never bumps `retry`; `reset` clears a pending defer; a filter-form `defer` counts the streams it matched | `Store.defer` doc; `extension-points.md` § `defer` | `store-tck.ts` → `defer` describe block: "hides a stream from claim until its deferred_at passes", "makes a stream claimable once the deferred_at is in the past", "does not bump retry while a stream is deferred", "reset clears a pending defer", "defers streams matching a filter and counts matches" **(#1090)** |
 | Stream filters guarantee a portable grammar — `^` / `$` anchors, `.`, `.*`, literal characters (including literal `_` / `%`) — matching identically on every adapter; a richer pattern either matches with full regex semantics or throws `ValidationError`, never a silent approximation | `QueryStreams.stream` / `StreamFilter` / `Query.stream` docs; `extension-points.md` § Stream filters | `store-tck.ts` → "stream filter grammar" describe block: "portable subset: anchors, `.`, and `.*` match identically", "literal `_` and `%` in patterns are not wildcards", "portable subset applies to stream-position filters", "non-portable patterns match with full regex semantics or throw", "bulk stream ops reject non-portable filters instead of mis-matching" **(#1114)** |
 
+## PostgresStore notify (adapter-specific — outside the TCK)
+
+Cross-process NOTIFY semantics need two store instances against the same
+physical store (the TCK notes them as "needs two processes"), so they are
+pinned in `libs/act-pg/test/` rather than the shared TCK.
+
+| Claim | Source | Backing test |
+|---|---|---|
+| `notify` is self-filtered per instance — a commit wakes other instances' listeners, never its own (the LISTEN handler skips payloads where `by === this._by`) | `cross-process-reactions.md` § Self-filter | `notify.contract.spec.ts` (act-pg) → "notify is self-filtered per instance — a commit wakes the other instance, never its own" **(#1120)** |
+| An oversize NOTIFY payload (≥ 8000 bytes) skips the NOTIFY instead of aborting the commit — the commit succeeds and delivery falls back to the poll path, preserving at-least-once | `cross-process-reactions.md` § Payload cap | `notify.contract.spec.ts` (act-pg) → "oversize notify payload skips the NOTIFY — the commit succeeds and events stay discoverable via the poll path" **(gap exposed a real bug, fixed — #1120)** |
+
 ## Orchestrator and builders
 
 | Claim | Source | Backing test |
