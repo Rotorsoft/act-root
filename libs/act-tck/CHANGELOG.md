@@ -1,3 +1,12 @@
+# [@rotorsoft/act-tck-v1.19.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.1...@rotorsoft/act-tck-v1.19.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **act-pg:** opinionated pool defaults and clear acquisition errors ([#1119](https://github.com/rotorsoft/act-root/issues/1119)) ([c1acdb5](https://github.com/rotorsoft/act-root/commit/c1acdb5c0d1489dfc1f4faa69bc413a06d06a32f))
+* **act-sqlite:** throw on non-portable stream filter patterns ([#1114](https://github.com/rotorsoft/act-root/issues/1114)) ([14dad8b](https://github.com/rotorsoft/act-root/commit/14dad8be006d25badef426246a6ea1a2126fb5e4))
+* **act:** surface warn-level signal when snapshot write fails ([#1115](https://github.com/rotorsoft/act-root/issues/1115)) ([b221ab1](https://github.com/rotorsoft/act-root/commit/b221ab1290ffdc2d1ddd1c5ddae3684f90982da2))
+
 # [@rotorsoft/act-tck-v1.19.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.0...@rotorsoft/act-tck-v1.19.1) (2026-07-04)
 
 # [@rotorsoft/act-tck-v1.19.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.18.0...@rotorsoft/act-tck-v1.19.0) (2026-07-03)
