@@ -46208,7 +46208,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = \`ackdefer-\${uid()}\`;
         const ctl = \`ackdefer-ctl-\${uid()}\`;
         await store.subscribe([{ stream: s }, { stream: ctl }]);
-        await store.commit<CounterEvents>(s, [inc(1)], make_meta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const [ctl_head] = await store.commit<CounterEvents>(
           ctl,
           [inc(1)],
