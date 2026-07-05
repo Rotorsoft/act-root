@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.18.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.3...@rotorsoft/act-v1.18.4) (2026-07-05)
+
+
+### Bug Fixes
+
+* **act:** externalize vitest from the test subpath bundle ([120f50a](https://github.com/rotorsoft/act-root/commit/120f50ab2526798325bfcab8e7ea3a9fe664a9a0))
+
 # [@rotorsoft/act-v1.18.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.2...@rotorsoft/act-v1.18.3) (2026-07-05)
 
 
