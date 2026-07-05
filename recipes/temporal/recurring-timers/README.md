@@ -134,6 +134,15 @@ See the [close-the-books recipe](../../scaling/close-the-books/README.md) and [a
 
 Every tick's next due-time must derive from that tick's own `created` (or from its payload), never from `Date.now()`. Watermarks and leases last seconds while a recurring loop can run for days, so a competing worker will re-claim the stream between firings. When it re-resolves the schedule against the same tick it has to land on the same due-time as the worker that first deferred, or the loop fires early and drifts. Anchoring `{ after }` to `event.created` and computing every `{ at }` from event data is what keeps the cadence stable across restarts and across competing consumers. This is the same derivability rule the one-shot defer surfaces enforce; recurrence inherits it tick by tick.
 
+## Failure modes
+
+What happens when the machinery under the loop hiccups (#1124):
+
+- **The durable defer write fails** (store blip during drain finalization). The framework surfaces it on the `error` lifecycle event and leaves the tick pending with no `deferred_at` — immediately re-claimable. The next drain redelivers, your handler re-throws its `DeferSignal`, and because the due-time derives from the tick (the durability rule above), it resolves to the same instant; the retried write heals the schedule. Same-cycle work — acks, close requests from `.autocloses` — is unaffected. The failure mode is an early redelivery of one tick, never a stalled loop.
+- **A worker crashes between deferring and persisting.** Identical outcome: the pending tick has no `deferred_at`, so the first drain after restart redelivers and re-persists. This is why the due-time must derive from the tick, not from `Date.now()` — the replacement worker lands on the same schedule.
+
+Both paths assume something drives the drain: live deployments get that from commits/notify, the breaker's retry probe, or a lane `cycleMs` poller (see the production checklist's sizing section).
+
 ## Run / test
 
 The example ships with a passing spec that drives the loop with a sub-second cadence and plain waits:
