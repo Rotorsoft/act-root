@@ -4,5 +4,5 @@
     "noEmit": true,
     "composite": false
   },
-  "include": ["scaling/**/examples/*.ts"]
+  "include": ["scaling/**/examples/*.ts", "observability/**/examples/*.ts"]
 }

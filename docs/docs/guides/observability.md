@@ -33,6 +33,21 @@ Two things to know before wiring:
 - **Listeners run synchronously on the emitter.** Keep them cheap — increment a counter, observe a histogram, return. Anything slow belongs in a reaction, not a lifecycle listener.
 - **Label cardinality is your problem, not the framework's.** `Lease.stream` can be one stream per aggregate when you use dynamic reaction targets. Feeding raw stream names into a Prometheus label will blow up your time-series count. Label by `lane`, by a derived family (`stream.split("-")[0]`), or not at all.
 
+## Or: install the bridge
+
+Everything in the next two sections ships pre-wired as [`@rotorsoft/act-otel`](https://www.npmjs.com/package/@rotorsoft/act-otel):
+
+```ts no-check
+import { dispose } from "@rotorsoft/act";
+import { instrument } from "@rotorsoft/act-otel";
+import { register } from "prom-client";
+
+dispose(instrument(app)); // canonical metric set, torn down with the app
+root.get("/metrics", async (c) => c.text(await register.metrics()));
+```
+
+Same metric names, same cardinality guards, one call. The hand-wiring below remains the reference — read it to understand what the bridge does, or copy it when you need a shape the bridge doesn't cover (custom buckets, a different client, per-tenant registries).
+
 ## Lifecycle events → prom-client
 
 The [production checklist](./production-checklist.md#8-observability) names three signals that cover most operational questions: `act.streams.blocked`, `act.commit.concurrency_error`, and `act.settle.duration_ms`. Prometheus metric names can't contain dots, so the canonical wiring spells them with underscores — same signals, Prometheus-legal names.

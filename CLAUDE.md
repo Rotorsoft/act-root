@@ -29,6 +29,7 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-sse` — **deprecated** Server-Sent Events package; now a thin re-export shim over `@rotorsoft/act-http/sse` (the canonical home), kept only for migration and scheduled for removal
   - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, the canonical `sse` subpath for incremental state broadcast (the surface the deprecated `@rotorsoft/act-sse` re-exports), plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
+  - `@rotorsoft/act-otel` — Prometheus metrics bridge: `instrument(app)` maintains the canonical metric set from the observability guide off the lifecycle events. Leaf package — core stays metrics-free by design
   - `@rotorsoft/act-crypto` — authenticated envelope encryption (AES-256-GCM + versioned wire format) for adapters that want column-level encryption with operator-controlled keys. Leaf package — adapters depend on it, core does not.
   - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
   - `@rotorsoft/act-tck` — Test Compatibility Kit for Store/Cache/Logger ports
@@ -146,6 +147,7 @@ When an Act application hits the edges (events table growing without bound, cool
 | HASH-on-stream partition recipe (SQL + run.sh) | [recipes/scaling/partitioning/hash-on-stream/](recipes/scaling/partitioning/hash-on-stream/README.md) |
 | RANGE-on-id (single-aggregate giants, docs only) | [recipes/scaling/partitioning/range-on-id/](recipes/scaling/partitioning/range-on-id/README.md) |
 | RANGE-on-created (bulk archival via DROP PARTITION) | [recipes/scaling/partitioning/range-on-created/](recipes/scaling/partitioning/range-on-created/README.md) |
+| Prometheus metrics via act-otel (alert rules + runnable scrape demo) | [recipes/observability/prometheus/README.md](recipes/observability/prometheus/README.md) |
 | Temporal / timing recipes landing (one-shot vs recurring) | [recipes/temporal/README.md](recipes/temporal/README.md) |
 | Recurring timers (tick-emits-next-tick over one-shot `.defer`) | [recipes/temporal/recurring-timers/README.md](recipes/temporal/recurring-timers/README.md) |
 

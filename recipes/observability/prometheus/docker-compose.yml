@@ -1,0 +1,29 @@
+# Real-time UI over the recipe's live demo — Prometheus scrapes, a
+# pre-provisioned Grafana dashboard (2x2, fits one screen) displays:
+#
+#   pnpm dev:metrics
+#
+# Grafana: http://localhost:3001/d/act-demo  (anonymous, no login)
+# Prometheus (raw): http://localhost:9090
+services:
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  grafana:
+    image: grafana/grafana:12.3.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

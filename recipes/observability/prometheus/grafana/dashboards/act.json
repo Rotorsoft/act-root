@@ -1,0 +1,86 @@
+{
+  "uid": "act-demo",
+  "title": "act — live demo",
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "commit throughput (events/s by name)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 12 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(act_events_committed_total[30s])",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "blocked streams (page on > 0)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "graphMode": "area", "colorMode": "background" },
+      "targets": [{ "expr": "act_streams_blocked", "legendFormat": "blocked" }]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "reaction acks (per lane, /s)",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 12 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(act_reactions_acked_total[30s])",
+          "legendFormat": "{{lane}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "blocks + errors (/s)",
+      "gridPos": { "x": 12, "y": 9, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 12 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(act_reactions_blocked_total[1m])",
+          "legendFormat": "blocked {{lane}}"
+        },
+        {
+          "expr": "rate(act_errors_total[1m])",
+          "legendFormat": "errors {{circuit}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39
+}
