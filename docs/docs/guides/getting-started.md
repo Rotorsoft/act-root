@@ -8,6 +8,10 @@ sidebar_position: 1
 
 This guide walks through modeling, dispatching actions to, and reading from a small event-sourced state in Act — start to finish, no prior framework knowledge required. By the end you'll have a runnable counter, a dispatched action, an event in the log, and a reconstructed state. You'll also know exactly which primitive to reach for next.
 
+:::tip Skip the setup
+Want a running app in one command? `npx degit rotorsoft/act-starter my-app` gives you a minimal, heavily-commented starter — one state, one projection, one reaction, a generated REST API, and `fixture()`-based tests. This guide explains the concepts that starter uses.
+:::
+
 ## What you'll build
 
 A counter with a single action (`increment`) and a single event (`Incremented`). Trivial domain on purpose — the point is to see every primitive in one place.
