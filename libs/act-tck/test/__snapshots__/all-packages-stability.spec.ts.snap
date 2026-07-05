@@ -1941,11 +1941,21 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    // #803: writer-only instances skip dynamic stream discovery. The
+    // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
     // checkpoint stays where it was.
     if (!this._drain) return { subscribed: 0, last_id: -1 };
-    return this._scoped(() => this._correlate.correlate(query));
+    return this._scoped(async () => {
+      const result = await this._correlate.correlate(query);
+      // Newly-subscribed streams must arm their lane controllers, same
+      // as reset/unblock: a lane worker's tick can disarm on an empty
+      // claim in the window before the subscription lands, and nothing
+      // re-arms until an unrelated commit — starving the fresh stream
+      // on an otherwise idle system.
+      if (result.subscribed > 0 && this._reactive_events.size > 0)
+        this._arm_all();
+      return result;
+    });
   }
 
   /**
@@ -16795,11 +16805,21 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    // #803: writer-only instances skip dynamic stream discovery. The
+    // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
     // checkpoint stays where it was.
     if (!this._drain) return { subscribed: 0, last_id: -1 };
-    return this._scoped(() => this._correlate.correlate(query));
+    return this._scoped(async () => {
+      const result = await this._correlate.correlate(query);
+      // Newly-subscribed streams must arm their lane controllers, same
+      // as reset/unblock: a lane worker's tick can disarm on an empty
+      // claim in the window before the subscription lands, and nothing
+      // re-arms until an unrelated commit — starving the fresh stream
+      // on an otherwise idle system.
+      if (result.subscribed > 0 && this._reactive_events.size > 0)
+        this._arm_all();
+      return result;
+    });
   }
 
   /**
