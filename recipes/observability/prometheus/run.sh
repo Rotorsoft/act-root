@@ -26,7 +26,7 @@ step "waiting for prometheus to be ready on :9090..."
 until curl -sf http://localhost:9090/-/ready >/dev/null 2>&1; do sleep 0.5; done
 step "prometheus is up — scraping the demo every 2s"
 step "UI: http://localhost:9090/graph?g0.expr=rate(act_events_committed_total%5B30s%5D)&g0.tab=0&g1.expr=act_streams_blocked&g1.tab=0"
-step "starting instrumented demo app on :4001 (Ctrl-C stops everything)..."
+step "starting the interactive demo on :4001 — nothing runs until you press a key (q or Ctrl-C stops everything)..."
 echo
 
 npx tsx "$R/examples/live-demo.ts"

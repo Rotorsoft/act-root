@@ -21,7 +21,7 @@ That last line is the one your pager cares about.
 
 ## Watch it live — the Prometheus UI
 
-The live demo is a self-contained app that generates its own traffic: continuous orders, a fulfillment reaction on its own lane, a flaky notification reaction (own lane, exponential backoff) failing a fifth of its attempts, a poison SKU every tenth order that blocks — and an operator loop unblocking the quarantine every twenty seconds, so the blocked gauge saws instead of climbing.
+The live demo is interactive — nothing moves until you do. It brings up a self-contained app (fulfillment and notification reactions on their own lanes, the notifier flaky on purpose with exponential backoff, a projection counting orders) and waits: the startup banner walks you through opening the Prometheus panels and the app's own pages first, then you drive it by key — `o`/`O` fire batches of orders, `p` places a poison order whose fulfillment stream blocks after its retry budget, and `u` is the operator move that unblocks the quarantine while you watch the gauge fall on the graph.
 
 ```bash
 pnpm dev:metrics
@@ -31,12 +31,12 @@ One command: starts Prometheus in docker, runs the demo, prints the UI link, and
 
 **http://localhost:9090/graph?g0.expr=rate(act_events_committed_total[30s])&g0.tab=0&g1.expr=act_streams_blocked&g1.tab=0**
 
-Prometheus scrapes the demo's `/metrics` on :4001 every two seconds. The panels worth watching:
+Prometheus scrapes the demo's `/metrics` on :4001 every two seconds — each keypress lands on the graph within a scrape or two. The pre-loaded panels:
 
 | Expression | What you see |
 |---|---|
 | `rate(act_events_committed_total[30s])` | steady commit throughput, by event name |
-| `act_streams_blocked` | the sawtooth: poison blocks, the operator loop unblocks |
+| `act_streams_blocked` | rises ~30s after `p`, falls when you press `u` |
 | `rate(act_reactions_acked_total[30s])` | per-lane progress — notifications wobble from the flaky downstream |
 | `rate(act_errors_total[1m])` | should stay flat; a rise means the store itself is failing |
 
