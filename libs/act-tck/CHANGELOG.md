@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.20.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.20.0...@rotorsoft/act-tck-v1.20.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **act:** failed defer persist never stalls recurrence or drops cycle outcomes ([42a4473](https://github.com/rotorsoft/act-root/commit/42a4473d2049a3fbf3fe8bb9ff6f9125b087f258)), closes [#1124](https://github.com/rotorsoft/act-root/issues/1124)
+* **act:** finalize drain cycles atomically — acks and defer schedules in one store call ([9ab2f26](https://github.com/rotorsoft/act-root/commit/9ab2f26e13999b1f8717984cd5bc088b919969e6))
+
 # [@rotorsoft/act-tck-v1.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.3...@rotorsoft/act-tck-v1.20.0) (2026-07-05)
 
 
