@@ -32,6 +32,10 @@ export {
   compile_autoclose_policy,
   policy_min_after_ms,
 } from "./autoclose-policy.js";
+export {
+  AUTOCLOSE_TARGET_PREFIX,
+  synthesize_autoclose_reactions,
+} from "./autoclose-reaction.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { reaction_on, register_lane } from "./builder-utils.js";

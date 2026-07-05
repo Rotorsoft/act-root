@@ -2,7 +2,6 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
-  type AutocloseConfig,
   audit,
   build_drain,
   build_es,
@@ -11,11 +10,9 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
-  CloseSignal,
   CorrelateCycle,
   classify_registry,
   close_correlation,
-  DeferSignal,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -23,8 +20,6 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
-  in_autoclose_window,
-  resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -34,15 +29,7 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import {
-  cache,
-  dispose,
-  log,
-  type Scoped,
-  scoped,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -66,7 +53,6 @@ import type {
   LoadTarget,
   Logger,
   Query,
-  Reaction,
   Registry,
   ScanOptions,
   ScanResult,
@@ -123,14 +109,6 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  * latency on the `"settled"` signal.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
-
-/**
- * Prefix for the synthetic per-aggregate stream the autoclose reaction (#1090)
- * runs on. `target = \`${AUTOCLOSE_TARGET_PREFIX}${aggregate}\``, `source =
- * aggregate` — a watermark distinct from the aggregate's own reactions, so an
- * autoclose defer never short-circuits them. Internal; not a public surface.
- */
-const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 // Re-export the autoclose config surface so operators can
 // `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
@@ -323,6 +301,22 @@ export type ActOptions<TLanes extends string = string> = {
   };
 };
 
+/** Reject `onlyLanes` entries that reference undeclared lanes. */
+function validate_only_lanes(
+  options: ActOptions,
+  lanes: ReadonlyArray<LaneConfig>
+): void {
+  if (!options.onlyLanes || options.onlyLanes.length === 0) return;
+  const declared = new Set<string>(["default", ...lanes.map((l) => l.name)]);
+  const unknown = options.onlyLanes.filter((l) => !declared.has(l));
+  if (unknown.length > 0)
+    throw new Error(
+      `ActOptions.onlyLanes references undeclared lane(s): ${unknown
+        .map((l) => `"${l}"`)
+        .join(", ")}`
+    );
+}
+
 export class Act<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -374,14 +368,6 @@ export class Act<
   >;
   /** Map of state name → state definition; populated by the builder. */
   private readonly _states: Map<string, State<any, any, any>>;
-  /**
-   * Resolved autoclose configuration (#837 / epic #802). Frozen at
-   * `act().build()` via {@link resolveAutocloseConfig}.
-   *
-   * @internal
-   */
-  private readonly _autoclose_config: AutocloseConfig;
-
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
    * via {@link ActLifecycleEvents}.
@@ -524,19 +510,7 @@ export class Act<
     this._states = states;
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
-    if (options.onlyLanes && options.onlyLanes.length > 0) {
-      const declared = new Set<string>([
-        "default",
-        ...lanes.map((l) => l.name),
-      ]);
-      const unknown = options.onlyLanes.filter((l) => !declared.has(l));
-      if (unknown.length > 0)
-        throw new Error(
-          `ActOptions.onlyLanes references undeclared lane(s): ${unknown
-            .map((l) => `"${l}"`)
-            .join(", ")}`
-        );
-    }
+    validate_only_lanes(options, lanes);
     this._scoped = options.scoped
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
@@ -557,119 +531,72 @@ export class Act<
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
-    // #1090 — synthesize the autoclose reaction. `.autocloses(policy)` is no
-    // longer a sweep: it's a reaction on every event the state owns that
-    // evaluates the policy against the LIVE head (so a reopened stream
-    // re-evaluates correctly), defers to the cooldown's earliest opening
-    // (`head.created + the policy's min after`), and closes via `CloseSignal`
-    // once the policy holds. Injected here — before `classify_registry` — so
-    // its dynamic resolver is discovered and its target stream subscribed.
-    for (const st of this._states.values()) {
-      const predicate = st.autoclose;
-      if (!predicate) continue;
-      const after_ms = st.autoclose_after_ms;
-      const archiver = st.archive;
-      const reaction: Reaction<TEvents> = {
-        // Run on a SYNTHETIC stream — `source` is the aggregate, `target` is a
-        // per-aggregate `__autoclose__` key — so the autoclose reaction never
-        // shares a watermark with the aggregate's own reactions. A shared
-        // watermark would let autoclose's defer short-circuit the aggregate's
-        // other reactions (the "a defer affects all reactions on a stream"
-        // hazard). The close still targets the aggregate (`source`).
-        resolver: (e) => ({
-          target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
-          source: e.stream,
-        }),
-        // Never block on autoclose: a transient query/store error should retry,
-        // not quarantine the synthetic stream.
-        options: { blockOnError: false, maxRetries: 3 },
-        handler: async (event) => {
-          const aggregate = event.stream;
-          const config = this._autoclose_config;
-          // Off-hours gating preserved from the sweep: outside the window,
-          // re-check next cycle instead of closing.
-          if (!in_autoclose_window(config.autocloseWindow, new Date()))
-            throw new DeferSignal({
-              at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
-            });
-          const stats = await store().query_stats([aggregate], {
-            count: true,
-            exclude: [TOMBSTONE_EVENT],
-          });
-          const entry = stats.get(aggregate);
-          // No live (non-tombstone) head → already closed, nothing to do.
-          if (!entry) return;
-          const head = entry.head;
-          // `count` is always present — query_stats is called with
-          // `count: true` above, so the option contract guarantees it.
-          if (predicate(aggregate, head, entry.count!))
-            throw new CloseSignal({
-              stream: aggregate,
-              archive: archiver ? () => archiver(aggregate, head) : undefined,
-              // Ack this reaction's own watermark to the live head so the
-              // close-cycle guard (which matches subscriptions by source =
-              // aggregate) sees it caught up instead of blocking its own close.
-              at: head.id,
-            });
-          // Not eligible yet: park on the cooldown's earliest opening when the
-          // policy has a time gate; otherwise wait for the next event to
-          // re-trigger (e.g. a `reaches` threshold).
-          if (after_ms !== undefined)
-            throw new DeferSignal({
-              at: new Date(head.created.getTime() + after_ms),
-            });
-        },
-      };
-      const key = `__autoclose_${st.name}`;
-      for (const event_name of Object.keys(st.events)) {
-        this.registry.events[event_name as keyof TEvents]?.reactions.set(
-          key,
-          reaction as Reaction<TEvents, keyof TEvents>
-        );
-      }
-    }
-
-    const {
-      static_targets,
-      has_dynamic_resolvers,
-      reactive_events,
-      event_to_state,
-      event_to_lanes,
-    } = classify_registry(this.registry, this._states);
-    this._reactive_events = reactive_events;
+    // The registry arrives complete and frozen from the builder — the
+    // autoclose reactions were synthesized there, so classification sees
+    // the finished shape and nothing here mutates it.
+    const classification = classify_registry(this.registry, this._states);
+    this._reactive_events = classification.reactive_events;
+    this._event_to_state = classification.event_to_state;
+    this._event_to_lanes = classification.event_to_lanes;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
-    // Validate autoclose + circuit-breaker knobs eagerly so out-of-range
-    // values throw at build time, not on the first cycle tick.
-    this._autoclose_config = resolveAutocloseConfig(options);
-    this._breaker = new CircuitBreaker(
+
+    // Composition sequence — each step builds one runtime subsystem from
+    // the pieces above. Order matters: controllers read the breaker, the
+    // audit bag reads the finalized controller set, settle reads the
+    // correlate cycle.
+    this._breaker = this._build_breaker(options);
+    this._drain_controllers = this._build_drain_controllers(options, lanes);
+    this._audit_deps = this._build_audit_deps();
+    this._correlate = this._build_correlate(options, classification);
+    this._settle = this._build_settle(options);
+
+    // Auto-wire cross-process notify when the store supports it. Bound at
+    // construction time — late `store(adapter)` injection after build won't
+    // take effect. Scoped Acts bind against their own store.
+    this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
+
+    dispose(() => this.shutdown());
+  }
+
+  /**
+   * Circuit breaker shared by every store-polling loop (drain, the settle
+   * correlate, autoclose). Validates the knobs eagerly so out-of-range
+   * values throw at build time, not on the first cycle tick.
+   */
+  private _build_breaker(options: ActOptions): CircuitBreaker {
+    return new CircuitBreaker(
       resolveCircuitBreakerConfig(options.circuitBreaker),
       {
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // Re-probe the store when the cooldown elapses, so recovery is
         // automatic even on the default lane (which has no periodic poller).
-        // The breaker is shared by every store-polling loop (drain, the
-        // settle correlate, autoclose), so any of them can trip it — but a
-        // bare `drain()` only touches the store when the controller is armed,
-        // so a trip from a correlate failure could go unprobed. `settle()`
-        // always runs a correlate (a store query) before draining, so it
-        // re-probes regardless of which loop opened the breaker: one success
-        // closes it and every loop resumes on its own cadence. A failed probe
-        // re-opens the breaker and reschedules the wake.
+        // Any polling loop can trip the shared breaker — but a bare `drain()`
+        // only touches the store when the controller is armed, so a trip
+        // from a correlate failure could go unprobed. `settle()` always runs
+        // a correlate (a store query) before draining, so it re-probes
+        // regardless of which loop opened the breaker: one success closes it
+        // and every loop resumes on its own cadence. A failed probe re-opens
+        // the breaker and reschedules the wake.
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
       }
     );
-    this._event_to_state = event_to_state;
-    this._event_to_lanes = event_to_lanes;
+  }
 
-    // Build one DrainController per active lane (ACT-1103). The implicit
-    // "default" lane is always present unless onlyLanes excludes it. Each
-    // controller filters its claim() by its lane name; the legacy
-    // single-controller path is the active set === { "default" } case
-    // with `lane: undefined` deps so claim() doesn't filter (preserves
-    // pre-1103 SQL planner behavior for apps that never call withLane).
+  /**
+   * One DrainController per active lane. The implicit "default" lane is
+   * always present unless onlyLanes excludes it. Each controller filters
+   * its claim() by its lane name; the legacy single-controller path is the
+   * active set === { "default" } case with `lane: undefined` deps so
+   * claim() doesn't filter (preserves the single-lane SQL planner shape
+   * for apps that never call withLane).
+   */
+  private _build_drain_controllers(
+    options: ActOptions,
+    lanes: ReadonlyArray<LaneConfig>
+  ): Map<string, DrainController<TEvents, TActions, TSchemaReg>> {
     const all_lanes = ["default", ...lanes.map((l) => l.name)];
     const only_set =
       options.onlyLanes && options.onlyLanes.length > 0
@@ -680,7 +607,10 @@ export class Act<
       : all_lanes;
     const single_default_lane =
       active_lanes.length === 1 && active_lanes[0] === "default";
-    this._drain_controllers = new Map();
+    const controllers = new Map<
+      string,
+      DrainController<TEvents, TActions, TSchemaReg>
+    >();
     for (const name of active_lanes) {
       const cfg = lanes.find((l) => l.name === name);
       const controller = new DrainController({
@@ -692,10 +622,11 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
-        // Reaction-requested close (#1090). Runs the same close machinery as
+        // Reaction-requested close. Runs the same close machinery as
         // `app.close` (tombstone guard + archive + atomic truncate) for the
-        // targets a handler signalled via `CloseSignal`. No `correlate()` here
-        // — the drain that produced these targets has already correlated.
+        // targets a handler signalled via `CloseSignal`. No `correlate()`
+        // here — the drain that produced these targets has already
+        // correlated.
         on_close: async (targets) => {
           const close_actor = { id: "$close", name: "close" };
           const result = await run_close_cycle(targets, {
@@ -711,7 +642,7 @@ export class Act<
         breaker: this._breaker,
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
-        // adapter SQL collapses to the pre-1103 shape.
+        // adapter SQL collapses to the single-lane shape.
         lane: single_default_lane ? undefined : name,
         defaults: cfg && {
           streamLimit: cfg.streamLimit,
@@ -722,41 +653,59 @@ export class Act<
       // cycleMs — the intent of `withLane({cycleMs: 100})` is "drive
       // this lane every 100 ms," independent of the Act-level settle
       // loop. unref()'d so the timer doesn't keep the process alive.
-      // #803: skip the auto-start on writer-only instances
-      // (`drain: false`) — they construct the controller but never
-      // run reactions locally.
+      // Writer-only instances (`drain: false`) construct the controller
+      // but never run reactions locally, so the auto-start is skipped.
       if (cfg?.cycleMs !== undefined && options.drain !== false)
         controller.start(cfg.cycleMs);
-      this._drain_controllers.set(name, controller);
+      controllers.set(name, controller);
     }
+    return controllers;
+  }
 
-    // Audit deps bag (#723). Snapshotted after registry classification +
-    // drain-controller build so the audit module sees the finalized lane
-    // set. Held as an immutable bag — the orchestrator never carries
-    // audit logic itself, only this typed contract.
-    this._audit_deps = {
+  /**
+   * Audit deps bag. Snapshotted after registry classification and
+   * drain-controller build so the audit module sees the finalized lane
+   * set. Held as an immutable bag — the orchestrator never carries audit
+   * logic itself, only this typed contract.
+   */
+  private _build_audit_deps(): AuditDeps {
+    return {
       store,
       logger: this._logger,
-      event_to_state,
+      event_to_state: this._event_to_state,
       states: this._states,
-      known_events: new Set(event_to_state.keys()),
+      known_events: new Set(this._event_to_state.keys()),
       declared_lanes: new Set(this._drain_controllers.keys()),
-      routed_events: new Set(event_to_lanes.keys()),
+      routed_events: new Set(this._event_to_lanes.keys()),
     };
+  }
 
-    this._correlate = new CorrelateCycle(
+  /**
+   * Correlate cycle over the classified registry. The cold-start callback
+   * arms every controller — historical events may need processing —
+   * except on writer-only instances (`drain: false`).
+   */
+  private _build_correlate(
+    options: ActOptions,
+    classification: ReturnType<
+      typeof classify_registry<TSchemaReg, TEvents, TActions>
+    >
+  ): CorrelateCycle<TSchemaReg, TEvents, TActions> {
+    return new CorrelateCycle(
       this.registry,
-      static_targets,
-      has_dynamic_resolvers,
+      classification.static_targets,
+      classification.has_dynamic_resolvers,
       this._cd,
       options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      // Cold start: assume drain is needed (historical events may need processing).
-      // #803: writer-only instances skip the cold-start arm.
       () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       }
     );
-    this._settle = new SettleLoop<TEvents>(
+  }
+
+  /** Settle loop driving correlate + drain to quiescence. */
+  private _build_settle(options: ActOptions): SettleLoop<TEvents> {
+    return new SettleLoop<TEvents>(
       {
         init: () => this._correlate.init(),
         checkpoint: () => this._correlate.checkpoint,
@@ -767,13 +716,6 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
-
-    // Auto-wire cross-process notify when the store supports it. Bound at
-    // construction time — late `store(adapter)` injection after build won't
-    // take effect. Scoped Acts bind against their own store.
-    this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
-
-    dispose(() => this.shutdown());
   }
 
   /** True after the first `shutdown()` call. Guards idempotency. */

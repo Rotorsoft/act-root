@@ -17,6 +17,8 @@ import {
   reaction_on,
   register_lane,
   register_state,
+  resolveAutocloseConfig,
+  synthesize_autoclose_reactions,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -567,6 +569,25 @@ export function act<
             };
             batch_handlers.set(target, wrapped as never);
           }
+          // Synthesize the autoclose reactions last, once the registry is
+          // fully merged — their dynamic resolvers must be present before
+          // the orchestrator classifies the registry. The window/cadence
+          // knobs resolve from this first build() call's options; repeat
+          // builds (per-tenant scoped Acts) share the registry and the
+          // synthesized reaction with it.
+          synthesize_autoclose_reactions(
+            registry,
+            states,
+            resolveAutocloseConfig(options ?? {})
+          );
+          // The registry is complete: freeze the containers so any later
+          // registration or orchestrator-side mutation throws instead of
+          // silently diverging from what was classified. (Reaction maps
+          // remain Map instances — the freeze guards the object shape,
+          // convention guards the maps.)
+          Object.freeze(registry.actions);
+          Object.freeze(registry.events);
+          Object.freeze(registry);
           _built = true;
         }
 
