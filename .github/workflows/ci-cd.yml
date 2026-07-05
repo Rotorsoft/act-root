@@ -104,8 +104,16 @@ jobs:
       - name: enforce RFC gate for public-surface additions
         env:
           BASE_REF: origin/${{ github.base_ref }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: node scripts/check-rfc-gate.mjs
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_BODY: ${{ github.event.pull_request.body }}
+        # Fetch the body live so an exempt marker (or RFC link) added to the
+        # PR description after opening takes effect on a plain job rerun —
+        # the event payload is frozen at trigger time and would miss it.
+        # Falls back to the payload if the API call fails.
+        run: |
+          LIVE_BODY="$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}" --jq '.body // ""' || true)"
+          PR_BODY="${LIVE_BODY:-$EVENT_BODY}" node scripts/check-rfc-gate.mjs
 
   ci:
     needs: changes
