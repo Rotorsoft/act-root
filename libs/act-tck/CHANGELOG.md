@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.3...@rotorsoft/act-tck-v1.20.0) (2026-07-05)
+
+
+### Features
+
+* **act-http:** camelcase aliases for sse public members, deprecate snake_case ([#1139](https://github.com/rotorsoft/act-root/issues/1139)) ([71bbcd9](https://github.com/rotorsoft/act-root/commit/71bbcd955228aff8310894707f7ce5983ef6ab85))
+
 # [@rotorsoft/act-tck-v1.19.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.2...@rotorsoft/act-tck-v1.19.3) (2026-07-04)
 
 
