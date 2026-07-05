@@ -27,11 +27,12 @@ The live demo is interactive — nothing moves until you do. It brings up a self
 pnpm dev:metrics
 ```
 
-One command: starts Prometheus in docker, runs the demo, prints the UI link, and tears the container down on Ctrl-C. (Manual equivalent: `docker compose -f recipes/observability/prometheus/docker-compose.yml up -d` + `npx tsx recipes/observability/prometheus/examples/live-demo.ts`.) Then open:
+One command: starts Prometheus + a pre-provisioned Grafana in docker, runs the demo, prints the links, and tears the containers down on Ctrl-C. Then open two tabs:
 
-**http://localhost:9090/graph?g0.expr=rate(act_events_committed_total[30s])&g0.tab=0&g1.expr=act_streams_blocked&g1.tab=0**
+- **http://localhost:3001/d/act-demo** — the Grafana dashboard: a 2×2 grid that fits one screen (commit throughput, a blocked-streams stat that goes red, per-lane ack rate, blocks + errors), refreshing every 5s, no login.
+- **http://localhost:4001/** — the app itself: projection tiles and an event feed updating over SSE as events commit, with the same action buttons the console keys drive.
 
-Prometheus scrapes the demo's `/metrics` on :4001 every two seconds — each keypress lands on the graph within a scrape or two. The pre-loaded panels:
+Prometheus scrapes the demo's `/metrics` every two seconds — each action lands on the dashboard within a refresh. Raw PromQL, if you prefer it over Grafana (`http://localhost:9090`):
 
 | Expression | What you see |
 |---|---|

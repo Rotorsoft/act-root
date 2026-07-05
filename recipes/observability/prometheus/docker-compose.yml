@@ -1,13 +1,10 @@
-# Real-time Prometheus UI over the recipe's live demo:
+# Real-time UI over the recipe's live demo — Prometheus scrapes, a
+# pre-provisioned Grafana dashboard (2x2, fits one screen) displays:
 #
-#   npx tsx recipes/observability/prometheus/examples/live-demo.ts
-#   docker compose -f recipes/observability/prometheus/docker-compose.yml up -d
-#   open "http://localhost:9090/graph?g0.expr=rate(act_events_committed_total[30s])&g0.tab=0&g1.expr=act_streams_blocked&g1.tab=0"
+#   pnpm dev:metrics
 #
-# The demo generates its own traffic (2s scrape interval): commits and
-# per-lane acks climb, and act_streams_blocked saws as poison streams
-# block and the operator loop unblocks them.
-# Tear down: docker compose -f recipes/observability/prometheus/docker-compose.yml down
+# Grafana: http://localhost:3001/d/act-demo  (anonymous, no login)
+# Prometheus (raw): http://localhost:9090
 services:
   prometheus:
     image: prom/prometheus:v3.9.1
@@ -17,3 +14,16 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+  grafana:
+    image: grafana/grafana:12.3.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

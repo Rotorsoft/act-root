@@ -1,16 +1,20 @@
 /**
- * Interactive: an instrumented app you drive from the console while
- * watching the Prometheus UI react.
+ * Interactive: a real app with a live dashboard, driven from the
+ * browser or the console, while the Prometheus UI reacts beside it.
  *
  *   pnpm dev:metrics        # brings up Prometheus + this app
  *
- * Nothing happens until you press a key — the startup banner walks you
- * through opening the UI pages first, then you fire batches of orders
- * and watch the panels move on the 2s scrape. The poison key blocks a
- * fulfillment stream after its retry budget; YOU are the operator who
- * unblocks it and watches the gauge fall.
+ * The dashboard on :4001 shows the projections updating over SSE as
+ * events commit — tiles for placed/shipped/pending/blocked, an event
+ * feed, and the same action buttons the console keys drive. Nothing
+ * happens until you act. The poison order blocks a fulfillment stream
+ * after its retry budget; YOU are the operator who unblocks it and
+ * watches both the tile and the Prometheus gauge fall.
  */
-import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, dispose, projection, state } from "@rotorsoft/act";
 import { instrument } from "@rotorsoft/act-otel";
 import { register } from "prom-client";
@@ -90,6 +94,46 @@ app.on("error", () => {}); // counted by the bridge; keep the console calm
 // The bridge — global registry, served below.
 dispose(instrument(app));
 
+// Dashboard plumbing: a rolling event feed and an SSE fanout that
+// pushes a fresh snapshot to every connected browser whenever the
+// pipeline moves (commits, acks, blocks) — the projections update in
+// the page the moment the events land.
+const feed: Array<{ name: string; stream: string; sku?: string }> = [];
+app.on("committed", (snapshots) => {
+  for (const snap of snapshots) {
+    const event = snap.event as {
+      name: string;
+      stream: string;
+      data?: { sku?: string };
+    };
+    feed.unshift({
+      name: event.name,
+      stream: event.stream,
+      sku: event.data?.sku,
+    });
+  }
+  feed.length = Math.min(feed.length, 12);
+});
+
+const clients = new Set<ServerResponse>();
+async function push() {
+  const blocked = await app.blocked_streams();
+  const snapshot = JSON.stringify({
+    ...stats,
+    blocked: blocked.length,
+    feed,
+  });
+  for (const client of clients) client.write(`data: ${snapshot}\n\n`);
+}
+app.on("committed", () => void push());
+app.on("acked", () => void push());
+app.on("blocked", () => void push());
+
+const html = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "dashboard.html"),
+  "utf8"
+);
+
 const server = createServer((req, res) => {
   if (req.url === "/metrics") {
     void register.metrics().then((m) => {
@@ -98,8 +142,34 @@ const server = createServer((req, res) => {
     });
     return;
   }
-  res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify(stats));
+  if (req.url === "/events") {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    clients.add(res);
+    res.on("close", () => clients.delete(res));
+    void push();
+    return;
+  }
+  if (req.method === "POST" && req.url?.startsWith("/do/")) {
+    const action = req.url.slice(4);
+    void (async () => {
+      if (action === "batch10") await place(10);
+      else if (action === "batch50") await place(50);
+      else if (action === "poison") await place(1, "poison");
+      else if (action === "unblock") {
+        await app.unblock({ blocked: true });
+        await push();
+      }
+    })();
+    res.writeHead(202);
+    res.end();
+    return;
+  }
+  res.writeHead(200, { "content-type": "text/html" });
+  res.end(html);
 });
 server.listen(4001);
 
@@ -212,6 +282,7 @@ process.stdin.on("data", (chunk: string) => {
 const exit = dispose(async () => {
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
   process.stdin.pause();
+  for (const client of clients) client.destroy();
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -219,16 +290,19 @@ console.log(`
 ──────────────────────────────────────────────────────────────────
   ${bold("act-otel live demo")} — nothing is running yet; ${bold("you")} drive it.
 
-  1. open the prometheus UI (three panels pre-loaded):
+  1. open the grafana dashboard (2x2, fits one screen, 5s refresh):
 
-     ${UI}
+     http://localhost:3001/d/act-demo
 
-       panel 1: commit throughput    panel 2: blocked gauge
-       panel 3: per-lane ack rate
+       commit throughput | blocked stat (goes red)
+       per-lane ack rate | blocks + errors
 
-  2. optional second tab — the app itself:
+     raw prometheus, if you prefer: ${UI}
 
-     http://localhost:4001/          live projection counts
+  2. open the app dashboard — projections update live over SSE,
+     and the buttons there do what the keys below do:
+
+     http://localhost:4001/          live dashboard (tiles + event feed)
      http://localhost:4001/metrics   the raw scrape prometheus reads
 
   3. come back here and press keys (2s scrape → ~2s to the graph):

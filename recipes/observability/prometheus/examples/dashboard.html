@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>act-otel live demo</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #0e1116; color: #dbe2ea; min-height: 100vh;
+    display: flex; flex-direction: column; gap: 24px; padding: 32px;
+  }
+  h1 { font-size: 18px; font-weight: 600; letter-spacing: .02em; }
+  h1 small { color: #6b7683; font-weight: 400; margin-left: 10px; }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; max-width: 860px; }
+  .tile {
+    background: #161b23; border: 1px solid #232b36; border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .tile .label { color: #6b7683; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  .tile .value { font-size: 34px; font-weight: 700; margin-top: 4px; transition: color .3s; }
+  .tile.blocked .value { color: #4ade80; }
+  .tile.blocked.hot .value { color: #f87171; }
+  .buttons { display: flex; gap: 10px; flex-wrap: wrap; max-width: 860px; }
+  button {
+    font: inherit; color: #dbe2ea; background: #1d2530; border: 1px solid #2d3846;
+    border-radius: 8px; padding: 10px 16px; cursor: pointer;
+  }
+  button:hover { background: #253040; }
+  button.danger { border-color: #7f1d1d; color: #fca5a5; }
+  button.danger:hover { background: #2c1a1a; }
+  button.op { border-color: #14532d; color: #86efac; }
+  button.op:hover { background: #16241b; }
+  .feed {
+    background: #161b23; border: 1px solid #232b36; border-radius: 10px;
+    padding: 14px 18px; max-width: 860px; min-height: 180px;
+  }
+  .feed .label { color: #6b7683; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+  .feed ul { list-style: none; }
+  .feed li { color: #9aa7b4; font-size: 13px; }
+  .feed li b { color: #dbe2ea; font-weight: 600; }
+  .feed li.poison b { color: #f87171; }
+  footer { color: #6b7683; font-size: 13px; }
+  footer a { color: #7cb7ff; text-decoration: none; }
+</style>
+</head>
+<body>
+  <h1>act-otel live demo <small>projections update over SSE as events commit</small></h1>
+
+  <div class="tiles">
+    <div class="tile"><div class="label">orders placed</div><div class="value" id="placed">0</div></div>
+    <div class="tile"><div class="label">orders shipped</div><div class="value" id="shipped">0</div></div>
+    <div class="tile"><div class="label">pending</div><div class="value" id="pending">0</div></div>
+    <div class="tile blocked" id="blockedTile"><div class="label">blocked streams</div><div class="value" id="blocked">0</div></div>
+  </div>
+
+  <div class="buttons">
+    <button onclick="act('batch10')">place 10 orders</button>
+    <button onclick="act('batch50')">place 50 orders</button>
+    <button class="danger" onclick="act('poison')">place poison order</button>
+    <button class="op" onclick="act('unblock')">unblock quarantine</button>
+  </div>
+
+  <div class="feed">
+    <div class="label">event feed</div>
+    <ul id="feed"></ul>
+  </div>
+
+  <footer>
+    raw scrape: <a href="/metrics">/metrics</a>
+    &nbsp;·&nbsp; grafana: <a href="http://localhost:3001/d/act-demo">localhost:3001/d/act-demo</a>
+    &nbsp;·&nbsp; prometheus: <a id="prom" href="#">localhost:9090</a>
+    &nbsp;·&nbsp; the blocked tile goes red ~30s after poison — press unblock and watch it (and the prometheus gauge) drop
+  </footer>
+
+<script>
+  const promUrl = "http://localhost:9090/graph" +
+    "?g0.expr=rate(act_events_committed_total%5B30s%5D)&g0.tab=0" +
+    "&g1.expr=act_streams_blocked&g1.tab=0" +
+    "&g2.expr=rate(act_reactions_acked_total%5B30s%5D)&g2.tab=0";
+  document.getElementById("prom").href = promUrl;
+
+  const act = (what) => fetch("/do/" + what, { method: "POST" });
+
+  const es = new EventSource("/events");
+  es.onmessage = (m) => {
+    const s = JSON.parse(m.data);
+    placed.textContent = s.placed;
+    shipped.textContent = s.shipped;
+    pending.textContent = Math.max(0, s.placed - s.shipped - s.blocked);
+    blocked.textContent = s.blocked;
+    blockedTile.classList.toggle("hot", s.blocked > 0);
+    feed.innerHTML = s.feed
+      .map((e) => `<li class="${e.sku === "poison" ? "poison" : ""}"><b>${e.name}</b> ${e.stream}${e.sku ? " · " + e.sku : ""}</li>`)
+      .join("");
+  };
+</script>
+</body>
+</html>
