@@ -46208,23 +46208,31 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = \`ackdefer-\${uid()}\`;
         const ctl = \`ackdefer-ctl-\${uid()}\`;
         await store.subscribe([{ stream: s }, { stream: ctl }]);
-        for (const st of [s, ctl])
-          await store.commit<CounterEvents>(
-            st,
-            [inc(1)],
-            make_meta({ stream: st })
-          );
+        await store.commit<CounterEvents>(s, [inc(1)], make_meta({ stream: s }));
+        const [ctl_head] = await store.commit<CounterEvents>(
+          ctl,
+          [inc(1)],
+          make_meta({ stream: ctl })
+        );
         const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
         const s_lease = leased.find((l) => l.stream === s)!;
         const ctl_lease = leased.find((l) => l.stream === ctl)!;
         const acked = await store.ack([
-          { ...ctl_lease, at: 1_000_000 },
+          { ...ctl_lease, at: ctl_head.id },
           { ...s_lease, due: Date.now() + 3_600_000 },
         ]);
         expect(acked.find((l) => l.stream === ctl)).toBeDefined();
         expect(acked.find((l) => l.stream === s)).toBeUndefined();
-        // The schedule holds: claim skips the deferred stream.
+        // The schedule holds: claim skips the deferred stream. A fresh
+        // commit on the control keeps the claim result non-empty, so the
+        // membership check proves the deferred stream is the one skipped.
+        await store.commit<CounterEvents>(
+          ctl,
+          [inc(2)],
+          make_meta({ stream: ctl })
+        );
         const again = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        expect(again.find((l) => l.stream === ctl)).toBeDefined();
         expect(again.find((l) => l.stream === s)).toBeUndefined();
       });
 
