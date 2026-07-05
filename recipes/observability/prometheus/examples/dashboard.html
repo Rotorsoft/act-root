@@ -13,6 +13,12 @@
   }
   h1 { font-size: 18px; font-weight: 600; letter-spacing: .02em; }
   h1 small { color: #6b7683; font-weight: 400; margin-left: 10px; }
+  .steps { display: flex; flex-direction: column; gap: 6px; max-width: 860px;
+    background: #12161d; border: 1px solid #232b36; border-radius: 10px; padding: 14px 18px; }
+  .step { color: #9aa7b4; font-size: 14px; }
+  .step b { color: #7cb7ff; margin-right: 8px; }
+  .step a { color: #7cb7ff; }
+  .pill-red { color: #f87171; } .pill-green { color: #86efac; }
   .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; max-width: 860px; }
   .tile {
     background: #161b23; border: 1px solid #232b36; border-radius: 10px;
@@ -47,6 +53,12 @@
 </head>
 <body>
   <h1>act-otel live demo <small>projections update over SSE as events commit</small></h1>
+
+  <div class="steps">
+    <div class="step"><b>1</b> open <a href="http://localhost:3001/d/act-demo" target="_blank">the grafana dashboard</a> side by side — 2×2, refreshes every 5s</div>
+    <div class="step"><b>2</b> fire batches below and watch commits, lanes, and these tiles move</div>
+    <div class="step"><b>3</b> place a <span class="pill-red">poison</span> order — in ~30s its stream blocks and everything goes red; then make the operator move: <span class="pill-green">unblock</span></div>
+  </div>
 
   <div class="tiles">
     <div class="tile"><div class="label">orders placed</div><div class="value" id="placed">0</div></div>

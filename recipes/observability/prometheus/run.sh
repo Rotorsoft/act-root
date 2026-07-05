@@ -27,9 +27,9 @@ until curl -sf http://localhost:9090/-/ready >/dev/null 2>&1; do sleep 0.5; done
 step "prometheus is up — scraping the demo every 2s"
 step "waiting for grafana to be ready on :3001..."
 until curl -sf http://localhost:3001/api/health >/dev/null 2>&1; do sleep 0.5; done
-step "grafana is up — dashboard: http://localhost:3001/d/act-demo"
+step "grafana is up (provisioned dashboard ready)"
 step "prometheus (raw queries): http://localhost:9090"
-step "starting the interactive demo on :4001 — nothing runs until you press a key (q or Ctrl-C stops everything)..."
+step "starting the app — drive everything from http://localhost:4001 (Ctrl-C here stops it all)..."
 echo
 
 npx tsx "$R/examples/live-demo.ts"

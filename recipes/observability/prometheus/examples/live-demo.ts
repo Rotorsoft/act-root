@@ -4,12 +4,13 @@
  *
  *   pnpm dev:metrics        # brings up Prometheus + this app
  *
- * The dashboard on :4001 shows the projections updating over SSE as
- * events commit — tiles for placed/shipped/pending/blocked, an event
- * feed, and the same action buttons the console keys drive. Nothing
- * happens until you act. The poison order blocks a fulfillment stream
- * after its retry budget; YOU are the operator who unblocks it and
- * watches both the tile and the Prometheus gauge fall.
+ * The dashboard on :4001 is the cockpit: a guided three-step strip,
+ * links to grafana and prometheus, action buttons firing batches, and
+ * projection tiles + an event feed updating over SSE as events commit.
+ * The poison button blocks a fulfillment stream after its retry
+ * budget; YOU are the operator who unblocks it and watches both the
+ * tile and the grafana stat fall. The console only launches and
+ * tears down (Ctrl-C).
  */
 import { readFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
@@ -185,128 +186,15 @@ async function place(count: number, sku?: string) {
   }
 }
 
-const UI =
-  "http://localhost:9090/graph" +
-  "?g0.expr=rate(act_events_committed_total%5B30s%5D)&g0.tab=0" +
-  "&g1.expr=act_streams_blocked&g1.tab=0" +
-  "&g2.expr=rate(act_reactions_acked_total%5B30s%5D)&g2.tab=0";
-
-// Plain ANSI colors, TTY-gated — no dependency, honest when piped.
-const tty = process.stdout.isTTY === true;
-const paint = (code: string) => (text: string) =>
-  tty ? `\x1b[${code}m${text}\x1b[0m` : text;
-const bold = paint("1");
-const dim = paint("2");
-const cyan = paint("36");
-const green = paint("32");
-const yellow = paint("33");
-const magenta = paint("35");
-
-const row = (key: string, what: string, effect: string) =>
-  `  ${cyan(bold(key))}  ${what.padEnd(26)}${dim(`→ ${effect}`)}`;
-const MENU = [
-  row("o", "place 10 orders", "commit rate + both lanes light up"),
-  row("O", "place 50 orders", "a burst worth graphing"),
-  row("p", "place a poison order", "its fulfillment stream blocks in ~30s"),
-  row("u", "unblock quarantine", "the operator move: watch the gauge fall"),
-  row("s", "show stats", ""),
-  row("q", "quit", "tears everything down"),
-].join("\n");
-
-// Feedback, then the menu again — the console always tells you what
-// you can do next.
-const say = (msg: string) => console.log(`\n${msg}\n\n${MENU}\n`);
-
-async function handle(key: string) {
-  switch (key) {
-    case "o":
-      await place(10);
-      say(
-        green(
-          "placed 10 orders — panel 1 spikes, panel 3 shows both lanes working"
-        )
-      );
-      return;
-    case "O":
-      await place(50);
-      say(green("placed 50 orders — a burst the lanes will chew through"));
-      return;
-    case "p":
-      await place(1, "poison");
-      say(
-        yellow(
-          "poison placed — its fulfillment stream retries, then blocks: panel 2 rises in ~30s"
-        )
-      );
-      return;
-    case "u": {
-      const unblocked = await app.unblock({ blocked: true });
-      say(
-        unblocked > 0
-          ? green(
-              `unblocked ${unblocked} stream(s) — panel 2 falls on the next scrape`
-            )
-          : dim("nothing is blocked right now")
-      );
-      return;
-    }
-    case "s": {
-      const blocked = await app.blocked_streams();
-      say(
-        magenta(
-          `placed=${stats.placed} shipped=${stats.shipped} blocked=${blocked.length}`
-        )
-      );
-      return;
-    }
-    case "q":
-    case "": // Ctrl-C in raw mode
-      console.log();
-      await exit("EXIT");
-      return;
-    default:
-      console.log(`\n${MENU}\n`);
-  }
-}
-
-// Raw single-key input on a TTY; line-buffered when piped (tests/CI).
-if (process.stdin.isTTY) process.stdin.setRawMode(true);
-process.stdin.resume();
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk: string) => {
-  const keys = chunk === "" ? [chunk] : [...chunk.trim()];
-  for (const key of keys) void handle(key);
-});
-
-// dispose() both registers the teardown and returns the exit runner.
-const exit = dispose(async () => {
-  if (process.stdin.isTTY) process.stdin.setRawMode(false);
-  process.stdin.pause();
+dispose(async () => {
   for (const client of clients) client.destroy();
   await new Promise((resolve) => server.close(resolve));
 });
 
 console.log(`
-──────────────────────────────────────────────────────────────────
-  ${bold("act-otel live demo")} — nothing is running yet; ${bold("you")} drive it.
+  the dashboard drives everything — open it and follow the steps there:
 
-  1. open the grafana dashboard (2x2, fits one screen, 5s refresh):
+      http://localhost:4001
 
-     http://localhost:3001/d/act-demo
-
-       commit throughput | blocked stat (goes red)
-       per-lane ack rate | blocks + errors
-
-     raw prometheus, if you prefer: ${UI}
-
-  2. open the app dashboard — projections update live over SSE,
-     and the buttons there do what the keys below do:
-
-     http://localhost:4001/          live dashboard (tiles + event feed)
-     http://localhost:4001/metrics   the raw scrape prometheus reads
-
-  3. come back here and press keys (2s scrape → ~2s to the graph):
-
-${MENU}
-──────────────────────────────────────────────────────────────────
+  (Ctrl-C here tears the demo and the containers down)
 `);

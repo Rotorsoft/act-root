@@ -21,13 +21,13 @@ That last line is the one your pager cares about.
 
 ## Watch it live — the Prometheus UI
 
-The live demo is interactive — nothing moves until you do. It brings up a self-contained app (fulfillment and notification reactions on their own lanes, the notifier flaky on purpose with exponential backoff, a projection counting orders) and waits: the startup banner walks you through opening the Prometheus panels and the app's own pages first, then you drive it by key — `o`/`O` fire batches of orders, `p` places a poison order whose fulfillment stream blocks after its retry budget, and `u` is the operator move that unblocks the quarantine while you watch the gauge fall on the graph.
+The live demo is interactive and web-first — nothing moves until you do, and everything is driven from the app's own dashboard. `pnpm dev:metrics` brings up the stack and prints one link: **http://localhost:4001**. The page is the cockpit — a three-step guide, links to Grafana and Prometheus, buttons that fire order batches, a poison order whose fulfillment stream blocks after its retry budget, and the operator's unblock button — with projection tiles and an event feed updating over SSE as events commit. Under the hood: fulfillment and notification reactions on their own lanes, the notifier flaky on purpose with exponential backoff, a projection counting orders.
 
 ```bash
 pnpm dev:metrics
 ```
 
-One command: starts Prometheus + a pre-provisioned Grafana in docker, runs the demo, prints the links, and tears the containers down on Ctrl-C. Then open two tabs:
+One command: starts Prometheus + a pre-provisioned Grafana in docker, runs the demo, and tears the containers down on Ctrl-C. Open the dashboard and keep Grafana beside it:
 
 - **http://localhost:3001/d/act-demo** — the Grafana dashboard: a 2×2 grid that fits one screen (commit throughput, a blocked-streams stat that goes red, per-lane ack rate, blocks + errors), refreshing every 5s, no login.
 - **http://localhost:4001/** — the app itself: projection tiles and an event feed updating over SSE as events commit, with the same action buttons the console keys drive.
