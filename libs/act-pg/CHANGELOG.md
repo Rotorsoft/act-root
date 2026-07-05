@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.10.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.10.1...@rotorsoft/act-pg-v1.10.2) (2026-07-05)
+
+
+### Bug Fixes
+
+* **act:** finalize drain cycles atomically — acks and defer schedules in one store call ([9ab2f26](https://github.com/rotorsoft/act-root/commit/9ab2f26e13999b1f8717984cd5bc088b919969e6))
+
 # [@rotorsoft/act-pg-v1.10.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.10.0...@rotorsoft/act-pg-v1.10.1) (2026-07-04)
 
 
