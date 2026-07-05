@@ -43,12 +43,14 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   /**
    * @param options.cacheSize - Max number of stream states kept in the LRU
    * cache (default 50).
-   * @param options.cache_size - Deprecated alias of `cacheSize` — removal in
-   * the next major. When both are given, `cacheSize` wins.
    */
   constructor(options?: {
     cacheSize?: number;
-    /** @deprecated use `cacheSize` — removal in the next major */
+    /**
+     * Deprecated alias of `cacheSize` — removal in the next major. When
+     * both are given, `cacheSize` wins.
+     * @deprecated use `cacheSize`
+     */
     cache_size?: number;
   }) {
     this.state_cache = new StateCache<S>(
