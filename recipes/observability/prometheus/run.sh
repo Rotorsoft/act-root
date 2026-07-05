@@ -6,6 +6,11 @@ R="$(cd "$(dirname "$0")" && pwd)"
 
 step() { echo "[dev:metrics] $*"; }
 
+if ! docker info >/dev/null 2>&1; then
+  step "docker daemon is not running — start Docker Desktop (or your docker service) and retry"
+  exit 1
+fi
+
 if lsof -ti :4001 >/dev/null 2>&1; then
   step "port 4001 is already in use — is another demo still running? (lsof -ti :4001)"
   exit 1
