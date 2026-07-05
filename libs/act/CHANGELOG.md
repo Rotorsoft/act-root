@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.18.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.4...@rotorsoft/act-v1.18.5) (2026-07-05)
+
+
+### Bug Fixes
+
+* **act:** correlate arms lane controllers for newly-subscribed streams ([9a23d4c](https://github.com/rotorsoft/act-root/commit/9a23d4c2968623a9581c6efe8facb7571167ced6))
+
 # [@rotorsoft/act-v1.18.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.3...@rotorsoft/act-v1.18.4) (2026-07-05)
 
 
