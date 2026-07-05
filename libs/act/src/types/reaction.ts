@@ -337,6 +337,16 @@ export type Lease = {
   readonly retry: number;
   readonly lagging: boolean;
   readonly lane?: string;
+  /**
+   * Defer marker on the finalize path. When set on a lease passed
+   * to {@link Store.ack}, the stream is being *deferred*, not acked: the
+   * adapter must persist `due` (ms since epoch) as the stream's
+   * `deferred_at` and reset `retry` — without advancing the watermark —
+   * atomically with the other entries' acks. Deferred entries are not part
+   * of ack's return value. Never set on leases returned by `claim` or
+   * carried by lifecycle events.
+   */
+  readonly due?: number;
 };
 
 /**

@@ -977,6 +977,13 @@ export class PostgresStore implements Store {
     const client = await this._client("ack");
     try {
       await client.query("BEGIN");
+      // One statement finalizes the whole batch, so acks and defer
+      // schedules land all-or-nothing per the Store.ack contract: an
+      // entry without `due` acks (watermark advances, schedule cleared),
+      // an entry with `due` defers (schedule set, watermark untouched).
+      // A defer is a deliberate "come back later," not a failure, so
+      // retry resets on both paths. Deferred rows are filtered out of
+      // the returned acked leases.
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -985,36 +992,40 @@ export class PostgresStore implements Store {
         retry: number;
         lagging: boolean;
         lane: string;
+        due: string | null;
       }>(
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, by text, at int, lagging boolean)
+        AS x(stream text, by text, at int, lagging boolean, due bigint)
       )
       UPDATE ${this._fqs} AS s
       SET
-        at = i.at,
+        at = CASE WHEN i.due IS NULL THEN i.at ELSE s.at END,
         retry = -1,
         leased_by = NULL,
         leased_until = NULL,
-        deferred_at = NULL
+        deferred_at = CASE WHEN i.due IS NULL THEN NULL
+                           ELSE to_timestamp(i.due / 1000.0) END
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by
-      RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane
+      RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane, i.due
       `,
         [JSON.stringify(leases)]
       );
       await client.query("COMMIT");
 
-      return rows.map((row) => ({
-        stream: row.stream,
-        source: row.source ?? undefined,
-        at: row.at,
-        by: row.by,
-        retry: row.retry,
-        lagging: row.lagging,
-        lane: row.lane,
-      }));
+      return rows
+        .filter((row) => row.due === null)
+        .map((row) => ({
+          stream: row.stream,
+          source: row.source ?? undefined,
+          at: row.at,
+          by: row.by,
+          retry: row.retry,
+          lagging: row.lagging,
+          lane: row.lane,
+        }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw new StoreError("ack", { cause: error });

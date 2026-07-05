@@ -160,16 +160,24 @@ class InMemoryStream {
   }
 
   /**
-   * Acknowledge completion of processing for this stream.
+   * Finalize this stream's lease: ack (advance the watermark) or, when the
+   * lease carries a `due` marker, defer (persist the schedule, hold the
+   * watermark) — see {@link Store.ack}.
    * @param lease - The lease request.
    */
   ack(lease: Lease) {
     if (this._leased_by === lease.by) {
       this._leased_by = undefined;
       this._leased_until = undefined;
-      this._at = lease.at;
       this._retry = -1;
-      // Advancing the watermark ends any active defer schedule (#1090).
+      if (lease.due !== undefined) {
+        // Defer marker: schedule the re-visit, keep the watermark.
+        // Deferred entries are not part of ack's return value.
+        this._deferred_at = lease.due;
+        return undefined;
+      }
+      this._at = lease.at;
+      // Advancing the watermark ends any active defer schedule.
       this._deferred_at = undefined;
       return {
         stream: this.stream,
@@ -643,6 +651,11 @@ export class InMemoryStore implements Store {
    */
   async ack(leases: Lease[]) {
     await sleep();
+    // Acks and defer schedules land in one synchronous pass — the
+    // in-memory equivalent of the single-transaction contract on
+    // {@link Store.ack}: no await between entries, so a caller
+    // never observes a cycle's acks without its schedules. `due`-carrying
+    // entries defer (and return undefined), the rest ack.
     return leases
       .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);

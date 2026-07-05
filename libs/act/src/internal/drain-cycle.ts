@@ -242,20 +242,22 @@ export async function run_drain_cycle<
     })
   );
 
-  // Ack any result that made progress — full success (no error), empty
-  // payloads (no work to do, watermark fast-forwards), and partial
-  // success (some events processed before the failure). The `error`
-  // string is no longer the "skip ack" signal; `handled > 0 || !error`
-  // is. Partial-success-then-block now lands in both `acked` and
-  // `blocked` arrays for the same stream — by design.
-  //
-  // A *deferred* result (#1090) is held out of ack entirely: the handler
-  // chose to re-visit the stream later without advancing the watermark, so
-  // the pending events must stay pending for the redelivery.
+  // Finalize the cycle in one atomic store call: results that made
+  // progress (`handled > 0 || !error` — full success, empty payloads, or
+  // partial success before a failure) ack at their new watermark, and
+  // deferred results ride the same batch marked with `due` (watermark
+  // held, schedule persisted, excluded from the returned acks). A failed
+  // finalize lands nothing — the catch in the controller covers every
+  // outcome uniformly. Partial-success-then-block still lands in both
+  // `acked` and `blocked` for the same stream — by design.
   const acked = await ops.ack(
-    handled
-      .filter((h) => h.defer === undefined && (h.handled > 0 || !h.error))
-      .map((h) => ({ ...h.lease, at: h.acked_at }))
+    handled.flatMap((h) =>
+      h.defer !== undefined
+        ? { ...h.lease, due: h.defer }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : []
+    )
   );
 
   const blocked = await ops.block(
@@ -263,22 +265,6 @@ export async function run_drain_cycle<
       .filter(({ block }) => block)
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
-
-  // Persist deferred streams' next-visit time (#1090). `claim()` skips a
-  // stream until its `deferred_at` passes, so the defer holds across every
-  // competing worker (the durable counterpart to the in-process wake timer)
-  // and the stream isn't re-claimed — `retry` stays untouched. `defer()`
-  // sets one time per call, so group streams by their due-time.
-  const deferrals = handled.filter((h) => h.defer !== undefined);
-  if (deferrals.length) {
-    const by_time = new Map<number, string[]>();
-    for (const h of deferrals) {
-      const list = by_time.get(h.defer!);
-      if (list) list.push(h.lease.stream);
-      else by_time.set(h.defer!, [h.lease.stream]);
-    }
-    for (const [at, streams] of by_time) await ops.defer(streams, at);
-  }
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, `defer === undefined`), which advances the
@@ -490,8 +476,11 @@ export class DrainController<
         this._deps.lane
       );
 
-      // The store responded (claim/fetch/ack/block all succeeded) — reset
-      // the breaker even when there was no work to do.
+      // The store responded (claim/fetch/ack+defer/block all succeeded) —
+      // reset the breaker even when there was no work to do. A failed
+      // finalize never reaches here: `Store.ack` applies watermarks and
+      // defer schedules atomically, so it either all landed or the
+      // whole cycle threw into the catch below and nothing did.
       this._deps.breaker.passed();
 
       if (!cycle) {

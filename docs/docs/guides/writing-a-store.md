@@ -16,7 +16,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support. Respecting the `after` / `limit` pair is what gives `scan` bounded-memory restore: the framework paginates by re-issuing `query` per batch, so any adapter that already honors those filters gets memory-safe scans for free. Stream/source filters must honor the portable regex grammar (`^` / `$` anchors, `.`, `.*`, literal characters — literal `_` / `%` included); if your backend can't express a richer pattern exactly, **throw `ValidationError`** instead of approximating — the TCK's "stream filter grammar" suite enforces both halves ([#1114](https://github.com/Rotorsoft/act-root/issues/1114))
 - `claim(lagging, leading, by, millis, lane?)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
 - `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
-- `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure
+- `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure. `ack` doubles as the drain's atomic finalize: a lease carrying `due` (ms since epoch) defers instead of acking — schedule set, watermark held, retry reset — in the same transaction as the batch's acks; deferred entries are excluded from the return value
 - `defer(input, deferred_at)` — park streams until a future wall-clock time without advancing their watermark (the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)); covered below
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`. The query gained an optional `source_matches` filter — covered below
@@ -88,6 +88,8 @@ Second, the `claim` query gains a guard that skips any stream still parked in th
 -- inside claim(...), alongside the blocked = false and lease-expiry predicates
 AND (deferred_at IS NULL OR deferred_at <= $now)
 ```
+
+The second write path for `deferred_at` is `ack` itself: the framework's drain finalizes every cycle with one `ack` call in which deferred leases ride the batch marked with `due`. Branch on it inside your ack transaction — no `due` means advance the watermark and clear the schedule; `due` means set the schedule, keep the watermark, reset retry, and honor the same `leased_by` ownership check as a plain ack. Atomicity here is load-bearing: a cycle's acks landing without its schedules (or vice versa) is exactly the partial state the contract forbids, and the TCK's `describe("ack finalize (due-marked leases)")` block pins it.
 
 That guard is the whole correctness story. Because the skip lives in the shared store and not in worker memory, every competing consumer honors the same deferral — this is durable shared state, not the in-process pacing that reaction backoff does. When the due-time passes, the next `claim` from any worker picks the stream up again at the unchanged watermark, so the same pending event is re-delivered and the handler gets another chance to decide.
 
