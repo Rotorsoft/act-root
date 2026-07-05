@@ -191,19 +191,21 @@ export function broadcastState(streamId: string, snaps: Snap[]) {
 
 /** Re-broadcast with updated presence (called on connect/disconnect). */
 export function broadcastPresenceChange(streamId: string) {
-  const cached = broadcast.get_state(streamId);
+  const cached = broadcast.state(streamId);
   if (!cached) return;
   const withPresence = applyPresence(cached, streamId);
-  broadcast.publish_overlay(streamId, withPresence);
+  broadcast.overlay(streamId, withPresence);
 }
 
 function applyPresence(state: AppState, streamId: string): AppState {
   // App-specific presence overlay — e.g., set `connected` on each player/user
-  const online = presence.get_online(streamId);
+  const online = presence.online(streamId);
   // ... overlay online status onto state
   return state;
 }
 ```
+
+Always use the short names (`overlay`, `state`, `online`, `isOnline`) — the snake_case names are deprecated aliases removed in the next major.
 
 ## packages/app/src/api/domain.routes.ts (domain commands + queries)
 
@@ -268,7 +270,7 @@ export const eventsRouter = t.router({
 
       try {
         // Yield cached state on connect (full state for first paint / reconnects)
-        const cached = broadcast.get_state(streamId);
+        const cached = broadcast.state(streamId);
         if (cached) yield { kind: "snap" as const, state: cached };
 
         while (!signal?.aborted) {

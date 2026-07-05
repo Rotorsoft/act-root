@@ -17,7 +17,7 @@
  * presence.remove(game_id, player_id);
  *
  * // Query:
- * presence.get_online(game_id); // Set<string>
+ * presence.online(game_id); // Set<string>
  * ```
  */
 export class PresenceTracker {
@@ -41,13 +41,23 @@ export class PresenceTracker {
   }
 
   /** Get the set of online identity IDs for a stream. */
-  get_online(streamId: string): Set<string> {
+  online(streamId: string): Set<string> {
     const counts = this.streams.get(streamId);
     return counts ? new Set(counts.keys()) : new Set();
   }
 
   /** Check if a specific identity is online for a stream. */
-  is_online(streamId: string, identity_id: string): boolean {
+  isOnline(streamId: string, identity_id: string): boolean {
     return (this.streams.get(streamId)?.get(identity_id) ?? 0) > 0;
+  }
+
+  /** @deprecated use `online` — removal in the next major */
+  get_online(streamId: string): Set<string> {
+    return this.online(streamId);
+  }
+
+  /** @deprecated use `isOnline` — removal in the next major */
+  is_online(streamId: string, identity_id: string): boolean {
+    return this.isOnline(streamId, identity_id);
   }
 }

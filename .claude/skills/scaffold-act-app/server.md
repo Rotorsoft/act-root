@@ -436,7 +436,7 @@ type MyAppState = BroadcastState & {
 
 // Create broadcast channel + presence tracker
 const broadcast = new BroadcastChannel<MyAppState>({
-  cache_size: 50,    // LRU cache entries; default 50
+  cacheSize: 50,    // LRU cache entries; default 50
 });
 const presence = new PresenceTracker();
 
@@ -452,12 +452,14 @@ function broadcastState(streamId: string, snaps: Snap[]) {
 
 // For non-event state changes (e.g. presence toggle)
 function broadcastPresenceChange(streamId: string) {
-  const cached = broadcast.get_state(streamId);
+  const cached = broadcast.state(streamId);
   if (!cached) return;
   const withPresence = applyPresence(cached, streamId);
-  broadcast.publish_overlay(streamId, withPresence);
+  broadcast.overlay(streamId, withPresence);
 }
 ```
+
+Use the short names (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`) — the snake_case names are deprecated aliases slated for removal in the next major.
 
 ### Client-Side Patch Application
 
@@ -507,7 +509,7 @@ onStateChange: publicProcedure
 
     try {
       // Yield cached state on connect (full state for first paint / reconnects)
-      const cached = broadcast.get_state(streamId);
+      const cached = broadcast.state(streamId);
       if (cached) yield { kind: "snap" as const, state: cached };
 
       while (!signal?.aborted) {
@@ -562,7 +564,7 @@ const OrderProjection = projection("orders")
 
 // Handler reads from broadcast cache (always hot after app.do())
 async function persistSummary(streamId: string): Promise<void> {
-  const state = broadcast.get_state(streamId);
+  const state = broadcast.state(streamId);
   if (!state) return; // cold start — bootstrap will rebuild
   const summary = toSummary(state); // lightweight ~500B vs ~2KB full state
   await db.upsert(streamId, summary);
@@ -713,7 +715,7 @@ If a projection's read-modify-write falls back to the live cache on a miss, it r
 ```typescript
 // BUG — live cache holds post-event snapshots, projection double-applies
 async function upsertProjection(streamId, mutator) {
-  let state = projCache.get(streamId) ?? broadcast.get_state(streamId);
+  let state = projCache.get(streamId) ?? broadcast.state(streamId);
   mutator(state); // patches applied twice
   await writeProjection(streamId, state);
 }

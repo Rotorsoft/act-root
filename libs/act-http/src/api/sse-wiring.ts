@@ -235,7 +235,7 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   const on_abort = () => resolve_wait?.();
   signal?.addEventListener("abort", on_abort);
   try {
-    const cached = channel.get_state(stream_id);
+    const cached = channel.state(stream_id);
     if (cached !== undefined) {
       yield { kind: "state", data: cached };
     }

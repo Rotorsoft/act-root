@@ -343,7 +343,7 @@ For every subscription, on every open:
 2. Acquire one slot on the per-process counter. Full counter →
    - Hono: `503 / SSE_BUSY` with `Retry-After: 1` (header set **before** the response body starts so it's a clean reject, not a hung stream).
    - tRPC: `TRPCError({ code: "TOO_MANY_REQUESTS" })`.
-3. Yield `{ kind: "state", data }` once if `channel.get_state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
+3. Yield `{ kind: "state", data }` once if `channel.state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
 4. Subscribe to the channel for `streamId` and forward every publication as `{ kind: "patch", data }`.
 5. Run a keep-alive ping every `heartbeatMs` (default 30 s). Below the 60 s idle timeout most reverse proxies impose.
 6. Tear down on `iter.return()` / disconnect / abort: unsubscribe, release the slot, clear the heartbeat. The teardown runs from a `finally` block so a crashed handler doesn't leak count.
