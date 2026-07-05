@@ -121,46 +121,71 @@ const UI =
   "&g1.expr=act_streams_blocked&g1.tab=0" +
   "&g2.expr=rate(act_reactions_acked_total%5B30s%5D)&g2.tab=0";
 
-const MENU = `  o  place 10 orders          → commit rate + both lanes light up
-  O  place 50 orders          → a burst worth graphing
-  p  place a poison order     → its fulfillment stream blocks in ~30s
-  u  unblock quarantine       → the operator move: watch the gauge fall
-  s  show stats
-  q  quit (tears everything down)`;
+// Plain ANSI colors, TTY-gated — no dependency, honest when piped.
+const tty = process.stdout.isTTY === true;
+const paint = (code: string) => (text: string) =>
+  tty ? `\x1b[${code}m${text}\x1b[0m` : text;
+const bold = paint("1");
+const dim = paint("2");
+const cyan = paint("36");
+const green = paint("32");
+const yellow = paint("33");
+const magenta = paint("35");
 
-const say = (msg: string) => console.log(`\n${msg}\n`);
+const row = (key: string, what: string, effect: string) =>
+  `  ${cyan(bold(key))}  ${what.padEnd(26)}${dim(`→ ${effect}`)}`;
+const MENU = [
+  row("o", "place 10 orders", "commit rate + both lanes light up"),
+  row("O", "place 50 orders", "a burst worth graphing"),
+  row("p", "place a poison order", "its fulfillment stream blocks in ~30s"),
+  row("u", "unblock quarantine", "the operator move: watch the gauge fall"),
+  row("s", "show stats", ""),
+  row("q", "quit", "tears everything down"),
+].join("\n");
+
+// Feedback, then the menu again — the console always tells you what
+// you can do next.
+const say = (msg: string) => console.log(`\n${msg}\n\n${MENU}\n`);
 
 async function handle(key: string) {
   switch (key) {
     case "o":
       await place(10);
       say(
-        "placed 10 orders — panel 1 spikes, panel 3 shows both lanes working"
+        green(
+          "placed 10 orders — panel 1 spikes, panel 3 shows both lanes working"
+        )
       );
       return;
     case "O":
       await place(50);
-      say("placed 50 orders — a burst the lanes will chew through");
+      say(green("placed 50 orders — a burst the lanes will chew through"));
       return;
     case "p":
       await place(1, "poison");
       say(
-        "poison placed — its fulfillment stream retries, then blocks: panel 2 rises in ~30s"
+        yellow(
+          "poison placed — its fulfillment stream retries, then blocks: panel 2 rises in ~30s"
+        )
       );
       return;
     case "u": {
       const unblocked = await app.unblock({ blocked: true });
       say(
         unblocked > 0
-          ? `unblocked ${unblocked} stream(s) — panel 2 falls on the next scrape`
-          : "nothing is blocked right now"
+          ? green(
+              `unblocked ${unblocked} stream(s) — panel 2 falls on the next scrape`
+            )
+          : dim("nothing is blocked right now")
       );
       return;
     }
     case "s": {
       const blocked = await app.blocked_streams();
       say(
-        `placed=${stats.placed} shipped=${stats.shipped} blocked=${blocked.length}`
+        magenta(
+          `placed=${stats.placed} shipped=${stats.shipped} blocked=${blocked.length}`
+        )
       );
       return;
     }
@@ -192,7 +217,7 @@ const exit = dispose(async () => {
 
 console.log(`
 ──────────────────────────────────────────────────────────────────
-  act-otel live demo — nothing is running yet; you drive it.
+  ${bold("act-otel live demo")} — nothing is running yet; ${bold("you")} drive it.
 
   1. open the prometheus UI (three panels pre-loaded):
 
