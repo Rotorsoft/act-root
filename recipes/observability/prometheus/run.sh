@@ -2,18 +2,23 @@
 # One-command live demo: Prometheus (docker) + the instrumented app.
 # Ctrl-C stops the app and tears the Prometheus container down.
 set -euo pipefail
-cd "$(dirname "$0")"
+R="$(cd "$(dirname "$0")" && pwd)"
 
 step() { echo "[dev:metrics] $*"; }
 
+if lsof -ti :4001 >/dev/null 2>&1; then
+  step "port 4001 is already in use — is another demo still running? (lsof -ti :4001)"
+  exit 1
+fi
+
 step "starting prometheus container (docker compose up -d)..."
-docker compose up -d
+docker compose -f "$R/docker-compose.yml" up -d
 trap '
   echo
   step "shutting down..."
   step "  1/2 demo app stopped (act disposal: traffic loops, /metrics server, bridge)"
   step "  2/2 stopping prometheus container (docker compose down)..."
-  docker compose down
+  docker compose -f "$R/docker-compose.yml" down
   step "teardown complete."
 ' EXIT
 
@@ -24,4 +29,4 @@ step "UI: http://localhost:9090/graph?g0.expr=rate(act_events_committed_total%5B
 step "starting instrumented demo app on :4001 (Ctrl-C stops everything)..."
 echo
 
-npx tsx examples/live-demo.ts
+npx tsx "$R/examples/live-demo.ts"
