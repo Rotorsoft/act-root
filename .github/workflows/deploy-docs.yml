@@ -35,6 +35,13 @@ jobs:
     needs: filter
     if: needs.filter.outputs.docs == 'true'
     runs-on: ubuntu-latest
+    # Deploy straight from this workflow via actions/deploy-pages instead of
+    # pushing a gh-pages branch for GitHub's internal (unretryable,
+    # unconfigurable) pages-build-deployment workflow to pick up. The double
+    # hop wedged twice on backend transients; this path has no second hop.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -48,7 +55,9 @@ jobs:
       - run: pnpm install
       - run: pnpm -F docs build:all
 
-      - uses: peaceiris/actions-gh-pages@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/build
+          path: docs/build
+      - uses: actions/deploy-pages@v4
+        id: deployment
