@@ -69,9 +69,13 @@ type AppState = BroadcastState & {
 };
 
 const broadcast = new BroadcastChannel<AppState>({
-  cache_size: 50, // LRU entries; default 50
+  cacheSize: 50, // LRU entries; default 50
 });
 ```
+
+:::note
+The snake_case member names these classes originally shipped with (`publish_overlay`, `get_state`, `get_subscriber_count`, `cache_size`, `get_online`, `is_online`) still work but are deprecated aliases — scheduled for removal in the next major. Use the short names shown here (`overlay`, `state`, `subscriberCount`, `cacheSize`, `online`, `isOnline`).
+:::
 
 ### Broadcasting a commit
 
@@ -102,11 +106,11 @@ broadcast.publish(streamId, state, patches);
 
 ### Overlays (non-event state changes)
 
-Some state changes don't have a corresponding event — typically presence ("alice is online") or computed-field refreshes. Use `publish_overlay()`:
+Some state changes don't have a corresponding event — typically presence ("alice is online") or computed-field refreshes. Use `overlay()`:
 
 ```typescript no-check
-broadcast.publish_overlay(streamId, {
-  onlineUsers: presence.get_online(streamId),
+broadcast.overlay(streamId, {
+  onlineUsers: presence.online(streamId),
 });
 ```
 
@@ -128,8 +132,8 @@ presence.add(streamId, identityId);
 presence.remove(streamId, identityId);
 
 // Query
-presence.get_online(streamId); // Set<string>
-presence.is_online(streamId, identityId); // boolean
+presence.online(streamId); // Set<string>
+presence.isOnline(streamId, identityId); // boolean
 ```
 
 ### If you use the generated transports
@@ -166,7 +170,7 @@ export const onStateChange = publicProcedure
 
     try {
       // Initial snapshot for first paint
-      const cached = broadcast.get_state(streamId);
+      const cached = broadcast.state(streamId);
       if (cached) yield { kind: "snap", state: cached } satisfies Envelope<AppState>;
 
       while (!signal?.aborted) {
@@ -225,7 +229,7 @@ onData: (env) => {
 1. **`_v` is `snap.event.version`** — the event store's stream version is the single source of truth. Never invent a version.
 2. **One broadcast function** — every code path that calls `app.do()` should funnel through the same publish helper. Multiple publish sites with different state shapes is how double-apply bugs start.
 3. **Broadcast from snapshots, not projections** — projections are eventually consistent and may lag. Broadcast from the snapshots returned by `app.do()`.
-4. **Presence is an overlay, not an event** — use `publish_overlay()` so connect/disconnect doesn't pollute the event log.
+4. **Presence is an overlay, not an event** — use `overlay()` so connect/disconnect doesn't pollute the event log.
 
 ## The double-apply bug
 
@@ -233,7 +237,7 @@ If a projection falls back to the broadcast cache on a miss, it reads state that
 
 ```typescript no-check
 // BUG — broadcast cache holds post-event snapshots
-let state = projCache.get(id) ?? broadcast.get_state(id); // ← already patched!
+let state = projCache.get(id) ?? broadcast.state(id); // ← already patched!
 mutator(state); // patches applied a second time
 
 // FIX — fall back to durable storage only
@@ -241,4 +245,4 @@ let state = projCache.get(id) ?? (await db.select(id)) ?? defaultState();
 mutator(state);
 ```
 
-The broadcast cache exists for *reconnect seeding* and for `publish_overlay()`'s read-modify-write. Everything else should go through the database.
+The broadcast cache exists for *reconnect seeding* and for `overlay()`'s read-modify-write. Everything else should go through the database.

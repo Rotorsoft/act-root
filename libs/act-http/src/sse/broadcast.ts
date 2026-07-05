@@ -27,7 +27,7 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * });
  *
  * // Initial state for reconnects:
- * const cached = broadcast.get_state(streamId);
+ * const cached = broadcast.state(streamId);
  * ```
  *
  * ## Version Contract
@@ -40,8 +40,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
 
-  constructor(options?: { cache_size?: number }) {
-    this.state_cache = new StateCache<S>(options?.cache_size ?? 50);
+  /**
+   * @param options.cacheSize - Max number of stream states kept in the LRU
+   * cache (default 50).
+   * @param options.cache_size - Deprecated alias of `cacheSize` — removal in
+   * the next major. When both are given, `cacheSize` wins.
+   */
+  constructor(options?: {
+    cacheSize?: number;
+    /** @deprecated use `cacheSize` — removal in the next major */
+    cache_size?: number;
+  }) {
+    this.state_cache = new StateCache<S>(
+      options?.cacheSize ?? options?.cache_size ?? 50
+    );
   }
 
   /**
@@ -77,7 +89,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * (e.g. presence overlay, computed field refresh).
    * Uses the same version as the cached state, single entry.
    */
-  publish_overlay(
+  overlay(
     streamId: string,
     overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
@@ -111,13 +123,31 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   }
 
   /** Get the number of subscribers for a stream. */
-  get_subscriber_count(streamId: string): number {
+  subscriberCount(streamId: string): number {
     return this.channels.get(streamId)?.size ?? 0;
   }
 
   /** Get the cached state for a stream (for reconnects / initial SSE yield). */
-  get_state(streamId: string): S | undefined {
+  state(streamId: string): S | undefined {
     return this.state_cache.get(streamId);
+  }
+
+  /** @deprecated use `overlay` — removal in the next major */
+  publish_overlay(
+    streamId: string,
+    overlay_patch: Partial<S>
+  ): PatchMessage<S> | undefined {
+    return this.overlay(streamId, overlay_patch);
+  }
+
+  /** @deprecated use `subscriberCount` — removal in the next major */
+  get_subscriber_count(streamId: string): number {
+    return this.subscriberCount(streamId);
+  }
+
+  /** @deprecated use `state` — removal in the next major */
+  get_state(streamId: string): S | undefined {
+    return this.state(streamId);
   }
 
   /** Direct access to the state cache (for app-specific reads like presence). */
