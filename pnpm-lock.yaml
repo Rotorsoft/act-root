@@ -227,7 +227,14 @@ importers:
         specifier: ^9.6.1
         version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.4))(vitest@4.1.9)
 
-  libs/act-crypto: {}
+  libs/act-crypto:
+    devDependencies:
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.9.4)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.4))(vitest@4.1.9)
 
   libs/act-diagram:
     dependencies:
@@ -305,6 +312,12 @@ importers:
       '@rotorsoft/act-ops':
         specifier: workspace:^
         version: link:../act-ops
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.9.4)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.4))(vitest@4.1.9)
       '@trpc/server':
         specifier: ^11.18.0
         version: 11.18.0(typescript@6.0.3)
@@ -324,9 +337,23 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
-  libs/act-ops: {}
+  libs/act-ops:
+    devDependencies:
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.9.4)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.4))(vitest@4.1.9)
 
-  libs/act-patch: {}
+  libs/act-patch:
+    devDependencies:
+      '@stryker-mutator/core':
+        specifier: ^9.6.1
+        version: 9.6.1(@types/node@25.9.4)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.1
+        version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.4))(vitest@4.1.9)
 
   libs/act-pg:
     dependencies:

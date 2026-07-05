@@ -335,6 +335,15 @@ jobs:
       (needs.ci.result == 'success' || needs.ci.result == 'skipped')
     needs: [changes, ci]
     runs-on: ubuntu-latest
+    # Job-level permissions REPLACE the workflow-level block, so the existing
+    # grants are restated here alongside the new one. `id-token: write` lets
+    # npm mint a Sigstore provenance attestation on publish (issue #1142) —
+    # the OIDC token proves the package was built by this workflow run.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
     strategy:
       max-parallel: 1 # prevents concurrent pull/push conflicts on main branch
       fail-fast: false
@@ -380,4 +389,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Publish with npm provenance (issue #1142). The actual publish is
+          # `pnpm publish` via @semantic-release/exec (`@semantic-release/npm`
+          # runs with npmPublish: false), and pnpm delegates the registry
+          # publish to the npm CLI — which reads NPM_CONFIG_* env config, so
+          # this flips provenance on without touching each lib's .releaserc.
+          # Requires the job-level `id-token: write` permission above.
+          NPM_CONFIG_PROVENANCE: true
         run: npx semantic-release
