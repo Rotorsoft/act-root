@@ -2,13 +2,13 @@
 
 You want a dashboard and a pager, not a printf. Act's core ships no metrics on purpose — the lifecycle events are the seam — and [`@rotorsoft/act-otel`](https://www.npmjs.com/package/@rotorsoft/act-otel) is the bridge that turns them into a Prometheus scrape. This recipe is the operator side: what to wire, what to alert on, and a runnable example that produces a real scrape including a poison stream landing on the gauge.
 
-## Run it
+## Run it — terminal scrape in thirty seconds
 
 ```bash
 npx tsx recipes/observability/prometheus/examples/instrumented-app.ts
 ```
 
-The example places three orders, lets reactions fulfill two of them, and feeds one poison SKU whose reaction exhausts its retry budget and blocks. The scrape it prints ends like this:
+The one-shot example places three orders, lets reactions fulfill two of them, and feeds one poison SKU whose reaction exhausts its retry budget and blocks. The scrape it prints ends like this:
 
 ```
 act_events_committed_total{name="OrderPlaced"} 3
@@ -18,6 +18,29 @@ act_streams_blocked 1
 ```
 
 That last line is the one your pager cares about.
+
+## Watch it live — the Prometheus UI
+
+The live demo is a self-contained app that generates its own traffic: continuous orders, a fulfillment reaction on its own lane, a flaky notification reaction (own lane, exponential backoff) failing a fifth of its attempts, a poison SKU every tenth order that blocks — and an operator loop unblocking the quarantine every twenty seconds, so the blocked gauge saws instead of climbing.
+
+```bash
+pnpm dev:metrics
+```
+
+One command: starts Prometheus in docker, runs the demo, prints the UI link, and tears the container down on Ctrl-C. (Manual equivalent: `docker compose -f recipes/observability/prometheus/docker-compose.yml up -d` + `npx tsx recipes/observability/prometheus/examples/live-demo.ts`.) Then open:
+
+**http://localhost:9090/graph?g0.expr=rate(act_events_committed_total[30s])&g0.tab=0&g1.expr=act_streams_blocked&g1.tab=0**
+
+Prometheus scrapes the demo's `/metrics` on :4001 every two seconds. The panels worth watching:
+
+| Expression | What you see |
+|---|---|
+| `rate(act_events_committed_total[30s])` | steady commit throughput, by event name |
+| `act_streams_blocked` | the sawtooth: poison blocks, the operator loop unblocks |
+| `rate(act_reactions_acked_total[30s])` | per-lane progress — notifications wobble from the flaky downstream |
+| `rate(act_errors_total[1m])` | should stay flat; a rise means the store itself is failing |
+
+Ctrl-C tears everything down: act's disposal closes the HTTP server, the traffic loops, and the bridge; the run script then stops the Prometheus container.
 
 ## The wiring
 

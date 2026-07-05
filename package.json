@@ -50,6 +50,7 @@
     "dev:calculator": "pnpm -F calculator dev",
     "dev:wolfdesk": "pnpm -F wolfdesk dev",
     "dev:http": "concurrently -n 'server,client' -c 'cyan,yellow' 'CORS_ORIGIN=http://localhost:3000 pnpm -F server dev' 'pnpm -F client dev'",
+    "dev:metrics": "bash recipes/observability/prometheus/run.sh",
     "dev:inspector": "pnpm -F @rotorsoft/act-inspector dev",
     "dev:diagram": "pnpm -F @rotorsoft/act-diagram dev",
     "act": "NODE_OPTIONS=--disable-warning=DEP0205 FORCE_COLOR=${FORCE_COLOR:-1} tsx libs/act-diagram/src/cli/index.ts",

@@ -1,0 +1,19 @@
+# Real-time Prometheus UI over the recipe's live demo:
+#
+#   npx tsx recipes/observability/prometheus/examples/live-demo.ts
+#   docker compose -f recipes/observability/prometheus/docker-compose.yml up -d
+#   open "http://localhost:9090/graph?g0.expr=rate(act_events_committed_total[30s])&g0.tab=0&g1.expr=act_streams_blocked&g1.tab=0"
+#
+# The demo generates its own traffic (2s scrape interval): commits and
+# per-lane acks climb, and act_streams_blocked saws as poison streams
+# block and the operator loop unblocks them.
+# Tear down: docker compose -f recipes/observability/prometheus/docker-compose.yml down
+services:
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
