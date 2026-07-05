@@ -242,31 +242,23 @@ export async function run_drain_cycle<
     })
   );
 
-  // Ack any result that made progress — full success (no error), empty
-  // payloads (no work to do, watermark fast-forwards), and partial
-  // success (some events processed before the failure). The `error`
-  // string is no longer the "skip ack" signal; `handled > 0 || !error`
-  // is. Partial-success-then-block now lands in both `acked` and
-  // `blocked` arrays for the same stream — by design.
-  //
-  // A *deferred* result does not advance the watermark: the handler
-  // chose to re-visit the stream later, so the pending events must stay
-  // pending for the redelivery. Its lease still rides the SAME finalize
-  // call, marked with `due`: `Store.ack` applies watermarks and
-  // `deferred_at` schedules in one transaction, so a cycle's outcomes can
-  // never land partially — a failed finalize acks nothing, closes stay
-  // pending, and the ordinary catch → breaker → redeliver path covers
-  // every outcome uniformly. `claim()` skips a deferred stream until its
-  // persisted due-time passes, holding the schedule across every
-  // competing worker; `retry` resets, since a defer is not a failure.
-  // Deferred entries are not part of ack's return value.
-  const finalize: Lease[] = [];
-  for (const h of handled) {
-    if (h.defer !== undefined) finalize.push({ ...h.lease, due: h.defer });
-    else if (h.handled > 0 || !h.error)
-      finalize.push({ ...h.lease, at: h.acked_at });
-  }
-  const acked = await ops.ack(finalize);
+  // Finalize the cycle in one atomic store call: results that made
+  // progress (`handled > 0 || !error` — full success, empty payloads, or
+  // partial success before a failure) ack at their new watermark, and
+  // deferred results ride the same batch marked with `due` (watermark
+  // held, schedule persisted, excluded from the returned acks). A failed
+  // finalize lands nothing — the catch in the controller covers every
+  // outcome uniformly. Partial-success-then-block still lands in both
+  // `acked` and `blocked` for the same stream — by design.
+  const acked = await ops.ack(
+    handled.flatMap((h) =>
+      h.defer !== undefined
+        ? { ...h.lease, due: h.defer }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : []
+    )
+  );
 
   const blocked = await ops.block(
     handled
