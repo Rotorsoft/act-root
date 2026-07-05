@@ -1,22 +1,14 @@
 // @ts-check
 
 /**
- * StrykerJS mutation testing — @rotorsoft/act-tck (issue #1028).
+ * StrykerJS mutation testing — @rotorsoft/act-http (issue #1142).
  *
  * Weekly/dispatch only (see mutation.yml) — never a PR check, so a break
  * never blocks a PR or merge. `thresholds.break` is the floor below which the
  * weekly run goes red, surfacing a real mutation-score regression. Set ~6 pts
  * under the baseline (the #1056 margin convention) to absorb run-to-run
- * noise: act-tck baseline 39.7% (#1142). The absolute score is low by
- * construction — the scope note below explains why: the differential /
- * property / stability TCK modules are NoCoverage in this narrowed scope,
- * and the total score counts them.
- *
- * Scope note: act-tck's source is exercised by its consumers, so this run
- * drives the store/cache/logger TCK factories via the in-memory specs in
- * @rotorsoft/act (see vitest.stryker.config.ts). The DB-backed property TCK
- * (store-property-tck.ts) is not covered here — expect survivors there until
- * a richer scope lands.
+ * noise: act-http baseline 92.4%.
+ * Survivor triage focus: receiver/express and hono route wiring.
  *
  * @type {import('@stryker-mutator/api/core').PartialStrykerOptions}
  */
@@ -45,7 +37,7 @@ export default {
   htmlReporter: {
     fileName: "reports/mutation/index.html",
   },
-  // Weekly-only gate floor (see file header). Baseline 39.7% → break 34.
-  thresholds: { high: 80, low: 60, break: 34 },
+  // Weekly-only gate floor (see file header). Baseline 92.4% → break 86.
+  thresholds: { high: 92, low: 80, break: 86 },
   tempDirName: ".stryker-tmp",
 };

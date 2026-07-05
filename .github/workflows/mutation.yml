@@ -7,7 +7,7 @@ name: Mutation
 # per-package Stryker configs set a `thresholds.break` floor (libs/*/stryker.conf.mjs,
 # ~6 pts under the CI baseline); a real mutation-score regression makes this
 # weekly run go red (a visible signal in the Actions tab), instead of vanishing
-# into a green check. act-tck stays `break: null` until its baseline lands.
+# into a green check.
 #
 # Mutation runs are slow (a full pass mutates every source file and re-runs
 # the suite per mutant), which is why this is off the per-PR hot path.
@@ -27,7 +27,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [act, act-pg, act-sqlite, act-tck]
+        package:
+          [
+            act,
+            act-pg,
+            act-sqlite,
+            act-tck,
+            act-http,
+            act-crypto,
+            act-patch,
+            act-ops,
+          ]
     services:
       # Always provisioned; only @rotorsoft/act-pg's specs connect to it
       # (port 5431, mirroring the unit-test CI job in ci-cd.yml).
