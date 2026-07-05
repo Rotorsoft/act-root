@@ -2,89 +2,118 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>act-otel live demo</title>
+<title>act live demo</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; }
   body {
-    font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: #0e1116; color: #dbe2ea; min-height: 100vh;
-    display: flex; flex-direction: column; gap: 24px; padding: 32px;
+    font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #0e1116; color: #dbe2ea; min-height: 100vh; padding: 36px 24px;
   }
-  h1 { font-size: 18px; font-weight: 600; letter-spacing: .02em; }
-  h1 small { color: #6b7683; font-weight: 400; margin-left: 10px; }
-  .steps { display: flex; flex-direction: column; gap: 6px; max-width: 860px;
-    background: #12161d; border: 1px solid #232b36; border-radius: 10px; padding: 14px 18px; }
-  .step { color: #9aa7b4; font-size: 14px; }
-  .step b { color: #7cb7ff; margin-right: 8px; }
-  .step a { color: #7cb7ff; }
-  .pill-red { color: #f87171; } .pill-green { color: #86efac; }
-  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; max-width: 860px; }
-  .tile {
-    background: #161b23; border: 1px solid #232b36; border-radius: 10px;
-    padding: 16px 18px;
+  .wrap { width: 960px; max-width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  h1 { font-size: 19px; font-weight: 650; }
+  h1 small { display: block; color: #6b7683; font-weight: 400; font-size: 13px; margin-top: 2px; }
+  .card {
+    background: #161b23; border: 1px solid #232b36; border-radius: 10px; padding: 16px 18px;
   }
-  .tile .label { color: #6b7683; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-  .tile .value { font-size: 34px; font-weight: 700; margin-top: 4px; transition: color .3s; }
+  .card .label { color: #6b7683; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 8px; }
+  .intro p { color: #9aa7b4; font-size: 13.5px; }
+  .intro b { color: #dbe2ea; }
+  .intro a { color: #7cb7ff; text-decoration: none; }
+
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .tile { background: #161b23; border: 1px solid #232b36; border-radius: 10px; padding: 14px 16px; }
+  .tile .label { color: #6b7683; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+  .tile .value { font-size: 30px; font-weight: 700; margin-top: 2px; transition: color .3s; }
+  .tile .hint { color: #56616d; font-size: 11px; margin-top: 2px; }
   .tile.blocked .value { color: #4ade80; }
   .tile.blocked.hot .value { color: #f87171; }
-  .buttons { display: flex; gap: 10px; flex-wrap: wrap; max-width: 860px; }
+
+  .buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
   button {
-    font: inherit; color: #dbe2ea; background: #1d2530; border: 1px solid #2d3846;
-    border-radius: 8px; padding: 10px 16px; cursor: pointer;
+    font: inherit; text-align: left; color: #dbe2ea; background: #1d2530;
+    border: 1px solid #2d3846; border-radius: 10px; padding: 12px 14px; cursor: pointer;
   }
+  button .t { display: block; font-weight: 650; font-size: 14px; }
+  button .d { display: block; color: #8a97a5; font-size: 11.5px; margin-top: 3px; }
   button:hover { background: #253040; }
-  button.danger { border-color: #7f1d1d; color: #fca5a5; }
+  button.danger { border-color: #7f1d1d; } button.danger .t { color: #fca5a5; }
   button.danger:hover { background: #2c1a1a; }
-  button.op { border-color: #14532d; color: #86efac; }
+  button.op { border-color: #14532d; } button.op .t { color: #86efac; }
   button.op:hover { background: #16241b; }
-  .feed {
-    background: #161b23; border: 1px solid #232b36; border-radius: 10px;
-    padding: 14px 18px; max-width: 860px; min-height: 180px;
-  }
-  .feed .label { color: #6b7683; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
-  .feed ul { list-style: none; }
-  .feed li { color: #9aa7b4; font-size: 13px; }
-  .feed li b { color: #dbe2ea; font-weight: 600; }
-  .feed li.poison b { color: #f87171; }
-  footer { color: #6b7683; font-size: 13px; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .rows { display: flex; flex-direction: column; gap: 4px; }
+  .row { display: grid; grid-template-columns: 132px 1fr auto; gap: 10px; font-size: 13px; color: #9aa7b4; }
+  .row b { color: #dbe2ea; font-weight: 600; }
+  .row.poison b, .row.poison span { color: #f87171; }
+  .muted { color: #56616d; font-size: 13px; }
+
+  footer { color: #6b7683; font-size: 12.5px; }
   footer a { color: #7cb7ff; text-decoration: none; }
 </style>
 </head>
 <body>
-  <h1>act-otel live demo <small>projections update over SSE as events commit</small></h1>
+<div class="wrap">
+  <h1>act live demo
+    <small>an event-sourced order pipeline — place → pay → ship → deliver — instrumented with @rotorsoft/act-otel</small>
+  </h1>
 
-  <div class="steps">
-    <div class="step"><b>1</b> open <a href="http://localhost:3001/d/act-demo" target="_blank">the grafana dashboard</a> side by side — 2×2, refreshes every 5s</div>
-    <div class="step"><b>2</b> fire batches below and watch commits, lanes, and these tiles move</div>
-    <div class="step"><b>3</b> place a <span class="pill-red">poison</span> order — in ~30s its stream blocks and everything goes red; then make the operator move: <span class="pill-green">unblock</span></div>
+  <div class="card intro">
+    <div class="label">what you're looking at</div>
+    <p>
+      Every button commits <b>real events</b> to an event store, and each hop of the order
+      lifecycle is a <b>reaction</b> on its own lane: <b>payments</b> charge placed orders,
+      <b>fulfillment</b> ships paid ones, and <b>delivery</b> is deliberately flaky — it drops
+      a fifth of its attempts and retries with backoff until the courier shows up. The tiles
+      are <b>projections</b>: read models rebuilt from the event stream, pushed to this page
+      over SSE the moment events land.
+      <a href="http://localhost:3001/d/act-demo" target="_blank">Grafana</a> watches the same
+      system from the outside through the act-otel Prometheus metrics — keep it open beside
+      this page and every click shows up in both worlds.
+    </p>
   </div>
 
   <div class="tiles">
-    <div class="tile"><div class="label">orders placed</div><div class="value" id="placed">0</div></div>
-    <div class="tile"><div class="label">orders shipped</div><div class="value" id="shipped">0</div></div>
-    <div class="tile"><div class="label">pending</div><div class="value" id="pending">0</div></div>
-    <div class="tile blocked" id="blockedTile"><div class="label">blocked streams</div><div class="value" id="blocked">0</div></div>
+    <div class="tile"><div class="label">placed</div><div class="value" id="placed">0</div><div class="hint">OrderPlaced</div></div>
+    <div class="tile"><div class="label">paid</div><div class="value" id="paid">0</div><div class="hint">payments lane</div></div>
+    <div class="tile"><div class="label">shipped</div><div class="value" id="shipped">0</div><div class="hint">fulfillment lane</div></div>
+    <div class="tile"><div class="label">delivered</div><div class="value" id="delivered">0</div><div class="hint">flaky delivery lane</div></div>
+    <div class="tile blocked" id="blockedTile"><div class="label">blocked</div><div class="value" id="blocked">0</div><div class="hint">quarantined — page on &gt; 0</div></div>
   </div>
 
   <div class="buttons">
-    <button onclick="act('batch10')">place 10 orders</button>
-    <button onclick="act('batch50')">place 50 orders</button>
-    <button class="danger" onclick="act('poison')">place poison order</button>
-    <button class="op" onclick="act('unblock')">unblock quarantine</button>
+    <button onclick="act('batch10')"><span class="t">place 10 orders</span><span class="d">a small batch through the whole chain</span></button>
+    <button onclick="act('batch50')"><span class="t">place 50 orders</span><span class="d">a burst worth graphing</span></button>
+    <button class="danger" onclick="act('poison')"><span class="t">place poison order</span><span class="d">a SKU the payment provider always rejects</span></button>
+    <button class="op" onclick="act('unblock')"><span class="t">fix &amp; unblock</span><span class="d">repair the provider, release the quarantine</span></button>
   </div>
 
-  <div class="feed">
-    <div class="label">event feed</div>
-    <ul id="feed"></ul>
+  <div class="cols">
+    <div class="card">
+      <div class="label">the poison story</div>
+      <p class="muted" style="margin-bottom:8px">
+        A <b style="color:#f87171">poison message</b> is an event its reaction can never
+        process — here, an order whose payment is rejected every time. Act retries it
+        (attempts below), then quarantines <b>only that stream</b>; every other order keeps
+        flowing. Unblocking alone would just re-block — the event redelivers and fails again —
+        so the green button does the real operator move: <b>fix the root cause, then
+        release</b>. The stuck order then pays, ships, and delivers.
+      </p>
+      <div class="rows" id="retrying"><div class="muted">nothing failing right now — place a poison order</div></div>
+    </div>
+    <div class="card">
+      <div class="label">event feed</div>
+      <div class="rows" id="feed"><div class="muted">no events yet — place a batch</div></div>
+    </div>
   </div>
 
   <footer>
-    raw scrape: <a href="/metrics">/metrics</a>
-    &nbsp;·&nbsp; grafana: <a href="http://localhost:3001/d/act-demo">localhost:3001/d/act-demo</a>
-    &nbsp;·&nbsp; prometheus: <a id="prom" href="#">localhost:9090</a>
-    &nbsp;·&nbsp; the blocked tile goes red ~30s after poison — press unblock and watch it (and the prometheus gauge) drop
+    grafana: <a href="http://localhost:3001/d/act-demo" target="_blank">localhost:3001/d/act-demo</a>
+    &nbsp;·&nbsp; prometheus: <a id="prom" href="#" target="_blank">localhost:9090</a>
+    &nbsp;·&nbsp; raw scrape: <a href="/metrics" target="_blank">/metrics</a>
   </footer>
+</div>
 
 <script>
   const promUrl = "http://localhost:9090/graph" +
@@ -99,13 +128,26 @@
   es.onmessage = (m) => {
     const s = JSON.parse(m.data);
     placed.textContent = s.placed;
+    paid.textContent = s.paid;
     shipped.textContent = s.shipped;
-    pending.textContent = Math.max(0, s.placed - s.shipped - s.blocked);
+    delivered.textContent = s.delivered;
     blocked.textContent = s.blocked;
     blockedTile.classList.toggle("hot", s.blocked > 0);
-    feed.innerHTML = s.feed
-      .map((e) => `<li class="${e.sku === "poison" ? "poison" : ""}"><b>${e.name}</b> ${e.stream}${e.sku ? " · " + e.sku : ""}</li>`)
-      .join("");
+    retrying.innerHTML = s.retrying.length
+      ? s.retrying.map((r) => {
+          const poison = r.stream.startsWith("payments:");
+          return poison
+            ? `<div class="row poison"><b>attempt ${Math.min(r.retry + 1, 4)} of 4</b><span>${r.stream}</span><span>blocks at 4</span></div>`
+            : `<div class="row"><b>attempt ${r.retry + 1}</b><span>${r.stream}</span><span>backoff retry</span></div>`;
+        }).join("")
+      : (s.blocked > 0
+          ? '<div class="row poison"><b>quarantined</b><span>stream blocked — fix &amp; unblock to recover</span><span></span></div>'
+          : '<div class="muted">nothing failing right now — place a poison order</div>');
+    feed.innerHTML = s.feed.length
+      ? s.feed.map((e) =>
+          `<div class="row ${e.sku === "poison" ? "poison" : ""}"><b>${e.name}</b><span>${e.stream}</span><span>${e.sku ?? ""}</span></div>`
+        ).join("")
+      : '<div class="muted">no events yet — place a batch</div>';
   };
 </script>
 </body>

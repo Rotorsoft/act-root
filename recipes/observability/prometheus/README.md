@@ -21,7 +21,7 @@ That last line is the one your pager cares about.
 
 ## Watch it live — the Prometheus UI
 
-The live demo is interactive and web-first — nothing moves until you do, and everything is driven from the app's own dashboard. `pnpm dev:metrics` brings up the stack and prints one link: **http://localhost:4001**. The page is the cockpit — a three-step guide, links to Grafana and Prometheus, buttons that fire order batches, a poison order whose fulfillment stream blocks after its retry budget, and the operator's unblock button — with projection tiles and an event feed updating over SSE as events commit. Under the hood: fulfillment and notification reactions on their own lanes, the notifier flaky on purpose with exponential backoff, a projection counting orders.
+The live demo is interactive and web-first — nothing moves until you do, and everything is driven from the app's own dashboard. `pnpm dev:metrics` brings up the stack and prints one link: **http://localhost:4001**. The page is the cockpit — a three-step guide, links to Grafana and Prometheus, buttons that fire order batches, a poison order whose fulfillment stream visibly retries then blocks (~15s), and the operator's fix-and-unblock button that ships the stuck order — with projection tiles and an event feed updating over SSE as events commit. Under the hood: fulfillment and notification reactions on their own lanes, the notifier flaky on purpose with exponential backoff, a projection counting orders.
 
 ```bash
 pnpm dev:metrics
@@ -37,7 +37,7 @@ Prometheus scrapes the demo's `/metrics` every two seconds — each action lands
 | Expression | What you see |
 |---|---|
 | `rate(act_events_committed_total[30s])` | steady commit throughput, by event name |
-| `act_streams_blocked` | rises ~30s after `p`, falls when you press `u` |
+| `act_streams_blocked` | rises ~15s after poison, falls on fix & unblock |
 | `rate(act_reactions_acked_total[30s])` | per-lane progress — notifications wobble from the flaky downstream |
 | `rate(act_errors_total[1m])` | should stay flat; a rise means the store itself is failing |
 
