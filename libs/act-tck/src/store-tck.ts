@@ -1140,6 +1140,77 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
+    describe("ack finalize (due-marked leases)", () => {
+      it("defers a due-marked lease instead of acking it", async () => {
+        // One finalize call carries both outcomes: the control stream acks
+        // (watermark advances), the due-marked stream defers (schedule set,
+        // watermark held). Deferred entries are not part of the return value.
+        const s = `ackdefer-${uid()}`;
+        const ctl = `ackdefer-ctl-${uid()}`;
+        await store.subscribe([{ stream: s }, { stream: ctl }]);
+        for (const st of [s, ctl])
+          await store.commit<CounterEvents>(
+            st,
+            [inc(1)],
+            make_meta({ stream: st })
+          );
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const s_lease = leased.find((l) => l.stream === s)!;
+        const ctl_lease = leased.find((l) => l.stream === ctl)!;
+        const acked = await store.ack([
+          { ...ctl_lease, at: 1_000_000 },
+          { ...s_lease, due: Date.now() + 3_600_000 },
+        ]);
+        expect(acked.find((l) => l.stream === ctl)).toBeDefined();
+        expect(acked.find((l) => l.stream === s)).toBeUndefined();
+        // The schedule holds: claim skips the deferred stream.
+        const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        expect(again.find((l) => l.stream === s)).toBeUndefined();
+      });
+
+      it("holds the watermark and resets retry on a due-marked lease", async () => {
+        // A due-time already in the past makes the stream immediately
+        // re-claimable — proving the finalize released the lease, kept the
+        // watermark, and reset retry (a defer is not a failure).
+        const s = `ackdefer-past-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s)!;
+        await store.ack([{ ...mine, due: Date.now() - 1_000 }]);
+        const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const re = again.find((l) => l.stream === s);
+        expect(re).toBeDefined();
+        expect(re!.at).toBe(mine.at); // watermark held — events still pending
+        expect(re!.retry).toBe(0); // reset by the finalize, bumped by claim
+        await store.ack([{ ...re!, at: 1_000_000 }]);
+      });
+
+      it("ignores due-marked entries from a non-holder", async () => {
+        // Same ownership rule as plain acks: only the lease holder can
+        // finalize, so a stale worker cannot overwrite a live schedule.
+        const s = `ackdefer-owner-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s)!;
+        await store.ack([
+          { ...mine, by: `stale-${uid()}`, due: Date.now() + 3_600_000 },
+        ]);
+        // No schedule was written: the holder can still finalize normally.
+        const acked = await store.ack([{ ...mine, at: 1_000_000 }]);
+        expect(acked.find((l) => l.stream === s)).toBeDefined();
+      });
+    });
+
     describe("reset", () => {
       it("rewinds a stream watermark to -1", async () => {
         const s = `reset-${uid()}`;

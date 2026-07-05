@@ -114,20 +114,6 @@ export type HandleBatch<TEvents extends Schemas> = (
 ) => Promise<HandleResult>;
 
 /**
- * A failed durable defer write (#1124). One entry per due-time group whose
- * `ops.defer` rejected; the streams stay pending with no `deferred_at`, so
- * they are immediately re-claimable — the next delivery re-evaluates the
- * handler, which re-throws its `DeferSignal`, and the persist is retried.
- *
- * @internal
- */
-export type DeferError = {
-  readonly at: number;
-  readonly streams: string[];
-  readonly error: unknown;
-};
-
-/**
  * One drain cycle's results. Returned by {@link run_drain_cycle}; consumed by
  * `Act.drain()` to update lifecycle state, the lag/lead ratio, and emit the
  * `acked` / `blocked` lifecycle events.
@@ -142,14 +128,6 @@ export type DrainCycle<TEvents extends Schemas> = {
   readonly blocked: BlockedLease[];
   /** Streams a handler asked to close this cycle (#1090) — handed to `on_close`. */
   readonly closeable: CloseTarget[];
-  /**
-   * Durable defer writes that failed this cycle (#1124). Never aborts
-   * finalization — close requests and lifecycle events from the same cycle
-   * must not be lost to a failed schedule write. The controller feeds these
-   * to the circuit breaker (operator signal + paced re-drive) and leaves the
-   * affected streams unparked so redelivery heals the durable record.
-   */
-  readonly defer_errors: DeferError[];
 };
 
 /**
@@ -210,7 +188,6 @@ export async function run_drain_cycle<
       acked: [],
       blocked: [],
       closeable: [],
-      defer_errors: [],
     };
   }
 
@@ -272,49 +249,30 @@ export async function run_drain_cycle<
   // is. Partial-success-then-block now lands in both `acked` and
   // `blocked` arrays for the same stream — by design.
   //
-  // A *deferred* result (#1090) is held out of ack entirely: the handler
-  // chose to re-visit the stream later without advancing the watermark, so
-  // the pending events must stay pending for the redelivery.
-  const acked = await ops.ack(
-    handled
-      .filter((h) => h.defer === undefined && (h.handled > 0 || !h.error))
-      .map((h) => ({ ...h.lease, at: h.acked_at }))
-  );
+  // A *deferred* result does not advance the watermark: the handler
+  // chose to re-visit the stream later, so the pending events must stay
+  // pending for the redelivery. Its lease still rides the SAME finalize
+  // call, marked with `due`: `Store.ack` applies watermarks and
+  // `deferred_at` schedules in one transaction, so a cycle's outcomes can
+  // never land partially — a failed finalize acks nothing, closes stay
+  // pending, and the ordinary catch → breaker → redeliver path covers
+  // every outcome uniformly. `claim()` skips a deferred stream until its
+  // persisted due-time passes, holding the schedule across every
+  // competing worker; `retry` resets, since a defer is not a failure.
+  // Deferred entries are not part of ack's return value.
+  const finalize: Lease[] = [];
+  for (const h of handled) {
+    if (h.defer !== undefined) finalize.push({ ...h.lease, due: h.defer });
+    else if (h.handled > 0 || !h.error)
+      finalize.push({ ...h.lease, at: h.acked_at });
+  }
+  const acked = await ops.ack(finalize);
 
   const blocked = await ops.block(
     handled
       .filter(({ block }) => block)
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
-
-  // Persist deferred streams' next-visit time (#1090). `claim()` skips a
-  // stream until its `deferred_at` passes, so the defer holds across every
-  // competing worker (the durable counterpart to the in-process wake timer)
-  // and the stream isn't re-claimed — `retry` stays untouched. `defer()`
-  // sets one time per call, so group streams by their due-time.
-  //
-  // A failed write is collected, never thrown (#1124): the close requests
-  // below were already acked, so aborting here would drop them permanently
-  // (the terminal event is never redelivered). The affected streams keep no
-  // `deferred_at` and stay immediately re-claimable — redelivery re-runs the
-  // handler, which re-throws its `DeferSignal`, and the persist is retried.
-  const defer_errors: DeferError[] = [];
-  const deferrals = handled.filter((h) => h.defer !== undefined);
-  if (deferrals.length) {
-    const by_time = new Map<number, string[]>();
-    for (const h of deferrals) {
-      const list = by_time.get(h.defer!);
-      if (list) list.push(h.lease.stream);
-      else by_time.set(h.defer!, [h.lease.stream]);
-    }
-    for (const [at, streams] of by_time) {
-      try {
-        await ops.defer(streams, at);
-      } catch (error) {
-        defer_errors.push({ at, streams, error });
-      }
-    }
-  }
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, `defer === undefined`), which advances the
@@ -325,7 +283,7 @@ export async function run_drain_cycle<
     .filter((h) => h.close !== undefined)
     .map((h) => h.close!);
 
-  return { leased, fetched, handled, acked, blocked, closeable, defer_errors };
+  return { leased, fetched, handled, acked, blocked, closeable };
 }
 
 /**
@@ -526,37 +484,20 @@ export class DrainController<
         this._deps.lane
       );
 
+      // The store responded (claim/fetch/ack+defer/block all succeeded) —
+      // reset the breaker even when there was no work to do. A failed
+      // finalize never reaches here: `Store.ack` applies watermarks and
+      // defer schedules atomically, so it either all landed or the
+      // whole cycle threw into the catch below and nothing did.
+      this._deps.breaker.passed();
+
       if (!cycle) {
-        // claim() returned no leases — fully caught up. The store responded,
-        // so reset the breaker.
-        this._deps.breaker.passed();
+        // claim() returned no leases — fully caught up
         this._armed = false;
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
       const { leased, fetched, handled, acked, blocked, closeable } = cycle;
-
-      // Breaker accounting (#1124). A failed durable defer write is a store
-      // failure even though the rest of the cycle landed: feed it to the
-      // breaker (operator signal via the `error` lifecycle event + the
-      // breaker's paced retry probe re-drives settle, so redelivery is
-      // guaranteed even on the default lane). Skipping `passed()` here is
-      // deliberate — consecutive defer-only failures must still escalate
-      // toward an open circuit instead of being reset by the healthy claim.
-      if (cycle.defer_errors.length) {
-        const streams = cycle.defer_errors.flatMap((d) => d.streams);
-        this._deps.breaker.failed(
-          Date.now(),
-          new Error(
-            `defer persist failed for ${streams.length} stream(s) [${streams.join(", ")}] — pending events stay claimable and redelivery will retry the schedule`,
-            { cause: cycle.defer_errors[0].error }
-          )
-        );
-      } else {
-        // The store responded (claim/fetch/ack/block/defer all succeeded) —
-        // reset the breaker even when there was no work to do.
-        this._deps.breaker.passed();
-      }
 
       // Cycle-level trace (ACT-1103) — one log line per drain pass:
       // claim + fetch + outcomes folded together so the operator sees
@@ -575,21 +516,11 @@ export class DrainController<
       // earliest pending visit. `handle` already reconciles a stream's
       // reactions into a single result per cycle, so the value written here
       // is authoritative for the stream — a plain overwrite, not a merge.
-      // Streams whose durable defer write failed are NOT parked locally
-      // (#1124): parking would delay this worker's redelivery to the due
-      // time while no `deferred_at` protects the schedule across workers or
-      // restarts. Left unparked, the next drain redelivers immediately, the
-      // handler re-throws its `DeferSignal`, and the persist is retried —
-      // the durable record heals at the next healthy cycle.
-      const failed_defers = new Set(
-        cycle.defer_errors.flatMap((d) => d.streams)
-      );
       for (const lease of acked) this._defer.delete(lease.stream);
       for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
         const next = h.defer ?? (h.block ? undefined : h.next_attempt_at);
-        if (next !== undefined && !failed_defers.has(h.lease.stream))
-          this._defer.set(h.lease.stream, next);
+        if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
       if (this._defer.size > 0) this._defer.schedule();
 
@@ -602,10 +533,8 @@ export class DrainController<
       if (closeable.length) await this._deps.on_close(closeable);
 
       // Disarm only when fully caught up. Errors keep the flag set so
-      // retries flow through the next drain — including failed defer writes
-      // (#1124), whose streams must be redelivered to heal their schedule.
-      const has_errors =
-        handled.some(({ error }) => error) || cycle.defer_errors.length > 0;
+      // retries flow through the next drain.
+      const has_errors = handled.some(({ error }) => error);
       if (!acked.length && !blocked.length && !has_errors) this._armed = false;
 
       return { fetched, leased, acked, blocked };

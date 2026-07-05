@@ -136,10 +136,10 @@ Every tick's next due-time must derive from that tick's own `created` (or from i
 
 ## Failure modes
 
-What happens when the machinery under the loop hiccups (#1124):
+What happens when the machinery under the loop hiccups:
 
-- **The durable defer write fails** (store blip during drain finalization). The framework surfaces it on the `error` lifecycle event and leaves the tick pending with no `deferred_at` — immediately re-claimable. The next drain redelivers, your handler re-throws its `DeferSignal`, and because the due-time derives from the tick (the durability rule above), it resolves to the same instant; the retried write heals the schedule. Same-cycle work — acks, close requests from `.autocloses` — is unaffected. The failure mode is an early redelivery of one tick, never a stalled loop.
-- **A worker crashes between deferring and persisting.** Identical outcome: the pending tick has no `deferred_at`, so the first drain after restart redelivers and re-persists. This is why the due-time must derive from the tick, not from `Date.now()` — the replacement worker lands on the same schedule.
+- **The finalize write fails** (store blip at the end of a drain cycle). The schedule is persisted atomically with the cycle's acks — one store call — so a failure lands *nothing*: no ack, no schedule, no lost work. The framework surfaces the error on the `error` lifecycle event and keeps the drain armed; the next cycle redelivers the tick, your handler re-throws its `DeferSignal`, and because the due-time derives from the tick (the durability rule above), it resolves to the same instant. The failure mode is an early redelivery of one tick, never a stalled loop or a half-landed cycle.
+- **A worker crashes mid-finalize.** Identical outcome: nothing landed, so the first drain after restart redelivers and finalizes again. This is why the due-time must derive from the tick, not from `Date.now()` — the replacement worker lands on the same schedule.
 
 Both paths assume something drives the drain: live deployments get that from commits/notify, the breaker's retry probe, or a lane `cycleMs` poller (see the production checklist's sizing section).
 

@@ -582,22 +582,37 @@ export interface Store extends Disposable, EventSource {
   ) => Promise<{ subscribed: number; watermark: number }>;
 
   /**
-   * Acknowledges successful processing of leased streams.
+   * Finalizes leased streams **atomically**: acknowledges the ones
+   * that processed successfully and persists defer schedules for the ones
+   * that chose to be re-visited later — one call, one transaction.
    *
-   * Updates the watermark to indicate events have been processed successfully.
-   * Releases the lease so other workers can process subsequent events.
+   * An entry without {@link Lease.due} is an **ack**: its watermark advances
+   * to `at` and the lease is released so other workers can process
+   * subsequent events. An entry *with* `due` is a **defer**: the stream's
+   * `deferred_at` is set to `due` (ms since epoch) and `retry` resets to
+   * `-1` — the same semantics as {@link defer} — while the watermark stays
+   * put. All-or-nothing is the contract: a failure must leave every
+   * watermark and every schedule untouched, so a drain cycle's outcomes can
+   * never land partially (an acked close request must not survive a lost
+   * defer, and vice versa).
    *
-   * @param leases - Leases to acknowledge with updated watermarks
-   * @returns Acknowledged leases
+   * @param leases - Leases to finalize; `due`-carrying entries defer, the
+   * rest ack
+   * @returns The acknowledged leases (deferred entries are not returned)
    *
    * @example
    * ```typescript
    * const leased = await store().claim(5, 5, randomUUID(), 10000);
-   * // Process events up to ID 150
-   * await store().ack(leased.map(l => ({ ...l, at: 150 })));
+   * // Ack most streams at ID 150; hold order-42 until half past
+   * await store().ack(leased.map(l =>
+   *   l.stream === "order-42"
+   *     ? { ...l, due: Date.now() + 30 * 60_000 }
+   *     : { ...l, at: 150 }
+   * ));
    * ```
    *
    * @see {@link claim} for acquiring leases
+   * @see {@link defer} for the standalone (operator-facing) schedule write
    */
   ack: (leases: Lease[]) => Promise<Lease[]>;
 

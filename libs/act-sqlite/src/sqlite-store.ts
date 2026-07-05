@@ -633,14 +633,28 @@ export class SqliteStore implements Store {
   async ack(leases: Lease[]) {
     const tx = await this.client.transaction("write");
     try {
+      // The whole batch finalizes in one transaction, so acks and defer
+      // schedules land all-or-nothing per the Store.ack contract: an
+      // entry without `due` acks (watermark advances, schedule cleared),
+      // an entry with `due` defers (schedule set, watermark untouched).
+      // A defer is a deliberate "come back later," not a failure, so
+      // retry resets on both paths. Only acked entries are returned.
       const result: Lease[] = [];
       for (const l of leases) {
-        const r = await tx.execute({
-          sql: `UPDATE streams SET at = ?, leased_by = NULL, leased_until = NULL, retry = -1, deferred_at = NULL
-                WHERE stream = ? AND leased_by = ?`,
-          args: [l.at, l.stream, l.by],
-        });
-        if (r.rowsAffected > 0) result.push(l);
+        if (l.due !== undefined) {
+          await tx.execute({
+            sql: `UPDATE streams SET deferred_at = ?, leased_by = NULL, leased_until = NULL, retry = -1
+                  WHERE stream = ? AND leased_by = ?`,
+            args: [new Date(l.due).toISOString(), l.stream, l.by],
+          });
+        } else {
+          const r = await tx.execute({
+            sql: `UPDATE streams SET at = ?, leased_by = NULL, leased_until = NULL, retry = -1, deferred_at = NULL
+                  WHERE stream = ? AND leased_by = ?`,
+            args: [l.at, l.stream, l.by],
+          });
+          if (r.rowsAffected > 0) result.push(l);
+        }
       }
       await tx.commit();
       return result;
