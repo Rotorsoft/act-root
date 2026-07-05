@@ -81,6 +81,7 @@ jobs:
             act-pg:      ['libs/act-pg/**']
             act-sqlite:  ['libs/act-sqlite/**']
             act-pino:    ['libs/act-pino/**']
+            act-otel:    ['libs/act-otel/**']
             act-ops:     ['libs/act-ops/**']
             act-crypto:  ['libs/act-crypto/**']
             act-diagram: ['libs/act-diagram/**']

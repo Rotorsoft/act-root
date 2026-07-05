@@ -34,6 +34,7 @@
       "@rotorsoft/act-patch": ["../libs/act-patch/src/index.ts"],
       "@rotorsoft/act-pg": ["../libs/act-pg/src/index.ts"],
       "@rotorsoft/act-pino": ["../libs/act-pino/src/index.ts"],
+      "@rotorsoft/act-otel": ["../libs/act-otel/src/index.ts"],
       "@rotorsoft/act-ops/idempotency": [
         "../libs/act-ops/src/idempotency/index.ts"
       ],
@@ -52,6 +53,7 @@
     "../libs/act-ops/src/**/*",
     "../libs/act-pg/src/**/*",
     "../libs/act-pino/src/**/*",
+    "../libs/act-otel/src/**/*",
     "../libs/act-sqlite/src/**/*",
     "../libs/act-tck/src/**/*"
   ],

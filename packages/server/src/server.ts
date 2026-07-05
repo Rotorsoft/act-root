@@ -4,12 +4,15 @@ import {
   type Operators,
 } from "@act/calculator";
 import { serve } from "@hono/node-server";
+import { dispose } from "@rotorsoft/act";
 import { hono as honoTransport } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { instrument } from "@rotorsoft/act-otel";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { register } from "prom-client";
 
 /**
  * Multi-transport demo (#847, #1123). One Act instance, four
@@ -114,6 +117,12 @@ app.route("/", restApi);
 
 // Serve the OpenAPI document.
 app.get("/openapi.json", (c) => c.json(apiDoc));
+
+// Prometheus scrape endpoint — the act-otel bridge maintains the
+// canonical metric set off the lifecycle events; its disposer joins
+// Act's registry so shutdown tears it down with everything else.
+dispose(instrument(calculatorApp));
+app.get("/metrics", async (c) => c.text(await register.metrics()));
 
 // tRPC bridge — proxy `/trpc/*` to tRPC's fetch adapter. The fetch
 // adapter speaks `Request` / `Response` natively, which is exactly

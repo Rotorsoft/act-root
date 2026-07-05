@@ -37,6 +37,7 @@
         "./libs/act-ops/src/idempotency/index.ts"
       ],
       "@rotorsoft/act-ops/receiver": ["./libs/act-ops/src/receiver/index.ts"],
+      "@rotorsoft/act-otel": ["./libs/act-otel/src/index.ts"],
       "@rotorsoft/act-patch": ["./libs/act-patch/src/index.ts"],
       "@rotorsoft/act-pg": ["./libs/act-pg/src/index.ts"],
       "@rotorsoft/act-pino": ["./libs/act-pino/src/index.ts"],

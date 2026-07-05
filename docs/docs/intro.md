@@ -95,6 +95,7 @@ Coming from Axon, Marten, MassTransit, or Temporal? Some patterns those framewor
 | [`@rotorsoft/act-http`](https://www.npmjs.com/package/@rotorsoft/act-http) | HTTP integrations — webhooks, auto-generated APIs, and the canonical `sse` subpath (`@rotorsoft/act-http/sse`) for incremental state broadcast |
 | [`@rotorsoft/act-sse`](https://www.npmjs.com/package/@rotorsoft/act-sse) | **Deprecated** — thin re-export shim over `@rotorsoft/act-http/sse`, kept only for migration and scheduled for removal |
 | [`@rotorsoft/act-pino`](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino logger adapter |
+| [`@rotorsoft/act-otel`](https://www.npmjs.com/package/@rotorsoft/act-otel) | Prometheus metrics bridge over the lifecycle events |
 | [`@rotorsoft/act-diagram`](https://www.npmjs.com/package/@rotorsoft/act-diagram) | SVG diagram generator |
 
 ## Requirements
