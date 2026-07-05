@@ -1,3 +1,15 @@
+# [@rotorsoft/act-tck-v1.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.20.1...@rotorsoft/act-tck-v1.21.0) (2026-07-05)
+
+
+### Bug Fixes
+
+* **act:** correlate arms lane controllers for newly-subscribed streams ([9a23d4c](https://github.com/rotorsoft/act-root/commit/9a23d4c2968623a9581c6efe8facb7571167ced6))
+
+
+### Features
+
+* **act-otel:** prometheus metrics bridge over the lifecycle events ([c2cafc0](https://github.com/rotorsoft/act-root/commit/c2cafc056476127d2baa667666a8343fb61f6ac6))
+
 # [@rotorsoft/act-tck-v1.20.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.20.0...@rotorsoft/act-tck-v1.20.1) (2026-07-05)
 
 
