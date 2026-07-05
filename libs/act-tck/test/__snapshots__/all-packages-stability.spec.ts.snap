@@ -39901,7 +39901,9 @@ const InstrumentOptionsSchema = z.object({
   registry: z
     .custom<Registry>(
       (v) =>
-        !!v && typeof (v as { registerMetric?: unknown }).registerMetric === "function",
+        !!v &&
+        typeof (v as { registerMetric?: unknown }).registerMetric ===
+          "function",
       { message: "registry must be a prom-client Registry" }
     )
     .optional(),
