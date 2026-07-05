@@ -59,4 +59,33 @@ describe("correlate arms lanes for newly-subscribed streams", () => {
     await sleep(120);
     expect(seen).toEqual(["o1"]);
   });
+
+  it("processes a first-ever event via the canonical settle wiring", async () => {
+    // Contract test over the production composition end to end: settle
+    // on commit, a lane worker, a dynamic resolver — no manual correlate
+    // or drain anywhere. The first-ever event on a fresh dynamic target
+    // must be processed without any additional traffic. (The direct-path
+    // test above is the minimal pin for the arming bug; this one guards
+    // the canonical wiring against any future regression in the
+    // init/arm/correlate/drain interplay, where the starvation window
+    // depends on store latency.)
+    const seen: string[] = [];
+    const app = act()
+      .withState(order)
+      .withLane({ name: "payments", cycleMs: 20 })
+      .on("OrderPlaced")
+      .do(async function charge(event) {
+        seen.push(event.stream);
+      })
+      .to((e) => ({
+        target: `payments:${e.stream}`,
+        source: e.stream,
+        lane: "payments",
+      }))
+      .build({ settleDebounceMs: 150 });
+    app.on("committed", () => app.settle());
+
+    await app.do("place", { stream: "o1", actor }, { sku: "x" });
+    await vi.waitFor(() => expect(seen).toEqual(["o1"]), { timeout: 2_000 });
+  });
 });
