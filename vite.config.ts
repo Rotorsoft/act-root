@@ -28,7 +28,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const root = import.meta.dirname;
 
@@ -59,6 +59,11 @@ export default defineConfig({
   resolve: { alias },
   test: {
     globals: true,
+    // Agent worktrees under .claude/worktrees hold full checkouts of the
+    // repo; without this exclude, a bare `vitest run` discovers their
+    // spec copies too — duplicated suites and contention on shared
+    // resources (the docker postgres) make runs fail spuriously.
+    exclude: [...configDefaults.exclude, "**/.claude/**"],
     // picocolors enables color emission when `CI` is set in env, which
     // wraps act-diagram CLI output in ANSI escapes and breaks
     // plain-text `toContain` assertions in format.spec/repl.spec. Force
