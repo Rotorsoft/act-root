@@ -48,6 +48,8 @@ const RFC_LINK_RE = /\brfcs\/\d{3,4}\b|\bRFC[-\s]?\d{1,4}\b/i;
 // comment) trips the line counter without adding public surface. The PR body
 // may declare the exemption with a reason — auditable in the PR itself:
 //   rfc-gate: exempt — internal-only diff, no public surface added
+// The workflow fetches the body live at job time, so adding the marker to
+// the description after opening takes effect on a plain rerun.
 const EXEMPT_RE = /^\s*rfc-gate:\s*exempt\s*[—-]+\s*\S.*$/im;
 
 const BASE_REF = process.env.BASE_REF || "origin/master";
