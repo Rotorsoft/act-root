@@ -147,6 +147,7 @@ When an Act application hits the edges (events table growing without bound, cool
 | HASH-on-stream partition recipe (SQL + run.sh) | [recipes/scaling/partitioning/hash-on-stream/](recipes/scaling/partitioning/hash-on-stream/README.md) |
 | RANGE-on-id (single-aggregate giants, docs only) | [recipes/scaling/partitioning/range-on-id/](recipes/scaling/partitioning/range-on-id/README.md) |
 | RANGE-on-created (bulk archival via DROP PARTITION) | [recipes/scaling/partitioning/range-on-created/](recipes/scaling/partitioning/range-on-created/README.md) |
+| Prometheus metrics via act-otel (alert rules + runnable scrape demo) | [recipes/observability/prometheus/README.md](recipes/observability/prometheus/README.md) |
 | Temporal / timing recipes landing (one-shot vs recurring) | [recipes/temporal/README.md](recipes/temporal/README.md) |
 | Recurring timers (tick-emits-next-tick over one-shot `.defer`) | [recipes/temporal/recurring-timers/README.md](recipes/temporal/recurring-timers/README.md) |
 

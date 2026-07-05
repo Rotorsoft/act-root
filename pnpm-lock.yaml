@@ -745,6 +745,9 @@ importers:
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../libs/act
+      '@rotorsoft/act-otel':
+        specifier: workspace:^
+        version: link:../libs/act-otel
     devDependencies:
       '@aws-sdk/client-s3':
         specifier: ^3.726.1
@@ -752,6 +755,9 @@ importers:
       '@types/node':
         specifier: ^25.9.4
         version: 25.9.4
+      prom-client:
+        specifier: ^15.1.3
+        version: 15.1.3
       zod:
         specifier: ^4.4.3
         version: 4.4.3
