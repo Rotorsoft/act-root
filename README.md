@@ -39,6 +39,9 @@ The primitives:
 
 ## 30-second demo
 
+Prefer a running project over a snippet? `npx degit rotorsoft/act-starter my-app` — a minimal, commented starter with a state, a projection, a reaction, a generated REST API, and tests ([Rotorsoft/act-starter](https://github.com/Rotorsoft/act-starter)).
+
+
 ```ts
 import { act, state } from "@rotorsoft/act";
 import { z } from "zod";
