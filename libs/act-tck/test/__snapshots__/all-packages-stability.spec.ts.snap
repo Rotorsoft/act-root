@@ -12379,8 +12379,8 @@ import type {
   BatchHandler,
   Committed,
   EventRegister,
-  FlushHandler,
   FoldOptions,
+  ProjectedState,
   Reaction,
   ReactionResolver,
   Schema,
@@ -12496,7 +12496,16 @@ export type ProjectionBuilder<
             state: State<TState, TE, TA>,
             options?: FoldOptions
           ) => {
-            flush: (handler: FlushHandler<TState>) => {
+            /**
+             * The sink: receives one {@link ProjectedState} per dirty stream
+             * per flush round. Must be an idempotent upsert keyed on
+             * \`stream\` (guard with \`id\` for order safety).
+             */
+            flush: (
+              handler: (
+                rows: ReadonlyArray<ProjectedState<TState>>
+              ) => Promise<void>
+            ) => {
               build: () => Projection<TE>;
             };
           };
@@ -12686,7 +12695,11 @@ function _projection<
           };
         }
         return {
-          flush: (handler: FlushHandler<TState>) => ({
+          flush: (
+            handler: (
+              rows: ReadonlyArray<ProjectedState<TState>>
+            ) => Promise<void>
+          ) => ({
             build: () => ({
               _tag: "Projection" as const,
               events: fold_events,
@@ -12964,33 +12977,22 @@ export type BatchHandler<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
- * One row of a state projection — a stream's folded state at the flush
- * frontier, produced by \`projection(name).of(state)\`.
+ * A stream's folded state at the flush frontier, produced by
+ * \`projection(name).of(state)\` — one per dirty stream per flush round.
  *
- * \`event_id\` is the max event id folded into the row. Flush handlers
- * should upsert keyed on \`stream\` and may guard with \`event_id\`
+ * \`id\` is the max event id folded in. Flush handlers should
+ * upsert keyed on \`stream\` and may guard with \`id\`
  * (ignore-if-older) to stay order-safe when a rebuild races a live
  * worker.
  *
  * @template TState - The projected state shape
  */
-export type StateRow<TState extends Schema = Schema> = Readonly<{
+export type ProjectedState<TState extends Schema = Schema> = Readonly<{
   stream: string;
   state: TState;
   version: number;
-  event_id: number;
+  id: number;
 }>;
-
-/**
- * Sink for a state projection's flush rounds — receives one row per
- * dirty stream and writes them wherever the app queries the list.
- * Must be an idempotent upsert keyed on \`stream\`; see {@link StateRow}.
- *
- * @template TState - The projected state shape
- */
-export type FlushHandler<TState extends Schema = Schema> = (
-  rows: ReadonlyArray<StateRow<TState>>
-) => Promise<void>;
 
 /**
  * Options for \`projection(name).of(state, options)\` — both deterministic:
@@ -15208,12 +15210,11 @@ import { z } from "zod";
 import { cache as state_cache } from "../ports.js";
 import type {
   BatchHandler,
-  FlushHandler,
   FoldOptions,
+  ProjectedState,
   Schema,
   Schemas,
   State,
-  StateRow,
 } from "../types/index.js";
 import { load } from "./event-sourcing.js";
 
@@ -15231,12 +15232,17 @@ export function resolveFoldConfig(options: FoldOptions): FoldConfig {
   return FoldOptionsSchema.parse(options);
 }
 
+/**
+ * A stream's in-flight fold: a mutable {@link ProjectedState} plus the
+ * engine's \`dirty\` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever re-applying
+ * history. Stripping \`dirty\` at the flush boundary yields the public
+ * row.
+ */
 type Fold<TState extends Schema> = {
-  state: TState;
-  version: number;
-  event_id: number;
-  dirty: boolean;
-};
+  -readonly [K in keyof ProjectedState<TState>]: ProjectedState<TState>[K];
+} & { dirty: boolean };
 
 /**
  * Build the batch handler that folds a state's events into per-stream rows.
@@ -15249,7 +15255,7 @@ export function make_fold_handler<
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
-  flush: FlushHandler<TState>,
+  flush: (rows: ReadonlyArray<ProjectedState<TState>>) => Promise<void>,
   config: FoldConfig
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
@@ -15257,19 +15263,15 @@ export function make_fold_handler<
   // a flush, and a sync auto-evicting set() would drop folded work.
   const cache = new Map<string, Fold<TState>>();
 
-  const row = (stream: string, f: Fold<TState>): StateRow<TState> => ({
-    stream,
-    state: f.state,
-    version: f.version,
-    event_id: f.event_id,
-  });
+  const row = ({ dirty: _, ...row }: Fold<TState>): ProjectedState<TState> =>
+    row;
 
   const flush_dirty = async () => {
-    const rows: StateRow<TState>[] = [];
+    const rows: ProjectedState<TState>[] = [];
     const flushed: Fold<TState>[] = [];
-    for (const [stream, f] of cache)
+    for (const f of cache.values())
       if (f.dirty) {
-        rows.push(row(stream, f));
+        rows.push(row(f));
         flushed.push(f);
       }
     if (rows.length === 0) return;
@@ -15292,7 +15294,7 @@ export function make_fold_handler<
           // folded work is durable.
           const oldest = cache.keys().next().value as string;
           const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(oldest, evictee)]);
+          if (evictee.dirty) await flush([row(evictee)]);
           cache.delete(oldest);
         }
         // First sight of this stream: load its head state through the
@@ -15305,26 +15307,29 @@ export function make_fold_handler<
         // The engine only sees streams with committed events, so when the
         // cache has no entry (pii-aware states never cache) the load
         // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-        };
+        const frontier = entry
+          ? { version: entry.version, id: entry.event_id }
+          : {
+              version: (snapshot.event as { version: number }).version,
+              id: (snapshot.event as { id: number }).id,
+            };
         fold = {
+          stream,
           state: snapshot.state,
           version: frontier.version,
-          event_id: frontier.event_id,
+          id: frontier.id,
           dirty: true,
         };
         cache.set(stream, fold);
       }
-      if (event.id > fold.event_id) {
+      if (event.id > fold.id) {
         const reducer = me.patch[event.name as keyof TEvents];
         fold.state = patch(
           fold.state,
           reducer(event as never, fold.state)
         ) as TState;
         fold.version = event.version;
-        fold.event_id = event.id;
+        fold.id = event.id;
         fold.dirty = true;
       } else {
         // Already folded (head load or redelivery) — mark dirty anyway
@@ -27224,8 +27229,8 @@ import type {
   BatchHandler,
   Committed,
   EventRegister,
-  FlushHandler,
   FoldOptions,
+  ProjectedState,
   Reaction,
   ReactionResolver,
   Schema,
@@ -27341,7 +27346,16 @@ export type ProjectionBuilder<
             state: State<TState, TE, TA>,
             options?: FoldOptions
           ) => {
-            flush: (handler: FlushHandler<TState>) => {
+            /**
+             * The sink: receives one {@link ProjectedState} per dirty stream
+             * per flush round. Must be an idempotent upsert keyed on
+             * \`stream\` (guard with \`id\` for order safety).
+             */
+            flush: (
+              handler: (
+                rows: ReadonlyArray<ProjectedState<TState>>
+              ) => Promise<void>
+            ) => {
               build: () => Projection<TE>;
             };
           };
@@ -27531,7 +27545,11 @@ function _projection<
           };
         }
         return {
-          flush: (handler: FlushHandler<TState>) => ({
+          flush: (
+            handler: (
+              rows: ReadonlyArray<ProjectedState<TState>>
+            ) => Promise<void>
+          ) => ({
             build: () => ({
               _tag: "Projection" as const,
               events: fold_events,
@@ -27809,33 +27827,22 @@ export type BatchHandler<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
- * One row of a state projection — a stream's folded state at the flush
- * frontier, produced by \`projection(name).of(state)\`.
+ * A stream's folded state at the flush frontier, produced by
+ * \`projection(name).of(state)\` — one per dirty stream per flush round.
  *
- * \`event_id\` is the max event id folded into the row. Flush handlers
- * should upsert keyed on \`stream\` and may guard with \`event_id\`
+ * \`id\` is the max event id folded in. Flush handlers should
+ * upsert keyed on \`stream\` and may guard with \`id\`
  * (ignore-if-older) to stay order-safe when a rebuild races a live
  * worker.
  *
  * @template TState - The projected state shape
  */
-export type StateRow<TState extends Schema = Schema> = Readonly<{
+export type ProjectedState<TState extends Schema = Schema> = Readonly<{
   stream: string;
   state: TState;
   version: number;
-  event_id: number;
+  id: number;
 }>;
-
-/**
- * Sink for a state projection's flush rounds — receives one row per
- * dirty stream and writes them wherever the app queries the list.
- * Must be an idempotent upsert keyed on \`stream\`; see {@link StateRow}.
- *
- * @template TState - The projected state shape
- */
-export type FlushHandler<TState extends Schema = Schema> = (
-  rows: ReadonlyArray<StateRow<TState>>
-) => Promise<void>;
 
 /**
  * Options for \`projection(name).of(state, options)\` — both deterministic:
@@ -29135,12 +29142,11 @@ import { z } from "zod";
 import { cache as state_cache } from "../ports.js";
 import type {
   BatchHandler,
-  FlushHandler,
   FoldOptions,
+  ProjectedState,
   Schema,
   Schemas,
   State,
-  StateRow,
 } from "../types/index.js";
 import { load } from "./event-sourcing.js";
 
@@ -29158,12 +29164,17 @@ export function resolveFoldConfig(options: FoldOptions): FoldConfig {
   return FoldOptionsSchema.parse(options);
 }
 
+/**
+ * A stream's in-flight fold: a mutable {@link ProjectedState} plus the
+ * engine's \`dirty\` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever re-applying
+ * history. Stripping \`dirty\` at the flush boundary yields the public
+ * row.
+ */
 type Fold<TState extends Schema> = {
-  state: TState;
-  version: number;
-  event_id: number;
-  dirty: boolean;
-};
+  -readonly [K in keyof ProjectedState<TState>]: ProjectedState<TState>[K];
+} & { dirty: boolean };
 
 /**
  * Build the batch handler that folds a state's events into per-stream rows.
@@ -29176,7 +29187,7 @@ export function make_fold_handler<
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
-  flush: FlushHandler<TState>,
+  flush: (rows: ReadonlyArray<ProjectedState<TState>>) => Promise<void>,
   config: FoldConfig
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
@@ -29184,19 +29195,15 @@ export function make_fold_handler<
   // a flush, and a sync auto-evicting set() would drop folded work.
   const cache = new Map<string, Fold<TState>>();
 
-  const row = (stream: string, f: Fold<TState>): StateRow<TState> => ({
-    stream,
-    state: f.state,
-    version: f.version,
-    event_id: f.event_id,
-  });
+  const row = ({ dirty: _, ...row }: Fold<TState>): ProjectedState<TState> =>
+    row;
 
   const flush_dirty = async () => {
-    const rows: StateRow<TState>[] = [];
+    const rows: ProjectedState<TState>[] = [];
     const flushed: Fold<TState>[] = [];
-    for (const [stream, f] of cache)
+    for (const f of cache.values())
       if (f.dirty) {
-        rows.push(row(stream, f));
+        rows.push(row(f));
         flushed.push(f);
       }
     if (rows.length === 0) return;
@@ -29219,7 +29226,7 @@ export function make_fold_handler<
           // folded work is durable.
           const oldest = cache.keys().next().value as string;
           const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(oldest, evictee)]);
+          if (evictee.dirty) await flush([row(evictee)]);
           cache.delete(oldest);
         }
         // First sight of this stream: load its head state through the
@@ -29232,26 +29239,29 @@ export function make_fold_handler<
         // The engine only sees streams with committed events, so when the
         // cache has no entry (pii-aware states never cache) the load
         // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-        };
+        const frontier = entry
+          ? { version: entry.version, id: entry.event_id }
+          : {
+              version: (snapshot.event as { version: number }).version,
+              id: (snapshot.event as { id: number }).id,
+            };
         fold = {
+          stream,
           state: snapshot.state,
           version: frontier.version,
-          event_id: frontier.event_id,
+          id: frontier.id,
           dirty: true,
         };
         cache.set(stream, fold);
       }
-      if (event.id > fold.event_id) {
+      if (event.id > fold.id) {
         const reducer = me.patch[event.name as keyof TEvents];
         fold.state = patch(
           fold.state,
           reducer(event as never, fold.state)
         ) as TState;
         fold.version = event.version;
-        fold.event_id = event.id;
+        fold.id = event.id;
         fold.dirty = true;
       } else {
         // Already folded (head load or redelivery) — mark dirty anyway
@@ -32943,33 +32953,22 @@ export type BatchHandler<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
- * One row of a state projection — a stream's folded state at the flush
- * frontier, produced by \`projection(name).of(state)\`.
+ * A stream's folded state at the flush frontier, produced by
+ * \`projection(name).of(state)\` — one per dirty stream per flush round.
  *
- * \`event_id\` is the max event id folded into the row. Flush handlers
- * should upsert keyed on \`stream\` and may guard with \`event_id\`
+ * \`id\` is the max event id folded in. Flush handlers should
+ * upsert keyed on \`stream\` and may guard with \`id\`
  * (ignore-if-older) to stay order-safe when a rebuild races a live
  * worker.
  *
  * @template TState - The projected state shape
  */
-export type StateRow<TState extends Schema = Schema> = Readonly<{
+export type ProjectedState<TState extends Schema = Schema> = Readonly<{
   stream: string;
   state: TState;
   version: number;
-  event_id: number;
+  id: number;
 }>;
-
-/**
- * Sink for a state projection's flush rounds — receives one row per
- * dirty stream and writes them wherever the app queries the list.
- * Must be an idempotent upsert keyed on \`stream\`; see {@link StateRow}.
- *
- * @template TState - The projected state shape
- */
-export type FlushHandler<TState extends Schema = Schema> = (
-  rows: ReadonlyArray<StateRow<TState>>
-) => Promise<void>;
 
 /**
  * Options for \`projection(name).of(state, options)\` — both deterministic:

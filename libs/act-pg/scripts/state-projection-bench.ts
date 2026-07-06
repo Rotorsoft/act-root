@@ -15,8 +15,8 @@
 import {
   act,
   dispose,
+  type ProjectedState,
   projection,
-  type StateRow,
   state,
   store,
 } from "@rotorsoft/act";
@@ -109,13 +109,13 @@ const shapes = {
   ".of().flush()": () =>
     projection("rows")
       .of(Counter)
-      .flush(async (rows: ReadonlyArray<StateRow<{ count: number }>>) => {
+      .flush(async (rows: ReadonlyArray<ProjectedState<{ count: number }>>) => {
         await upsert_rows(
           rows.map((r) => ({
             stream: r.stream,
             count: r.state.count,
             version: r.version,
-            id: r.event_id,
+            id: r.id,
           }))
         );
       })

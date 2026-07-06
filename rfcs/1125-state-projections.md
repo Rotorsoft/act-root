@@ -31,7 +31,7 @@ const Orders = projection("orders")
     maxCachedStates: 10_000, // LRU bound on in-memory folded states
   })
   .flush(async (rows) => {
-    // rows: ReadonlyArray<StateRow<OrderState>> — one per DIRTY stream,
+    // rows: ReadonlyArray<ProjectedState<OrderState>> — one per DIRTY stream,
     // each carrying the stream's folded state at the round frontier.
     await db
       .insert(orders)
@@ -54,7 +54,7 @@ New public surface (all additive):
 |---|---|
 | `.of(state, options?)` | on the `projection(name)` builder; derives the event register and the fold from the built state |
 | `.flush(handler)` | the only sink — receives dirty rows, writes them wherever the app queries them (the projections-to-database guide pattern) |
-| `StateRow<S>` | `{ stream, state, version, event_id }` |
+| `ProjectedState<S>` | `{ stream, state, version, id }` |
 | `FoldOptions` | `{ flushEvery?, maxCachedStates? }` — Zod-validated (`FoldOptionsSchema` + `resolveFoldConfig` + `DEFAULT_*`, per the config-validation convention) |
 
 **Scoping is by state type, and the state itself is the filter.** `.of(Order)`
@@ -92,10 +92,10 @@ and `.batch()` projections remain the escape hatch, unchanged.
   heuristics, no timers — behavior is a pure function of the event sequence
   and the two options.
 - **Idempotency — a contract, not a hope:** every row carries the max
-  `event_id` folded into it. The documented `flush` contract is a monotonic
+  `id` folded into it. The documented `flush` contract is a monotonic
   upsert keyed on `stream`: write the row, ignore it if the stored
-  `event_id` is already ≥ the incoming one. Under the single-writer watermark
-  discipline plain converging upserts are already correct; the `event_id`
+  `id` is already ≥ the incoming one. Under the single-writer watermark
+  discipline plain converging upserts are already correct; the `id`
   guard additionally makes replays racing a live worker (e.g. rebuild beside
   traffic) order-safe. The projections-to-database guide ships the SQL shape.
 - **Crash recovery:** a crash between rounds loses only unflushed in-memory

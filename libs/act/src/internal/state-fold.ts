@@ -23,12 +23,11 @@ import { z } from "zod";
 import { cache as state_cache } from "../ports.js";
 import type {
   BatchHandler,
-  FlushHandler,
   FoldOptions,
+  ProjectedState,
   Schema,
   Schemas,
   State,
-  StateRow,
 } from "../types/index.js";
 import { load } from "./event-sourcing.js";
 
@@ -47,20 +46,16 @@ export function resolveFoldConfig(options: FoldOptions): FoldConfig {
 }
 
 /**
- * A stream's in-flight fold — conceptually a subset of {@link Snapshot}
- * (state + frontier), reduced to what the hot loop needs: no event
- * envelope (a 10k-entry cache must not pin event payloads), a REQUIRED
- * frontier (Snapshot's optional `event` is exactly how a frontier bug
- * sneaks in), mutable in place (one object per stream, not one per
- * event), plus the engine's own `dirty` flag. `row()` converts to the
- * public {@link StateRow} at the flush boundary.
+ * A stream's in-flight fold: a mutable {@link ProjectedState} plus the
+ * engine's `dirty` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever re-applying
+ * history. Stripping `dirty` at the flush boundary yields the public
+ * row.
  */
 type Fold<TState extends Schema> = {
-  state: TState;
-  version: number;
-  event_id: number;
-  dirty: boolean;
-};
+  -readonly [K in keyof ProjectedState<TState>]: ProjectedState<TState>[K];
+} & { dirty: boolean };
 
 /**
  * Build the batch handler that folds a state's events into per-stream rows.
@@ -73,7 +68,7 @@ export function make_fold_handler<
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
-  flush: FlushHandler<TState>,
+  flush: (rows: ReadonlyArray<ProjectedState<TState>>) => Promise<void>,
   config: FoldConfig
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
@@ -81,19 +76,15 @@ export function make_fold_handler<
   // a flush, and a sync auto-evicting set() would drop folded work.
   const cache = new Map<string, Fold<TState>>();
 
-  const row = (stream: string, f: Fold<TState>): StateRow<TState> => ({
-    stream,
-    state: f.state,
-    version: f.version,
-    event_id: f.event_id,
-  });
+  const row = ({ dirty: _, ...row }: Fold<TState>): ProjectedState<TState> =>
+    row;
 
   const flush_dirty = async () => {
-    const rows: StateRow<TState>[] = [];
+    const rows: ProjectedState<TState>[] = [];
     const flushed: Fold<TState>[] = [];
-    for (const [stream, f] of cache)
+    for (const f of cache.values())
       if (f.dirty) {
-        rows.push(row(stream, f));
+        rows.push(row(f));
         flushed.push(f);
       }
     if (rows.length === 0) return;
@@ -116,7 +107,7 @@ export function make_fold_handler<
           // folded work is durable.
           const oldest = cache.keys().next().value as string;
           const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(oldest, evictee)]);
+          if (evictee.dirty) await flush([row(evictee)]);
           cache.delete(oldest);
         }
         // First sight of this stream: load its head state through the
@@ -129,26 +120,29 @@ export function make_fold_handler<
         // The engine only sees streams with committed events, so when the
         // cache has no entry (pii-aware states never cache) the load
         // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-        };
+        const frontier = entry
+          ? { version: entry.version, id: entry.event_id }
+          : {
+              version: (snapshot.event as { version: number }).version,
+              id: (snapshot.event as { id: number }).id,
+            };
         fold = {
+          stream,
           state: snapshot.state,
           version: frontier.version,
-          event_id: frontier.event_id,
+          id: frontier.id,
           dirty: true,
         };
         cache.set(stream, fold);
       }
-      if (event.id > fold.event_id) {
+      if (event.id > fold.id) {
         const reducer = me.patch[event.name as keyof TEvents];
         fold.state = patch(
           fold.state,
           reducer(event as never, fold.state)
         ) as TState;
         fold.version = event.version;
-        fold.event_id = event.id;
+        fold.id = event.id;
         fold.dirty = true;
       } else {
         // Already folded (head load or redelivery) — mark dirty anyway

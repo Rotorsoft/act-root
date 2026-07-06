@@ -234,33 +234,22 @@ export type BatchHandler<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
- * One row of a state projection — a stream's folded state at the flush
- * frontier, produced by `projection(name).of(state)`.
+ * A stream's folded state at the flush frontier, produced by
+ * `projection(name).of(state)` — one per dirty stream per flush round.
  *
- * `event_id` is the max event id folded into the row. Flush handlers
- * should upsert keyed on `stream` and may guard with `event_id`
+ * `id` is the max event id folded in. Flush handlers should
+ * upsert keyed on `stream` and may guard with `id`
  * (ignore-if-older) to stay order-safe when a rebuild races a live
  * worker.
  *
  * @template TState - The projected state shape
  */
-export type StateRow<TState extends Schema = Schema> = Readonly<{
+export type ProjectedState<TState extends Schema = Schema> = Readonly<{
   stream: string;
   state: TState;
   version: number;
-  event_id: number;
+  id: number;
 }>;
-
-/**
- * Sink for a state projection's flush rounds — receives one row per
- * dirty stream and writes them wherever the app queries the list.
- * Must be an idempotent upsert keyed on `stream`; see {@link StateRow}.
- *
- * @template TState - The projected state shape
- */
-export type FlushHandler<TState extends Schema = Schema> = (
-  rows: ReadonlyArray<StateRow<TState>>
-) => Promise<void>;
 
 /**
  * Options for `projection(name).of(state, options)` — both deterministic:

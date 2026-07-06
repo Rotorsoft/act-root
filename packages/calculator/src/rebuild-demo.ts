@@ -15,7 +15,13 @@
  *
  * Run: pnpm -F calculator dev:rebuild
  */
-import { act, dispose, projection, type StateRow, state } from "@rotorsoft/act";
+import {
+  act,
+  dispose,
+  type ProjectedState,
+  projection,
+  state,
+} from "@rotorsoft/act";
 import { z } from "zod";
 
 const Incremented = z.object({ by: z.number() });
@@ -45,7 +51,7 @@ async function main() {
     .build();
 
   // --- State projection: the counters list, folded by Counter itself ---
-  const list = new Map<string, StateRow<{ count: number }>>();
+  const list = new Map<string, ProjectedState<{ count: number }>>();
   let listWrites = 0;
   const CounterList = projection("counter-list")
     .of(Counter)

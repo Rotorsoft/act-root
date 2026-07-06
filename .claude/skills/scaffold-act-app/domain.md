@@ -190,10 +190,10 @@ export const ItemSlice = slice()
 **Prefer a state projection when the read model is the list of the aggregates.** When the rows are just the state's own attributes (the items list, the orders list), don't hand-write per-event handlers — fold through the state itself with `.of()`:
 
 ```typescript
-import { projection, type StateRow } from "@rotorsoft/act";
+import { projection, type ProjectedState } from "@rotorsoft/act";
 import { Item } from "./item.js";
 
-const items = new Map<string, StateRow<ItemState>>();
+const items = new Map<string, ProjectedState<ItemState>>();
 
 export const ItemList = projection("items")
   .of(Item) // every Item event, folded through Item's own reducers
@@ -209,7 +209,7 @@ export function getItems() {
 }
 ```
 
-The state is the filter (only that state's streams fold), flushes are one row per stream per round (rebuilds are O(streams), not O(events)), and when the sink is a database the flush should be a monotonic upsert keyed on `stream` guarded by `row.event_id`. Reach for hand-written `.on().do()` handlers only when the read model needs something the state does not carry (joins, per-actor indexes, counters across streams). Note: `.of()` takes a single built State — for sliced states (multiple same-name partials) keep per-event handlers for now.
+The state is the filter (only that state's streams fold), flushes are one row per stream per round (rebuilds are O(streams), not O(events)), and when the sink is a database the flush should be a monotonic upsert keyed on `stream` guarded by `row.id`. Reach for hand-written `.on().do()` handlers only when the read model needs something the state does not carry (joins, per-actor indexes, counters across streams). Note: `.of()` takes a single built State — for sliced states (multiple same-name partials) keep per-event handlers for now.
 
 **Co-location pattern**: Keep projection, query functions, and `clear*()` helpers together with the slice. This keeps the read model close to the events that build it.
 

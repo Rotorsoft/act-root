@@ -18,8 +18,8 @@ import type {
   BatchHandler,
   Committed,
   EventRegister,
-  FlushHandler,
   FoldOptions,
+  ProjectedState,
   Reaction,
   ReactionResolver,
   Schema,
@@ -135,7 +135,16 @@ export type ProjectionBuilder<
             state: State<TState, TE, TA>,
             options?: FoldOptions
           ) => {
-            flush: (handler: FlushHandler<TState>) => {
+            /**
+             * The sink: receives one {@link ProjectedState} per dirty stream
+             * per flush round. Must be an idempotent upsert keyed on
+             * `stream` (guard with `id` for order safety).
+             */
+            flush: (
+              handler: (
+                rows: ReadonlyArray<ProjectedState<TState>>
+              ) => Promise<void>
+            ) => {
               build: () => Projection<TE>;
             };
           };
@@ -325,7 +334,11 @@ function _projection<
           };
         }
         return {
-          flush: (handler: FlushHandler<TState>) => ({
+          flush: (
+            handler: (
+              rows: ReadonlyArray<ProjectedState<TState>>
+            ) => Promise<void>
+          ) => ({
             build: () => ({
               _tag: "Projection" as const,
               events: fold_events,
