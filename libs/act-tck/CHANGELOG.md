@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.22.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.21.0...@rotorsoft/act-tck-v1.22.0) (2026-07-06)
+
+
+### Features
+
+* **act-pg:** seed-sync is the schema story — pin the contract, harden concurrent boot ([893d620](https://github.com/rotorsoft/act-root/commit/893d620be5ead475f236285a28df17f52e34107c))
+
 # [@rotorsoft/act-tck-v1.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.20.1...@rotorsoft/act-tck-v1.21.0) (2026-07-05)
 
 
