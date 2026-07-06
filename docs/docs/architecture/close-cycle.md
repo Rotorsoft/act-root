@@ -191,7 +191,7 @@ Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.disc
 
 ### Autoclose as a synthesized reaction
 
-At construction (before `classify_registry`, so its dynamic resolver is discovered and its target subscribed), the orchestrator walks every state that declared `.autocloses(policy)` and injects one reaction registered against every event that state owns. The handler doesn't sweep anything — it fires when the aggregate commits, evaluates the policy against the aggregate's **live head**, and either closes, defers, or does nothing.
+At build time (`act().build()` synthesizes the reaction once the registry is fully merged — before the orchestrator classifies it, so its dynamic resolver is discovered and its target subscribed), the builder walks every state that declared `.autocloses(policy)` and injects one reaction registered against every event that state owns. The registry is then frozen; the orchestrator never mutates it. The handler doesn't sweep anything — it fires when the aggregate commits, evaluates the policy against the aggregate's **live head**, and either closes, defers, or does nothing.
 
 The subtle part is *where* the reaction runs. It runs on a **synthetic per-aggregate stream**: `target = __autoclose__:<stream>`, `source = <stream>`. Keeping the autoclose lease off the aggregate's own watermark is load-bearing — if it shared a watermark with the aggregate's other reactions, an autoclose deferral would hold all of them back too (a deferral parks the whole stream). The synthetic target isolates the autoclose lease so it can defer freely; the close still *targets* the aggregate.
 
