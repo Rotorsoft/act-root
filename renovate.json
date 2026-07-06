@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Run by the hosted Mend Renovate App (github.com/apps/renovate). No self-hosted workflow — see issue #877 for the migration rationale.",
+  "description": "Run by the hosted Mend Renovate App (github.com/apps/renovate). No self-hosted workflow \u2014 see issue #877 for the migration rationale.",
   "extends": [
     "config:recommended",
     ":automergePatch",
@@ -35,10 +35,10 @@
       "minimumReleaseAge": "30 days"
     },
     {
-      "description": "pnpm.overrides are security pins, not feature upgrades. They force a transitive dep to the latest *patch within its current major* (the CVE fix). A major bump jumps the override target past the major its consumers (Docusaurus, webpack-dev-server, babel-7 plugins) are written against, leaving peers unsatisfied and breaking the docs build. Closed #1102/#1103/#1104 for exactly this. Patch/minor on overrides is still fine.",
-      "matchDepTypes": ["pnpm.overrides"],
+      "description": "pnpm overrides are security pins, not feature upgrades. They force a transitive dep to the latest fix *within the major its consumers are written against*. A major bump jumps the override target past that major, leaving peers unsatisfied and breaking builds. Closed #1102/#1103/#1104 (and #1162/#1163/#1164 after the pins moved to pnpm-workspace.yaml) for exactly this. Patch/minor on overrides is still fine. Matched by file because the pins live in pnpm-workspace.yaml since the pnpm settings migration; the depType rule alone stopped matching there.",
       "matchUpdateTypes": ["major"],
-      "enabled": false
+      "enabled": false,
+      "matchFileNames": ["pnpm-workspace.yaml", "package.json"]
     }
   ],
   "lockFileMaintenance": {
