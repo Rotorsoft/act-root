@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.18.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.6...@rotorsoft/act-v1.18.7) (2026-07-06)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#1156](https://github.com/rotorsoft/act-root/issues/1156)) ([b460cdc](https://github.com/rotorsoft/act-root/commit/b460cdcdb64dc6c5c1f538a0fe955a19aabce145))
+
 # [@rotorsoft/act-v1.18.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.5...@rotorsoft/act-v1.18.6) (2026-07-06)
 
 # [@rotorsoft/act-v1.18.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.4...@rotorsoft/act-v1.18.5) (2026-07-05)
