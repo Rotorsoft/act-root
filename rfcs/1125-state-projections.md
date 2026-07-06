@@ -35,8 +35,8 @@ const Orders = projection("orders")
     // each carrying the stream's folded state at the round frontier.
     await db
       .insert(orders)
-      .values(rows.map((r) => ({ id: r.stream, ...r.state })))
-      .onConflictDoUpdate(/* keyed on id */);
+      .values(rows.map((r) => ({ stream: r.stream, ...r.state })))
+      .onConflictDoUpdate(/* keyed on stream — the primary key IS the stream */);
   })
   .build();
 

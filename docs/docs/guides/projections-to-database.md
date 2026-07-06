@@ -130,11 +130,11 @@ The most common read model is a list of the aggregates: the orders list, the tic
 const Orders = projection("orders")
   .on({ OrderPlaced })
     .do(async function inserted({ stream, data }) {
-      await db.insert(orders).values({ id: stream, sku: data.sku, status: "placed" });
+      await db.insert(orders).values({ stream, sku: data.sku, status: "placed" });
     })
   .on({ OrderShipped })
     .do(async function shipped({ stream }) {
-      await db.update(orders).set({ status: "shipped" }).where(eq(orders.id, stream));
+      await db.update(orders).set({ status: "shipped" }).where(eq(orders.stream, stream));
     })
   .build();
 ```
@@ -148,9 +148,9 @@ const Orders = projection("orders")
     // rows: one per DIRTY stream — its folded state at the flush frontier
     await db
       .insert(orders)
-      .values(rows.map((r) => ({ id: r.stream, ...r.state, eventId: r.id })))
+      .values(rows.map((r) => ({ stream: r.stream, ...r.state, eventId: r.id })))
       .onConflictDoUpdate({
-        target: orders.id,
+        target: orders.stream, // the primary key IS the stream
         set: { /* every projected column from excluded */ },
         setWhere: sql`${orders.eventId} <= excluded.event_id`,
       });
