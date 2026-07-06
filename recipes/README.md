@@ -20,7 +20,7 @@ The framing the rest of this folder is built around: **default Act plus Postgres
 
 ## What "default Act handles" looks like
 
-Concrete envelope of safe operation, all numbers traced back to the bench scripts in [`libs/act/PERFORMANCE.md`](../libs/act/PERFORMANCE.md) and [`libs/act-pg/PERFORMANCE.md`](../libs/act-pg/PERFORMANCE.md). Run the same scripts on your hardware before quoting them in capacity planning.
+Concrete envelope of safe operation, all numbers traced back to the bench scripts in [`libs/act/PERFORMANCE.md`](../libs/act/PERFORMANCE.md) and [`libs/act-pg/PERFORMANCE.md`](../libs/act-pg/PERFORMANCE.md). For the macro view — sustained `app.do` throughput and cold-start/rebuild wall-clock against stores seeded to 1M and 10M events, with a `run.sh` to reproduce on your hardware — see [**the envelope, measured**](PERFORMANCE.md). Run the same scripts on your hardware before quoting them in capacity planning.
 
 | Dimension                                  | Where you stop being CPU-bound                                                                         | Source                                                                            |
 |--------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|

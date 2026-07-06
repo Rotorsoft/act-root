@@ -1,23 +1,16 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
-    "outDir": "dist",
-    "rootDir": "src",
+    "module": "esnext",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "paths": {
       "@rotorsoft/act": ["../../libs/act/src/index.ts"],
       "@rotorsoft/act-pg": ["../../libs/act-pg/src/index.ts"]
-    }
-  },
-  "references": [
-    {
-      "path": "../../libs/act"
     },
-    {
-      "path": "../../libs/act-pg"
-    }
-  ]
+    "moduleResolution": "bundler",
+    "noEmit": true
+  },
+  "include": ["src", "evidence"]
 }

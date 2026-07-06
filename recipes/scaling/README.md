@@ -29,6 +29,13 @@ before moving down. Most operators stop at Gate 1.
 
 ## Symptoms cheat-sheet
 
+Measured thresholds for the common symptoms (Apple M3 Pro / dockerized PG 17 — see [the envelope, measured](../PERFORMANCE.md) and rerun `run.sh` on your hardware):
+
+- **Cold start feels slow** — replay costs ~0.5 s per 100k events per aggregate on reference hardware. Past ~100k events per stream, snapshots drop it to milliseconds (557–988× measured); past snapshot reach, it's a close-the-books signal.
+- **Rebuild window worries** — the batched fold runs ~300k events/s: 1M rebuilds in ~3 s, 10M in ~34 s. Rebuild-from-zero stays routine until the store approaches 100M+ — archive the cold tier before it does.
+- **Write throughput** — ~800 commits/s serialized on one hot aggregate vs ~5,200/s across 1,000 streams in a single process: the ceiling is per-stream, so restructure aggregate boundaries before adding infrastructure.
+
+
 Use this to jump straight to the gate that owns your problem. Detailed reasoning
 follows below.
 
