@@ -706,10 +706,10 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=1.17.0'
+        specifier: ^1.18.0
         version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: '>=1.10.0'
+        specifier: ^1.11.0
         version: link:../../libs/act-pg
       cli-table3:
         specifier: ^0.6.5

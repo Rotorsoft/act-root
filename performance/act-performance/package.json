@@ -8,11 +8,13 @@
     "serve": "tsx src/server.ts",
     "compose": "docker compose down && docker compose build --no-cache && docker compose up -d",
     "throughput:serial": "SERIAL_PROJECTION=true docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js",
-    "throughput:parallel": "docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js"
+    "throughput:parallel": "docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js",
+    "evidence": "bash evidence/run.sh",
+    "evidence:10m": "TIER=10M bash evidence/run.sh"
   },
   "dependencies": {
-    "@rotorsoft/act": ">=1.17.0",
-    "@rotorsoft/act-pg": ">=1.10.0",
+    "@rotorsoft/act": "^1.18.0",
+    "@rotorsoft/act-pg": "^1.11.0",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
     "pg": "^8.22.0",
