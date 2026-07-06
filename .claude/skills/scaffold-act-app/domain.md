@@ -234,7 +234,7 @@ export const ItemProjection = projection("items")
   .on({ ItemCreated })
   .do(async ({ stream, data, created }) => {
     await db().insert(items).values({
-      id: stream, name: data.name, status: "open", createdBy: data.createdBy,
+      stream, name: data.name, status: "open", createdBy: data.createdBy,
       createdAt: created.toISOString(),
     }).onConflictDoUpdate({
       target: items.id,
@@ -244,7 +244,7 @@ export const ItemProjection = projection("items")
   .on({ ItemClosed })
   .do(async ({ stream, data, created }) => {
     await db().update(items).set({ status: "closed", updatedAt: created.toISOString() })
-      .where(eq(items.id, stream));
+      .where(eq(items.stream, stream));
   })
   .build();
 
@@ -266,12 +266,12 @@ export async function getItems() {
 export const ItemProjection = projection("items")
   .on({ ItemCreated })
   .do(async ({ stream, data, created }) => {
-    await db().insert(items).values({ id: stream, name: data.name, status: "open" })
+    await db().insert(items).values({ stream, name: data.name, status: "open" })
       .onConflictDoUpdate({ target: items.id, set: { name: data.name } });
   })
   .on({ ItemClosed })
   .do(async ({ stream, data, created }) => {
-    await db().update(items).set({ status: "closed" }).where(eq(items.id, stream));
+    await db().update(items).set({ status: "closed" }).where(eq(items.stream, stream));
   })
   .batch(async (events, stream) => {
     // All events in one transaction — one DB round-trip
@@ -283,7 +283,7 @@ export const ItemProjection = projection("items")
               .onConflictDoUpdate({ target: items.id, set: { name: event.data.name } });
             break;
           case "ItemClosed":
-            await tx.update(items).set({ status: "closed" }).where(eq(items.id, event.stream));
+            await tx.update(items).set({ status: "closed" }).where(eq(items.stream, event.stream));
             break;
         }
       }

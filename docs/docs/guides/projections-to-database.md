@@ -29,7 +29,7 @@ Drizzle schema (any ORM works the same way — Knex, Kysely, raw `pg`, …):
 import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const tickets = pgTable("tickets", {
-  id: text("id").primaryKey(),
+  stream: text("stream").primaryKey(), // the primary key IS the stream
   title: text("title").notNull(),
   status: text("status").notNull(),
   messages: integer("messages").notNull().default(0),
@@ -56,7 +56,7 @@ export const TicketProjection = projection("tickets")
     .do(async function opened({ stream, data }) {
       await db
         .insert(tickets)
-        .values({ id: stream, status: "open", title: data.title })
+        .values({ stream, status: "open", title: data.title })
         .onConflictDoNothing();          // idempotent
     })
   .on({ TicketClosed })
@@ -64,14 +64,14 @@ export const TicketProjection = projection("tickets")
       await db
         .update(tickets)
         .set({ status: "closed", closedAt: new Date() })
-        .where(eq(tickets.id, stream));
+        .where(eq(tickets.stream, stream));
     })
   .on({ MessageAdded })
     .do(async function messageAdded({ stream }) {
       await db
         .update(tickets)
         .set({ messages: sql`${tickets.messages} + 1` })
-        .where(eq(tickets.id, stream));
+        .where(eq(tickets.stream, stream));
     })
   .build();
 ```
@@ -101,7 +101,7 @@ The default handler runs each event in its own connection. For projections that 
 .on({ OrderPlaced })
   .do(async function orderPlaced({ stream, data }) {
     await db.transaction(async (tx) => {
-      await tx.insert(orders).values({ id: stream, total: data.total });
+      await tx.insert(orders).values({ stream, total: data.total });
       await tx.update(stats).set({
         ordersCount: sql`${stats.ordersCount} + 1`,
         revenueCents: sql`${stats.revenueCents} + ${data.total}`,
@@ -182,12 +182,12 @@ For long event streams, replaying one event per transaction is slow. Define a `.
 export const TicketProjection = projection("tickets")
   .on({ TicketOpened })
     .do(async function opened({ stream, data }) {
-      await db.insert(tickets).values({ id: stream, ...data })
+      await db.insert(tickets).values({ stream, ...data })
         .onConflictDoNothing();
     })
   .on({ TicketClosed })
     .do(async function closed({ stream, data }) {
-      await db.update(tickets).set(data).where(eq(tickets.id, stream));
+      await db.update(tickets).set(data).where(eq(tickets.stream, stream));
     })
   // For replay: a single transaction per stream.
   .batch(async (events, stream) => {
@@ -195,11 +195,11 @@ export const TicketProjection = projection("tickets")
       for (const event of events) {
         switch (event.name) {
           case "TicketOpened":
-            await tx.insert(tickets).values({ id: stream, ...event.data })
+            await tx.insert(tickets).values({ stream, ...event.data })
               .onConflictDoNothing();
             break;
           case "TicketClosed":
-            await tx.update(tickets).set(event.data).where(eq(tickets.id, stream));
+            await tx.update(tickets).set(event.data).where(eq(tickets.stream, stream));
             break;
         }
       }
