@@ -234,6 +234,48 @@ export type BatchHandler<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
+ * One row of a state projection — a stream's folded state at the flush
+ * frontier, produced by `projection(name).of(state)`.
+ *
+ * `event_id` is the max event id folded into the row. Flush handlers
+ * should upsert keyed on `stream` and may guard with `event_id`
+ * (ignore-if-older) to stay order-safe when a rebuild races a live
+ * worker.
+ *
+ * @template TState - The projected state shape
+ */
+export type StateRow<TState extends Schema = Schema> = Readonly<{
+  stream: string;
+  state: TState;
+  version: number;
+  event_id: number;
+}>;
+
+/**
+ * Sink for a state projection's flush rounds — receives one row per
+ * dirty stream and writes them wherever the app queries the list.
+ * Must be an idempotent upsert keyed on `stream`; see {@link StateRow}.
+ *
+ * @template TState - The projected state shape
+ */
+export type FlushHandler<TState extends Schema = Schema> = (
+  rows: ReadonlyArray<StateRow<TState>>
+) => Promise<void>;
+
+/**
+ * Options for `projection(name).of(state, options)` — both deterministic:
+ * behavior is a pure function of the event sequence and these two bounds.
+ *
+ * @property flushEvery - Events folded between flush rounds (default 1000)
+ * @property maxCachedStates - LRU bound on in-memory folded states; the
+ * evictee is flushed before it is dropped (default 10000)
+ */
+export type FoldOptions = Readonly<{
+  flushEvery?: number;
+  maxCachedStates?: number;
+}>;
+
+/**
  * Defines a reaction to an event.
  * @template TEvents - Event schemas.
  * @template TKey - Event name.

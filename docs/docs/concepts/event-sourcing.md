@@ -324,6 +324,8 @@ Always go through `app.reset(...)` rather than `store().reset(...)` directly —
 
 Use `app.reset` for **rebuilds** (watermark → -1, every event replayed). Use [`app.unblock`](./error-handling.md#recovering-a-blocked-stream--appunblock) for **recovery** (watermark preserved, stream resumes from where it stopped). Don't conflate them — using `reset` to clear a blocked webhook stream would re-fire every historical webhook.
 
+Rebuild cost depends on the projection's shape. Per-event and `.batch()` handlers pay one write per event replayed. A **state projection** (`projection(name).of(state).flush(handler)` — see [projections to database](../guides/projections-to-database.md)) folds the replay in memory through the state's own reducers and flushes one row per stream per round, so the same rebuild costs O(streams) writes instead of O(events) — measured at 1,000× fewer row-writes on hot-key workloads.
+
 ## Closing the Books
 
 `app.close([targets])` is the event-sourcing equivalent of "closing the books" in accounting: archive the detail, then truncate the operational store. Each target chooses between *tombstone* (permanent close) and *restart* (seed a fresh `__snapshot__` and keep accepting actions):

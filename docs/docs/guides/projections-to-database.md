@@ -120,6 +120,53 @@ app.on("blocked", (blocked) => {
 });
 ```
 
+## State projections — the list of the aggregates themselves
+
+The most common read model is a list of the aggregates: the orders list, the tickets list — one queryable row per stream, holding attributes the state already has. Before `.of()`, building that list meant re-deriving state the framework already knows how to fold:
+
+```typescript no-check
+// the hand-rolled way: one handler per event, one write per event,
+// and the folding logic duplicated from the state's reducers
+const Orders = projection("orders")
+  .on({ OrderPlaced })
+    .do(async function inserted({ stream, data }) {
+      await db.insert(orders).values({ id: stream, sku: data.sku, status: "placed" });
+    })
+  .on({ OrderShipped })
+    .do(async function shipped({ stream }) {
+      await db.update(orders).set({ status: "shipped" }).where(eq(orders.id, stream));
+    })
+  .build();
+```
+
+With a state projection the state *is* the projection — its `init()` and `.patch()` reducers do the folding, and the flush receives one row per stream:
+
+```typescript no-check
+const Orders = projection("orders")
+  .of(Order) // every event of Order, folded through Order's own reducers
+  .flush(async (rows) => {
+    // rows: one per DIRTY stream — its folded state at the flush frontier
+    await db
+      .insert(orders)
+      .values(rows.map((r) => ({ id: r.stream, ...r.state, eventId: r.event_id })))
+      .onConflictDoUpdate({
+        target: orders.id,
+        set: { /* every projected column from excluded */ },
+        setWhere: sql`${orders.eventId} <= excluded.event_id`,
+      });
+  })
+  .build();
+```
+
+The `setWhere` guard is the documented flush contract: a **monotonic upsert** keyed on `stream`, ignoring writes older than what the table already holds (`event_id` is the max event id folded into the row). Plain converging upserts are already correct under the single-writer watermark; the guard additionally makes a rebuild racing a live worker order-safe.
+
+Semantics worth knowing:
+
+- **The state is the filter.** The projection consumes exactly the state's event register, so only that state's streams are folded — and every event of a folded stream reaches the reducer. There is deliberately no per-instance filter; a partial list is regular-projection territory.
+- **Two deterministic knobs.** `flushEvery` (events folded between flush rounds, default 1000) and `maxCachedStates` (LRU bound on in-memory folded states, default 10000). Under pressure the evictee is flushed before it is dropped — eviction never loses folded work.
+- **Write amplification tracks streams, not events.** A rebuild flushes one row per stream per round: measured on Postgres, rebuilding 100k events over 50 hot streams costs 100 row-writes instead of 100,000 — see [`libs/act-pg/PERFORMANCE.md`](https://github.com/Rotorsoft/act-root/blob/master/libs/act-pg/PERFORMANCE.md).
+- **If the read model needs anything the state does not carry**, use the per-event or `.batch()` shapes below — `.of()` is intentionally just the list case.
+
 ## Batched replay for rebuilds
 
 When you change the projection's logic — add a column, fix an aggregation, change a join — the old read model is wrong. The fix is to **rebuild from scratch**:
