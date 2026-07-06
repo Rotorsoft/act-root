@@ -7,9 +7,15 @@
  * 3. Reset the projection watermark with app.reset()
  * 4. Re-drain to replay all events through the (potentially updated) projection
  *
+ * Also contrasts the two projection shapes on the same replay: the
+ * per-event handler pays one call per event, while the state projection
+ * (`projection(name).of(state).flush(handler)`) folds events through the
+ * state's own reducers and flushes one row per stream — the rebuild
+ * cost tracks streams, not events.
+ *
  * Run: pnpm -F calculator dev:rebuild
  */
-import { act, dispose, projection, state } from "@rotorsoft/act";
+import { act, dispose, projection, type StateRow, state } from "@rotorsoft/act";
 import { z } from "zod";
 
 const Incremented = z.object({ by: z.number() });
@@ -38,7 +44,25 @@ async function main() {
     })
     .build();
 
-  const app = act().withState(Counter).withProjection(SumProjection).build();
+  // --- State projection: the counters list, folded by Counter itself ---
+  const list = new Map<string, StateRow<{ count: number }>>();
+  let listWrites = 0;
+  const CounterList = projection("counter-list")
+    .of(Counter)
+    .flush(async (rows) => {
+      // one row per DIRTY stream, carrying its folded state
+      for (const row of rows) {
+        listWrites++;
+        list.set(row.stream, row);
+      }
+    })
+    .build();
+
+  const app = act()
+    .withState(Counter)
+    .withProjection(SumProjection)
+    .withProjection(CounterList)
+    .build();
 
   const actor = { id: "demo", name: "Demo User" };
   const stream = "counter-1";
@@ -57,6 +81,9 @@ async function main() {
   console.log(`\n=== After initial drain ===`);
   console.log(`  Events processed: ${totalEvents}`);
   console.log(`  Sum: ${totalSum}`);
+  console.log(
+    `  Counter list: ${list.size} row(s) from ${listWrites} write(s) — the fold collapses 5 events into 1 row`
+  );
 
   const snap = await app.load(Counter, stream);
   console.log(`  Counter state: ${snap.state.count}`);
@@ -67,7 +94,9 @@ async function main() {
   totalEvents = 0;
   totalSum = 0;
 
-  const resetCount = await app.reset(["sum-proj"]);
+  list.clear();
+  listWrites = 0;
+  const resetCount = await app.reset(["sum-proj", "counter-list"]);
   console.log(`  Reset ${resetCount} stream(s)`);
 
   // Re-drain replays all events from the beginning
@@ -76,6 +105,12 @@ async function main() {
   console.log(`\n=== After rebuild ===`);
   console.log(`  Events re-processed: ${totalEvents}`);
   console.log(`  Sum (rebuilt): ${totalSum}`);
+  console.log(
+    `  Counter list rebuilt: ${list.size} row(s) from ${listWrites} write(s) — O(streams), not O(events)`
+  );
+  console.log(
+    `  List row state: ${list.get(stream)?.state.count} (folded by Counter's own reducers)`
+  );
 
   // Verify consistency
   console.log(`\n=== Verification ===`);

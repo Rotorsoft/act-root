@@ -103,6 +103,10 @@ and `.batch()` projections remain the escape hatch, unchanged.
   monotonic upserts converge to the same rows. Standard at-least-once.
 - **Rebuild:** `app.reset(["orders"])` replays through the same engine; this is
   where O(keys) vs O(events) pays.
+- **Sliced states (v1):** `.of()` takes a single built State artifact.
+  States composed from multiple same-name partials (`slice()` +
+  `withSlice`) do not produce one artifact today — those keep per-event
+  handlers; extending `.of()` to sliced compositions is future work.
 - **Tombstones (v1):** a tombstoned stream's row simply stops updating at its
   final state; `.autocloses`/`restart` streams keep folding via their seeded
   snapshot. Row deletion is deliberately out of scope — a delete contract can
