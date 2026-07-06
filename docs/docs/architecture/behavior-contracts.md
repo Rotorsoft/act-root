@@ -25,6 +25,7 @@ backed by unit/integration specs under `libs/act/test/`.
 
 | Claim | Source | Backing test |
 |---|---|---|
+| `seed()` is the schema maintenance story: additive, idempotent, lossless on any prior released shape, and safe to run on every boot from every worker (advisory-locked on Postgres for concurrent cold boots) | `writing-a-store.md` § The store schema is the framework's job; `extension-points.md` | act-pg + act-sqlite `seed-upgrade.spec.ts` → "upgrades the oldest supported shape losslessly and idempotently", "serializes concurrent cold boots on an empty schema" **(#1140)** |
 | `with_snaps: true` resumes from the latest snapshot per stream; an explicit `after` overrides the floor; a stream with no snapshot returns full history | `cache-and-snapshots.md`, `Store.query` doc | `store-tck.ts` → "with_snaps resumes from the latest snapshot per stream" |
 | Cold start absorbs the snapshot event into state and resets `patches` to 0 (`snaps` increments) | `cache-and-snapshots.md` "How the two interact on cold start" | `event-sourcing.spec.ts` → "should load from a snapshot event on cold start" |
 | Snapshot writes are fire-and-forget; a snap failure does not propagate | `cache-and-snapshots.md` "Snapshot creation" | `event-sourcing.spec.ts` → "should not throw on snap error and warn with stream, reason, and hint" |

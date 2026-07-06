@@ -25,6 +25,32 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 
 Reading the JSDoc on each method is the first step. The TCK is the second.
 
+## The store schema is the framework's job
+
+Act has **no migration framework, and never will**. Operators never write
+store migrations: `seed()` at boot is the entire schema-maintenance story —
+additive, idempotent, lossless on any prior released shape, safe to run from
+every worker on every boot. Event stores make this possible because they are
+stable by nature: events are immutable, so schema changes are additive
+nullable columns and index swaps, never destructive rewrites. Users manage
+migrations only for their **own projections outside Act's store** (Drizzle et
+al. — see projections-to-database.md).
+
+The adapter-author rule that keeps this true: **every schema change ships
+inside `seed()` as an additive `IF NOT EXISTS` step, plus an old-shape
+upgrade test** (see `seed-upgrade.spec.ts` in act-pg/act-sqlite for the
+canonical fixture: oldest supported shape + legacy rows → `seed()` → full
+current shape, rows intact, second seed a no-op). That is the conformance
+bar. On Postgres, `seed()` opens with a transaction-scoped advisory lock so
+N workers cold-booting an empty schema serialize instead of tripping
+`IF NOT EXISTS` catalog races.
+
+Adoption is **import, not adapt**: `seed()` assumes Act owns its tables. To
+bring existing events in from another system or shape, seed a fresh store
+and import via `scan`/`restore` (see § Implementing `Store.restore` below
+and the inspector's transfer pipeline) — never point Act at a foreign table
+and try to reshape it in place.
+
 ## The TCK is the spec
 
 `@rotorsoft/act-tck` exports `runStoreTck`, a function you drop into your adapter's vitest suite:

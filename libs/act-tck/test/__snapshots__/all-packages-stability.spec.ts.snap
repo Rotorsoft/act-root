@@ -40754,6 +40754,17 @@ export class PostgresStore implements Store {
     try {
       await client.query("BEGIN");
 
+      // Serialize concurrent cold boots. IF NOT EXISTS DDL is not
+      // race-safe while the objects are first being created — two
+      // connections creating the same table simultaneously can trip
+      // catalog unique-key errors — so N workers booting an empty
+      // schema at once serialize here instead. Transaction-scoped:
+      // the lock releases at COMMIT/ROLLBACK, and steady-state
+      // re-seeds pass through in microseconds.
+      await client.query(\`SELECT pg_advisory_xact_lock(hashtext($1))\`, [
+        \`\${this.config.schema}.\${this.config.table}\`,
+      ]);
+
       // Create schema
       await client.query(
         \`CREATE SCHEMA IF NOT EXISTS "\${this.config.schema}";\`
