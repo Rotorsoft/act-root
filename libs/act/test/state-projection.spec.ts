@@ -1,5 +1,13 @@
 import { ZodError, z } from "zod";
-import { act, projection, sensitive, state } from "../src/index.js";
+import {
+  act,
+  cache,
+  projection,
+  sensitive,
+  state,
+  store,
+} from "../src/index.js";
+import { SNAP_EVENT } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
 import type { StateRow } from "../src/types/index.js";
 
@@ -266,6 +274,31 @@ describe("state projection (.of)", () => {
       await app.do("register", { stream: "p1", actor }, { email: "a@b.c" });
       await settle_all(app);
       expect(rows_seen).toContain("p1");
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("resumes the first-sight load from the latest snapshot", async () => {
+    const h = harness();
+    const ctx = await sandbox(
+      act().withState(Counter).withProjection(h.counters)
+    );
+    try {
+      const app = ctx.app;
+      await app.do("increment", { stream: "c1", actor }, { by: 1 });
+      await app.do("increment", { stream: "c1", actor }, { by: 2 });
+      // Snapshot at the head, then more traffic on top of it.
+      await store().commit("c1", [{ name: SNAP_EVENT, data: { count: 3 } }], {
+        correlation: "t",
+        causation: {},
+      });
+      await app.do("increment", { stream: "c1", actor }, { by: 4 });
+      // Cold engine + cold act cache: the miss-load must take the
+      // snapshot floor (#1024) and fold only the tail on top of it.
+      await cache().invalidate("c1");
+      await settle_all(app);
+      expect(h.table.get("c1")?.state).toEqual({ count: 7 });
     } finally {
       await ctx.dispose();
     }

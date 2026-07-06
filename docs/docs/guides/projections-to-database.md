@@ -164,6 +164,7 @@ Semantics worth knowing:
 
 - **The state is the filter.** The projection consumes exactly the state's event register, so only that state's streams are folded — and every event of a folded stream reaches the reducer. There is deliberately no per-instance filter; a partial list is regular-projection territory.
 - **Two deterministic knobs.** `flushEvery` (events folded between flush rounds, default 1000) and `maxCachedStates` (LRU bound on in-memory folded states, default 10000). Under pressure the evictee is flushed before it is dropped — eviction never loses folded work.
+- **Snapshots compound.** On first sight of a stream the engine loads its head state through the regular `load()` path — cache and snapshots included — so with a `.snap()` predicate configured, a cold fold of a 100k-event aggregate costs the snapshot + tail read, not a full replay (the measured 557–988× cold-start reduction in [`recipes/PERFORMANCE.md`](https://github.com/Rotorsoft/act-root/blob/master/recipes/PERFORMANCE.md) applies directly to fold misses and rebuilds).
 - **Write amplification tracks streams, not events.** A rebuild flushes one row per stream per round: measured on Postgres, rebuilding 100k events over 50 hot streams costs 100 row-writes instead of 100,000 — see [`libs/act-pg/PERFORMANCE.md`](https://github.com/Rotorsoft/act-root/blob/master/libs/act-pg/PERFORMANCE.md).
 - **If the read model needs anything the state does not carry**, use the per-event or `.batch()` shapes below — `.of()` is intentionally just the list case.
 
