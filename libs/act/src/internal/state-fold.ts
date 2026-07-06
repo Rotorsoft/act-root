@@ -46,6 +46,15 @@ export function resolveFoldConfig(options: FoldOptions): FoldConfig {
   return FoldOptionsSchema.parse(options);
 }
 
+/**
+ * A stream's in-flight fold — conceptually a subset of {@link Snapshot}
+ * (state + frontier), reduced to what the hot loop needs: no event
+ * envelope (a 10k-entry cache must not pin event payloads), a REQUIRED
+ * frontier (Snapshot's optional `event` is exactly how a frontier bug
+ * sneaks in), mutable in place (one object per stream, not one per
+ * event), plus the engine's own `dirty` flag. `row()` converts to the
+ * public {@link StateRow} at the flush boundary.
+ */
 type Fold<TState extends Schema> = {
   state: TState;
   version: number;
