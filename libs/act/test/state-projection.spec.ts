@@ -279,18 +279,20 @@ describe("state projection (.of)", () => {
     expect(reaction?.resolver).toEqual({ target: "counters" });
     // The no-op only routes; invoking it is harmless and proves it.
     await expect(
-      reaction!.handler({} as never, "counters")
+      reaction!.handler({} as never, "counters", undefined as never)
     ).resolves.toBeUndefined();
   });
 
   it("rejects mixing .of() with .on() handlers", () => {
-    expect(() =>
-      projection("mixed")
-        .on({ Incremented: z.object({ by: z.number() }) })
-        .do(async function handleIncremented() {})
-        // biome-ignore lint/suspicious/noExplicitAny: exercising the runtime guard behind the type-level narrowing
-        .of(Counter as any)
-    ).toThrow(/mixes \.of\(\) with \.on\(\)/);
+    const started = projection("mixed")
+      .on({ Incremented: z.object({ by: z.number() }) })
+      .do(async function handleIncremented() {});
+    // The fluent types no longer offer .of here — reach past them to
+    // exercise the runtime backstop for untyped callers.
+    const untyped = started as unknown as {
+      of: (state: typeof Counter) => unknown;
+    };
+    expect(() => untyped.of(Counter)).toThrow(/mixes \.of\(\) with \.on\(\)/);
   });
 
   it("rejects out-of-range fold options at startup", () => {
