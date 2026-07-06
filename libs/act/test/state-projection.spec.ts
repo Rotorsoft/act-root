@@ -36,11 +36,14 @@ type CounterState = { count: number };
 function harness(options?: { flushEvery?: number; maxCachedStates?: number }) {
   const flushes: StateRow<CounterState>[][] = [];
   let fail_next = false;
+  let fail_every = 0;
+  let flush_calls = 0;
   const table = new Map<string, StateRow<CounterState>>();
   const counters = projection("counters")
     .of(Counter, options)
     .flush(async (rows) => {
-      if (fail_next) {
+      flush_calls++;
+      if (fail_next || (fail_every > 0 && flush_calls % fail_every === 0)) {
         fail_next = false;
         throw new Error("sink down");
       }
@@ -59,6 +62,9 @@ function harness(options?: { flushEvery?: number; maxCachedStates?: number }) {
     table,
     fail_next_flush: () => {
       fail_next = true;
+    },
+    fail_every_flush: (n: number) => {
+      fail_every = n;
     },
   };
 }
@@ -299,6 +305,124 @@ describe("state projection (.of)", () => {
       await cache().invalidate("c1");
       await settle_all(app);
       expect(h.table.get("c1")?.state).toEqual({ count: 7 });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("converges after a mid-round failure with partial flush progress", async () => {
+    // flushEvery=1 → one flush per event; the second flush throws AFTER
+    // the first landed. The watermark holds, the retry re-folds both
+    // streams, and the monotonic upsert converges — partial progress
+    // never leaves a stale row behind.
+    const h = harness({ flushEvery: 1 });
+    const ctx = await sandbox(
+      act().withState(Counter).withProjection(h.counters)
+    );
+    try {
+      const app = ctx.app;
+      await app.do("increment", { stream: "c1", actor }, { by: 3 });
+      await app.do("increment", { stream: "c2", actor }, { by: 5 });
+      h.fail_every_flush(2); // second flush call throws
+      await app.correlate();
+      await app.drain({ leaseMillis: 1, eventLimit: 1_000 });
+      h.fail_every_flush(0);
+      await new Promise((r) => setTimeout(r, 5));
+      await settle_all(app);
+      expect(h.table.get("c1")?.state).toEqual({ count: 3 });
+      expect(h.table.get("c2")?.state).toEqual({ count: 5 });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("keeps rows truthful under eviction thrash within one batch", async () => {
+    // maxCachedStates=1 with interleaved streams: every admission evicts
+    // the other stream mid-batch, and re-admission re-loads head state.
+    const h = harness({ maxCachedStates: 1 });
+    const ctx = await sandbox(
+      act().withState(Counter).withProjection(h.counters)
+    );
+    try {
+      const app = ctx.app;
+      for (const [s2, by] of [
+        ["c1", 1],
+        ["c2", 10],
+        ["c1", 2],
+        ["c2", 20],
+        ["c1", 3],
+        ["c2", 30],
+      ] as const)
+        await app.do("increment", { stream: s2, actor }, { by });
+      await settle_all(app);
+      expect(h.table.get("c1")?.state).toEqual({ count: 6 });
+      expect(h.table.get("c2")?.state).toEqual({ count: 60 });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("chaos oracle: rows equal load() ground truth after failures and recovery", async () => {
+    // Deterministic chaos: seeded traffic across 8 streams interleaved
+    // with drains, every 5th flush failing, a 2-state LRU forcing
+    // constant eviction, tiny flush rounds. The projection may block on
+    // exhausted retries — the operator move (unblock) must bring every
+    // row back to exact ground truth: table.state === load().state.
+    const h = harness({ maxCachedStates: 2, flushEvery: 3 });
+    const ctx = await sandbox(
+      act().withState(Counter).withProjection(h.counters)
+    );
+    try {
+      const app = ctx.app;
+      const STREAMS = 8;
+      let seed = 42;
+      const rand = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed;
+      };
+      h.fail_every_flush(5);
+      for (let i = 0; i < 120; i++) {
+        const s2 = `c${rand() % STREAMS}`;
+        await app.do("increment", { stream: s2, actor }, { by: (i % 7) + 1 });
+        if (i % 17 === 0) {
+          await app.correlate();
+          await app.drain({ leaseMillis: 1, eventLimit: 50 });
+          await new Promise((r) => setTimeout(r, 3));
+        }
+      }
+      // recovery: stop failing, release any quarantine, settle fully
+      h.fail_every_flush(0);
+      await app.unblock({ blocked: true });
+      await new Promise((r) => setTimeout(r, 5));
+      await settle_all(app);
+
+      for (let s2 = 0; s2 < STREAMS; s2++) {
+        const stream = `c${s2}`;
+        const truth = await app.load(Counter, stream);
+        if (truth.event === undefined) continue; // stream never traded
+        expect(h.table.get(stream)?.state, stream).toEqual(truth.state);
+        expect(h.table.get(stream)?.version, stream).toBe(truth.event.version);
+      }
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("freezes a tombstoned stream's row at its final state", async () => {
+    const h = harness();
+    const ctx = await sandbox(
+      act().withState(Counter).withProjection(h.counters)
+    );
+    try {
+      const app = ctx.app;
+      await app.do("increment", { stream: "c1", actor }, { by: 9 });
+      await settle_all(app);
+      await app.close([{ stream: "c1" }]);
+      await app.do("increment", { stream: "c2", actor }, { by: 1 });
+      await settle_all(app);
+      // the closed stream's row is untouched; live traffic keeps flowing
+      expect(h.table.get("c1")?.state).toEqual({ count: 9 });
+      expect(h.table.get("c2")?.state).toEqual({ count: 1 });
     } finally {
       await ctx.dispose();
     }
