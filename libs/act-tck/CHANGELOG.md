@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.23.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.22.0...@rotorsoft/act-tck-v1.23.0) (2026-07-08)
+
+
+### Features
+
+* **act:** state projections — projection(name).of(state).flush(handler) ([a5ef582](https://github.com/rotorsoft/act-root/commit/a5ef5827a5e64049f369883e6326790f46d71208)), closes [#1125](https://github.com/rotorsoft/act-root/issues/1125)
+
 # [@rotorsoft/act-tck-v1.22.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.21.0...@rotorsoft/act-tck-v1.22.0) (2026-07-06)
 
 

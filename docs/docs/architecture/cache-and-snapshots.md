@@ -163,6 +163,8 @@ Anything else — handler errors, validation errors, schema failures — leaves 
 
 ## Snapshot evolution — events first, snapshots second
 
+The cache carries an integrity contract: an entry's `state` always equals the fold of events at or below its `event_id`. Commits that land past the frontier an action loaded (reaction-driven appends skip the optimistic guard by design) invalidate the entry instead of writing a gapped fold, and the next load replays to truth. The same contiguity check gates snapshot persistence — a `__snapshot__` event is never written from a fold that missed interleaved events.
+
 A subtle gotcha: when a state's reducer changes (new field, renamed field), older snapshots in the store contain old-shape state. The framework doesn't migrate snapshots.
 
 The supported pattern:
