@@ -131,12 +131,29 @@ and `.batch()` projections remain the escape hatch, unchanged.
 - **A built-in queryable list store** — a new port for what is fundamentally
   the app's own read database; rejected per the no-new-ports rule. `flush` is
   sink-injection, the one place helpers are allowed.
+- **A bespoke flush-payload type** — the implementation went through three of
+  them in review (`StateRow`, `ProjectedState`, and a derived
+  `{ stream } & CacheEntry` intersection) before landing on none at all. The
+  defenses fell one by one: memory (an event envelope per cached fold is
+  bounded and cheap — conceded), the optional-event hazard (real, but an
+  argument against reusing `Snapshot`, not for inventing a sibling), and
+  key-in-value purity (a KV map's key does not belong in its value — but a
+  row *traveling away* from the map legitimately carries its identity). The
+  resolution was to make `CacheEntry` itself carry its `stream` key — a
+  pre-adoption minor on the Cache port, TCK updated in lockstep — so the
+  flush payload is `ReadonlyArray<CacheEntry<TState>>` verbatim. The
+  signature now states the architecture: a state projection flushes the
+  cache layer outward. The one naming split this surfaced — `Committed.id`
+  vs `CacheEntry.event_id` for the same number — is recorded as a next-major
+  alignment candidate.
 
 ## Stability impact
 
-Additive only: one new builder method on `projection()`, new exported types.
-No change to existing projection shapes, ports, or lifecycle events. Registry gains an
-internal discriminator for the list kind (not charter surface).
+Additive: one new builder method on `projection()` and one new type
+(`FoldOptions`). One port-type reshape: `CacheEntry` gains a required
+`stream` field, shipped as minor under the pre-adoption rule (no external
+cache adapters exist), with the cache TCK and every in-tree write site
+updated in the same slice. No changes to lifecycle events or other ports.
 
 ## Evidence plan
 
