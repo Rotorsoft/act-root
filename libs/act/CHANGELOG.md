@@ -1,3 +1,15 @@
+# [@rotorsoft/act-v1.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.19.0...@rotorsoft/act-v1.20.0) (2026-07-08)
+
+
+### Bug Fixes
+
+* **act:** cache and snapshot writes never lie about their frontier ([ef73607](https://github.com/rotorsoft/act-root/commit/ef736076b473716a6cafbebd45c73cdbdffe1cb3)), closes [#1169](https://github.com/rotorsoft/act-root/issues/1169)
+
+
+### Features
+
+* **act:** .of() resolves the registry-merged full state at build ([d9dfa3d](https://github.com/rotorsoft/act-root/commit/d9dfa3d8793c83c25aabeef4a923600ea4589b43))
+
 # [@rotorsoft/act-v1.19.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.8...@rotorsoft/act-v1.19.0) (2026-07-08)
 
 
