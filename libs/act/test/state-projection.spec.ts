@@ -519,8 +519,12 @@ describe("state projection (.of)", () => {
         for (const row of rows) table.set(row.stream, row.state);
       })
       .build();
-    // the projection rides a slice — the pending-projections path
-    const DuoSlice = slice().withState(PartB).withProjection(duos).build();
+    // the projection rides a slice — the pending-projections path; the
+    // cast crosses the slice builder's event-scoped generic on purpose
+    const DuoSlice = slice()
+      .withState(PartB)
+      .withProjection(duos as never)
+      .build();
     const ctx = await sandbox(act().withState(PartA).withSlice(DuoSlice));
     try {
       const app = ctx.app;
@@ -565,9 +569,11 @@ describe("state projection (.of)", () => {
       .of(Counter)
       .flush(async () => {})
       .build();
-    await expect(sandbox(act().withProjection(orphans))).rejects.toThrow(
-      /not registered/
-    );
+    // no state registered at all — the cast bypasses the event-scoped
+    // generic to reach the runtime guard
+    await expect(
+      sandbox(act().withProjection(orphans as never))
+    ).rejects.toThrow(/not registered/);
   });
 
   it("rejects mixed state names across .of() partials", () => {
