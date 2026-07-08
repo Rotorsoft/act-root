@@ -1,0 +1,59 @@
+{
+  "name": "@rotorsoft/act-notify",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Hybrid notify-broker decorator for Act stores \u2014 ride Redis (or any broker) for cross-process wakeups while the durable log stays on your store",
+  "keywords": [
+    "event-sourcing",
+    "notify",
+    "redis",
+    "kafka",
+    "broker",
+    "act"
+  ],
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/act-notify"
+  },
+  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-otel#readme",
+  "bugs": {
+    "url": "https://github.com/rotorsoft/act-root/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/@types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/@types/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.23.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
+    "build": "pnpm clean && tsup && pnpm types"
+  },
+  "peerDependencies": {
+    "@rotorsoft/act": "workspace:^"
+  },
+  "devDependencies": {
+    "@rotorsoft/act-tck": "workspace:^",
+    "zod": "^4.4.3",
+    "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-pg": "workspace:^"
+  }
+}

@@ -340,6 +340,21 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  libs/act-notify:
+    devDependencies:
+      '@rotorsoft/act':
+        specifier: workspace:^
+        version: link:../act
+      '@rotorsoft/act-pg':
+        specifier: workspace:^
+        version: link:../act-pg
+      '@rotorsoft/act-tck':
+        specifier: workspace:^
+        version: link:../act-tck
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   libs/act-ops:
     devDependencies:
       '@stryker-mutator/core':

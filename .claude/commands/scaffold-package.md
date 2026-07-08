@@ -25,10 +25,11 @@ Verify with `git ls-remote --tags origin | grep act-$ARGUMENTS`.
 4. **`tsconfig.json` + `tsconfig.build.json`** — copy from a sibling, update `references`.
 5. **`tsup.config.ts`** — copy from sibling. Adjust `entry` if subpath exports.
 6. **`.releaserc.json`** — copy from sibling, update `tagFormat` to `@rotorsoft/act-$ARGUMENTS-v${version}`.
-7. **`README.md`** — narrative explaining what the package does, when to use it, and when NOT to. Match the tone of the existing READMEs (no AI patterns).
+7. **`README.md`** — narrative explaining what the package does, when to use it, and when NOT to. Match the tone of the existing READMEs (no AI patterns). **Canonical sections are enforced by `pnpm check:readmes`**: italic tagline, then "## Why this package / Installation / Quick start / Related packages / Documentation / License" (bit act-notify in #1172 — copy act-otel's skeleton).
 8. **`CHANGELOG.md`** — empty file, `# Changelog`. Semantic-release will populate.
 9. **Repo wiring (the easily-forgotten checklist):**
    - `.github/workflows/ci-cd.yml` libs filter — add `act-$ARGUMENTS: ['libs/act-$ARGUMENTS/**']`
+   - **`pnpm paths:sync`** — regenerates `tsconfig.workspace.json` paths from package `exports`; CI runs `pnpm paths:check` and fails without it (bit act-notify in #1172)
    - `vite.config.ts` — add alias if tests need it
    - `packages/tsconfig.base.json` — add path mapping if packages will import the new lib
    - `README.md` (root) — one-line entry under Libraries (Core or Supporting)

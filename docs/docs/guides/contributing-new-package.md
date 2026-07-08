@@ -23,6 +23,7 @@ Pick a commit on `master` (or just before the feature branch diverged). This tag
 | File | What to add |
 |---|---|
 | `.github/workflows/ci-cd.yml` | Add the package name to the `cd` job matrix so semantic-release runs against it |
+| `tsconfig.workspace.json` | Run `pnpm paths:sync` — paths derive from package `exports`, and CI's `pnpm paths:check` fails until the new package is registered |
 | `libs/act-foo/.releaserc.json` | Copy from a sibling lib (`act-pg`, `act-sqlite`) and update `tagFormat` to match the new package |
 | `README.md` (root) | Add a one-line entry under the libraries section pointing at the package |
 | `CLAUDE.md` (root) | Add a one-line entry under "Project Structure / libs" |
