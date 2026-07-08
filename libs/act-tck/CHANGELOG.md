@@ -1,3 +1,15 @@
+# [@rotorsoft/act-tck-v1.24.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.23.0...@rotorsoft/act-tck-v1.24.0) (2026-07-08)
+
+
+### Bug Fixes
+
+* **act:** cache and snapshot writes never lie about their frontier ([ef73607](https://github.com/rotorsoft/act-root/commit/ef736076b473716a6cafbebd45c73cdbdffe1cb3)), closes [#1169](https://github.com/rotorsoft/act-root/issues/1169)
+
+
+### Features
+
+* **act:** .of() resolves the registry-merged full state at build ([d9dfa3d](https://github.com/rotorsoft/act-root/commit/d9dfa3d8793c83c25aabeef4a923600ea4589b43))
+
 # [@rotorsoft/act-tck-v1.23.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.22.0...@rotorsoft/act-tck-v1.23.0) (2026-07-08)
 
 
