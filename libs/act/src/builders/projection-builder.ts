@@ -9,15 +9,22 @@
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import { _this_ } from "../internal/index.js";
+import {
+  _this_,
+  make_fold_handler,
+  resolveFoldConfig,
+} from "../internal/index.js";
 import type {
   BatchHandler,
+  CacheEntry,
   Committed,
   EventRegister,
+  FoldOptions,
   Reaction,
   ReactionResolver,
   Schema,
   Schemas,
+  State,
 } from "../types/index.js";
 
 /**
@@ -44,10 +51,10 @@ type DoResult<
   TKey extends string,
   TData extends Schema,
   TTarget extends string | undefined = undefined,
-> = ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget> & {
+> = ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget, true> & {
   to: (
     resolver: ReactionResolver<TEvents & { [P in TKey]: TData }, TKey> | string
-  ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget>;
+  ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget, true>;
 };
 
 /**
@@ -63,6 +70,7 @@ type DoResult<
 export type ProjectionBuilder<
   TEvents extends Schemas,
   TTarget extends string | undefined = undefined,
+  THasHandlers extends boolean = false,
 > = {
   /**
    * Begins defining a projection handler for a specific event.
@@ -104,7 +112,47 @@ export type ProjectionBuilder<
       batch: (handler: BatchHandler<TEvents>) => {
         build: () => Projection<TEvents>;
       };
-    }
+    } & (THasHandlers extends false
+      ? {
+          /**
+           * Declares a state projection: fold every event of the given
+           * state through its own reducers and flush one row per stream —
+           * the queryable list of the aggregates themselves.
+           *
+           * The state is the filter: the projection consumes exactly the
+           * state's event register, so in a multi-state app only that
+           * state's streams are folded — and every event of a folded
+           * stream reaches the reducer. Write amplification tracks the
+           * distinct stream count, not the event count; `app.reset`
+           * rebuilds in O(streams) upserts.
+           *
+           * The fluent chain enforces the shape: `.of()` is only offered
+           * before any `.on()` handler, and narrows to `.flush()` +
+           * `.build()` — a projection either folds a state or declares
+           * handlers, never both.
+           */
+          of: <TState extends Schema, TE extends Schemas, TA extends Schemas>(
+            state: State<TState, TE, TA>,
+            options?: FoldOptions
+          ) => {
+            /**
+             * The sink: state projections flush the cache layer outward —
+             * the rows ARE the streams' {@link CacheEntry} values, one per
+             * dirty stream per flush round. Must be an idempotent upsert
+             * keyed on `stream` (guard with `event_id` for order safety
+             * when a rebuild races a live worker).
+             */
+            flush: (
+              handler: (
+                rows: ReadonlyArray<CacheEntry<TState>>
+              ) => Promise<void>
+            ) => {
+              build: () => Projection<TE>;
+            };
+          };
+        }
+      : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+        {})
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     {});
 
@@ -240,7 +288,7 @@ function _projection<
     events,
   };
 
-  // Add .batch() only for static-target projections
+  // Add .batch() and .of() only for static-target projections
   if (typeof target === "string") {
     return Object.assign(base, {
       batch: (handler: BatchHandler<TEvents>) => ({
@@ -251,6 +299,55 @@ function _projection<
           batchHandler: handler,
         }),
       }),
+      of: <TState extends Schema, TE extends Schemas, TA extends Schemas>(
+        state: State<TState, TE, TA>,
+        options: FoldOptions = {}
+      ) => {
+        if (Object.keys(events).length > 0)
+          throw new Error(
+            `Projection "${target}" mixes .of() with .on() handlers — a projection either folds a state or declares handlers, never both`
+          );
+        // Misconfiguration surfaces here, at startup — not on first drain.
+        const config = resolveFoldConfig(options);
+        // The state's own schema instances register the events, so a
+        // same-name declaration elsewhere passes the identity check in
+        // merge_event_register. The named no-op reaction routes fetches
+        // to this target; dispatch always goes through the batch handler.
+        const fold_events = {} as EventRegister<TE>;
+        for (const [name, schema] of Object.entries(state.events)) {
+          const noop = {
+            [`${target}_fold`]: async () => {},
+          }[`${target}_fold`] as (
+            event: Committed<TE, keyof TE & string>,
+            stream: string
+          ) => Promise<void>;
+          (fold_events as Record<string, unknown>)[name] = {
+            schema,
+            reactions: new Map([
+              [
+                `${target}_fold`,
+                {
+                  handler: noop,
+                  resolver: { target },
+                  options: { blockOnError: true, maxRetries: 3 },
+                },
+              ],
+            ]),
+          };
+        }
+        return {
+          flush: (
+            handler: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>
+          ) => ({
+            build: () => ({
+              _tag: "Projection" as const,
+              events: fold_events,
+              target,
+              batchHandler: make_fold_handler(state, handler, config),
+            }),
+          }),
+        };
+      },
     }) as ProjectionBuilder<TEvents, TTarget>;
   }
 

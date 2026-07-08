@@ -187,6 +187,30 @@ export const ItemSlice = slice()
   .build();
 ```
 
+**Prefer a state projection when the read model is the list of the aggregates.** When the rows are just the state's own attributes (the items list, the orders list), don't hand-write per-event handlers — fold through the state itself with `.of()`:
+
+```typescript
+import { type CacheEntry, projection } from "@rotorsoft/act";
+import { Item } from "./item.js";
+
+const items = new Map<string, CacheEntry<ItemState>>();
+
+export const ItemList = projection("items")
+  .of(Item) // every Item event, folded through Item's own reducers
+  .flush(async (rows) => {
+    for (const row of rows) items.set(row.stream, row); // one row per stream
+  })
+  .build();
+
+export function getItems() {
+  return Object.fromEntries(
+    [...items.entries()].map(([id, row]) => [id, row.state])
+  );
+}
+```
+
+The state is the filter (only that state's streams fold), flushes are one row per stream per round (rebuilds are O(streams), not O(events)), and when the sink is a database the flush should be a monotonic upsert keyed on `stream` guarded by `row.event_id`. Reach for hand-written `.on().do()` handlers only when the read model needs something the state does not carry (joins, per-actor indexes, counters across streams). Note: `.of()` takes a single built State — for sliced states (multiple same-name partials) keep per-event handlers for now.
+
 **Co-location pattern**: Keep projection, query functions, and `clear*()` helpers together with the slice. This keeps the read model close to the events that build it.
 
 **Query functions**: Export plain functions (`getItems()`, `getItemsByActor()`) that query the in-memory projection state. These are called from tRPC query procedures.
@@ -210,7 +234,7 @@ export const ItemProjection = projection("items")
   .on({ ItemCreated })
   .do(async ({ stream, data, created }) => {
     await db().insert(items).values({
-      id: stream, name: data.name, status: "open", createdBy: data.createdBy,
+      stream, name: data.name, status: "open", createdBy: data.createdBy,
       createdAt: created.toISOString(),
     }).onConflictDoUpdate({
       target: items.id,
@@ -220,7 +244,7 @@ export const ItemProjection = projection("items")
   .on({ ItemClosed })
   .do(async ({ stream, data, created }) => {
     await db().update(items).set({ status: "closed", updatedAt: created.toISOString() })
-      .where(eq(items.id, stream));
+      .where(eq(items.stream, stream));
   })
   .build();
 
@@ -242,12 +266,12 @@ export async function getItems() {
 export const ItemProjection = projection("items")
   .on({ ItemCreated })
   .do(async ({ stream, data, created }) => {
-    await db().insert(items).values({ id: stream, name: data.name, status: "open" })
+    await db().insert(items).values({ stream, name: data.name, status: "open" })
       .onConflictDoUpdate({ target: items.id, set: { name: data.name } });
   })
   .on({ ItemClosed })
   .do(async ({ stream, data, created }) => {
-    await db().update(items).set({ status: "closed" }).where(eq(items.id, stream));
+    await db().update(items).set({ status: "closed" }).where(eq(items.stream, stream));
   })
   .batch(async (events, stream) => {
     // All events in one transaction — one DB round-trip
@@ -259,7 +283,7 @@ export const ItemProjection = projection("items")
               .onConflictDoUpdate({ target: items.id, set: { name: event.data.name } });
             break;
           case "ItemClosed":
-            await tx.update(items).set({ status: "closed" }).where(eq(items.id, event.stream));
+            await tx.update(items).set({ status: "closed" }).where(eq(items.stream, event.stream));
             break;
         }
       }

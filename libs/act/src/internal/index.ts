@@ -79,4 +79,5 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
+export * from "./state-fold.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";

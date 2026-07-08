@@ -234,6 +234,19 @@ export type BatchHandler<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
+ * Options for `projection(name).of(state, options)` — both deterministic:
+ * behavior is a pure function of the event sequence and these two bounds.
+ *
+ * @property flushEvery - Events folded between flush rounds (default 1000)
+ * @property maxCachedStates - LRU bound on in-memory folded states; the
+ * evictee is flushed before it is dropped (default 10000)
+ */
+export type FoldOptions = Readonly<{
+  flushEvery?: number;
+  maxCachedStates?: number;
+}>;
+
+/**
  * Defines a reaction to an event.
  * @template TEvents - Event schemas.
  * @template TKey - Event name.

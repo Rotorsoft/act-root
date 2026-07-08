@@ -304,3 +304,38 @@ before-path is O(total events), the after-path O(events-since-snapshot)).
 The gated `load: cold replay over snapshot floor` scenario uses a small
 50/50 floor as a standing regression guard — if the floor silently breaks
 and the read scans the whole stream again, its p50 climbs past tolerance.
+
+### #1125 state projections — rebuild cost by projection shape (pg)
+
+`projection(name).of(state).flush(handler)` folds events through the
+state's own reducers in memory and flushes one row per stream per round,
+so rebuild write amplification tracks the distinct-stream count instead
+of the event count. Measured with
+`scripts/state-projection-bench.ts` (docker PG :5431, M3 Pro): the same
+100k-event store rebuilt to a real Postgres read table by all three
+shapes.
+
+Wide keys — 5,000 streams x 20 events:
+
+| Shape | Wall-clock | Row-writes |
+|---|---|---|
+| per-event `.do()` | 31.0 s | 100,000 |
+| `.batch()` | 0.4 s | 100,000 |
+| `.of().flush()` | 2.7 s | **5,000** |
+
+Hot keys — 50 streams x 2,000 events:
+
+| Shape | Wall-clock | Row-writes |
+|---|---|---|
+| per-event `.do()` | 31.1 s | 100,000 |
+| `.batch()` | 0.3 s | 100,000 |
+| `.of().flush()` | **0.9 s** | **100** |
+
+Reading the numbers honestly: `.batch()` posts competitive wall-clock
+because its handler here writes raw event fields — it cannot produce a
+*folded state list* without hand-rolling the fold cache, LRU and
+watermark discipline that `.of()` owns; a realistic batch handler pays
+reads (or re-derivation) the bench omits. On wide keys `.of()` spends
+its time in per-stream head loads (one per cache miss); on hot keys
+that cost amortizes across 2,000 events per stream and the shape is
+both the fastest and 1,000x lighter on writes.

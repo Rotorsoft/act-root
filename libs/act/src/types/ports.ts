@@ -1154,9 +1154,14 @@ export interface Store extends Disposable, EventSource {
 /**
  * A cached snapshot entry for a stream.
  *
+ * Carries its own `stream` key so an entry is self-describing when it
+ * travels away from the cache map — state projections flush entries
+ * outward as-is, one per dirty stream.
+ *
  * @template TState - The state schema type
  */
 export interface CacheEntry<TState extends Schema> {
+  readonly stream: string;
   readonly state: TState;
   readonly version: number;
   readonly event_id: number;

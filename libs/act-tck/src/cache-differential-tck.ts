@@ -95,6 +95,7 @@ const build_cache_plan = (seed: number, stream_count: number): CachePlan => {
   const make_entry = (): Entry => {
     const v = Math.floor(rng() * 1000);
     return {
+      stream: `e-${v}`,
       state: { count: v, label: `k${v % 7}` },
       version: v,
       event_id: v,

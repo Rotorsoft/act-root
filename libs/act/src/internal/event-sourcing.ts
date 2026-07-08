@@ -3,7 +3,7 @@
  * @category Internal
  *
  * Pure event-sourcing primitives: `snap` persists state checkpoints, `load`
- * reconstructs state by replaying events through reducers, and `action`
+ * reconstructs state by folding events through reducers, and `action`
  * validates an action, runs invariants, emits events, and commits them
  * atomically. `tombstone` commits the close-the-books guard with optimistic
  * concurrency.
@@ -358,7 +358,8 @@ export async function scan(
 }
 
 /**
- * Loads a snapshot of the state from the store by replaying events and applying patches.
+ * Loads a snapshot of the state from the store by folding events through the
+ * state's patch reducers.
  *
  * First checks the cache for a checkpoint, then queries the store for events
  * committed after the cached position. On cache miss, replays from the store
@@ -450,6 +451,7 @@ export async function load<
   // Time-travel loads bypass cache entirely and skip this too.
   if (replayed > 0 && !time_travel && event && !me.pii_aware) {
     await cache().set(stream, {
+      stream,
       state,
       version: event.version,
       event_id: event.id,
@@ -644,6 +646,7 @@ export async function action<
       if (!me.pii_aware) {
         cache()
           .set<TState>(stream, {
+            stream,
             state: last.state,
             version: last.event.version,
             event_id: last.event.id,
