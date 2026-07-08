@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 import { SNAP_EVENT } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
-import type { ProjectedState } from "../src/types/index.js";
+import type { CacheEntry } from "../src/types/index.js";
 
 const actor = { id: "a", name: "a" };
 
@@ -32,13 +32,14 @@ const Tag = state({ Tag: z.object({ label: z.string() }) })
   .build();
 
 type CounterState = { count: number };
+type Row = CacheEntry<CounterState>;
 
 function harness(options?: { flushEvery?: number; maxCachedStates?: number }) {
-  const flushes: ProjectedState<CounterState>[][] = [];
+  const flushes: Row[][] = [];
   let fail_next = false;
   let fail_every = 0;
   let flush_calls = 0;
-  const table = new Map<string, ProjectedState<CounterState>>();
+  const table = new Map<string, Row>();
   const counters = projection("counters")
     .of(Counter, options)
     .flush(async (rows) => {
@@ -51,7 +52,8 @@ function harness(options?: { flushEvery?: number; maxCachedStates?: number }) {
       // The documented contract: monotonic upsert keyed on stream.
       for (const row of rows) {
         const current = table.get(row.stream);
-        if (!current || row.id >= current.id) table.set(row.stream, row);
+        if (!current || row.event_id >= current.event_id)
+          table.set(row.stream, row);
       }
     })
     .build();
@@ -99,7 +101,7 @@ describe("state projection (.of)", () => {
       expect(h.table.get("c2")?.state).toEqual({ count: 5 });
       expect(h.table.get("c1")?.version).toBe(1);
       expect(h.table.get("c2")?.version).toBe(0);
-      expect(h.table.get("c1")!.id).toBeGreaterThan(0);
+      expect(h.table.get("c1")!.event_id).toBeGreaterThan(0);
     } finally {
       await ctx.dispose();
     }

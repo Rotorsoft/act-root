@@ -148,7 +148,7 @@ const Orders = projection("orders")
     // rows: one per DIRTY stream — its folded state at the flush frontier
     await db
       .insert(orders)
-      .values(rows.map((r) => ({ stream: r.stream, ...r.state, eventId: r.id })))
+      .values(rows.map((r) => ({ stream: r.stream, ...r.state, eventId: r.event_id })))
       .onConflictDoUpdate({
         target: orders.stream, // the primary key IS the stream
         set: { /* every projected column from excluded */ },
@@ -158,7 +158,7 @@ const Orders = projection("orders")
   .build();
 ```
 
-The `setWhere` guard is the documented flush contract: a **monotonic upsert** keyed on `stream`, ignoring writes older than what the table already holds (`id` is the max event id folded into the row). Plain converging upserts are already correct under the single-writer watermark; the guard additionally makes a rebuild racing a live worker order-safe.
+The `setWhere` guard is the documented flush contract: a **monotonic upsert** keyed on `stream`, ignoring writes older than what the table already holds (`event_id` is the max event id folded into the row). Plain converging upserts are already correct under the single-writer watermark; the guard additionally makes a rebuild racing a live worker order-safe.
 
 Semantics worth knowing:
 

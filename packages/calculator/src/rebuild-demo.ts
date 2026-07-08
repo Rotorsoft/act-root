@@ -17,8 +17,8 @@
  */
 import {
   act,
+  type CacheEntry,
   dispose,
-  type ProjectedState,
   projection,
   state,
 } from "@rotorsoft/act";
@@ -51,7 +51,7 @@ async function main() {
     .build();
 
   // --- State projection: the counters list, folded by Counter itself ---
-  const list = new Map<string, ProjectedState<{ count: number }>>();
+  const list = new Map<string, CacheEntry<{ count: number }>>();
   let listWrites = 0;
   const CounterList = projection("counter-list")
     .of(Counter)

@@ -193,6 +193,7 @@ interface Cache extends Disposable {
 }
 
 interface CacheEntry<TState> {
+  readonly stream: string; // the key, so an entry is self-describing in flight
   readonly state: TState;
   readonly version: number;
   readonly event_id: number;

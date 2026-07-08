@@ -450,6 +450,7 @@ export async function load<
   // Time-travel loads bypass cache entirely and skip this too.
   if (replayed > 0 && !time_travel && event && !me.pii_aware) {
     await cache().set(stream, {
+      stream,
       state,
       version: event.version,
       event_id: event.id,
@@ -644,6 +645,7 @@ export async function action<
       if (!me.pii_aware) {
         cache()
           .set<TState>(stream, {
+            stream,
             state: last.state,
             version: last.event.version,
             event_id: last.event.id,

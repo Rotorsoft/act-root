@@ -22,8 +22,10 @@ export type CacheTckOptions = {
 
 const entry = (
   event_id: number,
-  state: Record<string, unknown> = {}
+  state: Record<string, unknown> = {},
+  stream = `s-${event_id}`
 ): CacheEntry<Record<string, unknown>> => ({
+  stream,
   state,
   version: event_id,
   event_id,

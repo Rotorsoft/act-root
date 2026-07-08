@@ -16,10 +16,10 @@ import {
 } from "../internal/index.js";
 import type {
   BatchHandler,
+  CacheEntry,
   Committed,
   EventRegister,
   FoldOptions,
-  ProjectedState,
   Reaction,
   ReactionResolver,
   Schema,
@@ -136,13 +136,15 @@ export type ProjectionBuilder<
             options?: FoldOptions
           ) => {
             /**
-             * The sink: receives one {@link ProjectedState} per dirty stream
-             * per flush round. Must be an idempotent upsert keyed on
-             * `stream` (guard with `id` for order safety).
+             * The sink: state projections flush the cache layer outward —
+             * the rows ARE the streams' {@link CacheEntry} values, one per
+             * dirty stream per flush round. Must be an idempotent upsert
+             * keyed on `stream` (guard with `event_id` for order safety
+             * when a rebuild races a live worker).
              */
             flush: (
               handler: (
-                rows: ReadonlyArray<ProjectedState<TState>>
+                rows: ReadonlyArray<CacheEntry<TState>>
               ) => Promise<void>
             ) => {
               build: () => Projection<TE>;
@@ -335,9 +337,7 @@ function _projection<
         }
         return {
           flush: (
-            handler: (
-              rows: ReadonlyArray<ProjectedState<TState>>
-            ) => Promise<void>
+            handler: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>
           ) => ({
             build: () => ({
               _tag: "Projection" as const,

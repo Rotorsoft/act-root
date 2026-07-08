@@ -355,6 +355,7 @@ async function truncate_and_warm_cache(
       const state = seed_states.get(stream);
       if (state && entry) {
         await cache().set(stream, {
+          stream,
           state,
           version: entry.committed.version,
           event_id: entry.committed.id,

@@ -10,6 +10,7 @@ describe("InMemoryCache (adapter-specific)", () => {
   it("evicts the least-recently-used entry when full", async () => {
     const cache = new InMemoryCache({ maxSize: 3 });
     await cache.set("a", {
+      stream: "a",
       state: {},
       version: 0,
       event_id: 0,
@@ -17,6 +18,7 @@ describe("InMemoryCache (adapter-specific)", () => {
       snaps: 0,
     });
     await cache.set("b", {
+      stream: "b",
       state: {},
       version: 0,
       event_id: 1,
@@ -24,6 +26,7 @@ describe("InMemoryCache (adapter-specific)", () => {
       snaps: 0,
     });
     await cache.set("c", {
+      stream: "c",
       state: {},
       version: 0,
       event_id: 2,
@@ -36,6 +39,7 @@ describe("InMemoryCache (adapter-specific)", () => {
 
     // Adding "d" should evict "b" (least recently used).
     await cache.set("d", {
+      stream: "d",
       state: {},
       version: 0,
       event_id: 3,
@@ -52,6 +56,7 @@ describe("InMemoryCache (adapter-specific)", () => {
   it("set overwrites a prior entry on the same stream without growing", async () => {
     const cache = new InMemoryCache({ maxSize: 3 });
     await cache.set("a", {
+      stream: "a",
       state: { v: 1 },
       version: 0,
       event_id: 0,
@@ -59,6 +64,7 @@ describe("InMemoryCache (adapter-specific)", () => {
       snaps: 0,
     });
     await cache.set("a", {
+      stream: "a",
       state: { v: 2 },
       version: 1,
       event_id: 1,
@@ -71,6 +77,7 @@ describe("InMemoryCache (adapter-specific)", () => {
   it("dispose clears all entries (observable via `size`)", async () => {
     const cache = new InMemoryCache({ maxSize: 3 });
     await cache.set("a", {
+      stream: "a",
       state: {},
       version: 0,
       event_id: 0,
@@ -85,6 +92,7 @@ describe("InMemoryCache (adapter-specific)", () => {
     const big = new InMemoryCache();
     for (let i = 0; i < 1001; i++) {
       await big.set(`k${i}`, {
+        stream: `k${i}`,
         state: {},
         version: 0,
         event_id: i,

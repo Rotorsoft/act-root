@@ -31,8 +31,8 @@ const Orders = projection("orders")
     maxCachedStates: 10_000, // LRU bound on in-memory folded states
   })
   .flush(async (rows) => {
-    // rows: ReadonlyArray<ProjectedState<OrderState>> — one per DIRTY stream,
-    // each carrying the stream's folded state at the round frontier.
+    // rows: the streams' CacheEntry values — one per DIRTY stream,
+    // each carrying its folded state at the round frontier.
     await db
       .insert(orders)
       .values(rows.map((r) => ({ stream: r.stream, ...r.state })))
@@ -54,7 +54,7 @@ New public surface (all additive):
 |---|---|
 | `.of(state, options?)` | on the `projection(name)` builder; derives the event register and the fold from the built state |
 | `.flush(handler)` | the only sink — receives dirty rows, writes them wherever the app queries them (the projections-to-database guide pattern) |
-| `ProjectedState<S>` | `{ stream, state, version, id }` |
+| flush payload | `ReadonlyArray<CacheEntry<S>>` — no new type: `CacheEntry` gained its `stream` key, and state projections flush the cache layer outward |
 | `FoldOptions` | `{ flushEvery?, maxCachedStates? }` — Zod-validated (`FoldOptionsSchema` + `resolveFoldConfig` + `DEFAULT_*`, per the config-validation convention) |
 
 **Scoping is by state type, and the state itself is the filter.** `.of(Order)`
