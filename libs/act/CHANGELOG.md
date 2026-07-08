@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.19.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.8...@rotorsoft/act-v1.19.0) (2026-07-08)
+
+
+### Features
+
+* **act:** state projections — projection(name).of(state).flush(handler) ([a5ef582](https://github.com/rotorsoft/act-root/commit/a5ef5827a5e64049f369883e6326790f46d71208)), closes [#1125](https://github.com/rotorsoft/act-root/issues/1125)
+
 # [@rotorsoft/act-v1.18.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.18.7...@rotorsoft/act-v1.18.8) (2026-07-06)
 
 
