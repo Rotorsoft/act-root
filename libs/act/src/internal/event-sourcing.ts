@@ -529,7 +529,13 @@ export async function action<
       const snapshot = await load(me, { stream, actor: target.actor });
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      const expected = expectedVersion ?? snapshot.event?.version;
+      // snapshot.version is the frontier even on a warm cache hit,
+      // where snapshot.event is undefined — using the event would
+      // silently drop the optimistic guard for every cached stream.
+      // A brand-new stream (-1) stays unguarded: creations append.
+      const expected =
+        expectedVersion ??
+        (snapshot.version >= 0 ? snapshot.version : undefined);
 
       if (me.given) {
         const invariants = me.given[action] || [];
@@ -634,7 +640,13 @@ export async function action<
 
       // fire and forget snaps
       const last = snapshots.at(-1)!;
-      const snapped = me.snap?.(last);
+      // Guardless commits (reactions append at head by design) can land
+      // past events this fold never saw. A gapped fold must not become
+      // a snapshot event or a cache entry — both would lie at the head
+      // frontier. Contiguity is cheap to prove: the first committed
+      // version extends the loaded one.
+      const contiguous = committed[0].version === snapshot.version + 1;
+      const snapped = contiguous && me.snap?.(last);
 
       // #861: pii-aware states (any event declaring `sensitive(...)`
       // fields) never populate the snapshot cache — state evolves from
@@ -644,16 +656,24 @@ export async function action<
       // Fire-and-forget — log but don't fail the action on cache write errors
       // (e.g., transient network failures in a custom Cache adapter).
       if (!me.pii_aware) {
-        cache()
-          .set<TState>(stream, {
-            stream,
-            state: last.state,
-            version: last.event.version,
-            event_id: last.event.id,
-            patches: snapped ? 0 : last.patches,
-            snaps: snapped ? last.snaps + 1 : last.snaps,
-          })
-          .catch((err) => log().error(err));
+        if (contiguous)
+          cache()
+            .set<TState>(stream, {
+              stream,
+              state: last.state,
+              version: last.event.version,
+              event_id: last.event.id,
+              patches: snapped ? 0 : last.patches,
+              snaps: snapped ? last.snaps + 1 : last.snaps,
+            })
+            .catch((err) => log().error(err));
+        // A gapped entry would sit at the head frontier with unfolded
+        // events baked in — drop the checkpoint and let the next load
+        // replay to truth instead.
+        else
+          cache()
+            .invalidate(stream)
+            .catch((err) => log().error(err));
       }
 
       // Persist snap to store for cold-start durability. Fire-and-forget:
@@ -665,6 +685,36 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // Phantom conflict: fire-and-forget snap() commits occupy version
+      // slots at the head, so a warm follow-up action can collide with
+      // the framework's own bookkeeping rather than a competing writer.
+      // When every event past the guarded frontier is a snapshot, retry
+      // transparently — the caller's retry budget is for real conflicts.
+      if (
+        error.expectedVersion >= 0 &&
+        error.lastVersion > error.expectedVersion
+      ) {
+        const gap: string[] = [];
+        // backward + limit = lastVersion - expectedVersion returns exactly
+        // the events past the guarded frontier — no version filter needed
+        await store().query(
+          (e) => {
+            gap.push(e.name);
+          },
+          {
+            stream,
+            stream_exact: true,
+            backward: true,
+            with_snaps: true, // default queries hide them — the gap check needs them
+            limit: error.lastVersion - error.expectedVersion,
+          }
+        );
+        if (gap.length > 0 && gap.every((name) => name === SNAP_EVENT)) {
+          await cache().invalidate(stream);
+          attempt--;
+          continue;
+        }
+      }
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
