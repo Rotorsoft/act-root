@@ -9,8 +9,8 @@ export {
 } from "./ticket-invariants.js";
 export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";
 export { TicketOperations, TicketOpsSlice } from "./ticket-operations.js";
-// Projection
-export { TicketProjection } from "./ticket-projections.js";
+// Full state artifact + list projection
+export { Ticket, TicketProjection } from "./ticket-projections.js";
 // Timing automations (deferred reactions)
 export { TicketTimersSlice } from "./ticket-timers.js";
 export { TicketWebhooksSlice } from "./ticket-webhooks.js";
