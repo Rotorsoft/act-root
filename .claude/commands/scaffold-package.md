@@ -29,6 +29,7 @@ Verify with `git ls-remote --tags origin | grep act-$ARGUMENTS`.
 8. **`CHANGELOG.md`** — empty file, `# Changelog`. Semantic-release will populate.
 9. **Repo wiring (the easily-forgotten checklist):**
    - `.github/workflows/ci-cd.yml` libs filter — add `act-$ARGUMENTS: ['libs/act-$ARGUMENTS/**']`
+   - **`pnpm paths:sync`** — regenerates `tsconfig.workspace.json` paths from package `exports`; CI runs `pnpm paths:check` and fails without it (bit act-notify in #1172)
    - `vite.config.ts` — add alias if tests need it
    - `packages/tsconfig.base.json` — add path mapping if packages will import the new lib
    - `README.md` (root) — one-line entry under Libraries (Core or Supporting)
