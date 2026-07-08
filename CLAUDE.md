@@ -29,6 +29,7 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-sse` — **deprecated** Server-Sent Events package; now a thin re-export shim over `@rotorsoft/act-http/sse` (the canonical home), kept only for migration and scheduled for removal
   - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, the canonical `sse` subpath for incremental state broadcast (the surface the deprecated `@rotorsoft/act-sse` re-exports), plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
+  - `@rotorsoft/act-notify` — hybrid notify-broker decorator: `withBroker(store, broker)` delegates every durable Store method and rides an external broker (Redis implemented, Kafka scaffolded, Loopback for tests) for cross-process wakeups only — lifts the LISTEN/NOTIFY fanout ceiling without touching durability. TCK-proven over PostgresStore
   - `@rotorsoft/act-otel` — Prometheus metrics bridge: `instrument(app)` maintains the canonical metric set from the observability guide off the lifecycle events. Leaf package — core stays metrics-free by design
   - `@rotorsoft/act-crypto` — authenticated envelope encryption (AES-256-GCM + versioned wire format) for adapters that want column-level encryption with operator-controlled keys. Leaf package — adapters depend on it, core does not.
   - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
@@ -143,6 +144,7 @@ When an Act application hits the edges (events table growing without bound, cool
 | Close-the-books patterns (`.autocloses({...})`) | [recipes/scaling/close-the-books/README.md](recipes/scaling/close-the-books/README.md) |
 | Cold-tier archival (`.archives(...)` + S3 / JSONL) | [recipes/scaling/archival/README.md](recipes/scaling/archival/README.md) |
 | Scale-out by splitting stores (per-context/tenant `ActOptions.scoped`) | [recipes/scaling/split-stores/README.md](recipes/scaling/split-stores/README.md) |
+| Lift the LISTEN/NOTIFY fanout ceiling (act-notify + Redis) | [recipes/scaling/notify-broker/README.md](recipes/scaling/notify-broker/README.md) |
 | Partitioning gating page (the "don't" page) | [recipes/scaling/partitioning/README.md](recipes/scaling/partitioning/README.md) |
 | HASH-on-stream partition recipe (SQL + run.sh) | [recipes/scaling/partitioning/hash-on-stream/](recipes/scaling/partitioning/hash-on-stream/README.md) |
 | RANGE-on-id (single-aggregate giants, docs only) | [recipes/scaling/partitioning/range-on-id/](recipes/scaling/partitioning/range-on-id/README.md) |

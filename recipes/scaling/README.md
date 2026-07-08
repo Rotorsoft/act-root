@@ -33,6 +33,7 @@ Measured thresholds for the common symptoms (Apple M3 Pro / dockerized PG 17 —
 
 - **Cold start feels slow** — replay costs ~0.5 s per 100k events per aggregate on reference hardware. Past ~100k events per stream, snapshots drop it to milliseconds (557–988× measured); past snapshot reach, it's a close-the-books signal.
 - **Rebuild window worries** — the batched fold runs ~300k events/s: 1M rebuilds in ~3 s, 10M in ~34 s. Rebuild-from-zero stays routine until the store approaches 100M+ — archive the cold tier before it does. And when the projection is the list of the aggregates themselves, declare it as a state projection (`projection(name).of(state).flush(...)`) — the rebuild then writes one row per stream instead of one per event (measured 100 row-writes instead of 100,000 on a hot-key workload; see `libs/act-pg/PERFORMANCE.md`).
+- **Out of Postgres listener connections** — every worker's cross-process wakeup holds a `LISTEN` connection. Move the hint channel to a broker with [`act-notify`](notify-broker/README.md) — durability stays put, one Redis fans out to thousands.
 - **Write throughput** — ~800 commits/s serialized on one hot aggregate vs ~5,200/s across 1,000 streams in a single process: the ceiling is per-stream, so restructure aggregate boundaries before adding infrastructure.
 
 

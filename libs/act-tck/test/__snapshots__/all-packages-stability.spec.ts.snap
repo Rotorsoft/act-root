@@ -40394,6 +40394,314 @@ export class NonRetryableWebhookError extends NonRetryableHttpError {
 "
 `;
 
+exports[`@rotorsoft/act-notify — public API stability > stable public surface for (root) 1`] = `
+"// === index.ts ===
+/**
+ * @module act-notify
+ * @category Adapters
+ *
+ * Hybrid notify-broker decorator for Act stores. \`withBroker(store,
+ * broker)\` delegates every durable Store method to the wrapped adapter
+ * and rides an external broker for cross-process wakeups only — lifting
+ * the fanout ceiling of store-native channels (Postgres LISTEN/NOTIFY's
+ * subscriber-connection budget) without touching durability, leases, or
+ * ordering. The broker is a hint path, never the source of truth: drop
+ * every message and the poll cycle still drains correctly.
+ *
+ * It deliberately does NOT shard the durable log — write, replay, and
+ * global ordering stay bound to the wrapped store. For log-scale walls,
+ * see the partitioning and split-stores recipes.
+ */
+export { KafkaBroker, type KafkaBrokerOptions } from "./kafka.js";
+export { LoopbackBroker } from "./loopback.js";
+export {
+  DEFAULT_NOTIFY_CHANNEL,
+  RedisBroker,
+  type RedisBrokerOptions,
+  type RedisPublisher,
+  type RedisSubscriber,
+} from "./redis.js";
+export {
+  type Broker,
+  type BrokerDisposer,
+  type BrokerMessage,
+  withBroker,
+} from "./with-broker.js";
+
+// === kafka.ts ===
+/**
+ * @module kafka
+ * @category Adapters
+ *
+ * Kafka {@link Broker} — SCAFFOLD, not implemented. The wiring is not
+ * the hard part (a kafkajs-shaped producer/consumer pair mirrors the
+ * redis adapter); the semantics are: Kafka consumer groups deliver each
+ * message to ONE consumer per group, while \`Store.notify\` needs fan-out
+ * to EVERY worker. A correct implementation must give each process a
+ * unique, ephemeral \`groupId\` (or use manual partition assignment
+ * without groups), decide offset semantics (\`latest\` — old wakeups are
+ * worthless), and handle rebalance pauses that silently delay wakeups.
+ * Until those choices are settled against a real deployment, this
+ * adapter refuses loudly instead of fanning out incorrectly.
+ */
+import type { Broker, BrokerDisposer, BrokerMessage } from "./with-broker.js";
+
+/** Options the eventual implementation will take (kafkajs shapes). */
+export type KafkaBrokerOptions = {
+  /** Topic carrying wakeup hints. Default \`act-notify\`. */
+  readonly topic?: string;
+};
+
+const GUIDANCE =
+  "KafkaBroker is a scaffold: fan-out semantics (unique per-process groupId, latest-offset, rebalance pauses) are not settled. Use RedisBroker or LoopbackBroker, or contribute the implementation.";
+
+/** Refuses loudly until fan-out semantics are implemented. */
+export class KafkaBroker implements Broker {
+  readonly topic: string;
+
+  constructor(options: KafkaBrokerOptions = {}) {
+    this.topic = options.topic ?? "act-notify";
+  }
+
+  publish(_message: BrokerMessage): void {
+    throw new Error(GUIDANCE);
+  }
+
+  subscribe(_handler: (message: BrokerMessage) => void): BrokerDisposer {
+    throw new Error(GUIDANCE);
+  }
+}
+
+// === loopback.ts ===
+/**
+ * @module loopback
+ * @category Adapters
+ *
+ * In-process fan-out broker — the reference {@link Broker}. Useful for
+ * tests, for TCK conformance runs, and for the single-process
+ * multi-orchestrator case (several Acts over one store in one node
+ * process, no external infrastructure).
+ */
+import type { Broker, BrokerDisposer, BrokerMessage } from "./with-broker.js";
+
+/** Synchronous in-process fan-out to every subscriber. */
+export class LoopbackBroker implements Broker {
+  private readonly _subscribers = new Set<(message: BrokerMessage) => void>();
+
+  publish(message: BrokerMessage): void {
+    for (const handler of this._subscribers) handler(message);
+  }
+
+  subscribe(handler: (message: BrokerMessage) => void): BrokerDisposer {
+    this._subscribers.add(handler);
+    return () => {
+      this._subscribers.delete(handler);
+    };
+  }
+
+  /** Subscribers currently attached — handy in tests. */
+  get size(): number {
+    return this._subscribers.size;
+  }
+}
+
+// === redis.ts ===
+/**
+ * @module redis
+ * @category Adapters
+ *
+ * Redis pub/sub {@link Broker}. Sink-injection, zero dependencies: pass
+ * connected node-redis clients (v4+ shapes) — redis requires a dedicated
+ * connection in subscriber mode, hence the two-client contract. Pub/sub
+ * gives true fan-out (every subscribed worker sees every message), which
+ * is exactly the wakeup semantic \`Store.notify\` wants.
+ */
+import { log } from "@rotorsoft/act";
+import type { Broker, BrokerDisposer, BrokerMessage } from "./with-broker.js";
+
+/** The publishing side of a node-redis(v4+)-shaped client. */
+export type RedisPublisher = {
+  publish(channel: string, message: string): Promise<unknown>;
+};
+
+/** A node-redis(v4+)-shaped client in subscriber mode. */
+export type RedisSubscriber = {
+  subscribe(
+    channel: string,
+    listener: (message: string) => void
+  ): Promise<unknown>;
+  unsubscribe(channel: string): Promise<unknown>;
+};
+
+/** Options for {@link RedisBroker}. */
+export type RedisBrokerOptions = {
+  readonly publisher: RedisPublisher;
+  readonly subscriber: RedisSubscriber;
+  /** Pub/sub channel name. Default \`act:notify\`. */
+  readonly channel?: string;
+};
+
+export const DEFAULT_NOTIFY_CHANNEL = "act:notify";
+
+/**
+ * Fan-out over redis pub/sub. Malformed payloads on the channel are
+ * dropped with a warning — the channel is a hint path, so garbage
+ * degrades latency for one wakeup, never correctness.
+ */
+export class RedisBroker implements Broker {
+  private readonly _publisher: RedisPublisher;
+  private readonly _subscriber: RedisSubscriber;
+  private readonly _channel: string;
+
+  constructor(options: RedisBrokerOptions) {
+    this._publisher = options.publisher;
+    this._subscriber = options.subscriber;
+    this._channel = options.channel ?? DEFAULT_NOTIFY_CHANNEL;
+  }
+
+  async publish(message: BrokerMessage): Promise<void> {
+    await this._publisher.publish(this._channel, JSON.stringify(message));
+  }
+
+  async subscribe(
+    handler: (message: BrokerMessage) => void
+  ): Promise<BrokerDisposer> {
+    await this._subscriber.subscribe(this._channel, (raw) => {
+      try {
+        handler(JSON.parse(raw) as BrokerMessage);
+      } catch {
+        log().warn(
+          \`Dropping malformed notify payload on "\${this._channel}" — remote workers wake on their next poll cycle.\`
+        );
+      }
+    });
+    return async () => {
+      await this._subscriber.unsubscribe(this._channel);
+    };
+  }
+}
+
+// === with-broker.ts ===
+/**
+ * @module with-broker
+ * @category Adapters
+ *
+ * Hybrid notify-broker decorator. Wraps a durable {@link Store} and rides
+ * an external broker for cross-process wakeups, lifting the fanout
+ * ceiling of store-native channels (Postgres \`LISTEN\`/\`NOTIFY\` caps at
+ * the subscriber-connection budget). Every durable method delegates to
+ * the wrapped adapter untouched — the broker carries hints only, never
+ * truth: correctness still comes from \`claim()\`/drain over the store,
+ * exactly per the \`Store.notify\` "hint, not a contract" clause.
+ */
+import { randomUUID } from "node:crypto";
+import type {
+  Committed,
+  EventMeta,
+  Message,
+  Schemas,
+  Store,
+  StoreNotification,
+} from "@rotorsoft/act";
+import { log } from "@rotorsoft/act";
+
+/**
+ * The wire shape brokers carry. \`origin\` implements the port's
+ * self-filtering contract: subscribers drop messages published by their
+ * own store instance, so only genuinely remote commits wake the local
+ * orchestrator.
+ */
+export type BrokerMessage = {
+  readonly origin: string;
+  readonly notification: StoreNotification;
+};
+
+/** Disposer releasing a broker subscription. */
+export type BrokerDisposer = () => void | Promise<void>;
+
+/**
+ * Minimal broker contract — publish one message to every subscriber on
+ * the channel (fan-out semantics; a queue that delivers to one consumer
+ * starves every other worker's wakeup).
+ */
+export type Broker = {
+  publish(message: BrokerMessage): void | Promise<void>;
+  subscribe(
+    handler: (message: BrokerMessage) => void
+  ): BrokerDisposer | Promise<BrokerDisposer>;
+};
+
+/**
+ * Wrap a durable store so commits publish wakeup hints to the broker and
+ * \`notify\` subscribes to it — leaving every other Store method, and
+ * therefore every durability/lease/ordering guarantee, untouched.
+ *
+ * The wrapped store's own \`notify\` (if any) is shadowed, not exercised:
+ * construct the base adapter with its native channel disabled (e.g.
+ * \`new PostgresStore({ notify: false })\`) to avoid paying for both.
+ *
+ * Publish failures are swallowed and logged — a broker outage degrades
+ * cross-process latency to the poll cycle, never a commit.
+ *
+ * @param store - The durable adapter that remains the source of truth
+ * @param broker - The wakeup channel (fan-out)
+ * @returns A store of the same shape with broker-backed notifications
+ */
+export function withBroker<S extends Store>(
+  store: S,
+  broker: Broker
+): S & { notify: NonNullable<Store["notify"]> } {
+  const origin = randomUUID();
+
+  const commit = async <E extends Schemas>(
+    stream: string,
+    msgs: Message<E, keyof E>[],
+    meta: EventMeta,
+    expectedVersion?: number
+  ): Promise<Committed<E, keyof E>[]> => {
+    const committed = await store.commit(stream, msgs, meta, expectedVersion);
+    if (committed.length > 0) {
+      const notification: StoreNotification = {
+        stream,
+        events: committed.map(({ id, name }) => ({
+          id,
+          name: name as string,
+        })),
+      };
+      try {
+        await broker.publish({ origin, notification });
+      } catch (error) {
+        // Hint, not a contract: listeners fall back to the poll path.
+        log().warn(
+          \`Broker publish failed for stream "\${stream}": \${
+            error instanceof Error ? error.message : String(error)
+          } — remote workers wake on their next poll cycle.\`
+        );
+      }
+    }
+    return committed;
+  };
+
+  const notify = (handler: (notification: StoreNotification) => void) =>
+    broker.subscribe((message) => {
+      // Self-filtering contract: only remote commits wake this process.
+      if (message.origin !== origin) handler(message.notification);
+    });
+
+  return new Proxy(store, {
+    get(target, prop, receiver) {
+      if (prop === "commit") return commit;
+      if (prop === "notify") return notify;
+      const value = Reflect.get(target, prop, receiver);
+      // Rebind methods to the wrapped adapter — stores keep private
+      // state behind \`this\`, and a proxied receiver would break it.
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as S & { notify: NonNullable<Store["notify"]> };
+}
+"
+`;
+
 exports[`@rotorsoft/act-ops — public API stability > stable public surface for ./idempotency 1`] = `
 "// === in-memory.ts ===
 import { minSafeTtl, type RetryProfile } from "./min-safe-ttl.js";
