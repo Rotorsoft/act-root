@@ -11,7 +11,7 @@
 import type { ZodType } from "zod";
 import {
   _this_,
-  make_fold_handler,
+  type FoldConfig,
   resolveFoldConfig,
 } from "../internal/index.js";
 import type {
@@ -38,6 +38,105 @@ export type Projection<TEvents extends Schemas> = {
   readonly events: EventRegister<TEvents>;
   readonly target?: string;
   readonly batchHandler?: BatchHandler<TEvents>;
+  /**
+   * State-fold spec from `.of()`. The builder only records intent — the
+   * orchestrator resolves the REGISTRY-MERGED full state at
+   * `act().build()` and synthesizes the batch handler there, so the
+   * fold always covers every reducer of the state, including partials
+   * merged by slices the projection never saw.
+   * @internal
+   */
+  readonly fold?: {
+    readonly name: string;
+    readonly flush: (rows: ReadonlyArray<CacheEntry<any>>) => Promise<void>;
+    readonly config: FoldConfig;
+  };
+};
+
+/**
+ * The `.of()` continuation: state projections flush the cache layer
+ * outward — the rows ARE the streams' {@link CacheEntry} values, one
+ * per dirty stream per flush round. Must be an idempotent upsert keyed
+ * on `stream` (guard with `event_id` for order safety when a rebuild
+ * races a live worker).
+ */
+type FoldFlush<TState extends Schema, TE extends Schemas> = {
+  flush: (
+    handler: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>
+  ) => {
+    build: () => Projection<TE>;
+  };
+};
+
+/**
+ * `.of()` accepts the partials of ONE state (same name, enforced at the
+ * type level via `TName`) purely for typing and event registration —
+ * the fold itself always runs on the registry-merged full state,
+ * resolved at `act().build()`. Passing every partial is required: the
+ * orchestrator validates completeness at build and throws on missing
+ * events.
+ */
+type OfSignatures = {
+  <
+    TS1 extends Schema,
+    TE1 extends Schemas,
+    TA1 extends Schemas,
+    TN extends string,
+  >(
+    s1: State<TS1, TE1, TA1, TN>,
+    options?: FoldOptions
+  ): FoldFlush<TS1, TE1>;
+  <
+    TS1 extends Schema,
+    TE1 extends Schemas,
+    TA1 extends Schemas,
+    TS2 extends Schema,
+    TE2 extends Schemas,
+    TA2 extends Schemas,
+    TN extends string,
+  >(
+    s1: State<TS1, TE1, TA1, TN>,
+    s2: State<TS2, TE2, TA2, TN>,
+    options?: FoldOptions
+  ): FoldFlush<TS1 & TS2, TE1 & TE2>;
+  <
+    TS1 extends Schema,
+    TE1 extends Schemas,
+    TA1 extends Schemas,
+    TS2 extends Schema,
+    TE2 extends Schemas,
+    TA2 extends Schemas,
+    TS3 extends Schema,
+    TE3 extends Schemas,
+    TA3 extends Schemas,
+    TN extends string,
+  >(
+    s1: State<TS1, TE1, TA1, TN>,
+    s2: State<TS2, TE2, TA2, TN>,
+    s3: State<TS3, TE3, TA3, TN>,
+    options?: FoldOptions
+  ): FoldFlush<TS1 & TS2 & TS3, TE1 & TE2 & TE3>;
+  <
+    TS1 extends Schema,
+    TE1 extends Schemas,
+    TA1 extends Schemas,
+    TS2 extends Schema,
+    TE2 extends Schemas,
+    TA2 extends Schemas,
+    TS3 extends Schema,
+    TE3 extends Schemas,
+    TA3 extends Schemas,
+    TS4 extends Schema,
+    TE4 extends Schemas,
+    TA4 extends Schemas,
+    TN extends string,
+  >(
+    s1: State<TS1, TE1, TA1, TN>,
+    s2: State<TS2, TE2, TA2, TN>,
+    s3: State<TS3, TE3, TA3, TN>,
+    s4: State<TS4, TE4, TA4, TN>,
+    options?: FoldOptions
+  ): FoldFlush<TS1 & TS2 & TS3 & TS4, TE1 & TE2 & TE3 & TE4>;
 };
 
 /** Helper: a single-key record mapping an event name to its Zod schema. */
@@ -131,25 +230,7 @@ export type ProjectionBuilder<
            * `.build()` — a projection either folds a state or declares
            * handlers, never both.
            */
-          of: <TState extends Schema, TE extends Schemas, TA extends Schemas>(
-            state: State<TState, TE, TA>,
-            options?: FoldOptions
-          ) => {
-            /**
-             * The sink: state projections flush the cache layer outward —
-             * the rows ARE the streams' {@link CacheEntry} values, one per
-             * dirty stream per flush round. Must be an idempotent upsert
-             * keyed on `stream` (guard with `event_id` for order safety
-             * when a rebuild races a live worker).
-             */
-            flush: (
-              handler: (
-                rows: ReadonlyArray<CacheEntry<TState>>
-              ) => Promise<void>
-            ) => {
-              build: () => Projection<TE>;
-            };
-          };
+          of: OfSignatures;
         }
       : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
         {})
@@ -299,51 +380,65 @@ function _projection<
           batchHandler: handler,
         }),
       }),
-      of: <TState extends Schema, TE extends Schemas, TA extends Schemas>(
-        state: State<TState, TE, TA>,
-        options: FoldOptions = {}
-      ) => {
+      of: (...args: unknown[]) => {
         if (Object.keys(events).length > 0)
           throw new Error(
             `Projection "${target}" mixes .of() with .on() handlers — a projection either folds a state or declares handlers, never both`
           );
+        // Trailing options bag is the only non-State argument.
+        const is_state = (a: unknown): a is State<Schema, Schemas, Schemas> =>
+          !!a &&
+          typeof (a as State<Schema, Schemas, Schemas>).init === "function";
+        const partials = args.filter(is_state);
+        const options = (args.find((a) => !is_state(a)) ?? {}) as FoldOptions;
+        if (partials.length === 0)
+          throw new Error(`Projection "${target}" .of() requires a state`);
+        const name = partials[0].name;
+        for (const partial of partials)
+          if (partial.name !== name)
+            throw new Error(
+              `Projection "${target}" .of() partials must share one state name — got "${name}" and "${partial.name}"`
+            );
         // Misconfiguration surfaces here, at startup — not on first drain.
         const config = resolveFoldConfig(options);
-        // The state's own schema instances register the events, so a
-        // same-name declaration elsewhere passes the identity check in
+        // The partials' own schema instances register the events, so the
+        // same-name declarations in slices pass the identity check in
         // merge_event_register. The named no-op reaction routes fetches
-        // to this target; dispatch always goes through the batch handler.
-        const fold_events = {} as EventRegister<TE>;
-        for (const [name, schema] of Object.entries(state.events)) {
-          const noop = {
-            [`${target}_fold`]: async () => {},
-          }[`${target}_fold`] as (
-            event: Committed<TE, keyof TE & string>,
-            stream: string
-          ) => Promise<void>;
-          (fold_events as Record<string, unknown>)[name] = {
-            schema,
-            reactions: new Map([
-              [
-                `${target}_fold`,
-                {
-                  handler: noop,
-                  resolver: { target },
-                  options: { blockOnError: true, maxRetries: 3 },
-                },
-              ],
-            ]),
-          };
-        }
+        // to this target; dispatch always goes through the batch handler
+        // the orchestrator synthesizes from the registry-merged state.
+        const fold_events = {} as EventRegister<Schemas>;
+        for (const partial of partials)
+          for (const [event_name, schema] of Object.entries(partial.events)) {
+            if (event_name in fold_events) continue;
+            const noop = {
+              [`${target}_fold`]: async () => {},
+            }[`${target}_fold`] as (
+              event: Committed<Schemas, string>,
+              stream: string
+            ) => Promise<void>;
+            (fold_events as Record<string, unknown>)[event_name] = {
+              schema,
+              reactions: new Map([
+                [
+                  `${target}_fold`,
+                  {
+                    handler: noop,
+                    resolver: { target },
+                    options: { blockOnError: true, maxRetries: 3 },
+                  },
+                ],
+              ]),
+            };
+          }
         return {
           flush: (
-            handler: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>
+            handler: (rows: ReadonlyArray<CacheEntry<Schema>>) => Promise<void>
           ) => ({
             build: () => ({
               _tag: "Projection" as const,
               events: fold_events,
               target,
-              batchHandler: make_fold_handler(state, handler, config),
+              fold: { name, flush: handler, config },
             }),
           }),
         };

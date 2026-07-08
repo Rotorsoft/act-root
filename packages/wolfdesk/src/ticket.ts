@@ -9,7 +9,7 @@ export {
 } from "./ticket-invariants.js";
 export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";
 export { TicketOperations, TicketOpsSlice } from "./ticket-operations.js";
-// Projection
+// List projection (folds the full Ticket state)
 export { TicketProjection } from "./ticket-projections.js";
 // Timing automations (deferred reactions)
 export { TicketTimersSlice } from "./ticket-timers.js";

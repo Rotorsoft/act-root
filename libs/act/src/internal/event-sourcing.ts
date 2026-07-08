@@ -97,10 +97,10 @@ export interface EsOps {
  */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
-): Promise<void> {
+): Promise<Committed<TEvents, keyof TEvents> | undefined> {
   const { id, stream, name, meta, version } = snapshot.event!;
   try {
-    await store().commit(
+    const [committed] = await store().commit(
       stream,
       [{ name: SNAP_EVENT, data: snapshot.state }],
       {
@@ -109,6 +109,7 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
       },
       version // IMPORTANT! - state events are committed right after the snapshot event
     );
+    return committed as Committed<TEvents, keyof TEvents>;
   } catch (error) {
     // Swallow by design — a failed snapshot must never fail the action.
     // But surface an operator signal: a persistently failing snapshot
@@ -529,7 +530,13 @@ export async function action<
       const snapshot = await load(me, { stream, actor: target.actor });
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      const expected = expectedVersion ?? snapshot.event?.version;
+      // snapshot.version is the frontier even on a warm cache hit,
+      // where snapshot.event is undefined — using the event would
+      // silently drop the optimistic guard for every cached stream.
+      // A brand-new stream (-1) stays unguarded: creations append.
+      const expected =
+        expectedVersion ??
+        (snapshot.version >= 0 ? snapshot.version : undefined);
 
       if (me.given) {
         const invariants = me.given[action] || [];
@@ -634,33 +641,50 @@ export async function action<
 
       // fire and forget snaps
       const last = snapshots.at(-1)!;
-      const snapped = me.snap?.(last);
+      // Guardless commits (reactions append at head by design) can land
+      // past events this fold never saw. A gapped fold must not become
+      // a snapshot event or a cache entry — both would lie at the head
+      // frontier. Contiguity is cheap to prove: the first committed
+      // version extends the loaded one.
+      const contiguous = committed[0].version === snapshot.version + 1;
+      const snapped = contiguous && me.snap?.(last);
+
+      // Persist the snapshot before caching. Awaited on purpose: the
+      // snapshot event occupies the next version slot, so a follow-up
+      // action loading a pre-snap frontier from the cache would collide
+      // with the framework's own bookkeeping. Caching the snap frontier
+      // before the action returns keeps sequential callers from ever
+      // seeing a conflict they didn't cause. Failures are still
+      // swallowed inside snap() — the action never fails on it, and the
+      // cache then keeps the pre-snap frontier, which stays correct.
+      const snap_event = snapped ? await snap(last) : undefined;
 
       // #861: pii-aware states (any event declaring `sensitive(...)`
       // fields) never populate the snapshot cache — state evolves from
       // the actor-gated event view, so the cached state would vary by
       // caller. Pure states cache normally.
-      // Update cache with post-commit state (reset patches if snapped).
       // Fire-and-forget — log but don't fail the action on cache write errors
       // (e.g., transient network failures in a custom Cache adapter).
       if (!me.pii_aware) {
-        cache()
-          .set<TState>(stream, {
-            stream,
-            state: last.state,
-            version: last.event.version,
-            event_id: last.event.id,
-            patches: snapped ? 0 : last.patches,
-            snaps: snapped ? last.snaps + 1 : last.snaps,
-          })
-          .catch((err) => log().error(err));
+        if (contiguous)
+          cache()
+            .set<TState>(stream, {
+              stream,
+              state: last.state,
+              version: snap_event?.version ?? last.event.version,
+              event_id: snap_event?.id ?? last.event.id,
+              patches: snap_event ? 0 : last.patches,
+              snaps: snap_event ? last.snaps + 1 : last.snaps,
+            })
+            .catch((err) => log().error(err));
+        // A gapped entry would sit at the head frontier with unfolded
+        // events baked in — drop the checkpoint and let the next load
+        // replay to truth instead.
+        else
+          cache()
+            .invalidate(stream)
+            .catch((err) => log().error(err));
       }
-
-      // Persist snap to store for cold-start durability. Fire-and-forget:
-      // snap() has its own try/catch that logs failures, so the rejection
-      // can never escape — `void` is just to silence the floating-promise
-      // lint (action() doesn't await store durability for the snapshot).
-      if (snapped) void snap(last);
 
       return snapshots;
     } catch (error) {

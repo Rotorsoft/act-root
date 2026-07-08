@@ -1,88 +1,44 @@
 import { log, projection } from "@rotorsoft/act";
-import { eq, sql } from "drizzle-orm";
 import { db, tickets } from "./drizzle/index.js";
-import {
-  MessageAdded,
-  TicketAssigned,
-  TicketClosed,
-  TicketEscalated,
-  TicketOpened,
-  TicketReassigned,
-  TicketResolved,
-} from "./schemas/ticket.schemas.js";
+import { TicketCreation } from "./ticket-creation.js";
+import { TicketMessaging } from "./ticket-messaging.js";
+import { TicketOperations } from "./ticket-operations.js";
 
-// prettier-ignore
+// Replayed event data crosses the store as JSON, so a folded date can be
+// a Date (live commit) or an ISO string (replay) — normalize either.
+const ms = (d?: Date | string) => (d ? new Date(d).getTime() : null);
+
+// The tickets list: one row per stream, folded by the FULL Ticket state.
+// The partials are passed for typing and event registration only — the
+// orchestrator resolves the registry-merged state at build and refuses a
+// fold that misses any partial. The flush massages state into columns
+// inline — dates to millis, the messages record to a count — and upserts
+// keyed on the stream.
 export const TicketProjection = projection("tickets")
-  .on({ TicketOpened })
-  .do(async function opened({ stream, data }) {
-    const { closeAfter, ...other } = data;
-    await db
-      .insert(tickets)
-      .values({
-        id: stream,
-        messages: 0,
-        closeAfter: closeAfter?.getTime() ?? null,
-        ...other,
-      })
-      .onConflictDoNothing()
-      .then(() => log().info(`${stream} => opened`));
-  })
-  .on({ TicketClosed })
-  .do(async function closed({ stream, data }) {
-    await db
-      .update(tickets)
-      .set(data)
-      .where(eq(tickets.id, stream))
-      .then(() => log().info(`${stream} => closed`));
-  })
-  .on({ TicketResolved })
-  .do(async function resolved({ stream, data }) {
-    await db
-      .update(tickets)
-      .set(data)
-      .where(eq(tickets.id, stream))
-      .then(() => log().info(`${stream} => resolved`));
-  })
-  .on({ MessageAdded })
-  .do(async function messageAdded({ stream }) {
-    await db
-      .update(tickets)
-      .set({ messages: sql`${tickets.messages} + 1` })
-      .where(eq(tickets.id, stream))
-      .then(() => log().info(`${stream} => messageAdded`));
-  })
-  .on({ TicketAssigned })
-  .do(async function assigned({ stream, data }) {
-    const { reassignAfter, escalateAfter, ...other } = data;
-    await db
-      .update(tickets)
-      .set({
-        reassignAfter: reassignAfter?.getTime() ?? null,
-        escalateAfter: escalateAfter?.getTime() ?? null,
-        ...other,
-      })
-      .where(eq(tickets.id, stream))
-      .then(() => log().info(`${stream} => assigned`));
-  })
-  .on({ TicketEscalated })
-  .do(async function escalated({ stream, data }) {
-    await db
-      .update(tickets)
-      .set({ escalationId: data.requestId })
-      .where(eq(tickets.id, stream))
-      .then(() => log().info(`${stream} => escalated`));
-  })
-  .on({ TicketReassigned })
-  .do(async function reassigned({ stream, data }) {
-    const { reassignAfter, escalateAfter, ...other } = data;
-    await db
-      .update(tickets)
-      .set({
-        reassignAfter: reassignAfter?.getTime() ?? null,
-        escalateAfter: escalateAfter?.getTime() ?? null,
-        ...other,
-      })
-      .where(eq(tickets.id, stream))
-      .then(() => log().info(`${stream} => reassigned`));
+  .of(TicketCreation, TicketMessaging, TicketOperations)
+  .flush(async (rows) => {
+    for (const row of rows) {
+      const s = row.state;
+      const columns = {
+        productId: s.productId,
+        supportCategoryId: s.supportCategoryId,
+        escalationId: s.escalationId ?? null,
+        priority: s.priority,
+        title: s.title,
+        messages: Object.keys(s.messages).length,
+        userId: s.userId,
+        agentId: s.agentId ?? null,
+        resolvedById: s.resolvedById ?? null,
+        closedById: s.closedById ?? null,
+        reassignAfter: ms(s.reassignAfter),
+        escalateAfter: ms(s.escalateAfter),
+        closeAfter: ms(s.closeAfter),
+      };
+      await db
+        .insert(tickets)
+        .values({ id: row.stream, ...columns })
+        .onConflictDoUpdate({ target: tickets.id, set: columns })
+        .then(() => log().info(`${row.stream} => projected @${row.event_id}`));
+    }
   })
   .build();

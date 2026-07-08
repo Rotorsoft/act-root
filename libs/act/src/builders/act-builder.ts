@@ -8,6 +8,7 @@ import { Act, type ActOptions } from "../act.js";
 import {
   current_version_of,
   deprecated_event_names,
+  make_fold_handler,
   merge_event_register,
   merge_projection,
   pii_fields,
@@ -328,6 +329,7 @@ export function act<
     autoclose_archiver: (state_name) => _aa.get(state_name) ?? null,
   };
   const pending_projections: Projection<any>[] = [];
+  const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
   const lanes: LaneConfig[] = [];
 
@@ -434,6 +436,8 @@ export function act<
       withProjection: (proj) => {
         merge_projection(proj as Projection<any>, registry.events);
         register_batch_handler(proj as Projection<any>, batch_handlers);
+        if ((proj as Projection<any>).fold)
+          fold_projections.push(proj as Projection<any>);
         return builder;
       },
       withActor: <TNewActor extends Actor>() =>
@@ -463,6 +467,30 @@ export function act<
           for (const proj of pending_projections) {
             merge_projection(proj, registry.events as Record<string, any>);
             register_batch_handler(proj, batch_handlers);
+            if (proj.fold) fold_projections.push(proj);
+          }
+          // State projections fold the registry-merged FULL state — the
+          // builder only recorded intent. Resolve here, where every
+          // partial has merged, and refuse silently-partial folds: the
+          // projection's register must cover the state's whole register.
+          for (const proj of fold_projections) {
+            const fold = proj.fold!;
+            const merged = states.get(fold.name);
+            if (!merged)
+              throw new Error(
+                `State projection "${proj.target}" folds "${fold.name}", which is not registered — add it via withState/withSlice before build()`
+              );
+            const missing = Object.keys(merged.events).filter(
+              (event_name) => !(event_name in proj.events)
+            );
+            if (missing.length > 0)
+              throw new Error(
+                `State projection "${proj.target}" of "${fold.name}" is missing events ${missing.join(", ")} — pass every partial of the state to .of()`
+              );
+            batch_handlers.set(
+              proj.target!,
+              make_fold_handler(merged, fold.flush, fold.config)
+            );
           }
           finalize_deprecations();
           validate_lane_references(registry, lanes);

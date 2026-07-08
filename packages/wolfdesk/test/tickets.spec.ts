@@ -1,4 +1,4 @@
-import { dispose } from "@rotorsoft/act";
+import { cache, dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { app } from "../src/bootstrap.js";
@@ -73,13 +73,27 @@ describe("tickets", () => {
     expect(ticket?.userId).toBeDefined();
     expect(ticket?.agentId).toBeDefined();
     expect(ticket?.title).toBe(title);
-    expect(ticket?.messages).toBe(1);
+    // Opening a ticket carries its first message (the creation reducer
+    // stores it in state.messages), so open + addMessage = 2. The old
+    // per-event projection undercounted by starting at 0 and counting
+    // only MessageAdded; the fold projects the state as it truly is.
+    expect(ticket?.messages).toBe(2);
     expect(ticket?.closedById).toBeDefined();
     expect(ticket?.resolvedById).toBeDefined();
     expect(ticket?.escalationId).toBeDefined();
     expect(ticket?.closeAfter).toBeDefined();
     expect(ticket?.escalateAfter).toBeDefined();
     expect(ticket?.reassignAfter).toBeDefined();
+
+    // The row never lies: columns equal the full-state fold ground truth.
+    // Fresh replay through the registry-merged state is the fold ground
+    // truth — invalidate first so the oracle exercises the cold path.
+    await cache().invalidate(t.stream);
+    const truth = await app.load("Ticket", t.stream);
+    expect(ticket?.title).toBe(truth.state.title);
+    expect(ticket?.messages).toBe(Object.keys(truth.state.messages).length);
+    expect(ticket?.agentId).toBe(truth.state.agentId);
+    expect(ticket?.escalationId).toBe(truth.state.escalationId);
   });
 
   // Timing automations are now deferred reactions (src/ticket-timers.ts), not

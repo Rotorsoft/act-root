@@ -209,7 +209,7 @@ export function getItems() {
 }
 ```
 
-The state is the filter (only that state's streams fold), flushes are one row per stream per round (rebuilds are O(streams), not O(events)), and when the sink is a database the flush should be a monotonic upsert keyed on `stream` guarded by `row.event_id`. Reach for hand-written `.on().do()` handlers only when the read model needs something the state does not carry (joins, per-actor indexes, counters across streams). Note: `.of()` takes a single built State — for sliced states (multiple same-name partials) keep per-event handlers for now.
+The state is the filter (only that state's streams fold), flushes are one row per stream per round (rebuilds are O(streams), not O(events)), and when the sink is a database the flush should be a monotonic upsert keyed on `stream` guarded by `row.event_id`. Reach for hand-written `.on().do()` handlers only when the read model needs something the state does not carry (joins, per-actor indexes, counters across streams). Note: `.of()` always folds the FULL state, never partial slices — for sliced states pass every partial (`.of(TicketCreation, TicketMessaging, TicketOperations)`; same state name, type-enforced): the partials only provide typing and event registration, and `act().build()` resolves the registry-merged state and throws if any partial's events are missing (see wolfdesk's `ticket-projections.ts`). Row massaging (dates to millis, record to count) happens inline in `flush`.
 
 **Co-location pattern**: Keep projection, query functions, and `clear*()` helpers together with the slice. This keeps the read model close to the events that build it.
 
