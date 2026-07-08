@@ -4,7 +4,6 @@ import { eq } from "drizzle-orm";
 import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { Priority } from "../src/schemas/index.js";
-import { Ticket } from "../src/ticket-projections.js";
 import {
   addMessage,
   assignTicket,
@@ -87,11 +86,10 @@ describe("tickets", () => {
     expect(ticket?.reassignAfter).toBeDefined();
 
     // The row never lies: columns equal the full-state fold ground truth.
-    // Fresh replay through the full artifact is the fold ground truth —
-    // invalidate first, since a warm entry written mid-automation-chain
-    // can sit at the head frontier without the deferred fields folded in.
+    // Fresh replay through the registry-merged state is the fold ground
+    // truth — invalidate first so the oracle exercises the cold path.
     await cache().invalidate(t.stream);
-    const truth = await app.load(Ticket, t.stream);
+    const truth = await app.load("Ticket", t.stream);
     expect(ticket?.title).toBe(truth.state.title);
     expect(ticket?.messages).toBe(Object.keys(truth.state.messages).length);
     expect(ticket?.agentId).toBe(truth.state.agentId);

@@ -4,6 +4,7 @@ import {
   cache,
   projection,
   sensitive,
+  slice,
   state,
   store,
 } from "../src/index.js";
@@ -439,6 +440,148 @@ describe("state projection (.of)", () => {
     await expect(
       reaction!.handler({} as never, "counters", undefined as never)
     ).resolves.toBeUndefined();
+  });
+
+  it("folds a sliced state through the registry-merged reducers", async () => {
+    const PartA = state({
+      Pair: z.object({ ups: z.number(), downs: z.number() }),
+    })
+      .init(() => ({ ups: 0, downs: 0 }))
+      .emits({ Upped: z.object({}) })
+      .patch({ Upped: (_, s) => ({ ups: s.ups + 1 }) })
+      .on({ up: z.object({}) })
+      .emit(() => ["Upped", {}])
+      .build();
+    const PartB = state({
+      Pair: z.object({ ups: z.number(), downs: z.number() }),
+    })
+      .init(() => ({ ups: 0, downs: 0 }))
+      .emits({ Downed: z.object({}) })
+      .patch({ Downed: (_, s) => ({ downs: s.downs + 1 }) })
+      .on({ down: z.object({}) })
+      .emit(() => ["Downed", {}])
+      .build();
+    const table = new Map<string, { ups: number; downs: number }>();
+    const pairs = projection("pairs")
+      .of(PartA, PartB)
+      .flush(async (rows) => {
+        for (const row of rows) table.set(row.stream, row.state);
+      })
+      .build();
+    const ctx = await sandbox(
+      act().withState(PartA).withState(PartB).withProjection(pairs)
+    );
+    try {
+      const app = ctx.app;
+      await app.do("up", { stream: "p1", actor }, {});
+      await app.do("down", { stream: "p1", actor }, {});
+      await app.do("up", { stream: "p1", actor }, {});
+      await settle_all(app);
+      // both partials' reducers folded — the registry-merged full state
+      expect(table.get("p1")).toEqual({ ups: 2, downs: 1 });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("registers a fold projection provided by a slice and dedupes shared events", async () => {
+    const Shared = z.object({ tag: z.string() });
+    const PartA = state({ Duo2: z.object({ a: z.number(), tag: z.string() }) })
+      .init(() => ({ a: 0, tag: "" }))
+      .emits({ Marked: Shared, AHappened: z.object({}) })
+      .patch({
+        Marked: (e) => ({ tag: e.data.tag }),
+        AHappened: (_, s) => ({ a: s.a + 1 }),
+      })
+      .on({ mark: Shared })
+      .emit((data) => ["Marked", data])
+      .on({ doA: z.object({}) })
+      .emit(() => ["AHappened", {}])
+      .build();
+    // Same event name in a second partial — must reference the SAME
+    // schema instance per the cross-slice rule; the fold register
+    // dedupes it.
+    const PartB = state({ Duo2: z.object({ b: z.number(), tag: z.string() }) })
+      .init(() => ({ b: 0, tag: "" }))
+      .emits({ Marked: Shared, BHappened: z.object({}) })
+      // Marked stays passthrough here — only one partial may customize
+      // a shared event's patch; the merge keeps the custom one.
+      .patch({
+        BHappened: (_, s) => ({ b: s.b + 1 }),
+      })
+      .on({ doB: z.object({}) })
+      .emit(() => ["BHappened", {}])
+      .build();
+    const table = new Map<string, { a: number; b: number; tag: string }>();
+    const duos = projection("duos2")
+      .of(PartA, PartB)
+      .flush(async (rows) => {
+        for (const row of rows) table.set(row.stream, row.state);
+      })
+      .build();
+    // the projection rides a slice — the pending-projections path
+    const DuoSlice = slice().withState(PartB).withProjection(duos).build();
+    const ctx = await sandbox(act().withState(PartA).withSlice(DuoSlice));
+    try {
+      const app = ctx.app;
+      await app.do("doA", { stream: "d1", actor }, {});
+      await app.do("doB", { stream: "d1", actor }, {});
+      await app.do("mark", { stream: "d1", actor }, { tag: "x" });
+      await settle_all(app);
+      expect(table.get("d1")).toEqual({ a: 1, b: 1, tag: "x" });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("refuses a fold that misses a partial's events at build", async () => {
+    const PartA = state({ Duo: z.object({ a: z.number() }) })
+      .init(() => ({ a: 0 }))
+      .emits({ AHappened: z.object({}) })
+      .patch({ AHappened: (_, s) => ({ a: s.a + 1 }) })
+      .on({ doA: z.object({}) })
+      .emit(() => ["AHappened", {}])
+      .build();
+    const PartB = state({ Duo: z.object({ b: z.number() }) })
+      .init(() => ({ b: 0 }))
+      .emits({ BHappened: z.object({}) })
+      .patch({ BHappened: (_, s) => ({ b: s.b + 1 }) })
+      .on({ doB: z.object({}) })
+      .emit(() => ["BHappened", {}])
+      .build();
+    const partial_fold = projection("duos")
+      .of(PartA) // PartB's events are missing — silently-partial folds lie
+      .flush(async () => {})
+      .build();
+    await expect(
+      sandbox(
+        act().withState(PartA).withState(PartB).withProjection(partial_fold)
+      )
+    ).rejects.toThrow(/missing events BHappened/);
+  });
+
+  it("refuses a fold of an unregistered state at build", async () => {
+    const orphans = projection("orphans")
+      .of(Counter)
+      .flush(async () => {})
+      .build();
+    await expect(sandbox(act().withProjection(orphans))).rejects.toThrow(
+      /not registered/
+    );
+  });
+
+  it("rejects mixed state names across .of() partials", () => {
+    expect(() => projection("mixed-names").of(Counter, Tag as never)).toThrow(
+      /must share one state name/
+    );
+  });
+
+  it("rejects .of() without a state", () => {
+    expect(() =>
+      (projection("empty") as unknown as { of: (o: object) => unknown }).of({
+        flushEvery: 5,
+      })
+    ).toThrow(/requires a state/);
   });
 
   it("rejects mixing .of() with .on() handlers", () => {

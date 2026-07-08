@@ -103,16 +103,23 @@ and `.batch()` projections remain the escape hatch, unchanged.
   monotonic upserts converge to the same rows. Standard at-least-once.
 - **Rebuild:** `app.reset(["orders"])` replays through the same engine; this is
   where O(keys) vs O(events) pays.
-- **Sliced states — the full-state principle (settled in #1168):** a state
-  projection folds the full state, never partial slices — folding a subset
-  of reducers would quietly produce partially-folded rows, the exact "lying
-  row" class the contract forbids. `.of([partials])` is rejected
-  permanently. Sliced apps compose a full artifact instead, and built
-  partials expose their `init`/`patch`, so composition is a spread with no
-  duplicated logic (wolfdesk's `Ticket` in `ticket-projections.ts` is the
-  reference). A `.map()` interceptor for row massaging was considered and
-  deferred — `rows.map(...)` inline in `flush` is zero surface; revisit
-  only if a reusable transform shared across projections proves the need.
+- **Sliced states — the full-state principle, resolved by the builder
+  (settled in #1168):** a state projection folds the full state, never
+  partial slices — a partial fold would quietly produce the exact "lying
+  row" class the contract forbids. The final design keeps the principle
+  in the internals: `.of(...partials)` accepts the partials of ONE state
+  (same name, enforced at the type level) purely for typing and event
+  registration, and `act().build()` resolves the REGISTRY-MERGED full
+  state — the same merge slices already produce — before synthesizing
+  the fold handler. Completeness is validated loudly at build: a fold
+  whose register misses any of the state's events throws with the
+  missing names, and an unregistered state throws too. A hand-rolled
+  full artifact (spreading built partials' `init`/`patch`) works and was
+  the interim design, but was rejected as the recommendation — it
+  duplicates declaration and silently misses partials added later. A
+  `.map()` interceptor for row massaging was considered and deferred —
+  `rows.map(...)` inline in `flush` is zero surface; revisit only if a
+  reusable transform shared across projections proves the need.
 - **Tombstones (v1):** a tombstoned stream's row simply stops updating at its
   final state; `.autocloses`/`restart` streams keep folding via their seeded
   snapshot. Row deletion is deliberately out of scope — a delete contract can

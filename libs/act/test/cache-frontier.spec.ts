@@ -3,8 +3,9 @@ import { act, InMemoryCache, InMemoryStore, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 import type {
   Committed,
-  CommittedMessage,
   EventMeta,
+  Message,
+  Schemas,
 } from "../src/types/index.js";
 
 /**
@@ -14,12 +15,12 @@ import type {
  */
 class GatedStore extends InMemoryStore {
   gate?: Promise<void>;
-  override async commit(
+  override async commit<E extends Schemas>(
     stream: string,
-    msgs: CommittedMessage[],
+    msgs: Message<E, keyof E>[],
     meta: EventMeta,
     expectedVersion?: number
-  ) {
+  ): Promise<Committed<E, keyof E>[]> {
     if (this.gate) {
       const g = this.gate;
       this.gate = undefined;

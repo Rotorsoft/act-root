@@ -154,10 +154,3 @@ export const TicketOperationsState = TicketBase.extend({
   reassignAfter: z.date().optional(),
   escalateAfter: z.date().optional(),
 });
-
-// The full Ticket state — the union of every partial. State projections
-// fold the full state, never partial slices, so the list projection
-// composes this from the same shapes the slices declare.
-export const TicketState = TicketCreationState.extend(
-  TicketOperationsState.shape
-);

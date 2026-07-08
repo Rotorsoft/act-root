@@ -1,62 +1,21 @@
-import { log, projection, state } from "@rotorsoft/act";
+import { log, projection } from "@rotorsoft/act";
 import { db, tickets } from "./drizzle/index.js";
-import {
-  MessageAdded,
-  MessageDelivered,
-  MessageRead,
-  TicketAssigned,
-  TicketClosed,
-  TicketEscalated,
-  TicketEscalationRequested,
-  TicketOpened,
-  TicketReassigned,
-  TicketResolved,
-  TicketState,
-} from "./schemas/ticket.schemas.js";
 import { TicketCreation } from "./ticket-creation.js";
 import { TicketMessaging } from "./ticket-messaging.js";
 import { TicketOperations } from "./ticket-operations.js";
-
-/**
- * The full Ticket state: one artifact composing the slices' schemas and
- * reducers — the same shared instances, no duplicated logic. State
- * projections fold the full state, never partial slices, and built
- * partials expose their `init` and `patch`, so composition is a spread.
- */
-export const Ticket = state({ Ticket: TicketState })
-  .init(() => ({
-    ...TicketMessaging.init(),
-    ...TicketOperations.init(),
-    ...TicketCreation.init(),
-  }))
-  .emits({
-    TicketOpened,
-    TicketClosed,
-    TicketResolved,
-    MessageAdded,
-    MessageDelivered,
-    MessageRead,
-    TicketAssigned,
-    TicketEscalationRequested,
-    TicketEscalated,
-    TicketReassigned,
-  })
-  .patch({
-    ...TicketCreation.patch,
-    ...TicketMessaging.patch,
-    ...TicketOperations.patch,
-  })
-  .build();
 
 // Replayed event data crosses the store as JSON, so a folded date can be
 // a Date (live commit) or an ISO string (replay) — normalize either.
 const ms = (d?: Date | string) => (d ? new Date(d).getTime() : null);
 
-// The tickets list: one row per stream, folded by the full Ticket state.
-// The flush massages state into columns inline — dates to millis, the
-// messages record to a count — and upserts keyed on the stream.
+// The tickets list: one row per stream, folded by the FULL Ticket state.
+// The partials are passed for typing and event registration only — the
+// orchestrator resolves the registry-merged state at build and refuses a
+// fold that misses any partial. The flush massages state into columns
+// inline — dates to millis, the messages record to a count — and upserts
+// keyed on the stream.
 export const TicketProjection = projection("tickets")
-  .of(Ticket)
+  .of(TicketCreation, TicketMessaging, TicketOperations)
   .flush(async (rows) => {
     for (const row of rows) {
       const s = row.state;
