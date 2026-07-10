@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.0...@rotorsoft/act-sqlite-v1.12.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act-sqlite:** treat claim sources as exact stream names ([4eaa407](https://github.com/rotorsoft/act-root/commit/4eaa407b48016ee7d5f42587f077d2b50bd8a132))
+
 # [@rotorsoft/act-sqlite-v1.12.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.11.0...@rotorsoft/act-sqlite-v1.12.0) (2026-07-10)
 
 
