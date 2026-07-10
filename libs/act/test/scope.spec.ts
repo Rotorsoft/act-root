@@ -221,6 +221,147 @@ describe("scoped ports (ACT-501)", () => {
     await dispose();
   });
 
+  it("settle() subscribes static targets on the scoped store, not the singleton (ACT-1191)", async () => {
+    // A static `.to("stream")` target is subscribed during correlate
+    // init. That init ran outside `_scoped`, so `store().subscribe(...)`
+    // resolved to the singleton — the scoped store never learned about
+    // the static target. Assert the subscription lands on the scoped
+    // store and the singleton stays untouched.
+    const Src = state({ Src: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Fired: z.object({ n: z.number() }) })
+      .patch({ Fired: (e, s) => ({ n: s.n + e.data.n }) })
+      .on({ fire: z.object({ n: z.number() }) })
+      .emit((a) => ["Fired", { n: a.n }])
+      .build();
+
+    const staticBuilder = act()
+      .withState(Src)
+      .on("Fired")
+      .do(async function noop() {
+        // static target only needs to be subscribed, not handled
+      })
+      .to("react-target");
+
+    // Singleton starts empty and must stay that way.
+    await store().drop();
+
+    const { app, store: scoped, dispose } = await sandbox(staticBuilder);
+
+    const settled = new Promise<void>((resolve) =>
+      app.on("settled", () => resolve())
+    );
+    app.settle({ debounceMs: 0 });
+    await settled;
+
+    const scoped_streams: string[] = [];
+    await scoped.query_streams((p) => scoped_streams.push(p.stream));
+
+    const singleton_streams: string[] = [];
+    await store().query_streams((p) => singleton_streams.push(p.stream));
+
+    // The static target must be subscribed on the scoped store.
+    expect(scoped_streams).toContain("react-target");
+    // The singleton must never have seen it.
+    expect(singleton_streams).not.toContain("react-target");
+
+    await dispose();
+  });
+
+  it("start_correlations polls against the scoped store, not the singleton (ACT-1191)", async () => {
+    // The periodic correlation worker fires its correlate outside any
+    // caller frame. Pre-fix it resolved `store()` to the singleton, so a
+    // scoped Act's static targets were subscribed on the wrong store.
+    const Src = state({ Src: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Fired: z.object({ n: z.number() }) })
+      .patch({ Fired: (e, s) => ({ n: s.n + e.data.n }) })
+      .on({ fire: z.object({ n: z.number() }) })
+      .emit((a) => ["Fired", { n: a.n }])
+      .build();
+
+    const pollBuilder = act()
+      .withState(Src)
+      .on("Fired")
+      .do(async function noop() {})
+      .to("poll-target");
+
+    await store().drop();
+
+    const { app, store: scoped, dispose } = await sandbox(pollBuilder);
+
+    app.start_correlations({}, 5);
+    // Let the polling timer fire a few times.
+    await new Promise<void>((r) => setTimeout(r, 40));
+    app.stop_correlations();
+
+    const scoped_streams: string[] = [];
+    await scoped.query_streams((p) => scoped_streams.push(p.stream));
+    const singleton_streams: string[] = [];
+    await store().query_streams((p) => singleton_streams.push(p.stream));
+
+    expect(scoped_streams).toContain("poll-target");
+    expect(singleton_streams).not.toContain("poll-target");
+
+    await dispose();
+  });
+
+  it("lane worker ticks drain against the scoped store, not the singleton (ACT-1191)", async () => {
+    // A `withLane({cycleMs})` auto-starts a per-lane worker whose tick
+    // calls drain() outside any caller frame. Pre-fix that drain claimed
+    // on the singleton, so a scoped commit was never picked up and the
+    // reaction target never landed on the scoped store.
+    const Src = state({ Src: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Fired: z.object({ n: z.number() }) })
+      .patch({ Fired: (e, s) => ({ n: s.n + e.data.n }) })
+      .on({ fire: z.object({ n: z.number() }) })
+      .emit((a) => ["Fired", { n: a.n }])
+      .build();
+
+    const Out = state({ Out: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Landed: z.object({ n: z.number() }) })
+      .patch({ Landed: (e, s) => ({ n: s.n + e.data.n }) })
+      .on({ land: z.object({ n: z.number() }) })
+      .emit((a) => ["Landed", { n: a.n }])
+      .build();
+
+    const laneBuilder = act()
+      .withState(Src)
+      .withState(Out)
+      .withLane({ name: "fast", cycleMs: 5, leaseMillis: 100 })
+      .on("Fired")
+      .do(async function land(event, _stream, a) {
+        await a.do("land", { stream: "lane-out", actor }, { n: event.data.n });
+      })
+      .to({ target: "lane-out", lane: "fast" });
+
+    await store().drop();
+
+    const { app, dispose } = await sandbox(laneBuilder);
+
+    // Scoped commit — lands on the scoped store.
+    await app.do("fire", { stream: "src-1", actor }, { n: 4 });
+    // Correlate (scoped) arms the fast controller; the auto-started
+    // worker tick must drain against the scoped store.
+    await app.correlate();
+    await new Promise<void>((r) => setTimeout(r, 60));
+
+    // The reaction target must have been written on the scoped store.
+    const out = await app.load("Out", "lane-out");
+    expect(out.state.n).toBe(4);
+
+    // And the singleton must stay empty for that stream.
+    const singleton_events: unknown[] = [];
+    await store().query((e) => singleton_events.push(e), {
+      stream: "lane-out",
+    });
+    expect(singleton_events).toHaveLength(0);
+
+    await dispose();
+  });
+
   it("one builder, N tenants — build() is reusable", async () => {
     // The intended ergonomic pattern for multi-tenant / A-B-testing
     // setups: hold the builder in a constant (no `.build()` yet), then

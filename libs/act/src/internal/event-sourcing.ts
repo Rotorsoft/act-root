@@ -319,13 +319,21 @@ export async function scan(
         if (caused_by !== undefined) {
           const new_caused_by = id_map.get(caused_by);
           if (new_caused_by !== undefined && new_caused_by !== caused_by) {
+            // Spread `migrated`, not the original `event` (ACT-1192).
+            // Migration + stream_rename already ran above; rebuilding from
+            // `event` here would revert the new name/data/stream for any
+            // event whose causation id shifted — silently undoing the
+            // migration for most rows after the first id shift.
             remapped = {
-              ...event,
+              ...migrated,
               meta: {
-                ...event.meta,
+                ...migrated.meta,
                 causation: {
-                  ...event.meta.causation,
-                  event: { ...event.meta.causation.event!, id: new_caused_by },
+                  ...migrated.meta.causation,
+                  event: {
+                    ...migrated.meta.causation.event!,
+                    id: new_caused_by,
+                  },
                 },
               },
             };
@@ -450,7 +458,25 @@ export async function load<
   // event_id, picks up missed events, and replays — so an "older" cache
   // write from a concurrent slower load is self-correcting on next access.
   // Time-travel loads bypass cache entirely and skip this too.
-  if (replayed > 0 && !time_travel && event && !me.pii_aware) {
+  //
+  // Skip the write when the replayed head is the tombstone (ACT-1188).
+  // During the close guard window (tombstone committed, truncate pending)
+  // a cold load replays real events + the tombstone, so `replayed > 0`.
+  // Caching here would store a checkpoint at the tombstone's (version,
+  // event_id) with no `event` on the entry — the next `action()` would
+  // then get a warm hit where `snapshot.event` is undefined, its
+  // cold-path tombstone check (`snapshot.event?.name === TOMBSTONE_EVENT`)
+  // would go vacuously false, and a commit could land past the tombstone
+  // that the eventual truncate deletes. Leaving the cache cold keeps that
+  // check live on every subsequent load.
+  const head_is_tombstone = event?.name === TOMBSTONE_EVENT;
+  if (
+    replayed > 0 &&
+    !time_travel &&
+    event &&
+    !me.pii_aware &&
+    !head_is_tombstone
+  ) {
     await cache().set(stream, {
       stream,
       state,

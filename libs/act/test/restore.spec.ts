@@ -451,6 +451,71 @@ describe("scan (with committer)", () => {
     expect(seen[1]).toEqual({ id: 7, causationId: 1000 });
   });
 
+  it("keeps migrations applied when an id shift triggers the causation remap (ACT-1192)", async () => {
+    // A dropped snapshot renumbers the id space, so committed events land
+    // at fresh ids and the causation remap branch fires for anything that
+    // referenced an earlier kept event. Pre-fix, that branch rebuilt the
+    // sink event from the ORIGINAL row instead of the migrated one — so a
+    // migrated + remapped event silently reverted to its pre-migration
+    // name and data. Compose drop_snapshots (forces the shift) with an
+    // event_migration and a causation ref into the id map and assert the
+    // sink still receives the migrated shape.
+    let nextId = 1000;
+    const seen: Array<{ name: string; data: unknown; causationId?: number }> =
+      [];
+    const result = await scan(
+      fromArray([
+        baseEvent({ id: 1, name: "__snapshot__" }),
+        baseEvent({ id: 2, name: "OrderPaid", data: { amount: 40 } }),
+        baseEvent({
+          id: 3,
+          name: "OrderPaid",
+          data: { amount: 90 },
+          meta: {
+            correlation: "c",
+            causation: { event: { id: 2, name: "OrderPaid", stream: "s" } },
+          },
+        }),
+      ]),
+      {
+        drop_snapshots: true,
+        event_migrations: {
+          OrderPaid: {
+            to: "OrderPaid_v2",
+            from_schema: { parse: (d) => d as { amount: number } },
+            to_schema: { parse: (d) => d as { amount_cents: number } },
+            migrate: (d: { amount: number }) => ({
+              amount_cents: d.amount * 100,
+            }),
+          },
+        },
+      },
+      async (e) => {
+        seen.push({
+          name: e.name as string,
+          data: e.data,
+          causationId: e.meta.causation.event?.id,
+        });
+        return nextId++;
+      }
+    );
+
+    expect(result.migrated).toBe(2);
+    // Event id=2 committed first at new id 1000 (no causation ref).
+    expect(seen[0]).toEqual({
+      name: "OrderPaid_v2",
+      data: { amount_cents: 4000 },
+      causationId: undefined,
+    });
+    // Event id=3's causation.event.id (2) is remapped to 1000 — and the
+    // migrated name/data must survive the remap.
+    expect(seen[1]).toEqual({
+      name: "OrderPaid_v2",
+      data: { amount_cents: 9000 },
+      causationId: 1000,
+    });
+  });
+
   it("passes causation refs through unchanged when target not in source", async () => {
     const causationIds: Array<number | undefined> = [];
     await scan(

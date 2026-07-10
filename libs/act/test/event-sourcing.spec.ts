@@ -1,10 +1,15 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
-import { action, load, snap } from "../src/internal/event-sourcing.js";
-import { dispose, SNAP_EVENT, store } from "../src/ports.js";
+import {
+  action,
+  load,
+  snap,
+  tombstone,
+} from "../src/internal/event-sourcing.js";
+import { cache, dispose, SNAP_EVENT, store } from "../src/ports.js";
 import type { Snapshot } from "../src/types/action.js";
-import { InvariantError } from "../src/types/errors.js";
+import { InvariantError, StreamClosedError } from "../src/types/errors.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 
 // Minimal state machine mock
@@ -568,5 +573,47 @@ describe("event-sourcing", () => {
     expect(fakeLogger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Snapshot write failed on stream "s": fail')
     );
+  });
+});
+
+// ACT-1188: during the close guard window (tombstone committed, truncate
+// not yet run) a cold cache-miss load replays real events + the tombstone.
+// The buggy path cached an entry at the tombstone's (version, event_id)
+// with no `event` attached, so the next `action()` got a warm hit where
+// `snapshot.event` was undefined — the cold-path tombstone check went
+// vacuously false and a commit landed past the tombstone. The eventual
+// truncate then deleted the acknowledged commit: silent data loss.
+describe("event-sourcing — close guard cache poisoning (ACT-1188)", () => {
+  const actor = { id: "a", name: "a" };
+  const guarded = { ...me, given: undefined };
+
+  beforeEach(() => {
+    store(new InMemoryStore());
+  });
+
+  afterEach(async () => {
+    await dispose()();
+    vi.restoreAllMocks();
+  });
+
+  it("a cold load during the guard window keeps the tombstone check live", async () => {
+    // Seed a real event, then guard the stream with a tombstone (no
+    // truncate — the archive callback is still running).
+    await action(guarded, "increment", { stream: "g", actor }, { count: 1 });
+    const ts = await tombstone("g", 0, "corr-guard");
+    expect(ts).toBeDefined();
+
+    // Cold cache — simulate a fresh worker / evicted entry.
+    await cache().invalidate("g");
+
+    // Cold load during the guard window: replays INCREMENT + tombstone.
+    const loaded = await load(guarded, { stream: "g" });
+    expect(loaded.event?.name).toBe("__tombstone__");
+
+    // The next action must still see the stream as closed. Pre-fix, the
+    // poisoned warm hit let this commit succeed past the tombstone.
+    await expect(
+      action(guarded, "increment", { stream: "g", actor }, { count: 1 })
+    ).rejects.toBeInstanceOf(StreamClosedError);
   });
 });
