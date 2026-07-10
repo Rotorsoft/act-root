@@ -570,12 +570,24 @@ export class PostgresStore implements Store {
       // poison stream marches the counter up without bound. The original
       // `smallint` column overflowed at 32768, throwing "smallint out of
       // range" and killing every claim in the lane. Widen to `int` so PG
-      // matches the unbounded SQLite/InMemory adapters. `ALTER COLUMN ...
-      // TYPE integer` is idempotent — a no-op once the column is already
-      // `int` — and preserves existing values (smallint ⊂ int).
+      // matches the unbounded SQLite/InMemory adapters, preserving every
+      // existing value (smallint ⊂ int). Guarded on the current type so
+      // steady-state re-seeds skip the DDL — and its brief ACCESS
+      // EXCLUSIVE lock — entirely once the column is already `integer`.
       await client.query(
-        `ALTER TABLE ${this._fqs}
-         ALTER COLUMN retry TYPE integer;`
+        `DO $$
+         BEGIN
+           IF EXISTS (
+             SELECT 1 FROM information_schema.columns
+             WHERE table_schema = '${this.config.schema}'
+               AND table_name = '${this.config.table}_streams'
+               AND column_name = 'retry'
+               AND data_type = 'smallint'
+           ) THEN
+             EXECUTE 'ALTER TABLE ${this._fqs} ALTER COLUMN retry TYPE integer';
+           END IF;
+         END
+         $$;`
       );
 
       // Composite index for `claim()` — `(blocked, priority DESC, at)`
