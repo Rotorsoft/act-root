@@ -90,7 +90,7 @@ runStoreTck({
 });
 ```
 
-When `notify: true`, the TCK runs a structural smoke test (subscribe → dispose) to confirm the optional API is present and well-shaped. Cross-process LISTEN/NOTIFY semantics need two processes and stay in your adapter's own tests.
+When `notify: true`, the TCK runs the cross-instance conformance cases: a listener receives commits from a *sibling* instance created by the same `factory`, never its own commits (the port's self-filtering MUST — "implementations must skip their own commits"), and exactly one notification per commit transaction carrying the full event batch. This requires your `factory` to produce instances that share one backing store (two adapters on the same schema/table is the standing pattern). True cross-*process* plumbing — reconnect discipline, payload caps — still belongs in your adapter's own tests.
 
 The `restore` capability is the other opt-in today. Skip it (`capabilities.restore: false` or just omit) and the TCK's restore cases stay parked. Flip it on once you've implemented `Store.restore` — see the next section for the contract.
 

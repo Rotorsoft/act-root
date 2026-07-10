@@ -186,7 +186,7 @@ What makes this safe at all is that loads are snapshot-anchored. On a cache miss
 
 `run_windowed_closes` (in `libs/act/src/internal/close-cycle.ts`) executes three steps:
 
-1. **Min-watermark probe.** A read-only `query_streams` walk — same pagination and source-regex matching as the full path's Phase 2 — folds the minimum subscription watermark per target stream. This becomes the `max_id` cap handed to the store: the boundary snapshot may never sit above what the laggiest consumer has read. When the app has no reactions at all, the probe is skipped entirely; nothing can lag.
+1. **Min-watermark probe.** A read-only `query_streams` walk — same pagination and conservative in-process source matching as the full path's Phase 2 — folds the minimum subscription watermark per target stream. This becomes the `max_id` cap handed to the store: the boundary snapshot may never sit above what the laggiest consumer has read. When the app has no reactions at all, the probe is skipped entirely; nothing can lag.
 2. **Archive.** The per-target `archive` callback runs against the cutoff, sequentially for the same shared-resources reason as the full path. Note what's different: no guard precedes it. The prefix being archived is immutable (see below), so the callback reads stable history even while the stream keeps committing at the head.
 3. **Boundary truncate.** One `Store.truncate` call with `{ stream, before, max_id }` targets. The store finds the closest safe boundary — the latest `__snapshot__` with `created < before` and, when `max_id` is given, `id <= max_id` — and deletes events below it, keeping the snapshot and everything after it.
 

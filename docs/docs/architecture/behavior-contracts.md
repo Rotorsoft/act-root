@@ -87,12 +87,19 @@ backed by unit/integration specs under `libs/act/test/`.
 | `query_streams` reports `maxEventId` tracking the highest committed id | `Store.query_streams` doc | `store-tck.ts` → "maxEventId tracks the highest committed id" |
 | `claim` **skips** a stream until its `deferred_at` passes, then makes it claimable again; a defer never bumps `retry`; `reset` clears a pending defer; a filter-form `defer` counts the streams it matched | `Store.defer` doc; `extension-points.md` § `defer` | `store-tck.ts` → `defer` describe block: "hides a stream from claim until its deferred_at passes", "makes a stream claimable once the deferred_at is in the past", "does not bump retry while a stream is deferred", "reset clears a pending defer", "defers streams matching a filter and counts matches" **(#1090)** |
 | Stream filters guarantee a portable grammar — `^` / `$` anchors, `.`, `.*`, literal characters (including literal `_` / `%`) — matching identically on every adapter; a richer pattern either matches with full regex semantics or throws `ValidationError`, never a silent approximation | `QueryStreams.stream` / `StreamFilter` / `Query.stream` docs; `extension-points.md` § Stream filters | `store-tck.ts` → "stream filter grammar" describe block: "portable subset: anchors, `.`, and `.*` match identically", "literal `_` and `%` in patterns are not wildcards", "portable subset applies to stream-position filters", "non-portable patterns match with full regex semantics or throw", "bulk stream ops reject non-portable filters instead of mis-matching" **(#1114)** |
+| `claim` treats a subscription's `source` as an **exact stream name** — a source `s1` never matches a sibling stream `s12`, and an exact-source subscription receives exactly its stream's events (patterns belong to the `StreamFilter` surfaces, never to claim) | `Store.claim` / `Store.subscribe` docs; `Resolved.source` doc | `store-tck.ts` → describe("claim source matching"): "treats source as an exact stream name — no substring or pattern overmatch", "receives exactly its source stream's events" **(#1182 — the overmatch case failed red on InMemory's unanchored-RegExp and SQLite's contains-LIKE probes before the fix)** |
+| A lease timeout counts against the retry budget — reclaiming an expired lease increments `retry` no matter which worker reclaims it, and only `ack` resets the counter | `concurrency-model.md` § Timeout; `Store.claim` doc | `store-tck.ts` → "counts a timed-out lease reclaimed by another worker against the retry budget; ack resets it" **(#1183 — the doc previously claimed the opposite; the code was right)** |
+| An unexpired lease is invisible to competing claimers; an expired lease is handed to exactly one of them, with the shared retry counter intact | `concurrency-model.md` § Timeout / lease lifecycle | `store-tck.ts` → concurrency (capability): "does not hand an unexpired lease to a competing claimer", "hands an expired lease to exactly one competing claimer, with retry accounting shared across workers" **(#1184)** |
+| `notify` is self-filtering — an instance never receives its own commits, only a sibling instance's writing to the same backing store | `Store.notify` doc ("implementations must skip their own commits") | `store-tck.ts` → notify (capability): "does not deliver an instance's own commits (self-filtering)" **(#1184 — promoted from adapter-local suites to the TCK so third-party stores can't badge conformance while echoing their own commits)** |
+| `notify` delivers **one notification per commit transaction**, carrying the full ordered event batch | `Store.notify` doc; `cross-process-reactions.md` | `store-tck.ts` → notify (capability): "delivers one notification per commit transaction carrying the full event batch" **(#1184)** |
 
 ## PostgresStore notify (adapter-specific — outside the TCK)
 
-Cross-process NOTIFY semantics need two store instances against the same
-physical store (the TCK notes them as "needs two processes"), so they are
-pinned in `libs/act-pg/test/` rather than the shared TCK.
+The portable notify contract (cross-instance delivery, self-filtering,
+batch-per-commit) lives in the TCK's `notify` capability suite as of #1184.
+What stays here is PostgreSQL plumbing the TCK can't express portably —
+the LISTEN reconnect discipline and the 8000-byte NOTIFY payload cap —
+pinned in `libs/act-pg/test/`.
 
 | Claim | Source | Backing test |
 |---|---|---|
