@@ -117,3 +117,79 @@ describe("pg commit visibility — append serialization (#1178)", () => {
     expect(result.get("vis-d")?.committed.name).toBe("__tombstone__");
   });
 });
+
+describe("pg commit visibility — end-to-end no-loss (#1178)", () => {
+  let store: PostgresStore;
+  let pool: Pool;
+
+  beforeAll(async () => {
+    store = new PostgresStore({
+      port: 5431,
+      schema: "visibility_e2e",
+      table: "events",
+    });
+    await store.drop();
+    await store.seed();
+    pool = new Pool({
+      host: "localhost",
+      port: 5431,
+      database: "postgres",
+      user: "postgres",
+      password: "postgres",
+    });
+  });
+
+  afterAll(async () => {
+    await pool.end();
+    await store.drop();
+    await store.dispose();
+  });
+
+  it("a consumer never acks past an in-flight event — nothing is lost", async () => {
+    const FQ = '"visibility_e2e"."events"';
+    // Slow writer A: mid-commit (lock held, id assigned, not yet visible) —
+    // the faithful shape of another Act process inside PostgresStore.commit.
+    const a = await pool.connect();
+    await a.query("BEGIN");
+    await a.query("SELECT pg_advisory_xact_lock(hashtext($1))", [FQ]);
+    const ins = await a.query(
+      `INSERT INTO ${FQ}(name, data, stream, version, meta)
+       VALUES('Hit', '{}', 'stream-a', 0, $1) RETURNING id`,
+      [META]
+    );
+    const a_id = Number(ins.rows[0].id);
+
+    // Fast writer B commits to a different stream through the store.
+    const pending_b = store.commit(
+      "stream-b",
+      [{ name: "Hit", data: {} }],
+      META
+    );
+
+    // A projection-style consumer (no source filter) races the writers:
+    // claim whatever is visible and ack to the highest delivered id.
+    await store.subscribe([{ stream: "proj-e2e" }]);
+    const delivered: number[] = [];
+    const consume = async () => {
+      const leases = await store.claim(5, 5, "w-e2e", 5000);
+      for (const lease of leases) {
+        const events: number[] = [];
+        await store.query((e) => events.push(e.id), { after: lease.at });
+        delivered.push(...events);
+        await store.ack([{ ...lease, at: events.at(-1) ?? lease.at }]);
+      }
+      return leases.length;
+    };
+    await consume();
+
+    // The slow writer finishes; B unblocks (post-#1178 it was waiting).
+    await a.query("COMMIT");
+    a.release();
+    const [b] = await pending_b;
+
+    // Drain the consumer to idle: every committed event must be delivered.
+    for (let i = 0; i < 5; i++) await consume();
+    expect(delivered).toContain(a_id);
+    expect(delivered).toContain(b.id);
+  });
+});
