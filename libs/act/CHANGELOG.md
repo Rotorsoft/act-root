@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.20.0...@rotorsoft/act-v1.21.0) (2026-07-10)
+
+
+### Features
+
+* **act:** close the books on a rolling window ([b20c2fd](https://github.com/rotorsoft/act-root/commit/b20c2fdec9fb37f8f64514c7b7412bd368d26358)), closes [#1011](https://github.com/rotorsoft/act-root/issues/1011)
+* **act:** windowed truncate boundary on the store port ([4bf94bf](https://github.com/rotorsoft/act-root/commit/4bf94bf42bac0b40306f1ab379dea66ebb6404ca)), closes [#1011](https://github.com/rotorsoft/act-root/issues/1011)
+
 # [@rotorsoft/act-v1.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.19.0...@rotorsoft/act-v1.20.0) (2026-07-08)
 
 
