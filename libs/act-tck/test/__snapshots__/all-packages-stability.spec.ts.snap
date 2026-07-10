@@ -6040,11 +6040,15 @@ async function partition_by_safety(
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
   //
-  // \`source\` is matched as a regex against close-target stream names — the
-  // framework-wide convention (see \`QueryStreams.source\` docs and
-  // \`InMemoryStore.claim\`). Compiled patterns are cached because dynamic
-  // reactions commonly produce many subscriptions sharing one source
-  // pattern, so the callback fires repeatedly with the same \`source\`.
+  // The stored \`source\` on a subscription is an exact stream name in the
+  // claim contract, but this probe deliberately matches it as a regex
+  // against close-target names: exact names regex-match themselves, and
+  // any metacharacter over-match only widens the pending set — the
+  // conservative direction for a safety probe. (Pattern subscriptions are
+  // NOT part of the claim contract — the regex grammar belongs to the
+  // \`QueryStreams\`/\`StreamFilter\` surfaces.) Compiled patterns are cached
+  // because dynamic reactions commonly produce many subscriptions sharing
+  // one source, so the callback fires repeatedly with the same \`source\`.
   const pending_set = new Set<string>();
   const source_regex = new Map<string, RegExp>();
   const get_regex = (source: string): RegExp => {
@@ -9830,7 +9834,7 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the source-pattern probe in claim()
+  // max non-snapshot event id per stream — drives the exact-source probe in claim()
   // without scanning the full event log.
   private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
@@ -10065,25 +10069,15 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // Cache compiled regexes — multiple subscribed streams typically share the
-    // same source pattern, and the inner loop can run thousands of times per claim.
-    const source_regex = new Map<string, RegExp>();
-    const get_regex = (source: string) => {
-      let re = source_regex.get(source);
-      if (!re) {
-        re = new RegExp(source);
-        source_regex.set(source, re);
-      }
-      return re;
-    };
+    // \`source\` is an exact stream name in the has-work probe — resolvers
+    // hand \`subscribe\` exact names, so the probe is a single map lookup.
+    // Pattern matching belongs to the StreamFilter surfaces
+    // (\`query_streams\`, \`reset\`, \`unblock\`), never to claim.
     const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
-      const re = get_regex(s.source);
-      for (const [stream_name, maxId] of this._max_event_id_by_stream) {
-        if (maxId > s.at && re.test(stream_name)) return true;
-      }
-      return false;
+      const max_id = this._max_event_id_by_stream.get(s.source);
+      return max_id !== undefined && max_id > s.at;
     };
     const available = [...this._streams.values()].filter(
       (s) =>
@@ -11424,7 +11418,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its \`streams\` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional source stream filter (for reactions)
+ * @property source - Optional exact source stream name (for reactions)
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -11822,6 +11816,17 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
+   * A subscription's \`source\` is an **exact stream name** in the has-work
+   * probe — adapters must compare it by string equality, never as a regex
+   * or \`LIKE\` pattern. Resolvers hand {@link subscribe} exact names;
+   * pattern semantics live on the {@link StreamFilter} surfaces
+   * (\`query_streams\`, \`reset\`, \`unblock\`).
+   *
+   * Every granted lease **counts against the stream's retry budget**: claim
+   * increments the stream's retry counter and only {@link ack} resets it, so
+   * a timed-out lease reclaimed by any worker marches the stream toward
+   * \`blockOnError\` exactly like a handler failure.
+   *
    * Used by \`Act.drain()\` as the primary stream acquisition method.
    *
    * @param lagging - Max streams from the lagging frontier (ascending watermark)
@@ -11860,7 +11865,9 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint
+   * @param streams - Streams to register with optional source hint — an
+   *   **exact** stream name, matched by equality in {@link claim}'s
+   *   has-work probe (never a pattern)
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -12425,6 +12432,8 @@ export interface Store extends Disposable, EventSource {
    * **different process** writing to the same backing store. This keeps
    * the local fast path (\`do()\` already arms drain) free of duplicate
    * wake-ups and gives \`"notified"\` a clean cross-process semantic.
+   * Enforced by the \`notify\` capability cases in \`@rotorsoft/act-tck\`,
+   * along with one-notification-per-commit batch delivery.
    *
    * **Hint, not a contract:** the orchestrator never depends on \`notify\`
    * for correctness. If absent, dropped, or the store omits it, the
@@ -13448,7 +13457,10 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional source-stream filter for fetch optimization
+ * @property source - Optional **exact** source stream name — the only
+ *   stream this target consumes from. Matched by string equality in the
+ *   store's claim/fetch path (never a pattern); patterns belong to the
+ *   \`StreamFilter\` surfaces (\`query_streams\`, \`reset\`, \`unblock\`)
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -13613,7 +13625,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
+ * @property source - The exact source stream name, or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -13640,7 +13652,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional source stream for filtering
+ * @property source - Optional exact source stream name the subscription consumes from
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
@@ -21762,11 +21774,15 @@ async function partition_by_safety(
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
   //
-  // \`source\` is matched as a regex against close-target stream names — the
-  // framework-wide convention (see \`QueryStreams.source\` docs and
-  // \`InMemoryStore.claim\`). Compiled patterns are cached because dynamic
-  // reactions commonly produce many subscriptions sharing one source
-  // pattern, so the callback fires repeatedly with the same \`source\`.
+  // The stored \`source\` on a subscription is an exact stream name in the
+  // claim contract, but this probe deliberately matches it as a regex
+  // against close-target names: exact names regex-match themselves, and
+  // any metacharacter over-match only widens the pending set — the
+  // conservative direction for a safety probe. (Pattern subscriptions are
+  // NOT part of the claim contract — the regex grammar belongs to the
+  // \`QueryStreams\`/\`StreamFilter\` surfaces.) Compiled patterns are cached
+  // because dynamic reactions commonly produce many subscriptions sharing
+  // one source, so the callback fires repeatedly with the same \`source\`.
   const pending_set = new Set<string>();
   const source_regex = new Map<string, RegExp>();
   const get_regex = (source: string): RegExp => {
@@ -25329,7 +25345,7 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the source-pattern probe in claim()
+  // max non-snapshot event id per stream — drives the exact-source probe in claim()
   // without scanning the full event log.
   private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
@@ -25564,25 +25580,15 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // Cache compiled regexes — multiple subscribed streams typically share the
-    // same source pattern, and the inner loop can run thousands of times per claim.
-    const source_regex = new Map<string, RegExp>();
-    const get_regex = (source: string) => {
-      let re = source_regex.get(source);
-      if (!re) {
-        re = new RegExp(source);
-        source_regex.set(source, re);
-      }
-      return re;
-    };
+    // \`source\` is an exact stream name in the has-work probe — resolvers
+    // hand \`subscribe\` exact names, so the probe is a single map lookup.
+    // Pattern matching belongs to the StreamFilter surfaces
+    // (\`query_streams\`, \`reset\`, \`unblock\`), never to claim.
     const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
-      const re = get_regex(s.source);
-      for (const [stream_name, maxId] of this._max_event_id_by_stream) {
-        if (maxId > s.at && re.test(stream_name)) return true;
-      }
-      return false;
+      const max_id = this._max_event_id_by_stream.get(s.source);
+      return max_id !== undefined && max_id > s.at;
     };
     const available = [...this._streams.values()].filter(
       (s) =>
@@ -26886,7 +26892,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its \`streams\` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional source stream filter (for reactions)
+ * @property source - Optional exact source stream name (for reactions)
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -27284,6 +27290,17 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
+   * A subscription's \`source\` is an **exact stream name** in the has-work
+   * probe — adapters must compare it by string equality, never as a regex
+   * or \`LIKE\` pattern. Resolvers hand {@link subscribe} exact names;
+   * pattern semantics live on the {@link StreamFilter} surfaces
+   * (\`query_streams\`, \`reset\`, \`unblock\`).
+   *
+   * Every granted lease **counts against the stream's retry budget**: claim
+   * increments the stream's retry counter and only {@link ack} resets it, so
+   * a timed-out lease reclaimed by any worker marches the stream toward
+   * \`blockOnError\` exactly like a handler failure.
+   *
    * Used by \`Act.drain()\` as the primary stream acquisition method.
    *
    * @param lagging - Max streams from the lagging frontier (ascending watermark)
@@ -27322,7 +27339,9 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint
+   * @param streams - Streams to register with optional source hint — an
+   *   **exact** stream name, matched by equality in {@link claim}'s
+   *   has-work probe (never a pattern)
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -27887,6 +27906,8 @@ export interface Store extends Disposable, EventSource {
    * **different process** writing to the same backing store. This keeps
    * the local fast path (\`do()\` already arms drain) free of duplicate
    * wake-ups and gives \`"notified"\` a clean cross-process semantic.
+   * Enforced by the \`notify\` capability cases in \`@rotorsoft/act-tck\`,
+   * along with one-notification-per-commit batch delivery.
    *
    * **Hint, not a contract:** the orchestrator never depends on \`notify\`
    * for correctness. If absent, dropped, or the store omits it, the
@@ -28910,7 +28931,10 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional source-stream filter for fetch optimization
+ * @property source - Optional **exact** source stream name — the only
+ *   stream this target consumes from. Matched by string equality in the
+ *   store's claim/fetch path (never a pattern); patterns belong to the
+ *   \`StreamFilter\` surfaces (\`query_streams\`, \`reset\`, \`unblock\`)
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -29075,7 +29099,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
+ * @property source - The exact source stream name, or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -29102,7 +29126,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional source stream for filtering
+ * @property source - Optional exact source stream name the subscription consumes from
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
@@ -32891,7 +32915,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its \`streams\` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional source stream filter (for reactions)
+ * @property source - Optional exact source stream name (for reactions)
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -33289,6 +33313,17 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
+   * A subscription's \`source\` is an **exact stream name** in the has-work
+   * probe — adapters must compare it by string equality, never as a regex
+   * or \`LIKE\` pattern. Resolvers hand {@link subscribe} exact names;
+   * pattern semantics live on the {@link StreamFilter} surfaces
+   * (\`query_streams\`, \`reset\`, \`unblock\`).
+   *
+   * Every granted lease **counts against the stream's retry budget**: claim
+   * increments the stream's retry counter and only {@link ack} resets it, so
+   * a timed-out lease reclaimed by any worker marches the stream toward
+   * \`blockOnError\` exactly like a handler failure.
+   *
    * Used by \`Act.drain()\` as the primary stream acquisition method.
    *
    * @param lagging - Max streams from the lagging frontier (ascending watermark)
@@ -33327,7 +33362,9 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint
+   * @param streams - Streams to register with optional source hint — an
+   *   **exact** stream name, matched by equality in {@link claim}'s
+   *   has-work probe (never a pattern)
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -33892,6 +33929,8 @@ export interface Store extends Disposable, EventSource {
    * **different process** writing to the same backing store. This keeps
    * the local fast path (\`do()\` already arms drain) free of duplicate
    * wake-ups and gives \`"notified"\` a clean cross-process semantic.
+   * Enforced by the \`notify\` capability cases in \`@rotorsoft/act-tck\`,
+   * along with one-notification-per-commit batch delivery.
    *
    * **Hint, not a contract:** the orchestrator never depends on \`notify\`
    * for correctness. If absent, dropped, or the store omits it, the
@@ -34115,7 +34154,10 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional source-stream filter for fetch optimization
+ * @property source - Optional **exact** source stream name — the only
+ *   stream this target consumes from. Matched by string equality in the
+ *   store's claim/fetch path (never a pattern); patterns belong to the
+ *   \`StreamFilter\` surfaces (\`query_streams\`, \`reset\`, \`unblock\`)
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -34280,7 +34322,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
+ * @property source - The exact source stream name, or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -34307,7 +34349,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional source stream for filtering
+ * @property source - Optional exact source stream name the subscription consumes from
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
@@ -45411,9 +45453,13 @@ export class SqliteStore implements Store {
 
         let has_events: boolean;
         if (source) {
+          // Exact-source has-work probe: \`source\` is an exact stream
+          // name, so plain equality keeps the probe on the stream index.
+          // The portable LIKE grammar stays on the StreamFilter surfaces
+          // (\`query_streams\`, \`reset\`, \`unblock\`), never on claim.
           const check = await tx.execute({
-            sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\\\' LIMIT 1\`,
-            args: [at, streamPatternToLike(source)],
+            sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1\`,
+            args: [at, source],
           });
           has_events = check.rows.length > 0;
         } else {
@@ -48015,9 +48061,15 @@ import {
 export type StoreCapabilities = {
   /**
    * Adapter implements {@link Store.notify}. When \`true\`, the TCK runs
-   * a basic subscribe/dispose smoke test. Cross-process LISTEN/NOTIFY
-   * semantics are not exercised — that needs two processes and stays
-   * in the adapter's own suite.
+   * the cross-instance conformance cases: a listener receives commits
+   * from a *sibling* instance produced by the same \`factory\`, never its
+   * own commits (the port's self-filtering MUST), and exactly one
+   * notification per commit transaction carrying the full event batch.
+   * Requires the \`factory\` to produce instances sharing one backing
+   * store — e.g. two PostgresStores on the same schema/table, or two
+   * \`withBroker\` decorators on one broker. True cross-*process*
+   * LISTEN/NOTIFY plumbing needs two processes and stays in the
+   * adapter's own suite.
    */
   readonly notify?: boolean;
   /**
@@ -48100,7 +48152,8 @@ export type StoreTckOptions = {
  *   \`ValidationError\` — never a silent approximation
  * - \`subscribe\` — idempotent re-subscribe, watermark return value
  * - \`claim\` / \`ack\` — lease lifecycle, dual frontiers, leased streams
- *   not double-claimed
+ *   not double-claimed, exact-source has-work matching, timed-out-lease
+ *   retry accounting
  * - \`block\` — blocked streams hidden from claim, only same-drainer can block
  * - \`reset\` — restart watermarks (including blocked), no-op for missing
  * - \`prioritize\` — bulk priority updates by filter
@@ -48109,7 +48162,9 @@ export type StoreTckOptions = {
  *   behind the closest safe snapshot, tail + subscriptions kept,
  *   no-snapshot no-op, mixed full + windowed targets
  * - \`query_streams\` — filters, exact-match, pagination, blocked
- * - \`notify\` (capability-gated) — subscribe + dispose smoke test
+ * - \`notify\` (capability-gated) — cross-instance delivery, self-filtering
+ *   (an instance never receives its own commits), one notification per
+ *   commit transaction with the full event batch
  *
  * Tests namespace their streams with a per-test {@link uid} so the
  * suite is parallel-safe against a shared backing store (e.g., a real
@@ -48907,6 +48962,123 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.dispose();
         }
       });
+
+      // ACT-1183: a lease timeout is not a free pass. Every claim()
+      // increments the stream's retry counter and only ack resets it, so
+      // a stream whose workers keep dying marches toward \`blockOnError\`
+      // exactly like one whose handlers keep throwing — repeated worker
+      // deaths on one stream are poison-adjacent, and quarantining beats
+      // an infinite crash loop. The 0ms lease is the deterministic
+      // stand-in for "worker died mid-lease" (no wall-clock race).
+      it("counts a timed-out lease reclaimed by another worker against the retry budget; ack resets it", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = \`lease-timeout-\${uid()}\`;
+          await fresh.subscribe([{ stream: s }]);
+          const [e1] = await seed_stream(fresh, s, 1);
+          // Worker A claims and "dies" — its 0ms lease is already expired.
+          const a = await fresh.claim(1, 0, \`wA-\${uid()}\`, 0);
+          expect(a.find((l) => l.stream === s)?.retry).toBe(0);
+          // Worker B reclaims after the timeout: the budget marches.
+          const b = await fresh.claim(1, 0, \`wB-\${uid()}\`, 30_000);
+          const b_lease = b.find((l) => l.stream === s);
+          expect(b_lease).toBeDefined();
+          expect(b_lease!.retry).toBe(1);
+          // Ack resets the budget: the next claim is a first attempt again.
+          await fresh.ack([{ ...(b_lease as Lease), at: e1.id }]);
+          await seed_stream(fresh, s, 1);
+          const c = await fresh.claim(1, 0, \`wC-\${uid()}\`, 30_000);
+          expect(c.find((l) => l.stream === s)?.retry).toBe(0);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+    });
+
+    // ACT-1182: a subscription's \`source\` is an **exact stream name** in
+    // claim()'s has-work probe — never a regex, LIKE pattern, or substring.
+    // Every shipped resolver (autoclose, dynamic per-aggregate reactions)
+    // produces exact names, and exact equality keeps the probe on the
+    // adapter's stream index. Pattern matching belongs to the StreamFilter
+    // surfaces (\`query_streams\`, \`reset\`, \`unblock\`), not to claim. Before
+    // these cases, InMemory compiled \`source\` into an unanchored RegExp and
+    // SQLite into a contains-LIKE — both silently overmatched sibling
+    // streams sharing a prefix.
+    describe("claim source matching", () => {
+      it("treats source as an exact stream name — no substring or pattern overmatch", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const base = \`src-\${uid()}\`;
+          const sibling = \`\${base}2\`; // \`base\` is a strict prefix of \`sibling\`
+          const target = \`agg-\${uid()}\`;
+          const control = \`ctl-\${uid()}\`;
+          await fresh.subscribe([
+            { stream: target, source: base },
+            // Control subscription sourced from the sibling — it DOES see
+            // the sibling commit below, so the negative assertion runs
+            // through a populated claim result.
+            { stream: control, source: sibling },
+          ]);
+          // Advance the watermarks past -1 first — fresh subscriptions are
+          // claimable unconditionally on some adapters.
+          const [seeded] = await seed_stream(fresh, base, 1);
+          const [ctl_seeded] = await seed_stream(fresh, sibling, 1);
+          const first = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+          const mine = first.find((l) => l.stream === target);
+          const ctl = first.find((l) => l.stream === control);
+          expect(mine).toBeDefined();
+          expect(ctl).toBeDefined();
+          await fresh.ack([
+            { ...(mine as Lease), at: seeded.id },
+            { ...(ctl as Lease), at: ctl_seeded.id },
+          ]);
+          // New events land only on the *sibling* stream. An exact-source
+          // subscription on \`base\` must not see them as work; the control
+          // sourced from the sibling must.
+          await seed_stream(fresh, sibling, 1);
+          const second = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+          expect(second.find((l) => l.stream === control)).toBeDefined();
+          expect(second.find((l) => l.stream === target)).toBeUndefined();
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("receives exactly its source stream's events", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const base = \`src-\${uid()}\`;
+          const target = \`agg-\${uid()}\`;
+          await fresh.subscribe([{ stream: target, source: base }]);
+          const [e1] = await seed_stream(fresh, base, 1);
+          const first = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+          const f = first.find((l) => l.stream === target);
+          expect(f).toBeDefined();
+          expect(f!.source).toBe(base);
+          await fresh.ack([{ ...(f as Lease), at: e1.id }]);
+          // A fresh commit on the exact source makes the stream claimable
+          // again, and the fetch window (source + after watermark) yields
+          // exactly the new event.
+          const [e2] = await seed_stream(fresh, base, 1);
+          const second = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+          const sec = second.find((l) => l.stream === target);
+          expect(sec).toBeDefined();
+          expect(sec!.at).toBe(e1.id);
+          const events = await collect(fresh, {
+            stream: sec!.source,
+            after: sec!.at,
+          });
+          expect(events.map((e) => e.id)).toEqual([e2.id]);
+        } finally {
+          await fresh.dispose();
+        }
+      });
     });
 
     // ACT-982: competing-consumer correctness was previously proven only by
@@ -48956,6 +49128,64 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(new Set(claimed).size).toBe(claimed.length);
           // ...and every stream leased exactly once (none lost).
           expect(claimed.length).toBe(owned.size);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      // ACT-1184: lease expiry under competing claimers. An unexpired
+      // lease is invisible to every other worker; an expired one is
+      // handed to exactly one of them.
+      it("does not hand an unexpired lease to a competing claimer", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = \`unexpired-\${uid()}\`;
+          const other = \`unexpired-other-\${uid()}\`;
+          await fresh.subscribe([{ stream: s }]);
+          await seed_stream(fresh, s, 1);
+          const a = await fresh.claim(100, 100, \`wA-\${uid()}\`, 60_000);
+          expect(a.find((l) => l.stream === s)).toBeDefined();
+          // Subscribe \`other\` only AFTER A's claim so B's claim comes back
+          // populated and the negative assertion runs through a non-empty
+          // array (mirrors "does not double-claim a held lease").
+          await fresh.subscribe([{ stream: other }]);
+          await seed_stream(fresh, other, 1);
+          const b = await fresh.claim(100, 100, \`wB-\${uid()}\`, 60_000);
+          expect(b.find((l) => l.stream === other)).toBeDefined();
+          expect(b.find((l) => l.stream === s)).toBeUndefined();
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("hands an expired lease to exactly one competing claimer, with retry accounting shared across workers", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = \`expired-\${uid()}\`;
+          await fresh.subscribe([{ stream: s }]);
+          const [e1] = await seed_stream(fresh, s, 1);
+          // The original holder "dies": a 0ms lease is expired on arrival.
+          const dead = await fresh.claim(100, 0, \`wDead-\${uid()}\`, 0);
+          expect(dead.find((l) => l.stream === s)?.retry).toBe(0);
+          // Two workers race for the expired lease — exactly one wins,
+          // and the shared retry counter (ACT-1183) reflects the reclaim
+          // regardless of which worker performs it.
+          const [b, c] = await Promise.all([
+            fresh.claim(100, 100, \`wB-\${uid()}\`, 60_000),
+            fresh.claim(100, 100, \`wC-\${uid()}\`, 60_000),
+          ]);
+          const winners = [...b, ...c].filter((l) => l.stream === s);
+          expect(winners).toHaveLength(1);
+          expect(winners[0].retry).toBe(1);
+          // Ack by the winning worker resets the shared budget.
+          await fresh.ack([{ ...winners[0], at: e1.id }]);
+          await seed_stream(fresh, s, 1);
+          const again = await fresh.claim(100, 0, \`wNext-\${uid()}\`, 60_000);
+          expect(again.find((l) => l.stream === s)?.retry).toBe(0);
         } finally {
           await fresh.dispose();
         }
@@ -51275,6 +51505,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     if (caps.notify) {
+      // ACT-1184: the notify conformance suite. \`factory\` must produce
+      // sibling instances that share one backing store — the TCK's
+      // standing pattern (two PostgresStores on the same schema/table,
+      // two withBroker decorators on one broker). These cases enforce
+      // the port's MUSTs: cross-instance delivery, self-filtering
+      // ("implementations must skip their own commits"), and one
+      // notification per commit transaction carrying the full batch.
       describe("notify (capability)", () => {
         it("delivers a notification when a different instance commits", async () => {
           // Self-filtering contract: an instance does not see its own
@@ -51306,6 +51543,101 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             expect(received.length).toBeGreaterThanOrEqual(1);
             expect(received[0].stream).toBe(stream);
             expect(received[0].events.length).toBeGreaterThanOrEqual(1);
+          } finally {
+            await writer.dispose();
+            await Promise.resolve(disposer());
+          }
+        });
+
+        it("does not deliver an instance's own commits (self-filtering)", async () => {
+          const received: StoreNotification[] = [];
+          let resolve_sentinel!: () => void;
+          const sentinel_arrived = new Promise<void>((res) => {
+            resolve_sentinel = res;
+          });
+          const own = \`notify-self-\${uid()}\`;
+          const remote = \`notify-remote-\${uid()}\`;
+          const sentinel = \`notify-sentinel-\${uid()}\`;
+          const disposer = await store.notify!.call(store, (n) => {
+            received.push(n);
+            if (n.stream === sentinel) resolve_sentinel();
+          });
+          const writer = await options.factory();
+          try {
+            // Commit through the *listening* instance first, then through
+            // a sibling (a plain remote commit, then the sentinel).
+            // Notifications are delivered in commit order, so once the
+            // sentinel arrives the own-commit notification would already
+            // have been delivered were it not filtered.
+            await store.commit<CounterEvents>(
+              own,
+              [inc(1)],
+              make_meta({ stream: own })
+            );
+            await writer.commit<CounterEvents>(
+              remote,
+              [inc(1)],
+              make_meta({ stream: remote })
+            );
+            await writer.commit<CounterEvents>(
+              sentinel,
+              [inc(1)],
+              make_meta({ stream: sentinel })
+            );
+            await sentinel_arrived;
+            expect(received.find((n) => n.stream === own)).toBeUndefined();
+            expect(received.find((n) => n.stream === remote)).toBeDefined();
+            expect(received.find((n) => n.stream === sentinel)).toBeDefined();
+          } finally {
+            await writer.dispose();
+            await Promise.resolve(disposer());
+          }
+        });
+
+        it("delivers one notification per commit transaction carrying the full event batch", async () => {
+          const received: StoreNotification[] = [];
+          let resolve_sentinel!: () => void;
+          const sentinel_arrived = new Promise<void>((res) => {
+            resolve_sentinel = res;
+          });
+          const batch = \`notify-batch-\${uid()}\`;
+          const sentinel = \`notify-batch-sentinel-\${uid()}\`;
+          const disposer = await store.notify!.call(store, (n) => {
+            received.push(n);
+            if (n.stream === sentinel) resolve_sentinel();
+          });
+          const writer = await options.factory();
+          try {
+            // One commit transaction, three events. The sentinel commit
+            // bounds the wait: delivered in commit order, its arrival
+            // proves any duplicate batch notification would already be in
+            // \`received\`.
+            await writer.commit<CounterEvents>(
+              batch,
+              [inc(1), inc(2), inc(3)],
+              make_meta({ stream: batch })
+            );
+            await writer.commit<CounterEvents>(
+              sentinel,
+              [inc(1)],
+              make_meta({ stream: sentinel })
+            );
+            await sentinel_arrived;
+            const batch_notifications = received.filter(
+              (n) => n.stream === batch
+            );
+            expect(batch_notifications).toHaveLength(1);
+            const events = batch_notifications[0].events;
+            expect(events).toHaveLength(3);
+            // The batch arrives ordered with id + name per entry.
+            expect(events.map((e) => e.name)).toEqual([
+              "Incremented",
+              "Incremented",
+              "Incremented",
+            ]);
+            expect([...events.map((e) => e.id)].sort((a, b) => a - b)).toEqual(
+              events.map((e) => e.id)
+            );
           } finally {
             await writer.dispose();
             await Promise.resolve(disposer());

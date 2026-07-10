@@ -38,9 +38,15 @@ import {
 export type StoreCapabilities = {
   /**
    * Adapter implements {@link Store.notify}. When `true`, the TCK runs
-   * a basic subscribe/dispose smoke test. Cross-process LISTEN/NOTIFY
-   * semantics are not exercised — that needs two processes and stays
-   * in the adapter's own suite.
+   * the cross-instance conformance cases: a listener receives commits
+   * from a *sibling* instance produced by the same `factory`, never its
+   * own commits (the port's self-filtering MUST), and exactly one
+   * notification per commit transaction carrying the full event batch.
+   * Requires the `factory` to produce instances sharing one backing
+   * store — e.g. two PostgresStores on the same schema/table, or two
+   * `withBroker` decorators on one broker. True cross-*process*
+   * LISTEN/NOTIFY plumbing needs two processes and stays in the
+   * adapter's own suite.
    */
   readonly notify?: boolean;
   /**
@@ -123,7 +129,8 @@ export type StoreTckOptions = {
  *   `ValidationError` — never a silent approximation
  * - `subscribe` — idempotent re-subscribe, watermark return value
  * - `claim` / `ack` — lease lifecycle, dual frontiers, leased streams
- *   not double-claimed
+ *   not double-claimed, exact-source has-work matching, timed-out-lease
+ *   retry accounting
  * - `block` — blocked streams hidden from claim, only same-drainer can block
  * - `reset` — restart watermarks (including blocked), no-op for missing
  * - `prioritize` — bulk priority updates by filter
@@ -132,7 +139,9 @@ export type StoreTckOptions = {
  *   behind the closest safe snapshot, tail + subscriptions kept,
  *   no-snapshot no-op, mixed full + windowed targets
  * - `query_streams` — filters, exact-match, pagination, blocked
- * - `notify` (capability-gated) — subscribe + dispose smoke test
+ * - `notify` (capability-gated) — cross-instance delivery, self-filtering
+ *   (an instance never receives its own commits), one notification per
+ *   commit transaction with the full event batch
  *
  * Tests namespace their streams with a per-test {@link uid} so the
  * suite is parallel-safe against a shared backing store (e.g., a real
@@ -930,6 +939,123 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.dispose();
         }
       });
+
+      // ACT-1183: a lease timeout is not a free pass. Every claim()
+      // increments the stream's retry counter and only ack resets it, so
+      // a stream whose workers keep dying marches toward `blockOnError`
+      // exactly like one whose handlers keep throwing — repeated worker
+      // deaths on one stream are poison-adjacent, and quarantining beats
+      // an infinite crash loop. The 0ms lease is the deterministic
+      // stand-in for "worker died mid-lease" (no wall-clock race).
+      it("counts a timed-out lease reclaimed by another worker against the retry budget; ack resets it", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = `lease-timeout-${uid()}`;
+          await fresh.subscribe([{ stream: s }]);
+          const [e1] = await seed_stream(fresh, s, 1);
+          // Worker A claims and "dies" — its 0ms lease is already expired.
+          const a = await fresh.claim(1, 0, `wA-${uid()}`, 0);
+          expect(a.find((l) => l.stream === s)?.retry).toBe(0);
+          // Worker B reclaims after the timeout: the budget marches.
+          const b = await fresh.claim(1, 0, `wB-${uid()}`, 30_000);
+          const b_lease = b.find((l) => l.stream === s);
+          expect(b_lease).toBeDefined();
+          expect(b_lease!.retry).toBe(1);
+          // Ack resets the budget: the next claim is a first attempt again.
+          await fresh.ack([{ ...(b_lease as Lease), at: e1.id }]);
+          await seed_stream(fresh, s, 1);
+          const c = await fresh.claim(1, 0, `wC-${uid()}`, 30_000);
+          expect(c.find((l) => l.stream === s)?.retry).toBe(0);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+    });
+
+    // ACT-1182: a subscription's `source` is an **exact stream name** in
+    // claim()'s has-work probe — never a regex, LIKE pattern, or substring.
+    // Every shipped resolver (autoclose, dynamic per-aggregate reactions)
+    // produces exact names, and exact equality keeps the probe on the
+    // adapter's stream index. Pattern matching belongs to the StreamFilter
+    // surfaces (`query_streams`, `reset`, `unblock`), not to claim. Before
+    // these cases, InMemory compiled `source` into an unanchored RegExp and
+    // SQLite into a contains-LIKE — both silently overmatched sibling
+    // streams sharing a prefix.
+    describe("claim source matching", () => {
+      it("treats source as an exact stream name — no substring or pattern overmatch", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const base = `src-${uid()}`;
+          const sibling = `${base}2`; // `base` is a strict prefix of `sibling`
+          const target = `agg-${uid()}`;
+          const control = `ctl-${uid()}`;
+          await fresh.subscribe([
+            { stream: target, source: base },
+            // Control subscription sourced from the sibling — it DOES see
+            // the sibling commit below, so the negative assertion runs
+            // through a populated claim result.
+            { stream: control, source: sibling },
+          ]);
+          // Advance the watermarks past -1 first — fresh subscriptions are
+          // claimable unconditionally on some adapters.
+          const [seeded] = await seed_stream(fresh, base, 1);
+          const [ctl_seeded] = await seed_stream(fresh, sibling, 1);
+          const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+          const mine = first.find((l) => l.stream === target);
+          const ctl = first.find((l) => l.stream === control);
+          expect(mine).toBeDefined();
+          expect(ctl).toBeDefined();
+          await fresh.ack([
+            { ...(mine as Lease), at: seeded.id },
+            { ...(ctl as Lease), at: ctl_seeded.id },
+          ]);
+          // New events land only on the *sibling* stream. An exact-source
+          // subscription on `base` must not see them as work; the control
+          // sourced from the sibling must.
+          await seed_stream(fresh, sibling, 1);
+          const second = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+          expect(second.find((l) => l.stream === control)).toBeDefined();
+          expect(second.find((l) => l.stream === target)).toBeUndefined();
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("receives exactly its source stream's events", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const base = `src-${uid()}`;
+          const target = `agg-${uid()}`;
+          await fresh.subscribe([{ stream: target, source: base }]);
+          const [e1] = await seed_stream(fresh, base, 1);
+          const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+          const f = first.find((l) => l.stream === target);
+          expect(f).toBeDefined();
+          expect(f!.source).toBe(base);
+          await fresh.ack([{ ...(f as Lease), at: e1.id }]);
+          // A fresh commit on the exact source makes the stream claimable
+          // again, and the fetch window (source + after watermark) yields
+          // exactly the new event.
+          const [e2] = await seed_stream(fresh, base, 1);
+          const second = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+          const sec = second.find((l) => l.stream === target);
+          expect(sec).toBeDefined();
+          expect(sec!.at).toBe(e1.id);
+          const events = await collect(fresh, {
+            stream: sec!.source,
+            after: sec!.at,
+          });
+          expect(events.map((e) => e.id)).toEqual([e2.id]);
+        } finally {
+          await fresh.dispose();
+        }
+      });
     });
 
     // ACT-982: competing-consumer correctness was previously proven only by
@@ -979,6 +1105,64 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(new Set(claimed).size).toBe(claimed.length);
           // ...and every stream leased exactly once (none lost).
           expect(claimed.length).toBe(owned.size);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      // ACT-1184: lease expiry under competing claimers. An unexpired
+      // lease is invisible to every other worker; an expired one is
+      // handed to exactly one of them.
+      it("does not hand an unexpired lease to a competing claimer", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = `unexpired-${uid()}`;
+          const other = `unexpired-other-${uid()}`;
+          await fresh.subscribe([{ stream: s }]);
+          await seed_stream(fresh, s, 1);
+          const a = await fresh.claim(100, 100, `wA-${uid()}`, 60_000);
+          expect(a.find((l) => l.stream === s)).toBeDefined();
+          // Subscribe `other` only AFTER A's claim so B's claim comes back
+          // populated and the negative assertion runs through a non-empty
+          // array (mirrors "does not double-claim a held lease").
+          await fresh.subscribe([{ stream: other }]);
+          await seed_stream(fresh, other, 1);
+          const b = await fresh.claim(100, 100, `wB-${uid()}`, 60_000);
+          expect(b.find((l) => l.stream === other)).toBeDefined();
+          expect(b.find((l) => l.stream === s)).toBeUndefined();
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("hands an expired lease to exactly one competing claimer, with retry accounting shared across workers", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = `expired-${uid()}`;
+          await fresh.subscribe([{ stream: s }]);
+          const [e1] = await seed_stream(fresh, s, 1);
+          // The original holder "dies": a 0ms lease is expired on arrival.
+          const dead = await fresh.claim(100, 0, `wDead-${uid()}`, 0);
+          expect(dead.find((l) => l.stream === s)?.retry).toBe(0);
+          // Two workers race for the expired lease — exactly one wins,
+          // and the shared retry counter (ACT-1183) reflects the reclaim
+          // regardless of which worker performs it.
+          const [b, c] = await Promise.all([
+            fresh.claim(100, 100, `wB-${uid()}`, 60_000),
+            fresh.claim(100, 100, `wC-${uid()}`, 60_000),
+          ]);
+          const winners = [...b, ...c].filter((l) => l.stream === s);
+          expect(winners).toHaveLength(1);
+          expect(winners[0].retry).toBe(1);
+          // Ack by the winning worker resets the shared budget.
+          await fresh.ack([{ ...winners[0], at: e1.id }]);
+          await seed_stream(fresh, s, 1);
+          const again = await fresh.claim(100, 0, `wNext-${uid()}`, 60_000);
+          expect(again.find((l) => l.stream === s)?.retry).toBe(0);
         } finally {
           await fresh.dispose();
         }
@@ -3298,6 +3482,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     if (caps.notify) {
+      // ACT-1184: the notify conformance suite. `factory` must produce
+      // sibling instances that share one backing store — the TCK's
+      // standing pattern (two PostgresStores on the same schema/table,
+      // two withBroker decorators on one broker). These cases enforce
+      // the port's MUSTs: cross-instance delivery, self-filtering
+      // ("implementations must skip their own commits"), and one
+      // notification per commit transaction carrying the full batch.
       describe("notify (capability)", () => {
         it("delivers a notification when a different instance commits", async () => {
           // Self-filtering contract: an instance does not see its own
@@ -3329,6 +3520,101 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             expect(received.length).toBeGreaterThanOrEqual(1);
             expect(received[0].stream).toBe(stream);
             expect(received[0].events.length).toBeGreaterThanOrEqual(1);
+          } finally {
+            await writer.dispose();
+            await Promise.resolve(disposer());
+          }
+        });
+
+        it("does not deliver an instance's own commits (self-filtering)", async () => {
+          const received: StoreNotification[] = [];
+          let resolve_sentinel!: () => void;
+          const sentinel_arrived = new Promise<void>((res) => {
+            resolve_sentinel = res;
+          });
+          const own = `notify-self-${uid()}`;
+          const remote = `notify-remote-${uid()}`;
+          const sentinel = `notify-sentinel-${uid()}`;
+          const disposer = await store.notify!.call(store, (n) => {
+            received.push(n);
+            if (n.stream === sentinel) resolve_sentinel();
+          });
+          const writer = await options.factory();
+          try {
+            // Commit through the *listening* instance first, then through
+            // a sibling (a plain remote commit, then the sentinel).
+            // Notifications are delivered in commit order, so once the
+            // sentinel arrives the own-commit notification would already
+            // have been delivered were it not filtered.
+            await store.commit<CounterEvents>(
+              own,
+              [inc(1)],
+              make_meta({ stream: own })
+            );
+            await writer.commit<CounterEvents>(
+              remote,
+              [inc(1)],
+              make_meta({ stream: remote })
+            );
+            await writer.commit<CounterEvents>(
+              sentinel,
+              [inc(1)],
+              make_meta({ stream: sentinel })
+            );
+            await sentinel_arrived;
+            expect(received.find((n) => n.stream === own)).toBeUndefined();
+            expect(received.find((n) => n.stream === remote)).toBeDefined();
+            expect(received.find((n) => n.stream === sentinel)).toBeDefined();
+          } finally {
+            await writer.dispose();
+            await Promise.resolve(disposer());
+          }
+        });
+
+        it("delivers one notification per commit transaction carrying the full event batch", async () => {
+          const received: StoreNotification[] = [];
+          let resolve_sentinel!: () => void;
+          const sentinel_arrived = new Promise<void>((res) => {
+            resolve_sentinel = res;
+          });
+          const batch = `notify-batch-${uid()}`;
+          const sentinel = `notify-batch-sentinel-${uid()}`;
+          const disposer = await store.notify!.call(store, (n) => {
+            received.push(n);
+            if (n.stream === sentinel) resolve_sentinel();
+          });
+          const writer = await options.factory();
+          try {
+            // One commit transaction, three events. The sentinel commit
+            // bounds the wait: delivered in commit order, its arrival
+            // proves any duplicate batch notification would already be in
+            // `received`.
+            await writer.commit<CounterEvents>(
+              batch,
+              [inc(1), inc(2), inc(3)],
+              make_meta({ stream: batch })
+            );
+            await writer.commit<CounterEvents>(
+              sentinel,
+              [inc(1)],
+              make_meta({ stream: sentinel })
+            );
+            await sentinel_arrived;
+            const batch_notifications = received.filter(
+              (n) => n.stream === batch
+            );
+            expect(batch_notifications).toHaveLength(1);
+            const events = batch_notifications[0].events;
+            expect(events).toHaveLength(3);
+            // The batch arrives ordered with id + name per entry.
+            expect(events.map((e) => e.name)).toEqual([
+              "Incremented",
+              "Incremented",
+              "Incremented",
+            ]);
+            expect([...events.map((e) => e.id)].sort((a, b) => a - b)).toEqual(
+              events.map((e) => e.id)
+            );
           } finally {
             await writer.dispose();
             await Promise.resolve(disposer());

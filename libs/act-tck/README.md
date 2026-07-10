@@ -58,14 +58,14 @@ Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https:/
 - `commit` — single + multi-event commits, optimistic concurrency, preserved state on rejection
 - `query` — stream, names, correlation, before/after, created_after/before, limit, with_snaps, stream_exact, backward traversal
 - `subscribe` — idempotent re-subscribe
-- `claim` / `ack` — lease lifecycle, dual frontiers, leased streams not double-claimed, ack rejected from wrong holder
+- `claim` / `ack` — lease lifecycle, dual frontiers, leased streams not double-claimed, ack rejected from wrong holder, exact-source has-work matching, timed-out-lease retry accounting
 - `block` — blocked streams hidden from claim, same-drainer-only enforcement
 - `reset` — restart watermarks (including blocked), no-op for missing
 - `prioritize` — bulk priority updates by filter
 - `truncate` — snapshot vs tombstone seeding, empty inputs, missing streams
 - `query_streams` — filters, exact-match, pagination, blocked
 - `query_stats` — array + filter forms, opt-in count/tail/names, exclude + before, snapshot count via `names`
-- `notify` (capability-gated) — subscribe + dispose smoke test
+- `notify` (capability-gated) — cross-instance delivery, self-filtering (an instance never receives its own commits), one notification per commit transaction with the full event batch; requires the `factory` to produce instances sharing one backing store
 
 ### `runStoreDifferentialTck`
 
