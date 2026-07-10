@@ -43358,17 +43358,19 @@ export class PostgresStore implements Store {
       // the order they were assigned. Same-stream commits were already
       // serialized by the (stream, version) unique index; this extends
       // the guarantee across streams.
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-        this._fqt,
-      ]);
-
-      const last = await client.query<Committed<E, keyof E>>(
-        \`SELECT version
-        FROM \${this._fqt}
-        WHERE stream=$1 ORDER BY version DESC LIMIT 1\`,
+      // The lock window is kept as small as the guarantee allows: the
+      // head probe runs unlocked (optimistic concurrency is already
+      // protected by the (stream, version) unique index), the whole
+      // batch lands in a single multi-row INSERT, and the lock is
+      // acquired inside that INSERT via a cross-joined CTE — so it is
+      // held for exactly the id-assigning statement plus COMMIT, never
+      // for per-event round trips.
+      const last = await client.query<{ version: number | null }>(
+        \`SELECT version FROM \${this._fqt}
+         WHERE stream=$1 ORDER BY version DESC LIMIT 1\`,
         [stream]
       );
-      version = last.rowCount ? last.rows[0].version : -1;
+      version = last.rows.at(0)?.version ?? -1;
       if (typeof expectedVersion === "number" && version !== expectedVersion)
         throw new ConcurrencyError(
           stream,
@@ -43377,52 +43379,96 @@ export class PostgresStore implements Store {
           expectedVersion
         );
 
-      const committed: Committed<E, keyof E>[] = [];
+      // Encrypt the pii payloads when encryption is configured and
+      // there's anything to encrypt — \`null\` passes through verbatim so
+      // \`forget_pii\` semantics survive intact (a NULL stays NULL).
+      // Encrypted output is \`JSON.stringify\`-ed so the bare base64
+      // string casts to jsonb as a JSON string literal. Data/pii travel
+      // as text[] and cast to jsonb in SQL — the pg driver can't
+      // serialize object elements inside a jsonb[] parameter.
+      const base_version = version;
+      const names: string[] = [];
+      const datas: string[] = [];
+      const piis: (string | null)[] = [];
+      const versions: number[] = [];
       for (const { name, data, pii } of msgs) {
         version++;
-        const sql = \`
-          INSERT INTO \${this._fqt}(name, data, pii, stream, version, meta)
-          VALUES($1, $2, $3, $4, $5, $6) RETURNING *\`;
-        // Encrypt the pii payload when encryption is configured and
-        // there's anything to encrypt — \`null\` passes through verbatim
-        // so \`forget_pii\` semantics survive intact (a NULL stays NULL).
-        // Encrypted output is \`JSON.stringify\`-ed so the bare base64
-        // string lands in jsonb as a JSON string literal — the pg
-        // driver doesn't auto-wrap raw strings before they hit jsonb,
-        // and a bare token like \`AQAB...\` isn't valid JSON on its own.
-        const pii_for_write =
+        names.push(name as string);
+        datas.push(JSON.stringify(data));
+        piis.push(
           this._resolve_pii_key && pii != null
             ? JSON.stringify(await encrypt(pii, this._resolve_pii_key))
-            : (pii ?? null);
-        const vals = [name, data, pii_for_write, stream, version, meta];
-        try {
-          const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
-          const row = rows.at(0)!;
-          // Decrypt before handing back to the caller — the committed
-          // event the framework returns must carry the cleartext payload
-          // (the reducer chain runs against \`event.pii\`). The encrypted
-          // value only lives at rest in the column; never in memory past
-          // this point. Same cast rationale as the query path.
-          if (this._resolve_pii_key && typeof row.pii === "string") {
-            const decrypted = await decrypt(row.pii, this._resolve_pii_key);
-            (row as { pii: unknown }).pii = decrypted;
+            : pii != null
+              ? JSON.stringify(pii)
+              : null
+        );
+        versions.push(version);
+      }
+
+      let committed: Committed<E, keyof E>[];
+      try {
+        // The cross join on the lock CTE forces the advisory lock to be
+        // acquired before any row (and therefore any serial id) is
+        // produced; the xact-scoped lock releases at COMMIT. Single-event
+        // commits (the overwhelmingly common shape) skip the unnest
+        // machinery for a leaner plan.
+        const { rows } =
+          msgs.length === 1
+            ? await client.query<Committed<E, keyof E>>(
+                \`WITH l AS (SELECT pg_advisory_xact_lock(hashtext($7)))
+                 INSERT INTO \${this._fqt}(name, data, pii, stream, version, meta)
+                 SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l
+                 RETURNING *\`,
+                [
+                  names[0],
+                  datas[0],
+                  piis[0],
+                  versions[0],
+                  stream,
+                  meta,
+                  this._fqt,
+                ]
+              )
+            : await client.query<Committed<E, keyof E>>(
+                \`WITH l AS (SELECT pg_advisory_xact_lock(hashtext($7)))
+                 INSERT INTO \${this._fqt}(name, data, pii, stream, version, meta)
+                 SELECT u.name, u.data::jsonb, u.pii::jsonb, $5, u.version, $6
+                 FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[])
+                   WITH ORDINALITY AS u(name, data, pii, version, ord)
+                 ORDER BY u.ord
+                 RETURNING *\`,
+                [names, datas, piis, versions, stream, meta, this._fqt]
+              );
+        // Decrypt before handing back to the caller — the committed
+        // event the framework returns must carry the cleartext payload
+        // (the reducer chain runs against \`event.pii\`). The encrypted
+        // value only lives at rest in the column; never in memory past
+        // this point. Sorted by version as cheap insurance — RETURNING
+        // follows insertion order in practice, but the contract is the
+        // version sequence.
+        committed = rows.sort((a, b) => a.version - b.version);
+        if (this._resolve_pii_key) {
+          for (const row of committed) {
+            if (typeof row.pii === "string") {
+              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+              (row as { pii: unknown }).pii = decrypted;
+            }
           }
-          committed.push(row);
-        } catch (error) {
-          // PG unique-violation on (stream, version) — a concurrent commit
-          // beat us between the version SELECT and this INSERT. Surface as
-          // ConcurrencyError so callers retry on the framework signal
-          // instead of an adapter-specific error.
-          if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
-            throw new ConcurrencyError(
-              stream,
-              version - 1,
-              msgs as unknown as Message<Schemas, string>[],
-              expectedVersion ?? -1
-            );
-          }
-          throw error;
         }
+      } catch (error) {
+        // PG unique-violation on (stream, version) — a concurrent commit
+        // beat us between the head probe and this INSERT. Surface as
+        // ConcurrencyError so callers retry on the framework signal
+        // instead of an adapter-specific error.
+        if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
+          throw new ConcurrencyError(
+            stream,
+            base_version,
+            msgs as unknown as Message<Schemas, string>[],
+            expectedVersion ?? -1
+          );
+        }
+        throw error;
       }
 
       // One NOTIFY per commit transaction, payload carries the full event

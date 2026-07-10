@@ -348,25 +348,34 @@ correlate checkpoint) assumes id order equals visibility order. Two
 concurrent commits to different streams could surface out of order and
 let a watermark permanently skip an event (the classic event-store gap
 problem). The append path (`commit` and `truncate`) now takes
-`pg_advisory_xact_lock(hashtext(<events table>))` inside its
-transaction, so ids become visible in the order they were assigned.
+`pg_advisory_xact_lock(hashtext(<events table>))` so ids become visible
+in the order they were assigned.
+
+The lock window was then tightened in two steps: the head probe runs
+unlocked (optimistic concurrency is already protected by the
+`(stream, version)` unique index), the whole batch lands in one
+multi-row INSERT, and the lock is acquired *inside* that INSERT via a
+cross-joined CTE — held for exactly the id-assigning statement plus
+COMMIT. Single-event commits skip the unnest machinery for a leaner
+plan.
 
 Measured with `scripts/commit-lock.ts` (docker PG :5431, M3 Pro,
 3 runs each, 500 commits):
 
-| Scenario | Before | After | Delta |
+| Scenario | Before | Naive lock | Shipped (CTE window) |
 |---|---|---|---|
-| Sequential, 1 stream | ~1,280 commits/s | ~1,050 commits/s | −18% |
-| Concurrent, 10 streams × 10 workers | ~4,500 commits/s | ~1,380 commits/s | −69% |
+| Sequential, 1 stream | ~1,280 commits/s | ~1,050 commits/s | ~1,105 commits/s (−14%) |
+| Concurrent, 10 streams × 10 workers | ~4,500 commits/s | ~1,380 commits/s | ~2,570 commits/s (−43%) |
 
-Reading the numbers honestly: the concurrent collapse is the fix
-working — cross-stream commits *must* serialize their visibility
-window, so the concurrent ceiling converges toward the sequential one
-(it stays above it because client checkout and BEGIN still overlap;
-only the lock-held section serializes). The framework's realistic
-drain-inclusive throughput is ~310 commits/s (see `libs/act`
-PERFORMANCE.md), so the post-fix ceiling retains ~4× headroom over the
-whole pipeline. The rejected alternative — a read-side xmin-horizon
-fence that preserves parallel commits — trades this write-path cost
-for planner-hostile visibility predicates on every hot read and was
-set aside; the decision is recorded in `book/act-1178-commit-visibility.md`.
+Reading the numbers honestly: the concurrent loss is the fix working —
+visibility windows that must not overlap cannot be fully parallel, so
+the ceiling is bounded by the lock-held span (one insert round trip +
+COMMIT). ~2,570/s keeps ~8× headroom over the framework's realistic
+drain-inclusive throughput (~310 commits/s, see `libs/act`
+PERFORMANCE.md). Two alternatives were weighed and set aside, recorded
+in `book/act-1178-commit-visibility.md`: a read-side xmin-horizon fence
+(planner-hostile predicates on every hot read) and a shared-lock
+writers / exclusive-lock reader-fence scheme (near-zero write cost, but
+it moves the wait into every watermark read and needs a fenced-read
+port surface — a candidate follow-up if a workload ever needs parallel
+commit throughput above this ceiling).
