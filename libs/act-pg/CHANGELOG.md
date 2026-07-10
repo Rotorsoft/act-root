@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.12.0...@rotorsoft/act-pg-v1.13.0) (2026-07-10)
+
+
+### Features
+
+* **act-pg:** windowed truncate boundary ([796006e](https://github.com/rotorsoft/act-root/commit/796006e6661cb80e2237a22f012afd6182e51cc0)), closes [#1011](https://github.com/rotorsoft/act-root/issues/1011)
+
 # [@rotorsoft/act-pg-v1.12.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.11.0...@rotorsoft/act-pg-v1.12.0) (2026-07-08)
 
 
