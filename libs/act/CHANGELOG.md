@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.22.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.2...@rotorsoft/act-v1.22.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act:** treat claim sources as exact stream names in the in-memory store ([bd0c980](https://github.com/rotorsoft/act-root/commit/bd0c980cb69e3befad0fa2afd34674f4a6d9d168))
+
 # [@rotorsoft/act-v1.22.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.1...@rotorsoft/act-v1.22.2) (2026-07-10)
 
 
