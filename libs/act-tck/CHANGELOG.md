@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.26.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.25.0...@rotorsoft/act-tck-v1.26.0) (2026-07-10)
+
+
+### Features
+
+* **act-tck:** windowed truncate boundary cases ([838871d](https://github.com/rotorsoft/act-root/commit/838871d7d1c3240d8ac7d5c5d53b10db9f06e825)), closes [#1011](https://github.com/rotorsoft/act-root/issues/1011)
+* **act:** close the books on a rolling window ([b20c2fd](https://github.com/rotorsoft/act-root/commit/b20c2fdec9fb37f8f64514c7b7412bd368d26358)), closes [#1011](https://github.com/rotorsoft/act-root/issues/1011)
+
 # [@rotorsoft/act-tck-v1.25.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.24.0...@rotorsoft/act-tck-v1.25.0) (2026-07-08)
 
 
