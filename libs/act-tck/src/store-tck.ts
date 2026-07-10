@@ -127,7 +127,10 @@ export type StoreTckOptions = {
  * - `block` — blocked streams hidden from claim, only same-drainer can block
  * - `reset` — restart watermarks (including blocked), no-op for missing
  * - `prioritize` — bulk priority updates by filter
- * - `truncate` — snapshot vs tombstone seeding, empty inputs, missing streams
+ * - `truncate` — snapshot vs tombstone seeding, empty inputs, missing
+ *   streams; windowed boundaries (`before`/`max_id`) — prefix deleted
+ *   behind the closest safe snapshot, tail + subscriptions kept,
+ *   no-snapshot no-op, mixed full + windowed targets
  * - `query_streams` — filters, exact-match, pagination, blocked
  * - `notify` (capability-gated) — subscribe + dispose smoke test
  *
@@ -1817,6 +1820,187 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `trunc-missing-${uid()}`;
         const result = await store.truncate([{ stream: s }]);
         expect(result.get(s)?.deleted).toBe(0);
+      });
+
+      // Windowed truncation (#1011): a `before` boundary prunes the
+      // prefix below the closest safe `__snapshot__` — a pure prefix
+      // delete behind a real snapshot; no seed, no tombstone.
+      describe("windowed (before boundary)", () => {
+        // Layout: inc, inc, snapA{2}, inc, snapB{3}, inc — returns the
+        // stream name plus the two snapshot events for boundary asserts.
+        async function seed_windowed(s: string) {
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1), inc(1)],
+            make_meta({ stream: s })
+          );
+          const [snap_a] = await store.commit(
+            s,
+            [{ name: SNAP_EVENT, data: { count: 2 } }],
+            make_meta({ stream: s })
+          );
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          const [snap_b] = await store.commit(
+            s,
+            [{ name: SNAP_EVENT, data: { count: 3 } }],
+            make_meta({ stream: s })
+          );
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          return { snap_a, snap_b };
+        }
+
+        it("deletes the prefix below the closest safe snapshot and keeps the snapshot + tail", async () => {
+          const s = `trunc-win-${uid()}`;
+          const { snap_b } = await seed_windowed(s);
+          const before = new Date(Date.now() + 60_000);
+          const result = await store.truncate([{ stream: s, before }]);
+          const entry = result.get(s);
+          // 4 events below snapB: inc, inc, snapA, inc
+          expect(entry?.deleted).toBe(4);
+          // committed is the SURVIVING boundary snapshot, not a new seed
+          expect(entry?.committed.id).toBe(snap_b.id);
+          expect(entry?.committed.name).toBe(SNAP_EVENT);
+          expect(entry?.committed.data).toEqual({ count: 3 });
+          // windowed entries echo the boundary
+          expect(entry?.before).toEqual(before);
+          const remaining = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            after: -1,
+          });
+          expect(remaining.map((e) => e.name)).toEqual([
+            SNAP_EVENT,
+            "Incremented",
+          ]);
+          expect(remaining[0].id).toBe(snap_b.id);
+        });
+
+        it("honors the max_id cap — boundary never rises past a lagging consumer", async () => {
+          const s = `trunc-win-cap-${uid()}`;
+          const { snap_a, snap_b } = await seed_windowed(s);
+          const before = new Date(Date.now() + 60_000);
+          const result = await store.truncate([
+            { stream: s, before, max_id: snap_a.id },
+          ]);
+          const entry = result.get(s);
+          // snapB is newer but above the cap — snapA is the closest safe
+          expect(entry?.committed.id).toBe(snap_a.id);
+          expect(entry?.deleted).toBe(2);
+          const remaining = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            after: -1,
+          });
+          expect(remaining.map((e) => e.id)).toContain(snap_b.id);
+          expect(remaining[0].id).toBe(snap_a.id);
+          expect(remaining).toHaveLength(4);
+        });
+
+        it("no-ops when no snapshot qualifies — stream absent from the result, events untouched", async () => {
+          const s = `trunc-win-noop-${uid()}`;
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1), inc(1)],
+            make_meta({ stream: s })
+          );
+          // no snapshot at all
+          const none = await store.truncate([
+            { stream: s, before: new Date(Date.now() + 60_000) },
+          ]);
+          expect(none.has(s)).toBe(false);
+          // snapshot exists but the cutoff predates it
+          await store.commit(
+            s,
+            [{ name: SNAP_EVENT, data: { count: 2 } }],
+            make_meta({ stream: s })
+          );
+          const too_early = await store.truncate([
+            { stream: s, before: new Date(0) },
+          ]);
+          expect(too_early.has(s)).toBe(false);
+          // missing stream no-ops too
+          const missing = await store.truncate([
+            { stream: `trunc-win-missing-${uid()}`, before: new Date() },
+          ]);
+          expect(missing.size).toBe(0);
+          const remaining = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            after: -1,
+          });
+          expect(remaining).toHaveLength(3);
+        });
+
+        it("leaves subscriptions untouched, unlike a full truncate", async () => {
+          const s = `trunc-win-subs-${uid()}`;
+          await seed_windowed(s);
+          await store.subscribe([{ stream: s }]);
+          await store.truncate([
+            { stream: s, before: new Date(Date.now() + 60_000) },
+          ]);
+          const positions: string[] = [];
+          await store.query_streams((p) => positions.push(p.stream), {
+            stream: s,
+            stream_exact: true,
+          });
+          expect(positions).toEqual([s]);
+        });
+
+        it("mixes full and windowed targets in one call", async () => {
+          const w = `trunc-win-mix-w-${uid()}`;
+          const f = `trunc-win-mix-f-${uid()}`;
+          const { snap_b } = await seed_windowed(w);
+          await store.commit<CounterEvents>(
+            f,
+            [inc(1)],
+            make_meta({ stream: f })
+          );
+          const result = await store.truncate([
+            { stream: w, before: new Date(Date.now() + 60_000) },
+            { stream: f },
+          ]);
+          expect(result.get(w)?.committed.id).toBe(snap_b.id);
+          expect(result.get(w)?.before).toBeInstanceOf(Date);
+          expect(result.get(f)?.deleted).toBe(1);
+          expect(result.get(f)?.committed.name).toBe("__tombstone__");
+          expect(result.get(f)?.before).toBeUndefined();
+        });
+
+        it("keeps the stream writable and readable after a prune", async () => {
+          const s = `trunc-win-cont-${uid()}`;
+          const { snap_b } = await seed_windowed(s);
+          await store.truncate([
+            { stream: s, before: new Date(Date.now() + 60_000) },
+          ]);
+          // versions continue from the surviving tail; ids never reuse
+          // a pruned id
+          const [next] = await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          expect(next.version).toBe(6);
+          expect(next.id).toBeGreaterThan(snap_b.id);
+          // with_snaps replay anchors on the surviving boundary snapshot
+          const replay = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+          });
+          expect(replay[0].id).toBe(snap_b.id);
+          expect(replay).toHaveLength(3);
+        });
       });
     });
 
