@@ -232,7 +232,7 @@ Sequence at the end of a feature branch:
 3. **For substantive tickets** (anything that touched `libs/act/src/`, added a new public method, changed semantics, or migrated a callsite to a new primitive): run `/book-note <ticket-slug>` and write the narrative essay. See [.claude/commands/book-note.md](.claude/commands/book-note.md) and `book/README.md`. Skip only for pure chore/deps/docs PRs. The essay captures the *why* and the *rejected designs* — the part that won't be visible from the diff once it's merged. **Do this BEFORE opening the PR**, so the book entry lands with the code.
 4. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** Run the stale-reference grep:
    ```bash
-   grep -rln "<old-name-or-shape>" docs/docs book CLAUDE.md libs/*/README.md
+   grep -rln "<old-name-or-shape>" docs/docs book CLAUDE.md STABILITY.md libs/*/README.md
    ```
    Hits get fixed inline; **do not** leave them for a "follow-up PR." Specifically:
    - **Port changes** (`Store` / `Cache` / `Logger`) → check `docs/docs/architecture/extension-points.md` and the matching `docs/docs/guides/writing-a-{store,cache,logger}.md`. The method-list snippet in extension-points goes stale every time the interface gains, loses, or renames a method.
