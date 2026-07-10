@@ -41,6 +41,26 @@ describe("InMemoryStore (adapter-specific)", () => {
     expect(claimed.length).toBe(2);
   });
 
+  it("binary-searches id bounds on backward scans across truncation holes", async () => {
+    const s = store();
+    const meta = { correlation: "c", causation: {} };
+    await s.commit("bw-a", [{ name: "A", data: {} }], meta); // id 0
+    await s.commit("bw-b", [{ name: "B", data: {} }], meta); // id 1
+    await s.commit("bw-a", [{ name: "A", data: {} }], meta); // id 2
+    await s.commit("bw-b", [{ name: "B", data: {} }], meta); // id 3
+    // Full truncate of bw-a punches holes at ids 0 and 2 — ids no longer
+    // equal array indexes, so the backward `before` bound must resolve by
+    // id, not position.
+    await s.truncate([{ stream: "bw-a" }]);
+    const ids: number[] = [];
+    await s.query((e) => ids.push(e.id), { backward: true, before: 3 });
+    expect(ids).toEqual([1]);
+    // And without `before`: newest-first over the surviving ids.
+    const all: number[] = [];
+    await s.query((e) => all.push(e.id), { backward: true });
+    expect(all[0]).toBeGreaterThan(3); // the truncate's tombstone seed
+  });
+
   // ACT-1103 lane contract: every adapter is exercised by `runStoreTck`
   // (see `test/store-tck.spec.ts`). InMemoryStore has no adapter-only
   // lane concern — there's no schema migration to validate.
