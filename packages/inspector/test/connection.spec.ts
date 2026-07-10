@@ -127,74 +127,12 @@ describe("transfer (unified backup / restore / cross-adapter) — ACT-1128", () 
     ).rejects.toThrow(/current.*unavailable/);
   });
 
-  it("rejects malformed upload CSV with a clear error", async () => {
-    await caller.connect({ adapter: "inmemory" });
-    await expect(
-      caller.transfer({
-        source: { adapter: "upload", csv: "" },
-        target: { adapter: "current" },
-      })
-    ).rejects.toThrow(/at least one row/);
-  });
-
-  it("round-trips events: current → download → upload → current", async () => {
-    await caller.connect({ adapter: "inmemory" });
-    const store = getActiveStore()!;
-    await store.commit(
-      "round-trip-stream",
-      [
-        { name: "Opened", data: { id: 1 } },
-        { name: "Updated", data: { id: 1, field: "x" } },
-      ],
-      { correlation: "round-trip", causation: {} }
-    );
-    const backup = await caller.transfer({
-      source: { adapter: "current" },
-      target: { adapter: "download" },
-    });
-    expect(backup.count).toBe(2);
-    expect(backup.csv).toBeTruthy();
-    // Reconnect (fresh inmemory store), then restore from the CSV bytes.
-    await caller.connect({ adapter: "inmemory" });
-    const result = await caller.transfer({
-      source: { adapter: "upload", csv: backup.csv ?? "" },
-      target: { adapter: "current" },
-    });
-    expect(result.ok).toBe(true);
-    expect(result.count).toBe(2);
-    expect(result.result.kept).toBe(2);
-    expect(result.result.duration_ms).toBeGreaterThanOrEqual(0);
-    const verify = await caller.query({});
-    expect(verify.events).toHaveLength(2);
-    expect(verify.events.map((e) => e.name)).toEqual(["Opened", "Updated"]);
-  });
-
-  it("records the destructive `current`-target path in the audit log", async () => {
-    await caller.connect({ adapter: "inmemory" });
-    const store = getActiveStore()!;
-    await store.commit("audited-stream", [{ name: "Tick", data: {} }], {
-      correlation: "audit",
-      causation: {},
-    });
-    const backup = await caller.transfer({
-      source: { adapter: "current" },
-      target: { adapter: "download" },
-    });
-    await caller.connect({ adapter: "inmemory" });
-    const baselineEntries = (await caller.audit()).entries.length;
-    await caller.transfer({
-      source: { adapter: "upload", csv: backup.csv ?? "" },
-      target: { adapter: "current" },
-    });
-    const audit = await caller.audit();
-    expect(audit.entries.length).toBe(baselineEntries + 1);
-    const entry = audit.entries[0]!;
-    expect(entry.action).toBe("restore");
-    if (entry.action === "restore") {
-      expect(entry.adapter).toBe("inmemory");
-      expect(entry.result.kept).toBe(1);
-    }
-  });
+  // The `current`-target restore paths (upload → current, the audit
+  // capture, the malformed-upload validation error) require write-mode,
+  // which is gated off by default (#1194). They live in
+  // transfer-current.spec.ts, which enables ACT_INSPECTOR_WRITE. This
+  // file stays read-only so the `writeMode` "read-only" assertion above
+  // holds.
 
   it("dry-run reports counts without touching the target", async () => {
     await caller.connect({ adapter: "inmemory" });
@@ -278,32 +216,6 @@ describe("connect (sqlite)", () => {
     }
   });
 
-  it("supports transfer on a SQLite-backed connection (ACT-1128)", async () => {
-    dir = await mkdtemp(path.join(tmpdir(), "act-inspector-conn-sqlite-rs-"));
-    try {
-      const file = await buildActFile();
-      await caller.connect({ adapter: "sqlite", file });
-      const store = getActiveStore()!;
-      await store.commit("sqlite-stream", [{ name: "Tick", data: { n: 1 } }], {
-        correlation: "sqlite-transfer",
-        causation: {},
-      });
-      const backup = await caller.transfer({
-        source: { adapter: "current" },
-        target: { adapter: "download" },
-      });
-      // Reconnect to a fresh SQLite file, then restore the CSV.
-      const file2 = await buildActFile("store-2.db");
-      await caller.connect({ adapter: "sqlite", file: file2 });
-      const result = await caller.transfer({
-        source: { adapter: "upload", csv: backup.csv ?? "" },
-        target: { adapter: "current" },
-      });
-      expect(result.ok).toBe(true);
-      expect(result.count).toBe(1);
-      expect(result.result.kept).toBe(1);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+  // The SQLite-backed `current`-target restore round-trip requires
+  // write-mode; it lives in transfer-current.spec.ts (#1194).
 });

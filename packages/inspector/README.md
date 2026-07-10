@@ -41,7 +41,7 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
 | Table    | `events`    |
 | SSL      | `false`     |
 
-When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }` — suitable for self-signed certs on managed Postgres providers.
+When **SSL** is enabled (`ssl: true`), the connection verifies the server's TLS certificate (`rejectUnauthorized: true`) — `ssl: true` means *actually-verified* TLS. To connect to a server with a self-signed or mismatched certificate, set `sslInsecure: true` as a separate, explicit opt-out; the server disables certificate verification for that connection and logs a warning. Never use `sslInsecure` against production.
 
 ## Features
 
@@ -98,7 +98,17 @@ The inspector is **read-only by default**. Mutating controls (the inline priorit
 ACT_INSPECTOR_WRITE=1 pnpm -F @rotorsoft/act-inspector dev:server
 ```
 
-The flag is server-static — refreshing a tab doesn't reacquire write access, so a misclick in the dashboard can't reorder live priorities unless an operator has consciously enabled writes on the process. Every successful mutation lands an entry in the in-memory audit log on the Monitor view's right column (capacity 100, cleared on restart).
+The flag is server-static — refreshing a tab doesn't reacquire write access, so a misclick in the dashboard can't reorder live priorities unless an operator has consciously enabled writes on the process. Both `prioritize` and any **destructive `transfer`** (one that writes to a persistent target — the connected store, or a server-side CSV / SQLite / PG destination) are gated behind write mode. Read-only transfer paths — dry-runs and `download` exports — stay available so a read-only inspector can still inspect and export. Every successful mutation lands an entry in the in-memory audit log on the Monitor view's right column (capacity 100, cleared on restart).
+
+### Server-side file paths
+
+Every client-supplied file path a `transfer` uses — the `csv` and `sqlite` source and target slots, plus the `event_migrations_path` module — is resolved **relative to the inspector server's working directory**. Absolute paths and `..` traversal are rejected. This is the guard against a client coercing the server into reading (`/etc/passwd`, `~/.ssh/id_rsa`) or clobbering (`~/.bashrc`) files outside the inspector's cwd. Stage any file a transfer needs under the server's working directory first.
+
+### Network exposure
+
+The server binds **loopback (`127.0.0.1`) by default** — the unauthenticated tRPC surface (file transfer, `prioritize`) is reachable only from the operator's own machine. To expose it on the network, set `ACT_INSPECTOR_HOST` (e.g. `0.0.0.0`) explicitly; the server logs a warning when it binds to anything other than loopback. Behind that, put the inspector on a firewalled host or behind auth — nothing in the inspector authenticates callers.
+
+CORS allows any `http(s)://localhost` origin in local dev (or the exact `CORS_ORIGIN` when set). Origin-less requests can still *read*, but **mutations from an origin-less or cross-site request are refused** unless an explicit `CORS_ORIGIN` allowlist pins the caller — a small CSRF hardening for the mutating procedures.
 
 ### Navigation
 
@@ -159,7 +169,7 @@ packages/inspector/
 | `writeMode` | query | `{ enabled, reason }` — reflects the `ACT_INSPECTOR_WRITE` env var |
 | `prioritize` | mutation | Bulk-update stream priority via `Store.prioritize(filter, n)`. Filter shape mirrors `query_streams` (stream/source/lane/blocked). Refuses when read-only. |
 | `audit` | query | Last 100 mutations performed via the inspector — in-memory ring buffer |
-| `transfer` | mutation | Move events between any source and any target (ACT-1128 / #788). Source/target slots accept `current` (connected store), `upload`/`download` (browser CSV), `csv` (server-side file), and per-call `pg`/`sqlite` credentials. Subsumes the prior `backup` and `restore` mutations. `dry_run: true` swaps the configured target for an in-memory `PreviewSink` that collects the first 50 post-transform events — the response includes both the full `ScanResult` (counts) and `sample` (events). Migration overlay (ACT-1126): `stream_rename` accepts an ordered list of `{ pattern, replacement }` rules, applied via chained `String.prototype.replace` so independent and chained renames both work; `event_migrations_path` resolves a cwd-relative module path for schema-guarded payload rewrites |
+| `transfer` | mutation | Move events between any source and any target (ACT-1128 / #788). Source/target slots accept `current` (connected store), `upload`/`download` (browser CSV), `csv` (server-side file), and per-call `pg`/`sqlite` credentials. Subsumes the prior `backup` and `restore` mutations. `dry_run: true` swaps the configured target for an in-memory `PreviewSink` that collects the first 50 post-transform events — the response includes both the full `ScanResult` (counts) and `sample` (events). Migration overlay (ACT-1126): `stream_rename` accepts an ordered list of `{ pattern, replacement }` rules, applied via chained `String.prototype.replace` so independent and chained renames both work; `event_migrations_path` resolves a cwd-relative module path for schema-guarded payload rewrites. Every `csv` / `sqlite` file slot and the migrations path are guarded to the server's cwd (absolute / `..`-traversal paths rejected), and a destructive transfer refuses when the server is read-only |
 | `restoreProgress` | subscription | SSE stream of `{ processed }` ticks fired by `scan`'s `on_progress` during an in-flight transfer — drives the reactive progress bar |
 
 - **Event data**: flows through Act's `Store.query()` interface

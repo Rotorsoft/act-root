@@ -25,8 +25,35 @@ import {
   PG_PORT_RANGE_START,
   runDiscovery,
 } from "./discovery/index.js";
+import { mutationOriginAllowed } from "./security.js";
 
-const t = initTRPC.create();
+/**
+ * Request context (#1195). HTTP requests carry the `Origin` header and
+ * the CORS allowlist so the mutation guard can refuse cross-site,
+ * origin-less writes. In-process callers (`createCaller({})` in tests,
+ * trusted server-side code) leave `viaHttp` false and skip the guard.
+ */
+export type InspectorContext = {
+  viaHttp?: boolean;
+  origin?: string;
+  corsAllowlist?: string;
+};
+
+const t = initTRPC.context<InspectorContext>().create();
+
+/**
+ * Mutation procedure with the CORS origin guard (#1195). Every
+ * mutating tRPC procedure builds on this so an origin-less cross-site
+ * request can't reach a write. In-process callers (no `viaHttp`) pass
+ * straight through — the guard only applies to real HTTP requests.
+ */
+const mutationProcedure = t.procedure.use(async ({ ctx, next }) => {
+  if (ctx.viaHttp && !mutationOriginAllowed(ctx.origin, ctx.corsAllowlist))
+    throw new Error(
+      "Origin-less or cross-site mutation rejected. Set CORS_ORIGIN to allowlist your client."
+    );
+  return next();
+});
 
 /**
  * Write-mutation gate (#698). Mutating procedures that change adapter
@@ -41,6 +68,50 @@ const t = initTRPC.create();
  * priorities unless an operator has consciously set the env var.
  */
 const writeEnabled = process.env.ACT_INSPECTOR_WRITE === "1";
+
+/**
+ * Cwd-relative path guard (#1194). Every client-supplied file path —
+ * transfer csv/sqlite source and target slots, the `event_migrations`
+ * module path — resolves through here. Absolute paths and `..`
+ * traversal are rejected so a client can't coerce the server into
+ * reading (`/etc/passwd`, `~/.ssh/id_rsa`) or clobbering (`~/.bashrc`)
+ * files outside the inspector's working directory.
+ *
+ * Returns the resolved absolute path so callers can hand it straight
+ * to the adapter constructor. `label` names the offending field in
+ * the thrown error so the operator knows which input to fix.
+ */
+export function resolveUnderCwd(input: string, label: string): string {
+  const root = process.cwd();
+  const abs = resolve(root, input);
+  const rel = relative(root, abs);
+  if (isAbsolute(input) || rel.startsWith(".."))
+    throw new Error(`${label} must be a relative path under the inspector cwd`);
+  return abs;
+}
+
+/**
+ * PG SSL config mapping (#1195). `ssl:true` means *verified* TLS —
+ * `rejectUnauthorized:true`, the secure default. An operator who
+ * knowingly points at a server with a self-signed / mismatched cert
+ * opts out explicitly via `sslInsecure:true`, which disables cert
+ * verification and emits a warning so the downgrade is never silent.
+ * Returns the value to hand to `PostgresStore`'s `ssl` field, or
+ * `undefined` when SSL is off entirely.
+ */
+export function resolveSslConfig(
+  ssl: boolean,
+  sslInsecure: boolean
+): { rejectUnauthorized: boolean } | undefined {
+  if (!ssl) return undefined;
+  if (sslInsecure) {
+    console.warn(
+      "[inspector] sslInsecure=true — TLS certificate verification is DISABLED for this Postgres connection. Do not use against production."
+    );
+    return { rejectUnauthorized: false };
+  }
+  return { rejectUnauthorized: true };
+}
 
 /**
  * In-memory audit log (#698). Records each successful mutation so an
@@ -240,8 +311,11 @@ function buildPersistentAdapter(
       // commit/claim/subscribe — it's transfer-only). The cast is
       // safe because the transfer pipeline only calls `query` and
       // `restore` on the value; the other Store methods are never
-      // touched.
-      return new CsvFile({ path: endpoint.file }) as unknown as Store;
+      // touched. Path is guarded (#1194) so a client can't read or
+      // clobber files outside the inspector cwd.
+      return new CsvFile({
+        path: resolveUnderCwd(endpoint.file, "csv file"),
+      }) as unknown as Store;
     case "pg":
       return new PostgresStore({
         host: endpoint.host,
@@ -253,7 +327,9 @@ function buildPersistentAdapter(
         table: endpoint.table,
       });
     case "sqlite":
-      return new SqliteStore({ url: `file:${endpoint.file}` });
+      return new SqliteStore({
+        url: `file:${resolveUnderCwd(endpoint.file, "sqlite file")}`,
+      });
     default:
       throw new Error(
         `buildPersistentAdapter cannot construct '${endpoint.adapter}' — handle current/upload/download at the call site`
@@ -371,7 +447,7 @@ export const inspectorRouter = t.router({
    * `kind` so existing frontend payloads (`{ host, portFrom, portTo }`)
    * keep working unchanged.
    */
-  discover: t.procedure
+  discover: mutationProcedure
     .input(
       z.union([
         z.object({
@@ -415,7 +491,7 @@ export const inspectorRouter = t.router({
    *   process, no persistent config. Useful for demo / playground
    *   flows and for ACT-1131's test suite (real adapter, no mocking).
    */
-  connect: t.procedure
+  connect: mutationProcedure
     .input(
       z.union([
         z.object({
@@ -428,6 +504,12 @@ export const inspectorRouter = t.router({
           schema: z.string().default("public"),
           table: z.string().default("events"),
           ssl: z.boolean().default(false),
+          // Explicit, separate opt-out from TLS cert verification
+          // (#1195). `ssl:true` alone means *verified* TLS; an operator
+          // knowingly pointing at a self-signed / mismatched cert sets
+          // this to true and eats a logged warning. Keeps `ssl:true`
+          // honest — it no longer silently disables verification.
+          sslInsecure: z.boolean().default(false),
         }),
         z.object({
           adapter: z.literal("sqlite"),
@@ -477,9 +559,10 @@ export const inspectorRouter = t.router({
             },
           };
         }
-        const { adapter, ssl, ...pgConfig } = input;
-        const storeConfig = ssl
-          ? { ...pgConfig, ssl: { rejectUnauthorized: false } }
+        const { adapter, ssl, sslInsecure, ...pgConfig } = input;
+        const sslConfig = resolveSslConfig(ssl, sslInsecure);
+        const storeConfig = sslConfig
+          ? { ...pgConfig, ssl: sslConfig }
           : pgConfig;
         const newStore = new PostgresStore(storeConfig);
         // Test the connection
@@ -488,7 +571,7 @@ export const inspectorRouter = t.router({
         currentConfig = { adapter: "pg", ...pgConfig };
         return {
           ok: true as const,
-          config: { adapter, ...pgConfig, ssl, password: "***" },
+          config: { adapter, ...pgConfig, ssl, sslInsecure, password: "***" },
         };
       } catch (err) {
         currentStore = null;
@@ -501,7 +584,7 @@ export const inspectorRouter = t.router({
     }),
 
   /** Disconnect from current store */
-  disconnect: t.procedure.mutation(async () => {
+  disconnect: mutationProcedure.mutation(async () => {
     if (currentStore) {
       await currentStore.dispose();
       currentStore = null;
@@ -1052,7 +1135,7 @@ export const inspectorRouter = t.router({
    * updates use regex with optional source / blocked / lane scoping.
    * Refuses to run when {@link writeEnabled} is false.
    */
-  prioritize: t.procedure
+  prioritize: mutationProcedure
     .input(
       z.object({
         priority: z.number().int(),
@@ -1143,7 +1226,7 @@ export const inspectorRouter = t.router({
    * Progress events fan out through the existing `restoreProgress`
    * subscription.
    */
-  transfer: t.procedure
+  transfer: mutationProcedure
     .input(
       z.object({
         source: z.union([
@@ -1250,6 +1333,21 @@ export const inspectorRouter = t.router({
       })
     )
     .mutation(async ({ input }) => {
+      // Write-mode gate (#1194). A transfer that materially writes to a
+      // persistent target — the connected store, a server-side CSV /
+      // SQLite / PG destination — is destructive and refuses to run in
+      // read-only mode, exactly like `prioritize`. Dry-runs (in-memory
+      // preview, nothing touches disk) and `download` targets (read the
+      // source, hand bytes back to the browser, never mutate operator
+      // state) stay allowed so a read-only inspector can still inspect
+      // and export.
+      const writesToPersistentTarget =
+        !input.dry_run && input.target.adapter !== "download";
+      if (writesToPersistentTarget && !writeEnabled)
+        throw new Error(
+          "Inspector is in read-only mode. Set ACT_INSPECTOR_WRITE=1 on the server."
+        );
+
       if (sameEndpoint(input.source, input.target))
         throw new Error(
           "Transfer source and target refer to the same store — refusing to self-overwrite"
@@ -1399,14 +1497,12 @@ export const inspectorRouter = t.router({
         // so an operator can't import arbitrary modules off the
         // filesystem. The inspector is intentionally a thin tool; if
         // the migrations live elsewhere the operator can stage them
-        // under cwd first.
-        const root = process.cwd();
-        const abs = resolve(root, input.event_migrations_path);
-        const rel = relative(root, abs);
-        if (isAbsolute(input.event_migrations_path) || rel.startsWith(".."))
-          throw new Error(
-            "event_migrations_path must be a relative path under the inspector cwd"
-          );
+        // under cwd first. Shares the guard with the csv/sqlite file
+        // paths (#1194).
+        const abs = resolveUnderCwd(
+          input.event_migrations_path,
+          "event_migrations_path"
+        );
         const mod = (await import(abs)) as {
           // `any`: caller-defined per-key generics
           default?: Record<string, EventMigration<any, any>>;
