@@ -25,6 +25,7 @@ export {
   DEFAULT_CLOSE_YIELD_MS,
   hour_in_zone,
   in_autoclose_window,
+  next_window_open,
   resolveAutocloseConfig,
 } from "./autoclose-config.js";
 export {

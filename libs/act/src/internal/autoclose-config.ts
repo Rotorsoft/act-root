@@ -20,29 +20,30 @@ import type { ActOptions } from "../act.js";
 
 /**
  * Default {@link ActOptions.autocloseCycleMinutes}: 720 (12 h).
- * Autoclose is low-urgency housekeeping — a stream eligible for close
- * is "old" (past a retention age) or "resolved a while ago" (terminal
- * + grace), never urgent — so the cycle runs a couple of times a day,
- * not as a hot path. Each run sweeps the whole store; the cadence is
- * how often that sweep repeats. Range is 1 minute to 24 hours (1440);
- * the floor exists for window polling (see
- * {@link ActOptions.autocloseWindow}), the ceiling lets operators run
- * it once a day.
+ *
+ * @deprecated The knob it defaults is deprecated (#1175) — the
+ * off-window re-check is derived from `autocloseWindow` via
+ * {@link next_window_open}, so nothing consumes the cadence. Kept so
+ * existing imports and the compat validation keep working; removed in
+ * the next major.
  */
 export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
 
 /**
- * Default {@link ActOptions.closeBatchSize}: 64. Bounds the per-batch
- * `query_stats` page size + the truncate fan-out within a run so a
- * full-store sweep streams through in bounded chunks instead of
- * materializing every candidate or truncating thousands at once.
+ * Default {@link ActOptions.closeBatchSize}: 64.
+ *
+ * @deprecated Dead since #1090 removed the autoclose sweep — nothing
+ * pages the store in batches. Kept for compat; removed in the next
+ * major.
  */
 export const DEFAULT_CLOSE_BATCH_SIZE = 64;
 
 /**
- * Default {@link ActOptions.closeYieldMs}: 0. The cycle yields a
- * microtask between truncates by default; SQLite operators set a
- * positive value to release the writer lock.
+ * Default {@link ActOptions.closeYieldMs}: 0.
+ *
+ * @deprecated Dead since #1090 removed the autoclose sweep — there is
+ * no truncate loop to yield between. Kept for compat; removed in the
+ * next major.
  */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
 
@@ -190,4 +191,38 @@ export function in_autoclose_window(
   return window.start < window.end
     ? hour >= window.start && hour < window.end
     : hour >= window.start || hour < window.end;
+}
+
+/**
+ * The next instant the off-hours window opens at or after `now`. The
+ * synthesized autoclose reaction defers to this when a tick lands
+ * outside the window — parking until the window actually opens instead
+ * of blind-polling on a configured cadence (the pre-#1175 behavior,
+ * where a poll interval longer than the window could oscillate around
+ * it and miss it repeatedly).
+ *
+ * Walks forward hour by hour and asks `Intl` for the local hour at each
+ * step, so DST transitions resolve exactly the way the runtime's zone
+ * database says they do — a 23- or 25-hour day never desynchronizes the
+ * walk. The window validates as non-empty at build, and every zone hits
+ * each `[0, 23]` hour label within any 48-hour span, so the walk always
+ * terminates; the bound is a defensive backstop, with "one day out" as
+ * the fallback no real zone can reach.
+ *
+ * Minute/second offsets within the opening hour are preserved from
+ * `now` shifted by whole hours — the contract is hour-granular, matching
+ * the window's own `[start, end)` hour semantics.
+ *
+ * @internal
+ */
+export function next_window_open(
+  window: NonNullable<AutocloseConfig["autocloseWindow"]>,
+  now: Date
+): Date {
+  for (let h = 0; h <= 48; h++) {
+    const candidate = new Date(now.getTime() + h * 3_600_000);
+    if (hour_in_zone(candidate, window.timeZone) === window.start)
+      return candidate;
+  }
+  return new Date(now.getTime() + 86_400_000);
 }

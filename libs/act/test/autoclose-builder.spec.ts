@@ -22,6 +22,7 @@ import {
 import {
   hour_in_zone,
   in_autoclose_window,
+  next_window_open,
 } from "../src/internal/autoclose-config.js";
 
 const make_ticket = () =>
@@ -433,6 +434,48 @@ describe("autoclose window membership", () => {
     expect(in_autoclose_window(w, new Date("2024-06-01T06:00:00Z"))).toBe(
       false
     );
+  });
+});
+
+describe("next_window_open — the derived off-window re-check (#1175)", () => {
+  it("parks until the window opens later the same day", () => {
+    const w = { start: 22, end: 6, timeZone: "UTC" };
+    const noon = new Date("2024-06-01T12:15:00Z");
+    const open = next_window_open(w, noon);
+    expect(open.toISOString()).toBe("2024-06-01T22:15:00.000Z");
+    expect(in_autoclose_window(w, open)).toBe(true);
+  });
+
+  it("rolls to tomorrow when today's window has already passed", () => {
+    const w = { start: 2, end: 6, timeZone: "UTC" };
+    const morning = new Date("2024-06-01T10:00:00Z");
+    const open = next_window_open(w, morning);
+    expect(open.toISOString()).toBe("2024-06-02T02:00:00.000Z");
+  });
+
+  it("resolves the opening hour in the window's own time zone", () => {
+    // 12:00Z on 2024-06-01 is 08:00 in New York (EDT). A window opening
+    // at 22:00 local opens at 02:00Z the next UTC day.
+    const w = { start: 22, end: 6, timeZone: "America/New_York" };
+    const open = next_window_open(w, new Date("2024-06-01T12:00:00Z"));
+    expect(hour_in_zone(open, "America/New_York")).toBe(22);
+    expect(open.toISOString()).toBe("2024-06-02T02:00:00.000Z");
+  });
+
+  it("falls back to one day out if no hour ever matches (defensive)", () => {
+    // Fault injection: an Intl that reports an impossible hour starves
+    // the walk. Validation makes this unreachable for real windows; the
+    // backstop must still return a sane future date instead of looping.
+    const spy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "formatToParts")
+      .mockReturnValue([{ type: "hour", value: "99" } as never]);
+    try {
+      const now = new Date("2024-06-01T12:00:00Z");
+      const open = next_window_open({ start: 2, end: 6, timeZone: "UTC" }, now);
+      expect(open.getTime()).toBe(now.getTime() + 86_400_000);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
