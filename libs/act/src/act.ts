@@ -128,13 +128,18 @@ export {
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
  * Drives the typing of `emit` / `on` / `off` — the event-name argument
  * narrows its payload at the call site.
+ *
+ * The first parameter is kept (unused) for arity compatibility: `committed`
+ * carries snapshots of whichever state each action targeted, so its honest
+ * element type is `Snapshot<Schema, TEvents>` — the register map itself was
+ * never the shape of any snapshot's state.
  */
 export type ActLifecycleEvents<
-  TSchemaReg extends SchemaRegister<TActions>,
+  _TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
 > = {
-  committed: Snapshot<TSchemaReg, TEvents>[];
+  committed: Snapshot<Schema, TEvents>[];
   acked: Lease[];
   blocked: BlockedLease[];
   settled: Drain<TEvents>;
@@ -310,7 +315,7 @@ export class Act<
   TActions extends Schemas,
   TStateMap extends Record<string, Schema> = Record<string, never>,
   TActor extends Actor = Actor,
-> implements IAct<TEvents, TActions, TActor>
+> implements IAct<TEvents, TActions, TActor, TSchemaReg>
 {
   private _emitter = new EventEmitter();
   /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
@@ -891,7 +896,7 @@ export class Act<
         this._arm_for_event_names(
           snapshots.map((s) => (s.event as { name: string }).name)
         );
-      this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
+      this.emit("committed", snapshots);
       return snapshots;
     });
   }

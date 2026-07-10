@@ -203,8 +203,8 @@ export type ActionBuilder<
    * ```typescript
    * .on({ withdraw: z.object({ amount: z.number() }) })
    *   .given([
-   *     (_, snap) => snap.state.balance >= 0 || "Account closed",
-   *     (_, snap, action) => snap.state.balance >= action.amount || "Insufficient funds"
+   *     { description: "Account must be open", valid: (state) => state.status === "open" },
+   *     { description: "Funds must be available", valid: (state) => state.balance > 0 }
    *   ])
    *   .emit((action) => ["Withdrawn", { amount: action.amount }])
    * ```
@@ -223,18 +223,20 @@ export type ActionBuilder<
     /**
      * Adds business rule invariants that must hold before the action can execute.
      *
-     * Invariants are checked after loading the current state but before emitting events.
-     * Each invariant should return `true` or an error message string. All invariants
-     * must pass for the action to succeed.
+     * Invariants are checked after loading the current state but before emitting
+     * events. Each invariant pairs a `description` with a `valid(state, actor?)`
+     * predicate — when a predicate returns `false`, the action throws
+     * `InvariantError` carrying the description. All invariants must pass for
+     * the action to succeed.
      *
-     * @param rules - Array of invariant functions
+     * @param rules - Array of {@link Invariant} objects (`{ description, valid }`)
      * @returns An object with `.emit()` to finalize the action
      *
      * @example
      * ```typescript
      * .given([
-     *   (_, snap) => snap.state.status === "active" || "Must be active",
-     *   (target, snap) => snap.state.ownerId === target.actor.id || "Not authorized"
+     *   { description: "Must be active", valid: (state) => state.status === "active" },
+     *   { description: "Must be the owner", valid: (state, actor) => state.ownerId === actor?.id }
      * ])
      * ```
      */
@@ -650,20 +652,19 @@ export type ActionBuilder<
  *   })
  *   .on({ deposit: z.object({ amount: z.number() }) })
  *     .given([
- *       (_, snap) => snap.state.status === "open" || "Account must be open"
+ *       { description: "Account must be open", valid: (state) => state.status === "open" }
  *     ])
  *     .emit("Deposited")  // passthrough — action payload { amount } becomes event data
  *   .on({ withdraw: z.object({ amount: z.number() }) })
  *     .given([
- *       (_, snap) => snap.state.status === "open" || "Account must be open",
- *       (_, snap, action) =>
- *         snap.state.balance >= action.amount || "Insufficient funds"
+ *       { description: "Account must be open", valid: (state) => state.status === "open" },
+ *       { description: "Funds must be available", valid: (state) => state.balance > 0 }
  *     ])
  *     .emit("Withdrawn")
  *   .on({ close: z.object({}) })
  *     .given([
- *       (_, snap) => snap.state.status === "open" || "Already closed",
- *       (_, snap) => snap.state.balance === 0 || "Balance must be zero"
+ *       { description: "Account must be open", valid: (state) => state.status === "open" },
+ *       { description: "Balance must be zero", valid: (state) => state.balance === 0 }
  *     ])
  *     .emit("Closed")
  *   .build();

@@ -767,13 +767,18 @@ export {
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
  * Drives the typing of \`emit\` / \`on\` / \`off\` — the event-name argument
  * narrows its payload at the call site.
+ *
+ * The first parameter is kept (unused) for arity compatibility: \`committed\`
+ * carries snapshots of whichever state each action targeted, so its honest
+ * element type is \`Snapshot<Schema, TEvents>\` — the register map itself was
+ * never the shape of any snapshot's state.
  */
 export type ActLifecycleEvents<
-  TSchemaReg extends SchemaRegister<TActions>,
+  _TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
 > = {
-  committed: Snapshot<TSchemaReg, TEvents>[];
+  committed: Snapshot<Schema, TEvents>[];
   acked: Lease[];
   blocked: BlockedLease[];
   settled: Drain<TEvents>;
@@ -949,7 +954,7 @@ export class Act<
   TActions extends Schemas,
   TStateMap extends Record<string, Schema> = Record<string, never>,
   TActor extends Actor = Actor,
-> implements IAct<TEvents, TActions, TActor>
+> implements IAct<TEvents, TActions, TActor, TSchemaReg>
 {
   private _emitter = new EventEmitter();
   /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
@@ -1530,7 +1535,7 @@ export class Act<
         this._arm_for_event_names(
           snapshots.map((s) => (s.event as { name: string }).name)
         );
-      this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
+      this.emit("committed", snapshots);
       return snapshots;
     });
   }
@@ -2438,6 +2443,7 @@ export class Act<
 import type { Patch } from "@rotorsoft/act-patch";
 import type { ZodType, z } from "zod";
 import type { Disposable, TruncateResult } from "./ports.js";
+import type { SchemaRegister } from "./registry.js";
 import type {
   ActorSchema,
   CausationEventSchema,
@@ -3530,17 +3536,31 @@ export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
   | { at: Date; after?: never };
 
+/**
+ * The reaction-scoped application surface — what reaction handlers receive
+ * as their third argument, and the minimal contract host integrations can
+ * depend on.
+ *
+ * @template TEvents Event schemas
+ * @template TActions Action schemas
+ * @template TActor Actor type extending base Actor
+ * @template TSchemaReg Map of action name → target state schema, threaded by
+ *   {@link Act} so \`do\` returns snapshots typed to the action's state. The
+ *   default collapses to \`Schema\` per action, so annotations written as
+ *   \`IAct<TEvents, TActions>\` keep compiling unchanged.
+ */
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,
   TActor extends Actor = Actor,
+  TSchemaReg extends SchemaRegister<TActions> = SchemaRegister<TActions>,
 > {
   do<TKey extends keyof TActions & string>(
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     options?: DoOptions<TEvents>
-  ): Promise<Snapshot<any, any>[]>;
+  ): Promise<Snapshot<TSchemaReg[TKey], TEvents>[]>;
 
   /**
    * Load a state snapshot for a stream. Two shapes:
@@ -3558,17 +3578,28 @@ export interface IAct<
    * returns \`true\`, \`[REDACTED]\` otherwise. Forgotten events return
    * \`[SHREDDED]\` regardless of actor (data is gone, no auth question).
    */
-  load(
-    state: State<any, any, any> | string,
+  load<S extends Schema>(
+    state: State<S, any, any>,
     stream: string,
-    callback?: (snapshot: Snapshot<any, any>) => void,
+    callback?: (snapshot: Snapshot<S, TEvents>) => void,
     asOf?: AsOf
-  ): Promise<Snapshot<any, any>>;
-  load(
-    state: State<any, any, any> | string,
+  ): Promise<Snapshot<S, TEvents>>;
+  load<S extends Schema>(
+    state: State<S, any, any>,
     target: LoadTarget<TActor>,
-    callback?: (snapshot: Snapshot<any, any>) => void
-  ): Promise<Snapshot<any, any>>;
+    callback?: (snapshot: Snapshot<S, TEvents>) => void
+  ): Promise<Snapshot<S, TEvents>>;
+  load(
+    state: string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, TEvents>) => void,
+    asOf?: AsOf
+  ): Promise<Snapshot<Schema, TEvents>>;
+  load(
+    state: string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<Schema, TEvents>) => void
+  ): Promise<Snapshot<Schema, TEvents>>;
 
   query(
     query: Query,
@@ -15108,8 +15139,8 @@ export type ActionBuilder<
    * \`\`\`typescript
    * .on({ withdraw: z.object({ amount: z.number() }) })
    *   .given([
-   *     (_, snap) => snap.state.balance >= 0 || "Account closed",
-   *     (_, snap, action) => snap.state.balance >= action.amount || "Insufficient funds"
+   *     { description: "Account must be open", valid: (state) => state.status === "open" },
+   *     { description: "Funds must be available", valid: (state) => state.balance > 0 }
    *   ])
    *   .emit((action) => ["Withdrawn", { amount: action.amount }])
    * \`\`\`
@@ -15128,18 +15159,20 @@ export type ActionBuilder<
     /**
      * Adds business rule invariants that must hold before the action can execute.
      *
-     * Invariants are checked after loading the current state but before emitting events.
-     * Each invariant should return \`true\` or an error message string. All invariants
-     * must pass for the action to succeed.
+     * Invariants are checked after loading the current state but before emitting
+     * events. Each invariant pairs a \`description\` with a \`valid(state, actor?)\`
+     * predicate — when a predicate returns \`false\`, the action throws
+     * \`InvariantError\` carrying the description. All invariants must pass for
+     * the action to succeed.
      *
-     * @param rules - Array of invariant functions
+     * @param rules - Array of {@link Invariant} objects (\`{ description, valid }\`)
      * @returns An object with \`.emit()\` to finalize the action
      *
      * @example
      * \`\`\`typescript
      * .given([
-     *   (_, snap) => snap.state.status === "active" || "Must be active",
-     *   (target, snap) => snap.state.ownerId === target.actor.id || "Not authorized"
+     *   { description: "Must be active", valid: (state) => state.status === "active" },
+     *   { description: "Must be the owner", valid: (state, actor) => state.ownerId === actor?.id }
      * ])
      * \`\`\`
      */
@@ -15555,20 +15588,19 @@ export type ActionBuilder<
  *   })
  *   .on({ deposit: z.object({ amount: z.number() }) })
  *     .given([
- *       (_, snap) => snap.state.status === "open" || "Account must be open"
+ *       { description: "Account must be open", valid: (state) => state.status === "open" }
  *     ])
  *     .emit("Deposited")  // passthrough — action payload { amount } becomes event data
  *   .on({ withdraw: z.object({ amount: z.number() }) })
  *     .given([
- *       (_, snap) => snap.state.status === "open" || "Account must be open",
- *       (_, snap, action) =>
- *         snap.state.balance >= action.amount || "Insufficient funds"
+ *       { description: "Account must be open", valid: (state) => state.status === "open" },
+ *       { description: "Funds must be available", valid: (state) => state.balance > 0 }
  *     ])
  *     .emit("Withdrawn")
  *   .on({ close: z.object({}) })
  *     .given([
- *       (_, snap) => snap.state.status === "open" || "Already closed",
- *       (_, snap) => snap.state.balance === 0 || "Balance must be zero"
+ *       { description: "Account must be open", valid: (state) => state.status === "open" },
+ *       { description: "Balance must be zero", valid: (state) => state.balance === 0 }
  *     ])
  *     .emit("Closed")
  *   .build();
@@ -16609,13 +16641,18 @@ export {
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
  * Drives the typing of \`emit\` / \`on\` / \`off\` — the event-name argument
  * narrows its payload at the call site.
+ *
+ * The first parameter is kept (unused) for arity compatibility: \`committed\`
+ * carries snapshots of whichever state each action targeted, so its honest
+ * element type is \`Snapshot<Schema, TEvents>\` — the register map itself was
+ * never the shape of any snapshot's state.
  */
 export type ActLifecycleEvents<
-  TSchemaReg extends SchemaRegister<TActions>,
+  _TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
 > = {
-  committed: Snapshot<TSchemaReg, TEvents>[];
+  committed: Snapshot<Schema, TEvents>[];
   acked: Lease[];
   blocked: BlockedLease[];
   settled: Drain<TEvents>;
@@ -16791,7 +16828,7 @@ export class Act<
   TActions extends Schemas,
   TStateMap extends Record<string, Schema> = Record<string, never>,
   TActor extends Actor = Actor,
-> implements IAct<TEvents, TActions, TActor>
+> implements IAct<TEvents, TActions, TActor, TSchemaReg>
 {
   private _emitter = new EventEmitter();
   /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
@@ -17372,7 +17409,7 @@ export class Act<
         this._arm_for_event_names(
           snapshots.map((s) => (s.event as { name: string }).name)
         );
-      this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
+      this.emit("committed", snapshots);
       return snapshots;
     });
   }
@@ -18280,6 +18317,7 @@ export class Act<
 import type { Patch } from "@rotorsoft/act-patch";
 import type { ZodType, z } from "zod";
 import type { Disposable, TruncateResult } from "./ports.js";
+import type { SchemaRegister } from "./registry.js";
 import type {
   ActorSchema,
   CausationEventSchema,
@@ -19372,17 +19410,31 @@ export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
   | { at: Date; after?: never };
 
+/**
+ * The reaction-scoped application surface — what reaction handlers receive
+ * as their third argument, and the minimal contract host integrations can
+ * depend on.
+ *
+ * @template TEvents Event schemas
+ * @template TActions Action schemas
+ * @template TActor Actor type extending base Actor
+ * @template TSchemaReg Map of action name → target state schema, threaded by
+ *   {@link Act} so \`do\` returns snapshots typed to the action's state. The
+ *   default collapses to \`Schema\` per action, so annotations written as
+ *   \`IAct<TEvents, TActions>\` keep compiling unchanged.
+ */
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,
   TActor extends Actor = Actor,
+  TSchemaReg extends SchemaRegister<TActions> = SchemaRegister<TActions>,
 > {
   do<TKey extends keyof TActions & string>(
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     options?: DoOptions<TEvents>
-  ): Promise<Snapshot<any, any>[]>;
+  ): Promise<Snapshot<TSchemaReg[TKey], TEvents>[]>;
 
   /**
    * Load a state snapshot for a stream. Two shapes:
@@ -19400,17 +19452,28 @@ export interface IAct<
    * returns \`true\`, \`[REDACTED]\` otherwise. Forgotten events return
    * \`[SHREDDED]\` regardless of actor (data is gone, no auth question).
    */
-  load(
-    state: State<any, any, any> | string,
+  load<S extends Schema>(
+    state: State<S, any, any>,
     stream: string,
-    callback?: (snapshot: Snapshot<any, any>) => void,
+    callback?: (snapshot: Snapshot<S, TEvents>) => void,
     asOf?: AsOf
-  ): Promise<Snapshot<any, any>>;
-  load(
-    state: State<any, any, any> | string,
+  ): Promise<Snapshot<S, TEvents>>;
+  load<S extends Schema>(
+    state: State<S, any, any>,
     target: LoadTarget<TActor>,
-    callback?: (snapshot: Snapshot<any, any>) => void
-  ): Promise<Snapshot<any, any>>;
+    callback?: (snapshot: Snapshot<S, TEvents>) => void
+  ): Promise<Snapshot<S, TEvents>>;
+  load(
+    state: string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, TEvents>) => void,
+    asOf?: AsOf
+  ): Promise<Snapshot<Schema, TEvents>>;
+  load(
+    state: string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<Schema, TEvents>) => void
+  ): Promise<Snapshot<Schema, TEvents>>;
 
   query(
     query: Query,
@@ -30975,6 +31038,7 @@ exports[`@rotorsoft/act — public API stability > stable public surface for ./t
 import type { Patch } from "@rotorsoft/act-patch";
 import type { ZodType, z } from "zod";
 import type { Disposable, TruncateResult } from "./ports.js";
+import type { SchemaRegister } from "./registry.js";
 import type {
   ActorSchema,
   CausationEventSchema,
@@ -32067,17 +32131,31 @@ export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
   | { at: Date; after?: never };
 
+/**
+ * The reaction-scoped application surface — what reaction handlers receive
+ * as their third argument, and the minimal contract host integrations can
+ * depend on.
+ *
+ * @template TEvents Event schemas
+ * @template TActions Action schemas
+ * @template TActor Actor type extending base Actor
+ * @template TSchemaReg Map of action name → target state schema, threaded by
+ *   {@link Act} so \`do\` returns snapshots typed to the action's state. The
+ *   default collapses to \`Schema\` per action, so annotations written as
+ *   \`IAct<TEvents, TActions>\` keep compiling unchanged.
+ */
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,
   TActor extends Actor = Actor,
+  TSchemaReg extends SchemaRegister<TActions> = SchemaRegister<TActions>,
 > {
   do<TKey extends keyof TActions & string>(
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     options?: DoOptions<TEvents>
-  ): Promise<Snapshot<any, any>[]>;
+  ): Promise<Snapshot<TSchemaReg[TKey], TEvents>[]>;
 
   /**
    * Load a state snapshot for a stream. Two shapes:
@@ -32095,17 +32173,28 @@ export interface IAct<
    * returns \`true\`, \`[REDACTED]\` otherwise. Forgotten events return
    * \`[SHREDDED]\` regardless of actor (data is gone, no auth question).
    */
-  load(
-    state: State<any, any, any> | string,
+  load<S extends Schema>(
+    state: State<S, any, any>,
     stream: string,
-    callback?: (snapshot: Snapshot<any, any>) => void,
+    callback?: (snapshot: Snapshot<S, TEvents>) => void,
     asOf?: AsOf
-  ): Promise<Snapshot<any, any>>;
-  load(
-    state: State<any, any, any> | string,
+  ): Promise<Snapshot<S, TEvents>>;
+  load<S extends Schema>(
+    state: State<S, any, any>,
     target: LoadTarget<TActor>,
-    callback?: (snapshot: Snapshot<any, any>) => void
-  ): Promise<Snapshot<any, any>>;
+    callback?: (snapshot: Snapshot<S, TEvents>) => void
+  ): Promise<Snapshot<S, TEvents>>;
+  load(
+    state: string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, TEvents>) => void,
+    asOf?: AsOf
+  ): Promise<Snapshot<Schema, TEvents>>;
+  load(
+    state: string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<Schema, TEvents>) => void
+  ): Promise<Snapshot<Schema, TEvents>>;
 
   query(
     query: Query,
