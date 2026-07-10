@@ -45,6 +45,20 @@ bar. On Postgres, `seed()` opens with a transaction-scoped advisory lock so
 N workers cold-booting an empty schema serialize instead of tripping
 `IF NOT EXISTS` catalog races.
 
+A widening type change is additive too, and rides the same ladder — an
+idempotent `ALTER COLUMN ... TYPE` that is a no-op once the column already
+has the wider type and preserves every existing value. The precedent is the
+`streams.retry` widening from `smallint` to `int`
+([#1190](https://github.com/Rotorsoft/act-root/issues/1190)): `claim()`
+increments `retry` on every acquisition and never resets it for a
+zero-progress `blockOnError: false` stream, so a poison stream marches the
+counter up without bound and the old `smallint` overflowed at 32768,
+throwing "smallint out of range" and killing every claim in the lane. Just
+editing the `CREATE TABLE` would only fix fresh databases — the fix has to
+be a ladder step so existing deployments migrate on their next boot. The
+widening also aligns Postgres with the unbounded `retry` of the
+SQLite/InMemory adapters, closing a silent cross-adapter divergence.
+
 Adoption is **import, not adapt**: `seed()` assumes Act owns its tables. To
 bring existing events in from another system or shape, seed a fresh store
 and import via `scan`/`restore` (see § Implementing `Store.restore` below
