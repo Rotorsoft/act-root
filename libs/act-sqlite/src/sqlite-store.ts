@@ -561,9 +561,13 @@ export class SqliteStore implements Store {
 
         let has_events: boolean;
         if (source) {
+          // Exact-source has-work probe: `source` is an exact stream
+          // name, so plain equality keeps the probe on the stream index.
+          // The portable LIKE grammar stays on the StreamFilter surfaces
+          // (`query_streams`, `reset`, `unblock`), never on claim.
           const check = await tx.execute({
-            sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\' LIMIT 1`,
-            args: [at, streamPatternToLike(source)],
+            sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1`,
+            args: [at, source],
           });
           has_events = check.rows.length > 0;
         } else {
