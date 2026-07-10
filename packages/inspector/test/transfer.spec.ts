@@ -9,19 +9,33 @@
  * capability rejection.
  */
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { CsvFile } from "@rotorsoft/act";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { inspectorRouter } from "../src/server/router.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Transfers write to a persistent target, so they're gated behind
+// write-mode (#1194). Enable it before the router module reads the env
+// at import time. The path guard (#1194) also rejects paths outside the
+// inspector cwd, so `dir` is a temp folder created *under* cwd (not
+// `os.tmpdir()`), and every transfer passes cwd-relative paths.
+vi.hoisted(() => {
+  process.env.ACT_INSPECTOR_WRITE = "1";
+});
+
+const { inspectorRouter } = await import("../src/server/router.js");
 
 const caller = inspectorRouter.createCaller({});
 
+// Absolute temp dir under cwd + the same dir expressed relative to cwd.
+// Setup helpers use the absolute form; every `transfer` call passes the
+// relative form so it survives the cwd path guard.
 let dir: string;
+let rel: (name: string) => string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), "act-inspector-transfer-"));
+  dir = await mkdtemp(path.join(process.cwd(), "act-inspector-transfer-"));
+  rel = (name: string) => path.relative(process.cwd(), path.join(dir, name));
 });
 
 afterEach(async () => {
@@ -35,8 +49,8 @@ afterEach(async () => {
  * so test setup is independent of the code under test.
  */
 async function buildSqliteWithEvents(name: string, n: number): Promise<string> {
-  const file = path.join(dir, name);
-  const store = new SqliteStore({ url: `file:${file}` });
+  const relPath = rel(name);
+  const store = new SqliteStore({ url: `file:${path.join(dir, name)}` });
   try {
     await store.seed();
     for (let i = 0; i < n; i++)
@@ -47,16 +61,18 @@ async function buildSqliteWithEvents(name: string, n: number): Promise<string> {
   } finally {
     await store.dispose();
   }
-  return file;
+  // Return the cwd-relative form — every `transfer` call passes this so
+  // it survives the path guard (#1194).
+  return relPath;
 }
 
 /**
  * Count events in a SQLite file by querying directly. Like the
  * setup helper, this stays adapter-native to keep the test
- * orthogonal to the inspector.
+ * orthogonal to the inspector. Takes a cwd-relative path.
  */
 async function countSqliteEvents(file: string): Promise<number> {
-  const store = new SqliteStore({ url: `file:${file}` });
+  const store = new SqliteStore({ url: `file:${path.resolve(file)}` });
   try {
     let n = 0;
     await store.query(() => {
@@ -81,7 +97,7 @@ describe("transfer", () => {
 
   it("transfers events SQLite → CSV with verbatim counts and id renumber", async () => {
     const sourceFile = await buildSqliteWithEvents("source.sqlite", 3);
-    const targetFile = path.join(dir, "out.csv");
+    const targetFile = rel("out.csv");
     const result = await caller.transfer({
       source: { adapter: "sqlite", file: sourceFile, table: "events" },
       target: { adapter: "csv", file: targetFile },
@@ -92,7 +108,7 @@ describe("transfer", () => {
     expect(result.result.duration_ms).toBeGreaterThanOrEqual(0);
     // Sink renumbers ids densely from 1.
     const back: Array<{ id: number }> = [];
-    await new CsvFile({ path: targetFile }).query((e) =>
+    await new CsvFile({ path: path.resolve(targetFile) }).query((e) =>
       back.push({ id: e.id })
     );
     expect(back.map((e) => e.id)).toEqual([1, 2, 3]);
@@ -102,15 +118,15 @@ describe("transfer", () => {
     // First produce a CSV file by transferring out from SQLite, then
     // transfer back into a fresh SQLite file and check the count.
     const srcSqlite = await buildSqliteWithEvents("src.sqlite", 5);
-    const csv = path.join(dir, "mid.csv");
+    const csv = rel("mid.csv");
     await caller.transfer({
       source: { adapter: "sqlite", file: srcSqlite, table: "events" },
       target: { adapter: "csv", file: csv },
     });
 
-    const dstSqlite = path.join(dir, "dst.sqlite");
+    const dstSqlite = rel("dst.sqlite");
     // Seed an empty target so it has the events table.
-    const seed = new SqliteStore({ url: `file:${dstSqlite}` });
+    const seed = new SqliteStore({ url: `file:${path.resolve(dstSqlite)}` });
     await seed.seed();
     await seed.dispose();
 
@@ -124,7 +140,7 @@ describe("transfer", () => {
 
   it("dry-run reports counts without touching the target", async () => {
     const srcFile = await buildSqliteWithEvents("dry-src.sqlite", 4);
-    const targetFile = path.join(dir, "untouched.csv");
+    const targetFile = rel("untouched.csv");
     const result = await caller.transfer({
       source: { adapter: "sqlite", file: srcFile, table: "events" },
       target: { adapter: "csv", file: targetFile },
@@ -133,7 +149,7 @@ describe("transfer", () => {
     expect(result.result.kept).toBe(4);
     // No file should have been written by the dry-run path.
     await expect(
-      new CsvFile({ path: targetFile }).query(() => {})
+      new CsvFile({ path: path.resolve(targetFile) }).query(() => {})
     ).rejects.toThrow();
   });
 
@@ -145,10 +161,10 @@ describe("transfer", () => {
       caller.transfer({
         source: {
           adapter: "sqlite",
-          file: path.join(dir, "does-not-exist.sqlite"),
+          file: rel("does-not-exist.sqlite"),
           table: "events",
         },
-        target: { adapter: "csv", file: path.join(dir, "irrelevant.csv") },
+        target: { adapter: "csv", file: rel("irrelevant.csv") },
       })
     ).rejects.toThrow(/Transfer failed/);
   });
