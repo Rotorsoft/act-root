@@ -4802,9 +4802,9 @@ const AutoclosePolicySchema = z
  * not mean "match everything."
  *
  * @property after - Close when \`head.created\` is at least the resolved
- *   window in the past. Nested object leaves room for \`hours\` / \`ms\`
- *   units later without polluting the top level. Fractional \`days\`
- *   accepted (\`{ days: 1/24 }\` is 1 hour) so sub-day windows work.
+ *   window in the past. Days are the close surface's only unit;
+ *   fractional \`days\` cover sub-day cooldowns (\`{ days: 1/24 }\` is one
+ *   hour) without introducing another denomination.
  * @property is - Close when \`head.name\` matches. String for the
  *   single-terminal-event case (the most common); \`readonly string[]\`
  *   for multi-terminal states (\`Order: Shipped | Delivered |
@@ -20603,9 +20603,9 @@ const AutoclosePolicySchema = z
  * not mean "match everything."
  *
  * @property after - Close when \`head.created\` is at least the resolved
- *   window in the past. Nested object leaves room for \`hours\` / \`ms\`
- *   units later without polluting the top level. Fractional \`days\`
- *   accepted (\`{ days: 1/24 }\` is 1 hour) so sub-day windows work.
+ *   window in the past. Days are the close surface's only unit;
+ *   fractional \`days\` cover sub-day cooldowns (\`{ days: 1/24 }\` is one
+ *   hour) without introducing another denomination.
  * @property is - Close when \`head.name\` matches. String for the
  *   single-terminal-event case (the most common); \`readonly string[]\`
  *   for multi-terminal states (\`Order: Shipped | Delivered |
