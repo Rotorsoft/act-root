@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.26.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.2...@rotorsoft/act-tck-v1.26.3) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act:** type the reaction-scoped iact and repair invariant doc examples ([239137b](https://github.com/rotorsoft/act-root/commit/239137b4668c887a3724d97cc1ea40e1bafe22d1)), closes [#1185](https://github.com/rotorsoft/act-root/issues/1185)
+
 # [@rotorsoft/act-tck-v1.26.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.1...@rotorsoft/act-tck-v1.26.2) (2026-07-10)
 
 
