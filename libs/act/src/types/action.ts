@@ -598,11 +598,17 @@ export type AutoclosePredicate<TEvents extends Schemas> = (
  * truncate runs without an archive step (matches the explicit
  * `app.close({ stream })` default).
  *
+ * On a **windowed** close staged by a rolling-window policy
+ * (`.autocloses({ keep })`), the third argument carries the cutoff —
+ * archive the events older than `before`; the prune deletes a subset of
+ * them (the prefix below the boundary snapshot). Absent on full closes.
+ *
  * @template TEvents Event schemas declared by the owning state.
  */
 export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
-  head: Committed<TEvents, keyof TEvents>
+  head: Committed<TEvents, keyof TEvents>,
+  before?: Date
 ) => Promise<void>;
 
 /**
@@ -672,6 +678,17 @@ export type State<
    */
   autoclose_after_ms?: number;
   /**
+   * The rolling-window width (ms) of the `.autocloses({ keep })` policy,
+   * or `undefined` when the policy declares no rolling window (#1011).
+   * The synthesized autoclose reaction stages a windowed close (prune
+   * the prefix older than `now − autoclose_keep_ms` behind the closest
+   * safe snapshot) when the oldest surviving domain event ages out, and
+   * defers to `tail.created + autoclose_keep_ms` otherwise. Set
+   * alongside `autoclose` by the builder; only reachable behind
+   * `.snap(...)`.
+   */
+  autoclose_keep_ms?: number;
+  /**
    * Archiver set by `.archives(fn)`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
    * stages, so the existing close-cycle's archive-while-guarded
@@ -682,7 +699,8 @@ export type State<
    */
   archive?(
     stream: string,
-    head: Committed<TEvents, keyof TEvents>
+    head: Committed<TEvents, keyof TEvents>,
+    before?: Date
   ): Promise<void>;
   /**
    * Build-time step delegates wired by `act().build()`. The orchestrator
@@ -776,25 +794,42 @@ export type CloseTarget = {
   /** Stream name to close */
   readonly stream: string;
   /** When true, restart with a `__snapshot__` of the final state.
-   *  When false/omitted, permanently close with a `__tombstone__`. */
+   *  When false/omitted, permanently close with a `__tombstone__`.
+   *  Mutually exclusive with {@link before}. */
   readonly restart?: boolean;
   /** Called before truncation while the stream is guarded (no concurrent writes).
    *  Use `app.query()` or `app.query_array()` inside for pagination.
-   *  If it throws, the stream remains guarded but is not truncated. */
+   *  If it throws, the stream remains guarded but is not truncated.
+   *  On a windowed close ({@link before} set) there is no guard — the
+   *  callback archives the immutable pre-cutoff prefix, which concurrent
+   *  appends cannot change. */
   readonly archive?: () => Promise<void>;
+  /** Windowed close: prune events older than this cutoff instead of
+   *  closing the stream. The store deletes the prefix below the closest
+   *  safe `__snapshot__` (`created < before`, capped at the min consumer
+   *  watermark) and keeps the snapshot + tail — no tombstone, no seed,
+   *  and the stream keeps accepting actions. No qualifying snapshot ⇒
+   *  the stream is skipped this cycle. Mutually exclusive with
+   *  {@link restart}. */
+  readonly before?: Date;
 };
 
 /**
  * Result of a close operation — per-stream truncate outcomes plus the
  * names of any streams that were skipped (concurrent writes, pending
- * reactions).
+ * reactions, or windowed closes with no qualifying snapshot).
+ *
+ * Windowed entries in `truncated` echo the cutoff as `before` and carry
+ * the surviving boundary snapshot as `committed` — that's how consumers
+ * of the `closed` lifecycle event distinguish prunes from full closes.
  *
  * @see {@link IAct.close} for the close-the-books API
  */
 export type CloseResult = {
   /** Per-stream truncate results (deleted count + committed event) */
   readonly truncated: TruncateResult;
-  /** Streams skipped due to pending reactions or concurrent writes */
+  /** Streams skipped due to pending reactions, concurrent writes, or a
+   *  windowed close finding no qualifying snapshot */
   readonly skipped: string[];
 };
 

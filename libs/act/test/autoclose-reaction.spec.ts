@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   act,
@@ -190,5 +190,174 @@ describe("autoclose as a synthesized reaction", () => {
     expect(events.every((e) => (e.name as string) !== "__tombstone__")).toBe(
       true
     );
+  });
+});
+
+/**
+ * Rolling-window retention (#1011): `.autocloses({ keep })` stages
+ * *windowed* closes through the same synthesized reaction — prune the
+ * prefix older than `now − keep` behind the closest safe snapshot, defer
+ * to `tail.created + keep` otherwise. Only Date is faked so the store
+ * and drain keep their real timer behavior.
+ */
+describe("autoclose rolling window (keep)", () => {
+  // Snapshot every 2 patches so streams grow real boundaries.
+  function windowed_base() {
+    return state({ WTicket: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Bumped: ZodEmpty, Resolved: ZodEmpty })
+      .patch({
+        Bumped: (_, s) => ({ n: s.n + 1 }),
+        Resolved: (_, s) => s,
+      })
+      .on({ bump: ZodEmpty })
+      .emit(() => ["Bumped", {}])
+      .on({ resolve: ZodEmpty })
+      .emit(() => ["Resolved", {}])
+      .snap((s) => s.patches >= 2);
+  }
+
+  const actor = { id: "a", name: "a" };
+  const T0 = new Date("2026-01-01T00:00:00Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await dispose()();
+  });
+
+  it("defers while the window holds, prunes once the tail ages out", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ keep: { days: 1 } })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    for (let i = 0; i < 4; i++)
+      await app.do("bump", { stream: "k1", actor }, {});
+    await app.correlate();
+    await app.drain();
+    // Everything is younger than the window — deferred, nothing closed.
+    expect(closed).toHaveLength(0);
+
+    // Two days later the oldest domain event has aged out. A fresh event
+    // re-arms the drain (the deferred due-time has passed, so the parked
+    // reaction re-evaluates) and the prune is staged.
+    vi.setSystemTime(new Date(T0.getTime() + 2 * 86_400_000));
+    await app.do("bump", { stream: "k1", actor }, {});
+    await app.drain();
+
+    expect(closed).toHaveLength(1);
+    const entry = closed[0].truncated.get("k1");
+    expect(entry?.before).toBeInstanceOf(Date);
+    expect(entry?.committed.name).toBe("__snapshot__");
+
+    // Prefix pruned behind the boundary snapshot; the stream stays live.
+    const events = await app.query_array({
+      stream: "k1",
+      stream_exact: true,
+      with_snaps: true,
+      after: -1,
+    });
+    expect(events[0].name).toBe("__snapshot__");
+    expect(events.every((e) => (e.name as string) !== "__tombstone__")).toBe(
+      true
+    );
+    await app.do("bump", { stream: "k1", actor }, {});
+  });
+
+  it("passes the cutoff to the archiver on a windowed close", async () => {
+    const calls: Array<{ stream: string; before?: Date }> = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ keep: { days: 1 } })
+          .archives(async (stream, _head, before) => {
+            calls.push({ stream, before });
+          })
+          .build()
+      )
+      .build();
+
+    for (let i = 0; i < 4; i++)
+      await app.do("bump", { stream: "k2", actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(calls).toHaveLength(0);
+
+    vi.setSystemTime(new Date(T0.getTime() + 2 * 86_400_000));
+    await app.do("bump", { stream: "k2", actor }, {});
+    await app.drain();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].stream).toBe("k2");
+    expect(calls[0].before).toBeInstanceOf(Date);
+  });
+
+  it("terminate and prune stay independent — `is` full-closes even with keep declared", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ is: "Resolved", keep: { days: 1 } })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    // Two bumps fire the snap predicate; the resolve lands after the
+    // snapshot so the stream head is the terminal domain event (a
+    // trailing snapshot would defer the guarded full close to the next
+    // trigger).
+    await app.do("bump", { stream: "k3", actor }, {});
+    await app.do("bump", { stream: "k3", actor }, {});
+    await app.do("resolve", { stream: "k3", actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    expect(closed).toHaveLength(1);
+    const entry = closed[0].truncated.get("k3");
+    expect(entry?.before).toBeUndefined();
+    expect(entry?.committed.name).toBe("__tombstone__");
+  });
+
+  it("skips the prune when no snapshot qualifies, retrying next trigger", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ keep: { days: 1 } })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    // A single event — the snap predicate (patches >= 2) never fired,
+    // so there is no boundary to prune behind.
+    await app.do("bump", { stream: "k4", actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    // A fresh event re-arms the drain. It also fires the snap predicate
+    // (patches >= 2), but the new snapshot's `created` is *inside* the
+    // window, so it never qualifies as a boundary — the prune still
+    // no-ops and the stream is reported skipped.
+    vi.setSystemTime(new Date(T0.getTime() + 2 * 86_400_000));
+    await app.do("bump", { stream: "k4", actor }, {});
+    await app.drain();
+
+    expect(closed).toHaveLength(1);
+    expect(closed[0].truncated.size).toBe(0);
+    expect(closed[0].skipped).toEqual(["k4"]);
+    const events = await app.query_array({ stream: "k4", stream_exact: true });
+    expect(events).toHaveLength(2);
   });
 });

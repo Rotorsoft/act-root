@@ -8,6 +8,7 @@ import type { ZodType } from "zod";
 import {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_keep_ms,
   policy_min_after_ms,
 } from "../internal/index.js";
 import type {
@@ -141,6 +142,10 @@ type ActionEntry<
  * @template TEvents - Event schemas type
  * @template TActions - Action schemas type
  * @template TName - State name literal type
+ * @template TSnap - `true` once `.snap(...)` has been called. Gates the
+ *   `.autocloses({ keep })` rolling-window option — a windowed close is
+ *   meaningless without snapshots, so `keep` only typechecks after
+ *   `.snap` in the chain.
  *
  * @see {@link state} for complete usage examples
  */
@@ -149,6 +154,7 @@ export type ActionBuilder<
   TEvents extends Schemas,
   TActions extends Schemas,
   TName extends string = string,
+  TSnap extends boolean = false,
 > = {
   /**
    * Defines an action (command) that can be executed on this state.
@@ -273,7 +279,8 @@ export type ActionBuilder<
           TState,
           TEvents,
           TActions & { [P in TKey]: TNewActions },
-          TName
+          TName,
+          TSnap
         >;
         /** Passthrough — the action payload becomes the event data
          *  directly. Must reference an event declared in `.emits()`. */
@@ -283,7 +290,8 @@ export type ActionBuilder<
           TState,
           TEvents,
           TActions & { [P in TKey]: TNewActions },
-          TName
+          TName,
+          TSnap
         >;
       };
     };
@@ -332,7 +340,8 @@ export type ActionBuilder<
         TState,
         TEvents,
         TActions & { [P in TKey]: TNewActions },
-        TName
+        TName,
+        TSnap
       >;
       (
         event_name: keyof TEvents & string
@@ -340,7 +349,8 @@ export type ActionBuilder<
         TState,
         TEvents,
         TActions & { [P in TKey]: TNewActions },
-        TName
+        TName,
+        TSnap
       >;
     };
   };
@@ -377,7 +387,7 @@ export type ActionBuilder<
    */
   snap: (
     snap: (snapshot: Snapshot<TState, TEvents>) => boolean
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  ) => ActionBuilder<TState, TEvents, TActions, TName, true>;
   /**
    * Declares the disclosure predicate for `sensitive(...)`-marked event
    * fields. Gates external reads: returning `true` allows the actor to see
@@ -412,7 +422,7 @@ export type ActionBuilder<
       event: Committed<TEvents, keyof TEvents & string>,
       actor: Actor
     ) => boolean
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  ) => ActionBuilder<TState, TEvents, TActions, TName, TSnap>;
   /**
    * Declares the online close predicate for this state. The
    * orchestrator's autoclose cycle iterates the state's streams once
@@ -481,10 +491,34 @@ export type ActionBuilder<
    * ```typescript
    * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
    * ```
+   *
+   * @example Rolling window — keep the last 180 days of real events on a
+   *   live stream (requires `.snap(...)` earlier in the chain; `keep`
+   *   won't typecheck without it). Each eligible cycle prunes the prefix
+   *   below the closest safe snapshot older than `now − keep`.
+   * ```typescript
+   * .snap((s) => s.patches >= 100)
+   * .autocloses({ keep: { days: 180 } })
+   * ```
+   *
+   * @example Terminate AND prune — close 90 days after resolution,
+   *   meanwhile keep open streams pruned to a 180-day window.
+   * ```typescript
+   * .snap((s) => s.patches >= 100)
+   * .autocloses({ is: "TicketResolved", after: { days: 90 }, keep: { days: 180 } })
+   * ```
    */
   autocloses: (
-    policy: AutoclosePolicy
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+    policy: [TSnap] extends [true]
+      ? AutoclosePolicy
+      : Omit<AutoclosePolicy, "keep"> & {
+          /** Rolling-window retention requires `.snap(...)` earlier in
+           *  the builder chain — a windowed close prunes behind a real
+           *  snapshot, so a state that never snapshots has nothing to
+           *  prune behind. */
+          keep?: never;
+        }
+  ) => ActionBuilder<TState, TEvents, TActions, TName, TSnap>;
   /**
    * Declares the archiver the online close cycle runs **before**
    * truncating a stream this state's `.autocloses(...)` predicate
@@ -524,7 +558,7 @@ export type ActionBuilder<
    */
   archives: (
     archive: AutocloseArchiver<TEvents>
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  ) => ActionBuilder<TState, TEvents, TActions, TName, TSnap>;
   /**
    * Finalizes and builds the state definition.
    *
@@ -801,7 +835,15 @@ function action_builder<
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {
       internal.snap = snap;
-      return builder;
+      // Flip the type-level TSnap flag — same runtime object, the cast
+      // unlocks `.autocloses({ keep })` for the rest of the chain.
+      return builder as unknown as ActionBuilder<
+        TState,
+        TEvents,
+        TActions,
+        TName,
+        true
+      >;
     },
 
     discloses(
@@ -834,14 +876,23 @@ function action_builder<
           ".autocloses(...) requires a policy object; got " + typeof policy
         );
       }
+      // The type gate (`TSnap`) already rejects `keep` before `.snap` at
+      // compile time; this is the equivalent guard for untyped callers.
+      if ((policy as AutoclosePolicy).keep && !internal.snap) {
+        throw new Error(
+          ".autocloses({ keep }) requires .snap(...) earlier in the chain — a rolling window prunes behind a real snapshot, so a state that never snapshots has nothing to prune behind."
+        );
+      }
       // Replace on every call — matches snap / discloses state-level
       // semantics. Compile to the predicate the reaction evaluates, and
       // cache the policy's min `after` window so the reaction knows whether
-      // to park on a due-time or wait for the next event.
+      // to park on a due-time or wait for the next event; `keep` resolves
+      // to the rolling-window width the reaction prunes against.
       internal.autoclose = compile_autoclose_policy(
         policy
       ) as AutoclosePredicate<TEvents>;
       internal.autoclose_after_ms = policy_min_after_ms(policy);
+      internal.autoclose_keep_ms = policy_keep_ms(policy);
       return builder;
     },
 

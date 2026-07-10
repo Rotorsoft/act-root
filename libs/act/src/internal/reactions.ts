@@ -189,8 +189,13 @@ export function build_handle<
             acked_at: error.at ?? event.id,
             // Close the signalled stream (the autoclose reaction's aggregate,
             // which differs from its synthetic lease stream); a self-closing
-            // user reaction omits it and closes its own lease stream.
-            close: { stream: error.stream ?? stream, archive: error.archive },
+            // user reaction omits it and closes its own lease stream. A
+            // carried `before` makes it a windowed close (prune, not retire).
+            close: {
+              stream: error.stream ?? stream,
+              archive: error.archive,
+              before: error.before,
+            },
           };
         return finalize(
           lease,

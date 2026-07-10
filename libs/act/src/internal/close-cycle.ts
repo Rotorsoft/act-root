@@ -76,6 +76,11 @@ type StreamHead = {
  * Run the full close cycle for the given targets. Caller owns the
  * lifecycle event emission.
  *
+ * Targets carrying a `before` cutoff take the **windowed** branch — a
+ * pure prefix delete behind an existing snapshot (see
+ * {@link run_windowed_closes}); the rest run the guarded
+ * tombstone/restart pipeline below.
+ *
  * @internal
  */
 export async function run_close_cycle(
@@ -85,8 +90,22 @@ export async function run_close_cycle(
   // Caller (Act.close) filters empty targets; run_close_cycle assumes at
   // least one target.
   const target_map = new Map(targets.map((t) => [t.stream, t]));
-  const streams = [...target_map.keys()];
+  for (const t of target_map.values()) {
+    if (t.before !== undefined && t.restart)
+      throw new Error(
+        `close: \`before\` and \`restart\` are mutually exclusive (stream "${t.stream}") — a windowed close keeps the stream live behind a real snapshot; restart reseeds it`
+      );
+  }
+  const windowed = [...target_map.values()].filter(
+    (t) => t.before !== undefined
+  );
+  const full = [...target_map.values()].filter((t) => t.before === undefined);
   const skipped: string[] = [];
+  const windowed_result = windowed.length
+    ? await run_windowed_closes(windowed, deps, skipped)
+    : new Map();
+  if (!full.length) return { truncated: windowed_result, skipped };
+  const streams = full.map((t) => t.stream);
 
   // 1. Scan: find the latest non-tombstone event per stream
   const stream_info = await scan_stream_heads(streams);
@@ -98,7 +117,7 @@ export async function run_close_cycle(
     skipped,
     deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
   );
-  if (!safe.length) return { truncated: new Map(), skipped };
+  if (!safe.length) return { truncated: windowed_result, skipped };
 
   // 3. Guard: commit a tombstone with expectedVersion per safe stream.
   // Correlation comes from the orchestrator's configured correlator so
@@ -110,7 +129,7 @@ export async function run_close_cycle(
     deps.tombstone,
     skipped
   );
-  if (!guarded.length) return { truncated: new Map(), skipped };
+  if (!guarded.length) return { truncated: windowed_result, skipped };
 
   // 4. Seed: load final state for restart targets through the owning state
   const seed_states = await load_restart_seeds(
@@ -133,7 +152,115 @@ export async function run_close_cycle(
     deps.correlation
   );
 
+  for (const [stream, entry] of windowed_result) truncated.set(stream, entry);
   return { truncated, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Windowed branch — prune the prefix behind an existing snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the windowed closes: probe the min consumer watermark per stream
+ * (the `max_id` cap that keeps the boundary at/below what the laggiest
+ * consumer has read), run archive callbacks against the cutoff, then
+ * hand the boundary targets to {@link Store.truncate}.
+ *
+ * No tombstone guard and no cache touch — the cutoff is always in the
+ * past, so a concurrently-written snapshot (`created = now`) can never
+ * become the boundary: once the cutoff is fixed the boundary snapshot is
+ * fixed, and the prefix below it is immutable. Concurrent appends land
+ * at the head, above the boundary. Current state is unchanged, so the
+ * cache stays warm. Streams the store skips (no qualifying snapshot)
+ * are reported in `skipped`.
+ *
+ * @internal
+ */
+async function run_windowed_closes(
+  windowed: CloseTarget[],
+  deps: CloseCycleDeps,
+  skipped: string[]
+): Promise<CloseResult["truncated"]> {
+  // 1. Safety probe: min consumer watermark per stream. Skipped entirely
+  // when the app has no reactions — nothing can lag.
+  const min_at =
+    deps.reactive_events_size > 0
+      ? await probe_min_watermarks(
+          windowed.map((t) => t.stream),
+          deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
+        )
+      : new Map<string, number>();
+
+  // 2. Archive: user callbacks against the cutoff. Sequential for the
+  // same reason as the full path — shared resources, fail-fast. The
+  // pre-cutoff prefix is immutable, so no guard is needed; archiving a
+  // superset of what the boundary truncate deletes is by design
+  // (archive + live stream = full history).
+  for (const t of windowed) {
+    if (t.archive) await t.archive();
+  }
+
+  // 3. Boundary truncate: atomic per-store transaction; no seed.
+  const truncated = await store().truncate(
+    windowed.map((t) => ({
+      stream: t.stream,
+      before: t.before!,
+      max_id: min_at.get(t.stream),
+    }))
+  );
+  for (const t of windowed) {
+    if (!truncated.has(t.stream)) skipped.push(t.stream);
+  }
+  return truncated;
+}
+
+/**
+ * Min subscription watermark per target stream — the read-only probe
+ * backing the windowed close's `max_id` cap. Pagination and source
+ * matching mirror {@link partition_by_safety}; instead of flagging
+ * pending streams it folds `min(at)` per stream. Streams with no
+ * matching subscriptions are absent (no cap).
+ *
+ * @internal
+ */
+async function probe_min_watermarks(
+  streams: string[],
+  page_size: number
+): Promise<Map<string, number>> {
+  const min_at = new Map<string, number>();
+  const source_regex = new Map<string, RegExp>();
+  const get_regex = (source: string): RegExp => {
+    let re = source_regex.get(source);
+    if (!re) {
+      re = new RegExp(source);
+      source_regex.set(source, re);
+    }
+    return re;
+  };
+
+  let after: string | undefined;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store().query_streams(
+      (position) => {
+        last = position.stream;
+        const source_re = position.source
+          ? get_regex(position.source)
+          : undefined;
+        for (const stream of streams) {
+          if (!source_re || source_re.test(stream)) {
+            const prev = min_at.get(stream);
+            if (prev === undefined || position.at < prev)
+              min_at.set(stream, position.at);
+          }
+        }
+      },
+      { after, limit: page_size, source_matches: streams }
+    );
+    if (count < page_size) break;
+    after = last;
+  }
+  return min_at;
 }
 
 // ---------------------------------------------------------------------------

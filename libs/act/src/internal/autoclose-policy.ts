@@ -51,15 +51,41 @@ import type { AutoclosePredicate, Schemas } from "../types/action.js";
  */
 const MIN_AFTER_MS = 60_000;
 
-const AfterSchema = z
-  .object({
-    days: z
-      .number({ message: "autocloses: after.days must be a number" })
-      .positive("autocloses: after.days must be > 0"),
-  })
-  .refine((o) => o.days * 86_400_000 >= MIN_AFTER_MS, {
-    message: `autocloses: after resolves to < ${MIN_AFTER_MS}ms (one minute), which is too short to be a meaningful retention window`,
-  });
+/**
+ * Lower bound on a resolved `keep` window: one full day. The close
+ * cycle is low-cadence, non-priority housekeeping — the autoclose
+ * reaction re-checks on the order of `autocloseCycleMinutes` (default
+ * 12 h), so a rolling window denominated in minutes or hours cannot be
+ * honored and signals misconfiguration. Real retention contracts
+ * (180 days, 7 years) are days and up.
+ */
+const MIN_KEEP_MS = 86_400_000;
+
+/**
+ * Day-denominated window shared by `after` (terminate cooldown) and
+ * `keep` (rolling retention). Fractional days accepted; windows below
+ * the field's floor reject at build.
+ *
+ * @internal
+ */
+const window_schema = (
+  field: "after" | "keep",
+  min_ms: number,
+  floor: string
+) =>
+  z
+    .object({
+      days: z
+        .number({ message: `autocloses: ${field}.days must be a number` })
+        .positive(`autocloses: ${field}.days must be > 0`),
+    })
+    .refine((o) => o.days * 86_400_000 >= min_ms, {
+      message: `autocloses: ${field} resolves to < ${floor}, which is too short to be a meaningful retention window`,
+    });
+
+const AfterSchema = window_schema("after", MIN_AFTER_MS, "one minute");
+
+const KeepSchema = window_schema("keep", MIN_KEEP_MS, "one day");
 
 const IsSchema = z.union([
   z.string().min(1, "autocloses: is must be a non-empty event name"),
@@ -116,6 +142,7 @@ const AutoclosePolicySchema = z
     is: IsSchema.optional(),
     reaches: ReachesSchema.optional(),
     or: OrBlockSchema.optional(),
+    keep: KeepSchema.optional(),
   })
   .strict()
   .refine(
@@ -123,10 +150,11 @@ const AutoclosePolicySchema = z
       o.after !== undefined ||
       o.is !== undefined ||
       o.reaches !== undefined ||
-      o.or !== undefined,
+      o.or !== undefined ||
+      o.keep !== undefined,
     {
       message:
-        "autocloses: at least one of after / is / reaches / or must be specified — empty `{}` is a misconfiguration",
+        "autocloses: at least one of after / is / reaches / or / keep must be specified — empty `{}` is a misconfiguration",
     }
   );
 
@@ -151,6 +179,14 @@ const AutoclosePolicySchema = z
  *   `or` matches. Used for safety-net backstops layered onto a
  *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
  *   10k"*). Nested `or` inside `or` rejects at build time.
+ * @property keep - Rolling-window retention (#1011), **independent** of
+ *   the terminate fields: while the stream stays open, prune events
+ *   older than `now − keep` behind the closest safe snapshot via a
+ *   windowed close. Does not participate in the AND group or the `or`
+ *   block — a policy may terminate, prune, or both. Requires
+ *   `.snap(...)` earlier in the builder chain (type-gated) and a
+ *   window of at least one day — the close cycle is low-cadence
+ *   housekeeping, never sub-day realtime.
  */
 export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 
@@ -228,6 +264,21 @@ export function policy_min_after_ms(
   if (parsed.after) windows.push(parsed.after.days * 86_400_000);
   if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
   return windows.length ? Math.min(...windows) : undefined;
+}
+
+/**
+ * The rolling-window width (ms) of a policy's `keep` field, or
+ * `undefined` when the policy declares no rolling window. The
+ * synthesized autoclose reaction prunes the prefix older than
+ * `now − keep_ms` (via a windowed close) and derives its prune
+ * due-time as `tail.created + keep_ms` — the earliest the oldest
+ * surviving domain event can age out of the window.
+ *
+ * @internal
+ */
+export function policy_keep_ms(options: AutoclosePolicy): number | undefined {
+  const parsed = AutoclosePolicySchema.parse(options);
+  return parsed.keep ? parsed.keep.days * 86_400_000 : undefined;
 }
 
 export function compile_autoclose_policy(

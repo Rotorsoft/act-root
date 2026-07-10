@@ -30,6 +30,7 @@ export {
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_keep_ms,
   policy_min_after_ms,
 } from "./autoclose-policy.js";
 export {
