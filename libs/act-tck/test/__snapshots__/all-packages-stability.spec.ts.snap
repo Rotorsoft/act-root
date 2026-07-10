@@ -13874,11 +13874,25 @@ export function build_handle<
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
 
     const stream = lease.stream;
-    let at = payloads.at(0)!.event.id;
+    // One event fans out to one payload per matching reaction, and the
+    // watermark may only advance past an event once EVERY reaction on it
+    // has handled it — acking mid-group would silently drop the remaining
+    // reactions on redelivery (#1179). Track the last payload index per
+    // event id (payloads arrive in event order) so \`at\` advances exactly
+    // when a group completes; \`handled\` counts completed events, not
+    // payloads, so a mid-group failure with no completed events is a
+    // no-progress result (no ack, retry counter advances toward
+    // \`blockOnError\` instead of resetting on every partial pass).
+    const last_index_of = new Map<number, number>();
+    for (let i = 0; i < payloads.length; i++)
+      last_index_of.set(payloads[i].event.id, i);
+    let at = lease.at;
     let handled = 0;
 
     if (lease.retry > 0)
-      logger.warn(\`Retrying \${stream}@\${at} (\${lease.retry}).\`);
+      logger.warn(
+        \`Retrying \${stream}@\${payloads.at(0)!.event.id} (\${lease.retry}).\`
+      );
 
     const scoped_app: IAct<TEvents, TActions, TActor> = {
       do: bound_do,
@@ -13888,7 +13902,8 @@ export function build_handle<
       forget: bound_forget,
     };
 
-    for (const payload of payloads) {
+    for (let i = 0; i < payloads.length; i++) {
+      const payload = payloads[i];
       const { event, handler } = payload;
       scoped_app.do = <TKey extends keyof TActions & string>(
         action: TKey,
@@ -13903,8 +13918,10 @@ export function build_handle<
         });
       try {
         await handler(event, stream, scoped_app);
-        at = event.id;
-        handled++;
+        if (last_index_of.get(event.id) === i) {
+          at = event.id;
+          handled++;
+        }
       } catch (error) {
         // A defer is not a failure: hold the triggering events pending
         // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
@@ -29319,11 +29336,25 @@ export function build_handle<
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
 
     const stream = lease.stream;
-    let at = payloads.at(0)!.event.id;
+    // One event fans out to one payload per matching reaction, and the
+    // watermark may only advance past an event once EVERY reaction on it
+    // has handled it — acking mid-group would silently drop the remaining
+    // reactions on redelivery (#1179). Track the last payload index per
+    // event id (payloads arrive in event order) so \`at\` advances exactly
+    // when a group completes; \`handled\` counts completed events, not
+    // payloads, so a mid-group failure with no completed events is a
+    // no-progress result (no ack, retry counter advances toward
+    // \`blockOnError\` instead of resetting on every partial pass).
+    const last_index_of = new Map<number, number>();
+    for (let i = 0; i < payloads.length; i++)
+      last_index_of.set(payloads[i].event.id, i);
+    let at = lease.at;
     let handled = 0;
 
     if (lease.retry > 0)
-      logger.warn(\`Retrying \${stream}@\${at} (\${lease.retry}).\`);
+      logger.warn(
+        \`Retrying \${stream}@\${payloads.at(0)!.event.id} (\${lease.retry}).\`
+      );
 
     const scoped_app: IAct<TEvents, TActions, TActor> = {
       do: bound_do,
@@ -29333,7 +29364,8 @@ export function build_handle<
       forget: bound_forget,
     };
 
-    for (const payload of payloads) {
+    for (let i = 0; i < payloads.length; i++) {
+      const payload = payloads[i];
       const { event, handler } = payload;
       scoped_app.do = <TKey extends keyof TActions & string>(
         action: TKey,
@@ -29348,8 +29380,10 @@ export function build_handle<
         });
       try {
         await handler(event, stream, scoped_app);
-        at = event.id;
-        handled++;
+        if (last_index_of.get(event.id) === i) {
+          at = event.id;
+          handled++;
+        }
       } catch (error) {
         // A defer is not a failure: hold the triggering events pending
         // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
