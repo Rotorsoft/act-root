@@ -328,7 +328,7 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the source-pattern probe in claim()
+  // max non-snapshot event id per stream — drives the exact-source probe in claim()
   // without scanning the full event log.
   private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
@@ -563,25 +563,15 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // Cache compiled regexes — multiple subscribed streams typically share the
-    // same source pattern, and the inner loop can run thousands of times per claim.
-    const source_regex = new Map<string, RegExp>();
-    const get_regex = (source: string) => {
-      let re = source_regex.get(source);
-      if (!re) {
-        re = new RegExp(source);
-        source_regex.set(source, re);
-      }
-      return re;
-    };
+    // `source` is an exact stream name in the has-work probe — resolvers
+    // hand `subscribe` exact names, so the probe is a single map lookup.
+    // Pattern matching belongs to the StreamFilter surfaces
+    // (`query_streams`, `reset`, `unblock`), never to claim.
     const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
-      const re = get_regex(s.source);
-      for (const [stream_name, maxId] of this._max_event_id_by_stream) {
-        if (maxId > s.at && re.test(stream_name)) return true;
-      }
-      return false;
+      const max_id = this._max_event_id_by_stream.get(s.source);
+      return max_id !== undefined && max_id > s.at;
     };
     const available = [...this._streams.values()].filter(
       (s) =>

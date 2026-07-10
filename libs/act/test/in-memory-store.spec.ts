@@ -17,28 +17,28 @@ describe("InMemoryStore (adapter-specific)", () => {
     await dispose()();
   });
 
-  it("reuses compiled regex across streams sharing the same source", async () => {
+  it("claims by exact source and ignores sources with no committed events", async () => {
     const s = store();
     await s.commit("order-1", [{ name: "A", data: {} }], {
       correlation: "c",
       causation: {},
     });
-    // Two subscribers with the same source pattern.
+    // One subscriber on an exact source with events, one on a source
+    // that never receives a commit.
     await s.subscribe([
-      { stream: "sub-1", source: "order-.*" },
-      { stream: "sub-2", source: "order-.*" },
+      { stream: "sub-1", source: "order-1" },
+      { stream: "sub-2", source: "ghost" },
     ]);
     // Advance their watermarks so hasWork() does not short-circuit on at < 0.
     const first = await s.claim(2, 0, "actor", 10);
     await s.ack(first.map((l) => ({ ...l, at: 0 })));
-    // Commit a fresh event so both streams have new work past their watermark.
+    // Commit a fresh event so only the exact source has work past the watermark.
     await s.commit("order-1", [{ name: "A", data: {} }], {
       correlation: "c",
       causation: {},
     });
-    // Second claim — both streams compile the same source; the cache reuses the regex.
     const claimed = await s.claim(2, 0, "actor2", 10000);
-    expect(claimed.length).toBe(2);
+    expect(claimed.map((l) => l.stream)).toEqual(["sub-1"]);
   });
 
   it("binary-searches id bounds on backward scans across truncation holes", async () => {
