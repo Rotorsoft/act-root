@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.11.0...@rotorsoft/act-sqlite-v1.12.0) (2026-07-10)
+
+
+### Features
+
+* **act-sqlite:** windowed truncate boundary ([b65ca03](https://github.com/rotorsoft/act-root/commit/b65ca0344ca0fba86e90ab26fc4ed3869bf01de9)), closes [#1011](https://github.com/rotorsoft/act-root/issues/1011)
+
 # [@rotorsoft/act-sqlite-v1.11.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.10.2...@rotorsoft/act-sqlite-v1.11.0) (2026-07-06)
 
 
