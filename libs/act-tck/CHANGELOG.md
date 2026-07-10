@@ -1,3 +1,16 @@
+# [@rotorsoft/act-tck-v1.26.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.1...@rotorsoft/act-tck-v1.26.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act-pg:** serialize commit visibility to close the serial-id gap ([b3feaac](https://github.com/rotorsoft/act-root/commit/b3feaac923f379697986092a2e185dd3746f2c09)), closes [#1178](https://github.com/rotorsoft/act-root/issues/1178)
+
+
+### Performance Improvements
+
+* **act-pg:** shrink the commit visibility-lock window ([2f300a1](https://github.com/rotorsoft/act-root/commit/2f300a1ebfeb56faa26f8ff86b255668a7afe799)), closes [#1178](https://github.com/rotorsoft/act-root/issues/1178)
+* **act-pg:** single-statement commit makes the visibility lock free ([f911e65](https://github.com/rotorsoft/act-root/commit/f911e65ed78cf1c0f4dd3dd4a0c9fb450316dc3a)), closes [#1178](https://github.com/rotorsoft/act-root/issues/1178)
+
 # [@rotorsoft/act-tck-v1.26.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.0...@rotorsoft/act-tck-v1.26.1) (2026-07-10)
 
 
