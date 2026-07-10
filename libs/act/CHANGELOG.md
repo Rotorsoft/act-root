@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.22.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.0...@rotorsoft/act-v1.22.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act:** never ack past an event with an unhandled reaction ([853071e](https://github.com/rotorsoft/act-root/commit/853071ed5afc6b64bb16bf54aa65b8d986be9195)), closes [#1179](https://github.com/rotorsoft/act-root/issues/1179)
+
 # [@rotorsoft/act-v1.22.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.21.0...@rotorsoft/act-v1.22.0) (2026-07-10)
 
 
