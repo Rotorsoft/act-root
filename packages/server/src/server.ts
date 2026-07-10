@@ -59,8 +59,9 @@ type CalculatorLiveState = {
 // as version-keyed domain patches.
 const broadcast = new BroadcastChannel<CalculatorLiveState>();
 calculatorApp.on("committed", (snapshots) => {
-  // The lifecycle event is typed against the whole schema registry;
-  // this app registers a single state, so narrow to its shape once.
+  // The lifecycle payload is loosely typed by design — commits from any
+  // registered state land here. This app registers a single state, so
+  // narrow to its shape once.
   const snaps = snapshots as unknown as {
     state: Omit<CalculatorLiveState, "_v">;
     event?: { stream: string; version: number };

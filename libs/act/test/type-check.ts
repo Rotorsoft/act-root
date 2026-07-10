@@ -6,7 +6,14 @@
  * Each @ts-expect-error must fire (unused directive = regression).
  */
 import { z } from "zod";
-import { act, projection, slice, state } from "../src/index.js";
+import {
+  type Actor,
+  act,
+  type IAct,
+  projection,
+  slice,
+  state,
+} from "../src/index.js";
 
 // ── Define test states ──────────────────────────────────────────────
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -404,4 +411,55 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "test" });
+}
+
+// ── TEST 27: reaction handler app.load(State, stream) is typed ──────
+{
+  const _app = act()
+    .withState(Counter)
+    .on("Incremented")
+    .do(async (_event, _stream, app) => {
+      // Loaded state is typed via the State argument — no casts needed
+      const snap = await app.load(Counter, "s1");
+      const _count: number = snap.state.count;
+      // @ts-expect-error - "entries" is not on Counter state
+      snap.state.entries;
+      // Auth-aware LoadTarget form keeps the same typing
+      const authed = await app.load(Counter, {
+        stream: "s1",
+        actor: target.actor,
+      });
+      const _count2: number = authed.state.count;
+      // @ts-expect-error - "entries" is not on Counter state
+      authed.state.entries;
+    })
+    .to("target")
+    .build();
+}
+
+// ── TEST 28: IAct with TSchemaReg types do() to the target state ────
+{
+  type Events = { Incremented: { amount: number } };
+  type Actions = { increment: { by: number } };
+  type Reg = { increment: { count: number } };
+  const app = act().withState(Counter).build();
+  // Act stays assignable to the reaction-scoped IAct with the register provided
+  const typed: IAct<Events, Actions, Actor, Reg> = app;
+  void typed.do("increment", target, { by: 1 }).then((snapshots) => {
+    const _count: number = snapshots[0].state.count;
+    // @ts-expect-error - "entries" is not on Counter state
+    snapshots[0].state.entries;
+  });
+}
+
+// ── TEST 29: legacy IAct<E, A> annotations keep compiling ───────────
+{
+  type Events = { Incremented: { amount: number } };
+  type Actions = { increment: { by: number } };
+  const app = act().withState(Counter).build();
+  // TSchemaReg defaults to SchemaRegister<Actions> — no annotation change needed
+  const legacy: IAct<Events, Actions> = app;
+  void legacy.do("increment", target, { by: 1 }).then((snapshots) => {
+    const _patches: number = snapshots[0].patches;
+  });
 }
