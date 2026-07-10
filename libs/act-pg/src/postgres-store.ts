@@ -697,6 +697,21 @@ export class PostgresStore implements Store {
     let version = -1;
     try {
       await client.query("BEGIN");
+      // Serialize commit VISIBILITY, not just id assignment. `id` is a
+      // serial: it is assigned at INSERT time but the row appears at
+      // COMMIT time, and every watermark consumer (the claim has-work
+      // probe, fetch's `after`, the correlate checkpoint) assumes id
+      // order equals visibility order. Without this lock two concurrent
+      // commits to different streams can surface out of id order, and a
+      // reader that acks past the higher id permanently skips the lower
+      // one — the classic event-store gap problem. The xact-scoped
+      // advisory lock is released at COMMIT, so ids become visible in
+      // the order they were assigned. Same-stream commits were already
+      // serialized by the (stream, version) unique index; this extends
+      // the guarantee across streams.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        this._fqt,
+      ]);
 
       const last = await client.query<Committed<E, keyof E>>(
         `SELECT version
@@ -1777,6 +1792,12 @@ export class PostgresStore implements Store {
     const client = await this._client("truncate");
     try {
       await client.query("BEGIN");
+      // Seeds (snapshots/tombstones) produce watermark-relevant ids, so
+      // truncate takes the same visibility lock as commit — see the
+      // commit path for the id-order-vs-visibility-order rationale.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        this._fqt,
+      ]);
       const result = new Map<
         string,
         {

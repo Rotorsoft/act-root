@@ -339,3 +339,34 @@ reads (or re-derivation) the bench omits. On wide keys `.of()` spends
 its time in per-stream head loads (one per cache miss); on hot keys
 that cost amortizes across 2,000 events per stream and the shape is
 both the fastest and 1,000x lighter on writes.
+
+### #1178 commit-visibility lock — the cost of closing the id gap
+
+`id` is a serial: assigned at INSERT, visible at COMMIT — and every
+watermark consumer (claim's has-work probe, fetch's `after`, the
+correlate checkpoint) assumes id order equals visibility order. Two
+concurrent commits to different streams could surface out of order and
+let a watermark permanently skip an event (the classic event-store gap
+problem). The append path (`commit` and `truncate`) now takes
+`pg_advisory_xact_lock(hashtext(<events table>))` inside its
+transaction, so ids become visible in the order they were assigned.
+
+Measured with `scripts/commit-lock.ts` (docker PG :5431, M3 Pro,
+3 runs each, 500 commits):
+
+| Scenario | Before | After | Delta |
+|---|---|---|---|
+| Sequential, 1 stream | ~1,280 commits/s | ~1,050 commits/s | −18% |
+| Concurrent, 10 streams × 10 workers | ~4,500 commits/s | ~1,380 commits/s | −69% |
+
+Reading the numbers honestly: the concurrent collapse is the fix
+working — cross-stream commits *must* serialize their visibility
+window, so the concurrent ceiling converges toward the sequential one
+(it stays above it because client checkout and BEGIN still overlap;
+only the lock-held section serializes). The framework's realistic
+drain-inclusive throughput is ~310 commits/s (see `libs/act`
+PERFORMANCE.md), so the post-fix ceiling retains ~4× headroom over the
+whole pipeline. The rejected alternative — a read-side xmin-horizon
+fence that preserves parallel commits — trades this write-path cost
+for planner-hostile visibility predicates on every hot read and was
+set aside; the decision is recorded in `book/act-1178-commit-visibility.md`.

@@ -371,6 +371,7 @@ describe("PostgresStore", () => {
       const queryMock = vi
         .fn()
         .mockResolvedValueOnce(undefined) // BEGIN
+        .mockResolvedValueOnce(undefined) // visibility lock (#1178)
         .mockResolvedValueOnce({ rows: [boundary] }) // boundary SELECT
         .mockResolvedValueOnce({ rowCount: null }) // prefix DELETE
         .mockResolvedValueOnce(undefined); // COMMIT
