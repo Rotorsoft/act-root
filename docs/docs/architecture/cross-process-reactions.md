@@ -66,6 +66,8 @@ Every store instance carries a per-instance UUID (`_by`) embedded in the NOTIFY 
 
 The alternative (broadcast everything, let the consumer filter) was rejected as messier — it pollutes the local fast path with self-echoes and forces every listener to know about the filter.
 
+Self-filtering is a portable `Store.notify` contract, not a Postgres detail: the TCK's `notify` capability suite enforces it (plus one-notification-per-commit batch delivery) against every adapter that declares the capability ([#1184](https://github.com/Rotorsoft/act-root/issues/1184)).
+
 ## Payload cap — oversize commits degrade to poll
 
 PostgreSQL rejects NOTIFY payloads at or above 8000 bytes (`payload string

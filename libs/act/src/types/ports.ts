@@ -123,7 +123,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its `streams` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional source stream filter (for reactions)
+ * @property source - Optional exact source stream name (for reactions)
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -521,6 +521,17 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
+   * A subscription's `source` is an **exact stream name** in the has-work
+   * probe — adapters must compare it by string equality, never as a regex
+   * or `LIKE` pattern. Resolvers hand {@link subscribe} exact names;
+   * pattern semantics live on the {@link StreamFilter} surfaces
+   * (`query_streams`, `reset`, `unblock`).
+   *
+   * Every granted lease **counts against the stream's retry budget**: claim
+   * increments the stream's retry counter and only {@link ack} resets it, so
+   * a timed-out lease reclaimed by any worker marches the stream toward
+   * `blockOnError` exactly like a handler failure.
+   *
    * Used by `Act.drain()` as the primary stream acquisition method.
    *
    * @param lagging - Max streams from the lagging frontier (ascending watermark)
@@ -559,7 +570,9 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint
+   * @param streams - Streams to register with optional source hint — an
+   *   **exact** stream name, matched by equality in {@link claim}'s
+   *   has-work probe (never a pattern)
    * @returns `subscribed` count of newly registered streams, `watermark` max `at` across all streams
    *
    * @example
@@ -1124,6 +1137,8 @@ export interface Store extends Disposable, EventSource {
    * **different process** writing to the same backing store. This keeps
    * the local fast path (`do()` already arms drain) free of duplicate
    * wake-ups and gives `"notified"` a clean cross-process semantic.
+   * Enforced by the `notify` capability cases in `@rotorsoft/act-tck`,
+   * along with one-notification-per-commit batch delivery.
    *
    * **Hint, not a contract:** the orchestrator never depends on `notify`
    * for correctness. If absent, dropped, or the store omits it, the

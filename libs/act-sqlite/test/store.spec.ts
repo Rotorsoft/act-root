@@ -105,29 +105,25 @@ describe("sqlite store (adapter-specific)", () => {
     expect(exact[0].stream).toBe("anchor-prefix-1");
   });
 
-  it("claims streams whose dynamic source pattern matches existing events", async () => {
-    await store().commit("src-pat-alpha", [{ name: "sp", data: {} }], {
-      correlation: "",
-      causation: {},
-    });
-    await store().commit("src-pat-beta", [{ name: "sp", data: {} }], {
+  it("claims streams whose exact source has committed events", async () => {
+    await store().commit("src-exact-alpha", [{ name: "sp", data: {} }], {
       correlation: "",
       causation: {},
     });
     await store().subscribe([
-      { stream: "src-listener", source: "^src-pat-.*" },
+      { stream: "src-listener", source: "src-exact-alpha" },
     ]);
 
     const leases = await store().claim(10, 0, "src-worker", 30000);
     const target = leases.find((l) => l.stream === "src-listener");
     expect(target).toBeDefined();
-    expect(target!.source).toBe("^src-pat-.*");
+    expect(target!.source).toBe("src-exact-alpha");
     if (leases.length) await store().ack(leases.map((l) => ({ ...l, at: 0 })));
   });
 
-  it("does not claim when the source pattern matches no events", async () => {
+  it("does not claim when the exact source has no events", async () => {
     await store().subscribe([
-      { stream: "src-no-match", source: "^never-matches-anything-.*" },
+      { stream: "src-no-match", source: "never-committed-anywhere" },
     ]);
     const leases = await store().claim(10, 0, "ghost-worker", 30000);
     expect(leases.find((l) => l.stream === "src-no-match")).toBeUndefined();

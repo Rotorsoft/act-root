@@ -126,7 +126,10 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional source-stream filter for fetch optimization
+ * @property source - Optional **exact** source stream name — the only
+ *   stream this target consumes from. Matched by string equality in the
+ *   store's claim/fetch path (never a pattern); patterns belong to the
+ *   `StreamFilter` surfaces (`query_streams`, `reset`, `unblock`)
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   `claim()` orders streams by `priority DESC, at ASC`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -291,7 +294,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
+ * @property source - The exact source stream name, or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -318,7 +321,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional source stream for filtering
+ * @property source - Optional exact source stream name the subscription consumes from
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)

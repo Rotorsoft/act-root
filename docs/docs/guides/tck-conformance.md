@@ -154,7 +154,7 @@ The kit is just vitest, so the CI job is whatever runs your tests against a real
 
 You do not have to take "a conformant adapter is possible" on faith — the adapters Act ships are the proof, and their TCK specs are short enough to read in a sitting:
 
-- `InMemoryStore` — the reference store implementation; its TCK spec runs the full store contract with `notify`, `restore`, and `pii_isolation` on.
+- `InMemoryStore` — the reference store implementation; its TCK spec runs the full store contract with `restore`, `pii_isolation`, `concurrent_claim`, and `source_matches` on (`notify` stays off — the in-memory store is single-process by design and does not implement it).
 - `@rotorsoft/act-pg` / `@rotorsoft/act-sqlite` — production stores; same TCK spec, different `capabilities` bags, run against real engines in the conformance matrix.
 - `InMemoryCache` — the reference cache; its `runCacheTck` spec is the template the Redis sketch above mirrors.
 - `ConsoleLogger` / `@rotorsoft/act-pino` — the two shipped loggers, both validated by `runLoggerTck`.
