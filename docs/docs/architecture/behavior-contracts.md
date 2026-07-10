@@ -41,6 +41,7 @@ backed by unit/integration specs under `libs/act/test/`.
 
 | Claim | Source | Backing test |
 |---|---|---|
+| On Postgres, event ids become visible in id order — the append path (`commit`, `truncate`) holds a transaction-scoped advisory lock so a concurrent cross-stream commit can never surface below an id a watermark consumer already acked past | `concurrency-model.md` § Commit visibility ordering | act-pg `commit-visibility.spec.ts` → "a commit waits for an in-flight append transaction to finish", "truncate seeds take the same visibility lock" **(#1178)** |
 | `reactingTo` is auto-injected when a reaction handler omits it; an explicit value is respected | CLAUDE.md safety one-liner; `state-management.md` | `reacting-to.spec.ts` → "should auto-inject reactingTo when handler omits it", "should respect explicit reactingTo when provided" |
 | `NonRetryableError` forces a block on the first attempt when `blockOnError` is true (default) | `error-handling.md` "Non-retryable errors" | `non-retryable.spec.ts` → "blocks on first attempt when blockOnError is true (default)" |
 | `NonRetryableError` does **not** override `blockOnError: false` | `error-handling.md`; CLAUDE.md safety one-liner | `non-retryable.spec.ts` → "ignores NonRetryableError when blockOnError is false" |

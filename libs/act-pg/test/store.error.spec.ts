@@ -75,20 +75,27 @@ describe("PostgresStore", () => {
       ).rejects.toThrow("db error");
     });
 
-    it("throws notify fail on NOTIFY/COMMIT failure", async () => {
+    it("a notify-side failure aborts the commit statement", async () => {
+      // The NOTIFY rides the commit's single autocommit statement as a
+      // CTE (#1178) — a pg_notify failure aborts the whole statement, so
+      // the insert never becomes visible without its notification.
       const queryMock = vi
         .fn()
-        .mockResolvedValueOnce({ rowCount: 1, rows: [{ version: 0 }] }) // SELECT version
-        .mockResolvedValueOnce({ rows: [{ name: "E", id: 1 }] }) // INSERT
-        .mockImplementationOnce(() => Promise.reject(new Error("notify fail"))) // NOTIFY/COMMIT
+        .mockResolvedValueOnce({ rowCount: 1, rows: [{ version: 0 }] }) // head probe
+        .mockImplementationOnce(() => Promise.reject(new Error("notify fail"))) // lock+INSERT+NOTIFY statement
         .mockResolvedValue(Promise.resolve());
 
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
         // @ts-expect-error mock
         makeClient(queryMock)
       );
+      const notifying = new PostgresStore({
+        port: 5431,
+        table: "store_error_test",
+        notify: true,
+      });
       await expect(
-        store.commit("stream", [{ name: "E", data: {} }], {
+        notifying.commit("stream", [{ name: "E", data: {} }], {
           correlation: "c",
           causation: {},
         })
@@ -371,6 +378,7 @@ describe("PostgresStore", () => {
       const queryMock = vi
         .fn()
         .mockResolvedValueOnce(undefined) // BEGIN
+        .mockResolvedValueOnce(undefined) // visibility lock (#1178)
         .mockResolvedValueOnce({ rows: [boundary] }) // boundary SELECT
         .mockResolvedValueOnce({ rowCount: null }) // prefix DELETE
         .mockResolvedValueOnce(undefined); // COMMIT

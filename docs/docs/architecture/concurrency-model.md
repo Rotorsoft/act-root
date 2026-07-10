@@ -140,6 +140,12 @@ A common confusion: "If I commit while another worker holds a lease, does my com
 
 Real interaction surfaces in the close-the-books flow ([Close cycle](./close-cycle)), where the close operation must coordinate both: tombstone the stream (write a guard event via `commit`), then verify no leases are held (lease lifecycle).
 
+## Commit visibility ordering — closing the id gap
+
+Every watermark consumer — `claim()`'s has-work probe (`id > at`), fetch's `after`, the correlate checkpoint — assumes that event ids become **visible in id order**. Postgres does not give you that for free: a serial `id` is assigned at INSERT time but the row appears at COMMIT time, so two concurrent commits to *different* streams can surface out of order. A reader that acks past the higher id would then permanently skip the lower one when it finally appears — the classic event-store "gap problem". Same-stream commits were never exposed (the `(stream, version)` unique index serializes them); source-less projections and multi-stream reactions were.
+
+`PostgresStore` closes the gap on the append path (#1178): `commit()` and `truncate()` take a transaction-scoped `pg_advisory_xact_lock` keyed on the events table before assigning ids, released at COMMIT — id assignment and visibility are linearized, and the out-of-order interleaving is impossible by construction. The cost lands on concurrent cross-stream commit throughput (measured in `libs/act-pg/PERFORMANCE.md` § #1178); the ceiling stays well above the framework's realistic drain-inclusive pipeline rate, and correctness of the at-least-once guarantee is not a knob. InMemory is synchronous (no gap to close); SQLite is single-writer (same).
+
 ## Observability
 
 Both primitives surface in the trace breadcrumb stream:
