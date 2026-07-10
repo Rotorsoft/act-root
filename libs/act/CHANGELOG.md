@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.22.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.3...@rotorsoft/act-v1.22.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act:** close-guard cache poisoning, scoped-port leaks, restore migration remap ([8883b50](https://github.com/rotorsoft/act-root/commit/8883b50758e004ef86086f56dfb3db71e2185702)), closes [#1188](https://github.com/rotorsoft/act-root/issues/1188) [#1191](https://github.com/rotorsoft/act-root/issues/1191) [#1188](https://github.com/rotorsoft/act-root/issues/1188) [#1191](https://github.com/rotorsoft/act-root/issues/1191) [#1192](https://github.com/rotorsoft/act-root/issues/1192)
+
 # [@rotorsoft/act-v1.22.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.2...@rotorsoft/act-v1.22.3) (2026-07-10)
 
 
