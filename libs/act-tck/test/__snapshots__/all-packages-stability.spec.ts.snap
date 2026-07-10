@@ -2372,8 +2372,8 @@ export class Act<
    *
    * @example Windowed close — keep the last 180 days of real events
    * \`\`\`typescript
-   * const DAY = 24 * 60 * 60 * 1000;
-   * const cutoff = new Date(Date.now() - 180 * DAY);
+   * const cutoff = new Date();
+   * cutoff.setDate(cutoff.getDate() - 180);
    * await app.close([
    *   {
    *     stream: "ledger-acme",
@@ -3119,25 +3119,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
-   * or \`undefined\` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * \`autoclose\` by the builder.
+   * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
+   * policy, or \`undefined\` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to \`head.created\` plus this many days; a policy without an
+   * \`after\` waits for the next event instead of parking on a due-time.
+   * Set alongside \`autoclose\` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
   /**
-   * The rolling-window width (ms) of the \`.autocloses({ keep })\` policy,
-   * or \`undefined\` when the policy declares no rolling window (#1011).
-   * The synthesized autoclose reaction stages a windowed close (prune
-   * the prefix older than \`now − autoclose_keep_ms\` behind the closest
-   * safe snapshot) when the oldest surviving domain event ages out, and
-   * defers to \`tail.created + autoclose_keep_ms\` otherwise. Set
-   * alongside \`autoclose\` by the builder; only reachable behind
-   * \`.snap(...)\`.
+   * The rolling-window width (in days) of the \`.autocloses({ keep })\`
+   * policy, or \`undefined\` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside \`autoclose\`
+   * by the builder; only reachable behind \`.snap(...)\`.
    */
-  autoclose_keep_ms?: number;
+  autoclose_keep_days?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -4664,22 +4664,39 @@ import { z } from "zod";
 import type { AutoclosePredicate, Schemas } from "../types/action.js";
 
 /**
- * Lower bound on a resolved \`after\` window. Sub-minute windows are
- * almost always misconfiguration — the autoclose cycle ticks at the
- * order of \`autocloseCycleMinutes\` (default 12 h), so a 30 s window can't
- * be honored anyway. Rejecting at build keeps the failure mode noisy.
+ * One day in epoch milliseconds. The close surface is day-denominated
+ * throughout — policies declare \`{ days }\`, the State carries
+ * \`autoclose_*_days\`, and the reaction thinks in day offsets. This
+ * constant (with {@link days_after} / {@link days_before_now}) is the
+ * single place the closing process touches epoch arithmetic, because
+ * \`Date\` itself has no other currency.
  */
-const MIN_AFTER_MS = 60_000;
+const DAY_MS = 86_400_000;
+
+/**
+ * Lower bound on a resolved \`after\` window: one minute, expressed in
+ * days. Sub-minute cooldowns are almost always misconfiguration.
+ * Rejecting at build keeps the failure mode noisy.
+ */
+const MIN_AFTER_DAYS = 1 / 1440;
 
 /**
  * Lower bound on a resolved \`keep\` window: one full day. The close
- * cycle is low-cadence, non-priority housekeeping — the autoclose
- * reaction re-checks on the order of \`autocloseCycleMinutes\` (default
- * 12 h), so a rolling window denominated in minutes or hours cannot be
- * honored and signals misconfiguration. Real retention contracts
- * (180 days, 7 years) are days and up.
+ * cycle is low-cadence, non-priority housekeeping — a rolling window
+ * shorter than a day signals misconfiguration. Real retention
+ * contracts (180 days, 7 years) are days and up.
  */
-const MIN_KEEP_MS = 86_400_000;
+const MIN_KEEP_DAYS = 1;
+
+/** The \`Date\` that lies \`days\` after \`date\`. @internal */
+export function days_after(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+/** The \`Date\` that lies \`days\` in the past. @internal */
+export function days_before_now(days: number): Date {
+  return new Date(Date.now() - days * DAY_MS);
+}
 
 /**
  * Day-denominated window shared by \`after\` (terminate cooldown) and
@@ -4690,7 +4707,7 @@ const MIN_KEEP_MS = 86_400_000;
  */
 const window_schema = (
   field: "after" | "keep",
-  min_ms: number,
+  min_days: number,
   floor: string
 ) =>
   z
@@ -4699,13 +4716,13 @@ const window_schema = (
         .number({ message: \`autocloses: \${field}.days must be a number\` })
         .positive(\`autocloses: \${field}.days must be > 0\`),
     })
-    .refine((o) => o.days * 86_400_000 >= min_ms, {
+    .refine((o) => o.days >= min_days, {
       message: \`autocloses: \${field} resolves to < \${floor}, which is too short to be a meaningful retention window\`,
     });
 
-const AfterSchema = window_schema("after", MIN_AFTER_MS, "one minute");
+const AfterSchema = window_schema("after", MIN_AFTER_DAYS, "one minute");
 
-const KeepSchema = window_schema("keep", MIN_KEEP_MS, "one day");
+const KeepSchema = window_schema("keep", MIN_KEEP_DAYS, "one day");
 
 const IsSchema = z.union([
   z.string().min(1, "autocloses: is must be a non-empty event name"),
@@ -4814,8 +4831,7 @@ export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 function compile_after(
   after: NonNullable<AutoclosePolicy["after"]>
 ): AutoclosePredicate<Schemas> {
-  const after_ms = after.days * 86_400_000;
-  return (_stream, head) => Date.now() - head.created.getTime() >= after_ms;
+  return (_stream, head) => days_after(head.created, after.days) <= new Date();
 }
 
 /** Compile a single \`is\` field into its predicate slice. @internal */
@@ -4862,43 +4878,43 @@ function compile_reaches(
  * @internal
  */
 /**
- * The smallest \`after\` window (in ms) anywhere in a policy — across the
- * top-level \`after\` and the \`or.after\` block — or \`undefined\` when the
- * policy has no time component.
+ * The smallest \`after\` window (in days) anywhere in a policy — across
+ * the top-level \`after\` and the \`or.after\` block — or \`undefined\` when
+ * the policy has no time component.
  *
  * The synthesized autoclose reaction (#1090) uses this to decide how to
- * wait: a policy with an \`after\` defers its re-check to \`head.created +
- * min_after_ms\` (the earliest its time gate could open); a policy without
- * one (\`is\` / \`reaches\` only) has no time gate, so the reaction just waits
- * for the next event to re-trigger rather than parking on a due-time.
- * Conservative — the min across branches never defers past the soonest a
- * branch could fire.
+ * wait: a policy with an \`after\` defers its re-check to \`head.created\`
+ * plus this many days (the earliest its time gate could open); a policy
+ * without one (\`is\` / \`reaches\` only) has no time gate, so the reaction
+ * just waits for the next event to re-trigger rather than parking on a
+ * due-time. Conservative — the min across branches never defers past
+ * the soonest a branch could fire.
  *
  * @internal
  */
-export function policy_min_after_ms(
+export function policy_min_after_days(
   options: AutoclosePolicy
 ): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
   const windows: number[] = [];
-  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
-  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  if (parsed.after) windows.push(parsed.after.days);
+  if (parsed.or?.after) windows.push(parsed.or.after.days);
   return windows.length ? Math.min(...windows) : undefined;
 }
 
 /**
- * The rolling-window width (ms) of a policy's \`keep\` field, or
+ * The rolling-window width (in days) of a policy's \`keep\` field, or
  * \`undefined\` when the policy declares no rolling window. The
- * synthesized autoclose reaction prunes the prefix older than
- * \`now − keep_ms\` (via a windowed close) and derives its prune
- * due-time as \`tail.created + keep_ms\` — the earliest the oldest
+ * synthesized autoclose reaction prunes the prefix older than the
+ * window (via a windowed close) and derives its prune due-time as
+ * \`tail.created\` plus this many days — the earliest the oldest
  * surviving domain event can age out of the window.
  *
  * @internal
  */
-export function policy_keep_ms(options: AutoclosePolicy): number | undefined {
+export function policy_keep_days(options: AutoclosePolicy): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
-  return parsed.keep ? parsed.keep.days * 86_400_000 : undefined;
+  return parsed.keep?.days;
 }
 
 export function compile_autoclose_policy(
@@ -4971,6 +4987,7 @@ import {
   type AutocloseConfig,
   in_autoclose_window,
 } from "./autoclose-config.js";
+import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 
@@ -5003,8 +5020,8 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_ms = st.autoclose_after_ms;
-    const keep_ms = st.autoclose_keep_ms;
+    const after_days = st.autoclose_after_days;
+    const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
       // Run on a SYNTHETIC stream — \`source\` is the aggregate, \`target\` is a
@@ -5035,9 +5052,9 @@ export function synthesize_autoclose_reactions<
         // would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
-          tail: keep_ms !== undefined ? true : undefined,
+          tail: keep_days !== undefined ? true : undefined,
           exclude:
-            keep_ms !== undefined
+            keep_days !== undefined
               ? [TOMBSTONE_EVENT, SNAP_EVENT]
               : [TOMBSTONE_EVENT],
         });
@@ -5060,8 +5077,8 @@ export function synthesize_autoclose_reactions<
         // window, stage a windowed close — prune the prefix older than the
         // cutoff behind the closest safe snapshot. \`tail\` is present
         // whenever the stats entry is (same non-excluded event set).
-        if (keep_ms !== undefined) {
-          const cutoff = new Date(Date.now() - keep_ms);
+        if (keep_days !== undefined) {
+          const cutoff = days_before_now(keep_days);
           if (entry.tail!.created < cutoff)
             throw new CloseSignal({
               stream: aggregate,
@@ -5073,17 +5090,18 @@ export function synthesize_autoclose_reactions<
             });
         }
         // Not eligible yet: park on the earliest derivable due-time — the
-        // terminate cooldown's opening (\`head.created + after\`) and/or the
-        // moment the oldest domain event ages out of the rolling window
-        // (\`tail.created + keep\`). Neither → wait for the next event to
-        // re-trigger (e.g. a \`reaches\` threshold).
-        const dues: number[] = [];
-        if (after_ms !== undefined)
-          dues.push(head.created.getTime() + after_ms);
-        if (keep_ms !== undefined)
-          dues.push(entry.tail!.created.getTime() + keep_ms);
+        // day the terminate cooldown opens and/or the day the oldest
+        // domain event ages out of the rolling window. Neither → wait for
+        // the next event to re-trigger (e.g. a \`reaches\` threshold).
+        const dues: Date[] = [];
+        if (after_days !== undefined)
+          dues.push(days_after(head.created, after_days));
+        if (keep_days !== undefined)
+          dues.push(days_after(entry.tail!.created, keep_days));
         if (dues.length)
-          throw new DeferSignal({ at: new Date(Math.min(...dues)) });
+          throw new DeferSignal({
+            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
+          });
       },
     };
     const key = \`__autoclose_\${st.name}\`;
@@ -10741,8 +10759,10 @@ export {
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_keep_ms,
-  policy_min_after_ms,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
 } from "./autoclose-policy.js";
 export {
   AUTOCLOSE_TARGET_PREFIX,
@@ -14852,8 +14872,8 @@ import type { ZodType } from "zod";
 import {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_keep_ms,
-  policy_min_after_ms,
+  policy_keep_days,
+  policy_min_after_days,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -15735,8 +15755,8 @@ function action_builder<
       internal.autoclose = compile_autoclose_policy(
         policy
       ) as AutoclosePredicate<TEvents>;
-      internal.autoclose_after_ms = policy_min_after_ms(policy);
-      internal.autoclose_keep_ms = policy_keep_ms(policy);
+      internal.autoclose_after_days = policy_min_after_days(policy);
+      internal.autoclose_keep_days = policy_keep_days(policy);
       return builder;
     },
 
@@ -18153,8 +18173,8 @@ export class Act<
    *
    * @example Windowed close — keep the last 180 days of real events
    * \`\`\`typescript
-   * const DAY = 24 * 60 * 60 * 1000;
-   * const cutoff = new Date(Date.now() - 180 * DAY);
+   * const cutoff = new Date();
+   * cutoff.setDate(cutoff.getDate() - 180);
    * await app.close([
    *   {
    *     stream: "ledger-acme",
@@ -18900,25 +18920,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
-   * or \`undefined\` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * \`autoclose\` by the builder.
+   * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
+   * policy, or \`undefined\` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to \`head.created\` plus this many days; a policy without an
+   * \`after\` waits for the next event instead of parking on a due-time.
+   * Set alongside \`autoclose\` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
   /**
-   * The rolling-window width (ms) of the \`.autocloses({ keep })\` policy,
-   * or \`undefined\` when the policy declares no rolling window (#1011).
-   * The synthesized autoclose reaction stages a windowed close (prune
-   * the prefix older than \`now − autoclose_keep_ms\` behind the closest
-   * safe snapshot) when the oldest surviving domain event ages out, and
-   * defers to \`tail.created + autoclose_keep_ms\` otherwise. Set
-   * alongside \`autoclose\` by the builder; only reachable behind
-   * \`.snap(...)\`.
+   * The rolling-window width (in days) of the \`.autocloses({ keep })\`
+   * policy, or \`undefined\` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside \`autoclose\`
+   * by the builder; only reachable behind \`.snap(...)\`.
    */
-  autoclose_keep_ms?: number;
+  autoclose_keep_days?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -20445,22 +20465,39 @@ import { z } from "zod";
 import type { AutoclosePredicate, Schemas } from "../types/action.js";
 
 /**
- * Lower bound on a resolved \`after\` window. Sub-minute windows are
- * almost always misconfiguration — the autoclose cycle ticks at the
- * order of \`autocloseCycleMinutes\` (default 12 h), so a 30 s window can't
- * be honored anyway. Rejecting at build keeps the failure mode noisy.
+ * One day in epoch milliseconds. The close surface is day-denominated
+ * throughout — policies declare \`{ days }\`, the State carries
+ * \`autoclose_*_days\`, and the reaction thinks in day offsets. This
+ * constant (with {@link days_after} / {@link days_before_now}) is the
+ * single place the closing process touches epoch arithmetic, because
+ * \`Date\` itself has no other currency.
  */
-const MIN_AFTER_MS = 60_000;
+const DAY_MS = 86_400_000;
+
+/**
+ * Lower bound on a resolved \`after\` window: one minute, expressed in
+ * days. Sub-minute cooldowns are almost always misconfiguration.
+ * Rejecting at build keeps the failure mode noisy.
+ */
+const MIN_AFTER_DAYS = 1 / 1440;
 
 /**
  * Lower bound on a resolved \`keep\` window: one full day. The close
- * cycle is low-cadence, non-priority housekeeping — the autoclose
- * reaction re-checks on the order of \`autocloseCycleMinutes\` (default
- * 12 h), so a rolling window denominated in minutes or hours cannot be
- * honored and signals misconfiguration. Real retention contracts
- * (180 days, 7 years) are days and up.
+ * cycle is low-cadence, non-priority housekeeping — a rolling window
+ * shorter than a day signals misconfiguration. Real retention
+ * contracts (180 days, 7 years) are days and up.
  */
-const MIN_KEEP_MS = 86_400_000;
+const MIN_KEEP_DAYS = 1;
+
+/** The \`Date\` that lies \`days\` after \`date\`. @internal */
+export function days_after(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+/** The \`Date\` that lies \`days\` in the past. @internal */
+export function days_before_now(days: number): Date {
+  return new Date(Date.now() - days * DAY_MS);
+}
 
 /**
  * Day-denominated window shared by \`after\` (terminate cooldown) and
@@ -20471,7 +20508,7 @@ const MIN_KEEP_MS = 86_400_000;
  */
 const window_schema = (
   field: "after" | "keep",
-  min_ms: number,
+  min_days: number,
   floor: string
 ) =>
   z
@@ -20480,13 +20517,13 @@ const window_schema = (
         .number({ message: \`autocloses: \${field}.days must be a number\` })
         .positive(\`autocloses: \${field}.days must be > 0\`),
     })
-    .refine((o) => o.days * 86_400_000 >= min_ms, {
+    .refine((o) => o.days >= min_days, {
       message: \`autocloses: \${field} resolves to < \${floor}, which is too short to be a meaningful retention window\`,
     });
 
-const AfterSchema = window_schema("after", MIN_AFTER_MS, "one minute");
+const AfterSchema = window_schema("after", MIN_AFTER_DAYS, "one minute");
 
-const KeepSchema = window_schema("keep", MIN_KEEP_MS, "one day");
+const KeepSchema = window_schema("keep", MIN_KEEP_DAYS, "one day");
 
 const IsSchema = z.union([
   z.string().min(1, "autocloses: is must be a non-empty event name"),
@@ -20595,8 +20632,7 @@ export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 function compile_after(
   after: NonNullable<AutoclosePolicy["after"]>
 ): AutoclosePredicate<Schemas> {
-  const after_ms = after.days * 86_400_000;
-  return (_stream, head) => Date.now() - head.created.getTime() >= after_ms;
+  return (_stream, head) => days_after(head.created, after.days) <= new Date();
 }
 
 /** Compile a single \`is\` field into its predicate slice. @internal */
@@ -20643,43 +20679,43 @@ function compile_reaches(
  * @internal
  */
 /**
- * The smallest \`after\` window (in ms) anywhere in a policy — across the
- * top-level \`after\` and the \`or.after\` block — or \`undefined\` when the
- * policy has no time component.
+ * The smallest \`after\` window (in days) anywhere in a policy — across
+ * the top-level \`after\` and the \`or.after\` block — or \`undefined\` when
+ * the policy has no time component.
  *
  * The synthesized autoclose reaction (#1090) uses this to decide how to
- * wait: a policy with an \`after\` defers its re-check to \`head.created +
- * min_after_ms\` (the earliest its time gate could open); a policy without
- * one (\`is\` / \`reaches\` only) has no time gate, so the reaction just waits
- * for the next event to re-trigger rather than parking on a due-time.
- * Conservative — the min across branches never defers past the soonest a
- * branch could fire.
+ * wait: a policy with an \`after\` defers its re-check to \`head.created\`
+ * plus this many days (the earliest its time gate could open); a policy
+ * without one (\`is\` / \`reaches\` only) has no time gate, so the reaction
+ * just waits for the next event to re-trigger rather than parking on a
+ * due-time. Conservative — the min across branches never defers past
+ * the soonest a branch could fire.
  *
  * @internal
  */
-export function policy_min_after_ms(
+export function policy_min_after_days(
   options: AutoclosePolicy
 ): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
   const windows: number[] = [];
-  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
-  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  if (parsed.after) windows.push(parsed.after.days);
+  if (parsed.or?.after) windows.push(parsed.or.after.days);
   return windows.length ? Math.min(...windows) : undefined;
 }
 
 /**
- * The rolling-window width (ms) of a policy's \`keep\` field, or
+ * The rolling-window width (in days) of a policy's \`keep\` field, or
  * \`undefined\` when the policy declares no rolling window. The
- * synthesized autoclose reaction prunes the prefix older than
- * \`now − keep_ms\` (via a windowed close) and derives its prune
- * due-time as \`tail.created + keep_ms\` — the earliest the oldest
+ * synthesized autoclose reaction prunes the prefix older than the
+ * window (via a windowed close) and derives its prune due-time as
+ * \`tail.created\` plus this many days — the earliest the oldest
  * surviving domain event can age out of the window.
  *
  * @internal
  */
-export function policy_keep_ms(options: AutoclosePolicy): number | undefined {
+export function policy_keep_days(options: AutoclosePolicy): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
-  return parsed.keep ? parsed.keep.days * 86_400_000 : undefined;
+  return parsed.keep?.days;
 }
 
 export function compile_autoclose_policy(
@@ -20752,6 +20788,7 @@ import {
   type AutocloseConfig,
   in_autoclose_window,
 } from "./autoclose-config.js";
+import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 
@@ -20784,8 +20821,8 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_ms = st.autoclose_after_ms;
-    const keep_ms = st.autoclose_keep_ms;
+    const after_days = st.autoclose_after_days;
+    const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
       // Run on a SYNTHETIC stream — \`source\` is the aggregate, \`target\` is a
@@ -20816,9 +20853,9 @@ export function synthesize_autoclose_reactions<
         // would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
-          tail: keep_ms !== undefined ? true : undefined,
+          tail: keep_days !== undefined ? true : undefined,
           exclude:
-            keep_ms !== undefined
+            keep_days !== undefined
               ? [TOMBSTONE_EVENT, SNAP_EVENT]
               : [TOMBSTONE_EVENT],
         });
@@ -20841,8 +20878,8 @@ export function synthesize_autoclose_reactions<
         // window, stage a windowed close — prune the prefix older than the
         // cutoff behind the closest safe snapshot. \`tail\` is present
         // whenever the stats entry is (same non-excluded event set).
-        if (keep_ms !== undefined) {
-          const cutoff = new Date(Date.now() - keep_ms);
+        if (keep_days !== undefined) {
+          const cutoff = days_before_now(keep_days);
           if (entry.tail!.created < cutoff)
             throw new CloseSignal({
               stream: aggregate,
@@ -20854,17 +20891,18 @@ export function synthesize_autoclose_reactions<
             });
         }
         // Not eligible yet: park on the earliest derivable due-time — the
-        // terminate cooldown's opening (\`head.created + after\`) and/or the
-        // moment the oldest domain event ages out of the rolling window
-        // (\`tail.created + keep\`). Neither → wait for the next event to
-        // re-trigger (e.g. a \`reaches\` threshold).
-        const dues: number[] = [];
-        if (after_ms !== undefined)
-          dues.push(head.created.getTime() + after_ms);
-        if (keep_ms !== undefined)
-          dues.push(entry.tail!.created.getTime() + keep_ms);
+        // day the terminate cooldown opens and/or the day the oldest
+        // domain event ages out of the rolling window. Neither → wait for
+        // the next event to re-trigger (e.g. a \`reaches\` threshold).
+        const dues: Date[] = [];
+        if (after_days !== undefined)
+          dues.push(days_after(head.created, after_days));
+        if (keep_days !== undefined)
+          dues.push(days_after(entry.tail!.created, keep_days));
         if (dues.length)
-          throw new DeferSignal({ at: new Date(Math.min(...dues)) });
+          throw new DeferSignal({
+            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
+          });
       },
     };
     const key = \`__autoclose_\${st.name}\`;
@@ -26161,8 +26199,10 @@ export {
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_keep_ms,
-  policy_min_after_ms,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
 } from "./autoclose-policy.js";
 export {
   AUTOCLOSE_TARGET_PREFIX,
@@ -31521,25 +31561,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
-   * or \`undefined\` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * \`autoclose\` by the builder.
+   * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
+   * policy, or \`undefined\` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to \`head.created\` plus this many days; a policy without an
+   * \`after\` waits for the next event instead of parking on a due-time.
+   * Set alongside \`autoclose\` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
   /**
-   * The rolling-window width (ms) of the \`.autocloses({ keep })\` policy,
-   * or \`undefined\` when the policy declares no rolling window (#1011).
-   * The synthesized autoclose reaction stages a windowed close (prune
-   * the prefix older than \`now − autoclose_keep_ms\` behind the closest
-   * safe snapshot) when the oldest surviving domain event ages out, and
-   * defers to \`tail.created + autoclose_keep_ms\` otherwise. Set
-   * alongside \`autoclose\` by the builder; only reachable behind
-   * \`.snap(...)\`.
+   * The rolling-window width (in days) of the \`.autocloses({ keep })\`
+   * policy, or \`undefined\` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside \`autoclose\`
+   * by the builder; only reachable behind \`.snap(...)\`.
    */
-  autoclose_keep_ms?: number;
+  autoclose_keep_days?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it

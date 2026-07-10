@@ -48,25 +48,25 @@ describe(".autocloses(policy) — declarator", () => {
     const Ticket = make_ticket()
       .autocloses({ after: { days: 2 } })
       .build();
-    expect(Ticket.autoclose_after_ms).toBe(2 * 86_400_000);
+    expect(Ticket.autoclose_after_days).toBe(2);
   });
 
-  it("leaves autoclose_after_ms undefined for a policy with no `after`", () => {
+  it("leaves autoclose_after_days undefined for a policy with no `after`", () => {
     const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("takes the smallest `after` across top-level and the `or` block", () => {
     const Ticket = make_ticket()
       .autocloses({ after: { days: 90 }, or: { after: { days: 7 } } })
       .build();
-    expect(Ticket.autoclose_after_ms).toBe(7 * 86_400_000);
+    expect(Ticket.autoclose_after_days).toBe(7);
   });
 
   it("is absent on states that didn't declare it", () => {
     const Ticket = make_ticket().build();
     expect(Ticket.autoclose).toBeUndefined();
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("replaces an earlier declaration (state-level, last-write-wins)", () => {
@@ -75,7 +75,7 @@ describe(".autocloses(policy) — declarator", () => {
       .autocloses({ after: { days: 1 } })
       .autocloses({ is: "TicketResolved" })
       .build();
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("rejects the legacy function-predicate form with a migration message", () => {
@@ -111,14 +111,14 @@ describe(".autocloses({ keep }) — rolling window (#1011)", () => {
     const Ticket = snapping()
       .autocloses({ keep: { days: 180 } })
       .build();
-    expect(Ticket.autoclose_keep_ms).toBe(180 * 86_400_000);
+    expect(Ticket.autoclose_keep_days).toBe(180);
     // keep alone has no terminate component — no time gate either.
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("is absent on states whose policy has no keep", () => {
     const Ticket = snapping().autocloses({ is: "TicketResolved" }).build();
-    expect(Ticket.autoclose_keep_ms).toBeUndefined();
+    expect(Ticket.autoclose_keep_days).toBeUndefined();
   });
 
   it("accepts a keep-only policy whose terminate predicate never fires", () => {
@@ -145,8 +145,8 @@ describe(".autocloses({ keep }) — rolling window (#1011)", () => {
         keep: { days: 180 },
       })
       .build();
-    expect(Ticket.autoclose_after_ms).toBe(90 * 86_400_000);
-    expect(Ticket.autoclose_keep_ms).toBe(180 * 86_400_000);
+    expect(Ticket.autoclose_after_days).toBe(90);
+    expect(Ticket.autoclose_keep_days).toBe(180);
   });
 
   it("requires .snap earlier in the chain — the runtime guard for untyped callers", () => {

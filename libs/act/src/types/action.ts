@@ -669,25 +669,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest `after` window (ms) of the `.autocloses({...})` policy,
-   * or `undefined` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * `head.created + autoclose_after_ms`; a policy without an `after` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * `autoclose` by the builder.
+   * The smallest `after` window (in days) of the `.autocloses({...})`
+   * policy, or `undefined` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to `head.created` plus this many days; a policy without an
+   * `after` waits for the next event instead of parking on a due-time.
+   * Set alongside `autoclose` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
   /**
-   * The rolling-window width (ms) of the `.autocloses({ keep })` policy,
-   * or `undefined` when the policy declares no rolling window (#1011).
-   * The synthesized autoclose reaction stages a windowed close (prune
-   * the prefix older than `now − autoclose_keep_ms` behind the closest
-   * safe snapshot) when the oldest surviving domain event ages out, and
-   * defers to `tail.created + autoclose_keep_ms` otherwise. Set
-   * alongside `autoclose` by the builder; only reachable behind
-   * `.snap(...)`.
+   * The rolling-window width (in days) of the `.autocloses({ keep })`
+   * policy, or `undefined` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside `autoclose`
+   * by the builder; only reachable behind `.snap(...)`.
    */
-  autoclose_keep_ms?: number;
+  autoclose_keep_days?: number;
   /**
    * Archiver set by `.archives(fn)`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it

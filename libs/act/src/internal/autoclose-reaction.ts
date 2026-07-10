@@ -30,6 +30,7 @@ import {
   type AutocloseConfig,
   in_autoclose_window,
 } from "./autoclose-config.js";
+import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 
@@ -62,8 +63,8 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_ms = st.autoclose_after_ms;
-    const keep_ms = st.autoclose_keep_ms;
+    const after_days = st.autoclose_after_days;
+    const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
       // Run on a SYNTHETIC stream — `source` is the aggregate, `target` is a
@@ -94,9 +95,9 @@ export function synthesize_autoclose_reactions<
         // would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
-          tail: keep_ms !== undefined ? true : undefined,
+          tail: keep_days !== undefined ? true : undefined,
           exclude:
-            keep_ms !== undefined
+            keep_days !== undefined
               ? [TOMBSTONE_EVENT, SNAP_EVENT]
               : [TOMBSTONE_EVENT],
         });
@@ -119,8 +120,8 @@ export function synthesize_autoclose_reactions<
         // window, stage a windowed close — prune the prefix older than the
         // cutoff behind the closest safe snapshot. `tail` is present
         // whenever the stats entry is (same non-excluded event set).
-        if (keep_ms !== undefined) {
-          const cutoff = new Date(Date.now() - keep_ms);
+        if (keep_days !== undefined) {
+          const cutoff = days_before_now(keep_days);
           if (entry.tail!.created < cutoff)
             throw new CloseSignal({
               stream: aggregate,
@@ -132,17 +133,18 @@ export function synthesize_autoclose_reactions<
             });
         }
         // Not eligible yet: park on the earliest derivable due-time — the
-        // terminate cooldown's opening (`head.created + after`) and/or the
-        // moment the oldest domain event ages out of the rolling window
-        // (`tail.created + keep`). Neither → wait for the next event to
-        // re-trigger (e.g. a `reaches` threshold).
-        const dues: number[] = [];
-        if (after_ms !== undefined)
-          dues.push(head.created.getTime() + after_ms);
-        if (keep_ms !== undefined)
-          dues.push(entry.tail!.created.getTime() + keep_ms);
+        // day the terminate cooldown opens and/or the day the oldest
+        // domain event ages out of the rolling window. Neither → wait for
+        // the next event to re-trigger (e.g. a `reaches` threshold).
+        const dues: Date[] = [];
+        if (after_days !== undefined)
+          dues.push(days_after(head.created, after_days));
+        if (keep_days !== undefined)
+          dues.push(days_after(entry.tail!.created, keep_days));
         if (dues.length)
-          throw new DeferSignal({ at: new Date(Math.min(...dues)) });
+          throw new DeferSignal({
+            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
+          });
       },
     };
     const key = `__autoclose_${st.name}`;

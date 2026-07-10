@@ -30,8 +30,10 @@ export {
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_keep_ms,
-  policy_min_after_ms,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
 } from "./autoclose-policy.js";
 export {
   AUTOCLOSE_TARGET_PREFIX,

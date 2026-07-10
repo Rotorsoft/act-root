@@ -48,8 +48,14 @@ All additive; no new methods, no new lifecycle events.
   `keep` precedes `.snap`. A windowed close is meaningless without snapshots.
 - **`AutocloseArchiver`** gains an optional third parameter `before?: Date` so
   `.archives(fn)` archivers can page exactly the pre-cutoff prefix on prunes.
-- **`State.autoclose_keep_ms?: number`** (internal-facing field on the public
-  `State` type, set by the builder, consumed by the synthesized reaction).
+- **`State.autoclose_keep_days?: number`** (internal-facing field on the
+  public `State` type, set by the builder, consumed by the synthesized
+  reaction). The sibling `autoclose_after_ms` (#1090) is renamed to
+  `autoclose_after_days` in the same pass so the whole close surface speaks
+  days — a pre-adoption reshape (no published callers), MINOR per project
+  precedent. Epoch arithmetic is confined to the `days_after` /
+  `days_before_now` helpers in `autoclose-policy.ts`; nothing close-facing is
+  denominated in ms/seconds/minutes.
 
 ## Execution model
 
@@ -63,9 +69,9 @@ and:
    `before = now − keep` (a windowed close staged through the same `on_close`
    path);
 3. else defer to the earliest derivable due-time —
-   `min(head.created + after_ms, tail.created + keep_ms)`.
+   `min(head.created + after days, tail.created + keep days)`.
 
-`tail.created + keep_ms` is exact: the next prune can be productive no sooner
+`tail.created + keep days` is exact: the next prune can be productive no sooner
 than when the oldest surviving domain event ages out of the window. Off-hours
 (`autocloseWindow`) gating applies unchanged, before any evaluation.
 

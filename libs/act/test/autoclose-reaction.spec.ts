@@ -251,7 +251,7 @@ describe("autoclose rolling window (keep)", () => {
     // Two days later the oldest domain event has aged out. A fresh event
     // re-arms the drain (the deferred due-time has passed, so the parked
     // reaction re-evaluates) and the prune is staged.
-    vi.setSystemTime(new Date(T0.getTime() + 2 * 86_400_000));
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
     await app.do("bump", { stream: "k1", actor }, {});
     await app.drain();
 
@@ -293,7 +293,7 @@ describe("autoclose rolling window (keep)", () => {
     await app.drain();
     expect(calls).toHaveLength(0);
 
-    vi.setSystemTime(new Date(T0.getTime() + 2 * 86_400_000));
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
     await app.do("bump", { stream: "k2", actor }, {});
     await app.drain();
 
@@ -350,7 +350,7 @@ describe("autoclose rolling window (keep)", () => {
     // (patches >= 2), but the new snapshot's `created` is *inside* the
     // window, so it never qualifies as a boundary — the prune still
     // no-ops and the stream is reported skipped.
-    vi.setSystemTime(new Date(T0.getTime() + 2 * 86_400_000));
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
     await app.do("bump", { stream: "k4", actor }, {});
     await app.drain();
 

@@ -1733,8 +1733,8 @@ export class Act<
    *
    * @example Windowed close — keep the last 180 days of real events
    * ```typescript
-   * const DAY = 24 * 60 * 60 * 1000;
-   * const cutoff = new Date(Date.now() - 180 * DAY);
+   * const cutoff = new Date();
+   * cutoff.setDate(cutoff.getDate() - 180);
    * await app.close([
    *   {
    *     stream: "ledger-acme",

@@ -8,8 +8,8 @@ import type { ZodType } from "zod";
 import {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_keep_ms,
-  policy_min_after_ms,
+  policy_keep_days,
+  policy_min_after_days,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -891,8 +891,8 @@ function action_builder<
       internal.autoclose = compile_autoclose_policy(
         policy
       ) as AutoclosePredicate<TEvents>;
-      internal.autoclose_after_ms = policy_min_after_ms(policy);
-      internal.autoclose_keep_ms = policy_keep_ms(policy);
+      internal.autoclose_after_days = policy_min_after_days(policy);
+      internal.autoclose_keep_days = policy_keep_days(policy);
       return builder;
     },
 
