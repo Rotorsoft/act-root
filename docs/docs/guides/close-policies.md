@@ -203,7 +203,7 @@ Critically, the autoclose reaction runs on a **synthetic per-aggregate stream** 
 })
 ```
 
-`start > end` is an overnight window (the example above runs 22:00–06:00). `start === end` is rejected at build. Omit the window to evaluate on every commit. `autocloseCycleMinutes` (default 720, range `[1, 1440]`) sets how far the reaction defers when it lands outside the window — it is the off-hours re-check cadence, not a full-store sweep interval.
+`start > end` is an overnight window (the example above runs 22:00–06:00). `start === end` is rejected at build. Omit the window to evaluate on every commit. A reaction that triggers outside the window parks until the exact instant the window next opens — derived from the window itself, DST-correct, no polling cadence to configure. (`autocloseCycleMinutes` used to pace this re-check; since #1175 it is deprecated and ignored.)
 
 ## The archive contract
 

@@ -265,13 +265,12 @@ The crucial composition is the same as before: **online close doesn't reinvent a
 
 `.autocloses` still reads a handful of `ActOptions`, validated at `act().build()` (a `ZodError` at build, never on the first cycle):
 
-- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. When the current hour is outside `[start, end)` the handler defers to the next cycle instead of closing. Hours are `[0, 23]` integers in `timeZone` (IANA, default UTC, DST-correct); `start > end` is an overnight window. Omit to evaluate on every commit.
-- `autocloseCycleMinutes` — the re-check cadence used by the off-hours gate. When a commit lands outside the window, the handler defers by this many minutes rather than closing. Default 720 (12 h), range `[1, 1440]`. It is no longer a full-store sweep interval.
-- `closeBatchSize` / `closeYieldMs` / `closeOnError` — retained on `ActOptions`; with the sweep removed, `closeBatchSize` and `closeYieldMs` now matter only when an explicit bulk `app.close` truncates many streams at once.
+- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. When the current hour is outside `[start, end)` the handler defers to the exact instant the window next opens (`next_window_open`, DST-correct via `Intl`) — derived from the window itself, no polling cadence. This closed a real latency gap: the old poll (`autocloseCycleMinutes`, default 12 h) could oscillate around a short window and keep missing it. Hours are `[0, 23]` integers in `timeZone` (IANA, default UTC); `start > end` is an overnight window. Omit to evaluate on every commit.
+- `autocloseCycleMinutes` / `closeBatchSize` / `closeYieldMs` / `closeOnError` — **deprecated since #1175** (decision record: `rfcs/1175-close-cadence-days.md`). Accepted and range-validated so existing configs keep building and typos keep failing loudly, but nothing consumes them — the last three had been dead since #1090 removed the sweep. Removal rides the next major.
 
 ### Latency
 
-A stream closes shortly after it qualifies, not on a fixed sweep boundary: the reaction fires on the aggregate's own commits, and for `after`-style cooldowns the persisted defer wakes the worker at the exact cooldown instant (modulo the off-hours window, which pushes the re-check to the next in-window cycle). Eligibility still means "old" — terminal-plus-grace or past a retention age — so the close lands when the cooldown elapses rather than "right this second."
+A stream closes shortly after it qualifies, not on a fixed sweep boundary: the reaction fires on the aggregate's own commits, and for `after`-style cooldowns the persisted defer wakes the worker at the exact cooldown instant (modulo the off-hours window, which parks the re-check until the window opens). Eligibility still means "old" — terminal-plus-grace or past a retention age — so the close lands when the cooldown elapses rather than "right this second."
 
 ### What's NOT online-close
 
@@ -285,7 +284,7 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 - `libs/act/src/internal/defer-signal.ts` / `close-signal.ts` — the control-flow signals a reaction throws to defer or close
 - `libs/act/src/internal/defer-timer.ts` — the per-worker wake optimization over `stream → due-time` (clamped to `setTimeout`'s ceiling)
 - `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_min_after_days`, `policy_keep_days`
-- `libs/act/src/internal/autoclose-config.ts` — `autocloseWindow` / `autocloseCycleMinutes` resolver + `in_autoclose_window`
+- `libs/act/src/internal/autoclose-config.ts` — `autocloseWindow` resolver + `in_autoclose_window` / `next_window_open`
 - `libs/act/src/builders/state-builder.ts` — `.autocloses` / `.archives` declarators
 - `libs/act/test/autoclose-reaction.spec.ts` — synthesized-reaction behavior (immediate close, live-head reopen, cooldown park, threshold, off-hours defer, rolling-window prune/defer)
 - `libs/act/test/autoclose-policy.spec.ts` / `autoclose-builder.spec.ts` — policy compilation + declarator validation

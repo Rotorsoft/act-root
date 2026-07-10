@@ -146,11 +146,10 @@ after the policy qualifies, not synchronously with the commit.
 If the close has to happen in the same request that emitted the
 terminal event — regulatory cutoffs measured in seconds, "user
 deleted my account, the data must be gone now" workflows — call
-`app.close([{ stream }])` directly from the action handler. The
-[production checklist](../../../docs/docs/guides/production-checklist.md)
-covers cycle tuning (`autocloseCycleMinutes`, `closeBatchSize`,
-`closeYieldMs`) for the in-between case where eventual is too slow
-but a per-request close is overkill.
+`app.close([{ stream }])` directly from the action handler. For the in-between case where eventual is too slow but a
+per-request close is overkill, narrow the off-hours
+`autocloseWindow` (or drop it) — the reaction evaluates on the
+aggregate's own commits and parks only while the window is shut.
 
 **Stream rotation while keeping the entity alive.** An online
 terminate always tombstones. For a long-running business entity
