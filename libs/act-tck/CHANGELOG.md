@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.26.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.3...@rotorsoft/act-tck-v1.26.4) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act:** close-guard cache poisoning, scoped-port leaks, restore migration remap ([8883b50](https://github.com/rotorsoft/act-root/commit/8883b50758e004ef86086f56dfb3db71e2185702)), closes [#1188](https://github.com/rotorsoft/act-root/issues/1188) [#1191](https://github.com/rotorsoft/act-root/issues/1191) [#1188](https://github.com/rotorsoft/act-root/issues/1188) [#1191](https://github.com/rotorsoft/act-root/issues/1191) [#1192](https://github.com/rotorsoft/act-root/issues/1192)
+
 # [@rotorsoft/act-tck-v1.26.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.2...@rotorsoft/act-tck-v1.26.3) (2026-07-10)
 
 
