@@ -357,6 +357,35 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("truncate (windowed)", () => {
+    it("reports 0 deleted when rowCount is null (defensive)", async () => {
+      const boundary = {
+        id: 5,
+        stream: "w",
+        version: 2,
+        name: "__snapshot__",
+        data: {},
+        created: new Date(),
+        meta: { correlation: "", causation: {} },
+      };
+      const queryMock = vi
+        .fn()
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockResolvedValueOnce({ rows: [boundary] }) // boundary SELECT
+        .mockResolvedValueOnce({ rowCount: null }) // prefix DELETE
+        .mockResolvedValueOnce(undefined); // COMMIT
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(queryMock)
+      );
+      const result = await store.truncate([
+        { stream: "w", before: new Date() },
+      ]);
+      expect(result.get("w")?.deleted).toBe(0);
+      expect(result.get("w")?.committed.id).toBe(5);
+    });
+  });
+
   describe("restore", () => {
     it("swallows ROLLBACK error after a failed restore", async () => {
       // BEGIN succeeds, first TRUNCATE throws, then ROLLBACK ITSELF
