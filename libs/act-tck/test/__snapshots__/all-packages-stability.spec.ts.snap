@@ -43050,6 +43050,14 @@ const NOTIFY_CHANNEL_PREFIX = "act_commit";
 // See: https://www.postgresql.org/docs/current/sql-notify.html
 const NOTIFY_MAX_PAYLOAD_BYTES = 8000;
 
+// Capped exponential backoff for re-establishing the LISTEN subscription
+// after the dedicated client emits \`error\` (backend restart, failover,
+// network drop — #1189). Between attempts the store degrades to the poll
+// path, so callers never miss events — they just fall back to the next
+// drain cycle for cross-process wakeups until the LISTEN client is back.
+const NOTIFY_RECONNECT_BASE_MS = 250;
+const NOTIFY_RECONNECT_MAX_MS = 30_000;
+
 function notify_channel(schema: string, table: string): string {
   return \`\${NOTIFY_CHANNEL_PREFIX}_\${schema}_\${table}\`;
 }
@@ -43233,6 +43241,36 @@ export class PostgresStore implements Store {
    */
   private _listen_handler: ((msg: pg.Notification) => void) | undefined;
   /**
+   * Error listener attached to the active LISTEN client. node-postgres
+   * removes its idle-error guard on checkout, so a checked-out client
+   * that emits \`error\` (backend restart, failover, network drop) with no
+   * listener is an uncaught exception — a process crash (#1189). Tracked
+   * alongside \`_listen_handler\` so teardown detaches it in lockstep.
+   */
+  private _listen_error_handler: ((err: Error) => void) | undefined;
+  /**
+   * The caller's notification handler for the active subscription, kept
+   * so the self-healing reconnect path (#1189) can re-establish LISTEN
+   * on a fresh client after the dedicated one emits \`error\`. Cleared by
+   * \`_teardown_listen\`, which is what makes disposal cancel any pending
+   * reconnect.
+   */
+  private _notify_handler:
+    | ((notification: StoreNotification) => void)
+    | undefined;
+  /**
+   * Pending reconnect timer, if a LISTEN client error scheduled one.
+   * Tracked so \`_teardown_listen\` (and therefore \`dispose()\`) can cancel
+   * it — a reconnect must never fire after teardown.
+   */
+  private _reconnect_timer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Consecutive reconnect attempts since the last healthy LISTEN, used to
+   * grow the capped exponential backoff. Reset to 0 once a re-LISTEN
+   * succeeds.
+   */
+  private _reconnect_attempts = 0;
+  /**
    * Cross-process commit subscription. **Present only when
    * \`config.notify === true\`** — the orchestrator's auto-wire path
    * checks \`if (store.notify)\`, so omitting the method keeps
@@ -43311,18 +43349,33 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Tear down the active LISTEN subscription if any: detach the
-   * notification listener, run UNLISTEN, and destroy the dedicated
-   * client (do not return it to the pool — its listener is removed but
-   * destroying belt-and-braces guards against any future change in
-   * pg-pool semantics that could re-issue a half-clean client).
+   * Tear down the active LISTEN subscription if any: cancel any pending
+   * reconnect, forget the caller's handler (so no reconnect can fire
+   * after teardown), detach the notification + error listeners, run
+   * UNLISTEN, and destroy the dedicated client (do not return it to the
+   * pool — its listeners are removed but destroying belt-and-braces
+   * guards against any future change in pg-pool semantics that could
+   * re-issue a half-clean client).
+   *
+   * Clearing \`_notify_handler\` and the reconnect timer here is what makes
+   * \`dispose()\` safe during a pending reconnect (#1189): a scheduled
+   * \`_reconnect\` bails the moment it finds no handler.
    */
   private async _teardown_listen() {
+    if (this._reconnect_timer) {
+      clearTimeout(this._reconnect_timer);
+      this._reconnect_timer = undefined;
+    }
+    this._notify_handler = undefined;
+    this._reconnect_attempts = 0;
     if (!this._listen_client) return;
-    // _listen_handler is set in lockstep with _listen_client in notify(),
-    // so if the client is present, the handler is too.
+    // _listen_handler and _listen_error_handler are set in lockstep with
+    // _listen_client in _open_listen, so if the client is present, both
+    // handlers are too.
     this._listen_client.removeListener("notification", this._listen_handler!);
+    this._listen_client.removeListener("error", this._listen_error_handler!);
     this._listen_handler = undefined;
+    this._listen_error_handler = undefined;
     try {
       await this._listen_client.query(\`UNLISTEN \${this._channel}\`);
     } catch {
@@ -43412,7 +43465,7 @@ export class PostgresStore implements Store {
           stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
           source varchar(100) COLLATE pg_catalog."default",
           at int NOT NULL DEFAULT -1,
-          retry smallint NOT NULL DEFAULT -1,
+          retry int NOT NULL DEFAULT -1,
           blocked boolean NOT NULL DEFAULT false,
           error text,
           leased_by text,
@@ -43438,6 +43491,31 @@ export class PostgresStore implements Store {
       await client.query(
         \`ALTER TABLE \${this._fqs}
          ADD COLUMN IF NOT EXISTS deferred_at timestamptz;\`
+      );
+      // Migration for tables created before the retry widening (#1190).
+      // \`claim()\` increments \`retry\` on every acquisition and never
+      // resets it for a zero-progress \`blockOnError: false\` stream, so a
+      // poison stream marches the counter up without bound. The original
+      // \`smallint\` column overflowed at 32768, throwing "smallint out of
+      // range" and killing every claim in the lane. Widen to \`int\` so PG
+      // matches the unbounded SQLite/InMemory adapters, preserving every
+      // existing value (smallint ⊂ int). Guarded on the current type so
+      // steady-state re-seeds skip the DDL — and its brief ACCESS
+      // EXCLUSIVE lock — entirely once the column is already \`integer\`.
+      await client.query(
+        \`DO $$
+         BEGIN
+           IF EXISTS (
+             SELECT 1 FROM information_schema.columns
+             WHERE table_schema = '\${this.config.schema}'
+               AND table_name = '\${this.config.table}_streams'
+               AND column_name = 'retry'
+               AND data_type = 'smallint'
+           ) THEN
+             EXECUTE 'ALTER TABLE \${this._fqs} ALTER COLUMN retry TYPE integer';
+           END IF;
+         END
+         $$;\`
       );
 
       // Composite index for \`claim()\` — \`(blocked, priority DESC, at)\`
@@ -44632,6 +44710,13 @@ export class PostgresStore implements Store {
    * client; pool disposal also tears the subscription down as a safety
    * net.
    *
+   * The subscription is **self-healing** (#1189): the dedicated client
+   * has an \`error\` listener that, on a connection blip (backend restart,
+   * failover, network drop), tears the dead client down and re-LISTENs
+   * on a fresh one with capped exponential backoff — degrading to the
+   * poll path in between. A pending reconnect is cancelled by disposal,
+   * so no reconnect fires after teardown.
+   *
    * @param handler Called for each cross-process commit notification.
    * @returns Disposer that releases the LISTEN client.
    */
@@ -44641,6 +44726,38 @@ export class PostgresStore implements Store {
     // Close any prior subscription so callers don't silently double-listen.
     await this._teardown_listen();
 
+    // Remember the caller's handler so the self-healing reconnect path
+    // (#1189) can re-establish LISTEN on a fresh client after a
+    // connection blip without the caller re-subscribing.
+    this._notify_handler = handler;
+    try {
+      await this._open_listen(handler);
+    } catch (err) {
+      // Initial LISTEN failed — leave no half-set state behind so the
+      // orchestrator's wireNotify sees a clean rejection.
+      this._notify_handler = undefined;
+      throw err;
+    }
+
+    return async () => {
+      // No-op when this disposer is stale (a later notify() call already
+      // tore the subscription down and replaced the handler).
+      if (this._notify_handler !== handler) return;
+      await this._teardown_listen();
+    };
+  }
+
+  /**
+   * Check out a dedicated client, attach the notification + error
+   * listeners, and run \`LISTEN\`. Shared by the initial subscription and
+   * every reconnect (#1189). On any failure before \`LISTEN\` succeeds the
+   * client is detached and destroyed so nothing leaks — the caller
+   * decides whether to propagate (initial subscribe) or reschedule
+   * (reconnect).
+   */
+  private async _open_listen(
+    handler: (notification: StoreNotification) => void
+  ): Promise<void> {
     const client = await this._client("notify");
     const on_notification = (msg: pg.Notification) => {
       // Channel filter: this client only \`LISTEN\`s on \`this._channel\`,
@@ -44703,23 +44820,74 @@ export class PostgresStore implements Store {
         logger.error(err, "act_commit: handler threw, listener preserved");
       }
     };
+    // The dedicated LISTEN client loses node-postgres's idle-error guard
+    // on checkout, so an unhandled \`error\` (backend restart, failover,
+    // network drop) would crash the process (#1189). Handle it: log,
+    // tear the dead client down, and schedule a re-LISTEN with capped
+    // backoff. Between attempts the store degrades to the poll path.
+    const on_error = (err: Error) => {
+      logger.error(err, "act_commit: LISTEN client errored, reconnecting");
+      this._reconnect();
+    };
     client.on("notification", on_notification);
+    client.on("error", on_error);
     try {
       await client.query(\`LISTEN \${this._channel}\`);
     } catch (err) {
       client.removeListener("notification", on_notification);
+      client.removeListener("error", on_error);
       client.release(true);
       throw err;
     }
     this._listen_client = client;
     this._listen_handler = on_notification;
+    this._listen_error_handler = on_error;
+    // A healthy LISTEN resets the backoff so the next blip starts fresh.
+    this._reconnect_attempts = 0;
+  }
 
-    return async () => {
-      // No-op when this disposer is stale (a later notify() call already
-      // tore the subscription down).
-      if (this._listen_client !== client) return;
-      await this._teardown_listen();
-    };
+  /**
+   * Self-heal the LISTEN subscription after the dedicated client emitted
+   * \`error\` (#1189). Detaches and destroys the dead client, then
+   * reconnects on a fresh one with capped exponential backoff. Bails
+   * immediately if the subscription was disposed while a reconnect was
+   * pending (\`_notify_handler\` cleared by \`_teardown_listen\`), so no
+   * reconnect ever fires after teardown.
+   */
+  private _reconnect(): void {
+    const handler = this._notify_handler;
+    // Disposed (or torn down by a re-subscribe) while the error fired —
+    // nothing to reconnect.
+    if (!handler) return;
+    // Detach and destroy the dead client. Its listeners are gone once
+    // \`_teardown_listen\` runs, but the error already fired, so just drop
+    // it — do not run UNLISTEN on a broken connection.
+    if (this._listen_client) {
+      this._listen_client.removeListener("notification", this._listen_handler!);
+      this._listen_client.removeListener("error", this._listen_error_handler!);
+      this._listen_handler = undefined;
+      this._listen_error_handler = undefined;
+      this._listen_client.release(true);
+      this._listen_client = undefined;
+    }
+    const delay = Math.min(
+      NOTIFY_RECONNECT_MAX_MS,
+      NOTIFY_RECONNECT_BASE_MS * 2 ** this._reconnect_attempts
+    );
+    this._reconnect_attempts++;
+    this._reconnect_timer = setTimeout(() => {
+      this._reconnect_timer = undefined;
+      // Re-check: disposal may have won the race after the timer fired.
+      const current = this._notify_handler;
+      if (!current) return;
+      this._open_listen(current).catch((err) => {
+        logger.error(err, "act_commit: LISTEN reconnect failed, retrying");
+        this._reconnect();
+      });
+    }, delay);
+    // Don't keep the event loop alive purely for a reconnect attempt —
+    // a process that has nothing else to do should still be able to exit.
+    this._reconnect_timer.unref?.();
   }
 
   /**

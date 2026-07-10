@@ -78,6 +78,18 @@ const indexes = async (table: string): Promise<string[]> => {
   return rows.map((r: { indexname: string }) => r.indexname);
 };
 
+const column_type = async (
+  table: string,
+  column: string
+): Promise<string | undefined> => {
+  const { rows } = await pool().query(
+    `SELECT data_type FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = $2 AND column_name = $3`,
+    [SCHEMA, table, column]
+  );
+  return rows[0]?.data_type as string | undefined;
+};
+
 describe("PostgresStore seed-sync contract", () => {
   beforeEach(() => {
     store(new PostgresStore({ port: PORT, schema: SCHEMA, table: TABLE }));
@@ -98,6 +110,10 @@ describe("PostgresStore seed-sync contract", () => {
     const stream_cols = await columns(`${TABLE}_streams`);
     for (const c of ["priority", "lane", "deferred_at"])
       expect(stream_cols).toContain(c);
+
+    // #1190: the legacy `smallint` retry column is widened to `int` so a
+    // poison stream's ever-climbing retry counter never overflows.
+    expect(await column_type(`${TABLE}_streams`, "retry")).toBe("integer");
 
     // The superseded fetch index is gone; its replacement is present.
     const ix = await indexes(`${TABLE}_streams`);

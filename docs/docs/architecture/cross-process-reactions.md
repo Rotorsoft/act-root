@@ -80,6 +80,31 @@ their next poll cycle — delivery degrades in latency, never in guarantees.
 At-least-once is preserved because NOTIFY is only ever a latency
 optimization over the poll path, not the delivery mechanism itself.
 
+## Connection loss — the LISTEN client self-heals
+
+The dedicated LISTEN client is a long-lived checkout, and node-postgres
+drops its idle-error guard the moment a client leaves the pool. A backend
+restart, a failover, or a dropped network connection surfaces as an
+`error` event on that client. Left unhandled it is an uncaught exception —
+a **process crash**; and even a process that survived would keep a client
+that looks healthy but never receives another notification, so
+cross-process wakeups silently stop.
+
+`PostgresStore` handles that `error`: it logs, tears the dead client down,
+and re-establishes the `LISTEN` on a fresh client with **capped
+exponential backoff** (250 ms base, doubling to a 30 s ceiling). Between
+attempts the store degrades to the poll path — the same graceful fallback
+as an oversize payload — so no events are lost, only wakeup latency
+climbs until the subscription is back. A healthy re-`LISTEN` resets the
+backoff, so an unrelated blip later starts fresh. Disposal (`dispose()` or
+a re-subscribe) cancels any pending reconnect, so a reconnect never fires
+after teardown.
+
+This makes `notify` durable across the connection blips that are routine
+in managed Postgres (patching windows, failovers) without operator
+intervention — the subscription that was healthy before the blip is
+healthy after it, no restart required.
+
 ## Adapter status
 
 | Adapter | `notify` | Why |
