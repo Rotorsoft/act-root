@@ -12,10 +12,10 @@ Breaking changes to anything in this list require a **major** version bump and a
 
 The fluent surfaces exported from `@rotorsoft/act`:
 
-- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — predicate the autoclose cycle calls per candidate stream), `.archives` (online close-the-books epic #802 — companion archiver run while the stream is guarded, before truncate), `.build`
-- `slice(...)` — including `.actions`, `.given`, `.build`
-- `projection(...)` — including `.from`, `.on`, `.build`
-- `act(...)` — including `.with`, `.build`
+- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — declarative close/retention policy, including the rolling-window `keep` variant gated behind `.snap`, #1011), `.archives` (online close-the-books epic #802 — companion archiver run before truncate), `.build`
+- `slice(...)` — including `.withState`, the reaction chain `.on(event)` → optional `.defer(when)` (#1091) → `.do(handler, options?)` → optional `.to(resolver | target)`, and `.build`
+- `projection(...)` / `projection(target)` — including per-event `.on({ Event: schema })` handlers with their `.to(...)` routing, the bulk `.batch(handler)` form, the state-projection `.of(...states).flush(handler, config?)` form (#1125), and `.build`
+- `act(...)` — including `.withState`, `.withSlice`, `.withProjection`, `.withActor`, `.withLane` (ACT-1103), the same reaction chain as `slice(...)` (`.on` → optional `.defer` → `.do` → optional `.to`), and `.build(options?)`
 - `sensitive(zodType)` (sensitive-data epic #566 — schema-level marker for PII fields; the orchestrator splits sensitive keys off `data` into `pii` on commit and gates reads by `.discloses`)
 
 Adding new optional builder methods or new optional fields to existing return types is **not** a breaking change. Removing or renaming a method, changing a required parameter, or narrowing an output type **is**.
@@ -26,8 +26,9 @@ The runtime surface returned from `act(...).build()`:
 
 - `do`, `load`, `query`, `query_array`
 - `drain`, `settle`, `correlate`
-- `reset`, `unblock`, `blocked_streams`, `close`
+- `reset`, `unblock`, `blocked_streams`, `close`, `prioritize` (ACT-102 — operator override of claim scheduling priority)
 - `forget` (sensitive-data epic #566 — wipe a stream's PII via `Store.forget_pii`, invalidate the cache, emit the `forgotten` lifecycle event; throws on adapters without `pii_isolation`)
+- `restore` (backup/migration scan into the connected store; capability-gated on `Store.restore`)
 - `audit`
 
 The signatures, return shapes, and behavioral contracts of these methods are stable. Additive new methods on `IAct` are not breaking. Changing the meaning of an existing call (e.g., what `settle()` guarantees) is.
