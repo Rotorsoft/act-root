@@ -34,9 +34,56 @@ describe("webhookMiddleware (Fastify)", () => {
     const { reply } = mockReply();
     const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
+    const idem = (
+      req as FastifyRequest & {
+        idempotency: {
+          key: string;
+          deduped: boolean;
+          commit: () => unknown;
+          release: () => unknown;
+        };
+      }
+    ).idempotency;
+    expect(idem.key).toBe("req-1");
+    expect(idem.deduped).toBe(false);
+    expect(typeof idem.commit).toBe("function");
+    expect(typeof idem.release).toBe("function");
+  });
+
+  it("commit() durably dedups; a retry after success skips re-processing", async () => {
+    const store = freshStore();
+    const middleware = webhookMiddleware({ store });
+    const req = mockRequest({ "idempotency-key": "req-commit" }, BODY);
+    const { reply } = mockReply();
+    await middleware(req, reply);
+    await (
+      req as FastifyRequest & { idempotency: { commit: () => Promise<void> } }
+    ).idempotency.commit();
+    const req2 = mockRequest({ "idempotency-key": "req-commit" }, BODY);
+    const { reply: reply2 } = mockReply();
+    await middleware(req2, reply2);
     expect(
-      (req as FastifyRequest & { idempotency: unknown }).idempotency
-    ).toEqual({ key: "req-1", deduped: false });
+      (req2 as FastifyRequest & { idempotency: { deduped: boolean } })
+        .idempotency.deduped
+    ).toBe(true);
+  });
+
+  it("release() frees the tentative claim; a retry after failure re-processes", async () => {
+    const store = freshStore();
+    const middleware = webhookMiddleware({ store });
+    const req = mockRequest({ "idempotency-key": "req-release" }, BODY);
+    const { reply } = mockReply();
+    await middleware(req, reply);
+    await (
+      req as FastifyRequest & { idempotency: { release: () => Promise<void> } }
+    ).idempotency.release();
+    const req2 = mockRequest({ "idempotency-key": "req-release" }, BODY);
+    const { reply: reply2 } = mockReply();
+    await middleware(req2, reply2);
+    expect(
+      (req2 as FastifyRequest & { idempotency: { deduped: boolean } })
+        .idempotency.deduped
+    ).toBe(false);
   });
 
   it("replies 400 on missing-key", async () => {

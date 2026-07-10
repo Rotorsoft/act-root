@@ -206,6 +206,111 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     expect(responseBody.detail).toContain("downstream service unreachable");
   });
 
+  it("re-runs the handler on retry after a transient handler failure (no lost delivery)", async () => {
+    let attempts = 0;
+    const r = receiver({
+      port: 0,
+      store: new InMemoryIdempotencyStore(),
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        attempts++;
+        if (attempts === 1) throw new Error("transient downstream outage");
+      })
+      .build();
+
+    const fire = () =>
+      r.fetch(
+        new Request("http://localhost/OrderConfirmed", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": "req-transient",
+          },
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
+        })
+      );
+
+    // First delivery fails transiently — 500, key must NOT be committed.
+    const first = await fire();
+    expect(first.status).toBe(500);
+
+    // Sender retries with the same key — the handler must run again
+    // (the fix), not be short-circuited into a silent 204 (the bug).
+    const second = await fire();
+    expect(second.status).toBe(204);
+    expect(attempts).toBe(2);
+  });
+
+  it("dedups a retry after a successful delivery (handler runs exactly once)", async () => {
+    let attempts = 0;
+    const r = receiver({
+      port: 0,
+      store: new InMemoryIdempotencyStore(),
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        attempts++;
+      })
+      .build();
+
+    const fire = () =>
+      r.fetch(
+        new Request("http://localhost/OrderConfirmed", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": "req-committed",
+          },
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
+        })
+      );
+
+    expect((await fire()).status).toBe(204);
+    // Retry after success — deduped, handler does not run again.
+    expect((await fire()).status).toBe(204);
+    expect(attempts).toBe(1);
+  });
+
+  it("dedups a concurrent duplicate that arrives while the handler is in flight", async () => {
+    let attempts = 0;
+    let release_handler: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release_handler = resolve;
+    });
+
+    const r = receiver({
+      port: 0,
+      store: new InMemoryIdempotencyStore(),
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        attempts++;
+        await gate;
+      })
+      .build();
+
+    const fire = () =>
+      r.fetch(
+        new Request("http://localhost/OrderConfirmed", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": "req-concurrent",
+          },
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
+        })
+      );
+
+    // Fire the first delivery; its handler blocks on the gate.
+    const first = fire();
+    // A concurrent duplicate arrives mid-flight — the tentative claim
+    // must dedup it so the handler is not entered twice.
+    const second = await fire();
+    expect(second.status).toBe(204);
+
+    release_handler?.();
+    expect((await first).status).toBe(204);
+    expect(attempts).toBe(1);
+  });
+
   it("supports chaining multiple .on() calls with independent handler types", async () => {
     const ShipmentSchema = z.object({ trackingId: z.string() });
     let order: { orderId: string } | undefined;

@@ -82,7 +82,7 @@ Naming convention: type `Receiver` (PascalCase), factory `receiver` (lowercase) 
 
 ### `receiver/<framework>` — low-level middleware
 
-When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the per-framework `webhookMiddleware` factories. They compose `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim` and translate the result into the framework's idiomatic 400/401 response:
+When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the per-framework `webhookMiddleware` factories. They compose `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim` (a *tentative* claim — see the two-phase note below) and translate the result into the framework's idiomatic 400/401 response:
 
 ```ts
 // tRPC
@@ -107,17 +107,33 @@ Each adapter follows the same shape:
 
 ```ts
 import { webhookMiddleware } from "@rotorsoft/act-http/receiver/express";
-app.post("/webhook", webhookMiddleware({ store, secret }), (req, res) => {
-  const { key, deduped } = (req as any).idempotency;
-  // …
+app.post("/webhook", webhookMiddleware({ store, secret }), async (req, res) => {
+  const { key, deduped, commit, release } = (req as any).idempotency;
+  if (deduped) return res.status(204).end();
+  try {
+    // … process the event …
+    await commit();               // success — later retries dedup
+    res.status(204).end();
+  } catch (err) {
+    await release();              // transient — the sender's retry re-processes
+    res.status(500).json({ error: "handler-failed" });
+  }
 });
 ```
 
 ```ts
 import { webhookMiddleware } from "@rotorsoft/act-http/receiver/fastify";
-app.post("/webhook", { preHandler: webhookMiddleware({ store, secret }) }, async (req) => {
-  const { key, deduped } = (req as any).idempotency;
-  // …
+app.post("/webhook", { preHandler: webhookMiddleware({ store, secret }) }, async (req, reply) => {
+  const { key, deduped, commit, release } = (req as any).idempotency;
+  if (deduped) return reply.status(204).send();
+  try {
+    // … process the event …
+    await commit();
+    return reply.status(204).send();
+  } catch (err) {
+    await release();
+    return reply.status(500).send({ error: "handler-failed" });
+  }
 });
 ```
 
@@ -125,11 +141,15 @@ app.post("/webhook", { preHandler: webhookMiddleware({ store, secret }) }, async
 import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
 app.post("/webhook", webhookMiddleware({ store, secret }), (c) => {
   const { key, deduped } = c.get("idempotency");
+  // Hono auto-finalizes off the response: a 2xx commits, a 5xx/throw releases.
   // …
+  return c.body(null, 204);
 });
 ```
 
-On failure: the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of five verification reasons — `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature`) and short-circuits the handler. On success: `{ key, deduped }` is injected into the request context.
+On failure: the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of five verification reasons — `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature`) and short-circuits the handler. On success: `{ key, deduped, commit, release }` is injected into the request context.
+
+**Two-phase dedup.** The `claim` a middleware makes is *tentative*: it dedups a concurrent duplicate mid-flight but is not durable until confirmed, so a transient handler failure never claims-then-loses the delivery. **Hono** and **tRPC** wrap the downstream chain and finalize automatically (2xx / resolved → `commit`; 5xx / thrown / `{ ok: false }` → `release`). **Express** and **Fastify** middleware complete before the route handler, so the handler must call `commit()` on success or `release()` on a transient failure — skipping both leaves the claim tentative (dedups concurrent duplicates, expires on TTL, never permanently lost).
 
 ### `receiver` primitives — when neither builder nor middleware fits
 
@@ -305,14 +325,14 @@ onData: (msg) => {
 
 ### `/receiver` subpath
 
-- **`checkWebhook(headers, body, options)`** — framework-agnostic core. Composes `verifyWebhook` (when `options.secret` is set) + `extractIdempotencyKey` + `options.store.claim`. Returns `{ ok: false; status: 400|401; reason }` on failure or `{ ok: true; key; deduped }` on success. The per-framework adapters wrap this and translate the outcome into the framework's idiomatic response.
+- **`checkWebhook(headers, body, options)`** — framework-agnostic core. Composes `verifyWebhook` (when `options.secret` is set) + `extractIdempotencyKey` + `options.store.claim` (a *tentative* claim). Returns `{ ok: false; status: 400|401; reason }` on failure or `{ ok: true; key; deduped }` on success. The caller owns finalization: `options.store.commit(key)` on handler success, `options.store.release(key)` on a transient failure. The per-framework adapters wrap this and translate the outcome into the framework's idiomatic response.
 - **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope.
 - **`verifyWebhook(headers, body, secret, opts?)`** — HMAC-SHA256 signature + timestamp window verifier. Returns `{ ok: true }` or `{ ok: false; reason }` where reason is one of `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`. Default timestamp window is ±300 seconds; override via `opts.maxAgeSeconds`. Uses `crypto.timingSafeEqual` to avoid timing attacks. Pair with `webhook({ secret })` on the sender side.
 - **Types**: `CheckResult`, `CheckWebhookOptions`, `CheckFailureReason`, `VerifyResult`, `VerifyOptions`.
 
 ### `/receiver/<framework>` subpaths
 
-Each framework adapter exports a single function `webhookMiddleware(options)` that returns the framework's native middleware shape. Options are `{ store, secret?, verify? }` — the same `CheckWebhookOptions` as the core. Failure → 400/401 with `{ error: <reason> }`; success → `{ key, deduped }` is injected:
+Each framework adapter exports a single function `webhookMiddleware(options)` that returns the framework's native middleware shape. Options are `{ store, secret?, verify? }` — the same `CheckWebhookOptions` as the core. Failure → 400/401 with `{ error: <reason> }`; success → `{ key, deduped, commit, release }` is injected. Hono and tRPC auto-finalize off the downstream outcome; Express and Fastify require the route handler to call `commit()` / `release()` (see the two-phase note above):
 
 | Subpath | Injection site | Failure response |
 |---|---|---|
@@ -329,7 +349,7 @@ Shared utilities consumed by every transport in the auto-generated API umbrella 
 - **`ApiError`** — uniform envelope `{ error, detail?, code? }` shipped over the wire by every transport. Hosts get the same shape from REST, tRPC, and OpenAPI.
 - **`ERROR_MAP`** — `as const` table mapping framework error types to `{ status, code }`. `ValidationError → 422 / VALIDATION`, `InvariantError → 409 / INVARIANT`, `ConcurrencyError → 412 / CONCURRENCY`, `StreamClosedError → 410 / STREAM_CLOSED`, `NonRetryableError → 400 / NON_RETRYABLE`.
 - **`toApiError(err) → { status, body }`** — the single mapping helper every transport calls in its error boundary. Known framework errors map per `ERROR_MAP`; everything else surfaces as 500 / `INTERNAL` (with `detail` only when the throw was an `Error` — thrown strings or objects don't leak payloads).
-- **`withIdempotency(store, key, handler)`** — wraps an action handler in an `Idempotency-Key` claim. Reuses `@rotorsoft/act-ops/idempotency` — same contract `@rotorsoft/act-http/receiver` already speaks, so one `IdempotencyStore` covers both halves of the "Act over the wire" surface. Returns `{ deduped: false, result }` on fresh claim, `{ deduped: true }` on duplicate (handler is not called).
+- **`withIdempotency(store, key, handler)`** — wraps an action handler in a two-phase `Idempotency-Key` claim: it `claim`s tentatively, runs the handler, then `commit`s the key on success or `release`s it and re-throws on a handler rejection (so a transient failure re-processes on retry rather than deduping into a silent success). Reuses `@rotorsoft/act-ops/idempotency` — same contract `@rotorsoft/act-http/receiver` already speaks, so one `IdempotencyStore` covers both halves of the "Act over the wire" surface. Returns `{ deduped: false, result }` on fresh claim, `{ deduped: true }` on duplicate (handler is not called).
 - **`SseOptions`** — `{ channel: BroadcastChannel<S>, maxConnections?, heartbeatMs? }`. Shared SSE wiring options consumed by both `trpc(app, { sse })` and `hono(app, { sse })`. Defaults: `maxConnections=500` (validated `[1, 10_000]`), `heartbeatMs=30_000` (validated `[15_000, 300_000]`). Out-of-range values throw `RangeError` at transport construction so misconfiguration surfaces at startup, not at first connection.
 - **`SseConnectionCounter`** — per-process slot counter. The 501st concurrent open is refused (`503 / SSE_BUSY` with `Retry-After: 1` on Hono, `TOO_MANY_REQUESTS` on tRPC). Internal — both transports construct one each, shared by every state-name's subscription on a single generator instance.
 - **`runSseSubscription(channel, streamId, accounting?, signal?, on_cap_exceeded?)`** — the shared subscription loop both transports run. Acquires one slot (when an `accounting` is supplied), yields the cached state if present, then forwards every channel publication as a `{ kind: "patch", data }` frame until the consumer breaks or the signal aborts. Used internally; exported for adopters who want to build their own transport surface against the same accounting / cancellation discipline.

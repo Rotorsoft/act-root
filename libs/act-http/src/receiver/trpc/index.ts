@@ -28,8 +28,15 @@
  *
  * The middleware throws a `TRPCError` with `BAD_REQUEST` for
  * `missing-key` and `UNAUTHORIZED` for any verification failure.
- * On success it injects `{ key, deduped }` into the request context
- * under the `idempotency` property.
+ * On success it injects `{ key, deduped, commit, release }` into the
+ * request context under the `idempotency` property.
+ *
+ * **Two-phase dedup**: the claim is *tentative*. Because a tRPC
+ * middleware wraps `next()`, this adapter finalizes automatically:
+ * the downstream resolver returning **commits** the key, and a thrown
+ * error **releases** it so the sender's retry re-processes. The
+ * bound `ctx.idempotency.commit()` / `.release()` are exposed for
+ * resolvers that need to finalize a partial success explicitly.
  *
  * **Raw body requirement**: when `secret` is configured, the middleware
  * needs the raw request bytes for HMAC verification. Capture them in
@@ -40,6 +47,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { make_finalizers } from "../finalize.js";
 
 /**
  * Build a tRPC middleware that verifies the request signature (when
@@ -75,11 +83,42 @@ export function webhookMiddleware(options: CheckWebhookOptions): any {
         message: result.reason,
       });
     }
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        idempotency: { key: result.key, deduped: result.deduped },
-      },
-    });
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    let outcome: unknown;
+    try {
+      outcome = await opts.next({
+        ctx: {
+          ...opts.ctx,
+          idempotency: {
+            key: result.key,
+            deduped: result.deduped,
+            commit,
+            release,
+          },
+        },
+      });
+    } catch (err) {
+      // Resolver threw — release the tentative claim so a retry
+      // re-processes instead of being deduped into a silent success.
+      await release();
+      throw err;
+    }
+    // tRPC middleware results carry `{ ok: boolean }`; an `ok: false`
+    // result is an error the resolver returned rather than threw.
+    if (
+      typeof outcome === "object" &&
+      outcome !== null &&
+      "ok" in outcome &&
+      (outcome as { ok: unknown }).ok === false
+    ) {
+      await release();
+    } else {
+      await commit();
+    }
+    return outcome;
   };
 }
