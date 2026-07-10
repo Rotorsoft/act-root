@@ -647,20 +647,45 @@ export const inspectorRouter = t.router({
         {},
         { count: true, names: true, tail: true }
       );
+      // Streams with a synthesized autoclose reaction parked on them —
+      // the framework subscribes a `__autoclose__:<aggregate>` position
+      // per `.autocloses(...)` aggregate (the prefix is a framework
+      // convention, not a public export). Presence means a close/prune
+      // policy is scheduled against the stream.
+      const { positions } = await loadAllStreamPositions();
+      const autocloseTargets = new Set(
+        positions
+          .filter((p) => p.stream.startsWith("__autoclose__:"))
+          .map((p) => p.stream.slice("__autoclose__:".length))
+      );
       return [...stats.entries()]
-        .map(([stream, { head, tail, count, names }]) => ({
-          stream,
-          eventCount: count ?? 0,
-          lastEvent: String(head.created),
-          // Earliest event id + created (ACT-639 tail opt-in). Lets the
-          // Streams view render an "age" column and filter for stale
-          // streams that haven't committed in N days. `tail` is always
-          // present in this response because the query requested it.
-          firstEvent: tail ? String(tail.created) : null,
-          currentVersion: head.version,
-          isClosed: head.name === "__tombstone__",
-          nameCounts: names ?? {},
-        }))
+        .map(([stream, { head, tail, count, names }]) => {
+          const isClosed = head.name === "__tombstone__";
+          const tailIsSnapshot = tail?.name === "__snapshot__";
+          return {
+            stream,
+            eventCount: count ?? 0,
+            lastEvent: String(head.created),
+            // Earliest event id + created (ACT-639 tail opt-in). Lets the
+            // Streams view render an "age" column and filter for stale
+            // streams that haven't committed in N days. `tail` is always
+            // present in this response because the query requested it.
+            firstEvent: tail ? String(tail.created) : null,
+            currentVersion: head.version,
+            isClosed,
+            // Stream lifecycle affordances (#1174), derived from the head
+            // and tail the query already fetched:
+            // - restarted: a full close reseeded it — the earliest event
+            //   is a version-0 `__snapshot__`.
+            // - pruned: a windowed close truncated history behind a real
+            //   snapshot — the earliest event is a `__snapshot__` at a
+            //   version above 0 (#1011).
+            isRestarted: tailIsSnapshot && tail!.version === 0,
+            isPruned: tailIsSnapshot && tail!.version > 0,
+            closeScheduled: autocloseTargets.has(stream) && !isClosed,
+            nameCounts: names ?? {},
+          };
+        })
         .sort((a, b) => b.eventCount - a.eventCount)
         .slice(0, input?.limit ?? 100);
     }),

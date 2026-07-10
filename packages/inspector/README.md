@@ -49,7 +49,7 @@ When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }
 
 - **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels
 - **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips, zoom/pan, and density heatmap for large datasets
-- **Stream Inspector** — sortable/filterable stream list with event counts, versions, scheduling priority (inline-editable when write mode is on), drain lane, age (relative-time on first commit), and last activity. Stale-stream filter (≥7/14/30/90 days) hides anything that's committed recently — the "which long-lived streams have gone quiet?" query reduces to one click.
+- **Stream Inspector** — sortable/filterable stream list with event counts, versions, scheduling priority (inline-editable when write mode is on), drain lane, age (relative-time on first commit), and last activity. Stale-stream filter (≥7/14/30/90 days) hides anything that's committed recently — the "which long-lived streams have gone quiet?" query reduces to one click. Lifecycle badges (#1174) mark streams the close machinery has touched: `closed` (tombstone head), `restarted` (reseeded by a full close — version-0 snapshot tail), `pruned` (windowed close truncated history behind a boundary snapshot), and `close scheduled` (an `.autocloses(...)` reaction is parked on the stream). The detail panel spells out the pruned/restarted boundary with its snapshot version and date, so a short-looking log reads as intentionally windowed rather than young.
 - **Correlation Explorer** — trace a correlation ID across its full event chain:
   - Waterfall view with causation indentation, color-coded by stream, gap detection for reaction latency
   - DAG graph with directed arrows showing event causation
@@ -150,7 +150,7 @@ packages/inspector/
 | `query` | query | Event queries with full filter support |
 | `stats` | query | Aggregate counts for current filters |
 | `eventNames` | query | Distinct event names for filter dropdown |
-| `streams` | query | Stream list with event counts, head + tail timestamps, and version |
+| `streams` | query | Stream list with event counts, head + tail timestamps, version, and lifecycle flags (`isClosed` / `isRestarted` / `isPruned` / `closeScheduled`) derived from head + tail + the subscriptions table |
 | `streamStats` | query | Per-stream head + tail + count + name counts. Procedure also accepts an optional `before: <id>` for prefix-slice aggregation; the UI doesn't currently surface it |
 | `streamMeta` | query | Subscription positions from the streams table — priority, lane, retry, lease holder |
 | `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram, priority + lane counts |

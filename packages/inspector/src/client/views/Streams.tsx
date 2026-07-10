@@ -9,12 +9,46 @@ type StreamRow = {
   firstEvent: string | null;
   currentVersion: number;
   isClosed?: boolean;
+  // Stream lifecycle affordances (#1174), derived server-side from the
+  // head/tail the streams query already fetches plus the subscriptions
+  // table: restarted = reseeded by a full close (earliest event is a
+  // version-0 snapshot); pruned = windowed close truncated history
+  // behind a real snapshot; closeScheduled = an `.autocloses(...)`
+  // reaction is parked on the stream.
+  isRestarted?: boolean;
+  isPruned?: boolean;
+  closeScheduled?: boolean;
   // Joined from streamMeta (#698 slice 2). Null when the stream has no
   // subscription row yet — i.e., no reaction targets it, so it has no
   // priority or lane assignment. Default zero / "default" inferred.
   priority: number;
   lane: string | null;
 };
+
+/**
+ * Lifecycle chip next to the stream name (#1174). Same visual shape as
+ * the original `closed` badge; color communicates severity — closed is
+ * terminal (red), restarted/pruned are informational history markers,
+ * close-scheduled is a pending-policy hint.
+ */
+function LifecycleBadge({
+  label,
+  className,
+  title,
+}: {
+  label: string;
+  className: string;
+  title: string;
+}) {
+  return (
+    <span
+      className={`ml-2 inline-block rounded border px-1.5 py-0 text-[9px] font-medium ${className}`}
+      title={title}
+    >
+      {label}
+    </span>
+  );
+}
 
 type SortKey =
   | "stream"
@@ -411,9 +445,32 @@ export function Streams({
                 <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
                   {s.stream}
                   {s.isClosed && (
-                    <span className="ml-2 inline-block rounded border border-red-800 bg-red-900/50 px-1.5 py-0 text-[9px] font-medium text-red-400">
-                      closed
-                    </span>
+                    <LifecycleBadge
+                      label="closed"
+                      className="border-red-800 bg-red-900/50 text-red-400"
+                      title="head is a __tombstone__ — the stream no longer accepts actions"
+                    />
+                  )}
+                  {s.isRestarted && (
+                    <LifecycleBadge
+                      label="restarted"
+                      className="border-sky-800 bg-sky-900/40 text-sky-400"
+                      title="reseeded by a full close — history before the version-0 snapshot was truncated"
+                    />
+                  )}
+                  {s.isPruned && (
+                    <LifecycleBadge
+                      label="pruned"
+                      className="border-amber-800 bg-amber-900/40 text-amber-400"
+                      title="windowed close — events before the boundary snapshot were archived and pruned"
+                    />
+                  )}
+                  {s.closeScheduled && (
+                    <LifecycleBadge
+                      label="close scheduled"
+                      className="border-violet-800 bg-violet-900/40 text-violet-400"
+                      title="an .autocloses(...) policy is parked on this stream — it will close or prune when the policy fires"
+                    />
                   )}
                 </span>
               </button>
@@ -467,8 +524,25 @@ function StreamStatsHeader({
 }) {
   if (!stats) return null;
   const sameEvent = stats.tail && stats.tail.id === stats.head.id;
+  // Lifecycle line (#1174): the same tail-shape derivations the row
+  // badges use, but with the boundary's date — the operator's cue that
+  // a short-looking log is intentionally windowed, not young.
+  const pruned = stats.tail?.name === "__snapshot__" && stats.tail.version > 0;
+  const restarted =
+    stats.tail?.name === "__snapshot__" && stats.tail.version === 0;
+  const closed = stats.head.name === "__tombstone__";
   return (
     <div className="grid grid-cols-2 gap-3 border-b border-zinc-800 bg-zinc-950 px-4 py-3">
+      {(pruned || restarted || closed) && (
+        <div className="col-span-2 rounded border border-zinc-800 bg-zinc-925 px-2.5 py-1.5 text-[10px] text-zinc-400">
+          {closed &&
+            "Closed — the head is a __tombstone__; this stream no longer accepts actions. "}
+          {pruned &&
+            `History pruned — the earliest surviving event is a boundary __snapshot__ at version ${stats.tail!.version} (${new Date(stats.tail!.created).toLocaleString()}). Events before it were archived and deleted by a windowed close; the stream is live.`}
+          {restarted &&
+            `Restarted — history was truncated by a full close and reseeded with a version-0 __snapshot__ (${new Date(stats.tail!.created).toLocaleString()}).`}
+        </div>
+      )}
       <EndpointCard
         label="Tail (oldest)"
         endpoint={sameEvent ? null : stats.tail}
