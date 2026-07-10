@@ -340,42 +340,41 @@ its time in per-stream head loads (one per cache miss); on hot keys
 that cost amortizes across 2,000 events per stream and the shape is
 both the fastest and 1,000x lighter on writes.
 
-### #1178 commit-visibility lock — the cost of closing the id gap
+### #1178 commit-visibility lock — closing the id gap for free
 
 `id` is a serial: assigned at INSERT, visible at COMMIT — and every
 watermark consumer (claim's has-work probe, fetch's `after`, the
 correlate checkpoint) assumes id order equals visibility order. Two
 concurrent commits to different streams could surface out of order and
 let a watermark permanently skip an event (the classic event-store gap
-problem). The append path (`commit` and `truncate`) now takes
-`pg_advisory_xact_lock(hashtext(<events table>))` so ids become visible
-in the order they were assigned.
+problem). The append path now serializes visibility with
+`pg_advisory_xact_lock(hashtext(<events table>))`.
 
-The lock window was then tightened in two steps: the head probe runs
-unlocked (optimistic concurrency is already protected by the
-`(stream, version)` unique index), the whole batch lands in one
-multi-row INSERT, and the lock is acquired *inside* that INSERT via a
-cross-joined CTE — held for exactly the id-assigning statement plus
-COMMIT. Single-event commits skip the unnest machinery for a leaner
-plan.
+The design converged in three steps, each benchmarked with
+`scripts/commit-lock.ts` (docker PG :5431, M3 Pro, 3 runs, 500 commits):
 
-Measured with `scripts/commit-lock.ts` (docker PG :5431, M3 Pro,
-3 runs each, 500 commits):
+| Scenario | Before | Naive lock | CTE window | Shipped (single-statement) |
+|---|---|---|---|---|
+| Sequential, 1 stream | ~1,280/s | ~1,050/s | ~1,105/s | **~1,530/s (+20%)** |
+| Concurrent, 10 streams × 10 workers | ~4,500/s | ~1,380/s | ~2,570/s | **~4,760/s (parity)** |
 
-| Scenario | Before | Naive lock | Shipped (CTE window) |
-|---|---|---|---|
-| Sequential, 1 stream | ~1,280 commits/s | ~1,050 commits/s | ~1,105 commits/s (−14%) |
-| Concurrent, 10 streams × 10 workers | ~4,500 commits/s | ~1,380 commits/s | ~2,570 commits/s (−43%) |
+The naive shape held the lock across the whole transaction (probe + one
+INSERT round trip per event + COMMIT) and collapsed concurrent
+throughput by 69%. The shipped shape makes the entire commit **two
+round trips with no client round trip inside the lock window**: an
+unlocked head probe (optimistic concurrency is guarded by the
+`(stream, version)` unique index, not the probe), then one autocommit
+statement that acquires the lock in a CTE, inserts the whole batch
+(lean non-unnest plan for single-event commits), and raises the NOTIFY
+as another CTE in the same statement. The lock is held only for
+server-side execution plus the implicit COMMIT, and group commit
+absorbs the serialized WAL flushes — so cross-stream commits overlap
+everything except a sub-millisecond critical section. Sequential
+commits end up *faster* than before the fix because two round trips
+replaced four.
 
-Reading the numbers honestly: the concurrent loss is the fix working —
-visibility windows that must not overlap cannot be fully parallel, so
-the ceiling is bounded by the lock-held span (one insert round trip +
-COMMIT). ~2,570/s keeps ~8× headroom over the framework's realistic
-drain-inclusive throughput (~310 commits/s, see `libs/act`
-PERFORMANCE.md). Two alternatives were weighed and set aside, recorded
-in `book/act-1178-commit-visibility.md`: a read-side xmin-horizon fence
+Rejected along the way (decision record in
+`book/act-1178-commit-visibility.md`): a read-side xmin-horizon fence
 (planner-hostile predicates on every hot read) and a shared-lock
-writers / exclusive-lock reader-fence scheme (near-zero write cost, but
-it moves the wait into every watermark read and needs a fenced-read
-port surface — a candidate follow-up if a workload ever needs parallel
-commit throughput above this ceiling).
+writers / exclusive-fence readers scheme (obviated — the shipped shape
+already restores full write parallelism without touching the port).

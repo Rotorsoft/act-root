@@ -10,10 +10,9 @@ import { PostgresStore } from "../src/index.js";
 const query = (
   sql: string
 ): Promise<QueryResult<Committed<Schemas, keyof Schemas>>> => {
-  // The post-INSERT path issues `SELECT pg_notify(...)` and then a
-  // standalone `COMMIT`. Match either to simulate a failure on the
-  // commit-side of the transaction.
-  if (sql.includes("COMMIT") || sql.includes("pg_notify"))
+  // The commit is a single autocommit statement (lock CTE + INSERT);
+  // reject it to simulate a failure on the commit side (#1178).
+  if (sql.includes("INSERT"))
     return Promise.reject(Error("mocked commit error"));
 
   return Promise.resolve({

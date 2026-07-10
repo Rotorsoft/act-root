@@ -693,35 +693,35 @@ export class PostgresStore implements Store {
     expectedVersion?: number
   ) {
     if (msgs.length === 0) return [];
+    // Serialize commit VISIBILITY, not just id assignment. `id` is a
+    // serial: it is assigned at INSERT time but the row appears at
+    // COMMIT time, and every watermark consumer (the claim has-work
+    // probe, fetch's `after`, the correlate checkpoint) assumes id
+    // order equals visibility order. Without a fence two concurrent
+    // commits to different streams can surface out of id order, and a
+    // reader that acks past the higher id permanently skips the lower
+    // one — the classic event-store gap problem. Same-stream commits
+    // were already serialized by the (stream, version) unique index;
+    // the advisory lock below extends the guarantee across streams.
+    //
+    // The whole commit is TWO round trips with NO client round trip
+    // inside the lock window: an unlocked head probe (its own implicit
+    // transaction — optimistic concurrency is guarded by the unique
+    // index, not the probe), then ONE autocommit statement that
+    // acquires the xact-scoped lock in a CTE, inserts the batch, and
+    // (when enabled) raises the NOTIFY — the lock is held only for
+    // server-side execution plus the implicit COMMIT, never across a
+    // client round trip. The pooled client is checked out through
+    // `_client` so acquisition failures keep their StoreError context
+    // (#1119); checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
-    let version = -1;
     try {
-      await client.query("BEGIN");
-      // Serialize commit VISIBILITY, not just id assignment. `id` is a
-      // serial: it is assigned at INSERT time but the row appears at
-      // COMMIT time, and every watermark consumer (the claim has-work
-      // probe, fetch's `after`, the correlate checkpoint) assumes id
-      // order equals visibility order. Without this lock two concurrent
-      // commits to different streams can surface out of id order, and a
-      // reader that acks past the higher id permanently skips the lower
-      // one — the classic event-store gap problem. The xact-scoped
-      // advisory lock is released at COMMIT, so ids become visible in
-      // the order they were assigned. Same-stream commits were already
-      // serialized by the (stream, version) unique index; this extends
-      // the guarantee across streams.
-      // The lock window is kept as small as the guarantee allows: the
-      // head probe runs unlocked (optimistic concurrency is already
-      // protected by the (stream, version) unique index), the whole
-      // batch lands in a single multi-row INSERT, and the lock is
-      // acquired inside that INSERT via a cross-joined CTE — so it is
-      // held for exactly the id-assigning statement plus COMMIT, never
-      // for per-event round trips.
-      const last = await client.query<{ version: number | null }>(
+      const last = await client.query<{ version: number }>(
         `SELECT version FROM ${this._fqt}
          WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
         [stream]
       );
-      version = last.rows.at(0)?.version ?? -1;
+      let version = last.rows.at(0)?.version ?? -1;
       if (typeof expectedVersion === "number" && version !== expectedVersion)
         throw new ConcurrencyError(
           stream,
@@ -756,61 +756,81 @@ export class PostgresStore implements Store {
         versions.push(version);
       }
 
-      let committed: Committed<E, keyof E>[];
+      // The cross join on the lock CTE forces the advisory lock to be
+      // acquired before any row (and therefore any serial id) is
+      // produced. Single-event commits (the overwhelmingly common
+      // shape) skip the unnest machinery for a leaner plan. The NOTIFY
+      // rides the same statement as a CTE: one notification per commit
+      // transaction with the full batch, delivered at the implicit
+      // COMMIT, skipped in SQL when the payload would exceed PG's cap
+      // (listeners fall back to the poll path — degraded latency,
+      // never lost events), and skipped entirely when
+      // `config.notify === false` (the default). The final select LEFT
+      // JOINs the notify CTE so it is referenced (a bare SELECT CTE
+      // would otherwise be skipped) without changing row multiplicity —
+      // it yields at most one row.
+      const insert_select =
+        msgs.length === 1
+          ? `SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l`
+          : `SELECT u.name, u.data::jsonb, u.pii::jsonb, $5, u.version, $6
+             FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[])
+               WITH ORDINALITY AS u(name, data, pii, version, ord)
+             ORDER BY u.ord`;
+      const notify_ctes = this.config.notify
+        ? `,
+           payload AS (
+             SELECT json_build_object(
+               'stream', $5::text,
+               'events', json_agg(json_build_object('id', ins.id, 'name', ins.name) ORDER BY ins.version),
+               'by', $9::text
+             )::text AS p
+             FROM ins
+           ),
+           n AS (
+             SELECT pg_notify($8, payload.p) FROM payload
+             WHERE octet_length(payload.p) < $10
+           )`
+        : "";
+      const final_select = this.config.notify
+        ? "SELECT ins.* FROM ins LEFT JOIN n ON true ORDER BY ins.version"
+        : "SELECT * FROM ins ORDER BY version";
+      const sql = `WITH l AS (SELECT pg_advisory_xact_lock(hashtext($7))),
+        ins AS (
+          INSERT INTO ${this._fqt}(name, data, pii, stream, version, meta)
+          ${insert_select}
+          RETURNING *
+        )${notify_ctes}
+        ${final_select}`;
+      const base_params =
+        msgs.length === 1
+          ? [names[0], datas[0], piis[0], versions[0], stream, meta, this._fqt]
+          : [names, datas, piis, versions, stream, meta, this._fqt];
+      const params = this.config.notify
+        ? [...base_params, this._channel, this._by, NOTIFY_MAX_PAYLOAD_BYTES]
+        : base_params;
+
       try {
-        // The cross join on the lock CTE forces the advisory lock to be
-        // acquired before any row (and therefore any serial id) is
-        // produced; the xact-scoped lock releases at COMMIT. Single-event
-        // commits (the overwhelmingly common shape) skip the unnest
-        // machinery for a leaner plan.
-        const { rows } =
-          msgs.length === 1
-            ? await client.query<Committed<E, keyof E>>(
-                `WITH l AS (SELECT pg_advisory_xact_lock(hashtext($7)))
-                 INSERT INTO ${this._fqt}(name, data, pii, stream, version, meta)
-                 SELECT $1, $2::jsonb, $3::jsonb, $5, $4::int, $6 FROM l
-                 RETURNING *`,
-                [
-                  names[0],
-                  datas[0],
-                  piis[0],
-                  versions[0],
-                  stream,
-                  meta,
-                  this._fqt,
-                ]
-              )
-            : await client.query<Committed<E, keyof E>>(
-                `WITH l AS (SELECT pg_advisory_xact_lock(hashtext($7)))
-                 INSERT INTO ${this._fqt}(name, data, pii, stream, version, meta)
-                 SELECT u.name, u.data::jsonb, u.pii::jsonb, $5, u.version, $6
-                 FROM l, unnest($1::text[], $2::text[], $3::text[], $4::int[])
-                   WITH ORDINALITY AS u(name, data, pii, version, ord)
-                 ORDER BY u.ord
-                 RETURNING *`,
-                [names, datas, piis, versions, stream, meta, this._fqt]
-              );
+        const { rows } = await client.query<Committed<E, keyof E>>(sql, params);
         // Decrypt before handing back to the caller — the committed
         // event the framework returns must carry the cleartext payload
         // (the reducer chain runs against `event.pii`). The encrypted
         // value only lives at rest in the column; never in memory past
-        // this point. Sorted by version as cheap insurance — RETURNING
-        // follows insertion order in practice, but the contract is the
-        // version sequence.
-        committed = rows.sort((a, b) => a.version - b.version);
+        // this point.
         if (this._resolve_pii_key) {
-          for (const row of committed) {
+          for (const row of rows) {
             if (typeof row.pii === "string") {
               const decrypted = await decrypt(row.pii, this._resolve_pii_key);
               (row as { pii: unknown }).pii = decrypted;
             }
           }
         }
+        return rows;
       } catch (error) {
         // PG unique-violation on (stream, version) — a concurrent commit
         // beat us between the head probe and this INSERT. Surface as
         // ConcurrencyError so callers retry on the framework signal
-        // instead of an adapter-specific error.
+        // instead of an adapter-specific error. The statement is its own
+        // transaction, so there is nothing to roll back.
         if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
           throw new ConcurrencyError(
             stream,
@@ -821,37 +841,6 @@ export class PostgresStore implements Store {
         }
         throw error;
       }
-
-      // One NOTIFY per commit transaction, payload carries the full event
-      // batch so listeners reason about atomic groups (matches reaction
-      // semantics in the rest of the framework). `by` lets other
-      // PostgresStore instances self-filter their own writes — see
-      // `_subscribe_notifications()`. PG NOTIFY payloads cap at 8000
-      // bytes; for typical commits (1–10 events) this is comfortably
-      // under. Oversize payloads (very large batches, long stream/event
-      // names) skip the NOTIFY instead of aborting the transaction —
-      // listeners fall back to the poll path, so delivery degrades to
-      // the next poll cycle but the events are never lost. Skipped
-      // entirely when `config.notify === false` (the default) so
-      // single-instance deployments pay zero per-write overhead.
-      if (this.config.notify) {
-        const payload = JSON.stringify({
-          stream,
-          events: committed.map((c) => ({ id: c.id, name: c.name as string })),
-          by: this._by,
-        });
-        if (Buffer.byteLength(payload, "utf8") < NOTIFY_MAX_PAYLOAD_BYTES)
-          await client.query(`SELECT pg_notify($1, $2)`, [
-            this._channel,
-            payload,
-          ]);
-      }
-
-      await client.query("COMMIT");
-      return committed;
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw error;
     } finally {
       client.release();
     }
