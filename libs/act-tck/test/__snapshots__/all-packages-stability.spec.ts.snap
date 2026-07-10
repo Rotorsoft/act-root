@@ -2339,7 +2339,19 @@ export class Act<
    * 7. **Cache** — invalidate (tombstoned) or warm (restarted)
    * 8. **Emit "closed"** — lifecycle event with results
    *
-   * @param targets - Per-stream close options (stream, restart?, archive?)
+   * Targets carrying \`before\` take the **windowed** branch instead —
+   * close the books on a rolling window: probe the min consumer
+   * watermark (so the boundary never rises past a lagging reaction),
+   * run the archive callback against the cutoff, then prune the prefix
+   * below the closest safe \`__snapshot__\`. No tombstone guard (the
+   * pre-cutoff prefix is immutable), no seed, cache untouched — the
+   * stream stays live and keeps accepting actions. Requires the state
+   * to snapshot via \`.snap(...)\`; no qualifying snapshot ⇒ the stream
+   * lands in \`skipped\` (retry after the next snapshot). Windowed
+   * entries in the result echo \`before\` and carry the surviving
+   * boundary snapshot as \`committed\`.
+   *
+   * @param targets - Per-stream close options (stream, restart?, archive?, before?)
    * @returns \`{ truncated: TruncateResult, skipped: string[] }\`
    *
    * @example Archive and close
@@ -2355,6 +2367,19 @@ export class Act<
    * await app.close([
    *   { stream: "counter-1", restart: true },
    *   { stream: "counter-2" },  // tombstoned
+   * ]);
+   * \`\`\`
+   *
+   * @example Windowed close — keep the last 180 days of real events
+   * \`\`\`typescript
+   * const cutoff = new Date();
+   * cutoff.setDate(cutoff.getDate() - 180);
+   * await app.close([
+   *   {
+   *     stream: "ledger-acme",
+   *     before: cutoff,
+   *     archive: async () => { await archiveToS3("ledger-acme", cutoff); },
+   *   },
    * ]);
    * \`\`\`
    */
@@ -3023,11 +3048,17 @@ export type AutoclosePredicate<TEvents extends Schemas> = (
  * truncate runs without an archive step (matches the explicit
  * \`app.close({ stream })\` default).
  *
+ * On a **windowed** close staged by a rolling-window policy
+ * (\`.autocloses({ keep })\`), the third argument carries the cutoff —
+ * archive the events older than \`before\`; the prune deletes a subset of
+ * them (the prefix below the boundary snapshot). Absent on full closes.
+ *
  * @template TEvents Event schemas declared by the owning state.
  */
 export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
-  head: Committed<TEvents, keyof TEvents>
+  head: Committed<TEvents, keyof TEvents>,
+  before?: Date
 ) => Promise<void>;
 
 /**
@@ -3088,14 +3119,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
-   * or \`undefined\` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * \`autoclose\` by the builder.
+   * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
+   * policy, or \`undefined\` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to \`head.created\` plus this many days; a policy without an
+   * \`after\` waits for the next event instead of parking on a due-time.
+   * Set alongside \`autoclose\` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
+  /**
+   * The rolling-window width (in days) of the \`.autocloses({ keep })\`
+   * policy, or \`undefined\` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside \`autoclose\`
+   * by the builder; only reachable behind \`.snap(...)\`.
+   */
+  autoclose_keep_days?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -3107,7 +3149,8 @@ export type State<
    */
   archive?(
     stream: string,
-    head: Committed<TEvents, keyof TEvents>
+    head: Committed<TEvents, keyof TEvents>,
+    before?: Date
   ): Promise<void>;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
@@ -3201,25 +3244,42 @@ export type CloseTarget = {
   /** Stream name to close */
   readonly stream: string;
   /** When true, restart with a \`__snapshot__\` of the final state.
-   *  When false/omitted, permanently close with a \`__tombstone__\`. */
+   *  When false/omitted, permanently close with a \`__tombstone__\`.
+   *  Mutually exclusive with {@link before}. */
   readonly restart?: boolean;
   /** Called before truncation while the stream is guarded (no concurrent writes).
    *  Use \`app.query()\` or \`app.query_array()\` inside for pagination.
-   *  If it throws, the stream remains guarded but is not truncated. */
+   *  If it throws, the stream remains guarded but is not truncated.
+   *  On a windowed close ({@link before} set) there is no guard — the
+   *  callback archives the immutable pre-cutoff prefix, which concurrent
+   *  appends cannot change. */
   readonly archive?: () => Promise<void>;
+  /** Windowed close: prune events older than this cutoff instead of
+   *  closing the stream. The store deletes the prefix below the closest
+   *  safe \`__snapshot__\` (\`created < before\`, capped at the min consumer
+   *  watermark) and keeps the snapshot + tail — no tombstone, no seed,
+   *  and the stream keeps accepting actions. No qualifying snapshot ⇒
+   *  the stream is skipped this cycle. Mutually exclusive with
+   *  {@link restart}. */
+  readonly before?: Date;
 };
 
 /**
  * Result of a close operation — per-stream truncate outcomes plus the
  * names of any streams that were skipped (concurrent writes, pending
- * reactions).
+ * reactions, or windowed closes with no qualifying snapshot).
+ *
+ * Windowed entries in \`truncated\` echo the cutoff as \`before\` and carry
+ * the surviving boundary snapshot as \`committed\` — that's how consumers
+ * of the \`closed\` lifecycle event distinguish prunes from full closes.
  *
  * @see {@link IAct.close} for the close-the-books API
  */
 export type CloseResult = {
   /** Per-stream truncate results (deleted count + committed event) */
   readonly truncated: TruncateResult;
-  /** Streams skipped due to pending reactions or concurrent writes */
+  /** Streams skipped due to pending reactions, concurrent writes, or a
+   *  windowed close finding no qualifying snapshot */
   readonly skipped: string[];
 };
 
@@ -4604,22 +4664,65 @@ import { z } from "zod";
 import type { AutoclosePredicate, Schemas } from "../types/action.js";
 
 /**
- * Lower bound on a resolved \`after\` window. Sub-minute windows are
- * almost always misconfiguration — the autoclose cycle ticks at the
- * order of \`autocloseCycleMinutes\` (default 12 h), so a 30 s window can't
- * be honored anyway. Rejecting at build keeps the failure mode noisy.
+ * One day in epoch milliseconds. The close surface is day-denominated
+ * throughout — policies declare \`{ days }\`, the State carries
+ * \`autoclose_*_days\`, and the reaction thinks in day offsets. This
+ * constant (with {@link days_after} / {@link days_before_now}) is the
+ * single place the closing process touches epoch arithmetic, because
+ * \`Date\` itself has no other currency.
  */
-const MIN_AFTER_MS = 60_000;
+const DAY_MS = 86_400_000;
 
-const AfterSchema = z
-  .object({
-    days: z
-      .number({ message: "autocloses: after.days must be a number" })
-      .positive("autocloses: after.days must be > 0"),
-  })
-  .refine((o) => o.days * 86_400_000 >= MIN_AFTER_MS, {
-    message: \`autocloses: after resolves to < \${MIN_AFTER_MS}ms (one minute), which is too short to be a meaningful retention window\`,
-  });
+/**
+ * Lower bound on a resolved \`after\` window: one minute, expressed in
+ * days. Sub-minute cooldowns are almost always misconfiguration.
+ * Rejecting at build keeps the failure mode noisy.
+ */
+const MIN_AFTER_DAYS = 1 / 1440;
+
+/**
+ * Lower bound on a resolved \`keep\` window: one full day. The close
+ * cycle is low-cadence, non-priority housekeeping — a rolling window
+ * shorter than a day signals misconfiguration. Real retention
+ * contracts (180 days, 7 years) are days and up.
+ */
+const MIN_KEEP_DAYS = 1;
+
+/** The \`Date\` that lies \`days\` after \`date\`. @internal */
+export function days_after(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+/** The \`Date\` that lies \`days\` in the past. @internal */
+export function days_before_now(days: number): Date {
+  return new Date(Date.now() - days * DAY_MS);
+}
+
+/**
+ * Day-denominated window shared by \`after\` (terminate cooldown) and
+ * \`keep\` (rolling retention). Fractional days accepted; windows below
+ * the field's floor reject at build.
+ *
+ * @internal
+ */
+const window_schema = (
+  field: "after" | "keep",
+  min_days: number,
+  floor: string
+) =>
+  z
+    .object({
+      days: z
+        .number({ message: \`autocloses: \${field}.days must be a number\` })
+        .positive(\`autocloses: \${field}.days must be > 0\`),
+    })
+    .refine((o) => o.days >= min_days, {
+      message: \`autocloses: \${field} resolves to < \${floor}, which is too short to be a meaningful retention window\`,
+    });
+
+const AfterSchema = window_schema("after", MIN_AFTER_DAYS, "one minute");
+
+const KeepSchema = window_schema("keep", MIN_KEEP_DAYS, "one day");
 
 const IsSchema = z.union([
   z.string().min(1, "autocloses: is must be a non-empty event name"),
@@ -4676,6 +4779,7 @@ const AutoclosePolicySchema = z
     is: IsSchema.optional(),
     reaches: ReachesSchema.optional(),
     or: OrBlockSchema.optional(),
+    keep: KeepSchema.optional(),
   })
   .strict()
   .refine(
@@ -4683,10 +4787,11 @@ const AutoclosePolicySchema = z
       o.after !== undefined ||
       o.is !== undefined ||
       o.reaches !== undefined ||
-      o.or !== undefined,
+      o.or !== undefined ||
+      o.keep !== undefined,
     {
       message:
-        "autocloses: at least one of after / is / reaches / or must be specified — empty \`{}\` is a misconfiguration",
+        "autocloses: at least one of after / is / reaches / or / keep must be specified — empty \`{}\` is a misconfiguration",
     }
   );
 
@@ -4697,9 +4802,9 @@ const AutoclosePolicySchema = z
  * not mean "match everything."
  *
  * @property after - Close when \`head.created\` is at least the resolved
- *   window in the past. Nested object leaves room for \`hours\` / \`ms\`
- *   units later without polluting the top level. Fractional \`days\`
- *   accepted (\`{ days: 1/24 }\` is 1 hour) so sub-day windows work.
+ *   window in the past. Days are the close surface's only unit;
+ *   fractional \`days\` cover sub-day cooldowns (\`{ days: 1/24 }\` is one
+ *   hour) without introducing another denomination.
  * @property is - Close when \`head.name\` matches. String for the
  *   single-terminal-event case (the most common); \`readonly string[]\`
  *   for multi-terminal states (\`Order: Shipped | Delivered |
@@ -4711,6 +4816,14 @@ const AutoclosePolicySchema = z
  *   \`or\` matches. Used for safety-net backstops layered onto a
  *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
  *   10k"*). Nested \`or\` inside \`or\` rejects at build time.
+ * @property keep - Rolling-window retention (#1011), **independent** of
+ *   the terminate fields: while the stream stays open, prune events
+ *   older than \`now − keep\` behind the closest safe snapshot via a
+ *   windowed close. Does not participate in the AND group or the \`or\`
+ *   block — a policy may terminate, prune, or both. Requires
+ *   \`.snap(...)\` earlier in the builder chain (type-gated) and a
+ *   window of at least one day — the close cycle is low-cadence
+ *   housekeeping, never sub-day realtime.
  */
 export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 
@@ -4718,8 +4831,7 @@ export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 function compile_after(
   after: NonNullable<AutoclosePolicy["after"]>
 ): AutoclosePredicate<Schemas> {
-  const after_ms = after.days * 86_400_000;
-  return (_stream, head) => Date.now() - head.created.getTime() >= after_ms;
+  return (_stream, head) => days_after(head.created, after.days) <= new Date();
 }
 
 /** Compile a single \`is\` field into its predicate slice. @internal */
@@ -4766,28 +4878,43 @@ function compile_reaches(
  * @internal
  */
 /**
- * The smallest \`after\` window (in ms) anywhere in a policy — across the
- * top-level \`after\` and the \`or.after\` block — or \`undefined\` when the
- * policy has no time component.
+ * The smallest \`after\` window (in days) anywhere in a policy — across
+ * the top-level \`after\` and the \`or.after\` block — or \`undefined\` when
+ * the policy has no time component.
  *
  * The synthesized autoclose reaction (#1090) uses this to decide how to
- * wait: a policy with an \`after\` defers its re-check to \`head.created +
- * min_after_ms\` (the earliest its time gate could open); a policy without
- * one (\`is\` / \`reaches\` only) has no time gate, so the reaction just waits
- * for the next event to re-trigger rather than parking on a due-time.
- * Conservative — the min across branches never defers past the soonest a
- * branch could fire.
+ * wait: a policy with an \`after\` defers its re-check to \`head.created\`
+ * plus this many days (the earliest its time gate could open); a policy
+ * without one (\`is\` / \`reaches\` only) has no time gate, so the reaction
+ * just waits for the next event to re-trigger rather than parking on a
+ * due-time. Conservative — the min across branches never defers past
+ * the soonest a branch could fire.
  *
  * @internal
  */
-export function policy_min_after_ms(
+export function policy_min_after_days(
   options: AutoclosePolicy
 ): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
   const windows: number[] = [];
-  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
-  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  if (parsed.after) windows.push(parsed.after.days);
+  if (parsed.or?.after) windows.push(parsed.or.after.days);
   return windows.length ? Math.min(...windows) : undefined;
+}
+
+/**
+ * The rolling-window width (in days) of a policy's \`keep\` field, or
+ * \`undefined\` when the policy declares no rolling window. The
+ * synthesized autoclose reaction prunes the prefix older than the
+ * window (via a windowed close) and derives its prune due-time as
+ * \`tail.created\` plus this many days — the earliest the oldest
+ * surviving domain event can age out of the window.
+ *
+ * @internal
+ */
+export function policy_keep_days(options: AutoclosePolicy): number | undefined {
+  const parsed = AutoclosePolicySchema.parse(options);
+  return parsed.keep?.days;
 }
 
 export function compile_autoclose_policy(
@@ -4848,7 +4975,7 @@ export function compile_autoclose_policy(
  * @internal
  */
 
-import { store, TOMBSTONE_EVENT } from "../ports.js";
+import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Reaction,
   Registry,
@@ -4860,6 +4987,7 @@ import {
   type AutocloseConfig,
   in_autoclose_window,
 } from "./autoclose-config.js";
+import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 
@@ -4892,7 +5020,8 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_ms = st.autoclose_after_ms;
+    const after_days = st.autoclose_after_days;
+    const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
       // Run on a SYNTHETIC stream — \`source\` is the aggregate, \`target\` is a
@@ -4916,9 +5045,18 @@ export function synthesize_autoclose_reactions<
           throw new DeferSignal({
             at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
           });
+        // Rolling-window policies also exclude snapshots and fetch the
+        // tail: the prune decision keys on the oldest *domain* event —
+        // after a prune the oldest surviving event is the boundary
+        // snapshot, whose age says nothing about whether another prune
+        // would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
-          exclude: [TOMBSTONE_EVENT],
+          tail: keep_days !== undefined ? true : undefined,
+          exclude:
+            keep_days !== undefined
+              ? [TOMBSTONE_EVENT, SNAP_EVENT]
+              : [TOMBSTONE_EVENT],
         });
         const entry = stats.get(aggregate);
         // No live (non-tombstone) head → already closed, nothing to do.
@@ -4935,12 +5073,34 @@ export function synthesize_autoclose_reactions<
             // aggregate) sees it caught up instead of blocking its own close.
             at: head.id,
           });
-        // Not eligible yet: park on the cooldown's earliest opening when the
-        // policy has a time gate; otherwise wait for the next event to
-        // re-trigger (e.g. a \`reaches\` threshold).
-        if (after_ms !== undefined)
+        // Rolling window: when the oldest domain event has aged out of the
+        // window, stage a windowed close — prune the prefix older than the
+        // cutoff behind the closest safe snapshot. \`tail\` is present
+        // whenever the stats entry is (same non-excluded event set).
+        if (keep_days !== undefined) {
+          const cutoff = days_before_now(keep_days);
+          if (entry.tail!.created < cutoff)
+            throw new CloseSignal({
+              stream: aggregate,
+              before: cutoff,
+              archive: archiver
+                ? () => archiver(aggregate, head, cutoff)
+                : undefined,
+              at: head.id,
+            });
+        }
+        // Not eligible yet: park on the earliest derivable due-time — the
+        // day the terminate cooldown opens and/or the day the oldest
+        // domain event ages out of the rolling window. Neither → wait for
+        // the next event to re-trigger (e.g. a \`reaches\` threshold).
+        const dues: Date[] = [];
+        if (after_days !== undefined)
+          dues.push(days_after(head.created, after_days));
+        if (keep_days !== undefined)
+          dues.push(days_after(entry.tail!.created, keep_days));
+        if (dues.length)
           throw new DeferSignal({
-            at: new Date(head.created.getTime() + after_ms),
+            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
           });
       },
     };
@@ -5627,6 +5787,11 @@ type StreamHead = {
  * Run the full close cycle for the given targets. Caller owns the
  * lifecycle event emission.
  *
+ * Targets carrying a \`before\` cutoff take the **windowed** branch — a
+ * pure prefix delete behind an existing snapshot (see
+ * {@link run_windowed_closes}); the rest run the guarded
+ * tombstone/restart pipeline below.
+ *
  * @internal
  */
 export async function run_close_cycle(
@@ -5636,8 +5801,22 @@ export async function run_close_cycle(
   // Caller (Act.close) filters empty targets; run_close_cycle assumes at
   // least one target.
   const target_map = new Map(targets.map((t) => [t.stream, t]));
-  const streams = [...target_map.keys()];
+  for (const t of target_map.values()) {
+    if (t.before !== undefined && t.restart)
+      throw new Error(
+        \`close: \\\`before\\\` and \\\`restart\\\` are mutually exclusive (stream "\${t.stream}") — a windowed close keeps the stream live behind a real snapshot; restart reseeds it\`
+      );
+  }
+  const windowed = [...target_map.values()].filter(
+    (t) => t.before !== undefined
+  );
+  const full = [...target_map.values()].filter((t) => t.before === undefined);
   const skipped: string[] = [];
+  const windowed_result = windowed.length
+    ? await run_windowed_closes(windowed, deps, skipped)
+    : new Map();
+  if (!full.length) return { truncated: windowed_result, skipped };
+  const streams = full.map((t) => t.stream);
 
   // 1. Scan: find the latest non-tombstone event per stream
   const stream_info = await scan_stream_heads(streams);
@@ -5649,7 +5828,7 @@ export async function run_close_cycle(
     skipped,
     deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
   );
-  if (!safe.length) return { truncated: new Map(), skipped };
+  if (!safe.length) return { truncated: windowed_result, skipped };
 
   // 3. Guard: commit a tombstone with expectedVersion per safe stream.
   // Correlation comes from the orchestrator's configured correlator so
@@ -5661,7 +5840,7 @@ export async function run_close_cycle(
     deps.tombstone,
     skipped
   );
-  if (!guarded.length) return { truncated: new Map(), skipped };
+  if (!guarded.length) return { truncated: windowed_result, skipped };
 
   // 4. Seed: load final state for restart targets through the owning state
   const seed_states = await load_restart_seeds(
@@ -5684,7 +5863,115 @@ export async function run_close_cycle(
     deps.correlation
   );
 
+  for (const [stream, entry] of windowed_result) truncated.set(stream, entry);
   return { truncated, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Windowed branch — prune the prefix behind an existing snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the windowed closes: probe the min consumer watermark per stream
+ * (the \`max_id\` cap that keeps the boundary at/below what the laggiest
+ * consumer has read), run archive callbacks against the cutoff, then
+ * hand the boundary targets to {@link Store.truncate}.
+ *
+ * No tombstone guard and no cache touch — the cutoff is always in the
+ * past, so a concurrently-written snapshot (\`created = now\`) can never
+ * become the boundary: once the cutoff is fixed the boundary snapshot is
+ * fixed, and the prefix below it is immutable. Concurrent appends land
+ * at the head, above the boundary. Current state is unchanged, so the
+ * cache stays warm. Streams the store skips (no qualifying snapshot)
+ * are reported in \`skipped\`.
+ *
+ * @internal
+ */
+async function run_windowed_closes(
+  windowed: CloseTarget[],
+  deps: CloseCycleDeps,
+  skipped: string[]
+): Promise<CloseResult["truncated"]> {
+  // 1. Safety probe: min consumer watermark per stream. Skipped entirely
+  // when the app has no reactions — nothing can lag.
+  const min_at =
+    deps.reactive_events_size > 0
+      ? await probe_min_watermarks(
+          windowed.map((t) => t.stream),
+          deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
+        )
+      : new Map<string, number>();
+
+  // 2. Archive: user callbacks against the cutoff. Sequential for the
+  // same reason as the full path — shared resources, fail-fast. The
+  // pre-cutoff prefix is immutable, so no guard is needed; archiving a
+  // superset of what the boundary truncate deletes is by design
+  // (archive + live stream = full history).
+  for (const t of windowed) {
+    if (t.archive) await t.archive();
+  }
+
+  // 3. Boundary truncate: atomic per-store transaction; no seed.
+  const truncated = await store().truncate(
+    windowed.map((t) => ({
+      stream: t.stream,
+      before: t.before!,
+      max_id: min_at.get(t.stream),
+    }))
+  );
+  for (const t of windowed) {
+    if (!truncated.has(t.stream)) skipped.push(t.stream);
+  }
+  return truncated;
+}
+
+/**
+ * Min subscription watermark per target stream — the read-only probe
+ * backing the windowed close's \`max_id\` cap. Pagination and source
+ * matching mirror {@link partition_by_safety}; instead of flagging
+ * pending streams it folds \`min(at)\` per stream. Streams with no
+ * matching subscriptions are absent (no cap).
+ *
+ * @internal
+ */
+async function probe_min_watermarks(
+  streams: string[],
+  page_size: number
+): Promise<Map<string, number>> {
+  const min_at = new Map<string, number>();
+  const source_regex = new Map<string, RegExp>();
+  const get_regex = (source: string): RegExp => {
+    let re = source_regex.get(source);
+    if (!re) {
+      re = new RegExp(source);
+      source_regex.set(source, re);
+    }
+    return re;
+  };
+
+  let after: string | undefined;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store().query_streams(
+      (position) => {
+        last = position.stream;
+        const source_re = position.source
+          ? get_regex(position.source)
+          : undefined;
+        for (const stream of streams) {
+          if (!source_re || source_re.test(stream)) {
+            const prev = min_at.get(stream);
+            if (prev === undefined || position.at < prev)
+              min_at.set(stream, position.at);
+          }
+        }
+      },
+      { after, limit: page_size, source_matches: streams }
+    );
+    if (count < page_size) break;
+    after = last;
+  }
+  return min_at;
 }
 
 // ---------------------------------------------------------------------------
@@ -5967,17 +6254,26 @@ export class CloseSignal extends Error {
    * event id when omitted.
    */
   readonly at?: number;
+  /**
+   * Windowed close (#1011): prune events older than this cutoff behind
+   * the closest safe snapshot instead of retiring the stream. Thrown by
+   * the autoclose reaction of a \`.autocloses({ keep })\` state; flows
+   * into {@link CloseTarget.before}. Omitted → a full close.
+   */
+  readonly before?: Date;
 
   constructor(opts?: {
     stream?: string;
     archive?: () => Promise<void>;
     at?: number;
+    before?: Date;
   }) {
     super("reaction requested close");
     this.name = "CloseSignal";
     this.stream = opts?.stream;
     this.archive = opts?.archive;
     this.at = opts?.at;
+    this.before = opts?.before;
   }
 }
 
@@ -9503,6 +9799,10 @@ class InMemoryStream {
 export class InMemoryStore implements Store {
   // stored events
   private _events: Committed<Schemas, keyof Schemas>[] = [];
+  // next event id — monotonic, never reused. Deletions (truncate, windowed
+  // prune) punch holes in the id sequence, so ids are NOT array indexes and
+  // NOT \`_events.length\`; they only stay sorted ascending in \`_events\`.
+  private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
@@ -9521,10 +9821,26 @@ export class InMemoryStore implements Store {
 
   private _reset_indexes() {
     this._events.length = 0;
+    this._next_id = 0;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
     this._pii.clear();
+  }
+
+  // First index whose event id is greater than \`after\`. \`_events\` stays
+  // sorted ascending by id (append-only commits; deletions preserve
+  // order), so id-bounded scans binary-search their start instead of
+  // assuming id === index — an invariant that truncation breaks.
+  private _first_index_after(after: number): number {
+    let lo = 0;
+    let hi = this._events.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this._events[mid].id > after) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
   }
 
   // Attach the isolated PII payload (or null) to an event before handing it to
@@ -9589,7 +9905,10 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (query?.backward) {
-      let i = (query?.before || this._events.length) - 1;
+      let i =
+        (query?.before !== undefined
+          ? this._first_index_after(query.before - 1)
+          : this._events.length) - 1;
       while (i >= 0) {
         const e = this._events[i--];
         if (query && !this.in_query(query, e)) continue;
@@ -9604,7 +9923,7 @@ export class InMemoryStore implements Store {
         if (query?.limit && count >= query.limit) break;
       }
     } else {
-      let i = (query?.after ?? -1) + 1;
+      let i = this._first_index_after(query?.after ?? -1);
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit \`after\`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
@@ -9672,7 +9991,7 @@ export class InMemoryStore implements Store {
     let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
-        id: this._events.length,
+        id: this._next_id++,
         stream,
         version,
         created: new Date(),
@@ -9699,8 +10018,8 @@ export class InMemoryStore implements Store {
     this._stream_versions.set(stream, version - 1);
     if (last_non_snap_id >= 0) {
       this._max_event_id_by_stream.set(stream, last_non_snap_id);
-      // commit always assigns a fresh id from this._events.length, so any
-      // non-snap commit strictly raises the global max.
+      // commit always assigns a fresh id from the monotonic _next_id, so
+      // any non-snap commit strictly raises the global max.
       this._max_non_snap_event_id = last_non_snap_id;
     }
     return committed;
@@ -10112,7 +10431,7 @@ export class InMemoryStore implements Store {
       count++;
       if (count >= limit) break;
     }
-    return { maxEventId: this._events.length - 1, count };
+    return { maxEventId: this._events.at(-1)?.id ?? -1, count };
   }
 
   /**
@@ -10221,7 +10540,11 @@ export class InMemoryStore implements Store {
 
   /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * Windowed targets (\`before\` set) prune the prefix below the closest safe
+   * \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
+   * snapshot qualifies.
+   * @param targets - Streams to truncate with optional snapshot state and meta,
+   *   or a \`before\`/\`max_id\` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event.
    */
   async truncate(
@@ -10229,12 +10552,54 @@ export class InMemoryStore implements Store {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) {
     await sleep();
+    const result = new Map<
+      string,
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
+    >();
+
+    // Windowed targets: pure prefix delete behind the closest safe snapshot.
+    const windowed = targets.filter((t) => t.before !== undefined);
+    if (windowed.length) {
+      const drop = new Set<number>();
+      for (const { stream, before, max_id } of windowed) {
+        let boundary: Committed<Schemas, keyof Schemas> | undefined;
+        for (const e of this._events) {
+          if (
+            e.stream === stream &&
+            e.name === SNAP_EVENT &&
+            e.created < before! &&
+            (max_id === undefined || e.id <= max_id) &&
+            (!boundary || e.id > boundary.id)
+          )
+            boundary = e;
+        }
+        if (!boundary) continue; // no qualifying snapshot → no-op
+        let deleted = 0;
+        for (const e of this._events) {
+          if (e.stream === stream && e.id < boundary.id) {
+            drop.add(e.id);
+            this._pii.get(stream)?.delete(e.id);
+            deleted++;
+          }
+        }
+        result.set(stream, { deleted, committed: boundary, before });
+      }
+      if (drop.size) this._events = this._events.filter((e) => !drop.has(e.id));
+    }
+
+    const full = targets.filter((t) => t.before === undefined);
     // Count per-stream deletions
     const deleted_counts = new Map<string, number>();
-    const stream_set = new Set(targets.map((t) => t.stream));
+    const stream_set = new Set(full.map((t) => t.stream));
     for (const e of this._events) {
       if (stream_set.has(e.stream)) {
         deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
@@ -10245,14 +10610,13 @@ export class InMemoryStore implements Store {
       this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
+      // The pii payloads die with the event rows, matching the durable
+      // adapters' \`DELETE WHERE stream = ?\` scope.
+      this._pii.delete(stream);
     }
-    const result = new Map<
-      string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
-    >();
-    for (const { stream, snapshot, meta } of targets) {
+    for (const { stream, snapshot, meta } of full) {
       const event: Committed<Schemas, keyof Schemas> = {
-        id: this._events.length,
+        id: this._next_id++,
         stream,
         version: 0,
         created: new Date(),
@@ -10287,9 +10651,9 @@ export class InMemoryStore implements Store {
    * throw inside the driver restores the snapshot, leaving the store
    * byte-for-byte unchanged from the operator's perspective.
    *
-   * \`id\`s are reassigned \`0..N-1\` as events arrive (matching the
-   * adapter's commit-id convention — InMemory uses \`_events.length\`).
-   * \`created\` is preserved verbatim from the source.
+   * \`id\`s are reassigned \`0..N-1\` as events arrive (dense — the
+   * monotonic id counter restarts at 0 for the rebuild). \`created\` is
+   * preserved verbatim from the source.
    */
   async restore(
     driver: (
@@ -10299,19 +10663,21 @@ export class InMemoryStore implements Store {
     await sleep();
     // Snapshot every index so we can roll back on throw.
     const prev_events = this._events;
+    const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
+    this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
     this._max_event_id_by_stream = new Map();
     this._max_non_snap_event_id = -1;
     try {
       await driver(async (event) => {
-        const id = this._events.length;
+        const id = this._next_id++;
         const committed: Committed<Schemas, keyof Schemas> = { ...event, id };
         this._events.push(committed);
         // Last event per stream wins for the version watermark — the
@@ -10329,6 +10695,7 @@ export class InMemoryStore implements Store {
       // Roll back to the captured snapshot — every index restored
       // exactly as it was before the call started.
       this._events = prev_events;
+      this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
       this._max_event_id_by_stream = prev_max_event_id_by_stream;
@@ -10392,7 +10759,10 @@ export {
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_min_after_ms,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
 } from "./autoclose-policy.js";
 export {
   AUTOCLOSE_TARGET_PREFIX,
@@ -10974,10 +11344,20 @@ export interface Logger extends Disposable {
  * Result of a {@link Store.truncate} operation, keyed by stream name.
  * Each entry contains the number of deleted events and the committed
  * seed event (snapshot or tombstone).
+ *
+ * Windowed entries (targets carrying a \`before\` boundary) echo the
+ * boundary back as \`before\`, and \`committed\` is the **surviving
+ * boundary \`__snapshot__\`** — an event the app wrote earlier, not a
+ * new seed. Windowed no-ops (no qualifying snapshot) are absent from
+ * the map entirely.
  */
 export type TruncateResult = Map<
   string,
-  { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+  {
+    deleted: number;
+    committed: Committed<Schemas, keyof Schemas>;
+    before?: Date;
+  }
 >;
 
 /**
@@ -11728,14 +12108,31 @@ export interface Store extends Disposable, EventSource {
   /**
    * Atomically truncates streams and seeds each with a final event.
    *
-   * For each target, in a single transaction:
+   * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
    * 2. Removes the stream's entry from the streams table
    * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
    *
-   * @param targets - Streams to truncate with optional snapshot state and meta
-   * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event
+   * A **windowed** target (\`before\` set) is a pure prefix delete behind
+   * a real snapshot the app wrote — no seed, no tombstone, and the
+   * streams table is left untouched. The store finds the closest safe
+   * boundary — the latest \`__snapshot__\` with \`created < before\` and,
+   * when \`max_id\` is given, \`id <= max_id\` — and deletes events with
+   * \`id <\` that snapshot's id, keeping the snapshot + tail. No
+   * qualifying snapshot ⇒ no-op (the stream is absent from the result).
+   * Because \`load()\` resets state at each snapshot on replay, events
+   * below the boundary contribute nothing to any load result — deleting
+   * them cannot change what \`load()\` returns. \`snapshot\`/\`meta\` must be
+   * omitted on windowed targets; \`before\` takes precedence when both
+   * appear.
+   *
+   * @param targets - Streams to truncate; full targets carry optional
+   *   snapshot state and meta, windowed targets carry \`before\` (and
+   *   optionally \`max_id\`, the min consumer watermark cap)
+   * @returns Map keyed by stream name, each entry with \`deleted\` count
+   *   and \`committed\` event (the new seed, or the surviving boundary
+   *   snapshot on windowed entries, which also echo \`before\`)
    *
    * @see {@link Act.close} for the high-level close-the-books API that
    *   orchestrates safety checks, archive callbacks, and atomic
@@ -11746,6 +12143,8 @@ export interface Store extends Disposable, EventSource {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) => Promise<TruncateResult>;
 
@@ -13506,8 +13905,13 @@ export function build_handle<
             acked_at: error.at ?? event.id,
             // Close the signalled stream (the autoclose reaction's aggregate,
             // which differs from its synthetic lease stream); a self-closing
-            // user reaction omits it and closes its own lease stream.
-            close: { stream: error.stream ?? stream, archive: error.archive },
+            // user reaction omits it and closes its own lease stream. A
+            // carried \`before\` makes it a windowed close (prune, not retire).
+            close: {
+              stream: error.stream ?? stream,
+              archive: error.archive,
+              before: error.before,
+            },
           };
         return finalize(
           lease,
@@ -14468,7 +14872,8 @@ import type { ZodType } from "zod";
 import {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_min_after_ms,
+  policy_keep_days,
+  policy_min_after_days,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -14601,6 +15006,10 @@ type ActionEntry<
  * @template TEvents - Event schemas type
  * @template TActions - Action schemas type
  * @template TName - State name literal type
+ * @template TSnap - \`true\` once \`.snap(...)\` has been called. Gates the
+ *   \`.autocloses({ keep })\` rolling-window option — a windowed close is
+ *   meaningless without snapshots, so \`keep\` only typechecks after
+ *   \`.snap\` in the chain.
  *
  * @see {@link state} for complete usage examples
  */
@@ -14609,6 +15018,7 @@ export type ActionBuilder<
   TEvents extends Schemas,
   TActions extends Schemas,
   TName extends string = string,
+  TSnap extends boolean = false,
 > = {
   /**
    * Defines an action (command) that can be executed on this state.
@@ -14733,7 +15143,8 @@ export type ActionBuilder<
           TState,
           TEvents,
           TActions & { [P in TKey]: TNewActions },
-          TName
+          TName,
+          TSnap
         >;
         /** Passthrough — the action payload becomes the event data
          *  directly. Must reference an event declared in \`.emits()\`. */
@@ -14743,7 +15154,8 @@ export type ActionBuilder<
           TState,
           TEvents,
           TActions & { [P in TKey]: TNewActions },
-          TName
+          TName,
+          TSnap
         >;
       };
     };
@@ -14792,7 +15204,8 @@ export type ActionBuilder<
         TState,
         TEvents,
         TActions & { [P in TKey]: TNewActions },
-        TName
+        TName,
+        TSnap
       >;
       (
         event_name: keyof TEvents & string
@@ -14800,7 +15213,8 @@ export type ActionBuilder<
         TState,
         TEvents,
         TActions & { [P in TKey]: TNewActions },
-        TName
+        TName,
+        TSnap
       >;
     };
   };
@@ -14837,7 +15251,7 @@ export type ActionBuilder<
    */
   snap: (
     snap: (snapshot: Snapshot<TState, TEvents>) => boolean
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  ) => ActionBuilder<TState, TEvents, TActions, TName, true>;
   /**
    * Declares the disclosure predicate for \`sensitive(...)\`-marked event
    * fields. Gates external reads: returning \`true\` allows the actor to see
@@ -14872,7 +15286,7 @@ export type ActionBuilder<
       event: Committed<TEvents, keyof TEvents & string>,
       actor: Actor
     ) => boolean
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  ) => ActionBuilder<TState, TEvents, TActions, TName, TSnap>;
   /**
    * Declares the online close predicate for this state. The
    * orchestrator's autoclose cycle iterates the state's streams once
@@ -14941,10 +15355,34 @@ export type ActionBuilder<
    * \`\`\`typescript
    * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
    * \`\`\`
+   *
+   * @example Rolling window — keep the last 180 days of real events on a
+   *   live stream (requires \`.snap(...)\` earlier in the chain; \`keep\`
+   *   won't typecheck without it). Each eligible cycle prunes the prefix
+   *   below the closest safe snapshot older than \`now − keep\`.
+   * \`\`\`typescript
+   * .snap((s) => s.patches >= 100)
+   * .autocloses({ keep: { days: 180 } })
+   * \`\`\`
+   *
+   * @example Terminate AND prune — close 90 days after resolution,
+   *   meanwhile keep open streams pruned to a 180-day window.
+   * \`\`\`typescript
+   * .snap((s) => s.patches >= 100)
+   * .autocloses({ is: "TicketResolved", after: { days: 90 }, keep: { days: 180 } })
+   * \`\`\`
    */
   autocloses: (
-    policy: AutoclosePolicy
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+    policy: [TSnap] extends [true]
+      ? AutoclosePolicy
+      : Omit<AutoclosePolicy, "keep"> & {
+          /** Rolling-window retention requires \`.snap(...)\` earlier in
+           *  the builder chain — a windowed close prunes behind a real
+           *  snapshot, so a state that never snapshots has nothing to
+           *  prune behind. */
+          keep?: never;
+        }
+  ) => ActionBuilder<TState, TEvents, TActions, TName, TSnap>;
   /**
    * Declares the archiver the online close cycle runs **before**
    * truncating a stream this state's \`.autocloses(...)\` predicate
@@ -14984,7 +15422,7 @@ export type ActionBuilder<
    */
   archives: (
     archive: AutocloseArchiver<TEvents>
-  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  ) => ActionBuilder<TState, TEvents, TActions, TName, TSnap>;
   /**
    * Finalizes and builds the state definition.
    *
@@ -15261,7 +15699,15 @@ function action_builder<
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {
       internal.snap = snap;
-      return builder;
+      // Flip the type-level TSnap flag — same runtime object, the cast
+      // unlocks \`.autocloses({ keep })\` for the rest of the chain.
+      return builder as unknown as ActionBuilder<
+        TState,
+        TEvents,
+        TActions,
+        TName,
+        true
+      >;
     },
 
     discloses(
@@ -15294,14 +15740,23 @@ function action_builder<
           ".autocloses(...) requires a policy object; got " + typeof policy
         );
       }
+      // The type gate (\`TSnap\`) already rejects \`keep\` before \`.snap\` at
+      // compile time; this is the equivalent guard for untyped callers.
+      if ((policy as AutoclosePolicy).keep && !internal.snap) {
+        throw new Error(
+          ".autocloses({ keep }) requires .snap(...) earlier in the chain — a rolling window prunes behind a real snapshot, so a state that never snapshots has nothing to prune behind."
+        );
+      }
       // Replace on every call — matches snap / discloses state-level
       // semantics. Compile to the predicate the reaction evaluates, and
       // cache the policy's min \`after\` window so the reaction knows whether
-      // to park on a due-time or wait for the next event.
+      // to park on a due-time or wait for the next event; \`keep\` resolves
+      // to the rolling-window width the reaction prunes against.
       internal.autoclose = compile_autoclose_policy(
         policy
       ) as AutoclosePredicate<TEvents>;
-      internal.autoclose_after_ms = policy_min_after_ms(policy);
+      internal.autoclose_after_days = policy_min_after_days(policy);
+      internal.autoclose_keep_days = policy_keep_days(policy);
       return builder;
     },
 
@@ -17685,7 +18140,19 @@ export class Act<
    * 7. **Cache** — invalidate (tombstoned) or warm (restarted)
    * 8. **Emit "closed"** — lifecycle event with results
    *
-   * @param targets - Per-stream close options (stream, restart?, archive?)
+   * Targets carrying \`before\` take the **windowed** branch instead —
+   * close the books on a rolling window: probe the min consumer
+   * watermark (so the boundary never rises past a lagging reaction),
+   * run the archive callback against the cutoff, then prune the prefix
+   * below the closest safe \`__snapshot__\`. No tombstone guard (the
+   * pre-cutoff prefix is immutable), no seed, cache untouched — the
+   * stream stays live and keeps accepting actions. Requires the state
+   * to snapshot via \`.snap(...)\`; no qualifying snapshot ⇒ the stream
+   * lands in \`skipped\` (retry after the next snapshot). Windowed
+   * entries in the result echo \`before\` and carry the surviving
+   * boundary snapshot as \`committed\`.
+   *
+   * @param targets - Per-stream close options (stream, restart?, archive?, before?)
    * @returns \`{ truncated: TruncateResult, skipped: string[] }\`
    *
    * @example Archive and close
@@ -17701,6 +18168,19 @@ export class Act<
    * await app.close([
    *   { stream: "counter-1", restart: true },
    *   { stream: "counter-2" },  // tombstoned
+   * ]);
+   * \`\`\`
+   *
+   * @example Windowed close — keep the last 180 days of real events
+   * \`\`\`typescript
+   * const cutoff = new Date();
+   * cutoff.setDate(cutoff.getDate() - 180);
+   * await app.close([
+   *   {
+   *     stream: "ledger-acme",
+   *     before: cutoff,
+   *     archive: async () => { await archiveToS3("ledger-acme", cutoff); },
+   *   },
    * ]);
    * \`\`\`
    */
@@ -18369,11 +18849,17 @@ export type AutoclosePredicate<TEvents extends Schemas> = (
  * truncate runs without an archive step (matches the explicit
  * \`app.close({ stream })\` default).
  *
+ * On a **windowed** close staged by a rolling-window policy
+ * (\`.autocloses({ keep })\`), the third argument carries the cutoff —
+ * archive the events older than \`before\`; the prune deletes a subset of
+ * them (the prefix below the boundary snapshot). Absent on full closes.
+ *
  * @template TEvents Event schemas declared by the owning state.
  */
 export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
-  head: Committed<TEvents, keyof TEvents>
+  head: Committed<TEvents, keyof TEvents>,
+  before?: Date
 ) => Promise<void>;
 
 /**
@@ -18434,14 +18920,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
-   * or \`undefined\` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * \`autoclose\` by the builder.
+   * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
+   * policy, or \`undefined\` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to \`head.created\` plus this many days; a policy without an
+   * \`after\` waits for the next event instead of parking on a due-time.
+   * Set alongside \`autoclose\` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
+  /**
+   * The rolling-window width (in days) of the \`.autocloses({ keep })\`
+   * policy, or \`undefined\` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside \`autoclose\`
+   * by the builder; only reachable behind \`.snap(...)\`.
+   */
+  autoclose_keep_days?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -18453,7 +18950,8 @@ export type State<
    */
   archive?(
     stream: string,
-    head: Committed<TEvents, keyof TEvents>
+    head: Committed<TEvents, keyof TEvents>,
+    before?: Date
   ): Promise<void>;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
@@ -18547,25 +19045,42 @@ export type CloseTarget = {
   /** Stream name to close */
   readonly stream: string;
   /** When true, restart with a \`__snapshot__\` of the final state.
-   *  When false/omitted, permanently close with a \`__tombstone__\`. */
+   *  When false/omitted, permanently close with a \`__tombstone__\`.
+   *  Mutually exclusive with {@link before}. */
   readonly restart?: boolean;
   /** Called before truncation while the stream is guarded (no concurrent writes).
    *  Use \`app.query()\` or \`app.query_array()\` inside for pagination.
-   *  If it throws, the stream remains guarded but is not truncated. */
+   *  If it throws, the stream remains guarded but is not truncated.
+   *  On a windowed close ({@link before} set) there is no guard — the
+   *  callback archives the immutable pre-cutoff prefix, which concurrent
+   *  appends cannot change. */
   readonly archive?: () => Promise<void>;
+  /** Windowed close: prune events older than this cutoff instead of
+   *  closing the stream. The store deletes the prefix below the closest
+   *  safe \`__snapshot__\` (\`created < before\`, capped at the min consumer
+   *  watermark) and keeps the snapshot + tail — no tombstone, no seed,
+   *  and the stream keeps accepting actions. No qualifying snapshot ⇒
+   *  the stream is skipped this cycle. Mutually exclusive with
+   *  {@link restart}. */
+  readonly before?: Date;
 };
 
 /**
  * Result of a close operation — per-stream truncate outcomes plus the
  * names of any streams that were skipped (concurrent writes, pending
- * reactions).
+ * reactions, or windowed closes with no qualifying snapshot).
+ *
+ * Windowed entries in \`truncated\` echo the cutoff as \`before\` and carry
+ * the surviving boundary snapshot as \`committed\` — that's how consumers
+ * of the \`closed\` lifecycle event distinguish prunes from full closes.
  *
  * @see {@link IAct.close} for the close-the-books API
  */
 export type CloseResult = {
   /** Per-stream truncate results (deleted count + committed event) */
   readonly truncated: TruncateResult;
-  /** Streams skipped due to pending reactions or concurrent writes */
+  /** Streams skipped due to pending reactions, concurrent writes, or a
+   *  windowed close finding no qualifying snapshot */
   readonly skipped: string[];
 };
 
@@ -19950,22 +20465,65 @@ import { z } from "zod";
 import type { AutoclosePredicate, Schemas } from "../types/action.js";
 
 /**
- * Lower bound on a resolved \`after\` window. Sub-minute windows are
- * almost always misconfiguration — the autoclose cycle ticks at the
- * order of \`autocloseCycleMinutes\` (default 12 h), so a 30 s window can't
- * be honored anyway. Rejecting at build keeps the failure mode noisy.
+ * One day in epoch milliseconds. The close surface is day-denominated
+ * throughout — policies declare \`{ days }\`, the State carries
+ * \`autoclose_*_days\`, and the reaction thinks in day offsets. This
+ * constant (with {@link days_after} / {@link days_before_now}) is the
+ * single place the closing process touches epoch arithmetic, because
+ * \`Date\` itself has no other currency.
  */
-const MIN_AFTER_MS = 60_000;
+const DAY_MS = 86_400_000;
 
-const AfterSchema = z
-  .object({
-    days: z
-      .number({ message: "autocloses: after.days must be a number" })
-      .positive("autocloses: after.days must be > 0"),
-  })
-  .refine((o) => o.days * 86_400_000 >= MIN_AFTER_MS, {
-    message: \`autocloses: after resolves to < \${MIN_AFTER_MS}ms (one minute), which is too short to be a meaningful retention window\`,
-  });
+/**
+ * Lower bound on a resolved \`after\` window: one minute, expressed in
+ * days. Sub-minute cooldowns are almost always misconfiguration.
+ * Rejecting at build keeps the failure mode noisy.
+ */
+const MIN_AFTER_DAYS = 1 / 1440;
+
+/**
+ * Lower bound on a resolved \`keep\` window: one full day. The close
+ * cycle is low-cadence, non-priority housekeeping — a rolling window
+ * shorter than a day signals misconfiguration. Real retention
+ * contracts (180 days, 7 years) are days and up.
+ */
+const MIN_KEEP_DAYS = 1;
+
+/** The \`Date\` that lies \`days\` after \`date\`. @internal */
+export function days_after(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * DAY_MS);
+}
+
+/** The \`Date\` that lies \`days\` in the past. @internal */
+export function days_before_now(days: number): Date {
+  return new Date(Date.now() - days * DAY_MS);
+}
+
+/**
+ * Day-denominated window shared by \`after\` (terminate cooldown) and
+ * \`keep\` (rolling retention). Fractional days accepted; windows below
+ * the field's floor reject at build.
+ *
+ * @internal
+ */
+const window_schema = (
+  field: "after" | "keep",
+  min_days: number,
+  floor: string
+) =>
+  z
+    .object({
+      days: z
+        .number({ message: \`autocloses: \${field}.days must be a number\` })
+        .positive(\`autocloses: \${field}.days must be > 0\`),
+    })
+    .refine((o) => o.days >= min_days, {
+      message: \`autocloses: \${field} resolves to < \${floor}, which is too short to be a meaningful retention window\`,
+    });
+
+const AfterSchema = window_schema("after", MIN_AFTER_DAYS, "one minute");
+
+const KeepSchema = window_schema("keep", MIN_KEEP_DAYS, "one day");
 
 const IsSchema = z.union([
   z.string().min(1, "autocloses: is must be a non-empty event name"),
@@ -20022,6 +20580,7 @@ const AutoclosePolicySchema = z
     is: IsSchema.optional(),
     reaches: ReachesSchema.optional(),
     or: OrBlockSchema.optional(),
+    keep: KeepSchema.optional(),
   })
   .strict()
   .refine(
@@ -20029,10 +20588,11 @@ const AutoclosePolicySchema = z
       o.after !== undefined ||
       o.is !== undefined ||
       o.reaches !== undefined ||
-      o.or !== undefined,
+      o.or !== undefined ||
+      o.keep !== undefined,
     {
       message:
-        "autocloses: at least one of after / is / reaches / or must be specified — empty \`{}\` is a misconfiguration",
+        "autocloses: at least one of after / is / reaches / or / keep must be specified — empty \`{}\` is a misconfiguration",
     }
   );
 
@@ -20043,9 +20603,9 @@ const AutoclosePolicySchema = z
  * not mean "match everything."
  *
  * @property after - Close when \`head.created\` is at least the resolved
- *   window in the past. Nested object leaves room for \`hours\` / \`ms\`
- *   units later without polluting the top level. Fractional \`days\`
- *   accepted (\`{ days: 1/24 }\` is 1 hour) so sub-day windows work.
+ *   window in the past. Days are the close surface's only unit;
+ *   fractional \`days\` cover sub-day cooldowns (\`{ days: 1/24 }\` is one
+ *   hour) without introducing another denomination.
  * @property is - Close when \`head.name\` matches. String for the
  *   single-terminal-event case (the most common); \`readonly string[]\`
  *   for multi-terminal states (\`Order: Shipped | Delivered |
@@ -20057,6 +20617,14 @@ const AutoclosePolicySchema = z
  *   \`or\` matches. Used for safety-net backstops layered onto a
  *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
  *   10k"*). Nested \`or\` inside \`or\` rejects at build time.
+ * @property keep - Rolling-window retention (#1011), **independent** of
+ *   the terminate fields: while the stream stays open, prune events
+ *   older than \`now − keep\` behind the closest safe snapshot via a
+ *   windowed close. Does not participate in the AND group or the \`or\`
+ *   block — a policy may terminate, prune, or both. Requires
+ *   \`.snap(...)\` earlier in the builder chain (type-gated) and a
+ *   window of at least one day — the close cycle is low-cadence
+ *   housekeeping, never sub-day realtime.
  */
 export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 
@@ -20064,8 +20632,7 @@ export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 function compile_after(
   after: NonNullable<AutoclosePolicy["after"]>
 ): AutoclosePredicate<Schemas> {
-  const after_ms = after.days * 86_400_000;
-  return (_stream, head) => Date.now() - head.created.getTime() >= after_ms;
+  return (_stream, head) => days_after(head.created, after.days) <= new Date();
 }
 
 /** Compile a single \`is\` field into its predicate slice. @internal */
@@ -20112,28 +20679,43 @@ function compile_reaches(
  * @internal
  */
 /**
- * The smallest \`after\` window (in ms) anywhere in a policy — across the
- * top-level \`after\` and the \`or.after\` block — or \`undefined\` when the
- * policy has no time component.
+ * The smallest \`after\` window (in days) anywhere in a policy — across
+ * the top-level \`after\` and the \`or.after\` block — or \`undefined\` when
+ * the policy has no time component.
  *
  * The synthesized autoclose reaction (#1090) uses this to decide how to
- * wait: a policy with an \`after\` defers its re-check to \`head.created +
- * min_after_ms\` (the earliest its time gate could open); a policy without
- * one (\`is\` / \`reaches\` only) has no time gate, so the reaction just waits
- * for the next event to re-trigger rather than parking on a due-time.
- * Conservative — the min across branches never defers past the soonest a
- * branch could fire.
+ * wait: a policy with an \`after\` defers its re-check to \`head.created\`
+ * plus this many days (the earliest its time gate could open); a policy
+ * without one (\`is\` / \`reaches\` only) has no time gate, so the reaction
+ * just waits for the next event to re-trigger rather than parking on a
+ * due-time. Conservative — the min across branches never defers past
+ * the soonest a branch could fire.
  *
  * @internal
  */
-export function policy_min_after_ms(
+export function policy_min_after_days(
   options: AutoclosePolicy
 ): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
   const windows: number[] = [];
-  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
-  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  if (parsed.after) windows.push(parsed.after.days);
+  if (parsed.or?.after) windows.push(parsed.or.after.days);
   return windows.length ? Math.min(...windows) : undefined;
+}
+
+/**
+ * The rolling-window width (in days) of a policy's \`keep\` field, or
+ * \`undefined\` when the policy declares no rolling window. The
+ * synthesized autoclose reaction prunes the prefix older than the
+ * window (via a windowed close) and derives its prune due-time as
+ * \`tail.created\` plus this many days — the earliest the oldest
+ * surviving domain event can age out of the window.
+ *
+ * @internal
+ */
+export function policy_keep_days(options: AutoclosePolicy): number | undefined {
+  const parsed = AutoclosePolicySchema.parse(options);
+  return parsed.keep?.days;
 }
 
 export function compile_autoclose_policy(
@@ -20194,7 +20776,7 @@ export function compile_autoclose_policy(
  * @internal
  */
 
-import { store, TOMBSTONE_EVENT } from "../ports.js";
+import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Reaction,
   Registry,
@@ -20206,6 +20788,7 @@ import {
   type AutocloseConfig,
   in_autoclose_window,
 } from "./autoclose-config.js";
+import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 
@@ -20238,7 +20821,8 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_ms = st.autoclose_after_ms;
+    const after_days = st.autoclose_after_days;
+    const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
       // Run on a SYNTHETIC stream — \`source\` is the aggregate, \`target\` is a
@@ -20262,9 +20846,18 @@ export function synthesize_autoclose_reactions<
           throw new DeferSignal({
             at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
           });
+        // Rolling-window policies also exclude snapshots and fetch the
+        // tail: the prune decision keys on the oldest *domain* event —
+        // after a prune the oldest surviving event is the boundary
+        // snapshot, whose age says nothing about whether another prune
+        // would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
-          exclude: [TOMBSTONE_EVENT],
+          tail: keep_days !== undefined ? true : undefined,
+          exclude:
+            keep_days !== undefined
+              ? [TOMBSTONE_EVENT, SNAP_EVENT]
+              : [TOMBSTONE_EVENT],
         });
         const entry = stats.get(aggregate);
         // No live (non-tombstone) head → already closed, nothing to do.
@@ -20281,12 +20874,34 @@ export function synthesize_autoclose_reactions<
             // aggregate) sees it caught up instead of blocking its own close.
             at: head.id,
           });
-        // Not eligible yet: park on the cooldown's earliest opening when the
-        // policy has a time gate; otherwise wait for the next event to
-        // re-trigger (e.g. a \`reaches\` threshold).
-        if (after_ms !== undefined)
+        // Rolling window: when the oldest domain event has aged out of the
+        // window, stage a windowed close — prune the prefix older than the
+        // cutoff behind the closest safe snapshot. \`tail\` is present
+        // whenever the stats entry is (same non-excluded event set).
+        if (keep_days !== undefined) {
+          const cutoff = days_before_now(keep_days);
+          if (entry.tail!.created < cutoff)
+            throw new CloseSignal({
+              stream: aggregate,
+              before: cutoff,
+              archive: archiver
+                ? () => archiver(aggregate, head, cutoff)
+                : undefined,
+              at: head.id,
+            });
+        }
+        // Not eligible yet: park on the earliest derivable due-time — the
+        // day the terminate cooldown opens and/or the day the oldest
+        // domain event ages out of the rolling window. Neither → wait for
+        // the next event to re-trigger (e.g. a \`reaches\` threshold).
+        const dues: Date[] = [];
+        if (after_days !== undefined)
+          dues.push(days_after(head.created, after_days));
+        if (keep_days !== undefined)
+          dues.push(days_after(entry.tail!.created, keep_days));
+        if (dues.length)
           throw new DeferSignal({
-            at: new Date(head.created.getTime() + after_ms),
+            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
           });
       },
     };
@@ -20853,6 +21468,11 @@ type StreamHead = {
  * Run the full close cycle for the given targets. Caller owns the
  * lifecycle event emission.
  *
+ * Targets carrying a \`before\` cutoff take the **windowed** branch — a
+ * pure prefix delete behind an existing snapshot (see
+ * {@link run_windowed_closes}); the rest run the guarded
+ * tombstone/restart pipeline below.
+ *
  * @internal
  */
 export async function run_close_cycle(
@@ -20862,8 +21482,22 @@ export async function run_close_cycle(
   // Caller (Act.close) filters empty targets; run_close_cycle assumes at
   // least one target.
   const target_map = new Map(targets.map((t) => [t.stream, t]));
-  const streams = [...target_map.keys()];
+  for (const t of target_map.values()) {
+    if (t.before !== undefined && t.restart)
+      throw new Error(
+        \`close: \\\`before\\\` and \\\`restart\\\` are mutually exclusive (stream "\${t.stream}") — a windowed close keeps the stream live behind a real snapshot; restart reseeds it\`
+      );
+  }
+  const windowed = [...target_map.values()].filter(
+    (t) => t.before !== undefined
+  );
+  const full = [...target_map.values()].filter((t) => t.before === undefined);
   const skipped: string[] = [];
+  const windowed_result = windowed.length
+    ? await run_windowed_closes(windowed, deps, skipped)
+    : new Map();
+  if (!full.length) return { truncated: windowed_result, skipped };
+  const streams = full.map((t) => t.stream);
 
   // 1. Scan: find the latest non-tombstone event per stream
   const stream_info = await scan_stream_heads(streams);
@@ -20875,7 +21509,7 @@ export async function run_close_cycle(
     skipped,
     deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
   );
-  if (!safe.length) return { truncated: new Map(), skipped };
+  if (!safe.length) return { truncated: windowed_result, skipped };
 
   // 3. Guard: commit a tombstone with expectedVersion per safe stream.
   // Correlation comes from the orchestrator's configured correlator so
@@ -20887,7 +21521,7 @@ export async function run_close_cycle(
     deps.tombstone,
     skipped
   );
-  if (!guarded.length) return { truncated: new Map(), skipped };
+  if (!guarded.length) return { truncated: windowed_result, skipped };
 
   // 4. Seed: load final state for restart targets through the owning state
   const seed_states = await load_restart_seeds(
@@ -20910,7 +21544,115 @@ export async function run_close_cycle(
     deps.correlation
   );
 
+  for (const [stream, entry] of windowed_result) truncated.set(stream, entry);
   return { truncated, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Windowed branch — prune the prefix behind an existing snapshot
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the windowed closes: probe the min consumer watermark per stream
+ * (the \`max_id\` cap that keeps the boundary at/below what the laggiest
+ * consumer has read), run archive callbacks against the cutoff, then
+ * hand the boundary targets to {@link Store.truncate}.
+ *
+ * No tombstone guard and no cache touch — the cutoff is always in the
+ * past, so a concurrently-written snapshot (\`created = now\`) can never
+ * become the boundary: once the cutoff is fixed the boundary snapshot is
+ * fixed, and the prefix below it is immutable. Concurrent appends land
+ * at the head, above the boundary. Current state is unchanged, so the
+ * cache stays warm. Streams the store skips (no qualifying snapshot)
+ * are reported in \`skipped\`.
+ *
+ * @internal
+ */
+async function run_windowed_closes(
+  windowed: CloseTarget[],
+  deps: CloseCycleDeps,
+  skipped: string[]
+): Promise<CloseResult["truncated"]> {
+  // 1. Safety probe: min consumer watermark per stream. Skipped entirely
+  // when the app has no reactions — nothing can lag.
+  const min_at =
+    deps.reactive_events_size > 0
+      ? await probe_min_watermarks(
+          windowed.map((t) => t.stream),
+          deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
+        )
+      : new Map<string, number>();
+
+  // 2. Archive: user callbacks against the cutoff. Sequential for the
+  // same reason as the full path — shared resources, fail-fast. The
+  // pre-cutoff prefix is immutable, so no guard is needed; archiving a
+  // superset of what the boundary truncate deletes is by design
+  // (archive + live stream = full history).
+  for (const t of windowed) {
+    if (t.archive) await t.archive();
+  }
+
+  // 3. Boundary truncate: atomic per-store transaction; no seed.
+  const truncated = await store().truncate(
+    windowed.map((t) => ({
+      stream: t.stream,
+      before: t.before!,
+      max_id: min_at.get(t.stream),
+    }))
+  );
+  for (const t of windowed) {
+    if (!truncated.has(t.stream)) skipped.push(t.stream);
+  }
+  return truncated;
+}
+
+/**
+ * Min subscription watermark per target stream — the read-only probe
+ * backing the windowed close's \`max_id\` cap. Pagination and source
+ * matching mirror {@link partition_by_safety}; instead of flagging
+ * pending streams it folds \`min(at)\` per stream. Streams with no
+ * matching subscriptions are absent (no cap).
+ *
+ * @internal
+ */
+async function probe_min_watermarks(
+  streams: string[],
+  page_size: number
+): Promise<Map<string, number>> {
+  const min_at = new Map<string, number>();
+  const source_regex = new Map<string, RegExp>();
+  const get_regex = (source: string): RegExp => {
+    let re = source_regex.get(source);
+    if (!re) {
+      re = new RegExp(source);
+      source_regex.set(source, re);
+    }
+    return re;
+  };
+
+  let after: string | undefined;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store().query_streams(
+      (position) => {
+        last = position.stream;
+        const source_re = position.source
+          ? get_regex(position.source)
+          : undefined;
+        for (const stream of streams) {
+          if (!source_re || source_re.test(stream)) {
+            const prev = min_at.get(stream);
+            if (prev === undefined || position.at < prev)
+              min_at.set(stream, position.at);
+          }
+        }
+      },
+      { after, limit: page_size, source_matches: streams }
+    );
+    if (count < page_size) break;
+    after = last;
+  }
+  return min_at;
 }
 
 // ---------------------------------------------------------------------------
@@ -21193,17 +21935,26 @@ export class CloseSignal extends Error {
    * event id when omitted.
    */
   readonly at?: number;
+  /**
+   * Windowed close (#1011): prune events older than this cutoff behind
+   * the closest safe snapshot instead of retiring the stream. Thrown by
+   * the autoclose reaction of a \`.autocloses({ keep })\` state; flows
+   * into {@link CloseTarget.before}. Omitted → a full close.
+   */
+  readonly before?: Date;
 
   constructor(opts?: {
     stream?: string;
     archive?: () => Promise<void>;
     at?: number;
+    before?: Date;
   }) {
     super("reaction requested close");
     this.name = "CloseSignal";
     this.stream = opts?.stream;
     this.archive = opts?.archive;
     this.at = opts?.at;
+    this.before = opts?.before;
   }
 }
 
@@ -24506,6 +25257,10 @@ class InMemoryStream {
 export class InMemoryStore implements Store {
   // stored events
   private _events: Committed<Schemas, keyof Schemas>[] = [];
+  // next event id — monotonic, never reused. Deletions (truncate, windowed
+  // prune) punch holes in the id sequence, so ids are NOT array indexes and
+  // NOT \`_events.length\`; they only stay sorted ascending in \`_events\`.
+  private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
@@ -24524,10 +25279,26 @@ export class InMemoryStore implements Store {
 
   private _reset_indexes() {
     this._events.length = 0;
+    this._next_id = 0;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
     this._pii.clear();
+  }
+
+  // First index whose event id is greater than \`after\`. \`_events\` stays
+  // sorted ascending by id (append-only commits; deletions preserve
+  // order), so id-bounded scans binary-search their start instead of
+  // assuming id === index — an invariant that truncation breaks.
+  private _first_index_after(after: number): number {
+    let lo = 0;
+    let hi = this._events.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this._events[mid].id > after) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
   }
 
   // Attach the isolated PII payload (or null) to an event before handing it to
@@ -24592,7 +25363,10 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (query?.backward) {
-      let i = (query?.before || this._events.length) - 1;
+      let i =
+        (query?.before !== undefined
+          ? this._first_index_after(query.before - 1)
+          : this._events.length) - 1;
       while (i >= 0) {
         const e = this._events[i--];
         if (query && !this.in_query(query, e)) continue;
@@ -24607,7 +25381,7 @@ export class InMemoryStore implements Store {
         if (query?.limit && count >= query.limit) break;
       }
     } else {
-      let i = (query?.after ?? -1) + 1;
+      let i = this._first_index_after(query?.after ?? -1);
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit \`after\`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
@@ -24675,7 +25449,7 @@ export class InMemoryStore implements Store {
     let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
-        id: this._events.length,
+        id: this._next_id++,
         stream,
         version,
         created: new Date(),
@@ -24702,8 +25476,8 @@ export class InMemoryStore implements Store {
     this._stream_versions.set(stream, version - 1);
     if (last_non_snap_id >= 0) {
       this._max_event_id_by_stream.set(stream, last_non_snap_id);
-      // commit always assigns a fresh id from this._events.length, so any
-      // non-snap commit strictly raises the global max.
+      // commit always assigns a fresh id from the monotonic _next_id, so
+      // any non-snap commit strictly raises the global max.
       this._max_non_snap_event_id = last_non_snap_id;
     }
     return committed;
@@ -25115,7 +25889,7 @@ export class InMemoryStore implements Store {
       count++;
       if (count >= limit) break;
     }
-    return { maxEventId: this._events.length - 1, count };
+    return { maxEventId: this._events.at(-1)?.id ?? -1, count };
   }
 
   /**
@@ -25224,7 +25998,11 @@ export class InMemoryStore implements Store {
 
   /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * Windowed targets (\`before\` set) prune the prefix below the closest safe
+   * \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
+   * snapshot qualifies.
+   * @param targets - Streams to truncate with optional snapshot state and meta,
+   *   or a \`before\`/\`max_id\` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event.
    */
   async truncate(
@@ -25232,12 +26010,54 @@ export class InMemoryStore implements Store {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) {
     await sleep();
+    const result = new Map<
+      string,
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
+    >();
+
+    // Windowed targets: pure prefix delete behind the closest safe snapshot.
+    const windowed = targets.filter((t) => t.before !== undefined);
+    if (windowed.length) {
+      const drop = new Set<number>();
+      for (const { stream, before, max_id } of windowed) {
+        let boundary: Committed<Schemas, keyof Schemas> | undefined;
+        for (const e of this._events) {
+          if (
+            e.stream === stream &&
+            e.name === SNAP_EVENT &&
+            e.created < before! &&
+            (max_id === undefined || e.id <= max_id) &&
+            (!boundary || e.id > boundary.id)
+          )
+            boundary = e;
+        }
+        if (!boundary) continue; // no qualifying snapshot → no-op
+        let deleted = 0;
+        for (const e of this._events) {
+          if (e.stream === stream && e.id < boundary.id) {
+            drop.add(e.id);
+            this._pii.get(stream)?.delete(e.id);
+            deleted++;
+          }
+        }
+        result.set(stream, { deleted, committed: boundary, before });
+      }
+      if (drop.size) this._events = this._events.filter((e) => !drop.has(e.id));
+    }
+
+    const full = targets.filter((t) => t.before === undefined);
     // Count per-stream deletions
     const deleted_counts = new Map<string, number>();
-    const stream_set = new Set(targets.map((t) => t.stream));
+    const stream_set = new Set(full.map((t) => t.stream));
     for (const e of this._events) {
       if (stream_set.has(e.stream)) {
         deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
@@ -25248,14 +26068,13 @@ export class InMemoryStore implements Store {
       this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
+      // The pii payloads die with the event rows, matching the durable
+      // adapters' \`DELETE WHERE stream = ?\` scope.
+      this._pii.delete(stream);
     }
-    const result = new Map<
-      string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
-    >();
-    for (const { stream, snapshot, meta } of targets) {
+    for (const { stream, snapshot, meta } of full) {
       const event: Committed<Schemas, keyof Schemas> = {
-        id: this._events.length,
+        id: this._next_id++,
         stream,
         version: 0,
         created: new Date(),
@@ -25290,9 +26109,9 @@ export class InMemoryStore implements Store {
    * throw inside the driver restores the snapshot, leaving the store
    * byte-for-byte unchanged from the operator's perspective.
    *
-   * \`id\`s are reassigned \`0..N-1\` as events arrive (matching the
-   * adapter's commit-id convention — InMemory uses \`_events.length\`).
-   * \`created\` is preserved verbatim from the source.
+   * \`id\`s are reassigned \`0..N-1\` as events arrive (dense — the
+   * monotonic id counter restarts at 0 for the rebuild). \`created\` is
+   * preserved verbatim from the source.
    */
   async restore(
     driver: (
@@ -25302,19 +26121,21 @@ export class InMemoryStore implements Store {
     await sleep();
     // Snapshot every index so we can roll back on throw.
     const prev_events = this._events;
+    const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
+    this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
     this._max_event_id_by_stream = new Map();
     this._max_non_snap_event_id = -1;
     try {
       await driver(async (event) => {
-        const id = this._events.length;
+        const id = this._next_id++;
         const committed: Committed<Schemas, keyof Schemas> = { ...event, id };
         this._events.push(committed);
         // Last event per stream wins for the version watermark — the
@@ -25332,6 +26153,7 @@ export class InMemoryStore implements Store {
       // Roll back to the captured snapshot — every index restored
       // exactly as it was before the call started.
       this._events = prev_events;
+      this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
       this._max_event_id_by_stream = prev_max_event_id_by_stream;
@@ -25377,7 +26199,10 @@ export {
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  policy_min_after_ms,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
 } from "./autoclose-policy.js";
 export {
   AUTOCLOSE_TARGET_PREFIX,
@@ -25940,10 +26765,20 @@ export interface Logger extends Disposable {
  * Result of a {@link Store.truncate} operation, keyed by stream name.
  * Each entry contains the number of deleted events and the committed
  * seed event (snapshot or tombstone).
+ *
+ * Windowed entries (targets carrying a \`before\` boundary) echo the
+ * boundary back as \`before\`, and \`committed\` is the **surviving
+ * boundary \`__snapshot__\`** — an event the app wrote earlier, not a
+ * new seed. Windowed no-ops (no qualifying snapshot) are absent from
+ * the map entirely.
  */
 export type TruncateResult = Map<
   string,
-  { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+  {
+    deleted: number;
+    committed: Committed<Schemas, keyof Schemas>;
+    before?: Date;
+  }
 >;
 
 /**
@@ -26694,14 +27529,31 @@ export interface Store extends Disposable, EventSource {
   /**
    * Atomically truncates streams and seeds each with a final event.
    *
-   * For each target, in a single transaction:
+   * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
    * 2. Removes the stream's entry from the streams table
    * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
    *
-   * @param targets - Streams to truncate with optional snapshot state and meta
-   * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event
+   * A **windowed** target (\`before\` set) is a pure prefix delete behind
+   * a real snapshot the app wrote — no seed, no tombstone, and the
+   * streams table is left untouched. The store finds the closest safe
+   * boundary — the latest \`__snapshot__\` with \`created < before\` and,
+   * when \`max_id\` is given, \`id <= max_id\` — and deletes events with
+   * \`id <\` that snapshot's id, keeping the snapshot + tail. No
+   * qualifying snapshot ⇒ no-op (the stream is absent from the result).
+   * Because \`load()\` resets state at each snapshot on replay, events
+   * below the boundary contribute nothing to any load result — deleting
+   * them cannot change what \`load()\` returns. \`snapshot\`/\`meta\` must be
+   * omitted on windowed targets; \`before\` takes precedence when both
+   * appear.
+   *
+   * @param targets - Streams to truncate; full targets carry optional
+   *   snapshot state and meta, windowed targets carry \`before\` (and
+   *   optionally \`max_id\`, the min consumer watermark cap)
+   * @returns Map keyed by stream name, each entry with \`deleted\` count
+   *   and \`committed\` event (the new seed, or the surviving boundary
+   *   snapshot on windowed entries, which also echo \`before\`)
    *
    * @see {@link Act.close} for the high-level close-the-books API that
    *   orchestrates safety checks, archive callbacks, and atomic
@@ -26712,6 +27564,8 @@ export interface Store extends Disposable, EventSource {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) => Promise<TruncateResult>;
 
@@ -28472,8 +29326,13 @@ export function build_handle<
             acked_at: error.at ?? event.id,
             // Close the signalled stream (the autoclose reaction's aggregate,
             // which differs from its synthetic lease stream); a self-closing
-            // user reaction omits it and closes its own lease stream.
-            close: { stream: error.stream ?? stream, archive: error.archive },
+            // user reaction omits it and closes its own lease stream. A
+            // carried \`before\` makes it a windowed close (prune, not retire).
+            close: {
+              stream: error.stream ?? stream,
+              archive: error.archive,
+              before: error.before,
+            },
           };
         return finalize(
           lease,
@@ -30631,11 +31490,17 @@ export type AutoclosePredicate<TEvents extends Schemas> = (
  * truncate runs without an archive step (matches the explicit
  * \`app.close({ stream })\` default).
  *
+ * On a **windowed** close staged by a rolling-window policy
+ * (\`.autocloses({ keep })\`), the third argument carries the cutoff —
+ * archive the events older than \`before\`; the prune deletes a subset of
+ * them (the prefix below the boundary snapshot). Absent on full closes.
+ *
  * @template TEvents Event schemas declared by the owning state.
  */
 export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
-  head: Committed<TEvents, keyof TEvents>
+  head: Committed<TEvents, keyof TEvents>,
+  before?: Date
 ) => Promise<void>;
 
 /**
@@ -30696,14 +31561,25 @@ export type State<
     count: number
   ): boolean;
   /**
-   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
-   * or \`undefined\` when the policy has no time component (#1090). The
-   * synthesized autoclose reaction uses it to defer its re-check to
-   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
-   * for the next event instead of parking on a due-time. Set alongside
-   * \`autoclose\` by the builder.
+   * The smallest \`after\` window (in days) of the \`.autocloses({...})\`
+   * policy, or \`undefined\` when the policy has no time component
+   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * re-check to \`head.created\` plus this many days; a policy without an
+   * \`after\` waits for the next event instead of parking on a due-time.
+   * Set alongside \`autoclose\` by the builder. Day-denominated — the
+   * close surface never speaks in ms/seconds/minutes.
    */
-  autoclose_after_ms?: number;
+  autoclose_after_days?: number;
+  /**
+   * The rolling-window width (in days) of the \`.autocloses({ keep })\`
+   * policy, or \`undefined\` when the policy declares no rolling window
+   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * (prune the prefix older than the window behind the closest safe
+   * snapshot) when the oldest surviving domain event ages out, and
+   * defers until the tail ages out otherwise. Set alongside \`autoclose\`
+   * by the builder; only reachable behind \`.snap(...)\`.
+   */
+  autoclose_keep_days?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -30715,7 +31591,8 @@ export type State<
    */
   archive?(
     stream: string,
-    head: Committed<TEvents, keyof TEvents>
+    head: Committed<TEvents, keyof TEvents>,
+    before?: Date
   ): Promise<void>;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
@@ -30809,25 +31686,42 @@ export type CloseTarget = {
   /** Stream name to close */
   readonly stream: string;
   /** When true, restart with a \`__snapshot__\` of the final state.
-   *  When false/omitted, permanently close with a \`__tombstone__\`. */
+   *  When false/omitted, permanently close with a \`__tombstone__\`.
+   *  Mutually exclusive with {@link before}. */
   readonly restart?: boolean;
   /** Called before truncation while the stream is guarded (no concurrent writes).
    *  Use \`app.query()\` or \`app.query_array()\` inside for pagination.
-   *  If it throws, the stream remains guarded but is not truncated. */
+   *  If it throws, the stream remains guarded but is not truncated.
+   *  On a windowed close ({@link before} set) there is no guard — the
+   *  callback archives the immutable pre-cutoff prefix, which concurrent
+   *  appends cannot change. */
   readonly archive?: () => Promise<void>;
+  /** Windowed close: prune events older than this cutoff instead of
+   *  closing the stream. The store deletes the prefix below the closest
+   *  safe \`__snapshot__\` (\`created < before\`, capped at the min consumer
+   *  watermark) and keeps the snapshot + tail — no tombstone, no seed,
+   *  and the stream keeps accepting actions. No qualifying snapshot ⇒
+   *  the stream is skipped this cycle. Mutually exclusive with
+   *  {@link restart}. */
+  readonly before?: Date;
 };
 
 /**
  * Result of a close operation — per-stream truncate outcomes plus the
  * names of any streams that were skipped (concurrent writes, pending
- * reactions).
+ * reactions, or windowed closes with no qualifying snapshot).
+ *
+ * Windowed entries in \`truncated\` echo the cutoff as \`before\` and carry
+ * the surviving boundary snapshot as \`committed\` — that's how consumers
+ * of the \`closed\` lifecycle event distinguish prunes from full closes.
  *
  * @see {@link IAct.close} for the close-the-books API
  */
 export type CloseResult = {
   /** Per-stream truncate results (deleted count + committed event) */
   readonly truncated: TruncateResult;
-  /** Streams skipped due to pending reactions or concurrent writes */
+  /** Streams skipped due to pending reactions, concurrent writes, or a
+   *  windowed close finding no qualifying snapshot */
   readonly skipped: string[];
 };
 
@@ -31859,10 +32753,20 @@ export interface Logger extends Disposable {
  * Result of a {@link Store.truncate} operation, keyed by stream name.
  * Each entry contains the number of deleted events and the committed
  * seed event (snapshot or tombstone).
+ *
+ * Windowed entries (targets carrying a \`before\` boundary) echo the
+ * boundary back as \`before\`, and \`committed\` is the **surviving
+ * boundary \`__snapshot__\`** — an event the app wrote earlier, not a
+ * new seed. Windowed no-ops (no qualifying snapshot) are absent from
+ * the map entirely.
  */
 export type TruncateResult = Map<
   string,
-  { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+  {
+    deleted: number;
+    committed: Committed<Schemas, keyof Schemas>;
+    before?: Date;
+  }
 >;
 
 /**
@@ -32613,14 +33517,31 @@ export interface Store extends Disposable, EventSource {
   /**
    * Atomically truncates streams and seeds each with a final event.
    *
-   * For each target, in a single transaction:
+   * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
    * 2. Removes the stream's entry from the streams table
    * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
    *
-   * @param targets - Streams to truncate with optional snapshot state and meta
-   * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event
+   * A **windowed** target (\`before\` set) is a pure prefix delete behind
+   * a real snapshot the app wrote — no seed, no tombstone, and the
+   * streams table is left untouched. The store finds the closest safe
+   * boundary — the latest \`__snapshot__\` with \`created < before\` and,
+   * when \`max_id\` is given, \`id <= max_id\` — and deletes events with
+   * \`id <\` that snapshot's id, keeping the snapshot + tail. No
+   * qualifying snapshot ⇒ no-op (the stream is absent from the result).
+   * Because \`load()\` resets state at each snapshot on replay, events
+   * below the boundary contribute nothing to any load result — deleting
+   * them cannot change what \`load()\` returns. \`snapshot\`/\`meta\` must be
+   * omitted on windowed targets; \`before\` takes precedence when both
+   * appear.
+   *
+   * @param targets - Streams to truncate; full targets carry optional
+   *   snapshot state and meta, windowed targets carry \`before\` (and
+   *   optionally \`max_id\`, the min consumer watermark cap)
+   * @returns Map keyed by stream name, each entry with \`deleted\` count
+   *   and \`committed\` event (the new seed, or the surviving boundary
+   *   snapshot on windowed entries, which also echo \`before\`)
    *
    * @see {@link Act.close} for the high-level close-the-books API that
    *   orchestrates safety checks, archive callbacks, and atomic
@@ -32631,6 +33552,8 @@ export interface Store extends Disposable, EventSource {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) => Promise<TruncateResult>;
 
@@ -43424,7 +44347,11 @@ export class PostgresStore implements Store {
 
   /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * Windowed targets (\`before\` set) prune the prefix below the closest safe
+   * \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
+   * snapshot qualifies.
+   * @param targets - Streams to truncate with optional snapshot state and meta,
+   *   or a \`before\`/\`max_id\` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event.
    */
   async truncate(
@@ -43432,26 +44359,39 @@ export class PostgresStore implements Store {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ): Promise<
     Map<
       string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
     >
   > {
     if (!targets.length) return new Map();
-    const streams = targets.map((t) => t.stream);
+    const full = targets.filter((t) => t.before === undefined);
+    const windowed = targets.filter((t) => t.before !== undefined);
     const client = await this._client("truncate");
     try {
       await client.query("BEGIN");
-      await client.query(\`DELETE FROM \${this._fqs} WHERE stream = ANY($1)\`, [
-        streams,
-      ]);
       const result = new Map<
         string,
-        { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+        {
+          deleted: number;
+          committed: Committed<Schemas, keyof Schemas>;
+          before?: Date;
+        }
       >();
-      for (const { stream, snapshot, meta } of targets) {
+      if (full.length) {
+        await client.query(\`DELETE FROM \${this._fqs} WHERE stream = ANY($1)\`, [
+          full.map((t) => t.stream),
+        ]);
+      }
+      for (const { stream, snapshot, meta } of full) {
         const { rowCount } = await client.query(
           \`DELETE FROM \${this._fqt} WHERE stream = $1\`,
           [stream]
@@ -43470,6 +44410,30 @@ export class PostgresStore implements Store {
         result.set(stream, {
           deleted: rowCount ?? 0,
           committed: rows[0] as Committed<Schemas, keyof Schemas>,
+        });
+      }
+      for (const { stream, before, max_id } of windowed) {
+        // Closest safe boundary: latest snapshot older than the cutoff and
+        // at/below the consumer watermark cap. No qualifying snapshot →
+        // no-op, stream absent from the result.
+        const { rows } = await client.query(
+          \`SELECT id, stream, version, name, data, created, meta
+           FROM \${this._fqt}
+           WHERE stream = $1 AND name = $2 AND created < $3
+             AND ($4::int IS NULL OR id <= $4)
+           ORDER BY id DESC LIMIT 1\`,
+          [stream, SNAP_EVENT, before, max_id ?? null]
+        );
+        if (!rows.length) continue;
+        const boundary = rows[0] as Committed<Schemas, keyof Schemas>;
+        const { rowCount } = await client.query(
+          \`DELETE FROM \${this._fqt} WHERE stream = $1 AND id < $2\`,
+          [stream, boundary.id]
+        );
+        result.set(stream, {
+          deleted: rowCount ?? 0,
+          committed: boundary,
+          before,
         });
       }
       await client.query("COMMIT");
@@ -44984,21 +45948,66 @@ export class SqliteStore implements Store {
   }
 
   // --- truncate: transactional delete + seed ---
+  // Windowed targets (\`before\` set) prune the prefix below the closest safe
+  // \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
+  // snapshot qualifies.
   async truncate(
     targets: Array<{
       stream: string;
       snapshot?: Record<string, unknown>;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) {
     const result = new Map<
       string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
     >();
 
     const tx = await this.client.transaction("write");
     try {
-      for (const { stream, snapshot, meta } of targets) {
+      for (const { stream, before, max_id } of targets) {
+        if (before === undefined) continue;
+        // Closest safe boundary: latest snapshot older than the cutoff
+        // and at/below the consumer watermark cap. ISO-8601 strings
+        // compare lexicographically, so \`created < ?\` works on the text
+        // column. No qualifying snapshot → no-op, absent from the result.
+        const snap_row = await tx.execute({
+          sql: \`SELECT id, stream, version, name, data, meta, created
+                FROM events
+                WHERE stream = ? AND name = '__snapshot__' AND created < ?
+                  AND (? IS NULL OR id <= ?)
+                ORDER BY id DESC LIMIT 1\`,
+          args: [stream, before.toISOString(), max_id ?? null, max_id ?? null],
+        });
+        if (!snap_row.rows.length) continue;
+        const row = snap_row.rows[0];
+        const boundary_id = Number(row.id);
+        const del = await tx.execute({
+          sql: "DELETE FROM events WHERE stream = ? AND id < ?",
+          args: [stream, boundary_id],
+        });
+        result.set(stream, {
+          deleted: del.rowsAffected,
+          committed: {
+            id: boundary_id,
+            stream,
+            version: Number(row.version),
+            created: new Date(row.created as string),
+            name: row.name as string,
+            data: JSON.parse(row.data as string),
+            meta: JSON.parse(row.meta as string),
+          },
+          before,
+        });
+      }
+      for (const { stream, snapshot, meta, before } of targets) {
+        if (before !== undefined) continue;
         const count_row = await tx.execute({
           sql: "SELECT COUNT(*) as c FROM events WHERE stream = ?",
           args: [stream],
@@ -46957,7 +47966,10 @@ export type StoreTckOptions = {
  * - \`block\` — blocked streams hidden from claim, only same-drainer can block
  * - \`reset\` — restart watermarks (including blocked), no-op for missing
  * - \`prioritize\` — bulk priority updates by filter
- * - \`truncate\` — snapshot vs tombstone seeding, empty inputs, missing streams
+ * - \`truncate\` — snapshot vs tombstone seeding, empty inputs, missing
+ *   streams; windowed boundaries (\`before\`/\`max_id\`) — prefix deleted
+ *   behind the closest safe snapshot, tail + subscriptions kept,
+ *   no-snapshot no-op, mixed full + windowed targets
  * - \`query_streams\` — filters, exact-match, pagination, blocked
  * - \`notify\` (capability-gated) — subscribe + dispose smoke test
  *
@@ -48647,6 +49659,187 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = \`trunc-missing-\${uid()}\`;
         const result = await store.truncate([{ stream: s }]);
         expect(result.get(s)?.deleted).toBe(0);
+      });
+
+      // Windowed truncation (#1011): a \`before\` boundary prunes the
+      // prefix below the closest safe \`__snapshot__\` — a pure prefix
+      // delete behind a real snapshot; no seed, no tombstone.
+      describe("windowed (before boundary)", () => {
+        // Layout: inc, inc, snapA{2}, inc, snapB{3}, inc — returns the
+        // stream name plus the two snapshot events for boundary asserts.
+        async function seed_windowed(s: string) {
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1), inc(1)],
+            make_meta({ stream: s })
+          );
+          const [snap_a] = await store.commit(
+            s,
+            [{ name: SNAP_EVENT, data: { count: 2 } }],
+            make_meta({ stream: s })
+          );
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          const [snap_b] = await store.commit(
+            s,
+            [{ name: SNAP_EVENT, data: { count: 3 } }],
+            make_meta({ stream: s })
+          );
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          return { snap_a, snap_b };
+        }
+
+        it("deletes the prefix below the closest safe snapshot and keeps the snapshot + tail", async () => {
+          const s = \`trunc-win-\${uid()}\`;
+          const { snap_b } = await seed_windowed(s);
+          const before = new Date(Date.now() + 60_000);
+          const result = await store.truncate([{ stream: s, before }]);
+          const entry = result.get(s);
+          // 4 events below snapB: inc, inc, snapA, inc
+          expect(entry?.deleted).toBe(4);
+          // committed is the SURVIVING boundary snapshot, not a new seed
+          expect(entry?.committed.id).toBe(snap_b.id);
+          expect(entry?.committed.name).toBe(SNAP_EVENT);
+          expect(entry?.committed.data).toEqual({ count: 3 });
+          // windowed entries echo the boundary
+          expect(entry?.before).toEqual(before);
+          const remaining = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            after: -1,
+          });
+          expect(remaining.map((e) => e.name)).toEqual([
+            SNAP_EVENT,
+            "Incremented",
+          ]);
+          expect(remaining[0].id).toBe(snap_b.id);
+        });
+
+        it("honors the max_id cap — boundary never rises past a lagging consumer", async () => {
+          const s = \`trunc-win-cap-\${uid()}\`;
+          const { snap_a, snap_b } = await seed_windowed(s);
+          const before = new Date(Date.now() + 60_000);
+          const result = await store.truncate([
+            { stream: s, before, max_id: snap_a.id },
+          ]);
+          const entry = result.get(s);
+          // snapB is newer but above the cap — snapA is the closest safe
+          expect(entry?.committed.id).toBe(snap_a.id);
+          expect(entry?.deleted).toBe(2);
+          const remaining = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            after: -1,
+          });
+          expect(remaining.map((e) => e.id)).toContain(snap_b.id);
+          expect(remaining[0].id).toBe(snap_a.id);
+          expect(remaining).toHaveLength(4);
+        });
+
+        it("no-ops when no snapshot qualifies — stream absent from the result, events untouched", async () => {
+          const s = \`trunc-win-noop-\${uid()}\`;
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1), inc(1)],
+            make_meta({ stream: s })
+          );
+          // no snapshot at all
+          const none = await store.truncate([
+            { stream: s, before: new Date(Date.now() + 60_000) },
+          ]);
+          expect(none.has(s)).toBe(false);
+          // snapshot exists but the cutoff predates it
+          await store.commit(
+            s,
+            [{ name: SNAP_EVENT, data: { count: 2 } }],
+            make_meta({ stream: s })
+          );
+          const too_early = await store.truncate([
+            { stream: s, before: new Date(0) },
+          ]);
+          expect(too_early.has(s)).toBe(false);
+          // missing stream no-ops too
+          const missing = await store.truncate([
+            { stream: \`trunc-win-missing-\${uid()}\`, before: new Date() },
+          ]);
+          expect(missing.size).toBe(0);
+          const remaining = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            after: -1,
+          });
+          expect(remaining).toHaveLength(3);
+        });
+
+        it("leaves subscriptions untouched, unlike a full truncate", async () => {
+          const s = \`trunc-win-subs-\${uid()}\`;
+          await seed_windowed(s);
+          await store.subscribe([{ stream: s }]);
+          await store.truncate([
+            { stream: s, before: new Date(Date.now() + 60_000) },
+          ]);
+          const positions: string[] = [];
+          await store.query_streams((p) => positions.push(p.stream), {
+            stream: s,
+            stream_exact: true,
+          });
+          expect(positions).toEqual([s]);
+        });
+
+        it("mixes full and windowed targets in one call", async () => {
+          const w = \`trunc-win-mix-w-\${uid()}\`;
+          const f = \`trunc-win-mix-f-\${uid()}\`;
+          const { snap_b } = await seed_windowed(w);
+          await store.commit<CounterEvents>(
+            f,
+            [inc(1)],
+            make_meta({ stream: f })
+          );
+          const result = await store.truncate([
+            { stream: w, before: new Date(Date.now() + 60_000) },
+            { stream: f },
+          ]);
+          expect(result.get(w)?.committed.id).toBe(snap_b.id);
+          expect(result.get(w)?.before).toBeInstanceOf(Date);
+          expect(result.get(f)?.deleted).toBe(1);
+          expect(result.get(f)?.committed.name).toBe("__tombstone__");
+          expect(result.get(f)?.before).toBeUndefined();
+        });
+
+        it("keeps the stream writable and readable after a prune", async () => {
+          const s = \`trunc-win-cont-\${uid()}\`;
+          const { snap_b } = await seed_windowed(s);
+          await store.truncate([
+            { stream: s, before: new Date(Date.now() + 60_000) },
+          ]);
+          // versions continue from the surviving tail; ids never reuse
+          // a pruned id
+          const [next] = await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          expect(next.version).toBe(6);
+          expect(next.id).toBeGreaterThan(snap_b.id);
+          // with_snaps replay anchors on the surviving boundary snapshot
+          const replay = await collect(store, {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+          });
+          expect(replay[0].id).toBe(snap_b.id);
+          expect(replay).toHaveLength(3);
+        });
       });
     });
 

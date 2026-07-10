@@ -18,7 +18,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure. `ack` doubles as the drain's atomic finalize: a lease carrying `due` (ms since epoch) defers instead of acking — schedule set, watermark held, retry reset — in the same transaction as the batch's acks; deferred entries are excluded from the return value
 - `defer(input, deferred_at)` — park streams until a future wall-clock time without advancing their watermark (the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)); covered below
-- `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match
+- `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match. `truncate` targets come in two shapes — full (delete everything, seed a snapshot or tombstone) and windowed (`before` boundary, prefix delete behind a snapshot) — covered below
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`. The query gained an optional `source_matches` filter — covered below
 - `notify(handler)` — *optional* cross-process commit notifications
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)
@@ -130,6 +130,39 @@ Two query options carry semantics that are easy to get subtly wrong, so the cont
 `query_stats` keyset-paginates by stream name. Order your result by stream name ascending; when `after` is set, return only streams sorting strictly after it (it's exclusive, never inclusive); when `limit` is set, stop after that many streams. The trap is the default: an **omitted** `limit` means unbounded — return every matching stream. That preserves the pre-pagination behavior every caller already relied on, and it's deliberately unlike `query_streams`, whose `limit` defaults to 100. Callers walk pages by feeding the last key they saw back as the next `after`, so your only job is consistent ordering and an honest exclusive cursor.
 
 `query_streams.source_matches` is the inverse of the existing `source` filter and, unlike everything else in the query, it's a *hint*. The `source` filter narrows to subscriptions whose pattern is matched by a value (`source ~ pattern`); `source_matches` narrows to subscriptions whose stored `source` pattern matches one of the supplied stream names (`name ~ source`). A subscription whose `source` is absent or empty has no source constraint and reacts to every stream, so it must always be included no matter what names are passed. If your backend can run regex in that direction, implement it for real — Postgres does it with `EXISTS(SELECT 1 FROM unnest($names) n WHERE n ~ source)` plus the null/empty-source always-match clause. If it can't, **not implementing it is a conformant choice**: ignore the field and return a superset. The framework's only caller (the close-cycle safety probe) re-checks source and target in process, so correctness holds whether you narrow precisely or hand back extra rows. Gate the narrowing tests behind the `source_matches` capability — declare it `true` only when your adapter actually filters, and the TCK leaves the narrowing assertions parked otherwise.
+
+## Truncating streams — full targets and the windowed boundary
+
+`truncate` is the delete verb behind close-the-books, and it carries two contracts in one method, switched per target by the presence of `before`.
+
+A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream, remove the stream's row from the streams/subscriptions table, and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. After the transaction the stream has one row and no subscription state.
+
+A **windowed** target (`{ stream, before, max_id? }`, [#1011](https://github.com/Rotorsoft/act-root/issues/1011)) is a pure prefix delete on a stream that stays live. The adapter's job is to find the **closest safe boundary** — the latest `__snapshot__` event with `created < before` and, when `max_id` is supplied, `id <= max_id` — and delete every event with an id below it. The snapshot itself and everything after it survive. The SQL shape on Postgres:
+
+```sql no-check
+-- find the boundary: the latest safe snapshot for this stream
+SELECT id FROM events
+ WHERE stream = $stream
+   AND name = '__snapshot__'
+   AND created < $before
+   AND ($max_id IS NULL OR id <= $max_id)
+ ORDER BY id DESC LIMIT 1;
+
+-- prune the prefix below it (inside the same transaction as any sibling targets)
+DELETE FROM events WHERE stream = $stream AND id < $boundary_id;
+```
+
+The contract points adapter authors get wrong first:
+
+- **No seed, no tombstone, no streams-table touch.** Unlike a full truncate, the subscriptions row survives untouched — the stream must remain claimable and writable after the prune. The framework relies on this to keep the stream live.
+- **No qualifying snapshot is a no-op, not an error.** If the boundary query returns nothing (the stream never snapshotted, or every snapshot is too young or above the `max_id` cap), delete nothing and leave the stream **absent from the result map**. The orchestrator translates absence into `CloseResult.skipped`.
+- **Echo `before` in the result entry**, and set `committed` to the surviving boundary snapshot — an event that already exists, not something you write. Callers use the `before` field to distinguish windowed entries from full-close seeds.
+- **`snapshot`/`meta` must be omitted on windowed targets**; when both appear, `before` takes precedence.
+- **Mixed batches are legal.** One `truncate` call can carry full and windowed targets side by side; each target gets its own contract.
+
+Why the boundary anchors on a real snapshot: the framework's `load()` resets state at each `__snapshot__` on replay, so events below the latest snapshot contribute nothing to any load result — deleting them cannot change what `load()` returns. The `max_id` cap is the consumer-safety half: the orchestrator probes the minimum subscription watermark before calling you, so the boundary never rises past what the laggiest reaction has read.
+
+The TCK pins all of this in the `describe("windowed (before boundary)")` block of `store-tck.ts`: prefix deleted behind the closest safe snapshot, `max_id` cap honored, no-snapshot no-op, subscriptions preserved (explicitly contrasted with the full truncate), mixed full + windowed batches, and the stream staying writable and readable after a prune. Pass that block and windowed closes work on your backend with no further wiring.
 
 ## Implementing `Store.restore` (optional)
 

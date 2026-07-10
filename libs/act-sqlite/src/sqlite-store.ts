@@ -1236,21 +1236,66 @@ export class SqliteStore implements Store {
   }
 
   // --- truncate: transactional delete + seed ---
+  // Windowed targets (`before` set) prune the prefix below the closest safe
+  // `__snapshot__` instead — no seed, subscriptions untouched, no-op when no
+  // snapshot qualifies.
   async truncate(
     targets: Array<{
       stream: string;
       snapshot?: Record<string, unknown>;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) {
     const result = new Map<
       string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
     >();
 
     const tx = await this.client.transaction("write");
     try {
-      for (const { stream, snapshot, meta } of targets) {
+      for (const { stream, before, max_id } of targets) {
+        if (before === undefined) continue;
+        // Closest safe boundary: latest snapshot older than the cutoff
+        // and at/below the consumer watermark cap. ISO-8601 strings
+        // compare lexicographically, so `created < ?` works on the text
+        // column. No qualifying snapshot → no-op, absent from the result.
+        const snap_row = await tx.execute({
+          sql: `SELECT id, stream, version, name, data, meta, created
+                FROM events
+                WHERE stream = ? AND name = '__snapshot__' AND created < ?
+                  AND (? IS NULL OR id <= ?)
+                ORDER BY id DESC LIMIT 1`,
+          args: [stream, before.toISOString(), max_id ?? null, max_id ?? null],
+        });
+        if (!snap_row.rows.length) continue;
+        const row = snap_row.rows[0];
+        const boundary_id = Number(row.id);
+        const del = await tx.execute({
+          sql: "DELETE FROM events WHERE stream = ? AND id < ?",
+          args: [stream, boundary_id],
+        });
+        result.set(stream, {
+          deleted: del.rowsAffected,
+          committed: {
+            id: boundary_id,
+            stream,
+            version: Number(row.version),
+            created: new Date(row.created as string),
+            name: row.name as string,
+            data: JSON.parse(row.data as string),
+            meta: JSON.parse(row.meta as string),
+          },
+          before,
+        });
+      }
+      for (const { stream, snapshot, meta, before } of targets) {
+        if (before !== undefined) continue;
         const count_row = await tx.execute({
           sql: "SELECT COUNT(*) as c FROM events WHERE stream = ?",
           args: [stream],

@@ -1746,7 +1746,11 @@ export class PostgresStore implements Store {
 
   /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * Windowed targets (`before` set) prune the prefix below the closest safe
+   * `__snapshot__` instead — no seed, subscriptions untouched, no-op when no
+   * snapshot qualifies.
+   * @param targets - Streams to truncate with optional snapshot state and meta,
+   *   or a `before`/`max_id` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
    */
   async truncate(
@@ -1754,26 +1758,39 @@ export class PostgresStore implements Store {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ): Promise<
     Map<
       string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
     >
   > {
     if (!targets.length) return new Map();
-    const streams = targets.map((t) => t.stream);
+    const full = targets.filter((t) => t.before === undefined);
+    const windowed = targets.filter((t) => t.before !== undefined);
     const client = await this._client("truncate");
     try {
       await client.query("BEGIN");
-      await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
-        streams,
-      ]);
       const result = new Map<
         string,
-        { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+        {
+          deleted: number;
+          committed: Committed<Schemas, keyof Schemas>;
+          before?: Date;
+        }
       >();
-      for (const { stream, snapshot, meta } of targets) {
+      if (full.length) {
+        await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
+          full.map((t) => t.stream),
+        ]);
+      }
+      for (const { stream, snapshot, meta } of full) {
         const { rowCount } = await client.query(
           `DELETE FROM ${this._fqt} WHERE stream = $1`,
           [stream]
@@ -1792,6 +1809,30 @@ export class PostgresStore implements Store {
         result.set(stream, {
           deleted: rowCount ?? 0,
           committed: rows[0] as Committed<Schemas, keyof Schemas>,
+        });
+      }
+      for (const { stream, before, max_id } of windowed) {
+        // Closest safe boundary: latest snapshot older than the cutoff and
+        // at/below the consumer watermark cap. No qualifying snapshot →
+        // no-op, stream absent from the result.
+        const { rows } = await client.query(
+          `SELECT id, stream, version, name, data, created, meta
+           FROM ${this._fqt}
+           WHERE stream = $1 AND name = $2 AND created < $3
+             AND ($4::int IS NULL OR id <= $4)
+           ORDER BY id DESC LIMIT 1`,
+          [stream, SNAP_EVENT, before, max_id ?? null]
+        );
+        if (!rows.length) continue;
+        const boundary = rows[0] as Committed<Schemas, keyof Schemas>;
+        const { rowCount } = await client.query(
+          `DELETE FROM ${this._fqt} WHERE stream = $1 AND id < $2`,
+          [stream, boundary.id]
+        );
+        result.set(stream, {
+          deleted: rowCount ?? 0,
+          committed: boundary,
+          before,
         });
       }
       await client.query("COMMIT");

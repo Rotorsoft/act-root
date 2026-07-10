@@ -320,6 +320,10 @@ class InMemoryStream {
 export class InMemoryStore implements Store {
   // stored events
   private _events: Committed<Schemas, keyof Schemas>[] = [];
+  // next event id — monotonic, never reused. Deletions (truncate, windowed
+  // prune) punch holes in the id sequence, so ids are NOT array indexes and
+  // NOT `_events.length`; they only stay sorted ascending in `_events`.
+  private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
@@ -338,10 +342,26 @@ export class InMemoryStore implements Store {
 
   private _reset_indexes() {
     this._events.length = 0;
+    this._next_id = 0;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
     this._pii.clear();
+  }
+
+  // First index whose event id is greater than `after`. `_events` stays
+  // sorted ascending by id (append-only commits; deletions preserve
+  // order), so id-bounded scans binary-search their start instead of
+  // assuming id === index — an invariant that truncation breaks.
+  private _first_index_after(after: number): number {
+    let lo = 0;
+    let hi = this._events.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this._events[mid].id > after) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
   }
 
   // Attach the isolated PII payload (or null) to an event before handing it to
@@ -406,7 +426,10 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (query?.backward) {
-      let i = (query?.before || this._events.length) - 1;
+      let i =
+        (query?.before !== undefined
+          ? this._first_index_after(query.before - 1)
+          : this._events.length) - 1;
       while (i >= 0) {
         const e = this._events[i--];
         if (query && !this.in_query(query, e)) continue;
@@ -421,7 +444,7 @@ export class InMemoryStore implements Store {
         if (query?.limit && count >= query.limit) break;
       }
     } else {
-      let i = (query?.after ?? -1) + 1;
+      let i = this._first_index_after(query?.after ?? -1);
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit `after`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
@@ -489,7 +512,7 @@ export class InMemoryStore implements Store {
     let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
-        id: this._events.length,
+        id: this._next_id++,
         stream,
         version,
         created: new Date(),
@@ -516,8 +539,8 @@ export class InMemoryStore implements Store {
     this._stream_versions.set(stream, version - 1);
     if (last_non_snap_id >= 0) {
       this._max_event_id_by_stream.set(stream, last_non_snap_id);
-      // commit always assigns a fresh id from this._events.length, so any
-      // non-snap commit strictly raises the global max.
+      // commit always assigns a fresh id from the monotonic _next_id, so
+      // any non-snap commit strictly raises the global max.
       this._max_non_snap_event_id = last_non_snap_id;
     }
     return committed;
@@ -929,7 +952,7 @@ export class InMemoryStore implements Store {
       count++;
       if (count >= limit) break;
     }
-    return { maxEventId: this._events.length - 1, count };
+    return { maxEventId: this._events.at(-1)?.id ?? -1, count };
   }
 
   /**
@@ -1038,7 +1061,11 @@ export class InMemoryStore implements Store {
 
   /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * Windowed targets (`before` set) prune the prefix below the closest safe
+   * `__snapshot__` instead — no seed, subscriptions untouched, no-op when no
+   * snapshot qualifies.
+   * @param targets - Streams to truncate with optional snapshot state and meta,
+   *   or a `before`/`max_id` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
    */
   async truncate(
@@ -1046,12 +1073,54 @@ export class InMemoryStore implements Store {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) {
     await sleep();
+    const result = new Map<
+      string,
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+        before?: Date;
+      }
+    >();
+
+    // Windowed targets: pure prefix delete behind the closest safe snapshot.
+    const windowed = targets.filter((t) => t.before !== undefined);
+    if (windowed.length) {
+      const drop = new Set<number>();
+      for (const { stream, before, max_id } of windowed) {
+        let boundary: Committed<Schemas, keyof Schemas> | undefined;
+        for (const e of this._events) {
+          if (
+            e.stream === stream &&
+            e.name === SNAP_EVENT &&
+            e.created < before! &&
+            (max_id === undefined || e.id <= max_id) &&
+            (!boundary || e.id > boundary.id)
+          )
+            boundary = e;
+        }
+        if (!boundary) continue; // no qualifying snapshot → no-op
+        let deleted = 0;
+        for (const e of this._events) {
+          if (e.stream === stream && e.id < boundary.id) {
+            drop.add(e.id);
+            this._pii.get(stream)?.delete(e.id);
+            deleted++;
+          }
+        }
+        result.set(stream, { deleted, committed: boundary, before });
+      }
+      if (drop.size) this._events = this._events.filter((e) => !drop.has(e.id));
+    }
+
+    const full = targets.filter((t) => t.before === undefined);
     // Count per-stream deletions
     const deleted_counts = new Map<string, number>();
-    const stream_set = new Set(targets.map((t) => t.stream));
+    const stream_set = new Set(full.map((t) => t.stream));
     for (const e of this._events) {
       if (stream_set.has(e.stream)) {
         deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
@@ -1062,14 +1131,13 @@ export class InMemoryStore implements Store {
       this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
+      // The pii payloads die with the event rows, matching the durable
+      // adapters' `DELETE WHERE stream = ?` scope.
+      this._pii.delete(stream);
     }
-    const result = new Map<
-      string,
-      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
-    >();
-    for (const { stream, snapshot, meta } of targets) {
+    for (const { stream, snapshot, meta } of full) {
       const event: Committed<Schemas, keyof Schemas> = {
-        id: this._events.length,
+        id: this._next_id++,
         stream,
         version: 0,
         created: new Date(),
@@ -1104,9 +1172,9 @@ export class InMemoryStore implements Store {
    * throw inside the driver restores the snapshot, leaving the store
    * byte-for-byte unchanged from the operator's perspective.
    *
-   * `id`s are reassigned `0..N-1` as events arrive (matching the
-   * adapter's commit-id convention — InMemory uses `_events.length`).
-   * `created` is preserved verbatim from the source.
+   * `id`s are reassigned `0..N-1` as events arrive (dense — the
+   * monotonic id counter restarts at 0 for the rebuild). `created` is
+   * preserved verbatim from the source.
    */
   async restore(
     driver: (
@@ -1116,19 +1184,21 @@ export class InMemoryStore implements Store {
     await sleep();
     // Snapshot every index so we can roll back on throw.
     const prev_events = this._events;
+    const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
+    this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
     this._max_event_id_by_stream = new Map();
     this._max_non_snap_event_id = -1;
     try {
       await driver(async (event) => {
-        const id = this._events.length;
+        const id = this._next_id++;
         const committed: Committed<Schemas, keyof Schemas> = { ...event, id };
         this._events.push(committed);
         // Last event per stream wins for the version watermark — the
@@ -1146,6 +1216,7 @@ export class InMemoryStore implements Store {
       // Roll back to the captured snapshot — every index restored
       // exactly as it was before the call started.
       this._events = prev_events;
+      this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
       this._max_event_id_by_stream = prev_max_event_id_by_stream;

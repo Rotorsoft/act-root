@@ -67,10 +67,20 @@ export interface Logger extends Disposable {
  * Result of a {@link Store.truncate} operation, keyed by stream name.
  * Each entry contains the number of deleted events and the committed
  * seed event (snapshot or tombstone).
+ *
+ * Windowed entries (targets carrying a `before` boundary) echo the
+ * boundary back as `before`, and `committed` is the **surviving
+ * boundary `__snapshot__`** — an event the app wrote earlier, not a
+ * new seed. Windowed no-ops (no qualifying snapshot) are absent from
+ * the map entirely.
  */
 export type TruncateResult = Map<
   string,
-  { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+  {
+    deleted: number;
+    committed: Committed<Schemas, keyof Schemas>;
+    before?: Date;
+  }
 >;
 
 /**
@@ -821,14 +831,31 @@ export interface Store extends Disposable, EventSource {
   /**
    * Atomically truncates streams and seeds each with a final event.
    *
-   * For each target, in a single transaction:
+   * For each **full** target (no `before`), in a single transaction:
    * 1. Deletes all events for the stream
    * 2. Removes the stream's entry from the streams table
    * 3. Inserts a `__snapshot__` (when `snapshot` is provided) or
    *    `__tombstone__` event as the sole event on the stream
    *
-   * @param targets - Streams to truncate with optional snapshot state and meta
-   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event
+   * A **windowed** target (`before` set) is a pure prefix delete behind
+   * a real snapshot the app wrote — no seed, no tombstone, and the
+   * streams table is left untouched. The store finds the closest safe
+   * boundary — the latest `__snapshot__` with `created < before` and,
+   * when `max_id` is given, `id <= max_id` — and deletes events with
+   * `id <` that snapshot's id, keeping the snapshot + tail. No
+   * qualifying snapshot ⇒ no-op (the stream is absent from the result).
+   * Because `load()` resets state at each snapshot on replay, events
+   * below the boundary contribute nothing to any load result — deleting
+   * them cannot change what `load()` returns. `snapshot`/`meta` must be
+   * omitted on windowed targets; `before` takes precedence when both
+   * appear.
+   *
+   * @param targets - Streams to truncate; full targets carry optional
+   *   snapshot state and meta, windowed targets carry `before` (and
+   *   optionally `max_id`, the min consumer watermark cap)
+   * @returns Map keyed by stream name, each entry with `deleted` count
+   *   and `committed` event (the new seed, or the surviving boundary
+   *   snapshot on windowed entries, which also echo `before`)
    *
    * @see {@link Act.close} for the high-level close-the-books API that
    *   orchestrates safety checks, archive callbacks, and atomic
@@ -839,6 +866,8 @@ export interface Store extends Disposable, EventSource {
       stream: string;
       snapshot?: Schema;
       meta?: EventMeta;
+      before?: Date;
+      max_id?: number;
     }>
   ) => Promise<TruncateResult>;
 

@@ -7,7 +7,9 @@ title: Close cycle
 
 `app.close(targets)` archives, tombstones, and truncates streams from the operational store. The event-sourcing equivalent of "closing the books" in accounting: summarize the period, archive the detail, optionally restart with a fresh opening balance.
 
-`Act.close()` first runs `correlate({ limit: 1000 })` so the safety probe in Phase 2 sees dynamic reaction targets, then hands off to `runCloseCycle` which executes six gating phases (1 through 6 below). Phase 0 is the preparatory correlate. Failures at each phase have well-defined recovery characteristics — the goal is that any partial-failure state is *safe* (no data loss, no inconsistent state, retryable).
+`Act.close()` first runs `correlate({ limit: 1000 })` so the safety probe in Phase 2 sees dynamic reaction targets, then hands off to `run_close_cycle` which executes six gating phases (1 through 6 below). Phase 0 is the preparatory correlate. Failures at each phase have well-defined recovery characteristics — the goal is that any partial-failure state is *safe* (no data loss, no inconsistent state, retryable).
+
+Targets carrying a `before` cutoff never enter this pipeline. `run_close_cycle` splits the target list up front: `before` and `restart` are mutually exclusive (the call throws before touching the store), windowed targets take a dedicated branch (see [Windowed close](#windowed-close--prune-behind-a-snapshot) below), and the remaining full targets run the phases unchanged.
 
 ## Phase diagram
 
@@ -176,6 +178,28 @@ Calling `close()` on an already-closed stream is a no-op:
 
 For a stream that's been *restarted* but not tombstoned (one `__snapshot__` event at v=0), Phase 1 calls `query_stats` with `exclude: [SNAP_EVENT]` so the snapshot is filtered out server-side — leaving the stream absent from the result map. Without a head, Phase 2 doesn't include the stream in `safe`, so the restarted-but-empty stream stays untouched. To force-tombstone a restarted stream, commit at least one domain event first.
 
+## Windowed close — prune behind a snapshot
+
+A full close is a lifecycle ending: the stream is done, freeze it, archive it, tombstone it. `app.close([{ stream, before: cutoff }])` closes the books on a **rolling window** instead: the stream stays live and keeps accepting actions, but the prefix of events older than the cutoff is deleted from the operational store. Nothing is seeded, nothing is tombstoned, and the subscriptions table is untouched.
+
+What makes this safe at all is that loads are snapshot-anchored. On a cache miss `load()` replays with `with_snaps: true` and resets state at each `__snapshot__`, so events before the latest snapshot contribute nothing to any load result. Deleting a prefix behind a real, app-written snapshot cannot change what `load()` returns — there is no history rewrite and no synthesized boundary. This is the same anchoring that distinguishes the primitive from Marten's `CompactStreamAsync`, which synthesizes a snapshot inside the store call; the closest relative is EventStoreDB's `$tb` (truncate-before), the same prefix-delete idea. The precondition follows directly: the state must snapshot (`.snap(...)`), because without snapshots there is no boundary to anchor on.
+
+`run_windowed_closes` (in `libs/act/src/internal/close-cycle.ts`) executes three steps:
+
+1. **Min-watermark probe.** A read-only `query_streams` walk — same pagination and source-regex matching as the full path's Phase 2 — folds the minimum subscription watermark per target stream. This becomes the `max_id` cap handed to the store: the boundary snapshot may never sit above what the laggiest consumer has read. When the app has no reactions at all, the probe is skipped entirely; nothing can lag.
+2. **Archive.** The per-target `archive` callback runs against the cutoff, sequentially for the same shared-resources reason as the full path. Note what's different: no guard precedes it. The prefix being archived is immutable (see below), so the callback reads stable history even while the stream keeps committing at the head.
+3. **Boundary truncate.** One `Store.truncate` call with `{ stream, before, max_id }` targets. The store finds the closest safe boundary — the latest `__snapshot__` with `created < before` and, when `max_id` is given, `id <= max_id` — and deletes events below it, keeping the snapshot and everything after it.
+
+### Why there is no head guard
+
+The full path tombstone-guards each stream so the archive callback runs against a frozen stream — necessary when the *whole* stream is about to vanish. The windowed branch needs no guard, because the cutoff is always in the past. A concurrently-written snapshot carries `created = now`, so it can never qualify as the boundary; once the cutoff is fixed, the boundary snapshot is fixed, and the prefix below it is immutable. Concurrent appends land at the head, above the boundary, where the prune never reaches. Consumer safety doesn't need the guard either — it comes from the `max_id` cap: a lagging reaction degrades the prune to a smaller prune (or a no-op), never to data loss. The cache also stays warm: current state is unchanged by construction, so there is nothing to invalidate. All of this makes a windowed close strictly lighter than a full one — no guard commit, no seed, no cache touch.
+
+### Skipped semantics and result shape
+
+A stream with no qualifying snapshot (never snapshotted, or every snapshot is younger than the cutoff or above the `max_id` cap) is a no-op: the store leaves its events untouched and omits it from the truncate result, and `run_windowed_closes` reports it in `CloseResult.skipped` — the same bucket the full path uses for pending-reaction and concurrent-writer skips. Retry after the next snapshot lands.
+
+Streams that did prune appear in `CloseResult.truncated` with two windowed markers: the entry echoes `before`, and `committed` is the **surviving boundary snapshot** — an event the app wrote earlier, not a new seed. Consumers of the `closed` lifecycle event use the `before` field to distinguish prunes from full closes. Mixed target lists work in one call: windowed entries and full entries land in the same `truncated` map, skips from both branches in the same `skipped` array.
+
 ## Online close-the-books
 
 `Act.close(targets)` is the **explicit** close path — the operator hands the framework a list of stream names, the cycle runs once, the streams get truncated. Online close is the **declarative** version of the same primitive: a state declares a close policy, and the framework retires eligible streams without anyone calling `close`. As of [#1090](https://github.com/Rotorsoft/act-root/issues/1090) it is no longer a background sweep. `.autocloses(policy)` compiles to an internal **reaction** that rides the same drain the rest of the app already runs, and that reaction reuses `run_close_cycle` (phases 0–6 above) when a stream finally qualifies.
@@ -184,8 +208,8 @@ For a stream that's been *restarted* but not tombstoned (one `__snapshot__` even
 
 Two state-builder declarators:
 
-- `.autocloses(policy)` — a declarative `AutoclosePolicy` object (`{ is, after, reaches, or }`). The opaque function-predicate form is gone; see [the migration note in the close-policies guide](../guides/close-policies.md#migrating-from-the-function-predicate-form).
-- `.archives(fn)` — `(stream, head) => Promise<void>`. Optional companion. Runs while the stream is guarded but **before** truncate so the host can persist events to durable storage (S3, cold tier) before the tombstone lands.
+- `.autocloses(policy)` — a declarative `AutoclosePolicy` object (`{ is, after, reaches, or, keep }`). The terminate fields (`is` / `after` / `reaches` / `or`) decide when a stream's lifecycle ends; `keep: { days }` is the independent rolling-window variant that stages [windowed closes](#windowed-close--prune-behind-a-snapshot) while the stream stays open (see [the close-policies guide](../guides/close-policies.md#keep--days---the-rolling-window)). The opaque function-predicate form is gone; see [the migration note in the close-policies guide](../guides/close-policies.md#migrating-from-the-function-predicate-form).
+- `.archives(fn)` — `(stream, head, before?) => Promise<void>`. Optional companion. On a full close it runs while the stream is guarded but **before** truncate so the host can persist events to durable storage (S3, cold tier) before the tombstone lands. On a windowed close the third argument carries the cutoff (absent on full closes): archive the events older than `before` — the prune deletes a subset of them (the prefix below the boundary snapshot), so archive plus live stream always equals full history.
 
 Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.discloses`). Absent → the state opts out of online close entirely; the orchestrator synthesizes no reaction for it and pays nothing.
 
@@ -225,9 +249,11 @@ The subtle part is *where* the reaction runs. It runs on a **synthetic per-aggre
 
 Because the policy is re-evaluated against the live head on every visit, a **reopened** stream re-evaluates correctly: a ticket resolved and then reopened has `Opened` at head, so an `is: "Resolved"` policy no longer holds and the stream is not closed. The handler runs with `blockOnError: false` and `maxRetries: 3` — a transient `query_stats`/store error retries rather than quarantining the synthetic stream, and a stream that vanishes mid-cycle (a competing worker truncated it) yields an empty `query_stats` result and the handler simply returns.
 
+A `keep` policy rides the same reaction with two additions. Its `query_stats` call also fetches the **tail** and excludes snapshots along with tombstones — the prune decision keys on the oldest *domain* event, because after a prune the oldest surviving row is the boundary snapshot, whose age says nothing about whether another prune would be productive. When the terminate predicate matches, the full close wins (precedence unchanged). Otherwise, if the tail has aged out of the window (`tail.created < now − keep`), the handler stages a `CloseSignal` with `before = now − keep` — a windowed close through the same `on_close` path. And when neither fires, the defer due-time is the earliest of the two derivable instants: `head.created + after` (the terminate cooldown opening) and `tail.created + keep` (the moment the oldest surviving domain event ages out). The off-hours `autocloseWindow` gate applies before any of this, unchanged.
+
 ### Defer, not poll
 
-When the policy hasn't matched yet but has a time component (`after`), the handler throws `DeferSignal(head.created + min_after_ms)` — the earliest instant the time gate could open. That becomes a `HandleResult.defer`: the drain does **not** advance the watermark and does **not** bump `retry`, persists the due-time via `Store.defer`, and `claim` skips the synthetic stream until the due-time passes. The persisted `deferred_at` is the correctness mechanism — it holds across every competing worker. A per-worker `DeferTimer` is layered on top purely as an optimization, waking the local worker promptly at the due-time instead of on the next ordinary cycle; it clamps long horizons to `setTimeout`'s ~24.8-day ceiling and re-arms, since the persisted column is what actually gates the re-claim. Policies with no time gate (`is` / `reaches` only) don't park on a due-time at all — they ack and wait for the next event on the aggregate to re-trigger.
+When the policy hasn't matched yet but has a time component (`after`), the handler throws `DeferSignal(head.created + the minimum `after` window in days)` — the earliest instant the time gate could open. That becomes a `HandleResult.defer`: the drain does **not** advance the watermark and does **not** bump `retry`, persists the due-time via `Store.defer`, and `claim` skips the synthetic stream until the due-time passes. The persisted `deferred_at` is the correctness mechanism — it holds across every competing worker. A per-worker `DeferTimer` is layered on top purely as an optimization, waking the local worker promptly at the due-time instead of on the next ordinary cycle; it clamps long horizons to `setTimeout`'s ~24.8-day ceiling and re-arms, since the persisted column is what actually gates the re-claim. Policies with no time gate (`is` / `reaches` only) don't park on a due-time at all — they ack and wait for the next event on the aggregate to re-trigger.
 
 **The schedule is persisted atomically with the cycle's acks.** Drain finalization is a single `Store.ack` call: leases that processed successfully ack (watermark advances), and leases that deferred ride the same batch marked with `due` — the adapter applies both in one transaction. A cycle's outcomes therefore can never land partially: if the finalize fails, *nothing* landed — close requests were not acked (so they redeliver), no watermark moved, no schedule was written — and the ordinary failure path takes over: the error feeds the circuit breaker (surfacing on the `error` lifecycle event), the controller stays armed, and the breaker's paced retry probe re-drives `settle()` even on the default lane. On the retried cycle everything redelivers: the close lands, the handler re-throws its `DeferSignal` (the due-time is derivable from the triggering event, so it resolves to the same instant), and the schedule persists. The failure mode is one early redelivery, never a stalled recurrence or a lost close. The same reasoning covers a worker that crashes mid-finalize: nothing landed, so the first drain after restart (controllers arm at construction) redelivers and finalizes again.
 
@@ -249,7 +275,7 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 
 ### What's NOT online-close
 
-- **Restarting** streams. Online close always tombstones — `restart: true` is an explicit-close-only feature. Hosts that want "rotate this stream every 24h" run an explicit `app.close({ stream, restart: true })` from their own scheduler.
+- **Restarting** streams. An online terminate always tombstones — `restart: true` is an explicit-close-only feature. Hosts that want "rotate this stream every 24h" run an explicit `app.close({ stream, restart: true })` from their own scheduler. (A `keep` prune is not a rotation either: it deletes a prefix behind an existing snapshot, never seeds anything.)
 - **Cross-state coordination**. Each state's policy sees only its own aggregate's head. There's no "close stream A only if stream B is closed" primitive — the host runs that policy explicitly if they need it.
 - **Arbitrary conditions**. The declarative policy derives a due-time and a terminal set; conditions it can't express (per-stream metadata, a saga waiting on the *absence* of an event) belong in your own logic or scheduler calling `app.close`.
 
@@ -258,10 +284,10 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 - `libs/act/src/act.ts` — autoclose-reaction synthesis (`__autoclose__:` synthetic stream, off-hours gate, defer-to-cooldown, `CloseSignal`) and the `DrainController.on_close` → `run_close_cycle` wiring
 - `libs/act/src/internal/defer-signal.ts` / `close-signal.ts` — the control-flow signals a reaction throws to defer or close
 - `libs/act/src/internal/defer-timer.ts` — the per-worker wake optimization over `stream → due-time` (clamped to `setTimeout`'s ceiling)
-- `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_min_after_ms`
+- `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_min_after_days`, `policy_keep_days`
 - `libs/act/src/internal/autoclose-config.ts` — `autocloseWindow` / `autocloseCycleMinutes` resolver + `in_autoclose_window`
 - `libs/act/src/builders/state-builder.ts` — `.autocloses` / `.archives` declarators
-- `libs/act/test/autoclose-reaction.spec.ts` — synthesized-reaction behavior (immediate close, live-head reopen, cooldown park, threshold, off-hours defer)
+- `libs/act/test/autoclose-reaction.spec.ts` — synthesized-reaction behavior (immediate close, live-head reopen, cooldown park, threshold, off-hours defer, rolling-window prune/defer)
 - `libs/act/test/autoclose-policy.spec.ts` / `autoclose-builder.spec.ts` — policy compilation + declarator validation
 - `libs/act/test/defer-outcome.spec.ts` / `defer-timer.spec.ts` — the `defer` outcome and the wake timer
 - `libs/act-pg/test/autoclose.spec.ts` / `libs/act-sqlite/test/autoclose.spec.ts` — adapter integration
@@ -269,8 +295,9 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 
 ## Pointers
 
-- `libs/act/src/internal/close-cycle.ts` — phase-by-phase orchestration, `runCloseCycle`
+- `libs/act/src/internal/close-cycle.ts` — phase-by-phase orchestration, `run_close_cycle`, and the windowed branch `run_windowed_closes`
 - `libs/act/src/act.ts` — `Act.close()` — wires correlate + cycle + emit
 - `libs/act/src/types/errors.ts` — `StreamClosedError` thrown by `action()` on tombstoned streams
 - `libs/act/test/close.spec.ts` — happy-path and failure-mode coverage
+- `libs/act/test/close-windowed.spec.ts` — windowed-branch coverage (prune + live stream, lagging-consumer cap, no-snapshot skip, cache untouched, mixed targets)
 - `libs/act/test/property/close.property.spec.ts` — close idempotency under random workloads

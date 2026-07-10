@@ -346,10 +346,13 @@ const result = await app.close([
 ]);
 
 // result.truncated: Map<stream, { deleted, committed }>
-// result.skipped:   string[]   — streams with pending reactions or concurrent writers
+// result.skipped:   string[]   — pending reactions, concurrent writers, or
+//                                windowed closes with no qualifying snapshot
 ```
 
 After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent `app.do()`. Restarted streams are reseeded and continue normally. See [Close cycle](../architecture/close-cycle) for the full phase-by-phase semantics.
+
+There is a third variant for streams whose lifecycle never ends: a target carrying `before: Date` closes the books on a **rolling window**, pruning the events older than the cutoff behind the stream's closest safe snapshot while the stream stays live and keeps accepting actions — no tombstone, no seed. It requires the state to snapshot via `.snap(...)`, and the declarative form is `.autocloses({ keep: { days: 180 } })`. See [Windowed close](../architecture/close-cycle.md#windowed-close--prune-behind-a-snapshot) and the [close-policies guide](../guides/close-policies.md#keep--days---the-rolling-window).
 
 ## Restoring a store
 
@@ -468,8 +471,8 @@ Then `stream_rename` runs (after the event migration, so it sees the migrated ev
 | `app.restore(source, opts?, sink?)` | Wipe the sink (events + streams + subscriptions) and rebuild from the source in a single transaction. `created` preserved, `id` renumbered, causation refs rewritten. | Adapter transaction — all-or-nothing per call |
 | `app.reset(input)` | Set reaction watermarks to `-1` for matching streams, arm the orchestrator's drain flag so the next `settle()` replays every event through reactions. **Does not delete events.** | Per-stream watermark update |
 | `app.unblock(input)` | Lift the `blocked` flag from poison-message streams. Watermark preserved — the stream resumes from where it stopped, no replay. | Per-stream flag update |
-| `store().truncate(targets)` | Delete every event for the targeted streams and insert a single tombstone event. **Operator-facing, not orchestrator-aware.** Prefer `app.close(...)` for the orchestrator-coordinated variant. | Per-target transaction |
-| `app.close(targets)` | Archive + tombstone (or restart) a closed stream. Quiesces reactions, runs the archive callback, deletes events, commits the tombstone or a fresh `__snapshot__`. | Per-target transaction with reaction quiesce |
+| `store().truncate(targets)` | Full targets: delete every event for the stream and insert a single seed event. Windowed targets (`before`): delete only the prefix below the closest safe snapshot, no seed. **Operator-facing, not orchestrator-aware.** Prefer `app.close(...)` for the orchestrator-coordinated variant. | Per-target transaction |
+| `app.close(targets)` | Archive + tombstone (or restart) a closed stream — or, with `before`, prune a rolling window while the stream stays live. Quiesces reactions, runs the archive callback, deletes events, commits the tombstone or a fresh `__snapshot__` (windowed targets seed nothing). | Per-target transaction with reaction quiesce |
 
 Common confusions worth naming:
 

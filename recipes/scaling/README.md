@@ -46,6 +46,7 @@ follows below.
 | events table growing without bound              | Gate 1                  |
 | slow query_stats / app.load on busy aggregates  | Gate 1                  |
 | reducer cost rising as streams accumulate       | Gate 1                  |
+| long-lived stream that never closes + retention | Gate 1 (rolling window) |
 | auditors want history, business wants it gone   | Gate 2                  |
 | GDPR / retention window + cold-tier requirement | Gate 2                  |
 | one store hosting several contexts / tenants    | Gate 3                  |
@@ -65,7 +66,7 @@ follows below.
 |                                                 | + streamLimit           |
 | LISTEN/NOTIFY wakeup misses                     | not scaling; see        |
 |                                                 | libs/act-pg/PERFORMANCE |
-| close-cycle CPU climbing every release          | tune autocloseCycleMs / |
+| close-cycle CPU climbing every release          | tune autoclose knobs +  |
 |                                                 | closeBatchSize, then 1  |
 | even after Gates 1-4, the wall doesn't move     | Gate 5                  |
 ```
@@ -116,8 +117,39 @@ const Ticket = state({ Ticket: ticketSchema })
 The `.autocloses({...})` form covers ~90% of real policies in a line. See
 [docs/docs/guides/close-policies.md](../../docs/docs/guides/close-policies.md)
 for the full API: terminal-event matching, time windows, cardinality thresholds,
-`or:` backstops, and the per-cycle cost knobs (`autocloseCycleMs`,
-`closeBatchSize`, `closeYieldMs`).
+`or:` backstops, the rolling-window `keep` variant, and the cost knobs
+(`autocloseCycleMinutes`, `closeBatchSize`, `closeYieldMs`).
+
+### The rolling-window variant: streams that never close
+
+Some Gate 1 streams have no terminal event, ever — a per-account ledger, a
+tenant's activity stream, an audit trail the business treats as alive for a
+decade — but *do* have a retention window: keep exactly the last 180 days (or
+7 years) queryable as real events, archive and drop everything older. That is
+still a Gate 1 problem, and the answer is the **windowed close**: the same
+close primitive pointed at a rolling window instead of a lifecycle end.
+
+```ts
+const Ledger = state({ Ledger: ledgerSchema })
+  .emits({ Posted })
+  // ...
+  .snap((s) => s.patches >= 100)        // required: prunes anchor on snapshots
+  .autocloses({ keep: { days: 180 } })  // keep the last 180 days, prune the rest
+  .build();
+```
+
+The framework prunes events older than the window behind the closest safe
+snapshot — no tombstone, no seed; the stream stays live and keeps accepting
+actions. The imperative twin for one-off prunes is
+`app.close([{ stream, before: cutoff }])`. Position it against its neighbors:
+lifecycles that *end* stay on the plain terminate fields above; a whole events
+table growing across many streams is Gate 4's partitioning territory (table-wide
+`DROP PARTITION`, not per-stream retention). And it is not a load-latency fix —
+events behind the latest snapshot never affect load results anyway. Full
+semantics in
+[docs/docs/guides/close-policies.md § keep](../../docs/docs/guides/close-policies.md);
+pair it with `.archives(...)` (Gate 2) to land the pruned prefix in cold
+storage first.
 
 The recipe at [recipes/scaling/close-the-books/](./close-the-books/) is the
 operator-side companion: how to identify which streams should close, how to

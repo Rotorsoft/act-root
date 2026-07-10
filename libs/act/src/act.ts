@@ -1700,7 +1700,19 @@ export class Act<
    * 7. **Cache** — invalidate (tombstoned) or warm (restarted)
    * 8. **Emit "closed"** — lifecycle event with results
    *
-   * @param targets - Per-stream close options (stream, restart?, archive?)
+   * Targets carrying `before` take the **windowed** branch instead —
+   * close the books on a rolling window: probe the min consumer
+   * watermark (so the boundary never rises past a lagging reaction),
+   * run the archive callback against the cutoff, then prune the prefix
+   * below the closest safe `__snapshot__`. No tombstone guard (the
+   * pre-cutoff prefix is immutable), no seed, cache untouched — the
+   * stream stays live and keeps accepting actions. Requires the state
+   * to snapshot via `.snap(...)`; no qualifying snapshot ⇒ the stream
+   * lands in `skipped` (retry after the next snapshot). Windowed
+   * entries in the result echo `before` and carry the surviving
+   * boundary snapshot as `committed`.
+   *
+   * @param targets - Per-stream close options (stream, restart?, archive?, before?)
    * @returns `{ truncated: TruncateResult, skipped: string[] }`
    *
    * @example Archive and close
@@ -1716,6 +1728,19 @@ export class Act<
    * await app.close([
    *   { stream: "counter-1", restart: true },
    *   { stream: "counter-2" },  // tombstoned
+   * ]);
+   * ```
+   *
+   * @example Windowed close — keep the last 180 days of real events
+   * ```typescript
+   * const cutoff = new Date();
+   * cutoff.setDate(cutoff.getDate() - 180);
+   * await app.close([
+   *   {
+   *     stream: "ledger-acme",
+   *     before: cutoff,
+   *     archive: async () => { await archiveToS3("ledger-acme", cutoff); },
+   *   },
    * ]);
    * ```
    */

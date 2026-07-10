@@ -48,25 +48,25 @@ describe(".autocloses(policy) — declarator", () => {
     const Ticket = make_ticket()
       .autocloses({ after: { days: 2 } })
       .build();
-    expect(Ticket.autoclose_after_ms).toBe(2 * 86_400_000);
+    expect(Ticket.autoclose_after_days).toBe(2);
   });
 
-  it("leaves autoclose_after_ms undefined for a policy with no `after`", () => {
+  it("leaves autoclose_after_days undefined for a policy with no `after`", () => {
     const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("takes the smallest `after` across top-level and the `or` block", () => {
     const Ticket = make_ticket()
       .autocloses({ after: { days: 90 }, or: { after: { days: 7 } } })
       .build();
-    expect(Ticket.autoclose_after_ms).toBe(7 * 86_400_000);
+    expect(Ticket.autoclose_after_days).toBe(7);
   });
 
   it("is absent on states that didn't declare it", () => {
     const Ticket = make_ticket().build();
     expect(Ticket.autoclose).toBeUndefined();
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("replaces an earlier declaration (state-level, last-write-wins)", () => {
@@ -75,7 +75,7 @@ describe(".autocloses(policy) — declarator", () => {
       .autocloses({ after: { days: 1 } })
       .autocloses({ is: "TicketResolved" })
       .build();
-    expect(Ticket.autoclose_after_ms).toBeUndefined();
+    expect(Ticket.autoclose_after_days).toBeUndefined();
   });
 
   it("rejects the legacy function-predicate form with a migration message", () => {
@@ -101,6 +101,89 @@ describe(".autocloses(policy) — declarator", () => {
     const after = builder.autocloses({ is: "TicketResolved" });
     // Same identity — `.autocloses(...)` doesn't allocate a new builder.
     expect(after).toBe(builder);
+  });
+});
+
+describe(".autocloses({ keep }) — rolling window (#1011)", () => {
+  const snapping = () => make_ticket().snap((s) => s.patches >= 2);
+
+  it("caches the window width on the built state", () => {
+    const Ticket = snapping()
+      .autocloses({ keep: { days: 180 } })
+      .build();
+    expect(Ticket.autoclose_keep_days).toBe(180);
+    // keep alone has no terminate component — no time gate either.
+    expect(Ticket.autoclose_after_days).toBeUndefined();
+  });
+
+  it("is absent on states whose policy has no keep", () => {
+    const Ticket = snapping().autocloses({ is: "TicketResolved" }).build();
+    expect(Ticket.autoclose_keep_days).toBeUndefined();
+  });
+
+  it("accepts a keep-only policy whose terminate predicate never fires", () => {
+    const Ticket = snapping()
+      .autocloses({ keep: { days: 30 } })
+      .build();
+    const head = {
+      id: 0,
+      stream: "s",
+      version: 0,
+      created: new Date(0),
+      name: "TicketResolved",
+      data: {},
+      meta: {} as never,
+    } as never;
+    expect(Ticket.autoclose!("s", head, 1_000_000)).toBe(false);
+  });
+
+  it("composes with terminate fields — both windows cached", () => {
+    const Ticket = snapping()
+      .autocloses({
+        is: "TicketResolved",
+        after: { days: 90 },
+        keep: { days: 180 },
+      })
+      .build();
+    expect(Ticket.autoclose_after_days).toBe(90);
+    expect(Ticket.autoclose_keep_days).toBe(180);
+  });
+
+  it("requires .snap earlier in the chain — the runtime guard for untyped callers", () => {
+    expect(() =>
+      make_ticket().autocloses({ keep: { days: 180 } } as never)
+    ).toThrow(/requires \.snap/);
+  });
+
+  it("gates keep behind .snap at the type level", () => {
+    // @ts-expect-error — keep is only reachable after .snap(...)
+    const gated = () => make_ticket().autocloses({ keep: { days: 180 } });
+    expect(gated).toThrow(/requires \.snap/);
+  });
+
+  it("rejects windows below one day — close is low-cadence housekeeping", () => {
+    expect(() => snapping().autocloses({ keep: { days: 0.5 } })).toThrow(
+      /one day/
+    );
+    expect(() => snapping().autocloses({ keep: { days: -1 } })).toThrow(
+      /keep\.days must be > 0/
+    );
+  });
+
+  it("rejects keep inside the `or` block", () => {
+    expect(() =>
+      snapping().autocloses({
+        or: { keep: { days: 30 } } as never,
+      })
+    ).toThrow();
+  });
+
+  it("counts toward the at-least-one-field rule", () => {
+    // keep alone satisfies the rule; the empty bag still rejects.
+    expect(() => snapping().autocloses({ keep: { days: 30 } })).not.toThrow();
+    expect(() => snapping().autocloses({} as never)).toThrow(
+      /at least one of after \/ is \/ reaches \/ or \/ keep/
+    );
   });
 });
 

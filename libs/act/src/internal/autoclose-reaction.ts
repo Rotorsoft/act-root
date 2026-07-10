@@ -18,7 +18,7 @@
  * @internal
  */
 
-import { store, TOMBSTONE_EVENT } from "../ports.js";
+import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Reaction,
   Registry,
@@ -30,6 +30,7 @@ import {
   type AutocloseConfig,
   in_autoclose_window,
 } from "./autoclose-config.js";
+import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 
@@ -62,7 +63,8 @@ export function synthesize_autoclose_reactions<
   for (const st of states.values()) {
     const predicate = st.autoclose;
     if (!predicate) continue;
-    const after_ms = st.autoclose_after_ms;
+    const after_days = st.autoclose_after_days;
+    const keep_days = st.autoclose_keep_days;
     const archiver = st.archive;
     const reaction: Reaction<TEvents> = {
       // Run on a SYNTHETIC stream — `source` is the aggregate, `target` is a
@@ -86,9 +88,18 @@ export function synthesize_autoclose_reactions<
           throw new DeferSignal({
             at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
           });
+        // Rolling-window policies also exclude snapshots and fetch the
+        // tail: the prune decision keys on the oldest *domain* event —
+        // after a prune the oldest surviving event is the boundary
+        // snapshot, whose age says nothing about whether another prune
+        // would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
-          exclude: [TOMBSTONE_EVENT],
+          tail: keep_days !== undefined ? true : undefined,
+          exclude:
+            keep_days !== undefined
+              ? [TOMBSTONE_EVENT, SNAP_EVENT]
+              : [TOMBSTONE_EVENT],
         });
         const entry = stats.get(aggregate);
         // No live (non-tombstone) head → already closed, nothing to do.
@@ -105,12 +116,34 @@ export function synthesize_autoclose_reactions<
             // aggregate) sees it caught up instead of blocking its own close.
             at: head.id,
           });
-        // Not eligible yet: park on the cooldown's earliest opening when the
-        // policy has a time gate; otherwise wait for the next event to
-        // re-trigger (e.g. a `reaches` threshold).
-        if (after_ms !== undefined)
+        // Rolling window: when the oldest domain event has aged out of the
+        // window, stage a windowed close — prune the prefix older than the
+        // cutoff behind the closest safe snapshot. `tail` is present
+        // whenever the stats entry is (same non-excluded event set).
+        if (keep_days !== undefined) {
+          const cutoff = days_before_now(keep_days);
+          if (entry.tail!.created < cutoff)
+            throw new CloseSignal({
+              stream: aggregate,
+              before: cutoff,
+              archive: archiver
+                ? () => archiver(aggregate, head, cutoff)
+                : undefined,
+              at: head.id,
+            });
+        }
+        // Not eligible yet: park on the earliest derivable due-time — the
+        // day the terminate cooldown opens and/or the day the oldest
+        // domain event ages out of the rolling window. Neither → wait for
+        // the next event to re-trigger (e.g. a `reaches` threshold).
+        const dues: Date[] = [];
+        if (after_days !== undefined)
+          dues.push(days_after(head.created, after_days));
+        if (keep_days !== undefined)
+          dues.push(days_after(entry.tail!.created, keep_days));
+        if (dues.length)
           throw new DeferSignal({
-            at: new Date(head.created.getTime() + after_ms),
+            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
           });
       },
     };

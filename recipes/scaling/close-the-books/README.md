@@ -78,8 +78,10 @@ threshold (`reaches: N`) retires a cardinality-bounded stream like
 a rotating audit log without any domain event at all.
 
 The full set of fields (`after: { days }`, `is: "EventName"` or
-`is: string[]`, `reaches: N`), AND/OR composition rules, and the
-function-form escape hatch are documented at
+`is: string[]`, `reaches: N`, and the independent rolling-window
+`keep: { days }`), the AND/OR composition rules, and where to go
+when the declarative form can't express the condition are
+documented at
 [docs/docs/guides/close-policies.md](../../../docs/docs/guides/close-policies.md).
 
 ## What this buys you
@@ -139,24 +141,28 @@ the recipe; the architectural contract is at
 
 ## What this recipe is NOT for
 
-**Hard real-time close.** The autoclose cycle defaults to a 60-second
-tick. A terminal event lingers up to a cycle's worth before truncate.
+**Hard real-time close.** The autoclose reaction closes shortly
+after the policy qualifies, not synchronously with the commit.
 If the close has to happen in the same request that emitted the
 terminal event — regulatory cutoffs measured in seconds, "user
 deleted my account, the data must be gone now" workflows — call
 `app.close([{ stream }])` directly from the action handler. The
 [production checklist](../../../docs/docs/guides/production-checklist.md)
-covers cycle tuning (`autocloseCycleMs`, `closeBatchSize`,
-`closeYieldMs`) for the in-between case where 60 s is too long
+covers cycle tuning (`autocloseCycleMinutes`, `closeBatchSize`,
+`closeYieldMs`) for the in-between case where eventual is too slow
 but a per-request close is overkill.
 
-**Stream rotation while keeping the entity alive.** Close always
-tombstones. For a long-running business entity that needs its
-history rotated but stays live (a multi-year customer relationship
-where the last year of activity is what's hot and the older history
-is reference-only), use `app.close({ stream, restart: true })` —
-same primitive, different post-condition. The recipe page above
-covers when to reach for it.
+**Stream rotation while keeping the entity alive.** An online
+terminate always tombstones. For a long-running business entity
+that needs its history rotated but stays live, two tools exist:
+`app.close({ stream, restart: true })` collapses everything to a
+fresh snapshot in one shot, and `.autocloses({ keep: { days: N } })`
+maintains a rolling window of real events continuously (a
+multi-year customer relationship where the last year of activity
+is hot and older history is reference-only maps to
+`keep: { days: 365 }` plus `.archives`). See
+[docs/docs/guides/close-policies.md § keep](../../../docs/docs/guides/close-policies.md)
+and the [archival recipe](../archival/README.md).
 
 **Cross-state coordination.** Each state's predicate sees only
 its own candidates. "Close stream A only after B is closed"

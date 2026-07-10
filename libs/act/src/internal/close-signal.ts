@@ -42,16 +42,25 @@ export class CloseSignal extends Error {
    * event id when omitted.
    */
   readonly at?: number;
+  /**
+   * Windowed close (#1011): prune events older than this cutoff behind
+   * the closest safe snapshot instead of retiring the stream. Thrown by
+   * the autoclose reaction of a `.autocloses({ keep })` state; flows
+   * into {@link CloseTarget.before}. Omitted → a full close.
+   */
+  readonly before?: Date;
 
   constructor(opts?: {
     stream?: string;
     archive?: () => Promise<void>;
     at?: number;
+    before?: Date;
   }) {
     super("reaction requested close");
     this.name = "CloseSignal";
     this.stream = opts?.stream;
     this.archive = opts?.archive;
     this.at = opts?.at;
+    this.before = opts?.before;
   }
 }
