@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.22.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.21.0...@rotorsoft/act-v1.22.0) (2026-07-10)
+
+
+### Features
+
+* **act:** derive the off-window autoclose re-check from the window itself ([4fc9adc](https://github.com/rotorsoft/act-root/commit/4fc9adc7defe9fa1ad868c9e37e8f9677aa80642)), closes [#1090](https://github.com/rotorsoft/act-root/issues/1090) [#1175](https://github.com/rotorsoft/act-root/issues/1175)
+
 # [@rotorsoft/act-v1.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.20.0...@rotorsoft/act-v1.21.0) (2026-07-10)
 
 
