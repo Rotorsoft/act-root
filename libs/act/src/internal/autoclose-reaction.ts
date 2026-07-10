@@ -29,6 +29,7 @@ import type {
 import {
   type AutocloseConfig,
   in_autoclose_window,
+  next_window_open,
 } from "./autoclose-config.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { CloseSignal } from "./close-signal.js";
@@ -82,11 +83,11 @@ export function synthesize_autoclose_reactions<
       options: { blockOnError: false, maxRetries: 3 },
       handler: async (event) => {
         const aggregate = event.stream;
-        // Off-hours gating: outside the window, re-check next cycle
-        // instead of closing.
+        // Off-hours gating: outside the window, park until the window
+        // opens. Derived from the window itself — no polling cadence.
         if (!in_autoclose_window(config.autocloseWindow, new Date()))
           throw new DeferSignal({
-            at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
+            at: next_window_open(config.autocloseWindow!, new Date()),
           });
         // Rolling-window policies also exclude snapshots and fetch the
         // tail: the prune decision keys on the oldest *domain* event —

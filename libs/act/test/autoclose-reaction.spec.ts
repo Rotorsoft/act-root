@@ -191,6 +191,36 @@ describe("autoclose as a synthesized reaction", () => {
       true
     );
   });
+
+  it("parks an off-window tick until the window opens, then closes (#1175)", async () => {
+    // The re-check is derived from the window itself — no polling
+    // cadence. At 00:00 the {2, 6} window is closed and the reaction
+    // defers to exactly 02:00; once the clock passes it, the next
+    // trigger closes.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    try {
+      const closed: CloseResult[] = [];
+      const app = act()
+        .withState(ticket({ reaches: 2 }))
+        .build({ autocloseWindow: { start: 2, end: 6, timeZone: "UTC" } });
+      app.on("closed", (r) => closed.push(r));
+
+      await app.do("open", { stream: "t6", actor }, {});
+      await app.do("resolve", { stream: "t6", actor }, {});
+      await app.correlate();
+      await app.drain();
+      expect(closed).toHaveLength(0);
+
+      vi.setSystemTime(new Date("2026-01-01T02:30:00Z"));
+      await app.do("open", { stream: "t6", actor }, {});
+      await app.drain();
+      expect(closed).toHaveLength(1);
+      expect(closed[0].truncated.has("t6")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /**

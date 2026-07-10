@@ -239,60 +239,47 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
   /**
-   * How often the autoclose sweep runs, in minutes. Autoclose is
-   * low-urgency housekeeping, so each run sweeps the whole store once
-   * (paging through it in `closeBatchSize` batches) and this knob is
-   * how often that sweep repeats — a couple of times a day, not a hot
-   * path.
-   *
-   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MINUTES} (720 = 12 h).
-   * Validated as an integer `[1, 1440]` (1 minute to 24 hours) at
-   * `act().build()`; out-of-range throws. When `autocloseWindow` is
-   * set, this is the poll interval and should be shorter than the
-   * window.
-   *
-   * Zero-cost when no state declares `.autocloses(...)` — the
-   * controller is never constructed in that case.
+   * @deprecated Since #1175 this knob is accepted, validated, and
+   * ignored. It paced the off-hours re-check of the pre-#1090 autoclose
+   * sweep; the synthesized autoclose reaction now derives its re-check
+   * directly from `autocloseWindow` — a tick landing outside the window
+   * parks until the exact instant the window opens, so there is no
+   * polling cadence to configure (and nothing minute-denominated on the
+   * close surface). Still validated as an integer `[1, 1440]` so typos
+   * keep failing loudly at `act().build()`. Will be removed in the next
+   * major.
    */
   readonly autocloseCycleMinutes?: number;
   /**
-   * Batch size for the sweep: the per-batch `query_stats` page size +
-   * the truncate fan-out within a run. A run pages through the whole
-   * store `closeBatchSize` streams at a time, so this bounds memory
-   * and the per-batch write burst without limiting how many streams a
-   * run can close in total.
-   *
-   * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
-   * `[1, 1024]`; above 1024 the builder throws.
+   * @deprecated Dead since #1090 replaced the autoclose sweep with a
+   * synthesized per-aggregate reaction — nothing pages the store in
+   * batches anymore, so nothing reads this. Accepted and validated
+   * (`[1, 1024]`) for compatibility; will be removed in the next major.
    */
   readonly closeBatchSize?: number;
   /**
-   * Microsecond yield delay between successive `Store.truncate`
-   * calls within one cycle tick (#837). Defaults to `0` (microtask
-   * yield only). SQLite operators set a positive value to let the
-   * writer lock release between rows; PG / InMemory adapters
-   * generally don't need it because they don't serialize writers
-   * globally.
-   *
-   * Validated `[0, 1000]`.
+   * @deprecated Dead since #1090 — the sweep that yielded between
+   * successive `Store.truncate` calls no longer exists; closes are
+   * staged per stream by the autoclose reaction. Accepted and validated
+   * (`[0, 1000]`) for compatibility; will be removed in the next major.
    */
   readonly closeYieldMs?: number;
   /**
-   * Whether predicate exceptions should mark the stream as closed
-   * (#837). Default `false` — a thrown predicate is logged and the
-   * stream is skipped that cycle. Set `true` to close on error
-   * (defensive policy for "if I can't evaluate, assume terminal").
+   * @deprecated Dead since #1090 — the sweep-side predicate try/catch
+   * this flag steered no longer exists; a throwing policy predicate now
+   * follows the reaction retry path (`blockOnError: false`, three
+   * retries). Accepted for compatibility; will be removed in the next
+   * major.
    */
   readonly closeOnError?: boolean;
   /**
-   * Optional off-hours window restricting when the sweep runs. The
-   * ticker still fires every `autocloseCycleMinutes`, but a tick only
-   * sweeps when the current hour falls inside `[start, end)`. Hours
-   * are `[0, 23]` integers in `timeZone` (IANA, default `"UTC"`,
-   * DST-correct); `start > end` is an overnight window (e.g.
-   * `{ start: 22, end: 6 }`). Every in-window tick runs a full sweep,
-   * so size `autocloseCycleMinutes` to the window. Omit to run on
-   * every tick regardless of clock time.
+   * Optional off-hours window restricting when autoclose evaluates. A
+   * synthesized autoclose reaction that triggers outside the window
+   * defers to the next instant the window opens — derived from the
+   * window itself, no polling cadence. Hours are `[0, 23]` integers in
+   * `timeZone` (IANA, default `"UTC"`, DST-correct); `start > end` is
+   * an overnight window (e.g. `{ start: 22, end: 6 }`). Omit to
+   * evaluate regardless of clock time.
    */
   readonly autocloseWindow?: {
     readonly start: number;
