@@ -62,6 +62,14 @@ export class CorrelateCycle<
   private readonly _has_dynamic_resolvers: boolean;
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
+  /**
+   * Scope runner (#1191). The periodic `start_polling` timer fires
+   * outside any caller frame, so its `correlate()` must be re-wrapped in
+   * the Act's `_scoped` bag or `store()`/`cache()` resolve to the
+   * singleton for a scoped Act. The orchestrator always threads its
+   * `_scoped` (identity for a non-scoped Act), so it's required.
+   */
+  private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -69,7 +77,8 @@ export class CorrelateCycle<
     has_dynamic_resolvers: boolean,
     cd: DrainOps<TEvents>,
     maxSubscribedStreams: number,
-    on_init?: () => void
+    on_init: (() => void) | undefined,
+    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>
   ) {
     this._subscribed = new LruSet(maxSubscribedStreams);
     this._registry = registry;
@@ -77,6 +86,7 @@ export class CorrelateCycle<
     this._has_dynamic_resolvers = has_dynamic_resolvers;
     this._cd = cd;
     this._on_init = on_init;
+    this._run_scoped = run_scoped;
   }
 
   /** Last correlated event id. */
@@ -206,7 +216,9 @@ export class CorrelateCycle<
     const limit = query.limit || 100;
     this._timer = setInterval(
       () =>
-        this.correlate({ ...query, after: this._checkpoint, limit })
+        this._run_scoped(() =>
+          this.correlate({ ...query, after: this._checkpoint, limit })
+        )
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
           })

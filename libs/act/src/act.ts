@@ -632,6 +632,9 @@ export class Act<
           this.emit("closed", result);
         },
         breaker: this._breaker,
+        // Re-scope the per-lane worker's auto-start ticks so their drain
+        // resolves the scoped ports, not the singleton (#1191).
+        run_scoped: this._scoped,
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
         // adapter SQL collapses to the single-lane shape.
@@ -691,7 +694,10 @@ export class Act<
       options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
       () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
-      }
+      },
+      // Re-scope the background `start_correlations` timer so its
+      // correlate resolves the scoped ports, not the singleton (#1191).
+      this._scoped
     );
   }
 
@@ -699,7 +705,11 @@ export class Act<
   private _build_settle(options: ActOptions): SettleLoop<TEvents> {
     return new SettleLoop<TEvents>(
       {
-        init: () => this._correlate.init(),
+        // Scope the init like every other store-touching path — a bare
+        // `this._correlate.init()` runs `store().subscribe(...)` against
+        // the singleton for a scoped Act, so static targets never land on
+        // the scoped store and `_initialized` then blocks a retry (#1191).
+        init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
         correlate: (q) => this.correlate(q),
         drain: (o) => this.drain(o),

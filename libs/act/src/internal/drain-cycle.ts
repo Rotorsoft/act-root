@@ -327,6 +327,14 @@ export type DrainControllerDeps<
    * `error` lifecycle event), so callers just `failed(now, error)`.
    */
   readonly breaker: CircuitBreaker;
+  /**
+   * Scope runner (#1191). The per-lane worker (`start`) ticks outside
+   * any caller frame, so its `drain()` must be re-wrapped in the Act's
+   * `_scoped` bag or `store()`/`cache()` resolve to the singleton for a
+   * scoped Act. The orchestrator always threads its `_scoped` (identity
+   * for a non-scoped Act), so it's required.
+   */
+  readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
   readonly lane?: string;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
@@ -415,8 +423,9 @@ export class DrainController<
     // an already-queued timer that fires before `clearTimeout()` lands
     // will run at most one extra drain (drain is idempotent against
     // a non-armed controller and self-disarms when settled).
+    const run = this._deps.run_scoped;
     const tick = async () => {
-      if (this._armed) await this.drain();
+      if (this._armed) await run(() => this.drain());
       if (this._stopped) return;
       this._worker = setTimeout(tick, cycleMs);
       this._worker.unref();
