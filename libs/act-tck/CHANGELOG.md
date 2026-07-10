@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.26.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.4...@rotorsoft/act-tck-v1.26.5) (2026-07-10)
+
+
+### Bug Fixes
+
+* **act-pg:** self-healing LISTEN reconnect and widen streams.retry to int ([eb52460](https://github.com/rotorsoft/act-root/commit/eb524607f454ad40002c83cbdf09660309e4eed5)), closes [hi#severity](https://github.com/hi/issues/severity) [#1189](https://github.com/rotorsoft/act-root/issues/1189) [#1190](https://github.com/rotorsoft/act-root/issues/1190)
+
 # [@rotorsoft/act-tck-v1.26.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.3...@rotorsoft/act-tck-v1.26.4) (2026-07-10)
 
 
