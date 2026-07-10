@@ -10,10 +10,13 @@ Event-sourced streams accumulate. A ticketing app builds up resolved tickets tha
 
 The fix is to **close** stale streams: write a tombstone, truncate the events, and the stream becomes inaccessible for new commits (`StreamClosedError`) and old commits (`StreamClosedError` on `app.load`). Alongside the explicit `app.close({ stream })` primitive, this guide covers the *declarative* online version. As of [#1090](https://github.com/Rotorsoft/act-root/issues/1090) it is no longer a periodic store sweep: a state declares a close policy, and the framework compiles it into an internal reaction that rides the same drain everything else runs on, defers across the cooldown, and closes the stream the moment it qualifies.
 
+Not every stream's lifecycle ends, though. For long-lived streams that must keep a bounded window of history — regulated retention, storage budgets — the same declaration surface offers a rolling-window variant, [`keep: { days }`](#keep--days---the-rolling-window), which prunes old history behind a snapshot while the stream stays live.
+
 ## What this guide answers
 
 - How do I tell the framework "close this stream when X"?
 - How does the close actually happen, now that there's no sweep?
+- How do I keep only the last N days of history on a stream that never closes?
 - How do I plug in archive (S3, cold tier, analytics warehouse) before truncate?
 - What does the off-hours window do?
 - Which policy fits which workload, and where do I go when the declarative form can't express the condition?
@@ -43,7 +46,7 @@ const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
   .build();
 ```
 
-- **`.autocloses(policy)`** decides **when**. It takes a declarative `AutoclosePolicy` object — `{ is, after, reaches, or }`. There is no function-predicate form (see the [migration note](#migrating-from-the-function-predicate-form) if you have one).
+- **`.autocloses(policy)`** decides **when**. It takes a declarative `AutoclosePolicy` object — `{ is, after, reaches, or }` for terminating a stream, plus the independent rolling-window field [`keep`](#keep--days---the-rolling-window). There is no function-predicate form (see the [migration note](#migrating-from-the-function-predicate-form) if you have one).
 - **`.archives(fn)`** decides **what to persist before truncate**. Runs while the stream is guarded (no concurrent writes); a thrown archiver leaves the stream guarded but un-truncated, and the close retries on the next visit. It works whether or not `.autocloses` is declared (it also runs for explicit `app.close({ stream, archive })` calls).
 
 Build the app and opt in to the lifecycle:
@@ -117,6 +120,40 @@ Workloads: long-running chat threads, IoT telemetry streams, hot audit logs, eve
 
 Inclusive (`>=`) — the policy fires at the moment the threshold is reached, not after. The reaction reads the live count from `query_stats` on each visit, so a `reaches` policy re-evaluates whenever the aggregate commits another event.
 
+### `keep: { days }` — the rolling window
+
+"Keep exactly the last N days of real events; archive and prune everything older."
+
+The three fields above (and the `or` block) all decide when a stream's lifecycle *ends*. `keep` is different in kind: it never terminates anything. While the stream stays open, it prunes events older than `now − keep` behind the closest safe snapshot via a **windowed close** — no tombstone, no seed, and the stream keeps accepting actions. The workload it exists for is the long-lived stream with a regulated retention window: a ledger that must keep exactly 180 days queryable as real events, an audit trail with a 7-year contract, a per-tenant activity stream with bounded storage.
+
+```ts no-check
+const Ledger = state({ Ledger: z.object({ balance: z.number() }) })
+  .init(() => ({ balance: 0 }))
+  .emits({ Posted: z.object({ amount: z.number() }) })
+  .patch({ Posted: ({ data }, s) => ({ balance: s.balance + data.amount }) })
+  .on({ post: z.object({ amount: z.number() }) })
+  .emit((a) => ["Posted", { amount: a.amount }])
+  .snap((s) => s.patches >= 100)          // keep requires snapshots
+  .autocloses({ keep: { days: 180 } })    // prune history older than 180 days
+  .archives(async (stream, _head, before) => {
+    // before is set on windowed closes: archive the events older than the cutoff
+    if (before) await archiveToS3(stream, before);
+  })
+  .build();
+```
+
+Four things to know:
+
+**It requires `.snap(...)`, and the builder enforces it twice.** A windowed close anchors on a real snapshot the app wrote — the store deletes only the prefix below the latest `__snapshot__` older than the cutoff, so a state that never snapshots has nothing to prune behind. The `ActionBuilder` carries a type flag that `.snap()` flips: `keep` simply won't typecheck before `.snap` in the chain, and an untyped caller who sidesteps the type gets a runtime throw at build. Corollary: a stream that hasn't produced a qualifying snapshot yet is skipped that cycle (reported in `CloseResult.skipped`), and the prune retries after the next snapshot lands.
+
+**The floor is one full day.** The close cycle is low-cadence, non-priority housekeeping — nothing on the close surface is denominated in milliseconds, seconds, or minutes. Real retention contracts are days and up (`{ days: 180 }`, `{ days: 2555 }` for 7 years); a sub-day window rejects at build.
+
+**It is independent of the terminate fields.** `keep` participates in neither the top-level AND group nor the `or` block — declaring `keep` inside `or` rejects at build. A policy may terminate, prune, or both: `.autocloses({ is: "AccountClosed", keep: { days: 180 } })` prunes the rolling window while the account lives and full-closes when it ends, and a terminate match always takes precedence over a prune on the same visit.
+
+**The reaction defers to the tail, not the head.** The prune decision keys on the stream's oldest *domain* event (snapshots and tombstones excluded): when it has aged past `now − keep`, the reaction stages the windowed close with `before = now − keep`; otherwise it parks until `tail.created + keep` — the exact moment the oldest surviving event ages out of the window — or the terminate cooldown's opening, whichever comes first. After a prune the tail moves forward, the next due-time moves with it, and the stream settles into a steady rhythm of one productive prune per window.
+
+Be clear about what `keep` is *not* for. It is not a load-latency feature — events behind the latest snapshot never affect load results anyway, so pruning them makes `app.load` exactly zero faster. If your streams have lifecycles that end, the terminate fields above are the right tool; if the whole events table is too big across many streams, look at the [scaling recipes](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling) instead. `keep` earns its place when a live, never-closing stream must hold a bounded window of history — usually because a regulator or a storage budget says so. The imperative twin is `app.close([{ stream, before: cutoff }])` for one-off prunes driven by your own scheduler; the mechanics of both are in [Windowed close in the close-cycle architecture](../architecture/close-cycle.md#windowed-close--prune-behind-a-snapshot).
+
 ### Stacking — top-level AND + `or` block
 
 Top-level fields are AND-combined. Two reasons that's the right default:
@@ -149,9 +186,10 @@ The declarative form covers the bulk of real policies in one line. For the long 
 
 `.autocloses(policy)` compiles to an internal **reaction**, synthesized at `act().build()` against every event the state owns. There is no sweep and no ticker iterating the whole store. When the aggregate commits, the reaction fires and evaluates the policy against the aggregate's **live head** (read via `query_stats`, so a reopened stream re-evaluates correctly), then does one of three things:
 
-1. **The policy matches** → the reaction throws an internal close signal. The orchestrator runs the candidate through `run_close_cycle` — the same pipeline `app.close` uses — so the safety partition, tombstone guard, archive-while-guarded, and atomic truncate all apply unchanged, and a `closed` lifecycle event fires with the `CloseResult`.
-2. **The policy hasn't matched but has an `after` cooldown** → the reaction *defers* to `head.created + the window`. The drain holds the event pending without advancing the watermark or bumping `retry`, persists the due-time in the store, and re-delivers when the cooldown elapses. The deferral is durable shared state — every competing worker honors it — with a per-worker timer layered on top to wake the local worker promptly.
-3. **The policy hasn't matched and has no time gate** (`is` / `reaches` only) → the reaction acks and waits for the next event on the aggregate to re-trigger.
+1. **The terminate policy matches** → the reaction throws an internal close signal. The orchestrator runs the candidate through `run_close_cycle` — the same pipeline `app.close` uses — so the safety partition, tombstone guard, archive-while-guarded, and atomic truncate all apply unchanged, and a `closed` lifecycle event fires with the `CloseResult`.
+2. **A `keep` window is declared and the oldest domain event has aged out** → the reaction stages a *windowed* close with `before = now − keep`: the store prunes the prefix behind the closest safe snapshot (capped at the laggiest consumer's watermark), the stream stays live, and the windowed entry rides the same `closed` lifecycle event with its `before` echoed.
+3. **Neither fires but a due-time is derivable** (`after` cooldown, `keep` window, or both) → the reaction *defers* to the earliest of `head.created + after` and `tail.created + keep`. The drain holds the event pending without advancing the watermark or bumping `retry`, persists the due-time in the store, and re-delivers when it passes. The deferral is durable shared state — every competing worker honors it — with a per-worker timer layered on top to wake the local worker promptly.
+4. **No due-time is derivable** (`is` / `reaches` only) → the reaction acks and waits for the next event on the aggregate to re-trigger.
 
 Critically, the autoclose reaction runs on a **synthetic per-aggregate stream** (`__autoclose__:<stream>`) so its lease and deferrals never interfere with the aggregate's own reactions. For the full state machine, see [Online close-the-books in the close-cycle architecture](../architecture/close-cycle.md#online-close-the-books).
 
@@ -169,12 +207,14 @@ Critically, the autoclose reaction runs on a **synthetic per-aggregate stream** 
 
 ## The archive contract
 
-`.archives(fn)` runs **inside the close cycle's guard window** — the same window the explicit `app.close({ stream, archive })` uses. The cycle:
+On a full close, `.archives(fn)` runs **inside the close cycle's guard window** — the same window the explicit `app.close({ stream, archive })` uses. The cycle:
 
 1. Commits a tombstone marker with `expectedVersion`, locking the stream against concurrent writes.
 2. Runs the archiver (`await fn(stream, head)`).
 3. On success → truncates the events.
 4. On thrown archiver → leaves the stream guarded but un-truncated. No events are lost; the close retries the candidate on the next visit (which may succeed once the host fixes whatever broke).
+
+On a **windowed** close staged by a `keep` policy, the archiver receives the cutoff as a third argument — `fn(stream, head, before)` — and there is no guard: the pre-cutoff prefix is immutable (the cutoff is in the past, so concurrent appends land above the boundary), so the archiver reads stable history while the stream keeps committing. Archive the events older than `before`; the prune deletes a subset of them (only the prefix below the boundary snapshot), so archive plus the live stream always adds up to full history. A thrown archiver aborts the prune the same way — nothing deleted, retried on the next visit. On full closes the third argument is absent, which is how one archiver serves both paths.
 
 The host is responsible for:
 
@@ -184,9 +224,10 @@ The host is responsible for:
 
 ## What this primitive is NOT for
 
-- **Restart** (rotating a stream while keeping the entity alive). Online close always tombstones. Rotation stays on the explicit `app.close({ stream, restart: true })` path.
+- **Restart** (rotating a stream while keeping the entity alive). The terminate fields always tombstone. Rotation stays on the explicit `app.close({ stream, restart: true })` path. (`keep` is the different case: it prunes a live stream's history but is neither a rotation nor a restart — no seed is ever written.)
 - **Cross-state coordination** ("close stream A only if B is closed"). Each state's policy sees only its own aggregate's head. Compose in the host's scheduler if you need it.
 - **Arbitrary conditions.** The declarative policy derives a due-time and a terminal set; conditions it can't express belong in your own logic calling `app.close`.
+- **Load latency.** Pruning with `keep` never speeds up `app.load` — replay is snapshot-anchored, so pre-snapshot events already contribute nothing to any load result. If loads feel slow, tune `.snap` cadence instead.
 
 ## Migrating from the function-predicate form
 
