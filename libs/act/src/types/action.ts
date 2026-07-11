@@ -337,6 +337,18 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Stream head event id (global sequence) of the frontier this snapshot
+   * folds to. `-1` for a brand-new stream with no events. Always defined
+   * — populated atomically with `state` inside `load()`: from the cached
+   * checkpoint's `event_id` on a hit-with-no-new-events, or from the last
+   * replayed event on a cache miss. Consumers that pair a loaded state
+   * with the stream's frontier (the fold engine's first-sight path) read
+   * this instead of a separate cache lookup, which would open a TOCTOU
+   * window where a concurrent commit lands between the two reads and
+   * pairs older `state` with a newer frontier.
+   */
+  readonly frontier: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */

@@ -437,6 +437,7 @@ export async function load<
         event,
         state,
         version: event.version,
+        frontier: event.id,
         patches,
         snaps,
         cache_hit,
@@ -477,20 +478,34 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache().set(stream, {
-      stream,
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
+    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
+    // the state is already correctly computed, so a transient failure in a
+    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
+    // would break plain reads, reaction bound_load dispatches, and the fold
+    // engine's first-sight load. The cache is self-correcting: a subsequent
+    // load queries past `event_id`, replays what it missed, and re-warms.
+    await cache()
+      .set(stream, {
+        stream,
+        state,
+        version: event.version,
+        event_id: event.id,
+        patches,
+        snaps,
+      })
+      .catch((err) => log().error(err));
   }
 
   return {
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
+    // Frontier event id is captured atomically with `state`: the last
+    // replayed event's id on a cache miss, or the cached checkpoint's
+    // event_id on a warm hit with no new events. Consumers read this
+    // instead of a separate cache lookup that could race a concurrent
+    // commit (ACT-1204).
+    frontier: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -657,6 +672,7 @@ export async function action<
           event,
           state,
           version: event.version,
+          frontier: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -715,6 +731,15 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // A caller-pinned expectedVersion is a fixed target: every retry
+      // reloads and re-commits against the SAME pinned version, so the
+      // conflict is guaranteed to recur — retrying only burns the budget
+      // and sleeps out the backoff before surfacing the same terminal
+      // error. Rethrow immediately (ACT-1208). The retry loop exists to
+      // absorb races on framework-derived versions (a concurrent writer
+      // advanced the head), where the reload picks up the new frontier
+      // and the next attempt can succeed.
+      if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
