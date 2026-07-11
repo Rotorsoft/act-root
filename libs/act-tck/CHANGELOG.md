@@ -1,3 +1,12 @@
+# [@rotorsoft/act-tck-v1.26.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.6...@rotorsoft/act-tck-v1.26.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** keep the dead listen client's error handler across reconnect ([71624b8](https://github.com/rotorsoft/act-root/commit/71624b86f674cd871f11ec9e4253aeb81886055c)), closes [#1189](https://github.com/rotorsoft/act-root/issues/1189)
+* **act:** open autoclose window at the DST spring-forward gap instant ([acf00f3](https://github.com/rotorsoft/act-root/commit/acf00f3308a75cca6f742530a6a95eb373ecf599))
+* **act:** reject leading-zero event versions that collide with the canonical form ([4089364](https://github.com/rotorsoft/act-root/commit/4089364d710c12689f486a0cb511272b680d6434))
+
 # [@rotorsoft/act-tck-v1.26.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.5...@rotorsoft/act-tck-v1.26.6) (2026-07-11)
 
 
