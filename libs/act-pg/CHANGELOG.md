@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.3...@rotorsoft/act-pg-v1.13.4) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** keep the dead listen client's error handler across reconnect ([71624b8](https://github.com/rotorsoft/act-root/commit/71624b86f674cd871f11ec9e4253aeb81886055c)), closes [#1189](https://github.com/rotorsoft/act-root/issues/1189)
+
 # [@rotorsoft/act-pg-v1.13.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.2...@rotorsoft/act-pg-v1.13.3) (2026-07-11)
 
 
