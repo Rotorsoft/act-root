@@ -420,6 +420,73 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
       });
 
+      // #1199: `names: []` means "match no event names" on every adapter.
+      // An empty allow-list is an explicit "nothing passes" — the opposite
+      // of an omitted `names` (which matches all). PG historically dropped
+      // the empty filter (returned ALL); this pins the sane semantics.
+      it("names:[] matches no events", async () => {
+        const s = `q-names-empty-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), dec(1)],
+          make_meta({ stream: s })
+        );
+        const none = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          names: [],
+        });
+        expect(none).toHaveLength(0);
+        // Omitting `names` still returns everything — the contrast case.
+        const all = await collect(store, { stream: s, stream_exact: true });
+        expect(all).toHaveLength(2);
+      });
+
+      // #1199: falsy-zero `after`/`before` are honored, not dropped by a
+      // truthy guard. `after: 0` means strictly "id > 0"; `before: 0`
+      // means strictly "id < 0" (matches nothing). InMemory ids start at
+      // 0, so a truthy `if (after)` guard would leak id 0 on the backward
+      // path — this pins `!== undefined` semantics across adapters.
+      it("after:0 and before:0 are honored as id bounds", async () => {
+        const s = `q-zero-bound-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2), inc(3)],
+          make_meta({ stream: s })
+        );
+        // before:0 → nothing has an id below 0.
+        expect(
+          await collect(store, { stream: s, stream_exact: true, before: 0 })
+        ).toHaveLength(0);
+        // before:0 on the backward path is equally empty.
+        expect(
+          await collect(store, {
+            stream: s,
+            stream_exact: true,
+            before: 0,
+            backward: true,
+          })
+        ).toHaveLength(0);
+        // after:0 → strictly id > 0. On adapters whose ids start at 0 the
+        // first event (id 0) is excluded; on 1-based adapters every event
+        // survives. Either way no event with id <= 0 is returned.
+        const forward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          after: 0,
+        });
+        expect(forward.every((e) => e.id > 0)).toBe(true);
+        // Backward path with after:0 must apply the same exclusive bound —
+        // never leak an id-0 event.
+        const backward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          after: 0,
+          backward: true,
+        });
+        expect(backward.every((e) => e.id > 0)).toBe(true);
+      });
+
       it("created_after/created_before filter by timestamp", async () => {
         const s = `q-ts-${uid()}`;
         const committed = await store.commit<CounterEvents>(
@@ -723,6 +790,49 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
         if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
         else expect(count).toBe(1);
+      });
+
+      // #1197: stream filters are case-SENSITIVE across every adapter.
+      // PG (`~`) and InMemory (RegExp) are case-sensitive; a store that
+      // translates to `LIKE` must not let SQLite's ASCII-insensitive LIKE
+      // overmatch a differently-cased sibling. A `^order-` prefix must
+      // match `order-x` but never `Order-x`.
+      it("stream filters match case-sensitively (query)", async () => {
+        const tag = uid();
+        const lower = `order-${tag}`;
+        const upper = `Order-${tag}`;
+        await seed_streams([lower, upper]);
+
+        // ^prefix — only the lower-cased stream, never the capitalized one
+        expect(await streams_matching(`^order-${tag}`)).toEqual([lower]);
+        // ^exact$ — the capitalized name never matches a lower-cased pattern
+        expect(await streams_matching(`^Order-${tag}$`)).toEqual([upper]);
+        // contains — case-sensitive substring
+        expect(await streams_matching(`order-${tag}`)).toEqual([lower]);
+      });
+
+      it("stream filters match case-sensitively (position filters)", async () => {
+        const tag = uid();
+        const lower = `csp-order-${tag}`;
+        const upper = `csp-Order-${tag}`;
+        await store.subscribe([{ stream: lower }, { stream: upper }]);
+
+        const got: string[] = [];
+        await store.query_streams((p) => got.push(p.stream), {
+          stream: `^csp-order-${tag}`,
+        });
+        expect(got).toEqual([lower]);
+      });
+
+      it("bulk stream ops match case-sensitively", async () => {
+        const tag = uid();
+        const lower = `bcs-order-${tag}`;
+        const upper = `bcs-Order-${tag}`;
+        await store.subscribe([{ stream: lower }, { stream: upper }]);
+
+        // reset by pattern touches only the exactly-cased stream
+        const count = await store.reset({ stream: `^bcs-order-${tag}` });
+        expect(count).toBe(1);
       });
     });
 

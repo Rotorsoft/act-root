@@ -1,3 +1,5 @@
+import { unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { ConcurrencyError, StoreError } from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
 
@@ -110,16 +112,75 @@ describe("SqliteStore error paths", () => {
     expect(s).toBeInstanceOf(SqliteStore);
   });
 
-  it("commit: rolls back and rethrows on INSERT failure", async () => {
+  it("commit: rolls back and wraps INSERT failure in StoreError (#1202)", async () => {
     const client = mockClientFailOn("INSERT INTO events");
     (db as unknown as { client: unknown }).client = client;
-    await expect(
-      db.commit("s", [{ name: "E", data: {} }], {
+    // Parity with PG: a non-unique-violation driver error is wrapped in
+    // StoreError('commit'), not rethrown raw.
+    const err = await db
+      .commit("s", [{ name: "E", data: {} }], {
         correlation: "",
         causation: {},
       })
-    ).rejects.toThrow(/mocked INSERT INTO events error/);
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(err.operation).toBe("commit");
+    expect((err.cause as Error).message).toMatch(/mocked INSERT INTO events/);
     expect(client._tx.rollback).toHaveBeenCalled();
+  });
+
+  it("commit: maps a (stream,version) unique collision to ConcurrencyError (#1202)", async () => {
+    // A real DB with a v0 row already present. We stub ONLY the
+    // version-probe SELECT to return a stale MAX(version)=-1, so commit
+    // recomputes version=0 and the INSERT genuinely collides on the
+    // UNIQUE(stream, version) index — the race PG maps via 23505. The
+    // driver raises SQLITE_CONSTRAINT_UNIQUE; the adapter must surface
+    // ConcurrencyError, not the raw libsql error.
+    const DB_PATH = join(import.meta.dirname, `collide-${Date.now()}.db`);
+    const real = new SqliteStore({ url: `file:${DB_PATH}` });
+    await real.seed();
+    await real.commit("collide", [{ name: "E", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const client = (real as unknown as { client: { transaction: unknown } })
+      .client;
+    const realTransaction = (
+      client.transaction as (mode: string) => Promise<unknown>
+    ).bind(client);
+    (
+      client as { transaction: (mode: string) => Promise<unknown> }
+    ).transaction = async (mode: string) => {
+      const tx = (await realTransaction(mode)) as {
+        execute: (stmt: Stmt) => Promise<unknown>;
+      };
+      const realExecute = tx.execute.bind(tx);
+      tx.execute = (stmt: Stmt) => {
+        if (sqlOf(stmt).includes("MAX(version)"))
+          return Promise.resolve({
+            rows: [{ v: -1 }],
+            rowsAffected: 0,
+            lastInsertRowid: 0,
+          });
+        return realExecute(stmt);
+      };
+      return tx;
+    };
+    const err = await real
+      .commit("collide", [{ name: "E", data: {} }], {
+        correlation: "",
+        causation: {},
+      })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ConcurrencyError);
+    await real.dispose();
+    for (const ext of ["", "-wal", "-shm"]) {
+      try {
+        unlinkSync(DB_PATH + ext);
+      } catch {
+        // file may not exist
+      }
+    }
   });
 
   it("commit: throws ConcurrencyError when expectedVersion mismatches", async () => {

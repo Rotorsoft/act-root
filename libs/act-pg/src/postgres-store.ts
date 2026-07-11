@@ -49,9 +49,26 @@ const logger: Logger = log();
 const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\]";
 
 const { Pool, types } = pg;
-types.setTypeParser(types.builtins.JSONB, (val) =>
-  JSON.parse(val, dateReviver)
-);
+
+/**
+ * Per-Pool type parser (#1198). Overrides ONLY the JSONB parser to revive
+ * ISO-date strings in event payloads to `Date`, delegating every other
+ * OID to pg's global default. Passed as the Pool's `types` option so the
+ * Date coercion is scoped to this store's connections — it never mutates
+ * the process-global `pg.types` registry, so a host app's other pg usage
+ * (Drizzle projections, ad-hoc queries) reads jsonb with the stock
+ * parser. This is the shape pg threads down to each pooled client.
+ */
+const JSONB_OID = types.builtins.JSONB;
+const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
+  getTypeParser: ((oid: number, format?: unknown) =>
+    oid === JSONB_OID
+      ? (val: string) => JSON.parse(val, dateReviver)
+      : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
+          oid,
+          format
+        )) as typeof types.getTypeParser,
+};
 
 type Config = Readonly<{
   schema: string;
@@ -395,7 +412,8 @@ export class PostgresStore implements Store {
       pii_encryption: ___,
       ...poolConfig
     } = this.config;
-    this._pool = new Pool(poolConfig);
+    // Per-Pool JSONB reviver (#1198): scoped here, never global.
+    this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
@@ -716,11 +734,17 @@ export class PostgresStore implements Store {
             : `stream ~ $${values.length}`
         );
       }
-      if (names?.length) {
+      if (names !== undefined) {
+        // #1199: `names: []` means "match no event names" — an empty
+        // allow-list. `name = ANY('{}')` is always false, matching the
+        // InMemory/SQLite semantics. Historically a truthy `names?.length`
+        // guard dropped the empty filter and returned ALL — the opposite.
         values.push(names);
         conditions.push(`name = ANY($${values.length})`);
       }
-      if (before) {
+      if (before !== undefined) {
+        // #1199: `!== undefined` so a falsy-zero `before: 0` (strictly
+        // "id < 0", i.e. match nothing) is honored, not dropped.
         values.push(before);
         conditions.push(`id<$${values.length}`);
       }

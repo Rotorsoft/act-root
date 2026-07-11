@@ -1,91 +1,93 @@
 import { ValidationError } from "@rotorsoft/act";
-import { streamPatternToLike } from "../src/sqlite-store.js";
+import { streamPatternToGlob } from "../src/sqlite-store.js";
 
-describe("streamPatternToLike", () => {
+describe("streamPatternToGlob", () => {
   describe("anchors", () => {
     it("strips both anchors → exact match", () => {
-      expect(streamPatternToLike("^abc$")).toBe("abc");
+      expect(streamPatternToGlob("^abc$")).toBe("abc");
     });
 
     it("strips leading ^ only → starts-with", () => {
-      expect(streamPatternToLike("^abc")).toBe("abc%");
+      expect(streamPatternToGlob("^abc")).toBe("abc*");
     });
 
     it("strips trailing $ only → ends-with", () => {
-      expect(streamPatternToLike("abc$")).toBe("%abc");
+      expect(streamPatternToGlob("abc$")).toBe("*abc");
     });
 
     it("no anchors → contains (both sides padded)", () => {
-      expect(streamPatternToLike("abc")).toBe("%abc%");
+      expect(streamPatternToGlob("abc")).toBe("*abc*");
     });
 
     it("handles empty input with both anchors", () => {
-      expect(streamPatternToLike("^$")).toBe("");
+      expect(streamPatternToGlob("^$")).toBe("");
     });
 
-    it("handles empty input with no anchors (collapsed to %)", () => {
-      expect(streamPatternToLike("")).toBe("%");
+    it("handles empty input with no anchors (collapsed to *)", () => {
+      expect(streamPatternToGlob("")).toBe("*");
     });
   });
 
   describe("wildcards", () => {
-    it("converts .* to % when anchored", () => {
-      expect(streamPatternToLike("^abc.*$")).toBe("abc%");
+    it("converts .* to * when anchored", () => {
+      expect(streamPatternToGlob("^abc.*$")).toBe("abc*");
     });
 
-    it("converts .* to % when unanchored (still contains)", () => {
-      // unanchored gets %-padded; .* becomes %; adjacent %s are collapsed
-      expect(streamPatternToLike("abc.*")).toBe("%abc%");
+    it("converts .* to * when unanchored (still contains)", () => {
+      // unanchored gets *-padded; .* becomes *; adjacent *s are collapsed
+      expect(streamPatternToGlob("abc.*")).toBe("*abc*");
     });
 
-    it("converts single . to _ (single-char wildcard)", () => {
-      expect(streamPatternToLike("^a.c$")).toBe("a_c");
+    it("converts single . to ? (single-char wildcard)", () => {
+      expect(streamPatternToGlob("^a.c$")).toBe("a?c");
     });
 
     it("converts mixed . and .* in a single pattern", () => {
-      expect(streamPatternToLike("^a.b.*c$")).toBe("a_b%c");
+      expect(streamPatternToGlob("^a.b.*c$")).toBe("a?b*c");
     });
 
     it("handles only-wildcard pattern .*", () => {
-      expect(streamPatternToLike("^.*$")).toBe("%");
+      expect(streamPatternToGlob("^.*$")).toBe("*");
     });
   });
 
   describe("realistic patterns", () => {
     it("starts-with via ^prefix.*", () => {
-      expect(streamPatternToLike("^order-.*")).toBe("order-%");
+      expect(streamPatternToGlob("^order-.*")).toBe("order-*");
     });
 
     it("starts-with via ^prefix (no .*)", () => {
-      expect(streamPatternToLike("^order-")).toBe("order-%");
+      expect(streamPatternToGlob("^order-")).toBe("order-*");
     });
 
     it("ends-with via .*suffix$", () => {
-      expect(streamPatternToLike(".*-archive$")).toBe("%-archive");
+      expect(streamPatternToGlob(".*-archive$")).toBe("*-archive");
     });
 
     it("contains via plain substring", () => {
-      expect(streamPatternToLike("user")).toBe("%user%");
+      expect(streamPatternToGlob("user")).toBe("*user*");
     });
   });
 
-  describe("LIKE metacharacter escaping", () => {
-    it("escapes literal underscore so it is not a single-char wildcard", () => {
-      expect(streamPatternToLike("^user_1$")).toBe("user\\_1");
+  describe("GLOB literals need no escaping", () => {
+    // Under GLOB, `_` and `%` are ordinary characters (not wildcards),
+    // so they pass through verbatim — unlike LIKE, which needed ESCAPE.
+    it("passes a literal underscore through unescaped", () => {
+      expect(streamPatternToGlob("^user_1$")).toBe("user_1");
     });
 
-    it("escapes literal percent so it is not an any-run wildcard", () => {
-      expect(streamPatternToLike("^disc%off$")).toBe("disc\\%off");
+    it("passes a literal percent through unescaped", () => {
+      expect(streamPatternToGlob("^disc%off$")).toBe("disc%off");
     });
 
-    it("escapes metacharacters in unanchored (contains) patterns", () => {
-      expect(streamPatternToLike("a_b%c")).toBe("%a\\_b\\%c%");
+    it("passes _ and % through in unanchored (contains) patterns", () => {
+      expect(streamPatternToGlob("a_b%c")).toBe("*a_b%c*");
     });
 
-    it("does not collapse an escaped % into an adjacent wildcard", () => {
-      // contains "a%" — the escaped literal must survive next to the
-      // trailing any-run wildcard
-      expect(streamPatternToLike("a%")).toBe("%a\\%%");
+    it("keeps a literal % next to a trailing wildcard", () => {
+      // contains "a%" — the literal % must survive next to the trailing
+      // any-run wildcard, and the two must not collapse.
+      expect(streamPatternToGlob("a%")).toBe("*a%*");
     });
   });
 
@@ -104,12 +106,12 @@ describe("streamPatternToLike", () => {
     ] as const;
 
     it.each(cases)("throws on %s", (_label, pattern) => {
-      expect(() => streamPatternToLike(pattern)).toThrow(ValidationError);
+      expect(() => streamPatternToGlob(pattern)).toThrow(ValidationError);
     });
 
     it("names the offending pattern and enumerates the supported subset", () => {
       try {
-        streamPatternToLike("^a-(x|y)$");
+        streamPatternToGlob("^a-(x|y)$");
         expect.unreachable("should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
