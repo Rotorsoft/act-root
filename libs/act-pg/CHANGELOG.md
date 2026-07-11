@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.4...@rotorsoft/act-pg-v1.13.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
 # [@rotorsoft/act-pg-v1.13.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.3...@rotorsoft/act-pg-v1.13.4) (2026-07-11)
 
 

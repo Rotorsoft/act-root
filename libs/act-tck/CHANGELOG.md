@@ -1,3 +1,12 @@
+# [@rotorsoft/act-tck-v1.26.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.8...@rotorsoft/act-tck-v1.26.9) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** mark sensitive() action-input fields in the openapi request schema ([#1228](https://github.com/rotorsoft/act-root/issues/1228)) ([003eea2](https://github.com/rotorsoft/act-root/commit/003eea2bfd97c35641ee585a0a26cab40fa1c564))
+* **act-pg:** per-pool jsonb parser, names:[]/before guards, TCK + docs (ACT-1198/1199) ([1043227](https://github.com/rotorsoft/act-root/commit/10432274edc0ce583563d0902056fd6d6ed7955c)), closes [#1197](https://github.com/rotorsoft/act-root/issues/1197) [#1199](https://github.com/rotorsoft/act-root/issues/1199)
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
 # [@rotorsoft/act-tck-v1.26.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.7...@rotorsoft/act-tck-v1.26.8) (2026-07-11)
 
 

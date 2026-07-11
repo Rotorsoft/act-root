@@ -9,7 +9,8 @@
     "email": "rotorsoft@outlook.com"
   },
   "scripts": {
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run"
   },
   "keywords": [],
   "license": "ISC",

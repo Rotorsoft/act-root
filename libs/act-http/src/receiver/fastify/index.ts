@@ -50,7 +50,11 @@
  * default JSON parser eats the bytes — register a custom parser via
  * `app.addContentTypeParser("application/json", { parseAs: "string" }, …)`
  * and stash the string on `request.rawBody` (Fastify pattern). The
- * middleware reads `request.rawBody` for hashing. Skip when unsigned.
+ * middleware reads `request.rawBody` for hashing. Skip when unsigned. If
+ * `request.rawBody` is empty because the parser wasn't registered, the
+ * middleware short-circuits with `400 { error: "empty-body" }` instead
+ * of hashing an empty string and rejecting every valid request with a
+ * misleading `401 bad-signature`.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";

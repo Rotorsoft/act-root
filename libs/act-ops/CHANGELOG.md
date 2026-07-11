@@ -1,3 +1,10 @@
+# [@rotorsoft/act-ops-v0.2.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.2...@rotorsoft/act-ops-v0.2.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** commit receiver idempotency key on success, not on claim ([9badb1a](https://github.com/rotorsoft/act-root/commit/9badb1afdce72fb4813178fb2ea7e110057a2460)), closes [#1193](https://github.com/rotorsoft/act-root/issues/1193)
+
 # [@rotorsoft/act-ops-v0.2.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.1...@rotorsoft/act-ops-v0.2.2) (2026-06-29)
 
 
