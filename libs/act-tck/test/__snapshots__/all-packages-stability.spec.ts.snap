@@ -43193,6 +43193,11 @@ const NOTIFY_MAX_PAYLOAD_BYTES = 8000;
 const NOTIFY_RECONNECT_BASE_MS = 250;
 const NOTIFY_RECONNECT_MAX_MS = 30_000;
 
+// Keeps a destroyed LISTEN client from re-raising a late socket \`error\` as an
+// uncaught exception. Attached to the dead client through \`release(true)\` so it
+// is never listener-less during the reconnect backoff window (#1231).
+const swallow_error = (): void => {};
+
 function notify_channel(schema: string, table: string): string {
   return \`\${NOTIFY_CHANNEL_PREFIX}_\${schema}_\${table}\`;
 }
@@ -45007,18 +45012,31 @@ export class PostgresStore implements Store {
     // \`_teardown_listen\` runs, but the error already fired, so just drop
     // it — do not run UNLISTEN on a broken connection.
     if (this._listen_client) {
-      this._listen_client.removeListener("notification", this._listen_handler!);
-      this._listen_client.removeListener("error", this._listen_error_handler!);
+      const dead = this._listen_client;
+      dead.removeListener("notification", this._listen_handler!);
+      dead.removeListener("error", this._listen_error_handler!);
+      // A node-postgres socket routinely emits \`error\` more than once on
+      // teardown (in-flight LISTEN rejection, then the ECONNRESET/end that
+      // follows). \`release(true)\` destroys the connection but does not
+      // synchronously silence the socket, so the client must never be
+      // listener-less: an unhandled second \`error\` re-raises as an uncaught
+      // exception — the exact process crash #1189 fixed (#1231). Attach a
+      // swallow listener that lives until the destroyed client is GC'd.
+      dead.on("error", swallow_error);
       this._listen_handler = undefined;
       this._listen_error_handler = undefined;
-      this._listen_client.release(true);
       this._listen_client = undefined;
+      dead.release(true);
     }
     const delay = Math.min(
       NOTIFY_RECONNECT_MAX_MS,
       NOTIFY_RECONNECT_BASE_MS * 2 ** this._reconnect_attempts
     );
     this._reconnect_attempts++;
+    // A second error (or the recursive \`.catch\` reconnect) must not leave two
+    // live timers racing to re-LISTEN — cancel any pending one before we
+    // reassign. \`_teardown_listen\` clears it on disposal.
+    if (this._reconnect_timer) clearTimeout(this._reconnect_timer);
     this._reconnect_timer = setTimeout(() => {
       this._reconnect_timer = undefined;
       // Re-check: disposal may have won the race after the timer fired.
