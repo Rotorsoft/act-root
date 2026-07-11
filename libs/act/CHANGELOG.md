@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v1.22.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.8...@rotorsoft/act-v1.22.9) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** floor correlate cold-start checkpoint below the watermark ([4d3eb30](https://github.com/rotorsoft/act-root/commit/4d3eb30456a09f208cf752308997276d7aa8b1bc)), closes [#1207](https://github.com/rotorsoft/act-root/issues/1207)
+* **act:** fold TOCTOU frontier, load cache-error, expectedVersion retry ([611c425](https://github.com/rotorsoft/act-root/commit/611c425c1c20de62adc4b761b7026498835a4c16)), closes [#1204](https://github.com/rotorsoft/act-root/issues/1204) [#1206](https://github.com/rotorsoft/act-root/issues/1206) [#1208](https://github.com/rotorsoft/act-root/issues/1208)
+* **act:** re-arm settle wake-ups requested during a running cycle ([8876082](https://github.com/rotorsoft/act-root/commit/887608240d5be14616e6c7e067b6065103eff1ef)), closes [#1205](https://github.com/rotorsoft/act-root/issues/1205)
+
 # [@rotorsoft/act-v1.22.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.7...@rotorsoft/act-v1.22.8) (2026-07-11)
 
 
