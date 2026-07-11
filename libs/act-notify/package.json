@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-notify",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Hybrid notify-broker decorator for Act stores — ride Redis (or any broker) for cross-process wakeups while the durable log stays on your store",
   "keywords": [
     "event-sourcing",

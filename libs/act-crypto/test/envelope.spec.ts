@@ -112,6 +112,22 @@ describe("encrypt / decrypt round-trip", () => {
     expect(await decrypt(a, resolve)).toEqual(original);
     expect(await decrypt(b, resolve)).toEqual(original);
   });
+
+  it("rejects a payload that is not JSON-serializable with a validated message", async () => {
+    const resolve = makeKeyResolver({
+      keyProvider: () => makeKey(),
+      algorithm: "aes-256-gcm",
+    });
+    // JSON.stringify(undefined) === undefined and JSON.stringify(fn) ===
+    // undefined — Buffer.from(undefined) throws a raw internal TypeError
+    // today; after the guard it must be a clear "not JSON-serializable".
+    await expect(encrypt(undefined, resolve)).rejects.toThrow(
+      "act-crypto: payload is not JSON-serializable"
+    );
+    await expect(encrypt(() => 1, resolve)).rejects.toThrow(
+      "act-crypto: payload is not JSON-serializable"
+    );
+  });
 });
 
 describe("decrypt fault injection", () => {

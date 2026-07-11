@@ -2,8 +2,15 @@ import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { describe, expect, it, vi } from "vitest";
 import { withIdempotency } from "../../src/api/index.js";
 
-const makeStore = (claimImpl: IdempotencyStore["claim"]): IdempotencyStore => ({
+const makeStore = (
+  claimImpl: IdempotencyStore["claim"]
+): IdempotencyStore & {
+  commit: ReturnType<typeof vi.fn>;
+  release: ReturnType<typeof vi.fn>;
+} => ({
   claim: vi.fn<IdempotencyStore["claim"]>(claimImpl),
+  commit: vi.fn<IdempotencyStore["commit"]>(),
+  release: vi.fn<IdempotencyStore["release"]>(),
 });
 
 describe("withIdempotency", () => {
@@ -17,6 +24,17 @@ describe("withIdempotency", () => {
     expect(vi.mocked(store.claim)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(store.claim)).toHaveBeenCalledWith("key-1");
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("commits the key after the handler succeeds", async () => {
+    const handler = vi.fn().mockResolvedValue("done");
+    const store = makeStore(() => true);
+
+    await withIdempotency(store, "key-commit", handler);
+
+    expect(store.commit).toHaveBeenCalledTimes(1);
+    expect(store.commit).toHaveBeenCalledWith("key-commit");
+    expect(store.release).not.toHaveBeenCalled();
   });
 
   it("skips the handler and returns { deduped: true } on a duplicate claim", async () => {
@@ -50,7 +68,7 @@ describe("withIdempotency", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("propagates handler rejections after a fresh claim", async () => {
+  it("releases the key and propagates handler rejections after a fresh claim", async () => {
     const handler = vi.fn().mockRejectedValue(new Error("handler boom"));
     const store = makeStore(() => true);
 
@@ -59,5 +77,9 @@ describe("withIdempotency", () => {
     );
     expect(vi.mocked(store.claim)).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledTimes(1);
+    // Released so a retry re-processes; never committed.
+    expect(store.release).toHaveBeenCalledTimes(1);
+    expect(store.release).toHaveBeenCalledWith("key-throw");
+    expect(store.commit).not.toHaveBeenCalled();
   });
 });

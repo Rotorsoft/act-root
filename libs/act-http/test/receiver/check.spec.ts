@@ -116,6 +116,36 @@ describe("checkWebhook", () => {
     });
   });
 
+  describe("empty-body config error (raw body not captured)", () => {
+    it("rejects with 400 empty-body when secret is set but body is empty", async () => {
+      const store = freshStore();
+      const headers = signedHeaders(NOW);
+      // secret set + empty raw body → the misconfigured-raw-parser
+      // footgun. Rather than compute a guaranteed-failing HMAC over
+      // `${ts}.` and 401 with a generic bad-signature, surface a
+      // distinct configuration error the operator can act on.
+      const result = await checkWebhook(headers, "", {
+        store,
+        secret: SECRET,
+        verify: { now: NOW },
+      });
+      expect(result).toEqual({
+        ok: false,
+        status: 400,
+        reason: "empty-body",
+      });
+      // Never touched the dedup store — this fails before the claim.
+      expect(store.size()).toBe(0);
+    });
+
+    it("does not trigger empty-body when no secret is configured (unsigned receivers legitimately allow empty bodies)", async () => {
+      const store = freshStore();
+      const headers = { "idempotency-key": "req-1" };
+      const result = await checkWebhook(headers, "", { store });
+      expect(result).toEqual({ ok: true, key: "req-1", deduped: false });
+    });
+  });
+
   describe("check ordering", () => {
     it("rejects on bad signature before claiming the key (no dedup pollution)", async () => {
       const store = freshStore();

@@ -185,17 +185,37 @@ For custom callers — non-`webhook` reactions, queue forwarders, anything — p
 
 ### The `IdempotencyStore` port
 
-The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorsoft/act-ops`](https://www.npmjs.com/package/@rotorsoft/act-ops), the zero-`act`-dependency home for receiver-side primitives. One method, by design:
+The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorsoft/act-ops`](https://www.npmjs.com/package/@rotorsoft/act-ops), the zero-`act`-dependency home for receiver-side primitives. Three methods, two-phase by design:
 
 ```ts no-check
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 export interface IdempotencyStore {
   claim(key: string, now?: number): boolean | Promise<boolean>;
+  commit(key: string, now?: number): void | Promise<void>;
+  release(key: string): void | Promise<void>;
 }
 ```
 
-`true` means the key was fresh (and is now recorded); `false` means it was already present and the caller should treat the request as a duplicate. The union return type lets sync (in-memory) and async (durable) adapters share the same call site. The middleware that consumes the port (`#744`) awaits unconditionally.
+`claim` returns `true` when the key was fresh — but the claim it makes is
+**tentative**. A tentative claim dedups a concurrent duplicate that arrives while
+the handler is in flight (the second caller sees `false` and serializes behind the
+first), yet it is not durable across the sender's own retries until the caller
+confirms the outcome:
+
+- `commit(key)` — the handler succeeded; promote the claim to a durable record so
+  every later retry of the same key dedups.
+- `release(key)` — the handler failed transiently; drop the tentative claim so the
+  sender's retry re-processes instead of being deduped into a silent success.
+  Releasing a key that was already committed is a no-op.
+
+This two-phase shape is what stops a transient handler failure from permanently
+dropping a delivery. A `claim`-and-commit-on-arrival contract records the key
+before the handler runs, so a handler that throws still leaves the key claimed —
+the sender's retry is then deduped and the delivery is lost. Splitting the commit
+out of the claim closes that hole ([#1193](https://github.com/Rotorsoft/act-root/issues/1193)).
+The union return types let sync (in-memory) and async (durable) adapters share the
+same call site; the receiver adapters await unconditionally.
 
 > **Not a Cache.** In this codebase `Cache` means "rebuildable from a source of truth" (snapshot cache). Dedup state is authoritative — losing it allows duplicate side effects, not just a rebuild. Hence `Store`. The naming distinction matters when you swap implementations: the durable adapter's *persistence* is the load-bearing property, not its hit rate.
 
@@ -228,8 +248,24 @@ class RedisIdempotencyStore implements IdempotencyStore {
 
   async claim(key: string): Promise<boolean> {
     // SET ... NX EX is atomic: returns "OK" only when the key didn't exist.
-    const result = await this.redis.set(`idem:${key}`, "1", "EX", this.ttlSeconds, "NX");
+    // "pending" marks the claim tentative until commit/release.
+    const result = await this.redis.set(`idem:${key}`, "pending", "EX", this.ttlSeconds, "NX");
     return result === "OK";
+  }
+
+  async commit(key: string): Promise<void> {
+    // Promote to durable: refresh the value + TTL so retries dedup.
+    await this.redis.set(`idem:${key}`, "committed", "EX", this.ttlSeconds);
+  }
+
+  async release(key: string): Promise<void> {
+    // Only drop a still-pending claim; a committed key must survive.
+    // A small Lua CAS keeps this atomic against a concurrent commit.
+    await this.redis.eval(
+      `if redis.call('GET', KEYS[1]) == 'pending' then return redis.call('DEL', KEYS[1]) end`,
+      1,
+      `idem:${key}`
+    );
   }
 }
 ```
@@ -241,6 +277,7 @@ Use when: receiver is multi-process, dedup window is hours-to-days, Redis is alr
 ```sql
 CREATE TABLE idempotency_keys (
   key TEXT PRIMARY KEY,
+  committed BOOLEAN NOT NULL DEFAULT FALSE,
   seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_idempotency_seen_at ON idempotency_keys (seen_at);
@@ -255,12 +292,30 @@ class PostgresIdempotencyStore implements IdempotencyStore {
 
   async claim(key: string): Promise<boolean> {
     try {
+      // Inserts a tentative (committed = FALSE) row.
       await this.db.query(`INSERT INTO idempotency_keys(key) VALUES ($1)`, [key]);
       return true;
     } catch (err) {
       if (isUniqueViolation(err)) return false;
       throw err;
     }
+  }
+
+  async commit(key: string): Promise<void> {
+    // Idempotent upsert: commit even if the tentative row was lost to a crash.
+    await this.db.query(
+      `INSERT INTO idempotency_keys(key, committed) VALUES ($1, TRUE)
+       ON CONFLICT (key) DO UPDATE SET committed = TRUE`,
+      [key]
+    );
+  }
+
+  async release(key: string): Promise<void> {
+    // Only delete a still-tentative row; a committed key must survive.
+    await this.db.query(
+      `DELETE FROM idempotency_keys WHERE key = $1 AND committed = FALSE`,
+      [key]
+    );
   }
 }
 ```
@@ -346,11 +401,12 @@ Naming convention: the type is `Receiver` (PascalCase), the factory is `receiver
 |---:|---|---|
 | **204** | (empty) | Handler ran successfully, or dedup-skipped silently. Sender stops retrying. |
 | **400** | `{ "error": "missing-key" }` | No `Idempotency-Key` header |
+| **400** | `{ "error": "empty-body" }` | `secret` is set but the resolved raw body is empty — the raw-body parser isn't mounted (see below). Distinct from a signature failure so the misconfiguration is diagnosable. |
 | **401** | `{ "error": "missing-signature" \| "missing-timestamp" \| "stale" \| "future" \| "bad-signature" }` | Signature/timestamp verification failed |
 | **422** | `{ "error": "validation-failed", "detail": "..." }` | Schema rejected the body |
-| **500** | `{ "error": "handler-failed", "detail": "..." }` | Handler threw — sender retries |
+| **500** | `{ "error": "handler-failed", "detail": "..." }` | Handler threw — the claim is released, and the sender's retry re-processes |
 
-Successful first-time processing and dedup-skipped re-sends both return 204 — the sender treats both as "accepted, stop retrying." The receiver's logs distinguish them.
+Successful first-time processing and dedup-skipped re-sends both return 204 — the sender treats both as "accepted, stop retrying." The receiver's logs distinguish them. On a 500 the builder releases the tentative claim, so the sender's retry under the same `Idempotency-Key` re-runs the handler instead of being deduped into a silent success — a transient failure is never permanently lost.
 
 A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch verification + dedup work end-to-end.
 
@@ -417,14 +473,41 @@ app.post(
 
 Available for tRPC (`/receiver/trpc`), Express (`/receiver/express`), Fastify (`/receiver/fastify`), and Hono (`/receiver/hono`). Each exposes `webhookMiddleware(options)` that returns the framework's native middleware shape. Use these when the high-level `receiver` builder is too opinionated for your stack.
 
-For receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP) or with custom policy, the framework-agnostic core is also exported:
+**Finalizing the claim.** The `claim` a middleware makes is tentative (see [the port](#the-idempotencystore-port)) — it must be committed on success or released on failure, or a transient error re-runs the double-drop it's meant to prevent. The adapters that wrap the downstream chain finalize automatically: **Hono** and **tRPC** commit when the handler resolves with a 2xx / non-error result and release when it throws (or, for tRPC, returns `{ ok: false }`). **Express** and **Fastify** middleware complete *before* the route handler runs, so they can't observe its outcome — the route handler must call `req.idempotency.commit()` on success or `req.idempotency.release()` on a transient failure:
+
+```ts no-check
+app.post("/webhooks/orders", webhookMiddleware({ store, secret }), async (req, res) => {
+  const { key, deduped, commit, release } = req.idempotency;
+  if (deduped) return res.status(204).end(); // already processed — ack, no side effect
+  try {
+    await processOrder(req.body);
+    await commit();            // durable — later retries dedup
+    res.status(204).end();
+  } catch (err) {
+    await release();           // transient — the sender's retry re-processes
+    res.status(500).json({ error: "handler-failed" });
+  }
+});
+```
+
+Skipping both leaves the claim tentative: it still dedups a concurrent duplicate, but it expires on TTL, so the delivery is never permanently lost — it just isn't durably deduped either.
+
+For receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP) or with custom policy, the framework-agnostic core is also exported. `checkWebhook` claims tentatively; the caller owns commit/release:
 
 ```ts no-check
 import { checkWebhook } from "@rotorsoft/act-http/receiver";
 
 const result = await checkWebhook(req.headers, rawBody, { store, secret });
-if (!result.ok) reply(result.status, { error: result.reason });
-else handle({ key: result.key, deduped: result.deduped });
+if (!result.ok) return reply(result.status, { error: result.reason });
+if (result.deduped) return reply(204); // already processed
+try {
+  await handle({ key: result.key });
+  await store.commit(result.key);       // success — dedup future retries
+  reply(204);
+} catch (err) {
+  await store.release(result.key);      // transient — allow re-processing
+  reply(500, { error: "handler-failed" });
+}
 ```
 
 Swap `InMemoryIdempotencyStore` for a Redis or Postgres adapter — every layer above stays the same, because every adapter implements the same `IdempotencyStore` port.
@@ -489,6 +572,8 @@ Separating the reasons lets your dashboards distinguish "clients losing secrets"
 #### Why the receiver needs the raw body, not the parsed one
 
 The signature is over the bytes the sender wrote. Pre-parse normalization on the receiver — JSON re-stringification, whitespace trimming, key reordering — produces a different byte sequence, so the recomputed HMAC won't match. Framework adapters in #744 (tRPC / Express / Fastify / Hono) will provide the raw body alongside the parsed one; until then, capture the raw body in your framework's first middleware (`req.rawBody` in most ecosystems) and pass it to `verifyWebhook` directly.
+
+If the raw-body parser isn't mounted — a `secret` is configured but the default JSON parser (`express.json()`, Fastify's built-in) consumed the bytes, leaving nothing to hash — the Express and Fastify adapters short-circuit with a distinct `400 { "error": "empty-body" }` rather than computing an HMAC over an empty string and rejecting every valid request with a misleading `401 bad-signature`. The fix is to mount the raw parser: `app.use(express.raw({ type: "application/json" }))` on Express, or a `parseAs: "string"` content-type parser stashing `request.rawBody` on Fastify. (Hono's adapter reads `await c.req.text()` and is immune.)
 
 #### Timestamp window sizing
 

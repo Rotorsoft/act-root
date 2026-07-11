@@ -62,6 +62,19 @@ describe("resolveSseConfig", () => {
       resolveSseConfig({ channel, heartbeatMs: Number.NaN })
     ).toThrow();
   });
+
+  it("rejects fractional maxConnections", () => {
+    // 500.5 would let the counter admit 501 for a '500' cap.
+    expect(() =>
+      resolveSseConfig({ channel, maxConnections: 500.5 })
+    ).toThrow();
+  });
+
+  it("rejects fractional heartbeatMs", () => {
+    expect(() =>
+      resolveSseConfig({ channel, heartbeatMs: 30_000.5 })
+    ).toThrow();
+  });
 });
 
 describe("SseConnectionCounter", () => {

@@ -1,3 +1,34 @@
+# [@rotorsoft/act-v1.22.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.7...@rotorsoft/act-v1.22.8) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** per-pool jsonb parser, names:[]/before guards, TCK + docs (ACT-1198/1199) ([1043227](https://github.com/rotorsoft/act-root/commit/10432274edc0ce583563d0902056fd6d6ed7955c)), closes [#1197](https://github.com/rotorsoft/act-root/issues/1197) [#1199](https://github.com/rotorsoft/act-root/issues/1199)
+* **act:** honor names:[] and falsy-zero before/after in query (ACT-1199) ([c78e57b](https://github.com/rotorsoft/act-root/commit/c78e57b04a71326d47c39a77263aecfa2fbdf27a))
+
+# [@rotorsoft/act-v1.22.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.6...@rotorsoft/act-v1.22.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** mark sensitive() action-input fields in the openapi request schema ([#1228](https://github.com/rotorsoft/act-root/issues/1228)) ([003eea2](https://github.com/rotorsoft/act-root/commit/003eea2bfd97c35641ee585a0a26cab40fa1c564))
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
+# [@rotorsoft/act-v1.22.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.5...@rotorsoft/act-v1.22.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** open autoclose window at the DST spring-forward gap instant ([acf00f3](https://github.com/rotorsoft/act-root/commit/acf00f3308a75cca6f742530a6a95eb373ecf599))
+* **act:** reject leading-zero event versions that collide with the canonical form ([4089364](https://github.com/rotorsoft/act-root/commit/4089364d710c12689f486a0cb511272b680d6434))
+
+# [@rotorsoft/act-v1.22.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.4...@rotorsoft/act-v1.22.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** restore regex claim sources with a literal fast-path ([3abd00d](https://github.com/rotorsoft/act-root/commit/3abd00d53848948aa0d7a59a4884a47a0e6000eb)), closes [#1215](https://github.com/rotorsoft/act-root/issues/1215) [#1215](https://github.com/rotorsoft/act-root/issues/1215)
+
 # [@rotorsoft/act-v1.22.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.3...@rotorsoft/act-v1.22.4) (2026-07-10)
 
 

@@ -32,16 +32,38 @@
  * On failure: responds with the framework-idiomatic JSON shape
  * `{ error: <reason> }` at status 400 (missing-key) or 401
  * (verification failures), and does not call `next()`. On success:
- * attaches `req.idempotency = { key, deduped }` and calls `next()`.
+ * attaches `req.idempotency = { key, deduped, commit, release }` and
+ * calls `next()`.
+ *
+ * **Two-phase dedup**: the claim is *tentative*. Express runs the
+ * middleware to completion before the route handler, so — unlike the
+ * Hono adapter — it can't observe the handler's outcome to finalize
+ * automatically. The route handler **must** call
+ * `req.idempotency.commit()` on success or `req.idempotency.release()`
+ * on a transient failure. Skipping both leaves the claim tentative:
+ * it dedups concurrent duplicates but expires on TTL, so the delivery
+ * is never permanently lost — it just isn't durably deduped either.
  *
  * **Raw body requirement**: when `secret` is configured, mount
  * `express.raw({ type: "application/json" })` (or whatever
  * content-type your webhooks use) ahead of the receiver middleware.
  * The middleware reads `req.body` as a `Buffer | string` and converts
- * to a UTF-8 string for hashing. Skip when unsigned.
+ * to a UTF-8 string for hashing. Skip when unsigned. If the raw parser
+ * isn't mounted (the default `express.json()` ate the bytes, leaving a
+ * parsed object the adapter can't hash), the middleware short-circuits
+ * with `400 { error: "empty-body" }` instead of hashing an empty string
+ * and rejecting every valid request with a misleading `401
+ * bad-signature`.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type Finalizers, make_finalizers } from "../finalize.js";
+
+/** Shape attached to `req.idempotency` by the Express adapter. */
+export type ExpressIdempotency = {
+  key: string;
+  deduped: boolean;
+} & Finalizers;
 
 /**
  * Build an Express middleware that verifies the request signature
@@ -66,11 +88,16 @@ export function webhookMiddleware(
       res.status(result.status).json({ error: result.reason });
       return;
     }
-    (
-      req as Request & { idempotency: { key: string; deduped: boolean } }
-    ).idempotency = {
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    (req as Request & { idempotency: ExpressIdempotency }).idempotency = {
       key: result.key,
       deduped: result.deduped,
+      commit,
+      release,
     };
     next();
   };

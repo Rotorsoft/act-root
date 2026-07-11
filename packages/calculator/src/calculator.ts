@@ -75,6 +75,16 @@ const compute = (
       Number.parseFloat(left),
       Number.parseFloat(right)
     );
+    // A calculator must never fold an un-representable number into its
+    // state: division by zero yields ±Infinity, and a malformed operand
+    // (an empty, "." or "-" string) parses to NaN. Either would land in
+    // `result`, and `left = result.toString()` would re-inject
+    // "Infinity"/"NaN" into the input so it compounds on the next digit —
+    // and every consumer of `result` blocks on a ValidationError because
+    // `z.number()` rejects non-finite values. Reset to a clean zero
+    // instead, carrying the pending operator through.
+    if (!Number.isFinite(result))
+      return { result: 0, left: undefined, right: undefined, operator: new_op };
     return {
       result,
       left: result.toString(),

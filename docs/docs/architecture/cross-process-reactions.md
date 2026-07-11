@@ -100,6 +100,18 @@ backoff, so an unrelated blip later starts fresh. Disposal (`dispose()` or
 a re-subscribe) cancels any pending reconnect, so a reconnect never fires
 after teardown.
 
+A subtlety the teardown has to respect: a node-postgres socket routinely
+emits `error` **more than once** on the way down — the in-flight `LISTEN`
+rejection first, then the `ECONNRESET`/`end` that follows. If the dead
+client were ever left without an `error` listener during the backoff
+window, that second emission would re-raise as an uncaught exception — the
+exact crash the self-heal set out to prevent. So the reconnect never
+strips the dead client bare: it swaps the live handler for a swallow
+listener that stays attached through `release(true)`. The re-entrant path
+is guarded the same way — a second trigger while a reconnect timer is
+already pending cancels the pending timer before scheduling, so two timers
+never race to re-`LISTEN` on two fresh clients.
+
 This makes `notify` durable across the connection blips that are routine
 in managed Postgres (patching windows, failovers) without operator
 intervention — the subscription that was healthy before the blip is

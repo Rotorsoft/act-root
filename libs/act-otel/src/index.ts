@@ -21,8 +21,43 @@ import type {
   Schemas,
   Snapshot,
 } from "@rotorsoft/act";
-import { Counter, Gauge, type Registry, register } from "prom-client";
+import { log } from "@rotorsoft/act";
+import {
+  Counter,
+  type CounterConfiguration,
+  Gauge,
+  type GaugeConfiguration,
+  type Registry,
+  register,
+} from "prom-client";
 import { z } from "zod";
+
+/**
+ * Register a metric idempotently. A second {@link instrument} call on the
+ * same registry reuses the already-registered metric of that name rather
+ * than throwing prom-client's "already been registered" — which would
+ * leave the registration half-done. See {@link instrument} for why one
+ * registry can carry more than one bridge.
+ */
+function counter_on(
+  registry: Registry,
+  config: CounterConfiguration<string>
+): Counter {
+  return (
+    (registry.getSingleMetric(config.name) as Counter | undefined) ??
+    new Counter(config)
+  );
+}
+
+function gauge_on(
+  registry: Registry,
+  config: GaugeConfiguration<string>
+): Gauge {
+  return (
+    (registry.getSingleMetric(config.name) as Gauge | undefined) ??
+    new Gauge(config)
+  );
+}
 
 /**
  * The slice of a built Act the bridge needs — kept structural (same
@@ -113,6 +148,23 @@ function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
  * `act_streams_blocked` and `act_errors_total{circuit="open"}` growth are
  * page-worthy; the rest are dashboard material.
  *
+ * **Scrape resilience.** The `act_streams_blocked` gauge reads
+ * `blocked_streams()` inside its per-scrape `collect()`. A rejection there
+ * (a degraded store) is swallowed and logged via the {@link Logger} port —
+ * the gauge keeps its last value and every other metric still scrapes.
+ * prom-client would otherwise reject the whole `registry.metrics()` if any
+ * `collect()` rejected, blinding the dashboard exactly when the store is in
+ * trouble.
+ *
+ * **Idempotent registration.** Calling `instrument` twice against the same
+ * registry is safe: each metric is registered idempotently (an existing
+ * metric of that name is reused rather than re-created), so a second bridge
+ * shares the counters instead of throwing prom-client's "already been
+ * registered". The two bridges then feed the same metrics. Disposing either
+ * removes the shared metrics from the registry — call each returned
+ * disposer when tearing the app down, and treat one registry as backing one
+ * logical bridge even if you constructed it in two calls.
+ *
  * Returns a {@link Disposer} that unsubscribes the listeners and removes
  * the metrics from the registry — hand it to Act's `dispose(...)` registry
  * so Ctrl-C tears the bridge down with everything else:
@@ -145,59 +197,67 @@ export function instrument(
   const p = config.prefix;
   const registers = [registry];
 
-  const committed = new Counter({
+  const committed = counter_on(registry, {
     name: `${p}events_committed_total`,
     help: "Events committed, by event name",
     labelNames: ["name"],
     registers,
   });
-  const acked = new Counter({
+  const acked = counter_on(registry, {
     name: `${p}reactions_acked_total`,
     help: "Reaction stream acks, by lane",
     labelNames: ["lane"],
     registers,
   });
-  const blocked = new Counter({
+  const blocked = counter_on(registry, {
     name: `${p}reactions_blocked_total`,
     help: "Reaction streams blocked by poison messages, by lane",
     labelNames: ["lane"],
     registers,
   });
-  const settled = new Counter({
+  const settled = counter_on(registry, {
     name: `${p}settled_total`,
     help: "Settle cycles reaching quiescence",
     registers,
   });
-  const closed = new Counter({
+  const closed = counter_on(registry, {
     name: `${p}streams_closed_total`,
     help: "Streams closed (tombstoned/truncated)",
     registers,
   });
-  const forgotten = new Counter({
+  const forgotten = counter_on(registry, {
     name: `${p}events_forgotten_total`,
     help: "Events whose PII was erased via forget",
     registers,
   });
-  const notified = new Counter({
+  const notified = counter_on(registry, {
     name: `${p}notifications_total`,
     help: "Cross-process commit notifications received",
     registers,
   });
-  const errors = new Counter({
+  const errors = counter_on(registry, {
     name: `${p}errors_total`,
     help: "Store/drain errors surfaced to the circuit breaker, by circuit state",
     labelNames: ["circuit"],
     registers,
   });
-  const blocked_gauge = new Gauge({
+  const blocked_gauge = gauge_on(registry, {
     name: `${p}streams_blocked`,
     help: "Streams currently blocked (evaluated per scrape; page on > 0)",
     registers,
     async collect() {
-      const streams = await app.blocked_streams({
-        limit: config.blockedStreamsLimit,
-      });
-      this.set(streams.length);
+      // A blocked_streams() rejection (degraded store) must not poison the
+      // whole scrape — prom-client rejects registry.metrics() if any
+      // collect() rejects, blinding every other metric. Swallow it here,
+      // leave the gauge at its last value, and log via the Logger port.
+      try {
+        const streams = await app.blocked_streams({
+          limit: config.blockedStreamsLimit,
+        });
+        this.set(streams.length);
+      } catch (error) {
+        log().error(error as Error);
+      }
     },
   });
 

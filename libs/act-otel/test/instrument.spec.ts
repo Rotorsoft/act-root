@@ -200,4 +200,60 @@ describe("instrument", () => {
     expect(seen).toEqual([DEFAULT_BLOCKED_STREAMS_LIMIT]);
     await dispose();
   });
+
+  test("a blocked_streams rejection does not poison the whole scrape", async ({
+    app,
+  }) => {
+    const registry = new Registry();
+    const surface = {
+      on: app.on.bind(app),
+      off: app.off.bind(app),
+      blocked_streams: async () => {
+        throw new Error("store degraded");
+      },
+    };
+    const dispose = instrument(surface as never, { registry });
+
+    // Drive a real counter so we can assert the rest of the scrape survives.
+    app.emit("settled", { fetched: [], leased: [], acked: [], blocked: [] });
+
+    // The whole registry.metrics() must still RESOLVE despite the gauge's
+    // collect() rejecting — otherwise a degraded store blinds every metric.
+    const scrape = await registry.metrics();
+    expect(scrape).toContain("act_settled_total 1");
+    expect(await value(registry, "act_settled_total")).toBe(1);
+
+    await dispose();
+  });
+
+  test("a second instrument() on the same registry is idempotent", async ({
+    app,
+  }) => {
+    const registry = new Registry();
+    // Two independent app surfaces sharing one registry — e.g. two Acts in
+    // one process both exporting to the same /metrics endpoint. Each surface
+    // captures its own "settled" listener so we can fire them separately.
+    const settled: Array<() => void> = [];
+    const makeSurface = () => ({
+      on: (event: string, listener: () => void) => {
+        if (event === "settled") settled.push(listener);
+      },
+      off: () => {},
+      blocked_streams: async () => [],
+    });
+    void app;
+
+    const dispose1 = instrument(makeSurface() as never, { registry });
+    // Second bridge on the same registry must NOT throw
+    // 'already been registered'; it reuses the existing metrics.
+    const dispose2 = instrument(makeSurface() as never, { registry });
+
+    // Each bridge attached its own settled listener to its own surface.
+    for (const l of settled) l();
+    // Both apps' settled events increment the one shared counter.
+    expect(await value(registry, "act_settled_total")).toBe(2);
+
+    await dispose1();
+    await dispose2();
+  });
 });

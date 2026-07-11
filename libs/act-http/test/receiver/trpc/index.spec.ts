@@ -21,14 +21,75 @@ describe("webhookMiddleware (tRPC)", () => {
       },
       next,
     });
-    expect(next).toHaveBeenCalledWith({
-      ctx: {
-        headers: { "idempotency-key": "req-1" },
-        rawBody: BODY,
-        idempotency: { key: "req-1", deduped: false },
+    const call = next.mock.calls[0] as unknown as [
+      {
+        ctx: {
+          headers: unknown;
+          rawBody: unknown;
+          idempotency: {
+            key: string;
+            deduped: boolean;
+            commit: () => unknown;
+            release: () => unknown;
+          };
+        };
       },
-    });
+    ];
+    expect(call[0].ctx.headers).toEqual({ "idempotency-key": "req-1" });
+    expect(call[0].ctx.rawBody).toBe(BODY);
+    expect(call[0].ctx.idempotency.key).toBe("req-1");
+    expect(call[0].ctx.idempotency.deduped).toBe(false);
+    expect(typeof call[0].ctx.idempotency.commit).toBe("function");
+    expect(typeof call[0].ctx.idempotency.release).toBe("function");
     expect(result).toEqual({ status: "processed" });
+  });
+
+  it("commits on a resolved resolver — a retry after success dedups", async () => {
+    const store = freshStore();
+    const headers = { "idempotency-key": "req-commit" };
+    const okNext = vi.fn(async () => ({ ok: true, data: 1 }));
+    const middleware = webhookMiddleware({ store });
+    await middleware({ ctx: { headers, rawBody: BODY }, next: okNext });
+    // Retry after success — deduped, downstream not entered again.
+    const retryNext = vi.fn(async () => ({ ok: true }));
+    await middleware({ ctx: { headers, rawBody: BODY }, next: retryNext });
+    const args = retryNext.mock.calls[0] as unknown as [
+      { ctx: { idempotency: { deduped: boolean } } },
+    ];
+    expect(args[0].ctx.idempotency.deduped).toBe(true);
+  });
+
+  it("releases when the resolver throws — a retry after failure re-processes", async () => {
+    const store = freshStore();
+    const headers = { "idempotency-key": "req-throw" };
+    const boom = vi.fn(async () => {
+      throw new Error("transient outage");
+    });
+    const middleware = webhookMiddleware({ store });
+    await expect(
+      middleware({ ctx: { headers, rawBody: BODY }, next: boom })
+    ).rejects.toThrow("transient outage");
+    // Retry after the release — the key is fresh again.
+    const retryNext = vi.fn(async () => ({ ok: true }));
+    await middleware({ ctx: { headers, rawBody: BODY }, next: retryNext });
+    const args = retryNext.mock.calls[0] as unknown as [
+      { ctx: { idempotency: { deduped: boolean } } },
+    ];
+    expect(args[0].ctx.idempotency.deduped).toBe(false);
+  });
+
+  it("releases when the resolver returns { ok: false } — a retry re-processes", async () => {
+    const store = freshStore();
+    const headers = { "idempotency-key": "req-not-ok" };
+    const notOk = vi.fn(async () => ({ ok: false }));
+    const middleware = webhookMiddleware({ store });
+    await middleware({ ctx: { headers, rawBody: BODY }, next: notOk });
+    const retryNext = vi.fn(async () => ({ ok: true }));
+    await middleware({ ctx: { headers, rawBody: BODY }, next: retryNext });
+    const args = retryNext.mock.calls[0] as unknown as [
+      { ctx: { idempotency: { deduped: boolean } } },
+    ];
+    expect(args[0].ctx.idempotency.deduped).toBe(false);
   });
 
   it("injects deduped: true on a re-claim", async () => {

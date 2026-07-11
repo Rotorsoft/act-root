@@ -49,9 +49,26 @@ const logger: Logger = log();
 const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\]";
 
 const { Pool, types } = pg;
-types.setTypeParser(types.builtins.JSONB, (val) =>
-  JSON.parse(val, dateReviver)
-);
+
+/**
+ * Per-Pool type parser (#1198). Overrides ONLY the JSONB parser to revive
+ * ISO-date strings in event payloads to `Date`, delegating every other
+ * OID to pg's global default. Passed as the Pool's `types` option so the
+ * Date coercion is scoped to this store's connections — it never mutates
+ * the process-global `pg.types` registry, so a host app's other pg usage
+ * (Drizzle projections, ad-hoc queries) reads jsonb with the stock
+ * parser. This is the shape pg threads down to each pooled client.
+ */
+const JSONB_OID = types.builtins.JSONB;
+const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
+  getTypeParser: ((oid: number, format?: unknown) =>
+    oid === JSONB_OID
+      ? (val: string) => JSON.parse(val, dateReviver)
+      : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
+          oid,
+          format
+        )) as typeof types.getTypeParser,
+};
 
 type Config = Readonly<{
   schema: string;
@@ -140,6 +157,11 @@ const NOTIFY_MAX_PAYLOAD_BYTES = 8000;
 // drain cycle for cross-process wakeups until the LISTEN client is back.
 const NOTIFY_RECONNECT_BASE_MS = 250;
 const NOTIFY_RECONNECT_MAX_MS = 30_000;
+
+// Keeps a destroyed LISTEN client from re-raising a late socket `error` as an
+// uncaught exception. Attached to the dead client through `release(true)` so it
+// is never listener-less during the reconnect backoff window (#1231).
+const swallow_error = (): void => {};
 
 function notify_channel(schema: string, table: string): string {
   return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
@@ -390,7 +412,8 @@ export class PostgresStore implements Store {
       pii_encryption: ___,
       ...poolConfig
     } = this.config;
-    this._pool = new Pool(poolConfig);
+    // Per-Pool JSONB reviver (#1198): scoped here, never global.
+    this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
@@ -711,11 +734,17 @@ export class PostgresStore implements Store {
             : `stream ~ $${values.length}`
         );
       }
-      if (names?.length) {
+      if (names !== undefined) {
+        // #1199: `names: []` means "match no event names" — an empty
+        // allow-list. `name = ANY('{}')` is always false, matching the
+        // InMemory/SQLite semantics. Historically a truthy `names?.length`
+        // guard dropped the empty filter and returned ALL — the opposite.
         values.push(names);
         conditions.push(`name = ANY($${values.length})`);
       }
-      if (before) {
+      if (before !== undefined) {
+        // #1199: `!== undefined` so a falsy-zero `before: 0` (strictly
+        // "id < 0", i.e. match nothing) is honored, not dropped.
         values.push(before);
         conditions.push(`id<$${values.length}`);
       }
@@ -1469,7 +1498,7 @@ export class PostgresStore implements Store {
       values.push(query.after);
       conditions.push(`stream > $${values.length}`);
     }
-    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM ${this._fqs}`;
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM ${this._fqs}`;
     if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += ` ORDER BY stream LIMIT $${values.length}`;
@@ -1488,6 +1517,7 @@ export class PostgresStore implements Store {
           leased_until: Date | null;
           priority: number;
           lane: string;
+          deferred_at: Date | null;
         }>(sql, values),
         client.query<{ m: number | null }>(
           `SELECT COALESCE(MAX(id), -1) AS m FROM ${this._fqt}`
@@ -1507,6 +1537,9 @@ export class PostgresStore implements Store {
           leased_by: row.leased_by ?? undefined,
           leased_until: row.leased_until ?? undefined,
           lane: row.lane,
+          // Persisted as timestamptz; surface as ms since epoch (#1221) so
+          // the cold-start re-seed can re-arm the drain at the due-time.
+          deferred_at: row.deferred_at ? row.deferred_at.getTime() : undefined,
         });
         count++;
       }
@@ -1955,18 +1988,31 @@ export class PostgresStore implements Store {
     // `_teardown_listen` runs, but the error already fired, so just drop
     // it — do not run UNLISTEN on a broken connection.
     if (this._listen_client) {
-      this._listen_client.removeListener("notification", this._listen_handler!);
-      this._listen_client.removeListener("error", this._listen_error_handler!);
+      const dead = this._listen_client;
+      dead.removeListener("notification", this._listen_handler!);
+      dead.removeListener("error", this._listen_error_handler!);
+      // A node-postgres socket routinely emits `error` more than once on
+      // teardown (in-flight LISTEN rejection, then the ECONNRESET/end that
+      // follows). `release(true)` destroys the connection but does not
+      // synchronously silence the socket, so the client must never be
+      // listener-less: an unhandled second `error` re-raises as an uncaught
+      // exception — the exact process crash #1189 fixed (#1231). Attach a
+      // swallow listener that lives until the destroyed client is GC'd.
+      dead.on("error", swallow_error);
       this._listen_handler = undefined;
       this._listen_error_handler = undefined;
-      this._listen_client.release(true);
       this._listen_client = undefined;
+      dead.release(true);
     }
     const delay = Math.min(
       NOTIFY_RECONNECT_MAX_MS,
       NOTIFY_RECONNECT_BASE_MS * 2 ** this._reconnect_attempts
     );
     this._reconnect_attempts++;
+    // A second error (or the recursive `.catch` reconnect) must not leave two
+    // live timers racing to re-LISTEN — cancel any pending one before we
+    // reassign. `_teardown_listen` clears it on disposal.
+    if (this._reconnect_timer) clearTimeout(this._reconnect_timer);
     this._reconnect_timer = setTimeout(() => {
       this._reconnect_timer = undefined;
       // Re-check: disposal may have won the race after the timer fired.

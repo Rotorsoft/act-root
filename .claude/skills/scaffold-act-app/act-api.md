@@ -491,25 +491,36 @@ type Emitted<E> = [EventName, EventData];
 2. `snapshot` — Has `.state` (current state), `.patches` (event count), `.snaps` (snapshot count), `.event` (last event)
 3. `target` — Has `.stream` (stream ID), `.actor` (actor object with `.id` and `.name`, plus any fields from `withActor<T>()`)
 
-## 10. store().seed() — Test Isolation
+## 10. Test Isolation — fixture() / sandbox()
+
+Pass the **unbuilt builder** (`act().withState(...)` without `.build()`) to `fixture` or `sandbox` from `@rotorsoft/act/test`. Each call constructs a fresh InMemoryStore + InMemoryCache, seeds the store, and builds a scoped Act — no manual `store().seed()` needed.
+
+**`fixture(builder)` — the common case.** Returns a vitest `test` instance with an `app` fixture. Per-test isolation, auto-cleanup, and parallel-safe under `test.concurrent`:
 
 ```typescript
-import { store, dispose } from "@rotorsoft/act";
+import { fixture } from "@rotorsoft/act/test";
+import { itemBuilder, Item } from "../src/index.js";
 
-beforeEach(async () => {
-  await store().seed();
-  clearItems();           // also reset in-memory projections
-  clearUsers();           // each projection needs its own clear
-});
+const test = fixture(itemBuilder);
 
-afterAll(async () => {
-  await dispose()();      // disposes all adapters (store, cache, etc.)
+test("creates an item", async ({ app }) => {
+  await app.do("CreateItem", target(), { name: "Test" });
+  const snap = await app.load(Item, target().stream);
+  expect(snap.state.name).toBe("Test");
 });
 ```
 
-`seed()` initializes or resets the store. For InMemoryStore, call it in `beforeEach` (or `beforeAll`) to ensure a clean state between tests. For PostgresStore, it creates necessary tables and indexes. `dispose()()` cleans up all registered adapters (store, cache, and any custom disposers) — the cache is cleared automatically during disposal.
+**`sandbox(builder)` — `beforeAll`-shared or multi-Act setups.** Returns `{ app, store, cache, dispose }`. Use it when you need the store/cache handles or want to wire once in `beforeAll`. `dispose()` runs `app.shutdown()` + store/cache dispose and is idempotent:
 
-**Projection cleanup**: In-memory projections (Maps, arrays) persist across tests. Export `clear*()` functions from each projection module and call them in `beforeEach` alongside `store().seed()`.
+```typescript
+import { sandbox } from "@rotorsoft/act/test";
+
+const { app, dispose } = await sandbox(itemBuilder);
+// ...
+await dispose();
+```
+
+**Projection cleanup**: In-memory projections (Maps, arrays) live outside the store, so a fresh sandbox does not reset them. Export `clear*()` functions from each projection module and call them at the start of each test (or in a `beforeEach`):
 
 ```typescript
 // In projection module
@@ -518,19 +529,16 @@ const items = new Map<string, ItemView>();
 export function clearItems() { items.clear(); }
 
 // In test file
-beforeEach(async () => {
-  await store().seed();
+const test = fixture(itemBuilder);
+
+test("builds the read model", async ({ app }) => {
   clearItems();
   clearOrders();
-  clearUsers();
-});
-
-afterAll(async () => {
-  await dispose()();  // cleans up store, cache, and all adapters
+  // ... exercise app, then assert on getItems()
 });
 ```
 
-**Port pattern:** `store()` and `cache()` return the current adapters (defaults to InMemoryStore and InMemoryCache). To switch adapters:
+**Port pattern:** `store()` and `cache()` return the current singleton adapters (defaults to InMemoryStore and InMemoryCache). To switch adapters app-wide:
 ```typescript
 import { store, cache } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
@@ -544,6 +552,15 @@ await store().seed();                         // initializes it
 // For distributed deployments, replace the cache:
 cache(new RedisCache({ /* config */ }));      // sets the cache adapter
 ```
+
+For **per-test** PG/SQLite isolation, don't touch the singleton — pass a factory to the sandbox instead, so each test gets its own fresh adapter:
+```typescript
+const test = fixture(itemBuilder, {
+  store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
+});
+```
+
+Legacy `store().seed()` in `beforeEach` + `dispose()()` in `afterAll` remains valid only for tests that exercise the singleton port mechanism itself.
 
 ## 11. Cache Port — Always-On State Caching
 

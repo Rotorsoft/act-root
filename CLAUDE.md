@@ -57,9 +57,9 @@ pnpm dev:http         # multi-transport demo (trpc + hono rest + openapi) — se
 
 vitest                                                # watch mode
 pnpm -F calculator test                               # one package
-vitest packages/calculator/src/__tests__/calculator.test.ts  # one file
+npx vitest run packages/calculator/test/invariants.spec.ts   # one file
 
-pnpm -F shared drizzle:migrate   # migrations (also auto-run before tests)
+pnpm -F wolfdesk drizzle:migrate   # wolfdesk migrations (its tests also self-migrate)
 
 pnpm act                                  # interactive contracts explorer (current dir)
 pnpm act packages/wolfdesk                # explore a specific package
@@ -68,7 +68,7 @@ pnpm act -q TicketOpened                  # non-interactive: print one entity, e
 
 ## Important Constraints
 
-- **Node ≥ 22.18.0**, **pnpm ≥ 10.32.1** (not npm/yarn)
+- **Node ≥ 22.23.1**, **pnpm ≥ 11.9.0** (not npm/yarn)
 - TypeScript strict mode everywhere
 - All actions, events, and state require Zod schemas
 - Events are immutable — never mutate event data; evolve via [versioned event names](docs/docs/architecture/event-schema-evolution.md)

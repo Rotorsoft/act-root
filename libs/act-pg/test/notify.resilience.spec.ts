@@ -208,4 +208,120 @@ describe("PostgresStore LISTEN client resilience (#1189)", () => {
     expect(pool.clients[1].released).toBe(false);
     await store.dispose();
   });
+
+  // #1231: a node-postgres socket routinely emits `error` more than once on
+  // teardown (in-flight LISTEN rejection + socket ECONNRESET/end). The
+  // reconnect must never leave the dead client without an `error` listener
+  // during the backoff window, or the second emission re-raises as an
+  // uncaught exception — the exact process crash #1189 fixed.
+  it("a SECOND error on the dead client during the backoff window does not crash the process", async () => {
+    const { store, pool } = makeStore();
+    await store.notify!(() => {});
+    const first = pool.clients[0];
+
+    // First error: schedules the reconnect and detaches the original
+    // handler. The dead client must still carry *some* `error` listener.
+    first.emit("error", new Error("in-flight LISTEN rejection"));
+    expect(first.released).toBe(true);
+    expect(first.listenerCount("error")).toBeGreaterThan(0);
+
+    // Second error during the backoff window — sockets emit this on the
+    // ECONNRESET/end that follows. It must NOT re-raise as uncaught.
+    expect(() =>
+      first.emit("error", new Error("socket ECONNRESET"))
+    ).not.toThrow();
+
+    // The second error must not have triggered a second reconnect schedule.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pool.connect).toHaveBeenCalledTimes(2);
+
+    await store.dispose();
+  });
+
+  it("repeated reconnect cycles return the checked-out and listener counts to baseline (no leak, no double-subscribe)", async () => {
+    const { store, pool } = makeStore();
+    await store.notify!(() => {});
+
+    // Drive several full reconnect cycles.
+    for (let cycle = 0; cycle < 4; cycle++) {
+      const live = pool.clients[pool.clients.length - 1];
+      live.emit("error", new Error(`blip ${cycle}`));
+      // Healthy reconnect resets backoff, so each cycle is the base delay.
+      await vi.advanceTimersByTimeAsync(500);
+    }
+
+    // One fresh client per cycle plus the original = 5 checkouts.
+    expect(pool.connect).toHaveBeenCalledTimes(5);
+
+    // Every dead client is released; exactly one live client remains.
+    const live = pool.clients[pool.clients.length - 1];
+    const released = pool.clients.filter((c) => c.released);
+    expect(released).toHaveLength(pool.clients.length - 1);
+    expect(live.released).toBe(false);
+
+    // The live client carries exactly one `error` and one `notification`
+    // listener — no accumulation across cycles (no double-subscribe).
+    expect(live.listenerCount("error")).toBe(1);
+    expect(live.listenerCount("notification")).toBe(1);
+
+    // No timer left pending after the cycles settle.
+    expect(
+      (store as unknown as { _reconnect_timer: unknown })._reconnect_timer
+    ).toBeUndefined();
+
+    await store.dispose();
+  });
+
+  it("a re-entrant reconnect cancels the pending timer instead of leaking a second one (no double-LISTEN)", async () => {
+    const { store, pool } = makeStore();
+    await store.notify!(() => {});
+
+    // First error schedules a reconnect timer. `_listen_client` is now
+    // undefined, so a second socket error routes to the swallow listener and
+    // cannot re-enter `_reconnect`. The re-entrant guard exists for the
+    // hardened case where `_reconnect` runs again while a timer is still live
+    // — drive it directly and capture the timer identity before and after.
+    pool.clients[0].emit("error", new Error("down"));
+    const internals = store as unknown as {
+      _reconnect: () => void;
+      _reconnect_timer: ReturnType<typeof setTimeout>;
+    };
+    const firstTimer = internals._reconnect_timer;
+    expect(firstTimer).toBeDefined();
+
+    internals._reconnect();
+    const secondTimer = internals._reconnect_timer;
+    // A fresh timer replaced the old one — the guard cleared the first so two
+    // do not race to re-LISTEN.
+    expect(secondTimer).not.toBe(firstTimer);
+
+    // Exactly one reconnect fires despite two schedules.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(pool.connect).toHaveBeenCalledTimes(2);
+
+    await store.dispose();
+  });
+
+  it("dispose during a pending reconnect fires no reconnect and leaves no client checked out", async () => {
+    const { store, pool } = makeStore();
+    await store.notify!(() => {});
+    const first = pool.clients[0];
+
+    first.emit("error", new Error("down"));
+    expect(pool.connect).toHaveBeenCalledTimes(1);
+
+    // Dispose while the reconnect timer is pending.
+    await store.dispose();
+
+    // No reconnect fires after teardown.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(pool.connect).toHaveBeenCalledTimes(1);
+
+    // The dead client is released; no new client was checked out.
+    expect(first.released).toBe(true);
+    expect(pool.clients).toHaveLength(1);
+    expect(
+      (store as unknown as { _reconnect_timer: unknown })._reconnect_timer
+    ).toBeUndefined();
+  });
 });

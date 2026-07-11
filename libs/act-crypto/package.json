@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-crypto",
   "type": "module",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Authenticated envelope encryption helper for act adapters",
   "keywords": [
     "typescript",

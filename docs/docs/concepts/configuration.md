@@ -295,6 +295,8 @@ act()
 
 This is an escape hatch, not the primary path. A single process with multiple declared lanes already gets fast-lane responsiveness — `Act._drainAll` runs every controller's drain in parallel, so a slow lane's in-flight handler doesn't block a fast lane's claim. `onlyLanes` is for the cases where you want hardware isolation (different CPU/memory per lane) on top of that.
 
+Because no single `onlyLanes`-filtered instance drains every lane, the correctness burden shifts to the cluster: the union of every worker's `onlyLanes` must cover every declared lane (`∪ onlyLanes ⊇ declared lanes`), or a lane ends up with no controller anywhere and its streams stall. To surface a half-configured rollout, an instance whose `onlyLanes` excludes a declared lane logs a one-line startup advisory naming the orphaned lane(s) — expected per instance on a sharded cluster, a bug only when the same lane is orphaned by every instance. See [Production checklist → Sizing lanes](../guides/production-checklist.md) for how to reconcile the advisories.
+
 ## Port/Adapter Pattern
 
 Infrastructure concerns (logging, storage, caching) use singleton adapters injected via port functions. All three ports follow the same pattern — first call wins, with a sensible default:

@@ -43,11 +43,21 @@ export type InMemoryIdempotencyStoreOptions = {
  * - The oldest entry sits at `keys().next().value` (cheapest to evict).
  * - GC walks until the first non-expired entry and stops.
  *
+ * Each entry carries a `committed` flag so the two-phase contract
+ * holds: {@link claim} records a tentative entry (dedups concurrent
+ * duplicates but is droppable), {@link commit} marks it durable, and
+ * {@link release} drops it only while still tentative. GC treats
+ * tentative and committed entries identically — both expire on TTL,
+ * so a claim that neither committed nor released (the process died
+ * mid-handler) still frees the key when the window elapses.
+ *
  * `claim` is sync; durable adapters return a `Promise<boolean>` —
  * both satisfy the union return type in the port.
  */
+type IdemEntry = { expires_at: number; committed: boolean };
+
 export class InMemoryIdempotencyStore implements IdempotencyStore {
-  private readonly _seen = new Map<string, number>();
+  private readonly _seen = new Map<string, IdemEntry>();
   private readonly _ttl_ms: number;
   private readonly _max_entries: number;
 
@@ -63,14 +73,27 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   claim(key: string, now: number = Date.now()): boolean {
     this._gc(now);
     if (this._seen.has(key)) return false;
-    this._seen.set(key, now + this._ttl_ms);
+    this._record(key, now, false);
+    return true;
+  }
+
+  commit(key: string, now: number = Date.now()): void {
+    this._record(key, now, true);
+  }
+
+  release(key: string): void {
+    const entry = this._seen.get(key);
+    if (entry !== undefined && !entry.committed) this._seen.delete(key);
+  }
+
+  private _record(key: string, now: number, committed: boolean): void {
+    this._seen.set(key, { expires_at: now + this._ttl_ms, committed });
     if (this._seen.size > this._max_entries) {
       // Safe by construction: `_seen.size > _max_entries >= 0` implies at
       // least one entry, so `.next().value` resolves to a string key.
       const oldest = this._seen.keys().next().value as string;
       this._seen.delete(oldest);
     }
-    return true;
   }
 
   /** Number of entries currently tracked (post-GC at call time). */
@@ -85,8 +108,8 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   }
 
   private _gc(now: number): void {
-    for (const [key, expires_at] of this._seen) {
-      if (expires_at > now) break;
+    for (const [key, entry] of this._seen) {
+      if (entry.expires_at > now) break;
       this._seen.delete(key);
     }
   }

@@ -4,7 +4,7 @@
  * tests assert directly on the returned doc structure plus a stable
  * snapshot for diff-based surface-change detection in CI.
  */
-import { act, state, ZodEmpty } from "@rotorsoft/act";
+import { act, sensitive, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { describe, expect } from "vitest";
 import { z } from "zod";
@@ -287,4 +287,45 @@ describe("openapi(app, options) — doc emitter", () => {
     });
     expect(doc).toMatchSnapshot();
   });
+});
+
+// #1228 — action inputs marked `sensitive()` must be flagged in the
+// emitted request schema so codegen / Swagger UI don't echo PII freely.
+const Account = state({
+  Account: z.object({ email: z.string(), name: z.string() }),
+})
+  .init(() => ({ email: "", name: "" }))
+  .emits({ Registered: z.object({ email: z.string(), name: z.string() }) })
+  .patch({
+    Registered: ({ data }) => ({ email: data.email, name: data.name }),
+  })
+  .on({
+    Register: z.object({
+      email: sensitive(z.string().email()),
+      name: z.string(),
+    }),
+  })
+  .emit((a) => ["Registered", { email: a.email, name: a.name }])
+  .build();
+
+const sensitive_builder = act().withState(Account);
+const sensitive_test = fixture(sensitive_builder);
+
+describe("openapi — sensitive() request-field marking (#1228)", () => {
+  sensitive_test(
+    "annotates sensitive input fields writeOnly:true + format:password",
+    ({ app }) => {
+      const doc = openapi(app as never, base_options());
+      const schema = doc.paths["/api/actions/Register"]?.post?.requestBody
+        ?.content["application/json"]?.schema as {
+        properties: Record<string, Record<string, unknown>>;
+      };
+      // The sensitive field carries the marking.
+      expect(schema.properties.email.writeOnly).toBe(true);
+      expect(schema.properties.email.format).toBe("password");
+      // Non-sensitive fields are left untouched.
+      expect(schema.properties.name.writeOnly).toBeUndefined();
+      expect(schema.properties.name.format).not.toBe("password");
+    }
+  );
 });

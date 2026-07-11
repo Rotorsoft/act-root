@@ -1,3 +1,35 @@
+# [@rotorsoft/act-tck-v1.26.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.8...@rotorsoft/act-tck-v1.26.9) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** mark sensitive() action-input fields in the openapi request schema ([#1228](https://github.com/rotorsoft/act-root/issues/1228)) ([003eea2](https://github.com/rotorsoft/act-root/commit/003eea2bfd97c35641ee585a0a26cab40fa1c564))
+* **act-pg:** per-pool jsonb parser, names:[]/before guards, TCK + docs (ACT-1198/1199) ([1043227](https://github.com/rotorsoft/act-root/commit/10432274edc0ce583563d0902056fd6d6ed7955c)), closes [#1197](https://github.com/rotorsoft/act-root/issues/1197) [#1199](https://github.com/rotorsoft/act-root/issues/1199)
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
+# [@rotorsoft/act-tck-v1.26.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.7...@rotorsoft/act-tck-v1.26.8) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** commit receiver idempotency key on success, not on claim ([9badb1a](https://github.com/rotorsoft/act-root/commit/9badb1afdce72fb4813178fb2ea7e110057a2460)), closes [#1193](https://github.com/rotorsoft/act-root/issues/1193)
+
+# [@rotorsoft/act-tck-v1.26.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.6...@rotorsoft/act-tck-v1.26.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** keep the dead listen client's error handler across reconnect ([71624b8](https://github.com/rotorsoft/act-root/commit/71624b86f674cd871f11ec9e4253aeb81886055c)), closes [#1189](https://github.com/rotorsoft/act-root/issues/1189)
+* **act:** open autoclose window at the DST spring-forward gap instant ([acf00f3](https://github.com/rotorsoft/act-root/commit/acf00f3308a75cca6f742530a6a95eb373ecf599))
+* **act:** reject leading-zero event versions that collide with the canonical form ([4089364](https://github.com/rotorsoft/act-root/commit/4089364d710c12689f486a0cb511272b680d6434))
+
+# [@rotorsoft/act-tck-v1.26.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.5...@rotorsoft/act-tck-v1.26.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** restore regex claim sources with a literal fast-path ([3abd00d](https://github.com/rotorsoft/act-root/commit/3abd00d53848948aa0d7a59a4884a47a0e6000eb)), closes [#1215](https://github.com/rotorsoft/act-root/issues/1215) [#1215](https://github.com/rotorsoft/act-root/issues/1215)
+
 # [@rotorsoft/act-tck-v1.26.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.4...@rotorsoft/act-tck-v1.26.5) (2026-07-10)
 
 

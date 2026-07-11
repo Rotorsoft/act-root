@@ -35,7 +35,7 @@
     "clean": "pnpm -r run clean",
     "build": "pnpm -r build",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/act-typecheck.tsbuildinfo --project tsconfig.workspace.json --jsx react-jsx",
-    "test": "pnpm -F shared drizzle:migrate && vitest run --coverage",
+    "test": "vitest run --coverage",
     "bench:micro": "vitest bench --run --config vitest.bench.config.ts",
     "bench:scenarios": "vitest run --config vitest.bench.config.ts",
     "mutation": "pnpm --filter @rotorsoft/act --filter @rotorsoft/act-pg --filter @rotorsoft/act-sqlite --filter @rotorsoft/act-tck --workspace-concurrency=1 run mutation",

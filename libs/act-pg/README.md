@@ -179,7 +179,7 @@ Both adapters pass the same conformance suite — your application code doesn't 
 
 ## Compatibility
 
-- **Node**: >=22.18.0
+- **Node**: >=22.23.1
 - **PostgreSQL**: >=14 (uses `FOR UPDATE SKIP LOCKED`, `LISTEN`/`NOTIFY`, JSONB)
 - **Peer**: `@rotorsoft/act` >=0.39.0, `zod` ^4.4.3
 - **Bundled deps**: `pg` ^8.20.0

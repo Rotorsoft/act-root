@@ -138,18 +138,28 @@ describe("hono(app, options) — generated REST surface", () => {
     expect(res.status).toBe(200);
   });
 
-  test("body that fails Zod validation returns 400 with detail (via zValidator)", async ({
+  test("body that fails Zod validation returns 422 with the ApiError envelope (matches the in-do ValidationError path)", async ({
     app,
   }) => {
     const api = hono(app as never, default_options());
-    // Empty key violates `.min(1)`. zValidator short-circuits before
-    // the handler runs; Hono's default for validation failures is 400.
+    // Empty key violates `.min(1)`. The custom zValidator hook funnels
+    // the failure through the shared ApiError envelope at 422 — the same
+    // status/shape an in-do ValidationError maps to (ERROR_MAP.ValidationError
+    // = 422), so a client parsing ApiError sees one shape for both.
     const res = await api.request("/api/actions/PressKey", {
       method: "POST",
       headers: make_headers(),
       body: JSON.stringify({ key: "" }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      detail?: string;
+      code?: string;
+    };
+    expect(body.error).toBe("ValidationError");
+    expect(body.code).toBe("VALIDATION");
+    expect(typeof body.detail).toBe("string");
   });
 
   describe("expectedVersion (optimistic concurrency)", () => {

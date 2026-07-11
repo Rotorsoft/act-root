@@ -1,5 +1,6 @@
-import { type Actor, act, dispose, state } from "@rotorsoft/act";
-import { afterEach, describe, expect, it } from "vitest";
+import { type Actor, act, state } from "@rotorsoft/act";
+import { sandbox } from "@rotorsoft/act/test";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Calculator, DIGITS } from "../src/index.js";
 
@@ -32,28 +33,28 @@ const DigitBoard = state({
   .build();
 
 describe("calculator board projection (regex claim source)", () => {
-  afterEach(async () => {
-    await dispose()();
-  });
-
   it("projects digits from every stream matched by the ^(A|B)$ source", async () => {
     const actor: Actor = { id: "1", name: "Calculator" };
     const streams = ["A", "B"];
 
-    const app = act()
-      .withState(Calculator)
-      .withState(DigitBoard)
-      .on("DigitPressed")
-      .do(async function CountDigits(event) {
-        await app.do(
-          "CountDigit",
-          { stream: "Board", actor },
-          { digit: event.data.digit },
-          { reactingTo: event }
-        );
-      })
-      .to({ source: `^(${streams.join("|")})$`, target: "Board" })
-      .build();
+    // Per-test isolated Act (fresh InMemoryStore + InMemoryCache), auto
+    // disposed below. The reaction reads its Act from the handler's third
+    // parameter so the scoped app is used — never the singleton port.
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Calculator)
+        .withState(DigitBoard)
+        .on("DigitPressed")
+        .do(async function CountDigits(event, _stream, app) {
+          await app.do(
+            "CountDigit",
+            { stream: "Board", actor },
+            { digit: event.data.digit },
+            { reactingTo: event }
+          );
+        })
+        .to({ source: `^(${streams.join("|")})$`, target: "Board" })
+    );
 
     // Press "1" on A and "2" on B — two distinct source streams, both
     // matched only by the regex source, never by an exact-name lookup.
@@ -85,5 +86,7 @@ describe("calculator board projection (regex claim source)", () => {
     const board_state = board.state as BoardState;
     expect(board_state["1"]).toBe(1);
     expect(board_state["2"]).toBe(1);
+
+    await dispose();
   });
 });

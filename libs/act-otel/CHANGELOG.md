@@ -1,3 +1,10 @@
+# [@rotorsoft/act-otel-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.1...@rotorsoft/act-otel-v0.1.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-otel:** scrape resilience and idempotent registration ([115d754](https://github.com/rotorsoft/act-root/commit/115d754a2921ab28ad6b16c1b831199cb49df71f)), closes [#1232](https://github.com/rotorsoft/act-root/issues/1232) [#1237](https://github.com/rotorsoft/act-root/issues/1237)
+
 # [@rotorsoft/act-otel-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.0...@rotorsoft/act-otel-v0.1.1) (2026-07-06)
 
 

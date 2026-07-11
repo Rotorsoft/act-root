@@ -97,6 +97,10 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
           try {
             await handler(validated, { key: idem.key });
           } catch (err) {
+            // Transient failure: release the tentative claim so the
+            // sender's retry re-processes instead of being deduped
+            // into a silent success and permanently lost.
+            await options.store.release(idem.key);
             return c.json(
               {
                 error: "handler-failed",
@@ -105,6 +109,9 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
               500
             );
           }
+          // Success: promote the tentative claim to a durable record
+          // so every later retry of this key dedups.
+          await options.store.commit(idem.key);
         }
 
         return c.body(null, 204);

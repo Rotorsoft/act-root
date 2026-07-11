@@ -1,3 +1,31 @@
+# [@rotorsoft/act-pg-v1.13.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.5...@rotorsoft/act-pg-v1.13.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** per-pool jsonb parser, names:[]/before guards, TCK + docs (ACT-1198/1199) ([1043227](https://github.com/rotorsoft/act-root/commit/10432274edc0ce583563d0902056fd6d6ed7955c)), closes [#1197](https://github.com/rotorsoft/act-root/issues/1197) [#1199](https://github.com/rotorsoft/act-root/issues/1199)
+
+# [@rotorsoft/act-pg-v1.13.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.4...@rotorsoft/act-pg-v1.13.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
+# [@rotorsoft/act-pg-v1.13.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.3...@rotorsoft/act-pg-v1.13.4) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** keep the dead listen client's error handler across reconnect ([71624b8](https://github.com/rotorsoft/act-root/commit/71624b86f674cd871f11ec9e4253aeb81886055c)), closes [#1189](https://github.com/rotorsoft/act-root/issues/1189)
+
+# [@rotorsoft/act-pg-v1.13.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.2...@rotorsoft/act-pg-v1.13.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** restore regex claim sources with a literal fast-path ([3abd00d](https://github.com/rotorsoft/act-root/commit/3abd00d53848948aa0d7a59a4884a47a0e6000eb)), closes [#1215](https://github.com/rotorsoft/act-root/issues/1215) [#1215](https://github.com/rotorsoft/act-root/issues/1215)
+
 # [@rotorsoft/act-pg-v1.13.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.1...@rotorsoft/act-pg-v1.13.2) (2026-07-10)
 
 

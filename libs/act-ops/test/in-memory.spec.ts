@@ -57,6 +57,65 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("k")).toBe(true);
   });
 
+  describe("two-phase commit / release", () => {
+    it("release drops an uncommitted claim so a retry re-processes", () => {
+      const store = new InMemoryIdempotencyStore();
+      // Tentatively claim, then release — mirrors a handler that threw.
+      expect(store.claim("k")).toBe(true);
+      store.release("k");
+      // The key is fresh again: a retry after failure re-runs the handler.
+      expect(store.claim("k")).toBe(true);
+    });
+
+    it("commit makes a claim survive so a retry dedups", () => {
+      const store = new InMemoryIdempotencyStore();
+      expect(store.claim("k")).toBe(true);
+      store.commit("k");
+      // Committed — a retry sees the key and dedups.
+      expect(store.claim("k")).toBe(false);
+    });
+
+    it("release after commit is a no-op — a committed claim stays claimed", () => {
+      const store = new InMemoryIdempotencyStore();
+      expect(store.claim("k")).toBe(true);
+      store.commit("k");
+      store.release("k");
+      // Committing wins: release must not resurrect a committed key.
+      expect(store.claim("k")).toBe(false);
+    });
+
+    it("a competing claim during the tentative window still dedups", () => {
+      const store = new InMemoryIdempotencyStore();
+      // First delivery claims tentatively (handler still in flight).
+      expect(store.claim("k")).toBe(true);
+      // A concurrent duplicate arrives mid-flight — it must be deduped.
+      expect(store.claim("k")).toBe(false);
+    });
+
+    it("commit on a never-claimed key records it (durable-adapter safety)", () => {
+      const store = new InMemoryIdempotencyStore();
+      store.commit("k");
+      expect(store.claim("k")).toBe(false);
+    });
+
+    it("release on a never-claimed key is a no-op", () => {
+      const store = new InMemoryIdempotencyStore();
+      store.release("k");
+      expect(store.size()).toBe(0);
+      expect(store.claim("k")).toBe(true);
+    });
+
+    it("committed entries still expire after ttlMs", () => {
+      const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
+      const t0 = 1_000_000;
+      expect(store.claim("k", t0)).toBe(true);
+      store.commit("k", t0);
+      expect(store.claim("k", t0 + 500)).toBe(false);
+      // Past the window — fresh again even though it was committed.
+      expect(store.claim("k", t0 + 1_500)).toBe(true);
+    });
+  });
+
   it("gc stops at the first non-expired entry (insertion order)", () => {
     const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
     const t0 = 1_000_000;
