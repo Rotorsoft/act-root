@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.22.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.5...@rotorsoft/act-v1.22.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** open autoclose window at the DST spring-forward gap instant ([acf00f3](https://github.com/rotorsoft/act-root/commit/acf00f3308a75cca6f742530a6a95eb373ecf599))
+* **act:** reject leading-zero event versions that collide with the canonical form ([4089364](https://github.com/rotorsoft/act-root/commit/4089364d710c12689f486a0cb511272b680d6434))
+
 # [@rotorsoft/act-v1.22.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.4...@rotorsoft/act-v1.22.5) (2026-07-11)
 
 
