@@ -77,6 +77,17 @@ the production hot path a bare `patch()` — when the flag is `false` the schema
 is never touched, not even constructed. This is a debugging/CI aid, and it says
 so in the docs.
 
+**A runtime `if (validate_state)` inside the fold loop.** The first cut threaded
+the boolean through `load`/`action`/`make_fold_handler` and branched per event.
+Rejected in favor of the framework's existing decorator-selection idiom: there
+are two fold functions — a bare one that is literally `patch(state, patched)`
+and a validating one that patches then parses — and `build_es` selects which to
+bake into the `load`/`action` closures **once at construction**, exactly the way
+it already picks bare vs trace-decorated store ops from the log level. The
+projection builder makes the same one-time selection for the state-fold engine.
+The off-path then has no per-event branch at all, so a benchmark with the flag
+off shows zero delta from pre-#1238.
+
 ## Stability / charter impact
 
 - **Category:** public types — a new optional field on the exported

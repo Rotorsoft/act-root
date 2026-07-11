@@ -182,7 +182,7 @@ const app = act()
 
 This is a **debugging and CI aid, not a production guard**. Turn it on while developing new reducers or in CI to catch total-reducer bugs at the source; leave it off in production.
 
-- **Zero cost when off.** The default (`false`) keeps the fold path a bare merge — the schema is never touched, not even constructed. Flipping the flag is the entire opt-in; there is no per-state wiring.
+- **Zero cost when off.** The fold implementation is selected once at `build()` — the same way the orchestrator picks bare vs trace-decorated store ops from the log level. When off (the default), the fold path is byte-identical to a bare reduction: the validating fold is never selected, so there is no per-event cost, not even a branch. Flipping the flag is the entire opt-in; there is no per-state wiring.
 - **On the projection path**, a bad reduction throws inside the fold batch handler, which blocks the stream — the `ValidationError` message rides the [`blocked`](./error-handling#blocked-streams) lifecycle event's `error`. Recover the same way you recover any blocked stream once the reducer is fixed.
 - **Warm cache reads fold nothing**, so they are never validated — the flag guards reductions, not reads. A cold replay (a fresh `load`, a `reset`, or a time-travel `asOf` query) is what re-runs the reducers.
 

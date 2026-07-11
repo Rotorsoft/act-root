@@ -308,9 +308,12 @@ export type ActOptions<TLanes extends string = string> = {
    * This is a **debugging / CI aid, not a production guard**. Turn it on
    * in development and CI to catch total-reducer bugs at the source; the
    * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. When `false` (the
-   * default) the fold path is a bare merge with zero added cost — the
-   * schema is never touched.
+   * reduced state is the one shape it otherwise trusts. The fold
+   * implementation is selected **once at `build()`** (the same way the
+   * orchestrator picks bare vs trace-decorated store ops from the log
+   * level): when `false` (the default) the fold path is byte-identical to
+   * a bare reduction — the validating fold is never selected, so there is
+   * no per-event cost, not even a branch.
    */
   readonly validateFoldedState?: boolean;
 };

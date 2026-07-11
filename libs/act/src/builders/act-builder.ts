@@ -6,6 +6,7 @@
  */
 import { Act, type ActOptions } from "../act.js";
 import {
+  bare_fold,
   current_version_of,
   deprecated_event_names,
   make_fold_handler,
@@ -20,6 +21,7 @@ import {
   register_state,
   resolveAutocloseConfig,
   synthesize_autoclose_reactions,
+  validating_fold,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -473,6 +475,12 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
+          // ACT-1238: select the fold implementation ONCE (bare vs
+          // validating) — the same build-time selection `build_es` makes
+          // for the command/load paths — so the projection fold loop has
+          // no per-event branch when `validateFoldedState` is off.
+          const fold_fn =
+            options?.validateFoldedState === true ? validating_fold : bare_fold;
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -489,12 +497,7 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(
-                merged,
-                fold.flush,
-                fold.config,
-                options?.validateFoldedState === true
-              )
+              make_fold_handler(merged, fold.flush, fold.config, fold_fn)
             );
           }
           finalize_deprecations();

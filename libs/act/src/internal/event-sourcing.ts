@@ -43,26 +43,25 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
- * Apply a reducer's {@link Patch} to `state`, then — when
- * `validate_state` is set (the opt-in `ActOptions.validateFoldedState`,
- * ACT-1238) — parse the merged full state against the owning state's
- * declared Zod schema. A reducer that produces schema-violating state
- * (the calculator divide-by-zero NaN class, #1230) fails here, at the
- * triggering event, instead of propagating and surfacing hops later as
- * a confusing downstream error.
+ * Applies a reducer's {@link Patch} to `state` and returns the next
+ * state. The fold loop calls one of two implementations, selected **once**
+ * at construction (in {@link "tracing".build_es}) — never branched per
+ * event:
  *
- * The `target` string names the state and the triggering event
- * (`"<state>.<event>#<id>"`) so the resulting {@link ValidationError}
- * points straight at the reduction that produced bad state.
+ * - {@link bare_fold} — the default. Literally `patch(state, patched)`,
+ *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
+ * - {@link validating_fold} — the opt-in `ActOptions.validateFoldedState`
+ *   path. Patches, then parses the merged full state against the state's
+ *   declared Zod schema.
  *
- * When `validate_state` is falsy the schema parse is skipped entirely —
- * the fold is a bare `patch()` and the hot path is byte-for-byte the
- * pre-ACT-1238 behavior. This is a debugging / CI aid, not a production
- * guard.
+ * The `me`/`event` arguments are unused by the bare implementation but
+ * carried on the shared signature so the loop is call-shape-identical
+ * regardless of which fold was selected — the validating implementation
+ * needs them to name the failing reduction.
  *
  * @internal
  */
-export function fold_state<
+export type FoldFn = <
   TState extends Schema,
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -70,18 +69,42 @@ export function fold_state<
   me: State<TState, TEvents, TActions>,
   state: TState,
   patched: Readonly<Patch<TState>>,
-  event: Committed<TEvents, keyof TEvents>,
-  validate_state?: boolean
-): TState {
-  const next = patch(state, patched) as TState;
-  if (validate_state)
-    return validate(
-      `${me.name}.${String(event.name)}#${event.id}`,
-      next,
-      me.state
-    );
-  return next;
-}
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
+/**
+ * The default fold: a bare `patch()` with no wrapper and no branch. The
+ * off-path is byte-for-byte the pre-ACT-1238 reduction, so an app that
+ * leaves `validateFoldedState` off pays nothing — not even a comparison.
+ *
+ * @internal
+ */
+export const bare_fold: FoldFn = (_me, state, patched) =>
+  patch(state, patched) as typeof state;
+
+/**
+ * The opt-in fold (ACT-1238): patch, then parse the merged full state
+ * against the owning state's declared Zod schema. A reducer that produces
+ * schema-violating state (the calculator divide-by-zero NaN class, #1230)
+ * fails here, at the triggering event, instead of propagating and
+ * surfacing hops later as a confusing downstream error.
+ *
+ * The `target` string names the state and the triggering event
+ * (`"<state>.<event>#<id>"`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state. A debugging /
+ * CI aid, not a production guard — selected only when the operator opts
+ * in.
+ *
+ * @internal
+ */
+export const validating_fold: FoldFn = (me, state, patched, event) => {
+  const next = patch(state, patched) as typeof state;
+  return validate(
+    `${me.name}.${String(event.name)}#${event.id}`,
+    next,
+    me.state
+  );
+};
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -107,8 +130,7 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>,
-  validate_state?: boolean
+  options?: DoOptions<TEvents>
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -439,7 +461,7 @@ export async function load<
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  validate_state?: boolean
+  fold: FoldFn = bare_fold
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -464,13 +486,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = fold_state(
-          me,
-          state,
-          me.patch[event.name](event, state),
-          event,
-          validate_state
-        );
+        state = fold(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -589,7 +605,7 @@ export async function action<
   target: Target,
   payload: Readonly<TActions[TKey]>,
   options?: DoOptions<TEvents>,
-  validate_state?: boolean
+  fold: FoldFn = bare_fold
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -607,7 +623,7 @@ export async function action<
         me,
         { stream, actor: target.actor },
         undefined,
-        validate_state
+        fold
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
@@ -706,7 +722,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = fold_state(me, state, p, event, validate_state);
+        state = fold(me, state, p, event);
         patches++;
         return {
           event,

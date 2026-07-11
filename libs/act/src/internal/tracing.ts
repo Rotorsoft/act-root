@@ -31,7 +31,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps } from "./event-sourcing.js";
+import type { EsOps, FoldFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -176,11 +176,15 @@ export function build_es(
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: the app-wide `validateFoldedState` flag is baked in the
-  // same way — every `action()`/`load()` this EsOps drives folds with
-  // the flag, so state-fold and close-cycle callers inherit it without
-  // threading a boolean through their own signatures. Default `false`
-  // keeps the hot path a bare `patch()`.
+  // ACT-1238: select the fold implementation ONCE here — the same
+  // construction-time selection the trace decorators use below. An app
+  // with `validateFoldedState` off closes over `bare_fold` (the literal
+  // pre-#1238 `patch()`), so the fold loop has no per-event branch and no
+  // added cost; an app with the flag on closes over `validating_fold`.
+  // Baked into the load/action closures, so state-fold and close-cycle
+  // callers inherit the choice without threading anything through their
+  // own signatures.
+  const fold: FoldFn = validate_state ? es.validating_fold : es.bare_fold;
   const bound_action: EsOps["action"] = (
     me,
     action_name,
@@ -194,10 +198,10 @@ export function build_es(
       target,
       payload,
       { correlator, ...options },
-      validate_state
+      fold
     );
   const bound_load: EsOps["load"] = (me, target, callback) =>
-    es.load(me, target, callback, validate_state);
+    es.load(me, target, callback, fold);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,

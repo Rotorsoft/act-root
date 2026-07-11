@@ -57,9 +57,10 @@ describe("tracing", () => {
       expect(ops.snap).toBe(es.snap);
       // ACT-404: action always carries a bound correlator, so it's a
       // closure regardless of trace level. ACT-1238: load and action both
-      // bake in the app-wide `validateFoldedState` flag, so both are
-      // closures at non-trace levels — a bare `es.load`/`es.action` would
-      // fold without the flag.
+      // close over the fold implementation selected once at build (bare
+      // vs validating), so both are closures at non-trace levels — a bare
+      // `es.load`/`es.action` would default to `bare_fold` with no way to
+      // select the validating fold.
       expect(ops.load).not.toBe(es.load);
       expect(ops.action).not.toBe(es.action);
     });

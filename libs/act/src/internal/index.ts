@@ -60,8 +60,8 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps } from "./event-sourcing.js";
-export { scan } from "./event-sourcing.js";
+export type { EsOps, FoldFn } from "./event-sourcing.js";
+export { bare_fold, scan, validating_fold } from "./event-sourcing.js";
 export {
   current_version_of,
   deprecated_event_names,
