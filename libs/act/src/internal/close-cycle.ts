@@ -306,15 +306,14 @@ async function partition_by_safety(
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
   //
-  // The stored `source` on a subscription is an exact stream name in the
-  // claim contract, but this probe deliberately matches it as a regex
-  // against close-target names: exact names regex-match themselves, and
-  // any metacharacter over-match only widens the pending set — the
-  // conservative direction for a safety probe. (Pattern subscriptions are
-  // NOT part of the claim contract — the regex grammar belongs to the
-  // `QueryStreams`/`StreamFilter` surfaces.) Compiled patterns are cached
-  // because dynamic reactions commonly produce many subscriptions sharing
-  // one source, so the callback fires repeatedly with the same `source`.
+  // The stored `source` on a subscription may be a literal stream name or
+  // a pattern (e.g. `^(A|B)$`); this probe matches it as a regex against
+  // close-target names either way — a literal regex-matches itself, and a
+  // pattern matches the streams it claims for. Any metacharacter
+  // over-match only widens the pending set — the conservative direction
+  // for a safety probe. Compiled patterns are cached because dynamic
+  // reactions commonly produce many subscriptions sharing one source, so
+  // the callback fires repeatedly with the same `source`.
   const pending_set = new Set<string>();
   const source_regex = new Map<string, RegExp>();
   const get_regex = (source: string): RegExp => {

@@ -15,7 +15,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { StoreError, ValidationError } from "@rotorsoft/act";
+import { is_literal_source, StoreError, ValidationError } from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -484,6 +484,17 @@ export class SqliteStore implements Store {
       lane?: string;
     }>
   ) {
+    // Fail loud at registration for a claim source this adapter cannot
+    // match: libsql has no `REGEXP`, and the portable LIKE grammar cannot
+    // express alternation/grouping. A pattern source outside the portable
+    // subset (e.g. `^(A|B)$`) would otherwise silently never claim its
+    // stream, so `streamPatternToLike` throws `ValidationError` here —
+    // pointing operators to InMemory/PG for full regex claim sources —
+    // before any row is written. Literal sources skip the check entirely.
+    for (const { source } of streams) {
+      if (source !== undefined && !is_literal_source(source))
+        streamPatternToLike(source);
+    }
     const tx = await this.client.transaction("write");
     try {
       let subscribed = 0;
@@ -561,14 +572,22 @@ export class SqliteStore implements Store {
 
         let has_events: boolean;
         if (source) {
-          // Exact-source has-work probe: `source` is an exact stream
-          // name, so plain equality keeps the probe on the stream index.
-          // The portable LIKE grammar stays on the StreamFilter surfaces
-          // (`query_streams`, `reset`, `unblock`), never on claim.
-          const check = await tx.execute({
-            sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1`,
-            args: [at, source],
-          });
+          // Has-work probe. A literal `source` (no regex metacharacter)
+          // matches by equality — index-friendly, and exact so "s1" never
+          // claims "s12". A portable pattern (anchors, `.`, `.*`) matches
+          // via the same LIKE translation the StreamFilter surfaces use.
+          // Non-portable patterns (alternation/grouping) never reach here:
+          // `subscribe` rejects them up front, so `streamPatternToLike`
+          // below only sees the portable subset.
+          const check = is_literal_source(source)
+            ? await tx.execute({
+                sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1`,
+                args: [at, source],
+              })
+            : await tx.execute({
+                sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\' LIMIT 1`,
+                args: [at, streamPatternToLike(source)],
+              });
           has_events = check.rows.length > 0;
         } else {
           const check = await tx.execute({

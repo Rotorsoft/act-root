@@ -27,6 +27,7 @@ import type {
   Lease,
   Schemas,
 } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 
 /** @internal */
 export interface DrainOps<TEvents extends Schemas> {
@@ -52,8 +53,15 @@ export async function fetch<TEvents extends Schemas>(
   return Promise.all(
     leased.map(async ({ stream, source, at, lagging }) => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
+      // A literal `source` fetches with `stream_exact` so an exact name
+      // like "s1" reads only "s1" — never a sibling prefix "s12". A
+      // pattern source (e.g. `^(A|B)$`) stays a regex query, matching the
+      // same streams the has-work probe claimed it for.
+      const stream_exact =
+        source !== undefined && is_literal_source(source) ? true : undefined;
       await store().query<TEvents>((e) => events.push(e), {
         stream: source,
+        stream_exact,
         after: at,
         limit: eventLimit,
       });

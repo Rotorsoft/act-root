@@ -27,7 +27,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
-import { sleep } from "../utils.js";
+import { is_literal_source, sleep } from "../utils.js";
 
 /**
  * @internal
@@ -328,8 +328,9 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the exact-source probe in claim()
-  // without scanning the full event log.
+  // max non-snapshot event id per stream — drives the has-work probe in
+  // claim(): an O(1) lookup for a literal source, and the per-stream max
+  // that a pattern source scans, without touching the full event log.
   private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
   private _max_non_snap_event_id = -1;
@@ -563,15 +564,24 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // `source` is an exact stream name in the has-work probe — resolvers
-    // hand `subscribe` exact names, so the probe is a single map lookup.
-    // Pattern matching belongs to the StreamFilter surfaces
-    // (`query_streams`, `reset`, `unblock`), never to claim.
+    // Has-work probe. A **literal** `source` (no regex metacharacters) is
+    // matched by exact map lookup — the fast, index-friendly path that
+    // covers every autoclose/dynamic-resolver source. A **pattern** source
+    // (e.g. the calculator's `^(A|B)$`) is compiled to a RegExp once per
+    // candidate subscription and tested against every stream whose max
+    // event id has advanced past the watermark.
     const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
-      const max_id = this._max_event_id_by_stream.get(s.source);
-      return max_id !== undefined && max_id > s.at;
+      if (is_literal_source(s.source)) {
+        const max_id = this._max_event_id_by_stream.get(s.source);
+        return max_id !== undefined && max_id > s.at;
+      }
+      const re = new RegExp(s.source);
+      for (const [stream_name, max_id] of this._max_event_id_by_stream) {
+        if (max_id > s.at && re.test(stream_name)) return true;
+      }
+      return false;
     };
     const available = [...this._streams.values()].filter(
       (s) =>

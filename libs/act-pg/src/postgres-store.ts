@@ -37,6 +37,17 @@ import { dateReviver } from "./utils.js";
 
 const logger: Logger = log();
 
+/**
+ * POSIX regex bracket expression matching any single reaction-`source`
+ * metacharacter (`^ $ . * + ? ( ) [ ] { } | \`). A source that matches
+ * none of these is a literal stream name, claimed by equality; one that
+ * matches any is a pattern, claimed with `~`. Mirrors `is_literal_source`
+ * in `@rotorsoft/act` so the SQL classification agrees with the core
+ * helper. `]` leads and `\\` escapes the backslash; PG advanced regex
+ * honors backslash escapes inside brackets.
+ */
+const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\]";
+
 const { Pool, types } = pg;
 types.setTypeParser(types.builtins.JSONB, (val) =>
   JSON.parse(val, dateReviver)
@@ -974,7 +985,16 @@ export class PostgresStore implements Store {
               SELECT 1 FROM ${this._fqt} e
               WHERE e.id > s.at
                 AND e.name <> '${SNAP_EVENT}'
-                AND (s.source IS NULL OR e.stream = COALESCE(s.source, s.stream))
+                -- Literal source (no regex metacharacter) matches by
+                -- equality — index-friendly, and exact so "s1" never
+                -- claims "s12". A pattern source (e.g. '^(A|B)$') matches
+                -- with the POSIX regex operator so the calculator's static
+                -- regex reaction is claimed for every stream it anchors.
+                AND (
+                  s.source IS NULL
+                  OR (s.source !~ '${SOURCE_METACHARACTER_CLASS}' AND e.stream = s.source)
+                  OR (s.source ~ '${SOURCE_METACHARACTER_CLASS}' AND e.stream ~ s.source)
+                )
               LIMIT 1
             ))
           FOR UPDATE SKIP LOCKED

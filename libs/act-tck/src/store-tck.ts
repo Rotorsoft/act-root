@@ -87,6 +87,32 @@ export type StoreCapabilities = {
    * so correctness never depends on this flag — only probe cost.
    */
   readonly source_matches?: boolean;
+  /**
+   * Adapter matches a **pattern** reaction `source` (one carrying regex
+   * metacharacters, e.g. the calculator's `^(A|B)$`) as a full RegExp in
+   * claim()'s has-work probe, so a stream whose max event id exceeds the
+   * subscription watermark is claimed when its name matches the pattern.
+   * When `true`, the TCK runs the pattern-source claim suite. Literal
+   * sources stay exact everywhere regardless of this flag — the fast,
+   * index-friendly path.
+   *
+   * Stores that cannot run an arbitrary regex against candidate streams
+   * (e.g. SQLite, whose libsql build has no `REGEXP` and whose portable
+   * `LIKE` grammar cannot express alternation/grouping) leave this
+   * `false` and instead reject a non-portable claim source at
+   * {@link subscribe} time — see {@link rejects_nonportable_claim_source}.
+   */
+  readonly pattern_claim_source?: boolean;
+  /**
+   * Adapter cannot faithfully match every regex claim `source`, so it
+   * fails loud at registration: {@link subscribe} throws
+   * {@link ValidationError} for a source outside its portable subset
+   * (alternation/grouping like `^(A|B)$`), rather than silently never
+   * claiming the stream. When `true`, the TCK runs the reject-at-subscribe
+   * case. Currently only SQLite sets this — its message points operators
+   * to InMemory/PG for full regex claim sources.
+   */
+  readonly rejects_nonportable_claim_source?: boolean;
 };
 
 /**
@@ -1056,7 +1082,168 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.dispose();
         }
       });
+
+      // ACT-1220: an exact (literal) source must never fetch events from a
+      // sibling stream sharing its prefix. Guards the drain fetch path: an
+      // exact source `s1` claimed as work must, when queried, receive only
+      // `s1`'s events — not `s12`'s. Pre-#1215 fetch treated `source` as an
+      // unanchored regex, so `s1` would have pulled `s12`'s events into the
+      // handler.
+      it("fetches only the exact source stream's events, never a sibling prefix", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const base = `fx-${uid()}`;
+          const sibling = `${base}2`;
+          const target = `agg-${uid()}`;
+          await fresh.subscribe([{ stream: target, source: base }]);
+          const [b1] = await seed_stream(fresh, base, 1);
+          await seed_stream(fresh, sibling, 1);
+          const claimed = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+          const lease = claimed.find((l) => l.stream === target);
+          expect(lease).toBeDefined();
+          const events = await collect(fresh, {
+            stream: lease!.source,
+            stream_exact: true,
+            after: -1,
+          });
+          expect(events.map((e) => e.stream)).toEqual([base]);
+          expect(events.map((e) => e.id)).toEqual([b1.id]);
+        } finally {
+          await fresh.dispose();
+        }
+      });
     });
+
+    // ACT-1220: a **pattern** source (one carrying regex metacharacters) is
+    // matched as a full RegExp against candidate streams. This restores the
+    // calculator's shipped `source: "^(A|B)$"` static reaction, which
+    // #1215's exact-only claim contract silently broke — the Board
+    // projection stopped being claimed because `_max_event_id_by_stream.get(
+    // "^(A|B)$")` is always undefined. Literal sources keep the fast exact
+    // path; only sources with metacharacters compile to a RegExp.
+    describe.skipIf(!caps.pattern_claim_source)(
+      "claim pattern source matching (capability)",
+      () => {
+        it("claims a pattern-source target when any matched stream has work (^(A|B)$)", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            const a = `A-${uid()}`;
+            const b = `B-${uid()}`;
+            const target = `board-${uid()}`;
+            const pattern = `^(${a}|${b})$`;
+            await fresh.subscribe([{ stream: target, source: pattern }]);
+            // Commit to A only — the pattern must match it and claim.
+            const [ea] = await seed_stream(fresh, a, 1);
+            const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+            const l1 = first.find((s) => s.stream === target);
+            expect(l1).toBeDefined();
+            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
+            // Now commit to B — the same pattern-source target must claim
+            // again for the second matched stream.
+            const [eb] = await seed_stream(fresh, b, 1);
+            const second = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+            expect(second.find((s) => s.stream === target)).toBeDefined();
+            expect(eb.stream).toBe(b);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+
+        it("does not claim a pattern-source target when no matched stream has work", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            const a = `A-${uid()}`;
+            const b = `B-${uid()}`;
+            const other = `Z-${uid()}`;
+            const target = `board-${uid()}`;
+            const control = `ctl-${uid()}`;
+            const pattern = `^(${a}|${b})$`;
+            // The control target sources from `other` (a literal). It DOES
+            // see the `other` commit below, so the second claim is
+            // non-empty and the negative assertion runs through a
+            // populated result — the pattern target must simply be absent.
+            await fresh.subscribe([
+              { stream: target, source: pattern },
+              { stream: control, source: other },
+            ]);
+            // Advance the target's watermark past -1 first: a fresh
+            // subscription is claimable unconditionally on some adapters,
+            // so the negative assertion must run against a settled stream.
+            const [ea] = await seed_stream(fresh, a, 1);
+            const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+            const l1 = first.find((s) => s.stream === target);
+            expect(l1).toBeDefined();
+            // Ack both the pattern target and the fresh control lease so
+            // neither is held into the second claim; the control becomes
+            // claimable again only when `other` gets a commit below. Both
+            // are fresh subscriptions, so both are in the first claim.
+            const c1 = first.find((s) => s.stream === control);
+            expect(c1).toBeDefined();
+            await fresh.ack([
+              { ...(l1 as Lease), at: ea.id },
+              { ...(c1 as Lease), at: -1 },
+            ]);
+            // Now activity on a stream the pattern does NOT match must not
+            // make the target claimable again — but the control sourced
+            // from that stream must.
+            await seed_stream(fresh, other, 1);
+            const claimed = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+            const streams = claimed.map((s) => s.stream);
+            expect(streams).toContain(control);
+            expect(streams).not.toContain(target);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+      }
+    );
+
+    // ACT-1220: adapters that cannot faithfully run an arbitrary regex in
+    // claim reject a non-portable claim source loudly at subscribe() —
+    // failing at registration, not silently never claiming the stream.
+    describe.skipIf(!caps.rejects_nonportable_claim_source)(
+      "claim source registration (capability)",
+      () => {
+        it("throws at subscribe for a non-portable (alternation) claim source", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            await expect(
+              fresh.subscribe([
+                { stream: `board-${uid()}`, source: `^(${uid()}|${uid()})$` },
+              ])
+            ).rejects.toThrow(ValidationError);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+
+        it("accepts a portable-subset pattern claim source (^prefix.*) and claims on match", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            const prefix = `pfx${uid()}`.replace(/-/g, "");
+            const matched = `${prefix}child`;
+            const target = `board-${uid()}`;
+            await fresh.subscribe([{ stream: target, source: `^${prefix}.*` }]);
+            const [e] = await seed_stream(fresh, matched, 1);
+            const claimed = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
+            expect(claimed.find((s) => s.stream === target)).toBeDefined();
+            expect(e.stream).toBe(matched);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+      }
+    );
 
     // ACT-982: competing-consumer correctness was previously proven only by
     // the PG-specific multi-process stress harness. This makes it a portable
