@@ -33,12 +33,21 @@ const tenantCorrelator: Correlator = ({ state, action, actor }) => {
   return `${tenant}-${s}-${a}-${ts}${rnd}`;
 };
 
+/**
+ * The wired builder. Exported so tests can spin up an isolated, scoped Act
+ * per suite via `sandbox(builder, { actOptions: { correlator } })` instead
+ * of sharing the production singleton on the default port.
+ */
 // prettier-ignore
-export const app = act()
+export const builder = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
   .withSlice(TicketTimersSlice)
   .withSlice(TicketWebhooksSlice)
-  .withProjection(TicketProjection)
-  .build({ correlator: tenantCorrelator });
+  .withProjection(TicketProjection);
+
+/** Production singleton (used by `main.ts`). */
+export const app = builder.build({ correlator: tenantCorrelator });
+
+export { tenantCorrelator };
