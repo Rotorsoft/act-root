@@ -728,22 +728,25 @@ export class Act<
       typeof classify_registry<TSchemaReg, TEvents, TActions>
     >
   ): CorrelateCycle<TSchemaReg, TEvents, TActions> {
-    return new CorrelateCycle(
-      this.registry,
-      classification.static_targets,
-      classification.has_dynamic_resolvers,
-      this._cd,
-      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      () => {
+    return new CorrelateCycle({
+      registry: this.registry,
+      static_targets: classification.static_targets,
+      has_dynamic_resolvers: classification.has_dynamic_resolvers,
+      cd: this._cd,
+      max_subscribed_streams:
+        options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
       // Re-scope the background `start_correlations` timer so its
       // correlate resolves the scoped ports, not the singleton (#1191).
-      this._scoped,
+      run_scoped: this._scoped,
       // Cold-start defer re-seed (#1221). Skipped on writer-only instances
       // (`drain: false`) — they run no local controllers to re-arm.
-      this._drain ? () => this._seed_persisted_defers() : undefined
-    );
+      on_init_async: this._drain
+        ? () => this._seed_persisted_defers()
+        : undefined,
+    });
   }
 
   /**

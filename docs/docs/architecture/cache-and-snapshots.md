@@ -74,6 +74,8 @@ Two `load()`s on the same stream can race. If both write to cache, a slower load
 
 Step 7 is the key: every load that processes events past the cached point updates the cache. Stale entries are self-correcting on the next access. No version-comparison needed at write time.
 
+The checkpoint write is also **fire-and-forget** (ACT-1206): a failing `cache.set` — a transient blip in a remote-backed `Cache` — is logged, not thrown. The state is already correctly computed at that point, so failing the read would break plain reads, reaction `bound_load` dispatches, and the fold engine's first-sight load for no correctness gain. This matches `action()`'s cache write, which has always been fire-and-forget. And because the head event id `load()` returns (`Snapshot.id`) is captured atomically with `state`, consumers pairing a loaded state with its head event id read it directly instead of a second cache lookup that could race a concurrent commit (ACT-1204).
+
 ## Snapshot creation
 
 Snapshots are created by user code via the `me.snap?` predicate at the end of every `action()`:
