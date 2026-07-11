@@ -82,3 +82,36 @@ export const extend = <
 export async function sleep(ms?: number) {
   return new Promise((resolve) => setTimeout(resolve, ms ?? config().sleepMs));
 }
+
+/**
+ * Regex metacharacters that, when present in a reaction `source`, make it a
+ * pattern rather than a literal stream name. A source containing none of
+ * these is a bare stream name — the common case — and every claim/fetch
+ * site matches it by string equality on the store's stream index. A source
+ * containing any of them is compiled as a RegExp and matched against
+ * candidate streams with the caller's own anchoring (e.g. `^(A|B)$`).
+ */
+const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
+
+/**
+ * True when `source` is a **literal** stream name — it carries no regex
+ * metacharacter, so every adapter treats it as an exact match. This is the
+ * fast, index-friendly path and covers every autoclose/dynamic-resolver
+ * source (bare stream names). A `false` return means the source is a
+ * **pattern** (contains `^ $ . * + ? ( ) [ ] { } | \`) and must be compiled
+ * as a RegExp before matching — the shape the calculator's static
+ * `source: "^(A|B)$"` reaction relies on.
+ *
+ * The single source of truth for literal-vs-pattern classification across
+ * the InMemory has-work probe, the drain fetch path, and the SQL adapters,
+ * so all three agree on which sources take the exact path.
+ *
+ * @example
+ * ```typescript
+ * is_literal_source("Board");    // → true  (exact lookup)
+ * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
+ * ```
+ */
+export function is_literal_source(source: string): boolean {
+  return !SOURCE_METACHARACTERS.test(source);
+}

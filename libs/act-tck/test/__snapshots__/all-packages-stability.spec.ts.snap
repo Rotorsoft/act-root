@@ -6081,15 +6081,14 @@ async function partition_by_safety(
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
   //
-  // The stored \`source\` on a subscription is an exact stream name in the
-  // claim contract, but this probe deliberately matches it as a regex
-  // against close-target names: exact names regex-match themselves, and
-  // any metacharacter over-match only widens the pending set — the
-  // conservative direction for a safety probe. (Pattern subscriptions are
-  // NOT part of the claim contract — the regex grammar belongs to the
-  // \`QueryStreams\`/\`StreamFilter\` surfaces.) Compiled patterns are cached
-  // because dynamic reactions commonly produce many subscriptions sharing
-  // one source, so the callback fires repeatedly with the same \`source\`.
+  // The stored \`source\` on a subscription may be a literal stream name or
+  // a pattern (e.g. \`^(A|B)$\`); this probe matches it as a regex against
+  // close-target names either way — a literal regex-matches itself, and a
+  // pattern matches the streams it claims for. Any metacharacter
+  // over-match only widens the pending set — the conservative direction
+  // for a safety probe. Compiled patterns are cached because dynamic
+  // reactions commonly produce many subscriptions sharing one source, so
+  // the callback fires repeatedly with the same \`source\`.
   const pending_set = new Set<string>();
   const source_regex = new Map<string, RegExp>();
   const get_regex = (source: string): RegExp => {
@@ -8232,6 +8231,7 @@ import type {
   Lease,
   Schemas,
 } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 
 /** @internal */
 export interface DrainOps<TEvents extends Schemas> {
@@ -8257,8 +8257,15 @@ export async function fetch<TEvents extends Schemas>(
   return Promise.all(
     leased.map(async ({ stream, source, at, lagging }) => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
+      // A literal \`source\` fetches with \`stream_exact\` so an exact name
+      // like "s1" reads only "s1" — never a sibling prefix "s12". A
+      // pattern source (e.g. \`^(A|B)$\`) stays a regex query, matching the
+      // same streams the has-work probe claimed it for.
+      const stream_exact =
+        source !== undefined && is_literal_source(source) ? true : undefined;
       await store().query<TEvents>((e) => events.push(e), {
         stream: source,
+        stream_exact,
         after: at,
         limit: eventLimit,
       });
@@ -9621,7 +9628,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
-import { sleep } from "../utils.js";
+import { is_literal_source, sleep } from "../utils.js";
 
 /**
  * @internal
@@ -9922,8 +9929,9 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the exact-source probe in claim()
-  // without scanning the full event log.
+  // max non-snapshot event id per stream — drives the has-work probe in
+  // claim(): an O(1) lookup for a literal source, and the per-stream max
+  // that a pattern source scans, without touching the full event log.
   private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
   private _max_non_snap_event_id = -1;
@@ -10157,15 +10165,24 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // \`source\` is an exact stream name in the has-work probe — resolvers
-    // hand \`subscribe\` exact names, so the probe is a single map lookup.
-    // Pattern matching belongs to the StreamFilter surfaces
-    // (\`query_streams\`, \`reset\`, \`unblock\`), never to claim.
+    // Has-work probe. A **literal** \`source\` (no regex metacharacters) is
+    // matched by exact map lookup — the fast, index-friendly path that
+    // covers every autoclose/dynamic-resolver source. A **pattern** source
+    // (e.g. the calculator's \`^(A|B)$\`) is compiled to a RegExp once per
+    // candidate subscription and tested against every stream whose max
+    // event id has advanced past the watermark.
     const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
-      const max_id = this._max_event_id_by_stream.get(s.source);
-      return max_id !== undefined && max_id > s.at;
+      if (is_literal_source(s.source)) {
+        const max_id = this._max_event_id_by_stream.get(s.source);
+        return max_id !== undefined && max_id > s.at;
+      }
+      const re = new RegExp(s.source);
+      for (const [stream_name, max_id] of this._max_event_id_by_stream) {
+        if (max_id > s.at && re.test(stream_name)) return true;
+      }
+      return false;
     };
     const available = [...this._streams.values()].filter(
       (s) =>
@@ -11506,7 +11523,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its \`streams\` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional exact source stream name (for reactions)
+ * @property source - Optional source (literal name or regex pattern) the reaction consumes from
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -11904,11 +11921,16 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is an **exact stream name** in the has-work
-   * probe — adapters must compare it by string equality, never as a regex
-   * or \`LIKE\` pattern. Resolvers hand {@link subscribe} exact names;
-   * pattern semantics live on the {@link StreamFilter} surfaces
-   * (\`query_streams\`, \`reset\`, \`unblock\`).
+   * A subscription's \`source\` is matched against candidate streams by one
+   * of two rules in the has-work probe. A **literal** source (no regex
+   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * source) matches by string equality: the fast, index-friendly path, and
+   * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
+   * \`^ $ . * + ? ( ) [ ] { } | \\\`, e.g. a static \`^(A|B)$\` reaction) is
+   * compiled as a regex and matched against candidate stream names.
+   * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
+   * a non-portable pattern at {@link subscribe} time rather than silently
+   * never claiming the stream.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -11953,9 +11975,10 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint — an
-   *   **exact** stream name, matched by equality in {@link claim}'s
-   *   has-work probe (never a pattern)
+   * @param streams - Streams to register with optional source hint — a
+   *   literal stream name (matched by equality in {@link claim}'s has-work
+   *   probe) or a regex pattern (compiled and matched against candidate
+   *   streams); non-portable patterns are rejected here on SQLite
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -13545,10 +13568,12 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional **exact** source stream name — the only
- *   stream this target consumes from. Matched by string equality in the
- *   store's claim/fetch path (never a pattern); patterns belong to the
- *   \`StreamFilter\` surfaces (\`query_streams\`, \`reset\`, \`unblock\`)
+ * @property source - Optional source the target consumes from. A
+ *   **literal** name (no regex metacharacter) is matched by string
+ *   equality in the store's claim/fetch path — the fast, index-friendly
+ *   path, and exact so \`"s1"\` never matches \`"s12"\`. A name carrying regex
+ *   metacharacters (e.g. \`^(A|B)$\`) is compiled as a \`RegExp\` and matched
+ *   against candidate streams with the caller's own anchoring
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -13713,7 +13738,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The exact source stream name, or undefined when sourcing from all streams.
+ * @property source - The source (literal name or regex pattern), or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -13740,7 +13765,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional exact source stream name the subscription consumes from
+ * @property source - Optional source the subscription consumes from (literal name or regex pattern)
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
@@ -16574,6 +16599,39 @@ export const extend = <
  */
 export async function sleep(ms?: number) {
   return new Promise((resolve) => setTimeout(resolve, ms ?? config().sleepMs));
+}
+
+/**
+ * Regex metacharacters that, when present in a reaction \`source\`, make it a
+ * pattern rather than a literal stream name. A source containing none of
+ * these is a bare stream name — the common case — and every claim/fetch
+ * site matches it by string equality on the store's stream index. A source
+ * containing any of them is compiled as a RegExp and matched against
+ * candidate streams with the caller's own anchoring (e.g. \`^(A|B)$\`).
+ */
+const SOURCE_METACHARACTERS = /[\\^$.*+?()[\\]{}|\\\\]/;
+
+/**
+ * True when \`source\` is a **literal** stream name — it carries no regex
+ * metacharacter, so every adapter treats it as an exact match. This is the
+ * fast, index-friendly path and covers every autoclose/dynamic-resolver
+ * source (bare stream names). A \`false\` return means the source is a
+ * **pattern** (contains \`^ $ . * + ? ( ) [ ] { } | \\\`) and must be compiled
+ * as a RegExp before matching — the shape the calculator's static
+ * \`source: "^(A|B)$"\` reaction relies on.
+ *
+ * The single source of truth for literal-vs-pattern classification across
+ * the InMemory has-work probe, the drain fetch path, and the SQL adapters,
+ * so all three agree on which sources take the exact path.
+ *
+ * @example
+ * \`\`\`typescript
+ * is_literal_source("Board");    // → true  (exact lookup)
+ * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
+ * \`\`\`
+ */
+export function is_literal_source(source: string): boolean {
+  return !SOURCE_METACHARACTERS.test(source);
 }
 "
 `;
@@ -21904,15 +21962,14 @@ async function partition_by_safety(
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
   //
-  // The stored \`source\` on a subscription is an exact stream name in the
-  // claim contract, but this probe deliberately matches it as a regex
-  // against close-target names: exact names regex-match themselves, and
-  // any metacharacter over-match only widens the pending set — the
-  // conservative direction for a safety probe. (Pattern subscriptions are
-  // NOT part of the claim contract — the regex grammar belongs to the
-  // \`QueryStreams\`/\`StreamFilter\` surfaces.) Compiled patterns are cached
-  // because dynamic reactions commonly produce many subscriptions sharing
-  // one source, so the callback fires repeatedly with the same \`source\`.
+  // The stored \`source\` on a subscription may be a literal stream name or
+  // a pattern (e.g. \`^(A|B)$\`); this probe matches it as a regex against
+  // close-target names either way — a literal regex-matches itself, and a
+  // pattern matches the streams it claims for. Any metacharacter
+  // over-match only widens the pending set — the conservative direction
+  // for a safety probe. Compiled patterns are cached because dynamic
+  // reactions commonly produce many subscriptions sharing one source, so
+  // the callback fires repeatedly with the same \`source\`.
   const pending_set = new Set<string>();
   const source_regex = new Map<string, RegExp>();
   const get_regex = (source: string): RegExp => {
@@ -23832,6 +23889,7 @@ import type {
   Lease,
   Schemas,
 } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 
 /** @internal */
 export interface DrainOps<TEvents extends Schemas> {
@@ -23857,8 +23915,15 @@ export async function fetch<TEvents extends Schemas>(
   return Promise.all(
     leased.map(async ({ stream, source, at, lagging }) => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
+      // A literal \`source\` fetches with \`stream_exact\` so an exact name
+      // like "s1" reads only "s1" — never a sibling prefix "s12". A
+      // pattern source (e.g. \`^(A|B)$\`) stays a regex query, matching the
+      // same streams the has-work probe claimed it for.
+      const stream_exact =
+        source !== undefined && is_literal_source(source) ? true : undefined;
       await store().query<TEvents>((e) => events.push(e), {
         stream: source,
+        stream_exact,
         after: at,
         limit: eventLimit,
       });
@@ -25221,7 +25286,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
-import { sleep } from "../utils.js";
+import { is_literal_source, sleep } from "../utils.js";
 
 /**
  * @internal
@@ -25522,8 +25587,9 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the exact-source probe in claim()
-  // without scanning the full event log.
+  // max non-snapshot event id per stream — drives the has-work probe in
+  // claim(): an O(1) lookup for a literal source, and the per-stream max
+  // that a pattern source scans, without touching the full event log.
   private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
   private _max_non_snap_event_id = -1;
@@ -25757,15 +25823,24 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // \`source\` is an exact stream name in the has-work probe — resolvers
-    // hand \`subscribe\` exact names, so the probe is a single map lookup.
-    // Pattern matching belongs to the StreamFilter surfaces
-    // (\`query_streams\`, \`reset\`, \`unblock\`), never to claim.
+    // Has-work probe. A **literal** \`source\` (no regex metacharacters) is
+    // matched by exact map lookup — the fast, index-friendly path that
+    // covers every autoclose/dynamic-resolver source. A **pattern** source
+    // (e.g. the calculator's \`^(A|B)$\`) is compiled to a RegExp once per
+    // candidate subscription and tested against every stream whose max
+    // event id has advanced past the watermark.
     const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
-      const max_id = this._max_event_id_by_stream.get(s.source);
-      return max_id !== undefined && max_id > s.at;
+      if (is_literal_source(s.source)) {
+        const max_id = this._max_event_id_by_stream.get(s.source);
+        return max_id !== undefined && max_id > s.at;
+      }
+      const re = new RegExp(s.source);
+      for (const [stream_name, max_id] of this._max_event_id_by_stream) {
+        if (max_id > s.at && re.test(stream_name)) return true;
+      }
+      return false;
     };
     const available = [...this._streams.values()].filter(
       (s) =>
@@ -27069,7 +27144,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its \`streams\` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional exact source stream name (for reactions)
+ * @property source - Optional source (literal name or regex pattern) the reaction consumes from
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -27467,11 +27542,16 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is an **exact stream name** in the has-work
-   * probe — adapters must compare it by string equality, never as a regex
-   * or \`LIKE\` pattern. Resolvers hand {@link subscribe} exact names;
-   * pattern semantics live on the {@link StreamFilter} surfaces
-   * (\`query_streams\`, \`reset\`, \`unblock\`).
+   * A subscription's \`source\` is matched against candidate streams by one
+   * of two rules in the has-work probe. A **literal** source (no regex
+   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * source) matches by string equality: the fast, index-friendly path, and
+   * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
+   * \`^ $ . * + ? ( ) [ ] { } | \\\`, e.g. a static \`^(A|B)$\` reaction) is
+   * compiled as a regex and matched against candidate stream names.
+   * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
+   * a non-portable pattern at {@link subscribe} time rather than silently
+   * never claiming the stream.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -27516,9 +27596,10 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint — an
-   *   **exact** stream name, matched by equality in {@link claim}'s
-   *   has-work probe (never a pattern)
+   * @param streams - Streams to register with optional source hint — a
+   *   literal stream name (matched by equality in {@link claim}'s has-work
+   *   probe) or a regex pattern (compiled and matched against candidate
+   *   streams); non-portable patterns are rejected here on SQLite
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -29108,10 +29189,12 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional **exact** source stream name — the only
- *   stream this target consumes from. Matched by string equality in the
- *   store's claim/fetch path (never a pattern); patterns belong to the
- *   \`StreamFilter\` surfaces (\`query_streams\`, \`reset\`, \`unblock\`)
+ * @property source - Optional source the target consumes from. A
+ *   **literal** name (no regex metacharacter) is matched by string
+ *   equality in the store's claim/fetch path — the fast, index-friendly
+ *   path, and exact so \`"s1"\` never matches \`"s12"\`. A name carrying regex
+ *   metacharacters (e.g. \`^(A|B)$\`) is compiled as a \`RegExp\` and matched
+ *   against candidate streams with the caller's own anchoring
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -29276,7 +29359,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The exact source stream name, or undefined when sourcing from all streams.
+ * @property source - The source (literal name or regex pattern), or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -29303,7 +29386,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional exact source stream name the subscription consumes from
+ * @property source - Optional source the subscription consumes from (literal name or regex pattern)
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
@@ -31167,6 +31250,39 @@ export const extend = <
  */
 export async function sleep(ms?: number) {
   return new Promise((resolve) => setTimeout(resolve, ms ?? config().sleepMs));
+}
+
+/**
+ * Regex metacharacters that, when present in a reaction \`source\`, make it a
+ * pattern rather than a literal stream name. A source containing none of
+ * these is a bare stream name — the common case — and every claim/fetch
+ * site matches it by string equality on the store's stream index. A source
+ * containing any of them is compiled as a RegExp and matched against
+ * candidate streams with the caller's own anchoring (e.g. \`^(A|B)$\`).
+ */
+const SOURCE_METACHARACTERS = /[\\^$.*+?()[\\]{}|\\\\]/;
+
+/**
+ * True when \`source\` is a **literal** stream name — it carries no regex
+ * metacharacter, so every adapter treats it as an exact match. This is the
+ * fast, index-friendly path and covers every autoclose/dynamic-resolver
+ * source (bare stream names). A \`false\` return means the source is a
+ * **pattern** (contains \`^ $ . * + ? ( ) [ ] { } | \\\`) and must be compiled
+ * as a RegExp before matching — the shape the calculator's static
+ * \`source: "^(A|B)$"\` reaction relies on.
+ *
+ * The single source of truth for literal-vs-pattern classification across
+ * the InMemory has-work probe, the drain fetch path, and the SQL adapters,
+ * so all three agree on which sources take the exact path.
+ *
+ * @example
+ * \`\`\`typescript
+ * is_literal_source("Board");    // → true  (exact lookup)
+ * is_literal_source("^(A|B)$");  // → false (compile as RegExp)
+ * \`\`\`
+ */
+export function is_literal_source(source: string): boolean {
+  return !SOURCE_METACHARACTERS.test(source);
 }
 "
 `;
@@ -33118,7 +33234,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its \`streams\` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional exact source stream name (for reactions)
+ * @property source - Optional source (literal name or regex pattern) the reaction consumes from
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -33516,11 +33632,16 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is an **exact stream name** in the has-work
-   * probe — adapters must compare it by string equality, never as a regex
-   * or \`LIKE\` pattern. Resolvers hand {@link subscribe} exact names;
-   * pattern semantics live on the {@link StreamFilter} surfaces
-   * (\`query_streams\`, \`reset\`, \`unblock\`).
+   * A subscription's \`source\` is matched against candidate streams by one
+   * of two rules in the has-work probe. A **literal** source (no regex
+   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * source) matches by string equality: the fast, index-friendly path, and
+   * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
+   * \`^ $ . * + ? ( ) [ ] { } | \\\`, e.g. a static \`^(A|B)$\` reaction) is
+   * compiled as a regex and matched against candidate stream names.
+   * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
+   * a non-portable pattern at {@link subscribe} time rather than silently
+   * never claiming the stream.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -33565,9 +33686,10 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint — an
-   *   **exact** stream name, matched by equality in {@link claim}'s
-   *   has-work probe (never a pattern)
+   * @param streams - Streams to register with optional source hint — a
+   *   literal stream name (matched by equality in {@link claim}'s has-work
+   *   probe) or a regex pattern (compiled and matched against candidate
+   *   streams); non-portable patterns are rejected here on SQLite
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -34357,10 +34479,12 @@ export type ReactionResolver<
  * resolver.
  *
  * @property target - Stream name that processes this reaction
- * @property source - Optional **exact** source stream name — the only
- *   stream this target consumes from. Matched by string equality in the
- *   store's claim/fetch path (never a pattern); patterns belong to the
- *   \`StreamFilter\` surfaces (\`query_streams\`, \`reset\`, \`unblock\`)
+ * @property source - Optional source the target consumes from. A
+ *   **literal** name (no regex metacharacter) is matched by string
+ *   equality in the store's claim/fetch path — the fast, index-friendly
+ *   path, and exact so \`"s1"\` never matches \`"s12"\`. A name carrying regex
+ *   metacharacters (e.g. \`^(A|B)$\`) is compiled as a \`RegExp\` and matched
+ *   against candidate streams with the caller's own anchoring
  * @property priority - Optional scheduling hint. The lagging-frontier
  *   \`claim()\` orders streams by \`priority DESC, at ASC\`, so a higher value
  *   makes the stream win lease slots ahead of equal-watermark peers under
@@ -34525,7 +34649,7 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name
- * @property source - The exact source stream name, or undefined when sourcing from all streams.
+ * @property source - The source (literal name or regex pattern), or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
@@ -34552,7 +34676,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * - Balance load between lagging and leading streams
  *
  * @property stream - The target stream name being processed
- * @property source - Optional exact source stream name the subscription consumes from
+ * @property source - Optional source the subscription consumes from (literal name or regex pattern)
  * @property at - Watermark: last successfully processed event ID
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
@@ -42965,6 +43089,17 @@ import { dateReviver } from "./utils.js";
 
 const logger: Logger = log();
 
+/**
+ * POSIX regex bracket expression matching any single reaction-\`source\`
+ * metacharacter (\`^ $ . * + ? ( ) [ ] { } | \\\`). A source that matches
+ * none of these is a literal stream name, claimed by equality; one that
+ * matches any is a pattern, claimed with \`~\`. Mirrors \`is_literal_source\`
+ * in \`@rotorsoft/act\` so the SQL classification agrees with the core
+ * helper. \`]\` leads and \`\\\\\` escapes the backslash; PG advanced regex
+ * honors backslash escapes inside brackets.
+ */
+const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\\\\\]";
+
 const { Pool, types } = pg;
 types.setTypeParser(types.builtins.JSONB, (val) =>
   JSON.parse(val, dateReviver)
@@ -43824,7 +43959,16 @@ export class PostgresStore implements Store {
               SELECT 1 FROM \${this._fqt} e
               WHERE e.id > s.at
                 AND e.name <> '\${SNAP_EVENT}'
-                AND (s.source IS NULL OR e.stream = COALESCE(s.source, s.stream))
+                -- Literal source (no regex metacharacter) matches by
+                -- equality — index-friendly, and exact so "s1" never
+                -- claims "s12". A pattern source (e.g. '^(A|B)$') matches
+                -- with the POSIX regex operator so the calculator's static
+                -- regex reaction is claimed for every stream it anchors.
+                AND (
+                  s.source IS NULL
+                  OR (s.source !~ '\${SOURCE_METACHARACTER_CLASS}' AND e.stream = s.source)
+                  OR (s.source ~ '\${SOURCE_METACHARACTER_CLASS}' AND e.stream ~ s.source)
+                )
               LIMIT 1
             ))
           FOR UPDATE SKIP LOCKED
@@ -45110,7 +45254,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { StoreError, ValidationError } from "@rotorsoft/act";
+import { is_literal_source, StoreError, ValidationError } from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -45579,6 +45723,17 @@ export class SqliteStore implements Store {
       lane?: string;
     }>
   ) {
+    // Fail loud at registration for a claim source this adapter cannot
+    // match: libsql has no \`REGEXP\`, and the portable LIKE grammar cannot
+    // express alternation/grouping. A pattern source outside the portable
+    // subset (e.g. \`^(A|B)$\`) would otherwise silently never claim its
+    // stream, so \`streamPatternToLike\` throws \`ValidationError\` here —
+    // pointing operators to InMemory/PG for full regex claim sources —
+    // before any row is written. Literal sources skip the check entirely.
+    for (const { source } of streams) {
+      if (source !== undefined && !is_literal_source(source))
+        streamPatternToLike(source);
+    }
     const tx = await this.client.transaction("write");
     try {
       let subscribed = 0;
@@ -45656,14 +45811,22 @@ export class SqliteStore implements Store {
 
         let has_events: boolean;
         if (source) {
-          // Exact-source has-work probe: \`source\` is an exact stream
-          // name, so plain equality keeps the probe on the stream index.
-          // The portable LIKE grammar stays on the StreamFilter surfaces
-          // (\`query_streams\`, \`reset\`, \`unblock\`), never on claim.
-          const check = await tx.execute({
-            sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1\`,
-            args: [at, source],
-          });
+          // Has-work probe. A literal \`source\` (no regex metacharacter)
+          // matches by equality — index-friendly, and exact so "s1" never
+          // claims "s12". A portable pattern (anchors, \`.\`, \`.*\`) matches
+          // via the same LIKE translation the StreamFilter surfaces use.
+          // Non-portable patterns (alternation/grouping) never reach here:
+          // \`subscribe\` rejects them up front, so \`streamPatternToLike\`
+          // below only sees the portable subset.
+          const check = is_literal_source(source)
+            ? await tx.execute({
+                sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1\`,
+                args: [at, source],
+              })
+            : await tx.execute({
+                sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\\\' LIMIT 1\`,
+                args: [at, streamPatternToLike(source)],
+              });
           has_events = check.rows.length > 0;
         } else {
           const check = await tx.execute({
@@ -48313,6 +48476,32 @@ export type StoreCapabilities = {
    * so correctness never depends on this flag — only probe cost.
    */
   readonly source_matches?: boolean;
+  /**
+   * Adapter matches a **pattern** reaction \`source\` (one carrying regex
+   * metacharacters, e.g. the calculator's \`^(A|B)$\`) as a full RegExp in
+   * claim()'s has-work probe, so a stream whose max event id exceeds the
+   * subscription watermark is claimed when its name matches the pattern.
+   * When \`true\`, the TCK runs the pattern-source claim suite. Literal
+   * sources stay exact everywhere regardless of this flag — the fast,
+   * index-friendly path.
+   *
+   * Stores that cannot run an arbitrary regex against candidate streams
+   * (e.g. SQLite, whose libsql build has no \`REGEXP\` and whose portable
+   * \`LIKE\` grammar cannot express alternation/grouping) leave this
+   * \`false\` and instead reject a non-portable claim source at
+   * {@link subscribe} time — see {@link rejects_nonportable_claim_source}.
+   */
+  readonly pattern_claim_source?: boolean;
+  /**
+   * Adapter cannot faithfully match every regex claim \`source\`, so it
+   * fails loud at registration: {@link subscribe} throws
+   * {@link ValidationError} for a source outside its portable subset
+   * (alternation/grouping like \`^(A|B)$\`), rather than silently never
+   * claiming the stream. When \`true\`, the TCK runs the reject-at-subscribe
+   * case. Currently only SQLite sets this — its message points operators
+   * to InMemory/PG for full regex claim sources.
+   */
+  readonly rejects_nonportable_claim_source?: boolean;
 };
 
 /**
@@ -49282,7 +49471,168 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.dispose();
         }
       });
+
+      // ACT-1220: an exact (literal) source must never fetch events from a
+      // sibling stream sharing its prefix. Guards the drain fetch path: an
+      // exact source \`s1\` claimed as work must, when queried, receive only
+      // \`s1\`'s events — not \`s12\`'s. Pre-#1215 fetch treated \`source\` as an
+      // unanchored regex, so \`s1\` would have pulled \`s12\`'s events into the
+      // handler.
+      it("fetches only the exact source stream's events, never a sibling prefix", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const base = \`fx-\${uid()}\`;
+          const sibling = \`\${base}2\`;
+          const target = \`agg-\${uid()}\`;
+          await fresh.subscribe([{ stream: target, source: base }]);
+          const [b1] = await seed_stream(fresh, base, 1);
+          await seed_stream(fresh, sibling, 1);
+          const claimed = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+          const lease = claimed.find((l) => l.stream === target);
+          expect(lease).toBeDefined();
+          const events = await collect(fresh, {
+            stream: lease!.source,
+            stream_exact: true,
+            after: -1,
+          });
+          expect(events.map((e) => e.stream)).toEqual([base]);
+          expect(events.map((e) => e.id)).toEqual([b1.id]);
+        } finally {
+          await fresh.dispose();
+        }
+      });
     });
+
+    // ACT-1220: a **pattern** source (one carrying regex metacharacters) is
+    // matched as a full RegExp against candidate streams. This restores the
+    // calculator's shipped \`source: "^(A|B)$"\` static reaction, which
+    // #1215's exact-only claim contract silently broke — the Board
+    // projection stopped being claimed because \`_max_event_id_by_stream.get(
+    // "^(A|B)$")\` is always undefined. Literal sources keep the fast exact
+    // path; only sources with metacharacters compile to a RegExp.
+    describe.skipIf(!caps.pattern_claim_source)(
+      "claim pattern source matching (capability)",
+      () => {
+        it("claims a pattern-source target when any matched stream has work (^(A|B)$)", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            const a = \`A-\${uid()}\`;
+            const b = \`B-\${uid()}\`;
+            const target = \`board-\${uid()}\`;
+            const pattern = \`^(\${a}|\${b})$\`;
+            await fresh.subscribe([{ stream: target, source: pattern }]);
+            // Commit to A only — the pattern must match it and claim.
+            const [ea] = await seed_stream(fresh, a, 1);
+            const first = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+            const l1 = first.find((s) => s.stream === target);
+            expect(l1).toBeDefined();
+            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
+            // Now commit to B — the same pattern-source target must claim
+            // again for the second matched stream.
+            const [eb] = await seed_stream(fresh, b, 1);
+            const second = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+            expect(second.find((s) => s.stream === target)).toBeDefined();
+            expect(eb.stream).toBe(b);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+
+        it("does not claim a pattern-source target when no matched stream has work", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            const a = \`A-\${uid()}\`;
+            const b = \`B-\${uid()}\`;
+            const other = \`Z-\${uid()}\`;
+            const target = \`board-\${uid()}\`;
+            const control = \`ctl-\${uid()}\`;
+            const pattern = \`^(\${a}|\${b})$\`;
+            // The control target sources from \`other\` (a literal). It DOES
+            // see the \`other\` commit below, so the second claim is
+            // non-empty and the negative assertion runs through a
+            // populated result — the pattern target must simply be absent.
+            await fresh.subscribe([
+              { stream: target, source: pattern },
+              { stream: control, source: other },
+            ]);
+            // Advance the target's watermark past -1 first: a fresh
+            // subscription is claimable unconditionally on some adapters,
+            // so the negative assertion must run against a settled stream.
+            const [ea] = await seed_stream(fresh, a, 1);
+            const first = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+            const l1 = first.find((s) => s.stream === target);
+            expect(l1).toBeDefined();
+            // Ack both the pattern target and the fresh control lease so
+            // neither is held into the second claim; the control becomes
+            // claimable again only when \`other\` gets a commit below. Both
+            // are fresh subscriptions, so both are in the first claim.
+            const c1 = first.find((s) => s.stream === control);
+            expect(c1).toBeDefined();
+            await fresh.ack([
+              { ...(l1 as Lease), at: ea.id },
+              { ...(c1 as Lease), at: -1 },
+            ]);
+            // Now activity on a stream the pattern does NOT match must not
+            // make the target claimable again — but the control sourced
+            // from that stream must.
+            await seed_stream(fresh, other, 1);
+            const claimed = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+            const streams = claimed.map((s) => s.stream);
+            expect(streams).toContain(control);
+            expect(streams).not.toContain(target);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+      }
+    );
+
+    // ACT-1220: adapters that cannot faithfully run an arbitrary regex in
+    // claim reject a non-portable claim source loudly at subscribe() —
+    // failing at registration, not silently never claiming the stream.
+    describe.skipIf(!caps.rejects_nonportable_claim_source)(
+      "claim source registration (capability)",
+      () => {
+        it("throws at subscribe for a non-portable (alternation) claim source", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            await expect(
+              fresh.subscribe([
+                { stream: \`board-\${uid()}\`, source: \`^(\${uid()}|\${uid()})$\` },
+              ])
+            ).rejects.toThrow(ValidationError);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+
+        it("accepts a portable-subset pattern claim source (^prefix.*) and claims on match", async () => {
+          const fresh = await options.factory();
+          try {
+            await fresh.drop();
+            await fresh.seed();
+            const prefix = \`pfx\${uid()}\`.replace(/-/g, "");
+            const matched = \`\${prefix}child\`;
+            const target = \`board-\${uid()}\`;
+            await fresh.subscribe([{ stream: target, source: \`^\${prefix}.*\` }]);
+            const [e] = await seed_stream(fresh, matched, 1);
+            const claimed = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
+            expect(claimed.find((s) => s.stream === target)).toBeDefined();
+            expect(e.stream).toBe(matched);
+          } finally {
+            await fresh.dispose();
+          }
+        });
+      }
+    );
 
     // ACT-982: competing-consumer correctness was previously proven only by
     // the PG-specific multi-process stress harness. This makes it a portable

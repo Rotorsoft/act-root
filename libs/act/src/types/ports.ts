@@ -123,7 +123,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * mirrors what every adapter already tracks on its `streams` table.
  *
  * @property stream - The subscription target (projection or reaction stream)
- * @property source - Optional exact source stream name (for reactions)
+ * @property source - Optional source (literal name or regex pattern) the reaction consumes from
  * @property at - Last processed event id watermark (-1 for fresh streams)
  * @property retry - Current retry counter
  * @property blocked - True when the stream is blocked by a poison message
@@ -521,11 +521,16 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's `source` is an **exact stream name** in the has-work
-   * probe — adapters must compare it by string equality, never as a regex
-   * or `LIKE` pattern. Resolvers hand {@link subscribe} exact names;
-   * pattern semantics live on the {@link StreamFilter} surfaces
-   * (`query_streams`, `reset`, `unblock`).
+   * A subscription's `source` is matched against candidate streams by one
+   * of two rules in the has-work probe. A **literal** source (no regex
+   * metacharacter — the common case, and every autoclose/dynamic-resolver
+   * source) matches by string equality: the fast, index-friendly path, and
+   * exact so `"s1"` never matches `"s12"`. A **pattern** source (carrying
+   * `^ $ . * + ? ( ) [ ] { } | \`, e.g. a static `^(A|B)$` reaction) is
+   * compiled as a regex and matched against candidate stream names.
+   * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
+   * a non-portable pattern at {@link subscribe} time rather than silently
+   * never claiming the stream.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -570,9 +575,10 @@ export interface Store extends Disposable, EventSource {
    * Also returns the current maximum watermark across all subscribed streams,
    * used internally for correlation checkpoint initialization on cold start.
    *
-   * @param streams - Streams to register with optional source hint — an
-   *   **exact** stream name, matched by equality in {@link claim}'s
-   *   has-work probe (never a pattern)
+   * @param streams - Streams to register with optional source hint — a
+   *   literal stream name (matched by equality in {@link claim}'s has-work
+   *   probe) or a regex pattern (compiled and matched against candidate
+   *   streams); non-portable patterns are rejected here on SQLite
    * @returns `subscribed` count of newly registered streams, `watermark` max `at` across all streams
    *
    * @example
