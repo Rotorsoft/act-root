@@ -15,7 +15,7 @@
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -41,6 +41,82 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
+
+/**
+ * The reduction pipeline names three distinct things, and each word means
+ * exactly one of them:
+ *
+ * - a **reducer** is a state's `.patch()` handler — it takes one event and
+ *   returns a {@link Patch} *partial*;
+ * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
+ *   that partial into the current state, yielding the next full state;
+ * - the **fold** is the loop that applies the patch step across a stream's
+ *   events (the reader loop in {@link load} / {@link action}, and the
+ *   projection engine in {@link "projection-fold"}).
+ *
+ * `PatchFn` is the per-event patch step. The fold loop calls one of two
+ * implementations, selected **once** at construction (in
+ * {@link "tracing".build_es}) — never branched per event:
+ *
+ * - {@link bare_patch} — the default. Literally `patch(state, partial)`,
+ *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
+ * - {@link validating_patch} — the opt-in `ActOptions.validateFoldedState`
+ *   path. Merges, then parses the merged full state against the state's
+ *   declared Zod schema.
+ *
+ * The `me`/`event` arguments are unused by the bare implementation but
+ * carried on the shared signature so the fold loop is call-shape-identical
+ * regardless of which patch step was selected — the validating
+ * implementation needs them to name the failing reduction.
+ *
+ * @internal
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
+/**
+ * The default patch step: a bare `patch()` merge with no wrapper and no
+ * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * app that leaves `validateFoldedState` off pays nothing — not even a
+ * comparison.
+ *
+ * @internal
+ */
+export const bare_patch: PatchFn = (_me, state, partial) =>
+  patch(state, partial) as typeof state;
+
+/**
+ * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * parse the merged full state against the owning state's declared Zod
+ * schema. A reducer that produces schema-violating state (the calculator
+ * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * instead of propagating and surfacing hops later as a confusing
+ * downstream error.
+ *
+ * The `target` string names the state and the triggering event
+ * (`"<state>.<event>#<id>"`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state. A debugging /
+ * CI aid, not a production guard — selected only when the operator opts
+ * in.
+ *
+ * @internal
+ */
+export const validating_patch: PatchFn = (me, state, partial, event) => {
+  const next = patch(state, partial) as typeof state;
+  return validate(
+    `${me.name}.${String(event.name)}#${event.id}`,
+    next,
+    me.state
+  );
+};
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -396,7 +472,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -421,7 +498,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = patch_fn(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -553,7 +630,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -567,7 +645,12 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        patch_fn
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       // snapshot.version is the head version even on a warm cache hit,
@@ -665,7 +748,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = patch_fn(me, state, p, event);
         patches++;
         return {
           event,

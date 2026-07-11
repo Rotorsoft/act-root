@@ -6,11 +6,13 @@
  */
 import { Act, type ActOptions } from "../act.js";
 import {
+  bare_patch,
   current_version_of,
   deprecated_event_names,
   make_fold_handler,
   merge_event_register,
   merge_projection,
+  type PatchFn,
   pii_fields,
   pii_gate,
   pii_split,
@@ -20,6 +22,7 @@ import {
   register_state,
   resolveAutocloseConfig,
   synthesize_autoclose_reactions,
+  validating_patch,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -455,6 +458,15 @@ export function act<
       on: <TKey extends keyof TEvents>(event: TKey) =>
         reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
+        // ACT-1238: select the per-event patch step ONCE here — the
+        // single selection site. `bare_patch` (the literal pre-#1238
+        // `patch()` merge) when `validateFoldedState` is off, else
+        // `validating_patch`. The same selected value feeds BOTH the
+        // projection-fold handlers below and `build_es` (via the Act
+        // constructor), so the command/load paths and the projection
+        // path share one choice and neither branches per event.
+        const patch_fn: PatchFn =
+          options?.validateFoldedState === true ? validating_patch : bare_patch;
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
         // `.build({scoped: ...})` repeatedly (e.g., per tenant) is
@@ -473,6 +485,8 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
+          // The `patch_fn` selected once at the top of `build()` feeds the
+          // fold handlers, matching the command/load paths (ACT-1238).
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -489,7 +503,7 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config)
+              make_fold_handler(merged, fold.flush, fold.config, patch_fn)
             );
           }
           finalize_deprecations();
@@ -624,7 +638,8 @@ export function act<
           states,
           batch_handlers,
           options,
-          lanes
+          lanes,
+          patch_fn
         );
       },
       events: registry.events,

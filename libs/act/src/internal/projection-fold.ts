@@ -1,5 +1,5 @@
 /**
- * @module state-fold
+ * @module projection-fold
  * @category Internal
  *
  * Fold engine behind `projection(name).of(state)` — maintains per-stream
@@ -25,7 +25,6 @@
  * - Eviction under `maxCachedStates` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 import type {
   BatchHandler,
@@ -35,7 +34,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import { load } from "./event-sourcing.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 
 export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 export const DEFAULT_MAX_CACHED_STATES = 10_000;
@@ -75,7 +74,8 @@ export function make_fold_handler<
 >(
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig
+  config: FoldConfig,
+  patch_fn: PatchFn = bare_patch
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
@@ -126,7 +126,7 @@ export function make_fold_handler<
         // `event.id > fold.event_id` guard below then permanently skips
         // the intervening events. Dirty from the start: the row must be
         // written at least once.
-        const snapshot = await load(me, { stream });
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
         fold = {
           stream,
           state: snapshot.state,
@@ -140,10 +140,12 @@ export function make_fold_handler<
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch(
+        fold.state = patch_fn(
+          me,
           fold.state,
-          reducer(event as never, fold.state)
-        ) as TState;
+          reducer(event as never, fold.state),
+          event as never
+        );
         fold.version = event.version;
         fold.event_id = event.id;
         fold.patches++;

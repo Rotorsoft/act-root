@@ -3,6 +3,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -20,6 +21,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -291,6 +293,31 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When `true`, each time an event is folded into state — on the
+   * command path (`do`), on `load`/replay, and inside projection-fold
+   * projections — the merged full state is parsed against the owning
+   * state's `state({ Name: schema })` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose `target` names the state and the event (`<state>.<event>#<id>`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at `build()`** (the same way the
+   * orchestrator picks bare vs trace-decorated store ops from the log
+   * level): when `false` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
@@ -490,13 +517,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from `.withLane(...)` calls. Slice 1 records them on the
    *   instance; later slices fan out one `DrainController` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from `ActOptions.validateFoldedState` (ACT-1238) — `bare_patch` by
+   *   default, `validating_patch` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to `bare_patch` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -507,7 +541,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside `act-builder`:
     // reactions registered against an event with `sensitive(...)` fields get
