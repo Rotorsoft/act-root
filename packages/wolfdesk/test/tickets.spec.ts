@@ -1,18 +1,11 @@
-import { cache, dispose } from "@rotorsoft/act";
+import type { Cache } from "@rotorsoft/act";
+import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
-import { app } from "../src/bootstrap.js";
+import { builder, tenantCorrelator } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { Priority } from "../src/schemas/index.js";
-import {
-  addMessage,
-  assignTicket,
-  escalateTicket,
-  markTicketResolved,
-  openTicket,
-  requestTicketEscalation,
-  target,
-} from "./actions.js";
+import { type Actions, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
 
@@ -24,14 +17,42 @@ async function findTicket(stream: string) {
 }
 
 describe("tickets", () => {
+  // Per-suite isolated Act built from the shared wolfdesk builder — the
+  // scoped store/cache replace the singleton port; the Drizzle projection
+  // DB is shared (external) and reset below.
+  let app: ReturnType<typeof builder.build>;
+  let cache: Cache;
+  let dispose: () => Promise<void>;
+  let addMessage: Actions["addMessage"];
+  let assignTicket: Actions["assignTicket"];
+  let escalateTicket: Actions["escalateTicket"];
+  let markTicketResolved: Actions["markTicketResolved"];
+  let openTicket: Actions["openTicket"];
+  let requestTicketEscalation: Actions["requestTicketEscalation"];
+
   beforeAll(async () => {
+    const ctx = await sandbox(builder, {
+      actOptions: { correlator: tenantCorrelator },
+    });
+    app = ctx.app;
+    cache = ctx.cache;
+    dispose = ctx.dispose;
+    ({
+      addMessage,
+      assignTicket,
+      escalateTicket,
+      markTicketResolved,
+      openTicket,
+      requestTicketEscalation,
+    } = makeActions(app));
+
     await init_tickets_db();
     await db.delete(tickets).catch((e) => console.error(e));
     // app.on("acked", (leases) => console.log("acked", leases));
   });
 
   afterAll(async () => {
-    await dispose()();
+    await dispose();
   });
 
   const DAY = 24 * 60 * 60 * 1000;
@@ -88,7 +109,7 @@ describe("tickets", () => {
     // The row never lies: columns equal the full-state fold ground truth.
     // Fresh replay through the registry-merged state is the fold ground
     // truth — invalidate first so the oracle exercises the cold path.
-    await cache().invalidate(t.stream);
+    await cache.invalidate(t.stream);
     const truth = await app.load("Ticket", t.stream);
     expect(ticket?.title).toBe(truth.state.title);
     expect(ticket?.messages).toBe(Object.keys(truth.state.messages).length);

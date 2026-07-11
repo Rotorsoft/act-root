@@ -1,25 +1,47 @@
-import { dispose } from "@rotorsoft/act";
+import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
-import { app } from "../src/bootstrap.js";
-import {
-  acknowledgeMessage,
-  addMessage,
-  assignTicket,
-  closeTicket,
-  escalateTicket,
-  markMessageDelivered,
-  markTicketResolved,
-  openTicket,
-  reassignTicket,
-  requestTicketEscalation,
-  target,
-} from "./actions.js";
+import { builder, tenantCorrelator } from "../src/bootstrap.js";
+import { type Actions, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
 
 describe("ticket without reactions", () => {
+  // Per-suite isolated Act built from the shared wolfdesk builder.
+  let app: ReturnType<typeof builder.build>;
+  let dispose: () => Promise<void>;
+  let acknowledgeMessage: Actions["acknowledgeMessage"];
+  let addMessage: Actions["addMessage"];
+  let assignTicket: Actions["assignTicket"];
+  let closeTicket: Actions["closeTicket"];
+  let escalateTicket: Actions["escalateTicket"];
+  let markMessageDelivered: Actions["markMessageDelivered"];
+  let markTicketResolved: Actions["markTicketResolved"];
+  let openTicket: Actions["openTicket"];
+  let reassignTicket: Actions["reassignTicket"];
+  let requestTicketEscalation: Actions["requestTicketEscalation"];
+
+  beforeAll(async () => {
+    const ctx = await sandbox(builder, {
+      actOptions: { correlator: tenantCorrelator },
+    });
+    app = ctx.app;
+    dispose = ctx.dispose;
+    ({
+      acknowledgeMessage,
+      addMessage,
+      assignTicket,
+      closeTicket,
+      escalateTicket,
+      markMessageDelivered,
+      markTicketResolved,
+      openTicket,
+      reassignTicket,
+      requestTicketEscalation,
+    } = makeActions(app));
+  });
+
   afterAll(async () => {
-    await dispose()();
+    await dispose();
   });
 
   const t = target();

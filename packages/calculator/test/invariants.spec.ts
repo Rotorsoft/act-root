@@ -1,19 +1,28 @@
 import {
   type Actor,
   act,
-  dispose,
   InvariantError,
   ValidationError,
 } from "@rotorsoft/act";
+import { sandbox } from "@rotorsoft/act/test";
 import { Calculator } from "../src/index.js";
+
+const builder = act().withState(Calculator);
 
 describe("calculator invariants", () => {
   const actor: Actor = { id: "1", name: "Calculator" };
   const stream = "I";
-  const app = act().withState(Calculator).build();
+  // Shared isolated Act for the whole suite (the cases build on each other's
+  // stream state), wired once in beforeAll and torn down in afterAll.
+  let app: ReturnType<typeof builder.build>;
+  let dispose: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ app, dispose } = await sandbox(builder));
+  });
 
   afterAll(async () => {
-    await dispose()();
+    await dispose();
   });
 
   it("should throw invariant error", async () => {
