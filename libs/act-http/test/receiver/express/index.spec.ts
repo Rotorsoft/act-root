@@ -130,6 +130,22 @@ describe("webhookMiddleware (Express)", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it("responds 400 empty-body when secret is set but raw body was not captured", async () => {
+    const store = freshStore();
+    // secret set + no raw body (express.json() ate the bytes, leaving a
+    // parsed object the adapter can't hash) → surface the distinct
+    // configuration error instead of a misleading 401 bad-signature.
+    const { req, res, next, json } = mockTriplet(
+      { "idempotency-key": "req-1", "x-webhook-signature": "sha256=deadbeef" },
+      undefined
+    );
+    const middleware = webhookMiddleware({ store, secret: "test-secret" });
+    await middleware(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({ error: "empty-body" });
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("responds 401 with the verify failure reason", async () => {
     const store = freshStore();
     const { req, res, next, json } = mockTriplet(
