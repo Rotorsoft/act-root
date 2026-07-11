@@ -1,3 +1,10 @@
+# [@rotorsoft/act-crypto-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.1...@rotorsoft/act-crypto-v0.1.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-crypto:** guard non-JSON-serializable encrypt payloads ([d9ce232](https://github.com/rotorsoft/act-root/commit/d9ce232190bcd1ae3cfa039d715ae78af770a0fe)), closes [#1236](https://github.com/rotorsoft/act-root/issues/1236)
+
 # [@rotorsoft/act-crypto-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.0...@rotorsoft/act-crypto-v0.1.1) (2026-06-29)
 
 
