@@ -462,6 +462,39 @@ describe("next_window_open — the derived off-window re-check (#1175)", () => {
     expect(open.toISOString()).toBe("2024-06-02T02:00:00.000Z");
   });
 
+  it("opens ~1h out on a DST spring-forward day whose start hour is in the gap (#1233)", () => {
+    // 2026-03-08 in America/New_York: 02:00 local does not exist (spring
+    // forward jumps 01:59:59 → 03:00:00). A window whose start hour is the
+    // skipped 02:00 must not defer ~24h — it opens at the gap's replacement
+    // instant (03:00 local = 07:00Z), ~1h after a now that sits just before.
+    const w = { start: 2, end: 3, timeZone: "America/New_York" };
+    // 06:30Z presents as local hour 1 — outside the window, just before the gap.
+    const now = new Date("2026-03-08T06:30:00Z");
+    const open = next_window_open(w, now);
+    const deltaMs = open.getTime() - now.getTime();
+    expect(deltaMs).toBeGreaterThan(0);
+    expect(deltaMs).toBeLessThan(90 * 60_000); // ~1h, not ~24h
+    expect(open.toISOString()).toBe("2026-03-08T07:00:00.000Z");
+    // and that replacement instant reads as in-window
+    expect(in_autoclose_window(w, open)).toBe(true);
+  });
+
+  it("in_autoclose_window is true at the DST gap replacement instant (#1233)", () => {
+    const w = { start: 2, end: 3, timeZone: "America/New_York" };
+    // 07:00Z presents as local hour 3 (the gap replacement); the empty
+    // [2,3) window must still admit this instant so autoclose isn't
+    // disabled for the whole DST day.
+    expect(in_autoclose_window(w, new Date("2026-03-08T07:00:00Z"))).toBe(true);
+    // just before the gap (local hour 1) stays out of window
+    expect(in_autoclose_window(w, new Date("2026-03-08T06:30:00Z"))).toBe(
+      false
+    );
+    // an hour later (local hour 4) is past the window
+    expect(in_autoclose_window(w, new Date("2026-03-08T08:00:00Z"))).toBe(
+      false
+    );
+  });
+
   it("falls back to one day out if no hour ever matches (defensive)", () => {
     // Fault injection: an Intl that reports an impossible hour starves
     // the walk. Validation makes this unreachable for real windows; the

@@ -58,6 +58,23 @@ export function deprecated_event_names(names: Iterable<string>): Set<string> {
   const deprecated = new Set<string>();
   for (const list of groups.values()) {
     if (list.length < 2) continue;
+    // Two names mapping to the same numeric version (e.g. a leading-zero
+    // `Foo_v02` alongside `Foo_v2`) can't both be a distinct version — one
+    // is a typo. Left unguarded, the sort below would flag whichever lands
+    // second, so declaration order would decide which one is "current",
+    // and the real current event could be marked deprecated (a static
+    // `.emit(...)` on it would then throw at build). Reject the collision
+    // with a clear, order-independent error instead.
+    const by_version = new Map<number, string>();
+    for (const { version, name } of list) {
+      const clash = by_version.get(version);
+      if (clash)
+        throw new Error(
+          `duplicate event version: ${clash} and ${name} both map to version ${version} — ` +
+            "leading zeros in a `_v<n>` suffix are not allowed; use a single canonical spelling"
+        );
+      by_version.set(version, name);
+    }
     list.sort((a, b) => b.version - a.version); // descending
     // index 0 is current; the rest are deprecated
     for (let i = 1; i < list.length; i++) deprecated.add(list[i].name);

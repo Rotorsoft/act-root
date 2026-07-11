@@ -166,6 +166,7 @@ After a schema migration, `OrderPlaced` and `OrderPlaced_v2` both live in the re
 - **Gaps allowed.** `{Foo, Foo_v3}` (no `Foo_v2`) → `Foo` is deprecated, `Foo_v3` is current. The framework picks the highest version regardless of contiguity.
 - **`_v1` is a literal name.** Version suffixes start at 2 (the base is implicitly v1). If you name an event `Foo_v1`, it's treated as a distinct event with no grouping. Don't use this — write `Foo` for the v1 of an event.
 - **Single-version events.** No `_v<n>` siblings means no deprecation; `OrderPaid` standing alone is just an event.
+- **No leading zeros in a version.** `Foo_v2` and `Foo_v02` both parse to numeric version 2 — they can't both be a distinct version, so one is a typo. Rather than let declaration order silently pick which one is "current" (and possibly deprecate the real current event, making its `.emit(...)` throw), the build **rejects** the collision with a clear, order-independent error: *"duplicate event version: Foo_v2 and Foo_v02 both map to version 2."* Pick one canonical spelling.
 
 **Why this works for rolling deploys:**
 

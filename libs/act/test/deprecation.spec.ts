@@ -57,6 +57,27 @@ describe("deprecation (ACT-403)", () => {
       const d = deprecated_event_names(["Foo_v2", "Foo_v3"]);
       expect([...d]).toEqual(["Foo_v2"]);
     });
+
+    it("rejects a leading-zero version colliding with its canonical form regardless of order (#1234)", () => {
+      // `Foo_v02` and `Foo_v2` both parse to numeric version 2. Without a
+      // guard, whichever sorts second is flagged deprecated — so declaration
+      // order decides whether the real current `Foo_v2` gets marked
+      // deprecated (making a static `.emit("Foo_v2")` throw at build). Reject
+      // the collision with a clear message, order-independently.
+      expect(() => deprecated_event_names(["Foo_v2", "Foo_v02"])).toThrow(
+        /duplicate event version/i
+      );
+      expect(() => deprecated_event_names(["Foo_v02", "Foo_v2"])).toThrow(
+        /duplicate event version/i
+      );
+      // the message names both offending events
+      expect(() => deprecated_event_names(["Foo_v2", "Foo_v02"])).toThrow(
+        /Foo_v2/
+      );
+      expect(() => deprecated_event_names(["Foo_v2", "Foo_v02"])).toThrow(
+        /Foo_v02/
+      );
+    });
   });
 
   describe("current_version_of", () => {
