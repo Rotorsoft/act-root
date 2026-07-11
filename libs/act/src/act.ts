@@ -3,6 +3,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -20,6 +21,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -515,13 +517,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from `.withLane(...)` calls. Slice 1 records them on the
    *   instance; later slices fan out one `DrainController` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from `ActOptions.validateFoldedState` (ACT-1238) — `bare_patch` by
+   *   default, `validating_patch` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to `bare_patch` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -532,11 +541,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(
-      this._logger,
-      this._correlator,
-      options.validateFoldedState === true
-    );
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside `act-builder`:
     // reactions registered against an event with `sensitive(...)` fields get

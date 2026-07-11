@@ -84,12 +84,16 @@ vocabulary matters here: a **reducer** (a state's `.patch()` handler) turns one
 event into a partial; a **patch step** merges that partial into state; the
 **fold** is the loop applying the patch step across a stream's events. There are
 two patch-step implementations — `bare_patch`, literally `patch(state, partial)`,
-and `validating_patch`, which merges then parses — and `build_es` selects which
-to bake into the `load`/`action` closures **once at construction**, exactly the
-way it already picks bare vs trace-decorated store ops from the log level. The
-projection builder makes the same one-time selection for the projection-fold
-engine. The off-path fold loop then has no per-event branch at all, so a
-benchmark with the flag off shows zero delta from pre-#1238.
+and `validating_patch`, which merges then parses. The **builder** selects between
+them **once at `build()`** — the single selection site — from
+`ActOptions.validateFoldedState`, then feeds that one chosen value down two
+paths: it passes it to `build_es` (via the `Act` constructor), which bakes it
+into the `load`/`action` closures without itself branching on the flag, and it
+passes the same value to the projection-fold engine's `make_fold_handler`. This
+mirrors how the orchestrator already picks bare vs trace-decorated store ops
+from the log level, once at construction. The off-path fold loop then has no
+per-event branch at all, so a benchmark with the flag off shows zero delta from
+pre-#1238.
 
 ## Stability / charter impact
 

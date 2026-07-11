@@ -169,24 +169,20 @@ const traced = <F extends AsyncFn>(
 export function build_es(
   logger: Logger,
   correlator: Correlator = default_correlator,
-  validate_state = false
+  patch_fn: PatchFn = es.bare_patch
 ): EsOps {
   // Bake the orchestrator-level `correlator` into every `action()` call
   // so EsOps callers don't need to thread it. A per-call
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: select the per-event patch step ONCE here — the same
-  // construction-time selection the trace decorators use below. An app
-  // with `validateFoldedState` off closes over `bare_patch` (the literal
-  // pre-#1238 `patch()` merge), so the fold loop has no per-event branch
-  // and no added cost; an app with the flag on closes over
-  // `validating_patch`. Baked into the load/action closures, so the
-  // projection-fold engine and close-cycle callers inherit the choice
-  // without threading anything through their own signatures.
-  const patch_fn: PatchFn = validate_state
-    ? es.validating_patch
-    : es.bare_patch;
+  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // (`act-builder.ts`) — bare vs validating — and passed in here already
+  // bound, so this factory stays agnostic to `validateFoldedState`. It
+  // just bakes the given `patch_fn` into the load/action closures, so
+  // the projection-fold engine and close-cycle callers inherit the same
+  // choice without threading anything through their own signatures. The
+  // default (`bare_patch`) keeps direct callers on the pre-#1238 path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,

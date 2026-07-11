@@ -16,6 +16,7 @@ import {
   make_fold_handler,
   merge_event_register,
   merge_projection,
+  type PatchFn,
   pii_fields,
   pii_gate,
   pii_split,
@@ -461,6 +462,15 @@ export function act<
       on: <TKey extends keyof TEvents>(event: TKey) =>
         reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
+        // ACT-1238: select the per-event patch step ONCE here — the
+        // single selection site. \`bare_patch\` (the literal pre-#1238
+        // \`patch()\` merge) when \`validateFoldedState\` is off, else
+        // \`validating_patch\`. The same selected value feeds BOTH the
+        // projection-fold handlers below and \`build_es\` (via the Act
+        // constructor), so the command/load paths and the projection
+        // path share one choice and neither branches per event.
+        const patch_fn: PatchFn =
+          options?.validateFoldedState === true ? validating_patch : bare_patch;
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
         // \`.build({scoped: ...})\` repeatedly (e.g., per tenant) is
@@ -479,14 +489,8 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
-          // ACT-1238: select the per-event patch step ONCE (bare vs
-          // validating) — the same build-time selection \`build_es\` makes
-          // for the command/load paths — so the projection fold loop has
-          // no per-event branch when \`validateFoldedState\` is off.
-          const patch_fn =
-            options?.validateFoldedState === true
-              ? validating_patch
-              : bare_patch;
+          // The \`patch_fn\` selected once at the top of \`build()\` feeds the
+          // fold handlers, matching the command/load paths (ACT-1238).
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -638,7 +642,8 @@ export function act<
           states,
           batch_handlers,
           options,
-          lanes
+          lanes,
+          patch_fn
         );
       },
       events: registry.events,
@@ -652,6 +657,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -669,6 +675,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -1164,13 +1171,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from \`.withLane(...)\` calls. Slice 1 records them on the
    *   instance; later slices fan out one \`DrainController\` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from \`ActOptions.validateFoldedState\` (ACT-1238) — \`bare_patch\` by
+   *   default, \`validating_patch\` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to \`bare_patch\` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -1181,11 +1195,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(
-      this._logger,
-      this._correlator,
-      options.validateFoldedState === true
-    );
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside \`act-builder\`:
     // reactions registered against an event with \`sensitive(...)\` fields get
@@ -16410,24 +16420,20 @@ const traced = <F extends AsyncFn>(
 export function build_es(
   logger: Logger,
   correlator: Correlator = default_correlator,
-  validate_state = false
+  patch_fn: PatchFn = es.bare_patch
 ): EsOps {
   // Bake the orchestrator-level \`correlator\` into every \`action()\` call
   // so EsOps callers don't need to thread it. A per-call
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: select the per-event patch step ONCE here — the same
-  // construction-time selection the trace decorators use below. An app
-  // with \`validateFoldedState\` off closes over \`bare_patch\` (the literal
-  // pre-#1238 \`patch()\` merge), so the fold loop has no per-event branch
-  // and no added cost; an app with the flag on closes over
-  // \`validating_patch\`. Baked into the load/action closures, so the
-  // projection-fold engine and close-cycle callers inherit the choice
-  // without threading anything through their own signatures.
-  const patch_fn: PatchFn = validate_state
-    ? es.validating_patch
-    : es.bare_patch;
+  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // (\`act-builder.ts\`) — bare vs validating — and passed in here already
+  // bound, so this factory stays agnostic to \`validateFoldedState\`. It
+  // just bakes the given \`patch_fn\` into the load/action closures, so
+  // the projection-fold engine and close-cycle callers inherit the same
+  // choice without threading anything through their own signatures. The
+  // default (\`bare_patch\`) keeps direct callers on the pre-#1238 path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
@@ -16790,6 +16796,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -16807,6 +16814,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -17302,13 +17310,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from \`.withLane(...)\` calls. Slice 1 records them on the
    *   instance; later slices fan out one \`DrainController\` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from \`ActOptions.validateFoldedState\` (ACT-1238) — \`bare_patch\` by
+   *   default, \`validating_patch\` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to \`bare_patch\` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -17319,11 +17334,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(
-      this._logger,
-      this._correlator,
-      options.validateFoldedState === true
-    );
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside \`act-builder\`:
     // reactions registered against an event with \`sensitive(...)\` fields get
@@ -31198,24 +31209,20 @@ const traced = <F extends AsyncFn>(
 export function build_es(
   logger: Logger,
   correlator: Correlator = default_correlator,
-  validate_state = false
+  patch_fn: PatchFn = es.bare_patch
 ): EsOps {
   // Bake the orchestrator-level \`correlator\` into every \`action()\` call
   // so EsOps callers don't need to thread it. A per-call
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: select the per-event patch step ONCE here — the same
-  // construction-time selection the trace decorators use below. An app
-  // with \`validateFoldedState\` off closes over \`bare_patch\` (the literal
-  // pre-#1238 \`patch()\` merge), so the fold loop has no per-event branch
-  // and no added cost; an app with the flag on closes over
-  // \`validating_patch\`. Baked into the load/action closures, so the
-  // projection-fold engine and close-cycle callers inherit the choice
-  // without threading anything through their own signatures.
-  const patch_fn: PatchFn = validate_state
-    ? es.validating_patch
-    : es.bare_patch;
+  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // (\`act-builder.ts\`) — bare vs validating — and passed in here already
+  // bound, so this factory stays agnostic to \`validateFoldedState\`. It
+  // just bakes the given \`patch_fn\` into the load/action closures, so
+  // the projection-fold engine and close-cycle callers inherit the same
+  // choice without threading anything through their own signatures. The
+  // default (\`bare_patch\`) keeps direct callers on the pre-#1238 path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,

@@ -12,6 +12,7 @@ import {
   make_fold_handler,
   merge_event_register,
   merge_projection,
+  type PatchFn,
   pii_fields,
   pii_gate,
   pii_split,
@@ -457,6 +458,15 @@ export function act<
       on: <TKey extends keyof TEvents>(event: TKey) =>
         reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
+        // ACT-1238: select the per-event patch step ONCE here — the
+        // single selection site. `bare_patch` (the literal pre-#1238
+        // `patch()` merge) when `validateFoldedState` is off, else
+        // `validating_patch`. The same selected value feeds BOTH the
+        // projection-fold handlers below and `build_es` (via the Act
+        // constructor), so the command/load paths and the projection
+        // path share one choice and neither branches per event.
+        const patch_fn: PatchFn =
+          options?.validateFoldedState === true ? validating_patch : bare_patch;
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
         // `.build({scoped: ...})` repeatedly (e.g., per tenant) is
@@ -475,14 +485,8 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
-          // ACT-1238: select the per-event patch step ONCE (bare vs
-          // validating) — the same build-time selection `build_es` makes
-          // for the command/load paths — so the projection fold loop has
-          // no per-event branch when `validateFoldedState` is off.
-          const patch_fn =
-            options?.validateFoldedState === true
-              ? validating_patch
-              : bare_patch;
+          // The `patch_fn` selected once at the top of `build()` feeds the
+          // fold handlers, matching the command/load paths (ACT-1238).
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -634,7 +638,8 @@ export function act<
           states,
           batch_handlers,
           options,
-          lanes
+          lanes,
+          patch_fn
         );
       },
       events: registry.events,
