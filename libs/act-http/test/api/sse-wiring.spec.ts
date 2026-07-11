@@ -159,8 +159,10 @@ describe("runSseSubscription", () => {
   it("calls on_cap_exceeded when the counter is full", () => {
     const channel = new BroadcastChannel<S>();
     const counter = new SseConnectionCounter(0);
-    const gen = runSseSubscription(channel, "k", counter, undefined, () => {
-      throw new Error("cap");
+    const gen = runSseSubscription(channel, "k", counter, undefined, {
+      on_cap_exceeded: () => {
+        throw new Error("cap");
+      },
     });
     return expect(gen.next()).rejects.toThrow(/cap/);
   });
@@ -218,6 +220,75 @@ describe("runSseSubscription", () => {
     const first = await gen.next();
     expect(first.value).toMatchObject({ kind: "state" });
     // Caller bails out without iterating further.
+    await gen.return(undefined);
+    expect(counter.open).toBe(0);
+  });
+
+  it("does not release a slot it never acquired when the cap is full and no on_cap_exceeded is supplied", async () => {
+    // Defect #2: acquire() returns false, on_cap_exceeded is undefined,
+    // so the loop runs with no slot — but the finally still calls
+    // release(), decrementing _open below the true count and inflating
+    // the effective cap. The counter starts at its limit (one live
+    // holder), the generator fails to acquire, then closing it must NOT
+    // drop the live holder's slot.
+    const channel = new BroadcastChannel<S>();
+    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+    const counter = new SseConnectionCounter(1);
+    // One legitimate holder occupies the only slot.
+    expect(counter.acquire()).toBe(true);
+    expect(counter.open).toBe(1);
+
+    // Cap is full; no on_cap_exceeded → generator falls through without
+    // a slot of its own. Pull the cached-state frame, then close it.
+    const gen = runSseSubscription(channel, "k", counter, undefined);
+    const first = await gen.next();
+    expect(first.value).toMatchObject({ kind: "state" });
+    await gen.return(undefined); // runs the finally → release()
+
+    // The live holder's slot must survive: exactly one open.
+    expect(counter.open).toBe(1);
+  });
+
+  it("bounds the per-connection pending buffer, dropping the oldest when a slow consumer stalls", async () => {
+    // Defect #1: a stalled consumer that never pulls lets `pending`
+    // grow without bound. With a bound of N, publishing far more than N
+    // messages before the consumer reads must retain only the newest N
+    // (drop-oldest), not every message.
+    const channel = new BroadcastChannel<S>();
+    const counter = new SseConnectionCounter(5);
+    const maxPending = 3;
+    const gen = runSseSubscription(channel, "k", counter, undefined, {
+      maxPending,
+    });
+
+    // Prime the subscription: pull the first frame so the loop is now
+    // awaiting the next publish and the subscriber callback is armed.
+    const primed = gen.next();
+    // The consumer stalls here — it never pulls again while we flood.
+    // Flood the channel with far more than `maxPending` publications.
+    const flood = 50;
+    for (let i = 1; i <= flood; i++) {
+      channel.publish("k", { _v: i, n: i }, [{ n: i }]);
+    }
+
+    // First frame is the earliest surviving patch (n === flood - maxPending + 1).
+    const first = await primed;
+    expect(first.value).toMatchObject({
+      kind: "patch",
+      data: { [flood - maxPending + 1]: { n: flood - maxPending + 1 } },
+    });
+
+    // Only `maxPending - 1` remain queued (one was just shifted out).
+    const rest: SseSubscriptionFrame<S>[] = [];
+    for (let i = 0; i < maxPending - 1; i++) {
+      rest.push((await gen.next()).value as SseSubscriptionFrame<S>);
+    }
+    // The very last flooded message must be present (newest kept).
+    expect(rest.at(-1)).toMatchObject({
+      kind: "patch",
+      data: { [flood]: { n: flood } },
+    });
+
     await gen.return(undefined);
     expect(counter.open).toBe(0);
   });

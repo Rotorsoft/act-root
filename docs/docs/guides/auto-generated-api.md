@@ -350,20 +350,21 @@ For every subscription, on every open:
    - Hono: `503 / SSE_BUSY` with `Retry-After: 1` (header set **before** the response body starts so it's a clean reject, not a hung stream).
    - tRPC: `TRPCError({ code: "TOO_MANY_REQUESTS" })`.
 3. Yield `{ kind: "state", data }` once if `channel.state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
-4. Subscribe to the channel for `streamId` and forward every publication as `{ kind: "patch", data }`.
+4. Subscribe to the channel for `streamId` and forward every publication as `{ kind: "patch", data }`. The per-connection backlog of undelivered frames is bounded by `maxPendingPerConnection` (default 256): when a slow consumer can't drain as fast as a busy stream publishes, the **oldest** frame is dropped to make room for the newest (drop-oldest). Each frame carries a full version-keyed patch, so the consumer converges on current state even after a skip — it just misses intermediate versions it was too slow to see. This caps per-connection memory independently of the connection-count cap.
 5. Run a keep-alive ping every `heartbeatMs` (default 30 s). Below the 60 s idle timeout most reverse proxies impose.
-6. Tear down on `iter.return()` / disconnect / abort: unsubscribe, release the slot, clear the heartbeat. The teardown runs from a `finally` block so a crashed handler doesn't leak count.
+6. Tear down on `iter.return()` / disconnect / abort: unsubscribe, release the slot, clear the heartbeat. The teardown runs from a `finally` block so a crashed handler doesn't leak count. A subscription that could not acquire a slot (cap full, no `on_cap_exceeded` reject) releases nothing on teardown — only an acquired slot is released, so the counter never underflows.
 
 The shared loop is exported as `runSseSubscription` from `@rotorsoft/act-http/api` for adopters who want to build a different transport (WebSocket, a custom long-poll bridge) on the same accounting + cancellation discipline.
 
 ### Defaults and validation
 
-`SseOptions = { channel, maxConnections?, heartbeatMs? }`. Defaults sized for typical business-app dashboards:
+`SseOptions = { channel, maxConnections?, heartbeatMs?, maxPendingPerConnection? }`. Defaults sized for typical business-app dashboards:
 
 | Knob | Default | Range | Why |
 |---|---|---|---|
 | `maxConnections` | `500` | `[1, 10_000]` | Comfortable for hundreds of human viewers; above 10k the FD ceiling and memory force horizontal scaling regardless of tuning. |
 | `heartbeatMs` | `30_000` | `[15_000, 300_000]` | Sub-15s wastes bandwidth on business workloads; above 5 min risks proxy idle drops. |
+| `maxPendingPerConnection` | `256` | `[1, 100_000]` | Bounds the per-connection undelivered-frame backlog. A stalled consumer on a busy stream can't drain as fast as it publishes; at the bound the oldest frame is dropped (drop-oldest) so one wedged client can't pin unbounded memory. |
 
 Out-of-range knobs throw `RangeError` at transport construction — misconfiguration surfaces at startup, not at first connection.
 

@@ -292,7 +292,8 @@ export function hono<TApp extends ActSurface = ActSurface>(
               sse_config.channel,
               stream_id,
               undefined,
-              controller.signal
+              controller.signal,
+              { maxPending: sse_config.maxPendingPerConnection }
             )) {
               await sse_stream.writeSSE({
                 event: frame.kind,
