@@ -2570,9 +2570,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
- * @property \`names?\` - Filter by event names
- * @property \`before?\` - Filter events before this id
- * @property \`after?\` - Filter events after this id
+ * @property \`names?\` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting \`names\`, which matches all. All adapters honor this identically.
+ * @property \`before?\` - Filter events strictly before this id (\`id < before\`). Honored even when \`0\` (\`before: 0\` matches nothing).
+ * @property \`after?\` - Filter events strictly after this id (\`id > after\`). Honored even when \`0\` (\`after: 0\` excludes an id-0 event on adapters whose ids start at 0).
  * @property \`limit?\` - Limit the number of events to return
  * @property \`created_before?\` - Filter events created before this date/time
  * @property \`created_after?\` - Filter events created after this date/time
@@ -10112,7 +10112,7 @@ export class InMemoryStore implements Store {
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_before && e.created >= query.created_before)
           continue;
-        if (query.after && e.id <= query.after) break;
+        if (query.after !== undefined && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -10144,7 +10144,7 @@ export class InMemoryStore implements Store {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before && e.id >= query.before) break;
+        if (query?.before !== undefined && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -11959,6 +11959,14 @@ export interface Store extends Disposable, EventSource {
    *
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
+   *
+   * **Payload dates round-trip as \`Date\`.** A \`Date\` committed inside event
+   * \`data\` (or \`meta\`) is returned as a \`Date\`, not an ISO string — every
+   * adapter revives ISO-8601 strings on read. A consequence: a plain string
+   * that happens to match ISO-8601 exactly is revived to a \`Date\` too, and a
+   * timezone-less ISO string is parsed in the reader's local time. Keep
+   * ISO-shaped strings you want to stay strings out of event payloads, or
+   * carry them in a wrapper field.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
@@ -18646,9 +18654,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
- * @property \`names?\` - Filter by event names
- * @property \`before?\` - Filter events before this id
- * @property \`after?\` - Filter events after this id
+ * @property \`names?\` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting \`names\`, which matches all. All adapters honor this identically.
+ * @property \`before?\` - Filter events strictly before this id (\`id < before\`). Honored even when \`0\` (\`before: 0\` matches nothing).
+ * @property \`after?\` - Filter events strictly after this id (\`id > after\`). Honored even when \`0\` (\`after: 0\` excludes an id-0 event on adapters whose ids start at 0).
  * @property \`limit?\` - Limit the number of events to return
  * @property \`created_before?\` - Filter events created before this date/time
  * @property \`created_after?\` - Filter events created after this date/time
@@ -25845,7 +25853,7 @@ export class InMemoryStore implements Store {
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_before && e.created >= query.created_before)
           continue;
-        if (query.after && e.id <= query.after) break;
+        if (query.after !== undefined && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -25877,7 +25885,7 @@ export class InMemoryStore implements Store {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before && e.id >= query.before) break;
+        if (query?.before !== undefined && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -27655,6 +27663,14 @@ export interface Store extends Disposable, EventSource {
    *
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
+   *
+   * **Payload dates round-trip as \`Date\`.** A \`Date\` committed inside event
+   * \`data\` (or \`meta\`) is returned as a \`Date\`, not an ISO string — every
+   * adapter revives ISO-8601 strings on read. A consequence: a plain string
+   * that happens to match ISO-8601 exactly is revived to a \`Date\` too, and a
+   * timezone-less ISO string is parsed in the reader's local time. Keep
+   * ISO-shaped strings you want to stay strings out of event payloads, or
+   * carry them in a wrapper field.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
@@ -31559,9 +31575,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
- * @property \`names?\` - Filter by event names
- * @property \`before?\` - Filter events before this id
- * @property \`after?\` - Filter events after this id
+ * @property \`names?\` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting \`names\`, which matches all. All adapters honor this identically.
+ * @property \`before?\` - Filter events strictly before this id (\`id < before\`). Honored even when \`0\` (\`before: 0\` matches nothing).
+ * @property \`after?\` - Filter events strictly after this id (\`id > after\`). Honored even when \`0\` (\`after: 0\` excludes an id-0 event on adapters whose ids start at 0).
  * @property \`limit?\` - Limit the number of events to return
  * @property \`created_before?\` - Filter events created before this date/time
  * @property \`created_after?\` - Filter events created after this date/time
@@ -33745,6 +33761,14 @@ export interface Store extends Disposable, EventSource {
    *
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
+   *
+   * **Payload dates round-trip as \`Date\`.** A \`Date\` committed inside event
+   * \`data\` (or \`meta\`) is returned as a \`Date\`, not an ISO string — every
+   * adapter revives ISO-8601 strings on read. A consequence: a plain string
+   * that happens to match ISO-8601 exactly is revived to a \`Date\` too, and a
+   * timezone-less ISO string is parsed in the reader's local time. Keep
+   * ISO-shaped strings you want to stay strings out of event payloads, or
+   * carry them in a wrapper field.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
@@ -43901,9 +43925,26 @@ const logger: Logger = log();
 const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\\\\\]";
 
 const { Pool, types } = pg;
-types.setTypeParser(types.builtins.JSONB, (val) =>
-  JSON.parse(val, dateReviver)
-);
+
+/**
+ * Per-Pool type parser (#1198). Overrides ONLY the JSONB parser to revive
+ * ISO-date strings in event payloads to \`Date\`, delegating every other
+ * OID to pg's global default. Passed as the Pool's \`types\` option so the
+ * Date coercion is scoped to this store's connections — it never mutates
+ * the process-global \`pg.types\` registry, so a host app's other pg usage
+ * (Drizzle projections, ad-hoc queries) reads jsonb with the stock
+ * parser. This is the shape pg threads down to each pooled client.
+ */
+const JSONB_OID = types.builtins.JSONB;
+const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
+  getTypeParser: ((oid: number, format?: unknown) =>
+    oid === JSONB_OID
+      ? (val: string) => JSON.parse(val, dateReviver)
+      : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
+          oid,
+          format
+        )) as typeof types.getTypeParser,
+};
 
 type Config = Readonly<{
   schema: string;
@@ -44247,7 +44288,8 @@ export class PostgresStore implements Store {
       pii_encryption: ___,
       ...poolConfig
     } = this.config;
-    this._pool = new Pool(poolConfig);
+    // Per-Pool JSONB reviver (#1198): scoped here, never global.
+    this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = \`"\${this.config.schema}"."\${this.config.table}"\`;
     this._fqs = \`"\${this.config.schema}"."\${this.config.table}_streams"\`;
     this._channel = notify_channel(this.config.schema, this.config.table);
@@ -44568,11 +44610,17 @@ export class PostgresStore implements Store {
             : \`stream ~ $\${values.length}\`
         );
       }
-      if (names?.length) {
+      if (names !== undefined) {
+        // #1199: \`names: []\` means "match no event names" — an empty
+        // allow-list. \`name = ANY('{}')\` is always false, matching the
+        // InMemory/SQLite semantics. Historically a truthy \`names?.length\`
+        // guard dropped the empty filter and returned ALL — the opposite.
         values.push(names);
         conditions.push(\`name = ANY($\${values.length})\`);
       }
-      if (before) {
+      if (before !== undefined) {
+        // #1199: \`!== undefined\` so a falsy-zero \`before: 0\` (strictly
+        // "id < 0", i.e. match nothing) is honored, not dropped.
         values.push(before);
         conditions.push(\`id<$\${values.length}\`);
       }
@@ -46240,7 +46288,12 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { is_literal_source, StoreError, ValidationError } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  is_literal_source,
+  StoreError,
+  ValidationError,
+} from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -46289,20 +46342,82 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/**
+ * ISO-8601 shape (optional fractional seconds, optional timezone). Kept
+ * in sync with the PostgresStore reviver so payload dates round-trip
+ * identically across adapters (#1198).
+ * @internal
+ */
+const ISO_8601 =
+  /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
+
+/**
+ * \`JSON.parse\` reviver that revives ISO-date strings to \`Date\`. Parity
+ * with PG's JSONB reviver (#1198): a \`Date\` committed into event \`data\`
+ * reads back as a \`Date\`, not an ISO string — so an InMemory/PG → SQLite
+ * migration doesn't silently break reducers calling \`.getTime()\`.
+ * @internal
+ */
+const date_reviver = (_key: string, value: unknown): unknown =>
+  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * Parse a JSON-encoded TEXT column, reviving ISO-date strings to \`Date\`
+ * for cross-adapter payload parity (#1198).
+ * @internal
+ */
+const parse_json = (raw: string): unknown => JSON.parse(raw, date_reviver);
+
+/**
+ * SQLite extended result code for a UNIQUE constraint violation
+ * (\`SQLITE_CONSTRAINT_UNIQUE\`). libsql surfaces it on the error's
+ * \`rawCode\`.
+ * @internal
+ */
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * Recognize a \`(stream, version)\` unique-constraint violation from a
+ * libsql commit error (#1202). Detects via the extended result code when
+ * present, falling back to the message text (\`UNIQUE constraint failed\`)
+ * for drivers that surface only the message.
+ * @internal
+ */
+const is_unique_violation = (e: unknown): boolean => {
+  const err = e as { rawCode?: number; message?: unknown };
+  return (
+    err?.rawCode === SQLITE_CONSTRAINT_UNIQUE ||
+    (typeof err?.message === "string" &&
+      err.message.includes("UNIQUE constraint failed"))
+  );
+};
+
 /** Portable stream-filter body grammar: literal characters, \`.\` (any
  *  single character), and \`.*\` (any run). Everything else — escapes
  *  (\`\\.\`), character classes (\`[0-9]\`), grouping/alternation (\`(a|b)\`),
  *  quantifiers (\`+ ? { }\`), and mid-pattern anchors — has no faithful
- *  \`LIKE\` translation and must throw instead of silently mis-matching.
+ *  \`GLOB\` translation and must throw instead of silently mis-matching.
  *  @internal
  */
 const PORTABLE_BODY = /^(?:\\.\\*|\\.|[^\\\\^$.()[\\]{}|+?*])*$/;
 
 /** Translate a stream filter (regex-shaped or plain substring) into a
- *  SQL LIKE pattern. Honors \`^\` / \`$\` anchors and converts \`.*\` → \`%\`,
- *  \`.\` → \`_\`. Unanchored input gets \`%\` wildcards on both sides.
- *  Literal \`%\` / \`_\` in the pattern are escaped with \`\\\` so they match
- *  themselves — every consumer appends \`ESCAPE '\\'\` to its \`LIKE\`.
+ *  SQLite \`GLOB\` pattern.
+ *
+ *  #1197: \`GLOB\` — not \`LIKE\` — because \`GLOB\` is **case-sensitive**,
+ *  matching PG's \`~\` and InMemory's \`RegExp\`. SQLite's \`LIKE\` is ASCII
+ *  case-insensitive, and its per-connection \`PRAGMA case_sensitive_like\`
+ *  override is unreliable under libsql's pooled connections (a
+ *  transaction and a follow-up read can land on different connections).
+ *  \`GLOB\` carries its case-sensitivity in the operator itself, so it is
+ *  correct regardless of which pooled connection runs the statement.
+ *
+ *  Honors \`^\` / \`$\` anchors and converts \`.*\` → \`*\`, \`.\` → \`?\`.
+ *  Unanchored input gets \`*\` wildcards on both sides. \`GLOB\` has no
+ *  ESCAPE clause and \`%\` / \`_\` are ordinary literals under it — so no
+ *  escaping is needed. The portable grammar rejects \`*\`, \`?\`, and \`[\`
+ *  as literals (they are metacharacters), so a literal can never collide
+ *  with a \`GLOB\` wildcard.
  *
  *  Only the portable filter grammar documented on
  *  {@link QueryStreams.stream} is convertible: \`^\` / \`$\` anchors, \`.\`,
@@ -46313,16 +46428,16 @@ const PORTABLE_BODY = /^(?:\\.\\*|\\.|[^\\\\^$.()[\\]{}|+?*])*$/;
  *
  *  Examples:
  *  - \`^abc$\`  → \`abc\`        (exact)
- *  - \`^abc.*\` → \`abc%\`       (starts-with)
- *  - \`.*abc$\` → \`%abc\`       (ends-with)
- *  - \`abc\`    → \`%abc%\`      (contains)
- *  - \`a.c\`    → \`%a_c%\`      (single-char wildcard, contains)
- *  - \`^a_c$\`  → \`a\\_c\`       (literal underscore, escaped for LIKE)
+ *  - \`^abc.*\` → \`abc*\`       (starts-with)
+ *  - \`.*abc$\` → \`*abc\`       (ends-with)
+ *  - \`abc\`    → \`*abc*\`      (contains)
+ *  - \`a.c\`    → \`*a?c*\`      (single-char wildcard, contains)
+ *  - \`^a_c$\`  → \`a_c\`        (literal underscore — ordinary under GLOB)
  *  - \`(a|b)\`  → throws {@link ValidationError}
  *
  *  @internal exported for testing
  */
-export function streamPatternToLike(input: string): string {
+export function streamPatternToGlob(input: string): string {
   let s = input;
   const start = s.startsWith("^");
   const end = s.endsWith("$");
@@ -46330,29 +46445,29 @@ export function streamPatternToLike(input: string): string {
   if (end) s = s.slice(0, -1);
   if (!PORTABLE_BODY.test(s))
     throw new ValidationError(
-      \`stream filter pattern "\${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to LIKE; use stream_exact/source_exact for literal names\`,
+      \`stream filter pattern "\${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to GLOB; use stream_exact/source_exact for literal names\`,
       input,
       "non-portable stream filter pattern"
     );
   const tokens: string[] = [];
-  if (!start) tokens.push("%");
+  if (!start) tokens.push("*");
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === ".") {
       if (s[i + 1] === "*") {
-        tokens.push("%");
+        tokens.push("*");
         i++;
-      } else tokens.push("_");
-    } else if (c === "%" || c === "_") tokens.push(\`\\\\\${c}\`);
-    else tokens.push(c);
+      } else tokens.push("?");
+    } else tokens.push(c);
   }
-  if (!end) tokens.push("%");
-  // Collapse adjacent \`%\` wildcards — e.g. \`^a.*\` would otherwise yield
-  // \`a%%\`. Token-level so escaped literals (\`\\%\`) are never merged.
+  if (!end) tokens.push("*");
+  // Collapse adjacent \`*\` wildcards — e.g. \`^a.*\` would otherwise yield
+  // \`a**\`. GLOB treats \`**\` as \`*\`, but collapsing keeps the output
+  // minimal and matches the pre-#1197 LIKE behavior.
   let out = "";
   let prev = "";
   for (const t of tokens) {
-    if (t === "%" && prev === "%") continue;
+    if (t === "*" && prev === "*") continue;
     out += t;
     prev = t;
   }
@@ -46556,18 +46671,20 @@ export class SqliteStore implements Store {
     expectedVersion?: number
   ): Promise<Committed<E, keyof E>[]> {
     const tx = await this.client.transaction("write");
+    // Hoisted so the catch can build a ConcurrencyError with the head
+    // version on a (stream, version) unique collision (#1202).
+    let current_version = -1;
     try {
       const version_row = await tx.execute({
         sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
         args: [stream],
       });
-      const current_version = Number(version_row.rows[0].v);
+      current_version = Number(version_row.rows[0].v);
 
       if (
         typeof expectedVersion === "number" &&
         current_version !== expectedVersion
       ) {
-        const { ConcurrencyError } = await import("@rotorsoft/act");
         throw new ConcurrencyError(
           stream,
           current_version,
@@ -46611,7 +46728,22 @@ export class SqliteStore implements Store {
       return committed;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      // #1202: map the (stream, version) unique collision to
+      // ConcurrencyError — the same signal PG raises from 23505 — so a
+      // caller retries on the framework contract, not a raw libsql error.
+      // This is the race where the version probe passed but a concurrent
+      // INSERT (a second store on the same file, tooling, the act CLI)
+      // beat this one to the row. Every other driver error is wrapped in
+      // StoreError('commit') for parity with the adapter's other methods.
+      if (e instanceof ConcurrencyError) throw e;
+      if (is_unique_violation(e))
+        throw new ConcurrencyError(
+          stream,
+          current_version,
+          msgs as Message<Schemas, keyof Schemas>[],
+          expectedVersion ?? -1
+        );
+      throw new StoreError("commit", { cause: e });
     }
   }
 
@@ -46628,11 +46760,15 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ? ESCAPE '\\\\'";
-        args.push(streamPatternToLike(query.stream));
+        sql += " AND stream GLOB ?";
+        args.push(streamPatternToGlob(query.stream));
       }
     }
-    if (query?.names) {
+    if (query?.names !== undefined) {
+      // #1199: \`names: []\` means "match no event names". An empty
+      // placeholder list yields \`name IN ()\` which SQLite evaluates as
+      // always-false — matching the PG (\`= ANY('{}')\`) / InMemory
+      // semantics. \`!== undefined\` (not truthiness) keeps that explicit.
       sql += \` AND name IN (\${query.names.map(() => "?").join(",")})\`;
       args.push(...query.names);
     }
@@ -46686,8 +46822,8 @@ export class SqliteStore implements Store {
           version: Number(row.version),
           created: new Date(row.created as string),
           name: row.name as string,
-          data: JSON.parse(row.data as string),
-          meta: JSON.parse(row.meta as string),
+          data: parse_json(row.data as string) as any,
+          meta: parse_json(row.meta as string) as any,
           pii: pii_value,
         })
       );
@@ -46710,15 +46846,15 @@ export class SqliteStore implements Store {
     }>
   ) {
     // Fail loud at registration for a claim source this adapter cannot
-    // match: libsql has no \`REGEXP\`, and the portable LIKE grammar cannot
+    // match: libsql has no \`REGEXP\`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
     // subset (e.g. \`^(A|B)$\`) would otherwise silently never claim its
-    // stream, so \`streamPatternToLike\` throws \`ValidationError\` here —
+    // stream, so \`streamPatternToGlob\` throws \`ValidationError\` here —
     // pointing operators to InMemory/PG for full regex claim sources —
     // before any row is written. Literal sources skip the check entirely.
     for (const { source } of streams) {
       if (source !== undefined && !is_literal_source(source))
-        streamPatternToLike(source);
+        streamPatternToGlob(source);
     }
     const tx = await this.client.transaction("write");
     try {
@@ -46800,9 +46936,9 @@ export class SqliteStore implements Store {
           // Has-work probe. A literal \`source\` (no regex metacharacter)
           // matches by equality — index-friendly, and exact so "s1" never
           // claims "s12". A portable pattern (anchors, \`.\`, \`.*\`) matches
-          // via the same LIKE translation the StreamFilter surfaces use.
+          // via the same GLOB translation the StreamFilter surfaces use.
           // Non-portable patterns (alternation/grouping) never reach here:
-          // \`subscribe\` rejects them up front, so \`streamPatternToLike\`
+          // \`subscribe\` rejects them up front, so \`streamPatternToGlob\`
           // below only sees the portable subset.
           const check = is_literal_source(source)
             ? await tx.execute({
@@ -46810,8 +46946,8 @@ export class SqliteStore implements Store {
                 args: [at, source],
               })
             : await tx.execute({
-                sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\\\' LIMIT 1\`,
-                args: [at, streamPatternToLike(source)],
+                sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream GLOB ? LIMIT 1\`,
+                args: [at, streamPatternToGlob(source)],
               });
           has_events = check.rows.length > 0;
         } else {
@@ -46980,8 +47116,8 @@ export class SqliteStore implements Store {
         conditions.push("stream = ?");
         args.push(filter.stream);
       } else {
-        conditions.push("stream LIKE ? ESCAPE '\\\\'");
-        args.push(streamPatternToLike(filter.stream));
+        conditions.push("stream GLOB ?");
+        args.push(streamPatternToGlob(filter.stream));
       }
     }
     if (filter.source !== undefined) {
@@ -46990,8 +47126,8 @@ export class SqliteStore implements Store {
         conditions.push("source = ?");
         args.push(filter.source);
       } else {
-        conditions.push("source LIKE ? ESCAPE '\\\\'");
-        args.push(streamPatternToLike(filter.source));
+        conditions.push("source GLOB ?");
+        args.push(streamPatternToGlob(filter.source));
       }
     }
     if (filter.blocked !== undefined) {
@@ -47090,8 +47226,8 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ? ESCAPE '\\\\'";
-        args.push(streamPatternToLike(query.stream));
+        sql += " AND stream GLOB ?";
+        args.push(streamPatternToGlob(query.stream));
       }
     }
     if (query?.source !== undefined) {
@@ -47100,8 +47236,8 @@ export class SqliteStore implements Store {
         sql += " AND source = ?";
         args.push(query.source);
       } else {
-        sql += " AND source LIKE ? ESCAPE '\\\\'";
-        args.push(streamPatternToLike(query.source));
+        sql += " AND source GLOB ?";
+        args.push(streamPatternToGlob(query.source));
       }
     }
     if (query?.blocked !== undefined) {
@@ -47203,8 +47339,8 @@ export class SqliteStore implements Store {
         where.push(\`e.stream = ?\`);
         args.push(input.stream);
       } else {
-        where.push(\`e.stream LIKE ? ESCAPE '\\\\'\`);
-        args.push(streamPatternToLike(input.stream));
+        where.push(\`e.stream GLOB ?\`);
+        args.push(streamPatternToGlob(input.stream));
       }
     }
     if (exclude.length) {
@@ -47306,8 +47442,8 @@ export class SqliteStore implements Store {
         stream: row.stream as string,
         version: Number(row.version),
         name: row.name as string,
-        data: JSON.parse(row.data as string),
-        meta: JSON.parse(row.meta as string),
+        data: parse_json(row.data as string) as any,
+        meta: parse_json(row.meta as string) as any,
         created: new Date(row.created as string),
         pii: await this._parse_pii_from_read(row.pii),
       }) as Committed<E, keyof E>;
@@ -47419,8 +47555,8 @@ export class SqliteStore implements Store {
         stream: stream as string,
         version: Number(version),
         name: name as string,
-        data: JSON.parse(data as string),
-        meta: JSON.parse(meta as string),
+        data: parse_json(data as string) as any,
+        meta: parse_json(meta as string) as any,
         created: new Date(created as string),
         pii: await this._parse_pii_from_read(pii),
       }) as Committed<E, keyof E>;
@@ -47536,8 +47672,8 @@ export class SqliteStore implements Store {
             version: Number(row.version),
             created: new Date(row.created as string),
             name: row.name as string,
-            data: JSON.parse(row.data as string),
-            meta: JSON.parse(row.meta as string),
+            data: parse_json(row.data as string) as any,
+            meta: parse_json(row.meta as string) as any,
           },
           before,
         });
@@ -49795,6 +49931,73 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
       });
 
+      // #1199: \`names: []\` means "match no event names" on every adapter.
+      // An empty allow-list is an explicit "nothing passes" — the opposite
+      // of an omitted \`names\` (which matches all). PG historically dropped
+      // the empty filter (returned ALL); this pins the sane semantics.
+      it("names:[] matches no events", async () => {
+        const s = \`q-names-empty-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), dec(1)],
+          make_meta({ stream: s })
+        );
+        const none = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          names: [],
+        });
+        expect(none).toHaveLength(0);
+        // Omitting \`names\` still returns everything — the contrast case.
+        const all = await collect(store, { stream: s, stream_exact: true });
+        expect(all).toHaveLength(2);
+      });
+
+      // #1199: falsy-zero \`after\`/\`before\` are honored, not dropped by a
+      // truthy guard. \`after: 0\` means strictly "id > 0"; \`before: 0\`
+      // means strictly "id < 0" (matches nothing). InMemory ids start at
+      // 0, so a truthy \`if (after)\` guard would leak id 0 on the backward
+      // path — this pins \`!== undefined\` semantics across adapters.
+      it("after:0 and before:0 are honored as id bounds", async () => {
+        const s = \`q-zero-bound-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2), inc(3)],
+          make_meta({ stream: s })
+        );
+        // before:0 → nothing has an id below 0.
+        expect(
+          await collect(store, { stream: s, stream_exact: true, before: 0 })
+        ).toHaveLength(0);
+        // before:0 on the backward path is equally empty.
+        expect(
+          await collect(store, {
+            stream: s,
+            stream_exact: true,
+            before: 0,
+            backward: true,
+          })
+        ).toHaveLength(0);
+        // after:0 → strictly id > 0. On adapters whose ids start at 0 the
+        // first event (id 0) is excluded; on 1-based adapters every event
+        // survives. Either way no event with id <= 0 is returned.
+        const forward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          after: 0,
+        });
+        expect(forward.every((e) => e.id > 0)).toBe(true);
+        // Backward path with after:0 must apply the same exclusive bound —
+        // never leak an id-0 event.
+        const backward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          after: 0,
+          backward: true,
+        });
+        expect(backward.every((e) => e.id > 0)).toBe(true);
+      });
+
       it("created_after/created_before filter by timestamp", async () => {
         const s = \`q-ts-\${uid()}\`;
         const committed = await store.commit<CounterEvents>(
@@ -50098,6 +50301,49 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
         if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
         else expect(count).toBe(1);
+      });
+
+      // #1197: stream filters are case-SENSITIVE across every adapter.
+      // PG (\`~\`) and InMemory (RegExp) are case-sensitive; a store that
+      // translates to \`LIKE\` must not let SQLite's ASCII-insensitive LIKE
+      // overmatch a differently-cased sibling. A \`^order-\` prefix must
+      // match \`order-x\` but never \`Order-x\`.
+      it("stream filters match case-sensitively (query)", async () => {
+        const tag = uid();
+        const lower = \`order-\${tag}\`;
+        const upper = \`Order-\${tag}\`;
+        await seed_streams([lower, upper]);
+
+        // ^prefix — only the lower-cased stream, never the capitalized one
+        expect(await streams_matching(\`^order-\${tag}\`)).toEqual([lower]);
+        // ^exact$ — the capitalized name never matches a lower-cased pattern
+        expect(await streams_matching(\`^Order-\${tag}$\`)).toEqual([upper]);
+        // contains — case-sensitive substring
+        expect(await streams_matching(\`order-\${tag}\`)).toEqual([lower]);
+      });
+
+      it("stream filters match case-sensitively (position filters)", async () => {
+        const tag = uid();
+        const lower = \`csp-order-\${tag}\`;
+        const upper = \`csp-Order-\${tag}\`;
+        await store.subscribe([{ stream: lower }, { stream: upper }]);
+
+        const got: string[] = [];
+        await store.query_streams((p) => got.push(p.stream), {
+          stream: \`^csp-order-\${tag}\`,
+        });
+        expect(got).toEqual([lower]);
+      });
+
+      it("bulk stream ops match case-sensitively", async () => {
+        const tag = uid();
+        const lower = \`bcs-order-\${tag}\`;
+        const upper = \`bcs-Order-\${tag}\`;
+        await store.subscribe([{ stream: lower }, { stream: upper }]);
+
+        // reset by pattern touches only the exactly-cased stream
+        const count = await store.reset({ stream: \`^bcs-order-\${tag}\` });
+        expect(count).toBe(1);
       });
     });
 
