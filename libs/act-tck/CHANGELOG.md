@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.26.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.7...@rotorsoft/act-tck-v1.26.8) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** commit receiver idempotency key on success, not on claim ([9badb1a](https://github.com/rotorsoft/act-root/commit/9badb1afdce72fb4813178fb2ea7e110057a2460)), closes [#1193](https://github.com/rotorsoft/act-root/issues/1193)
+
 # [@rotorsoft/act-tck-v1.26.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.6...@rotorsoft/act-tck-v1.26.7) (2026-07-11)
 
 
