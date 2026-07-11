@@ -91,11 +91,13 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
 const SseOptionsSchema = z.object({
   maxConnections: z
     .number()
+    .int()
     .min(1)
     .max(10_000)
     .default(DEFAULT_SSE_MAX_CONNECTIONS),
   heartbeatMs: z
     .number()
+    .int()
     .min(15_000)
     .max(300_000)
     .default(DEFAULT_SSE_HEARTBEAT_MS),

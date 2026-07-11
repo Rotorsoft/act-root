@@ -115,6 +115,9 @@ export function makeKeyResolver(encryption: Encryption): () => Promise<Buffer> {
  * @param resolve_key Key resolver from {@link makeKeyResolver}.
  * @returns Base64-encoded framed ciphertext suitable for a text or
  *   jsonb column.
+ * @throws Error if `payload` is not JSON-serializable (`undefined`, a
+ *   function, or a `Symbol` — anything `JSON.stringify` maps to
+ *   `undefined`).
  */
 export async function encrypt(
   payload: unknown,
@@ -123,7 +126,13 @@ export async function encrypt(
   const key = await resolve_key();
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
+  // JSON.stringify(undefined) and JSON.stringify(fn) both return undefined;
+  // Buffer.from(undefined) would throw a raw internal TypeError. Guard here
+  // so callers get a clear, validated failure instead.
+  const json = JSON.stringify(payload);
+  if (json === undefined)
+    throw new Error("act-crypto: payload is not JSON-serializable");
+  const plaintext = Buffer.from(json, "utf8");
   const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([Buffer.from([V1_AES_256_GCM]), iv, tag, ct]).toString(
