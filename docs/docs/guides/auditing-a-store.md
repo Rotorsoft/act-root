@@ -91,7 +91,7 @@ Streams that have accumulated many events since their last `__snapshot__` marker
 
 ### `routing-health` → restart-with-new-config
 
-- **`unknown-lane`** — stream subscription row's `lane` field isn't in the running registry's declared lane set. Happens when `withLane(...)` is renamed or removed but the streams table still pins existing streams to the deprecated name. Lane assignment is restart-driven (`subscribe()` UPSERTs lane on every call), so the resolution is "restart with the lane re-declared, or re-subscribe streams under the new name."
+- **`unknown-lane`** — stream subscription row's `lane` field isn't in the running registry's declared lane set. Happens when `withLane(...)` is renamed or removed but the streams table still pins existing streams to the deprecated name. Lane assignment is restart-driven (`subscribe()` UPSERTs lane on every call), so the resolution is "restart with the lane re-declared, or re-subscribe streams under the new name." The check compares against the app's **declared** lane universe (`default` plus every `.withLane` name), not the lanes whose controllers happen to be running on this instance — so a worker started with `onlyLanes: ["fast"]` does not false-flag a stream correctly assigned to the `slow` lane that a peer worker drains ([#1224](https://github.com/Rotorsoft/act-root/issues/1224)).
 - **`unrouted`** — events in the store whose name has no registered reaction. Could be intentional (pure-projection events) or a bug (resolver typo, removed reaction). The audit surfaces the count; you decide.
 
 ### `correlation-gaps` → fix upstream correlator

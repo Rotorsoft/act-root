@@ -1477,6 +1477,37 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(leased.find((l) => l.stream === s)).toBeDefined();
       });
 
+      it("exposes a future deferred_at via query_streams (#1221)", async () => {
+        // The cold-start defer re-seed reads the persisted schedule back
+        // through query_streams: a stream with a future deferred_at must
+        // surface the ms-since-epoch value so the orchestrator can re-arm
+        // the drain at the due-time. A stream with no active defer omits it.
+        const deferred = `defer-qs-${uid()}`;
+        const plain = `defer-qs-plain-${uid()}`;
+        await store.subscribe([{ stream: deferred }, { stream: plain }]);
+        for (const s of [deferred, plain])
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        const due = Date.now() + 3_600_000;
+        await store.defer([deferred], due);
+
+        const seen = new Map<string, number | undefined>();
+        await store.query_streams((p) => {
+          if (p.stream === deferred || p.stream === plain)
+            seen.set(p.stream, p.deferred_at);
+        });
+        // The deferred stream reports its schedule; adapters persist at
+        // second/ms precision, so allow a small rounding tolerance.
+        const got = seen.get(deferred);
+        expect(got).toBeDefined();
+        expect(Math.abs((got as number) - due)).toBeLessThan(2_000);
+        // The undeferred stream omits the field.
+        expect(seen.get(plain)).toBeUndefined();
+      });
+
       it("defers streams matching a filter and counts matches", async () => {
         const tag = uid();
         const a = `deferfilter-${tag}-a`;

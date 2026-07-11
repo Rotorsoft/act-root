@@ -109,6 +109,189 @@ describe("defer durability", () => {
     expect(defer_spy).not.toHaveBeenCalled();
   });
 
+  it("re-seeds the DeferTimer from persisted deferred_at at cold start (#1221)", async () => {
+    // A stream is deferred to a future due-time and persisted (subscribe
+    // registers it, defer sets deferred_at). Then the process "restarts":
+    // a fresh Act builds new controllers with an EMPTY in-memory
+    // DeferTimer. Nothing commits to this idle stream — the only thing
+    // that can re-arm the drain is a cold-start read of the persisted
+    // deferred_at. Without the fix the DeferTimer stays empty, the
+    // controller disarms, and the due-time never re-arms the drain.
+    const due = Date.now() + 60_000;
+    // Persist the deferred stream directly on the shared (singleton) store,
+    // simulating the state left behind by a pre-restart worker.
+    await store().subscribe([{ stream: "idle-agg", source: "idle-agg" }]);
+    await store().defer(["idle-agg"], due);
+
+    // Cold start: a fresh Act over the same store, new controllers + a new
+    // (empty) DeferTimer. init() must re-seed the timer from deferred_at.
+    const noop = async () => {};
+    const app = act().withState(counter).on("ticked").do(noop).build();
+    await app.correlate();
+
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { _defer: { size: number; is_deferred: (s: string) => boolean } }
+        >;
+      }
+    )._drain_controllers;
+    const controller = controllers.get("default")! as unknown as {
+      _defer: { size: number; is_deferred: (s: string) => boolean };
+      armed: boolean;
+    };
+    const defer_timer = controller._defer;
+    expect(defer_timer.size).toBe(1);
+    expect(defer_timer.is_deferred("idle-agg")).toBe(true);
+  });
+
+  it("re-arms the drain at the persisted due-time with no intervening commit (#1221)", async () => {
+    // A near-future due-time so a real-time wait is short. The store's own
+    // async ops use real setTimeout, so fake timers can't drive the wake
+    // without deadlocking the store — a short real delay is the honest test.
+    const due = Date.now() + 40;
+    await store().subscribe([{ stream: "idle-agg", source: "idle-agg" }]);
+    await store().defer(["idle-agg"], due);
+
+    const noop = async () => {};
+    const app = act().withState(counter).on("ticked").do(noop).build();
+    await app.correlate();
+    // Drive the cold-start drain to the disarmed state: the deferred stream
+    // isn't claimable yet, so the controller disarms on the empty claim.
+    await app.drain();
+
+    const controller = (
+      app as unknown as {
+        _drain_controllers: Map<string, { armed: boolean }>;
+      }
+    )._drain_controllers.get("default")!;
+
+    // Disarmed, and nothing has committed to the idle aggregate.
+    expect(controller.armed).toBe(false);
+
+    // Past the due-time: the re-seeded timer wakes and re-arms the
+    // controller — the only thing that could, since no commit intervened.
+    await sleep(80);
+    expect(controller.armed).toBe(true);
+  });
+
+  it("seeds a non-default lane's controller from persisted deferred_at (#1221)", async () => {
+    const due = Date.now() + 60_000;
+    // A deferred stream stored on the "slow" lane.
+    await store().subscribe([
+      { stream: "slow-agg", source: "slow-agg", lane: "slow" },
+    ]);
+    await store().defer(["slow-agg"], due);
+
+    const noop = async () => {};
+    const app = act()
+      .withState(counter)
+      .withLane({ name: "slow" })
+      .on("ticked")
+      .do(noop)
+      .build();
+    await app.correlate();
+
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { _defer: { size: number; is_deferred: (s: string) => boolean } }
+        >;
+      }
+    )._drain_controllers;
+    // Seeded on the "slow" controller, not "default".
+    expect(controllers.get("slow")!._defer.is_deferred("slow-agg")).toBe(true);
+    expect(controllers.get("default")!._defer.size).toBe(0);
+  });
+
+  it("skips a deferred stream whose lane is excluded by onlyLanes (#1221)", async () => {
+    const due = Date.now() + 60_000;
+    // A deferred stream on the "slow" lane, but this instance runs only
+    // "fast" — no controller owns "slow", so the seed must skip it (a peer
+    // worker owns that timer). Covers the missing-controller branch.
+    await store().subscribe([
+      { stream: "slow-agg", source: "slow-agg", lane: "slow" },
+    ]);
+    await store().defer(["slow-agg"], due);
+
+    const noop = async () => {};
+    const app = act()
+      .withState(counter)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .on("ticked")
+      .do(noop)
+      .build({ onlyLanes: ["fast"] });
+    await app.correlate();
+
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<string, { _defer: { size: number } }>;
+      }
+    )._drain_controllers;
+    // Only "fast" has a controller; nothing was seeded (slow is a peer's).
+    expect(controllers.has("slow")).toBe(false);
+    expect(controllers.get("fast")!._defer.size).toBe(0);
+  });
+
+  it("routes a lane-less persisted defer to the default controller (#1221)", async () => {
+    // A StreamPosition may omit `lane` (the field is optional on the port).
+    // An adapter that returns no lane must route to the default controller.
+    // Stub query_streams to hand back exactly that shape.
+    const due = Date.now() + 60_000;
+    vi.spyOn(store(), "query_streams").mockImplementationOnce(
+      async (callback) => {
+        callback({
+          stream: "lane-less",
+          at: -1,
+          retry: -1,
+          blocked: false,
+          error: "",
+          priority: 0,
+          deferred_at: due,
+        });
+        return { maxEventId: -1, count: 1 };
+      }
+    );
+
+    const noop = async () => {};
+    const app = act().withState(counter).on("ticked").do(noop).build();
+    await app.correlate();
+
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { _defer: { is_deferred: (s: string) => boolean } }
+        >;
+      }
+    )._drain_controllers;
+    expect(controllers.get("default")!._defer.is_deferred("lane-less")).toBe(
+      true
+    );
+  });
+
+  it("does not seed a past-due deferred_at at cold start (#1221)", async () => {
+    // A past-due schedule is already claimable — the ordinary armed drain
+    // handles it, so the cold-start seed skips it. Covers the
+    // `deferred_at <= now` branch.
+    await store().subscribe([{ stream: "past-agg", source: "past-agg" }]);
+    await store().defer(["past-agg"], Date.now() - 1_000);
+
+    const noop = async () => {};
+    const app = act().withState(counter).on("ticked").do(noop).build();
+    await app.correlate();
+
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<string, { _defer: { size: number } }>;
+      }
+    )._drain_controllers;
+    expect(controllers.get("default")!._defer.size).toBe(0);
+  });
+
   it("keeps the drain armed while finalization is unhealed", async () => {
     let attempts = 0;
     const deferring = async () => {
