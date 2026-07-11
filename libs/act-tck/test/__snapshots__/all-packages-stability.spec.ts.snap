@@ -2789,6 +2789,18 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Stream head event id (global sequence) of the frontier this snapshot
+   * folds to. \`-1\` for a brand-new stream with no events. Always defined
+   * — populated atomically with \`state\` inside \`load()\`: from the cached
+   * checkpoint's \`event_id\` on a hit-with-no-new-events, or from the last
+   * replayed event on a cache miss. Consumers that pair a loaded state
+   * with the stream's frontier (the fold engine's first-sight path) read
+   * this instead of a separate cache lookup, which would open a TOCTOU
+   * window where a concurrent commit lands between the two reads and
+   * pairs older \`state\` with a newer frontier.
+   */
+  readonly frontier: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
@@ -6823,6 +6835,25 @@ import type { DrainOps } from "./drain.js";
 import { LruSet } from "./lru-map.js";
 
 /**
+ * Cold-start back-scan window (ACT-1207). On init the correlate cursor
+ * would otherwise jump straight to the store watermark (\`max(at)\` across
+ * every subscribed stream). A dynamic-resolver event committed but not
+ * yet correlated before a crash sits *below* that watermark whenever a
+ * busier stream has since advanced — so a plain \`max(at)\` cold start
+ * skips it forever, and a one-shot dynamic target is never subscribed.
+ *
+ * Flooring the cold-start checkpoint at \`watermark - BACK_SCAN\` re-scans
+ * the tail on restart so those in-flight events are re-discovered.
+ * Re-scanning already-correlated events is harmless: \`_subscribed\`
+ * dedups and \`subscribe\` is an idempotent UPSERT. The window bounds the
+ * one-time restart cost; steady-state correlation still advances the
+ * checkpoint forward normally.
+ *
+ * @internal
+ */
+const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
  * Static resolver target collected at build time. Subscribed once during
  * init; never re-evaluated.
  *
@@ -6867,6 +6898,12 @@ export class CorrelateCycle<
    * \`_scoped\` (identity for a non-scoped Act), so it's required.
    */
   private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Tail re-scan window applied to the cold-start checkpoint (ACT-1207).
+   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
+   * public option) so tests can shrink it; defaults otherwise.
+   */
+  private readonly _cold_start_back_scan: number;
 
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -6875,7 +6912,8 @@ export class CorrelateCycle<
     cd: DrainOps<TEvents>,
     maxSubscribedStreams: number,
     on_init: (() => void) | undefined,
-    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>
+    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>,
+    cold_start_back_scan: number = DEFAULT_COLD_START_BACK_SCAN
   ) {
     this._subscribed = new LruSet(maxSubscribedStreams);
     this._registry = registry;
@@ -6884,6 +6922,7 @@ export class CorrelateCycle<
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
+    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -6893,7 +6932,10 @@ export class CorrelateCycle<
 
   /**
    * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
+   * - Reads max(at) from store, then floors the cold-start checkpoint at
+   *   \`watermark - back_scan\` when dynamic resolvers exist, so an event
+   *   committed-but-not-correlated before a crash is re-scanned on
+   *   restart instead of skipped (ACT-1207)
    * - Subscribes static resolver targets (idempotent upsert)
    * - Populates the subscribed-streams LRU
    * - Fires \`on_init\` once (Act uses this to flag a cold-start drain)
@@ -6903,7 +6945,14 @@ export class CorrelateCycle<
     this._initialized = true;
 
     const { watermark } = await store().subscribe([...this._static_targets]);
-    this._checkpoint = watermark;
+    // Without dynamic resolvers correlate never scans, so the checkpoint
+    // is inert — keep the plain \`max(at)\` cold start. With dynamic
+    // resolvers, back the cursor off the watermark by a bounded window so
+    // the crash-window tail (an uncorrelated event now below a busier
+    // stream's watermark) is re-discovered. Never floor below -1.
+    this._checkpoint = this._has_dynamic_resolvers
+      ? Math.max(-1, watermark - this._cold_start_back_scan)
+      : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
@@ -9212,6 +9261,7 @@ export async function load<
         event,
         state,
         version: event.version,
+        frontier: event.id,
         patches,
         snaps,
         cache_hit,
@@ -9252,20 +9302,34 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache().set(stream, {
-      stream,
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
+    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
+    // the state is already correctly computed, so a transient failure in a
+    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
+    // would break plain reads, reaction bound_load dispatches, and the fold
+    // engine's first-sight load. The cache is self-correcting: a subsequent
+    // load queries past \`event_id\`, replays what it missed, and re-warms.
+    await cache()
+      .set(stream, {
+        stream,
+        state,
+        version: event.version,
+        event_id: event.id,
+        patches,
+        snaps,
+      })
+      .catch((err) => log().error(err));
   }
 
   return {
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
+    // Frontier event id is captured atomically with \`state\`: the last
+    // replayed event's id on a cache miss, or the cached checkpoint's
+    // event_id on a warm hit with no new events. Consumers read this
+    // instead of a separate cache lookup that could race a concurrent
+    // commit (ACT-1204).
+    frontier: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -9432,6 +9496,7 @@ export async function action<
           event,
           state,
           version: event.version,
+          frontier: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -9490,6 +9555,15 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // A caller-pinned expectedVersion is a fixed target: every retry
+      // reloads and re-commits against the SAME pinned version, so the
+      // conflict is guaranteed to recur — retrying only burns the budget
+      // and sleeps out the backoff before surfacing the same terminal
+      // error. Rethrow immediately (ACT-1208). The retry loop exists to
+      // absorb races on framework-derived versions (a concurrent writer
+      // advanced the head), where the reload picks up the new frontier
+      // and the next attempt can succeed.
+      if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
@@ -14806,6 +14880,16 @@ export type SettleDeps<TEvents extends Schemas> = {
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
+  /**
+   * Set when a \`schedule()\` timer fires while a cycle is still running
+   * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
+   * the wake-up isn't dropped — a commit landing during the final
+   * no-progress drain pass would otherwise leave armed controllers with
+   * nothing to re-drain on an instance with no lane \`cycleMs\` and no
+   * polling. Carries the options of the dropped call so the re-armed
+   * pass honors its \`debounceMs\`/\`maxPasses\`/drain overrides.
+   */
+  private _pending: SettleOptions | undefined = undefined;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via \`SettleOptions.debounceMs\`. */
   private readonly _default_debounce_ms: number;
@@ -14833,7 +14917,13 @@ export class SettleLoop<TEvents extends Schemas> {
     if (this._timer) clearTimeout(this._timer);
     this._timer = setTimeout(() => {
       this._timer = undefined;
-      if (this._running) return;
+      // A cycle is already running. Record this wake-up as pending rather
+      // than dropping it (ACT-1205) — the running cycle's \`finally\`
+      // re-schedules it so armed controllers always get one more drain.
+      if (this._running) {
+        this._pending = options;
+        return;
+      }
       this._running = true;
 
       (async () => {
@@ -14867,12 +14957,22 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          // A wake-up arrived mid-cycle. Re-arm one more pass with its
+          // options so the requested drain actually happens (ACT-1205).
+          const pending = this._pending;
+          if (pending !== undefined) {
+            this._pending = undefined;
+            this.schedule(pending);
+          }
         });
     }, debounceMs);
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
   stop(): void {
+    // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
+    // the running cycle's \`finally\` (ACT-1205).
+    this._pending = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;
@@ -16038,15 +16138,18 @@ function action_builder<
  *   acks only after a fully-flushed batch — fold work is never
  *   acknowledged before it is durable.
  * - On first sight of a stream the engine loads its head state through
- *   the same \`load()\` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
+ *   the same \`load()\` the command path uses (cache, snapshots and all).
+ *   The loaded snapshot carries its own frontier (\`version\` and
+ *   \`frontier\` event_id), captured atomically with \`state\`, so the
+ *   engine never pairs a stale state with a newer frontier read
+ *   separately from the cache (ACT-1204). Fetched events at or below the
+ *   loaded frontier are skipped, later ones fold through the state's own
+ *   patch reducers.
  * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
 import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -16136,28 +16239,24 @@ export function make_fold_handler<
           cache.delete(oldest);
         }
         // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
+        // regular load path (cache, snapshots). The loaded state and its
+        // frontier (\`version\`, \`frontier\` event_id, \`patches\`, \`snaps\`)
+        // are captured atomically inside \`load()\` — even on a warm cache
+        // hit where \`snapshot.event\` is undefined. Reading the frontier
+        // back from the cache separately (ACT-1204) opened a TOCTOU
+        // window: a concurrent \`action()\` committing between the two
+        // awaits pairs this OLDER state with a NEWER event_id, and the
+        // \`event.id > fold.event_id\` guard below then permanently skips
+        // the intervening events. Dirty from the start: the row must be
+        // written at least once.
         const snapshot = await load(me, { stream });
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
         fold = {
           stream,
           state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
+          version: snapshot.version,
+          event_id: snapshot.frontier,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
           dirty: true,
         };
         cache.set(stream, fold);
@@ -18865,6 +18964,18 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Stream head event id (global sequence) of the frontier this snapshot
+   * folds to. \`-1\` for a brand-new stream with no events. Always defined
+   * — populated atomically with \`state\` inside \`load()\`: from the cached
+   * checkpoint's \`event_id\` on a hit-with-no-new-events, or from the last
+   * replayed event on a cache miss. Consumers that pair a loaded state
+   * with the stream's frontier (the fold engine's first-sight path) read
+   * this instead of a separate cache lookup, which would open a TOCTOU
+   * window where a concurrent commit lands between the two reads and
+   * pairs older \`state\` with a newer frontier.
+   */
+  readonly frontier: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
@@ -22779,6 +22890,25 @@ import type { DrainOps } from "./drain.js";
 import { LruSet } from "./lru-map.js";
 
 /**
+ * Cold-start back-scan window (ACT-1207). On init the correlate cursor
+ * would otherwise jump straight to the store watermark (\`max(at)\` across
+ * every subscribed stream). A dynamic-resolver event committed but not
+ * yet correlated before a crash sits *below* that watermark whenever a
+ * busier stream has since advanced — so a plain \`max(at)\` cold start
+ * skips it forever, and a one-shot dynamic target is never subscribed.
+ *
+ * Flooring the cold-start checkpoint at \`watermark - BACK_SCAN\` re-scans
+ * the tail on restart so those in-flight events are re-discovered.
+ * Re-scanning already-correlated events is harmless: \`_subscribed\`
+ * dedups and \`subscribe\` is an idempotent UPSERT. The window bounds the
+ * one-time restart cost; steady-state correlation still advances the
+ * checkpoint forward normally.
+ *
+ * @internal
+ */
+const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
  * Static resolver target collected at build time. Subscribed once during
  * init; never re-evaluated.
  *
@@ -22823,6 +22953,12 @@ export class CorrelateCycle<
    * \`_scoped\` (identity for a non-scoped Act), so it's required.
    */
   private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Tail re-scan window applied to the cold-start checkpoint (ACT-1207).
+   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
+   * public option) so tests can shrink it; defaults otherwise.
+   */
+  private readonly _cold_start_back_scan: number;
 
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -22831,7 +22967,8 @@ export class CorrelateCycle<
     cd: DrainOps<TEvents>,
     maxSubscribedStreams: number,
     on_init: (() => void) | undefined,
-    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>
+    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>,
+    cold_start_back_scan: number = DEFAULT_COLD_START_BACK_SCAN
   ) {
     this._subscribed = new LruSet(maxSubscribedStreams);
     this._registry = registry;
@@ -22840,6 +22977,7 @@ export class CorrelateCycle<
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
+    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -22849,7 +22987,10 @@ export class CorrelateCycle<
 
   /**
    * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
+   * - Reads max(at) from store, then floors the cold-start checkpoint at
+   *   \`watermark - back_scan\` when dynamic resolvers exist, so an event
+   *   committed-but-not-correlated before a crash is re-scanned on
+   *   restart instead of skipped (ACT-1207)
    * - Subscribes static resolver targets (idempotent upsert)
    * - Populates the subscribed-streams LRU
    * - Fires \`on_init\` once (Act uses this to flag a cold-start drain)
@@ -22859,7 +23000,14 @@ export class CorrelateCycle<
     this._initialized = true;
 
     const { watermark } = await store().subscribe([...this._static_targets]);
-    this._checkpoint = watermark;
+    // Without dynamic resolvers correlate never scans, so the checkpoint
+    // is inert — keep the plain \`max(at)\` cold start. With dynamic
+    // resolvers, back the cursor off the watermark by a bounded window so
+    // the crash-window tail (an uncorrelated event now below a busier
+    // stream's watermark) is re-discovered. Never floor below -1.
+    this._checkpoint = this._has_dynamic_resolvers
+      ? Math.max(-1, watermark - this._cold_start_back_scan)
+      : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
@@ -24945,6 +25093,7 @@ export async function load<
         event,
         state,
         version: event.version,
+        frontier: event.id,
         patches,
         snaps,
         cache_hit,
@@ -24985,20 +25134,34 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache().set(stream, {
-      stream,
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
+    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
+    // the state is already correctly computed, so a transient failure in a
+    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
+    // would break plain reads, reaction bound_load dispatches, and the fold
+    // engine's first-sight load. The cache is self-correcting: a subsequent
+    // load queries past \`event_id\`, replays what it missed, and re-warms.
+    await cache()
+      .set(stream, {
+        stream,
+        state,
+        version: event.version,
+        event_id: event.id,
+        patches,
+        snaps,
+      })
+      .catch((err) => log().error(err));
   }
 
   return {
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
+    // Frontier event id is captured atomically with \`state\`: the last
+    // replayed event's id on a cache miss, or the cached checkpoint's
+    // event_id on a warm hit with no new events. Consumers read this
+    // instead of a separate cache lookup that could race a concurrent
+    // commit (ACT-1204).
+    frontier: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -25165,6 +25328,7 @@ export async function action<
           event,
           state,
           version: event.version,
+          frontier: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -25223,6 +25387,15 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // A caller-pinned expectedVersion is a fixed target: every retry
+      // reloads and re-commits against the SAME pinned version, so the
+      // conflict is guaranteed to recur — retrying only burns the budget
+      // and sleeps out the backoff before surfacing the same terminal
+      // error. Rethrow immediately (ACT-1208). The retry loop exists to
+      // absorb races on framework-derived versions (a concurrent writer
+      // advanced the head), where the reload picks up the new frontier
+      // and the next attempt can succeed.
+      if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
@@ -30671,6 +30844,16 @@ export type SettleDeps<TEvents extends Schemas> = {
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
+  /**
+   * Set when a \`schedule()\` timer fires while a cycle is still running
+   * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
+   * the wake-up isn't dropped — a commit landing during the final
+   * no-progress drain pass would otherwise leave armed controllers with
+   * nothing to re-drain on an instance with no lane \`cycleMs\` and no
+   * polling. Carries the options of the dropped call so the re-armed
+   * pass honors its \`debounceMs\`/\`maxPasses\`/drain overrides.
+   */
+  private _pending: SettleOptions | undefined = undefined;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via \`SettleOptions.debounceMs\`. */
   private readonly _default_debounce_ms: number;
@@ -30698,7 +30881,13 @@ export class SettleLoop<TEvents extends Schemas> {
     if (this._timer) clearTimeout(this._timer);
     this._timer = setTimeout(() => {
       this._timer = undefined;
-      if (this._running) return;
+      // A cycle is already running. Record this wake-up as pending rather
+      // than dropping it (ACT-1205) — the running cycle's \`finally\`
+      // re-schedules it so armed controllers always get one more drain.
+      if (this._running) {
+        this._pending = options;
+        return;
+      }
       this._running = true;
 
       (async () => {
@@ -30732,12 +30921,22 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          // A wake-up arrived mid-cycle. Re-arm one more pass with its
+          // options so the requested drain actually happens (ACT-1205).
+          const pending = this._pending;
+          if (pending !== undefined) {
+            this._pending = undefined;
+            this.schedule(pending);
+          }
         });
     }, debounceMs);
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
   stop(): void {
+    // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
+    // the running cycle's \`finally\` (ACT-1205).
+    this._pending = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;
@@ -30764,15 +30963,18 @@ export class SettleLoop<TEvents extends Schemas> {
  *   acks only after a fully-flushed batch — fold work is never
  *   acknowledged before it is durable.
  * - On first sight of a stream the engine loads its head state through
- *   the same \`load()\` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
+ *   the same \`load()\` the command path uses (cache, snapshots and all).
+ *   The loaded snapshot carries its own frontier (\`version\` and
+ *   \`frontier\` event_id), captured atomically with \`state\`, so the
+ *   engine never pairs a stale state with a newer frontier read
+ *   separately from the cache (ACT-1204). Fetched events at or below the
+ *   loaded frontier are skipped, later ones fold through the state's own
+ *   patch reducers.
  * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
 import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -30862,28 +31064,24 @@ export function make_fold_handler<
           cache.delete(oldest);
         }
         // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
+        // regular load path (cache, snapshots). The loaded state and its
+        // frontier (\`version\`, \`frontier\` event_id, \`patches\`, \`snaps\`)
+        // are captured atomically inside \`load()\` — even on a warm cache
+        // hit where \`snapshot.event\` is undefined. Reading the frontier
+        // back from the cache separately (ACT-1204) opened a TOCTOU
+        // window: a concurrent \`action()\` committing between the two
+        // awaits pairs this OLDER state with a NEWER event_id, and the
+        // \`event.id > fold.event_id\` guard below then permanently skips
+        // the intervening events. Dirty from the start: the row must be
+        // written at least once.
         const snapshot = await load(me, { stream });
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
         fold = {
           stream,
           state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
+          version: snapshot.version,
+          event_id: snapshot.frontier,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
           dirty: true,
         };
         cache.set(stream, fold);
@@ -31778,6 +31976,18 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Stream head event id (global sequence) of the frontier this snapshot
+   * folds to. \`-1\` for a brand-new stream with no events. Always defined
+   * — populated atomically with \`state\` inside \`load()\`: from the cached
+   * checkpoint's \`event_id\` on a hit-with-no-new-events, or from the last
+   * replayed event on a cache miss. Consumers that pair a loaded state
+   * with the stream's frontier (the fold engine's first-sight path) read
+   * this instead of a separate cache lookup, which would open a TOCTOU
+   * window where a concurrent commit lands between the two reads and
+   * pairs older \`state\` with a newer frontier.
+   */
+  readonly frontier: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */

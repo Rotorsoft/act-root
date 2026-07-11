@@ -72,6 +72,8 @@ If `hasDynamicResolvers` is false, `correlate()` becomes effectively a no-op pas
 
 The checkpoint advances only after `subscribe` succeeds. If `subscribe` throws, the checkpoint stays where it was and the next correlate retries from the same point.
 
+**Cold-start floor (ACT-1207).** On the first `init()`, the checkpoint would naively jump to the store watermark (`max(at)` across every subscribed stream). That overshoots any dynamic-resolver event committed but not correlated before a crash: a busier static-target stream can have acked past it, so a plain `max(at)` restart scans over it and its one-shot dynamic target is never subscribed. When dynamic resolvers exist, the cold-start checkpoint is instead floored at `watermark - back_scan` so the crash-window tail is re-scanned. Re-scanning already-correlated events is harmless — the subscribed-streams LRU dedups and `subscribe` is an idempotent UPSERT. Apps with no dynamic resolvers never scan, so they keep the plain `max(at)` cold start.
+
 ### The subscribed-streams LRU
 
 `CorrelateCycle` holds an `LruSet<string>` cap (default 1000, configurable via `ActOptions.maxSubscribedStreams`). Apps that mint millions of dynamic targets — e.g., one stream per user activity — would otherwise grow this set unbounded.
@@ -188,6 +190,8 @@ The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the col
 "Until no progress" handles paginated catch-up. After `app.reset(...)`, a settled stream might have thousands of events. One drain cycle's `streamLimit × eventLimit` won't catch up; subsequent cycles will. `settle()` doesn't return until the work is done — the caller gets the `"settled"` event when there's nothing left.
 
 The debounce is `ActOptions.settleDebounceMs ?? 10` by default. Coalesces commits in the same tick (typical pattern: tRPC mutation chain calling `app.do` many times) into one settle pass.
+
+**Mid-cycle wake-ups are never dropped (ACT-1205).** The reentrancy guard skips starting a second overlapping cycle, but a `schedule()` whose timer fires *while a cycle is running* is recorded as pending rather than discarded — the running cycle's `finally` re-arms it. Without this, a commit landing during the final no-progress drain pass (its wake-up firing just before `_running` clears) would be lost, and armed controllers could starve on an instance with no lane `cycleMs` and no polling.
 
 ## Why drain is one-cycle, settle is the loop
 
