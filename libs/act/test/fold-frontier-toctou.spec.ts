@@ -21,13 +21,13 @@ import type { CacheEntry, Schema } from "../src/types/index.js";
  * event at or below that overshot frontier, even in later drain batches:
  * the row lags head forever.
  *
- * The fix folds the frontier into the snapshot `load()` returns
+ * The fix folds the head event id into the snapshot `load()` returns
  * (captured atomically with `state`) and drops the second read. This
  * test lands the racing rewarm inside the old two-read window via a
- * cache whose second `get("c1")` overshoots the frontier, then delivers
+ * cache whose second `get("c1")` overshoots the head id, then delivers
  * the missed event in a following drain batch. RED on the old code (the
  * row is stuck at the pre-race state); GREEN once the fold trusts
- * `snapshot.frontier`.
+ * `snapshot.id`.
  */
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -69,12 +69,12 @@ describe("fold first-sight frontier TOCTOU (ACT-1204)", () => {
     const store = new InMemoryStore();
 
     // The cache fires a one-shot hook on the SECOND `get("c1")` — the
-    // fold's separate frontier read on the OLD code (the first `get` is
+    // fold's separate head-id read on the OLD code (the first `get` is
     // `load()`'s own internal probe). The hook overshoots the cached
-    // frontier to event_id 2 while leaving the state at count=1: exactly
-    // the entry a racing writer that computed from a stale base leaves
-    // behind. On the fixed code the fold issues no second read, so the
-    // hook never fires and the snapshot frontier (event_id 1) stands.
+    // event_id to 2 while leaving the state at count=1: exactly the entry
+    // a racing writer that computed from a stale base leaves behind. On
+    // the fixed code the fold issues no second read, so the hook never
+    // fires and the snapshot's head id (event_id 1) stands.
     let armed = false;
     let gets = 0;
     class RacingCache extends InMemoryCache {
@@ -83,14 +83,14 @@ describe("fold first-sight frontier TOCTOU (ACT-1204)", () => {
           gets++;
           if (gets === 2) {
             armed = false;
-            // Return a frontier that overshoots the count=1 state without
+            // Return an event_id that overshoots the count=1 state without
             // persisting it — only the fold's separate read sees the race;
             // the shared cache stays truthful for `app.load`/`action`.
             return {
               stream: "c1",
               state: { count: 1 },
               version: 0,
-              // Frontier overshoots the count=1 state to event #2's id
+              // event_id overshoots the count=1 state to event #2's id
               // (ids are 0-based: event #1 is id 0, event #2 is id 1).
               event_id: 1,
               patches: 1,

@@ -17,12 +17,11 @@
  *   acknowledged before it is durable.
  * - On first sight of a stream the engine loads its head state through
  *   the same `load()` the command path uses (cache, snapshots and all).
- *   The loaded snapshot carries its own frontier (`version` and
- *   `frontier` event_id), captured atomically with `state`, so the
- *   engine never pairs a stale state with a newer frontier read
- *   separately from the cache (ACT-1204). Fetched events at or below the
- *   loaded frontier are skipped, later ones fold through the state's own
- *   patch reducers.
+ *   The loaded snapshot carries its own head position (`version` and the
+ *   global event `id`), captured atomically with `state`, so the engine
+ *   never pairs a stale state with a newer head id read separately from
+ *   the cache (ACT-1204). Fetched events at or below the loaded id are
+ *   skipped, later ones fold through the state's own patch reducers.
  * - Eviction under `maxCachedStates` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
@@ -118,12 +117,12 @@ export function make_fold_handler<
         }
         // First sight of this stream: load its head state through the
         // regular load path (cache, snapshots). The loaded state and its
-        // frontier (`version`, `frontier` event_id, `patches`, `snaps`)
-        // are captured atomically inside `load()` — even on a warm cache
-        // hit where `snapshot.event` is undefined. Reading the frontier
-        // back from the cache separately (ACT-1204) opened a TOCTOU
-        // window: a concurrent `action()` committing between the two
-        // awaits pairs this OLDER state with a NEWER event_id, and the
+        // head position (`version`, global `id`, `patches`, `snaps`) are
+        // captured atomically inside `load()` — even on a warm cache hit
+        // where `snapshot.event` is undefined. Reading the head id back
+        // from the cache separately (ACT-1204) opened a TOCTOU window: a
+        // concurrent `action()` committing between the two awaits pairs
+        // this OLDER state with a NEWER event_id, and the
         // `event.id > fold.event_id` guard below then permanently skips
         // the intervening events. Dirty from the start: the row must be
         // written at least once.
@@ -132,7 +131,7 @@ export function make_fold_handler<
           stream,
           state: snapshot.state,
           version: snapshot.version,
-          event_id: snapshot.frontier,
+          event_id: snapshot.id,
           patches: snapshot.patches,
           snaps: snapshot.snaps,
           dirty: true,

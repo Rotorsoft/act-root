@@ -437,7 +437,7 @@ export async function load<
         event,
         state,
         version: event.version,
-        frontier: event.id,
+        id: event.id,
         patches,
         snaps,
         cache_hit,
@@ -500,12 +500,11 @@ export async function load<
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
-    // Frontier event id is captured atomically with `state`: the last
-    // replayed event's id on a cache miss, or the cached checkpoint's
-    // event_id on a warm hit with no new events. Consumers read this
-    // instead of a separate cache lookup that could race a concurrent
-    // commit (ACT-1204).
-    frontier: event?.id ?? cached?.event_id ?? -1,
+    // Head event id, captured atomically with `state`: the last replayed
+    // event's id on a cache miss, or the cached checkpoint's event_id on a
+    // warm hit with no new events. Consumers read this instead of a
+    // separate cache lookup that could race a concurrent commit (ACT-1204).
+    id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -571,7 +570,7 @@ export async function action<
       const snapshot = await load(me, { stream, actor: target.actor });
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      // snapshot.version is the frontier even on a warm cache hit,
+      // snapshot.version is the head version even on a warm cache hit,
       // where snapshot.event is undefined — using the event would
       // silently drop the optimistic guard for every cached stream.
       // A brand-new stream (-1) stays unguarded: creations append.
@@ -672,7 +671,7 @@ export async function action<
           event,
           state,
           version: event.version,
-          frontier: event.id,
+          id: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -686,19 +685,19 @@ export async function action<
       // Guardless commits (reactions append at head by design) can land
       // past events this fold never saw. A gapped fold must not become
       // a snapshot event or a cache entry — both would lie at the head
-      // frontier. Contiguity is cheap to prove: the first committed
+      // position. Contiguity is cheap to prove: the first committed
       // version extends the loaded one.
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
       // Persist the snapshot before caching. Awaited on purpose: the
       // snapshot event occupies the next version slot, so a follow-up
-      // action loading a pre-snap frontier from the cache would collide
-      // with the framework's own bookkeeping. Caching the snap frontier
+      // action loading a pre-snap checkpoint from the cache would collide
+      // with the framework's own bookkeeping. Caching the snap checkpoint
       // before the action returns keeps sequential callers from ever
       // seeing a conflict they didn't cause. Failures are still
       // swallowed inside snap() — the action never fails on it, and the
-      // cache then keeps the pre-snap frontier, which stays correct.
+      // cache then keeps the pre-snap checkpoint, which stays correct.
       const snap_event = snapped ? await snap(last) : undefined;
 
       // #861: pii-aware states (any event declaring `sensitive(...)`
@@ -719,7 +718,7 @@ export async function action<
               snaps: snap_event ? last.snaps + 1 : last.snaps,
             })
             .catch((err) => log().error(err));
-        // A gapped entry would sit at the head frontier with unfolded
+        // A gapped entry would sit at the head position with unfolded
         // events baked in — drop the checkpoint and let the next load
         // replay to truth instead.
         else
@@ -737,8 +736,8 @@ export async function action<
       // and sleeps out the backoff before surfacing the same terminal
       // error. Rethrow immediately (ACT-1208). The retry loop exists to
       // absorb races on framework-derived versions (a concurrent writer
-      // advanced the head), where the reload picks up the new frontier
-      // and the next attempt can succeed.
+      // advanced the head), where the reload picks up the new head
+      // version and the next attempt can succeed.
       if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {

@@ -66,7 +66,7 @@ try {
 
 Declare the retry budget on the action itself. The orchestrator owns the loop: on `ConcurrencyError` it invalidates the cache, applies an optional `backoff`, and re-runs from `load()`. Any other error rethrows immediately and does not consume the budget.
 
-The loop only retries **framework-derived** versions — where a concurrent writer advanced the head and the reload picks up the new frontier. When the caller pins `target.expectedVersion` explicitly, a `ConcurrencyError` is a fixed conflict: every retry reloads and re-commits against the same pinned version and is guaranteed to fail again. So a caller-pinned conflict rethrows immediately, without burning the budget or sleeping out the backoff (ACT-1208).
+The loop only retries **framework-derived** versions — where a concurrent writer advanced the head and the reload picks up the new head version. When the caller pins `target.expectedVersion` explicitly, a `ConcurrencyError` is a fixed conflict: every retry reloads and re-commits against the same pinned version and is guaranteed to fail again. So a caller-pinned conflict rethrows immediately, without burning the budget or sleeping out the backoff (ACT-1208).
 
 ```typescript no-check
 import { state } from "@rotorsoft/act";
