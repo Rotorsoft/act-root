@@ -50,6 +50,19 @@ export type SseOptions = {
    * bandwidth on a business workload; over 5 min risks proxy drops.
    */
   readonly heartbeatMs?: number;
+  /**
+   * Hard cap on the per-connection in-memory backlog of undelivered
+   * broadcast frames. A consumer that stalls (slow client, paused
+   * tab) can't drain frames as fast as a busy stream publishes them;
+   * without a bound the backlog grows until the process runs out of
+   * memory. When the backlog is full the **oldest** frame is dropped
+   * to make room for the newest — the consumer always converges on
+   * current state (each frame carries a full version-keyed patch),
+   * it just skips intermediate versions it was too slow to see.
+   *
+   * Default `256`. Validated range `[1, 100_000]`.
+   */
+  readonly maxPendingPerConnection?: number;
 };
 
 /**
@@ -63,6 +76,7 @@ export type SseConfig = {
   readonly channel: BroadcastChannel<BroadcastState>;
   readonly maxConnections: number;
   readonly heartbeatMs: number;
+  readonly maxPendingPerConnection: number;
 };
 
 /**
@@ -79,6 +93,16 @@ export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
  * 60 s idle timeout most reverse proxies impose.
  */
 export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
+
+/**
+ * Default cap on the per-connection undelivered-frame backlog. Sized
+ * so a briefly-stalled consumer on a busy stream keeps recent history
+ * without letting a permanently-wedged client pin unbounded memory.
+ * At overflow the oldest frame is dropped (drop-oldest) — each frame
+ * is a full version-keyed patch, so the consumer converges on current
+ * state regardless of which intermediate versions it missed.
+ */
+export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 
 /**
  * Zod schema for the numeric knobs on {@link SseOptions}. Defaults,
@@ -101,6 +125,12 @@ const SseOptionsSchema = z.object({
     .min(15_000)
     .max(300_000)
     .default(DEFAULT_SSE_HEARTBEAT_MS),
+  maxPendingPerConnection: z
+    .number()
+    .int()
+    .min(1)
+    .max(100_000)
+    .default(DEFAULT_SSE_MAX_PENDING_PER_CONNECTION),
 });
 
 /**
@@ -115,11 +145,13 @@ export function resolveSseConfig(options: SseOptions): SseConfig {
   const parsed = SseOptionsSchema.parse({
     maxConnections: options.maxConnections,
     heartbeatMs: options.heartbeatMs,
+    maxPendingPerConnection: options.maxPendingPerConnection,
   });
   return {
     channel: options.channel,
     maxConnections: parsed.maxConnections,
     heartbeatMs: parsed.heartbeatMs,
+    maxPendingPerConnection: parsed.maxPendingPerConnection,
   };
 }
 
@@ -207,6 +239,28 @@ export type SseAccounting = {
 };
 
 /**
+ * Per-subscription knobs for {@link runSseSubscription}, bundled so the
+ * two transports (and their tests) pass one options object rather than
+ * a growing positional tail.
+ */
+export type RunSseOptions = {
+  /**
+   * Invoked when {@link SseAccounting.acquire} returns `false` (the
+   * connection cap is full). tRPC throws `TRPCError` here to reject the
+   * subscription cleanly from inside the generator; Hono enforces the
+   * cap outside the loop and omits this.
+   */
+  readonly on_cap_exceeded?: () => never;
+  /**
+   * Upper bound on the per-connection undelivered-frame backlog. When
+   * the backlog reaches this many frames the oldest is dropped to make
+   * room for the newest (drop-oldest). Defaults to
+   * {@link DEFAULT_SSE_MAX_PENDING_PER_CONNECTION} when omitted.
+   */
+  readonly maxPending?: number;
+};
+
+/**
  * The shared subscription loop both transports run. Optionally
  * acquires one slot on the supplied {@link SseAccounting}, yields the
  * cached state (when present), then forwards every channel
@@ -223,14 +277,30 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   stream_id: string,
   accounting: SseAccounting | undefined,
   signal: AbortSignal | undefined,
-  on_cap_exceeded?: () => never
+  options?: RunSseOptions
 ): AsyncGenerator<SseSubscriptionFrame<S>> {
-  if (accounting && !accounting.acquire() && on_cap_exceeded) {
-    on_cap_exceeded();
+  // Track whether we actually reserved a slot. Releasing in `finally`
+  // unconditionally would decrement the counter below the true open
+  // count when acquire() fails without an `on_cap_exceeded` handler —
+  // inflating the effective cap over time. Only release what we
+  // acquired.
+  let acquired = false;
+  if (accounting) {
+    acquired = accounting.acquire();
+    if (!acquired && options?.on_cap_exceeded) {
+      options.on_cap_exceeded();
+    }
   }
+  const max_pending =
+    options?.maxPending ?? DEFAULT_SSE_MAX_PENDING_PER_CONNECTION;
   const pending: unknown[] = [];
   let resolve_wait: (() => void) | null = null;
   const unsubscribe = channel.subscribe(stream_id, (msg) => {
+    // Bound the per-connection backlog: a stalled consumer can't drain
+    // as fast as a busy stream publishes, so drop the oldest frame to
+    // cap memory. Each frame is a full version-keyed patch, so the
+    // consumer converges on current state regardless of skips.
+    if (pending.length >= max_pending) pending.shift();
     pending.push(msg);
     resolve_wait?.();
   });
@@ -254,6 +324,6 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   } finally {
     signal?.removeEventListener("abort", on_abort);
     unsubscribe();
-    accounting?.release();
+    if (acquired) accounting?.release();
   }
 }

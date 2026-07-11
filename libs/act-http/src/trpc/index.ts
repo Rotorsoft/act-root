@@ -402,11 +402,14 @@ export function trpc<
             input.stream,
             sse_counter,
             signal,
-            () => {
-              throw new TRPCError({
-                code: "TOO_MANY_REQUESTS",
-                message: "max concurrent SSE subscriptions reached",
-              });
+            {
+              maxPending: sse_config.maxPendingPerConnection,
+              on_cap_exceeded: () => {
+                throw new TRPCError({
+                  code: "TOO_MANY_REQUESTS",
+                  message: "max concurrent SSE subscriptions reached",
+                });
+              },
             }
           )
         );

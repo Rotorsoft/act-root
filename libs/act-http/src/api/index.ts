@@ -45,7 +45,9 @@ export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
 export {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
+  DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
   fireAndForget,
+  type RunSseOptions,
   resolveSseConfig,
   runSseSubscription,
   type SseAccounting,
