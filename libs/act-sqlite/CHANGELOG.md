@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.1...@rotorsoft/act-sqlite-v1.12.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** restore regex claim sources with a literal fast-path ([3abd00d](https://github.com/rotorsoft/act-root/commit/3abd00d53848948aa0d7a59a4884a47a0e6000eb)), closes [#1215](https://github.com/rotorsoft/act-root/issues/1215) [#1215](https://github.com/rotorsoft/act-root/issues/1215)
+
 # [@rotorsoft/act-sqlite-v1.12.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.0...@rotorsoft/act-sqlite-v1.12.1) (2026-07-10)
 
 
