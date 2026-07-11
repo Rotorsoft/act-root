@@ -1474,7 +1474,7 @@ export class PostgresStore implements Store {
       values.push(query.after);
       conditions.push(`stream > $${values.length}`);
     }
-    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM ${this._fqs}`;
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM ${this._fqs}`;
     if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += ` ORDER BY stream LIMIT $${values.length}`;
@@ -1493,6 +1493,7 @@ export class PostgresStore implements Store {
           leased_until: Date | null;
           priority: number;
           lane: string;
+          deferred_at: Date | null;
         }>(sql, values),
         client.query<{ m: number | null }>(
           `SELECT COALESCE(MAX(id), -1) AS m FROM ${this._fqt}`
@@ -1512,6 +1513,9 @@ export class PostgresStore implements Store {
           leased_by: row.leased_by ?? undefined,
           leased_until: row.leased_until ?? undefined,
           lane: row.lane,
+          // Persisted as timestamptz; surface as ms since epoch (#1221) so
+          // the cold-start re-seed can re-arm the drain at the due-time.
+          deferred_at: row.deferred_at ? row.deferred_at.getTime() : undefined,
         });
         count++;
       }

@@ -21,7 +21,11 @@
  * Lives in process memory, per worker — the same per-worker pacing trade-off
  * documented for backoff. Durability comes from the data the due-time is
  * *derived* from (an un-advanced watermark, an event's `created` timestamp),
- * not from the map: a restart rebuilds it from the log.
+ * not from the map. A restart empties the map, so the cold-start rebuild is
+ * explicit: `CorrelateCycle.init` seeds each still-future `deferred_at` back
+ * onto the owning lane's timer via {@link "drain-cycle".DrainController.seed_defer}
+ * (#1221), so an idle deferred stream re-arms at its due-time with no
+ * intervening commit.
  *
  * @internal
  */

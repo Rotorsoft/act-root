@@ -857,7 +857,7 @@ export class SqliteStore implements Store {
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
     let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM streams WHERE 1=1";
+      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM streams WHERE 1=1";
     const args: unknown[] = [];
 
     if (query?.stream !== undefined) {
@@ -902,6 +902,9 @@ export class SqliteStore implements Store {
     let count = 0;
     for (const row of streamsResult.rows) {
       const leased_until = row.leased_until as string | null;
+      // Persisted as an ISO string (like leased_until); surface as ms since
+      // epoch (#1221) so the cold-start re-seed re-arms at the due-time.
+      const deferred_at = row.deferred_at as string | null;
       callback({
         stream: row.stream as string,
         source: (row.source as string | null) ?? undefined,
@@ -913,6 +916,7 @@ export class SqliteStore implements Store {
         leased_by: (row.leased_by as string | null) ?? undefined,
         leased_until: leased_until ? new Date(leased_until) : undefined,
         lane: row.lane as string,
+        deferred_at: deferred_at ? new Date(deferred_at).getTime() : undefined,
       });
       count++;
     }

@@ -136,6 +136,11 @@ class InMemoryStream {
     return this._leased_until;
   }
 
+  /** Persisted next-visit time (#1090/#1221), or undefined when no active defer. */
+  get deferred_at() {
+    return this._deferred_at;
+  }
+
   /**
    * Attempt to lease this stream for processing.
    * @param lease - The lease request.
@@ -948,6 +953,7 @@ export class InMemoryStore implements Store {
         leased_by: s.leased_by,
         leased_until: s.leased_until,
         lane: s.lane,
+        deferred_at: s.deferred_at,
       });
       count++;
       if (count >= limit) break;

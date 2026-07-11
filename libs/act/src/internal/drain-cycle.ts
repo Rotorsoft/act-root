@@ -396,6 +396,23 @@ export class DrainController<
     this._armed = true;
   }
 
+  /**
+   * Re-seed a persisted defer schedule into the process-local timer at cold
+   * start (#1221). The `_defer` map lives in worker memory and is empty
+   * after a restart; a stream deferred to a future due-time (e.g. an idle
+   * autoclose aggregate) is durable in the store's `deferred_at` but has
+   * nothing in memory to re-arm the drain at the due-time. The orchestrator
+   * reads the persisted `deferred_at` for this controller's lane and calls
+   * this to park the stream + (re)schedule the shared wake — so the drain
+   * re-arms at the due-time with no intervening commit. `schedule()`
+   * collapses many seeds into one timer, so callers may seed in a loop and
+   * let the earliest due-time win.
+   */
+  seed_defer(stream: string, at: number): void {
+    this._defer.set(stream, at);
+    this._defer.schedule();
+  }
+
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;

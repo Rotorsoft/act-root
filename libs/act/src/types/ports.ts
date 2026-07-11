@@ -133,6 +133,12 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier `claim()` ordering — see {@link Store.prioritize}.
  * @property lane - Drain lane bound to the stream (ACT-1103)
+ * @property deferred_at - Persisted next-visit time (ms since epoch) when
+ *   the stream is held out of {@link claim} by a `defer` outcome; omitted
+ *   when the stream carries no active defer schedule. Read at cold start to
+ *   re-seed the in-process defer timer so an idle deferred stream re-arms
+ *   its drain across a restart (#1221) — the schedule outlives the process
+ *   memory it was derived from.
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -145,6 +151,7 @@ export type StreamPosition = {
   readonly leased_by?: string;
   readonly leased_until?: Date;
   readonly lane?: string;
+  readonly deferred_at?: number;
 };
 
 /**
