@@ -33,8 +33,8 @@ schema I already declared."
 
 - **Public type field** — `ActOptions.validateFoldedState?: boolean`, default
   `false`. When `true`, after each event is folded into state — on the command
-  path (`do`), on `load`/cold-replay, and inside `projection(...).of(state)`
-  state-fold — the merged full state is parsed against the owning state's
+  path (`do`), on `load`/cold-replay, and inside the `projection(...).of(state)`
+  projection fold — the merged full state is parsed against the owning state's
   declared Zod schema. A reducer that produces schema-violating state throws a
   `ValidationError` (existing exported error type) whose `target` names the
   state and the triggering event (`"<state>.<event>#<id>"`). When `false` the
@@ -79,14 +79,17 @@ so in the docs.
 
 **A runtime `if (validate_state)` inside the fold loop.** The first cut threaded
 the boolean through `load`/`action`/`make_fold_handler` and branched per event.
-Rejected in favor of the framework's existing decorator-selection idiom: there
-are two fold functions — a bare one that is literally `patch(state, patched)`
-and a validating one that patches then parses — and `build_es` selects which to
-bake into the `load`/`action` closures **once at construction**, exactly the way
-it already picks bare vs trace-decorated store ops from the log level. The
-projection builder makes the same one-time selection for the state-fold engine.
-The off-path then has no per-event branch at all, so a benchmark with the flag
-off shows zero delta from pre-#1238.
+Rejected in favor of the framework's existing decorator-selection idiom. The
+vocabulary matters here: a **reducer** (a state's `.patch()` handler) turns one
+event into a partial; a **patch step** merges that partial into state; the
+**fold** is the loop applying the patch step across a stream's events. There are
+two patch-step implementations — `bare_patch`, literally `patch(state, partial)`,
+and `validating_patch`, which merges then parses — and `build_es` selects which
+to bake into the `load`/`action` closures **once at construction**, exactly the
+way it already picks bare vs trace-decorated store ops from the log level. The
+projection builder makes the same one-time selection for the projection-fold
+engine. The off-path fold loop then has no per-event branch at all, so a
+benchmark with the flag off shows zero delta from pre-#1238.
 
 ## Stability / charter impact
 
@@ -97,7 +100,8 @@ off shows zero delta from pre-#1238.
   as before. Ships as **MINOR**.
 - **No port method**, so no TCK or adapter work. The validation lives entirely
   in the orchestrator's fold path (`internal/event-sourcing.ts`,
-  `internal/state-fold.ts`), which the charter explicitly leaves out of scope.
+  `internal/projection-fold.ts`), which the charter explicitly leaves out of
+  scope.
 
 ## Open questions
 

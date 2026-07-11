@@ -1,5 +1,5 @@
 /**
- * @module state-fold
+ * @module projection-fold
  * @category Internal
  *
  * Fold engine behind `projection(name).of(state)` — maintains per-stream
@@ -32,7 +32,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import { bare_fold, type FoldFn, load } from "./event-sourcing.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 
 export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 export const DEFAULT_MAX_CACHED_STATES = 10_000;
@@ -73,7 +73,7 @@ export function make_fold_handler<
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
   config: FoldConfig,
-  fold_fn: FoldFn = bare_fold
+  patch_fn: PatchFn = bare_patch
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
@@ -118,7 +118,7 @@ export function make_fold_handler<
         // snapshot carries no event (nothing replayed) — the frontier
         // lives in the cache entry, so read it back. Dirty from the
         // start: the row must be written at least once.
-        const snapshot = await load(me, { stream }, undefined, fold_fn);
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
         const entry = await state_cache().get<TState>(stream);
         // The engine only sees streams with committed events, so when the
         // cache has no entry (pii-aware states never cache) the load
@@ -142,7 +142,7 @@ export function make_fold_handler<
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = fold_fn(
+        fold.state = patch_fn(
           me,
           fold.state,
           reducer(event as never, fold.state),

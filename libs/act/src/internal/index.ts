@@ -60,8 +60,8 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps, FoldFn } from "./event-sourcing.js";
-export { bare_fold, scan, validating_fold } from "./event-sourcing.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -72,6 +72,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
+export * from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -83,5 +84,4 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export * from "./state-fold.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";

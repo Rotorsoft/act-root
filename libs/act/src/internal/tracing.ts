@@ -31,7 +31,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps, FoldFn } from "./event-sourcing.js";
+import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -176,15 +176,17 @@ export function build_es(
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: select the fold implementation ONCE here — the same
+  // ACT-1238: select the per-event patch step ONCE here — the same
   // construction-time selection the trace decorators use below. An app
-  // with `validateFoldedState` off closes over `bare_fold` (the literal
-  // pre-#1238 `patch()`), so the fold loop has no per-event branch and no
-  // added cost; an app with the flag on closes over `validating_fold`.
-  // Baked into the load/action closures, so state-fold and close-cycle
-  // callers inherit the choice without threading anything through their
-  // own signatures.
-  const fold: FoldFn = validate_state ? es.validating_fold : es.bare_fold;
+  // with `validateFoldedState` off closes over `bare_patch` (the literal
+  // pre-#1238 `patch()` merge), so the fold loop has no per-event branch
+  // and no added cost; an app with the flag on closes over
+  // `validating_patch`. Baked into the load/action closures, so the
+  // projection-fold engine and close-cycle callers inherit the choice
+  // without threading anything through their own signatures.
+  const patch_fn: PatchFn = validate_state
+    ? es.validating_patch
+    : es.bare_patch;
   const bound_action: EsOps["action"] = (
     me,
     action_name,
@@ -198,10 +200,10 @@ export function build_es(
       target,
       payload,
       { correlator, ...options },
-      fold
+      patch_fn
     );
   const bound_load: EsOps["load"] = (me, target, callback) =>
-    es.load(me, target, callback, fold);
+    es.load(me, target, callback, patch_fn);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,

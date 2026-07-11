@@ -10,7 +10,7 @@ exports[`@rotorsoft/act — public API stability > stable public surface for (ro
  */
 import { Act, type ActOptions } from "../act.js";
 import {
-  bare_fold,
+  bare_patch,
   current_version_of,
   deprecated_event_names,
   make_fold_handler,
@@ -25,7 +25,7 @@ import {
   register_state,
   resolveAutocloseConfig,
   synthesize_autoclose_reactions,
-  validating_fold,
+  validating_patch,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -479,12 +479,14 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
-          // ACT-1238: select the fold implementation ONCE (bare vs
+          // ACT-1238: select the per-event patch step ONCE (bare vs
           // validating) — the same build-time selection \`build_es\` makes
           // for the command/load paths — so the projection fold loop has
           // no per-event branch when \`validateFoldedState\` is off.
-          const fold_fn =
-            options?.validateFoldedState === true ? validating_fold : bare_fold;
+          const patch_fn =
+            options?.validateFoldedState === true
+              ? validating_patch
+              : bare_patch;
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -501,7 +503,7 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config, fold_fn)
+              make_fold_handler(merged, fold.flush, fold.config, patch_fn)
             );
           }
           finalize_deprecations();
@@ -943,7 +945,7 @@ export type ActOptions<TLanes extends string = string> = {
    * reduction (ACT-1238). Off by default.
    *
    * When \`true\`, each time an event is folded into state — on the
-   * command path (\`do\`), on \`load\`/replay, and inside state-fold
+   * command path (\`do\`), on \`load\`/replay, and inside projection-fold
    * projections — the merged full state is parsed against the owning
    * state's \`state({ Name: schema })\` schema. A reducer that produces
    * schema-violating state (the calculator divide-by-zero NaN class,
@@ -955,12 +957,12 @@ export type ActOptions<TLanes extends string = string> = {
    * This is a **debugging / CI aid, not a production guard**. Turn it on
    * in development and CI to catch total-reducer bugs at the source; the
    * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. The fold
-   * implementation is selected **once at \`build()\`** (the same way the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at \`build()\`** (the same way the
    * orchestrator picks bare vs trace-decorated store ops from the log
-   * level): when \`false\` (the default) the fold path is byte-identical to
-   * a bare reduction — the validating fold is never selected, so there is
-   * no per-event cost, not even a branch.
+   * level): when \`false\` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
    */
   readonly validateFoldedState?: boolean;
 };
@@ -8797,51 +8799,63 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
- * Applies a reducer's {@link Patch} to \`state\` and returns the next
- * state. The fold loop calls one of two implementations, selected **once**
- * at construction (in {@link "tracing".build_es}) — never branched per
- * event:
+ * The reduction pipeline names three distinct things, and each word means
+ * exactly one of them:
  *
- * - {@link bare_fold} — the default. Literally \`patch(state, patched)\`,
+ * - a **reducer** is a state's \`.patch()\` handler — it takes one event and
+ *   returns a {@link Patch} *partial*;
+ * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
+ *   that partial into the current state, yielding the next full state;
+ * - the **fold** is the loop that applies the patch step across a stream's
+ *   events (the reader loop in {@link load} / {@link action}, and the
+ *   projection engine in {@link "projection-fold"}).
+ *
+ * \`PatchFn\` is the per-event patch step. The fold loop calls one of two
+ * implementations, selected **once** at construction (in
+ * {@link "tracing".build_es}) — never branched per event:
+ *
+ * - {@link bare_patch} — the default. Literally \`patch(state, partial)\`,
  *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
- * - {@link validating_fold} — the opt-in \`ActOptions.validateFoldedState\`
- *   path. Patches, then parses the merged full state against the state's
+ * - {@link validating_patch} — the opt-in \`ActOptions.validateFoldedState\`
+ *   path. Merges, then parses the merged full state against the state's
  *   declared Zod schema.
  *
  * The \`me\`/\`event\` arguments are unused by the bare implementation but
- * carried on the shared signature so the loop is call-shape-identical
- * regardless of which fold was selected — the validating implementation
- * needs them to name the failing reduction.
+ * carried on the shared signature so the fold loop is call-shape-identical
+ * regardless of which patch step was selected — the validating
+ * implementation needs them to name the failing reduction.
  *
  * @internal
  */
-export type FoldFn = <
+export type PatchFn = <
   TState extends Schema,
   TEvents extends Schemas,
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
   state: TState,
-  patched: Readonly<Patch<TState>>,
+  partial: Readonly<Patch<TState>>,
   event: Committed<TEvents, keyof TEvents>
 ) => TState;
 
 /**
- * The default fold: a bare \`patch()\` with no wrapper and no branch. The
- * off-path is byte-for-byte the pre-ACT-1238 reduction, so an app that
- * leaves \`validateFoldedState\` off pays nothing — not even a comparison.
+ * The default patch step: a bare \`patch()\` merge with no wrapper and no
+ * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * app that leaves \`validateFoldedState\` off pays nothing — not even a
+ * comparison.
  *
  * @internal
  */
-export const bare_fold: FoldFn = (_me, state, patched) =>
-  patch(state, patched) as typeof state;
+export const bare_patch: PatchFn = (_me, state, partial) =>
+  patch(state, partial) as typeof state;
 
 /**
- * The opt-in fold (ACT-1238): patch, then parse the merged full state
- * against the owning state's declared Zod schema. A reducer that produces
- * schema-violating state (the calculator divide-by-zero NaN class, #1230)
- * fails here, at the triggering event, instead of propagating and
- * surfacing hops later as a confusing downstream error.
+ * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * parse the merged full state against the owning state's declared Zod
+ * schema. A reducer that produces schema-violating state (the calculator
+ * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * instead of propagating and surfacing hops later as a confusing
+ * downstream error.
  *
  * The \`target\` string names the state and the triggering event
  * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
@@ -8851,8 +8865,8 @@ export const bare_fold: FoldFn = (_me, state, patched) =>
  *
  * @internal
  */
-export const validating_fold: FoldFn = (me, state, patched, event) => {
-  const next = patch(state, patched) as typeof state;
+export const validating_patch: PatchFn = (me, state, partial, event) => {
+  const next = patch(state, partial) as typeof state;
   return validate(
     \`\${me.name}.\${String(event.name)}#\${event.id}\`,
     next,
@@ -9215,7 +9229,7 @@ export async function load<
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  fold: FoldFn = bare_fold
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -9240,7 +9254,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = fold(me, state, me.patch[event.name](event, state), event);
+        state = patch_fn(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -9359,7 +9373,7 @@ export async function action<
   target: Target,
   payload: Readonly<TActions[TKey]>,
   options?: DoOptions<TEvents>,
-  fold: FoldFn = bare_fold
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -9377,7 +9391,7 @@ export async function action<
         me,
         { stream, actor: target.actor },
         undefined,
-        fold
+        patch_fn
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
@@ -9476,7 +9490,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = fold(me, state, p, event);
+        state = patch_fn(me, state, p, event);
         patches++;
         return {
           event,
@@ -11019,8 +11033,8 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps, FoldFn } from "./event-sourcing.js";
-export { bare_fold, scan, validating_fold } from "./event-sourcing.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -11031,6 +11045,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
+export * from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -11042,7 +11057,6 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export * from "./state-fold.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
 
 // === index.ts ===
@@ -13545,6 +13559,178 @@ export function projection<TEvents extends Schemas = {}>(
   target?: string
 ): ProjectionBuilder<TEvents, string | undefined> {
   return _projection<TEvents, string | undefined>(target);
+}
+
+// === projection-fold.ts ===
+/**
+ * @module projection-fold
+ * @category Internal
+ *
+ * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
+ * folded states in a bounded in-memory cache and flushes one row per dirty
+ * stream per round, so write amplification tracks the distinct-key count
+ * instead of the event count.
+ *
+ * The flush payload deliberately has no type of its own: a state
+ * projection flushes the cache layer outward — the rows ARE the
+ * streams' {@link CacheEntry} values.
+ *
+ * Correctness discipline:
+ * - The engine runs as the projection's batch handler, so the watermark
+ *   acks only after a fully-flushed batch — fold work is never
+ *   acknowledged before it is durable.
+ * - On first sight of a stream the engine loads its head state through
+ *   the same \`load()\` the command path uses (cache, snapshots and all);
+ *   fetched events at or below the loaded frontier are skipped, later
+ *   ones fold through the state's own patch reducers.
+ * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
+ *   (flush-before-evict) — eviction never loses folded work.
+ */
+import { z } from "zod";
+import { cache as state_cache } from "../ports.js";
+import type {
+  BatchHandler,
+  CacheEntry,
+  FoldOptions,
+  Schema,
+  Schemas,
+  State,
+} from "../types/index.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
+
+export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+export const DEFAULT_MAX_CACHED_STATES = 10_000;
+
+const FoldOptionsSchema = z.object({
+  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
+  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+});
+
+export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
+
+export function resolveFoldConfig(options: FoldOptions): FoldConfig {
+  return FoldOptionsSchema.parse(options);
+}
+
+/**
+ * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
+ * engine's \`dirty\` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever
+ * re-applying history. Stripping \`dirty\` at the flush boundary yields
+ * the entry — the flush payload IS the cache entry.
+ */
+type Fold<TState extends Schema> = {
+  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
+} & { dirty: boolean };
+
+/**
+ * Build the batch handler that folds a state's events into per-stream rows.
+ * The returned closure is long-lived (one per built projection): its cache
+ * survives across drain cycles, so warm streams fold without I/O.
+ */
+export function make_fold_handler<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
+  config: FoldConfig,
+  patch_fn: PatchFn = bare_patch
+): BatchHandler<TEvents> {
+  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
+  // delete + re-insert. Not the shared LruMap — eviction here must await
+  // a flush, and a sync auto-evicting set() would drop folded work.
+  const cache = new Map<string, Fold<TState>>();
+
+  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
+
+  const flush_dirty = async () => {
+    const rows: CacheEntry<TState>[] = [];
+    const flushed: Fold<TState>[] = [];
+    for (const f of cache.values())
+      if (f.dirty) {
+        rows.push(row(f));
+        flushed.push(f);
+      }
+    if (rows.length === 0) return;
+    await flush(rows);
+    for (const f of flushed) f.dirty = false;
+  };
+
+  return async (events) => {
+    let folded_since_flush = 0;
+    for (const event of events) {
+      const stream = event.stream;
+      let fold = cache.get(stream);
+      if (fold) {
+        // promote to most-recent
+        cache.delete(stream);
+        cache.set(stream, fold);
+      } else {
+        if (cache.size >= config.maxCachedStates) {
+          // flush-before-evict: the oldest entry leaves only after its
+          // folded work is durable.
+          const oldest = cache.keys().next().value as string;
+          const evictee = cache.get(oldest) as Fold<TState>;
+          if (evictee.dirty) await flush([row(evictee)]);
+          cache.delete(oldest);
+        }
+        // First sight of this stream: load its head state through the
+        // regular load path (cache, snapshots). On a warm cache hit the
+        // snapshot carries no event (nothing replayed) — the frontier
+        // lives in the cache entry, so read it back. Dirty from the
+        // start: the row must be written at least once.
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
+        const entry = await state_cache().get<TState>(stream);
+        // The engine only sees streams with committed events, so when the
+        // cache has no entry (pii-aware states never cache) the load
+        // replayed at least one event — snapshot.event is set.
+        const frontier = entry ?? {
+          version: (snapshot.event as { version: number }).version,
+          event_id: (snapshot.event as { id: number }).id,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
+        };
+        fold = {
+          stream,
+          state: snapshot.state,
+          version: frontier.version,
+          event_id: frontier.event_id,
+          patches: frontier.patches,
+          snaps: frontier.snaps,
+          dirty: true,
+        };
+        cache.set(stream, fold);
+      }
+      if (event.id > fold.event_id) {
+        const reducer = me.patch[event.name as keyof TEvents];
+        fold.state = patch_fn(
+          me,
+          fold.state,
+          reducer(event as never, fold.state),
+          event as never
+        );
+        fold.version = event.version;
+        fold.event_id = event.id;
+        fold.patches++;
+        fold.dirty = true;
+      } else {
+        // Already folded (head load or redelivery) — mark dirty anyway
+        // so replays repopulate the read table: this is what keeps a
+        // rebuild at one upsert per stream instead of zero.
+        fold.dirty = true;
+      }
+      if (++folded_since_flush >= config.flushEvery) {
+        await flush_dirty();
+        folded_since_flush = 0;
+      }
+    }
+    // Flush before returning: the drain acks this batch's watermark only
+    // after the handler resolves, so rows are durable before the ack.
+    await flush_dirty();
+  };
 }
 
 // === reaction.ts ===
@@ -16052,178 +16238,6 @@ function action_builder<
   return builder;
 }
 
-// === state-fold.ts ===
-/**
- * @module state-fold
- * @category Internal
- *
- * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
- * folded states in a bounded in-memory cache and flushes one row per dirty
- * stream per round, so write amplification tracks the distinct-key count
- * instead of the event count.
- *
- * The flush payload deliberately has no type of its own: a state
- * projection flushes the cache layer outward — the rows ARE the
- * streams' {@link CacheEntry} values.
- *
- * Correctness discipline:
- * - The engine runs as the projection's batch handler, so the watermark
- *   acks only after a fully-flushed batch — fold work is never
- *   acknowledged before it is durable.
- * - On first sight of a stream the engine loads its head state through
- *   the same \`load()\` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
- * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
- *   (flush-before-evict) — eviction never loses folded work.
- */
-import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
-import type {
-  BatchHandler,
-  CacheEntry,
-  FoldOptions,
-  Schema,
-  Schemas,
-  State,
-} from "../types/index.js";
-import { bare_fold, type FoldFn, load } from "./event-sourcing.js";
-
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
-
-/**
- * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
- * engine's \`dirty\` flag. Mutable because the hot loop updates one
- * object per stream rather than allocating per event; the required
- * frontier fields are what keep a warm-cache load from ever
- * re-applying history. Stripping \`dirty\` at the flush boundary yields
- * the entry — the flush payload IS the cache entry.
- */
-type Fold<TState extends Schema> = {
-  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
-} & { dirty: boolean };
-
-/**
- * Build the batch handler that folds a state's events into per-stream rows.
- * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
- */
-export function make_fold_handler<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
->(
-  me: State<TState, TEvents, TActions>,
-  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig,
-  fold_fn: FoldFn = bare_fold
-): BatchHandler<TEvents> {
-  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
-  // delete + re-insert. Not the shared LruMap — eviction here must await
-  // a flush, and a sync auto-evicting set() would drop folded work.
-  const cache = new Map<string, Fold<TState>>();
-
-  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
-
-  const flush_dirty = async () => {
-    const rows: CacheEntry<TState>[] = [];
-    const flushed: Fold<TState>[] = [];
-    for (const f of cache.values())
-      if (f.dirty) {
-        rows.push(row(f));
-        flushed.push(f);
-      }
-    if (rows.length === 0) return;
-    await flush(rows);
-    for (const f of flushed) f.dirty = false;
-  };
-
-  return async (events) => {
-    let folded_since_flush = 0;
-    for (const event of events) {
-      const stream = event.stream;
-      let fold = cache.get(stream);
-      if (fold) {
-        // promote to most-recent
-        cache.delete(stream);
-        cache.set(stream, fold);
-      } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
-        const snapshot = await load(me, { stream }, undefined, fold_fn);
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
-      }
-      if (event.id > fold.event_id) {
-        const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = fold_fn(
-          me,
-          fold.state,
-          reducer(event as never, fold.state),
-          event as never
-        );
-        fold.version = event.version;
-        fold.event_id = event.id;
-        fold.patches++;
-        fold.dirty = true;
-      } else {
-        // Already folded (head load or redelivery) — mark dirty anyway
-        // so replays repopulate the read table: this is what keeps a
-        // rebuild at one upsert per stream instead of zero.
-        fold.dirty = true;
-      }
-      if (++folded_since_flush >= config.flushEvery) {
-        await flush_dirty();
-        folded_since_flush = 0;
-      }
-    }
-    // Flush before returning: the drain acks this batch's watermark only
-    // after the handler resolves, so rows are durable before the ack.
-    await flush_dirty();
-  };
-}
-
 // === tracing.ts ===
 /**
  * @module tracing
@@ -16258,7 +16272,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps, FoldFn } from "./event-sourcing.js";
+import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -16403,15 +16417,17 @@ export function build_es(
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: select the fold implementation ONCE here — the same
+  // ACT-1238: select the per-event patch step ONCE here — the same
   // construction-time selection the trace decorators use below. An app
-  // with \`validateFoldedState\` off closes over \`bare_fold\` (the literal
-  // pre-#1238 \`patch()\`), so the fold loop has no per-event branch and no
-  // added cost; an app with the flag on closes over \`validating_fold\`.
-  // Baked into the load/action closures, so state-fold and close-cycle
-  // callers inherit the choice without threading anything through their
-  // own signatures.
-  const fold: FoldFn = validate_state ? es.validating_fold : es.bare_fold;
+  // with \`validateFoldedState\` off closes over \`bare_patch\` (the literal
+  // pre-#1238 \`patch()\` merge), so the fold loop has no per-event branch
+  // and no added cost; an app with the flag on closes over
+  // \`validating_patch\`. Baked into the load/action closures, so the
+  // projection-fold engine and close-cycle callers inherit the choice
+  // without threading anything through their own signatures.
+  const patch_fn: PatchFn = validate_state
+    ? es.validating_patch
+    : es.bare_patch;
   const bound_action: EsOps["action"] = (
     me,
     action_name,
@@ -16425,10 +16441,10 @@ export function build_es(
       target,
       payload,
       { correlator, ...options },
-      fold
+      patch_fn
     );
   const bound_load: EsOps["load"] = (me, target, callback) =>
-    es.load(me, target, callback, fold);
+    es.load(me, target, callback, patch_fn);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
@@ -17067,7 +17083,7 @@ export type ActOptions<TLanes extends string = string> = {
    * reduction (ACT-1238). Off by default.
    *
    * When \`true\`, each time an event is folded into state — on the
-   * command path (\`do\`), on \`load\`/replay, and inside state-fold
+   * command path (\`do\`), on \`load\`/replay, and inside projection-fold
    * projections — the merged full state is parsed against the owning
    * state's \`state({ Name: schema })\` schema. A reducer that produces
    * schema-violating state (the calculator divide-by-zero NaN class,
@@ -17079,12 +17095,12 @@ export type ActOptions<TLanes extends string = string> = {
    * This is a **debugging / CI aid, not a production guard**. Turn it on
    * in development and CI to catch total-reducer bugs at the source; the
    * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. The fold
-   * implementation is selected **once at \`build()\`** (the same way the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at \`build()\`** (the same way the
    * orchestrator picks bare vs trace-decorated store ops from the log
-   * level): when \`false\` (the default) the fold path is byte-identical to
-   * a bare reduction — the validating fold is never selected, so there is
-   * no per-event cost, not even a branch.
+   * level): when \`false\` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
    */
   readonly validateFoldedState?: boolean;
 };
@@ -24578,51 +24594,63 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
- * Applies a reducer's {@link Patch} to \`state\` and returns the next
- * state. The fold loop calls one of two implementations, selected **once**
- * at construction (in {@link "tracing".build_es}) — never branched per
- * event:
+ * The reduction pipeline names three distinct things, and each word means
+ * exactly one of them:
  *
- * - {@link bare_fold} — the default. Literally \`patch(state, patched)\`,
+ * - a **reducer** is a state's \`.patch()\` handler — it takes one event and
+ *   returns a {@link Patch} *partial*;
+ * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
+ *   that partial into the current state, yielding the next full state;
+ * - the **fold** is the loop that applies the patch step across a stream's
+ *   events (the reader loop in {@link load} / {@link action}, and the
+ *   projection engine in {@link "projection-fold"}).
+ *
+ * \`PatchFn\` is the per-event patch step. The fold loop calls one of two
+ * implementations, selected **once** at construction (in
+ * {@link "tracing".build_es}) — never branched per event:
+ *
+ * - {@link bare_patch} — the default. Literally \`patch(state, partial)\`,
  *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
- * - {@link validating_fold} — the opt-in \`ActOptions.validateFoldedState\`
- *   path. Patches, then parses the merged full state against the state's
+ * - {@link validating_patch} — the opt-in \`ActOptions.validateFoldedState\`
+ *   path. Merges, then parses the merged full state against the state's
  *   declared Zod schema.
  *
  * The \`me\`/\`event\` arguments are unused by the bare implementation but
- * carried on the shared signature so the loop is call-shape-identical
- * regardless of which fold was selected — the validating implementation
- * needs them to name the failing reduction.
+ * carried on the shared signature so the fold loop is call-shape-identical
+ * regardless of which patch step was selected — the validating
+ * implementation needs them to name the failing reduction.
  *
  * @internal
  */
-export type FoldFn = <
+export type PatchFn = <
   TState extends Schema,
   TEvents extends Schemas,
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
   state: TState,
-  patched: Readonly<Patch<TState>>,
+  partial: Readonly<Patch<TState>>,
   event: Committed<TEvents, keyof TEvents>
 ) => TState;
 
 /**
- * The default fold: a bare \`patch()\` with no wrapper and no branch. The
- * off-path is byte-for-byte the pre-ACT-1238 reduction, so an app that
- * leaves \`validateFoldedState\` off pays nothing — not even a comparison.
+ * The default patch step: a bare \`patch()\` merge with no wrapper and no
+ * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * app that leaves \`validateFoldedState\` off pays nothing — not even a
+ * comparison.
  *
  * @internal
  */
-export const bare_fold: FoldFn = (_me, state, patched) =>
-  patch(state, patched) as typeof state;
+export const bare_patch: PatchFn = (_me, state, partial) =>
+  patch(state, partial) as typeof state;
 
 /**
- * The opt-in fold (ACT-1238): patch, then parse the merged full state
- * against the owning state's declared Zod schema. A reducer that produces
- * schema-violating state (the calculator divide-by-zero NaN class, #1230)
- * fails here, at the triggering event, instead of propagating and
- * surfacing hops later as a confusing downstream error.
+ * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * parse the merged full state against the owning state's declared Zod
+ * schema. A reducer that produces schema-violating state (the calculator
+ * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * instead of propagating and surfacing hops later as a confusing
+ * downstream error.
  *
  * The \`target\` string names the state and the triggering event
  * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
@@ -24632,8 +24660,8 @@ export const bare_fold: FoldFn = (_me, state, patched) =>
  *
  * @internal
  */
-export const validating_fold: FoldFn = (me, state, patched, event) => {
-  const next = patch(state, patched) as typeof state;
+export const validating_patch: PatchFn = (me, state, partial, event) => {
+  const next = patch(state, partial) as typeof state;
   return validate(
     \`\${me.name}.\${String(event.name)}#\${event.id}\`,
     next,
@@ -24996,7 +25024,7 @@ export async function load<
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  fold: FoldFn = bare_fold
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -25021,7 +25049,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = fold(me, state, me.patch[event.name](event, state), event);
+        state = patch_fn(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -25140,7 +25168,7 @@ export async function action<
   target: Target,
   payload: Readonly<TActions[TKey]>,
   options?: DoOptions<TEvents>,
-  fold: FoldFn = bare_fold
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -25158,7 +25186,7 @@ export async function action<
         me,
         { stream, actor: target.actor },
         undefined,
-        fold
+        patch_fn
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
@@ -25257,7 +25285,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = fold(me, state, p, event);
+        state = patch_fn(me, state, p, event);
         patches++;
         return {
           event,
@@ -26782,8 +26810,8 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps, FoldFn } from "./event-sourcing.js";
-export { bare_fold, scan, validating_fold } from "./event-sourcing.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -26794,6 +26822,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
+export * from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -26805,7 +26834,6 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export * from "./state-fold.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
 
 // === index.ts ===
@@ -29291,6 +29319,178 @@ export function projection<TEvents extends Schemas = {}>(
   return _projection<TEvents, string | undefined>(target);
 }
 
+// === projection-fold.ts ===
+/**
+ * @module projection-fold
+ * @category Internal
+ *
+ * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
+ * folded states in a bounded in-memory cache and flushes one row per dirty
+ * stream per round, so write amplification tracks the distinct-key count
+ * instead of the event count.
+ *
+ * The flush payload deliberately has no type of its own: a state
+ * projection flushes the cache layer outward — the rows ARE the
+ * streams' {@link CacheEntry} values.
+ *
+ * Correctness discipline:
+ * - The engine runs as the projection's batch handler, so the watermark
+ *   acks only after a fully-flushed batch — fold work is never
+ *   acknowledged before it is durable.
+ * - On first sight of a stream the engine loads its head state through
+ *   the same \`load()\` the command path uses (cache, snapshots and all);
+ *   fetched events at or below the loaded frontier are skipped, later
+ *   ones fold through the state's own patch reducers.
+ * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
+ *   (flush-before-evict) — eviction never loses folded work.
+ */
+import { z } from "zod";
+import { cache as state_cache } from "../ports.js";
+import type {
+  BatchHandler,
+  CacheEntry,
+  FoldOptions,
+  Schema,
+  Schemas,
+  State,
+} from "../types/index.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
+
+export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+export const DEFAULT_MAX_CACHED_STATES = 10_000;
+
+const FoldOptionsSchema = z.object({
+  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
+  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+});
+
+export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
+
+export function resolveFoldConfig(options: FoldOptions): FoldConfig {
+  return FoldOptionsSchema.parse(options);
+}
+
+/**
+ * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
+ * engine's \`dirty\` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever
+ * re-applying history. Stripping \`dirty\` at the flush boundary yields
+ * the entry — the flush payload IS the cache entry.
+ */
+type Fold<TState extends Schema> = {
+  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
+} & { dirty: boolean };
+
+/**
+ * Build the batch handler that folds a state's events into per-stream rows.
+ * The returned closure is long-lived (one per built projection): its cache
+ * survives across drain cycles, so warm streams fold without I/O.
+ */
+export function make_fold_handler<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
+  config: FoldConfig,
+  patch_fn: PatchFn = bare_patch
+): BatchHandler<TEvents> {
+  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
+  // delete + re-insert. Not the shared LruMap — eviction here must await
+  // a flush, and a sync auto-evicting set() would drop folded work.
+  const cache = new Map<string, Fold<TState>>();
+
+  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
+
+  const flush_dirty = async () => {
+    const rows: CacheEntry<TState>[] = [];
+    const flushed: Fold<TState>[] = [];
+    for (const f of cache.values())
+      if (f.dirty) {
+        rows.push(row(f));
+        flushed.push(f);
+      }
+    if (rows.length === 0) return;
+    await flush(rows);
+    for (const f of flushed) f.dirty = false;
+  };
+
+  return async (events) => {
+    let folded_since_flush = 0;
+    for (const event of events) {
+      const stream = event.stream;
+      let fold = cache.get(stream);
+      if (fold) {
+        // promote to most-recent
+        cache.delete(stream);
+        cache.set(stream, fold);
+      } else {
+        if (cache.size >= config.maxCachedStates) {
+          // flush-before-evict: the oldest entry leaves only after its
+          // folded work is durable.
+          const oldest = cache.keys().next().value as string;
+          const evictee = cache.get(oldest) as Fold<TState>;
+          if (evictee.dirty) await flush([row(evictee)]);
+          cache.delete(oldest);
+        }
+        // First sight of this stream: load its head state through the
+        // regular load path (cache, snapshots). On a warm cache hit the
+        // snapshot carries no event (nothing replayed) — the frontier
+        // lives in the cache entry, so read it back. Dirty from the
+        // start: the row must be written at least once.
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
+        const entry = await state_cache().get<TState>(stream);
+        // The engine only sees streams with committed events, so when the
+        // cache has no entry (pii-aware states never cache) the load
+        // replayed at least one event — snapshot.event is set.
+        const frontier = entry ?? {
+          version: (snapshot.event as { version: number }).version,
+          event_id: (snapshot.event as { id: number }).id,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
+        };
+        fold = {
+          stream,
+          state: snapshot.state,
+          version: frontier.version,
+          event_id: frontier.event_id,
+          patches: frontier.patches,
+          snaps: frontier.snaps,
+          dirty: true,
+        };
+        cache.set(stream, fold);
+      }
+      if (event.id > fold.event_id) {
+        const reducer = me.patch[event.name as keyof TEvents];
+        fold.state = patch_fn(
+          me,
+          fold.state,
+          reducer(event as never, fold.state),
+          event as never
+        );
+        fold.version = event.version;
+        fold.event_id = event.id;
+        fold.patches++;
+        fold.dirty = true;
+      } else {
+        // Already folded (head load or redelivery) — mark dirty anyway
+        // so replays repopulate the read table: this is what keeps a
+        // rebuild at one upsert per stream instead of zero.
+        fold.dirty = true;
+      }
+      if (++folded_since_flush >= config.flushEvery) {
+        await flush_dirty();
+        folded_since_flush = 0;
+      }
+    }
+    // Flush before returning: the drain acks this batch's watermark only
+    // after the handler resolves, so rows are durable before the ack.
+    await flush_dirty();
+  };
+}
+
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -30826,178 +31026,6 @@ export class SettleLoop<TEvents extends Schemas> {
   }
 }
 
-// === state-fold.ts ===
-/**
- * @module state-fold
- * @category Internal
- *
- * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
- * folded states in a bounded in-memory cache and flushes one row per dirty
- * stream per round, so write amplification tracks the distinct-key count
- * instead of the event count.
- *
- * The flush payload deliberately has no type of its own: a state
- * projection flushes the cache layer outward — the rows ARE the
- * streams' {@link CacheEntry} values.
- *
- * Correctness discipline:
- * - The engine runs as the projection's batch handler, so the watermark
- *   acks only after a fully-flushed batch — fold work is never
- *   acknowledged before it is durable.
- * - On first sight of a stream the engine loads its head state through
- *   the same \`load()\` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
- * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
- *   (flush-before-evict) — eviction never loses folded work.
- */
-import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
-import type {
-  BatchHandler,
-  CacheEntry,
-  FoldOptions,
-  Schema,
-  Schemas,
-  State,
-} from "../types/index.js";
-import { bare_fold, type FoldFn, load } from "./event-sourcing.js";
-
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
-
-/**
- * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
- * engine's \`dirty\` flag. Mutable because the hot loop updates one
- * object per stream rather than allocating per event; the required
- * frontier fields are what keep a warm-cache load from ever
- * re-applying history. Stripping \`dirty\` at the flush boundary yields
- * the entry — the flush payload IS the cache entry.
- */
-type Fold<TState extends Schema> = {
-  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
-} & { dirty: boolean };
-
-/**
- * Build the batch handler that folds a state's events into per-stream rows.
- * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
- */
-export function make_fold_handler<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
->(
-  me: State<TState, TEvents, TActions>,
-  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig,
-  fold_fn: FoldFn = bare_fold
-): BatchHandler<TEvents> {
-  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
-  // delete + re-insert. Not the shared LruMap — eviction here must await
-  // a flush, and a sync auto-evicting set() would drop folded work.
-  const cache = new Map<string, Fold<TState>>();
-
-  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
-
-  const flush_dirty = async () => {
-    const rows: CacheEntry<TState>[] = [];
-    const flushed: Fold<TState>[] = [];
-    for (const f of cache.values())
-      if (f.dirty) {
-        rows.push(row(f));
-        flushed.push(f);
-      }
-    if (rows.length === 0) return;
-    await flush(rows);
-    for (const f of flushed) f.dirty = false;
-  };
-
-  return async (events) => {
-    let folded_since_flush = 0;
-    for (const event of events) {
-      const stream = event.stream;
-      let fold = cache.get(stream);
-      if (fold) {
-        // promote to most-recent
-        cache.delete(stream);
-        cache.set(stream, fold);
-      } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
-        const snapshot = await load(me, { stream }, undefined, fold_fn);
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
-      }
-      if (event.id > fold.event_id) {
-        const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = fold_fn(
-          me,
-          fold.state,
-          reducer(event as never, fold.state),
-          event as never
-        );
-        fold.version = event.version;
-        fold.event_id = event.id;
-        fold.patches++;
-        fold.dirty = true;
-      } else {
-        // Already folded (head load or redelivery) — mark dirty anyway
-        // so replays repopulate the read table: this is what keeps a
-        // rebuild at one upsert per stream instead of zero.
-        fold.dirty = true;
-      }
-      if (++folded_since_flush >= config.flushEvery) {
-        await flush_dirty();
-        folded_since_flush = 0;
-      }
-    }
-    // Flush before returning: the drain acks this batch's watermark only
-    // after the handler resolves, so rows are durable before the ack.
-    await flush_dirty();
-  };
-}
-
 // === tracing.ts ===
 /**
  * @module tracing
@@ -31032,7 +31060,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps, FoldFn } from "./event-sourcing.js";
+import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -31177,15 +31205,17 @@ export function build_es(
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: select the fold implementation ONCE here — the same
+  // ACT-1238: select the per-event patch step ONCE here — the same
   // construction-time selection the trace decorators use below. An app
-  // with \`validateFoldedState\` off closes over \`bare_fold\` (the literal
-  // pre-#1238 \`patch()\`), so the fold loop has no per-event branch and no
-  // added cost; an app with the flag on closes over \`validating_fold\`.
-  // Baked into the load/action closures, so state-fold and close-cycle
-  // callers inherit the choice without threading anything through their
-  // own signatures.
-  const fold: FoldFn = validate_state ? es.validating_fold : es.bare_fold;
+  // with \`validateFoldedState\` off closes over \`bare_patch\` (the literal
+  // pre-#1238 \`patch()\` merge), so the fold loop has no per-event branch
+  // and no added cost; an app with the flag on closes over
+  // \`validating_patch\`. Baked into the load/action closures, so the
+  // projection-fold engine and close-cycle callers inherit the choice
+  // without threading anything through their own signatures.
+  const patch_fn: PatchFn = validate_state
+    ? es.validating_patch
+    : es.bare_patch;
   const bound_action: EsOps["action"] = (
     me,
     action_name,
@@ -31199,10 +31229,10 @@ export function build_es(
       target,
       payload,
       { correlator, ...options },
-      fold
+      patch_fn
     );
   const bound_load: EsOps["load"] = (me, target, callback) =>
-    es.load(me, target, callback, fold);
+    es.load(me, target, callback, patch_fn);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,

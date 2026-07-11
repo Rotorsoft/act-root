@@ -296,7 +296,7 @@ export type ActOptions<TLanes extends string = string> = {
    * reduction (ACT-1238). Off by default.
    *
    * When `true`, each time an event is folded into state — on the
-   * command path (`do`), on `load`/replay, and inside state-fold
+   * command path (`do`), on `load`/replay, and inside projection-fold
    * projections — the merged full state is parsed against the owning
    * state's `state({ Name: schema })` schema. A reducer that produces
    * schema-violating state (the calculator divide-by-zero NaN class,
@@ -308,12 +308,12 @@ export type ActOptions<TLanes extends string = string> = {
    * This is a **debugging / CI aid, not a production guard**. Turn it on
    * in development and CI to catch total-reducer bugs at the source; the
    * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. The fold
-   * implementation is selected **once at `build()`** (the same way the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at `build()`** (the same way the
    * orchestrator picks bare vs trace-decorated store ops from the log
-   * level): when `false` (the default) the fold path is byte-identical to
-   * a bare reduction — the validating fold is never selected, so there is
-   * no per-event cost, not even a branch.
+   * level): when `false` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
    */
   readonly validateFoldedState?: boolean;
 };

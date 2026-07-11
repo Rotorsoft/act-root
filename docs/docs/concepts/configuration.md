@@ -172,7 +172,7 @@ A single-node deployment rarely needs to tune this; raise the threshold for flak
 
 Act validates action inputs (against their `.on({...})` schema) and emitted events (against their `.emits({...})` schema), but it does **not** validate the state a reducer folds those events into — reducers are trusted to be total. A reducer that produces schema-violating state (the calculator divide-by-zero that folds `result: NaN` into a `z.number()` field, #1230) fails silently at the source and surfaces hops later as a confusing downstream error.
 
-`validateFoldedState` closes that gap. When set, every reduction — on the command path (`do`), on `load`/cold-replay, and inside `projection(...).of(state)` state-fold — parses the merged full state against the owning state's declared schema. A bad reduction throws a `ValidationError` **at the triggering event**, whose `target` names the state and the event (`"<state>.<event>#<id>"`), so you see the reducer that produced the bad value instead of the symptom downstream.
+`validateFoldedState` closes that gap. When set, every reduction — on the command path (`do`), on `load`/cold-replay, and inside the `projection(...).of(state)` projection fold — parses the merged full state against the owning state's declared schema. A bad reduction throws a `ValidationError` **at the triggering event**, whose `target` names the state and the event (`"<state>.<event>#<id>"`), so you see the reducer that produced the bad value instead of the symptom downstream.
 
 ```typescript no-check
 const app = act()
@@ -182,7 +182,7 @@ const app = act()
 
 This is a **debugging and CI aid, not a production guard**. Turn it on while developing new reducers or in CI to catch total-reducer bugs at the source; leave it off in production.
 
-- **Zero cost when off.** The fold implementation is selected once at `build()` — the same way the orchestrator picks bare vs trace-decorated store ops from the log level. When off (the default), the fold path is byte-identical to a bare reduction: the validating fold is never selected, so there is no per-event cost, not even a branch. Flipping the flag is the entire opt-in; there is no per-state wiring.
+- **Zero cost when off.** The reduction pipeline names three things: a **reducer** (a state's `.patch()` handler) turns one event into a partial, a **patch step** merges that partial into state, and the **fold** is the loop applying the patch step across a stream's events. The patch step is selected once at `build()` — the same way the orchestrator picks bare vs trace-decorated store ops from the log level. When off (the default), the fold loop is byte-identical to a bare reduction: the validating patch step is never selected, so there is no per-event cost, not even a branch. Flipping the flag is the entire opt-in; there is no per-state wiring.
 - **On the projection path**, a bad reduction throws inside the fold batch handler, which blocks the stream — the `ValidationError` message rides the [`blocked`](./error-handling#blocked-streams) lifecycle event's `error`. Recover the same way you recover any blocked stream once the reducer is fixed.
 - **Warm cache reads fold nothing**, so they are never validated — the flag guards reductions, not reads. A cold replay (a fresh `load`, a `reset`, or a time-travel `asOf` query) is what re-runs the reducers.
 
