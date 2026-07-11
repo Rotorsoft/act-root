@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.10...@rotorsoft/act-tck-v1.27.0) (2026-07-11)
+
+
+### Features
+
+* **act:** validateFoldedState — opt-in state-schema validation after each reduction ([4b176d6](https://github.com/rotorsoft/act-root/commit/4b176d6fdbbe71dbd64b84fa81dbf360bba504c2)), closes [#1230](https://github.com/rotorsoft/act-root/issues/1230) [#1238](https://github.com/rotorsoft/act-root/issues/1238)
+
 # [@rotorsoft/act-tck-v1.26.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.9...@rotorsoft/act-tck-v1.26.10) (2026-07-11)
 
 # [@rotorsoft/act-tck-v1.26.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.8...@rotorsoft/act-tck-v1.26.9) (2026-07-11)
