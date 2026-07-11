@@ -1,6 +1,7 @@
 {
   "name": "@rotorsoft/act-inspector",
   "version": "0.0.1",
+  "private": true,
   "description": "Act event sourcing observatory — inspect, query, and visualize events in Act stores",
   "type": "module",
   "author": {
