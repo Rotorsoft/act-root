@@ -13,6 +13,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { register } from "prom-client";
+import { resolveDemoActor } from "./demo-actor.js";
 
 /**
  * Multi-transport demo (#847, #1123). One Act instance, four
@@ -79,7 +80,17 @@ calculatorApp.on("committed", (snapshots) => {
 });
 
 const restApi = honoTransport(calculatorApp, {
-  actor: () => ({ id: "1", name: "Calculator" }),
+  // DEMO ONLY — no auth; production hosts MUST resolve a verified actor.
+  // Every generated mutation trusts whatever this returns. In a real
+  // service, resolve the actor from a verified JWT / session / mTLS
+  // identity off the request context — e.g.
+  //   actor: (c) => resolveActorFromJwt(c)
+  // (see `authenticated(...)` in `@rotorsoft/act-http/hono`). Copying the
+  // hardcoded resolver below into production is a privilege-escalation
+  // footgun: it grants every caller the same identity with no auth.
+  // `resolveDemoActor()` logs a one-time warning if it ever runs outside
+  // the demo, so the mistake surfaces in the logs.
+  actor: () => resolveDemoActor(),
   stream: () => "calculator",
   expectedVersion: () => undefined,
   sse: { channel: broadcast },
