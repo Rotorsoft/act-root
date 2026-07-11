@@ -15,7 +15,12 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { is_literal_source, StoreError, ValidationError } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  is_literal_source,
+  StoreError,
+  ValidationError,
+} from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -64,20 +69,82 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/**
+ * ISO-8601 shape (optional fractional seconds, optional timezone). Kept
+ * in sync with the PostgresStore reviver so payload dates round-trip
+ * identically across adapters (#1198).
+ * @internal
+ */
+const ISO_8601 =
+  /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\.\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
+
+/**
+ * `JSON.parse` reviver that revives ISO-date strings to `Date`. Parity
+ * with PG's JSONB reviver (#1198): a `Date` committed into event `data`
+ * reads back as a `Date`, not an ISO string — so an InMemory/PG → SQLite
+ * migration doesn't silently break reducers calling `.getTime()`.
+ * @internal
+ */
+const date_reviver = (_key: string, value: unknown): unknown =>
+  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * Parse a JSON-encoded TEXT column, reviving ISO-date strings to `Date`
+ * for cross-adapter payload parity (#1198).
+ * @internal
+ */
+const parse_json = (raw: string): unknown => JSON.parse(raw, date_reviver);
+
+/**
+ * SQLite extended result code for a UNIQUE constraint violation
+ * (`SQLITE_CONSTRAINT_UNIQUE`). libsql surfaces it on the error's
+ * `rawCode`.
+ * @internal
+ */
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * Recognize a `(stream, version)` unique-constraint violation from a
+ * libsql commit error (#1202). Detects via the extended result code when
+ * present, falling back to the message text (`UNIQUE constraint failed`)
+ * for drivers that surface only the message.
+ * @internal
+ */
+const is_unique_violation = (e: unknown): boolean => {
+  const err = e as { rawCode?: number; message?: unknown };
+  return (
+    err?.rawCode === SQLITE_CONSTRAINT_UNIQUE ||
+    (typeof err?.message === "string" &&
+      err.message.includes("UNIQUE constraint failed"))
+  );
+};
+
 /** Portable stream-filter body grammar: literal characters, `.` (any
  *  single character), and `.*` (any run). Everything else — escapes
  *  (`\.`), character classes (`[0-9]`), grouping/alternation (`(a|b)`),
  *  quantifiers (`+ ? { }`), and mid-pattern anchors — has no faithful
- *  `LIKE` translation and must throw instead of silently mis-matching.
+ *  `GLOB` translation and must throw instead of silently mis-matching.
  *  @internal
  */
 const PORTABLE_BODY = /^(?:\.\*|\.|[^\\^$.()[\]{}|+?*])*$/;
 
 /** Translate a stream filter (regex-shaped or plain substring) into a
- *  SQL LIKE pattern. Honors `^` / `$` anchors and converts `.*` → `%`,
- *  `.` → `_`. Unanchored input gets `%` wildcards on both sides.
- *  Literal `%` / `_` in the pattern are escaped with `\` so they match
- *  themselves — every consumer appends `ESCAPE '\'` to its `LIKE`.
+ *  SQLite `GLOB` pattern.
+ *
+ *  #1197: `GLOB` — not `LIKE` — because `GLOB` is **case-sensitive**,
+ *  matching PG's `~` and InMemory's `RegExp`. SQLite's `LIKE` is ASCII
+ *  case-insensitive, and its per-connection `PRAGMA case_sensitive_like`
+ *  override is unreliable under libsql's pooled connections (a
+ *  transaction and a follow-up read can land on different connections).
+ *  `GLOB` carries its case-sensitivity in the operator itself, so it is
+ *  correct regardless of which pooled connection runs the statement.
+ *
+ *  Honors `^` / `$` anchors and converts `.*` → `*`, `.` → `?`.
+ *  Unanchored input gets `*` wildcards on both sides. `GLOB` has no
+ *  ESCAPE clause and `%` / `_` are ordinary literals under it — so no
+ *  escaping is needed. The portable grammar rejects `*`, `?`, and `[`
+ *  as literals (they are metacharacters), so a literal can never collide
+ *  with a `GLOB` wildcard.
  *
  *  Only the portable filter grammar documented on
  *  {@link QueryStreams.stream} is convertible: `^` / `$` anchors, `.`,
@@ -88,16 +155,16 @@ const PORTABLE_BODY = /^(?:\.\*|\.|[^\\^$.()[\]{}|+?*])*$/;
  *
  *  Examples:
  *  - `^abc$`  → `abc`        (exact)
- *  - `^abc.*` → `abc%`       (starts-with)
- *  - `.*abc$` → `%abc`       (ends-with)
- *  - `abc`    → `%abc%`      (contains)
- *  - `a.c`    → `%a_c%`      (single-char wildcard, contains)
- *  - `^a_c$`  → `a\_c`       (literal underscore, escaped for LIKE)
+ *  - `^abc.*` → `abc*`       (starts-with)
+ *  - `.*abc$` → `*abc`       (ends-with)
+ *  - `abc`    → `*abc*`      (contains)
+ *  - `a.c`    → `*a?c*`      (single-char wildcard, contains)
+ *  - `^a_c$`  → `a_c`        (literal underscore — ordinary under GLOB)
  *  - `(a|b)`  → throws {@link ValidationError}
  *
  *  @internal exported for testing
  */
-export function streamPatternToLike(input: string): string {
+export function streamPatternToGlob(input: string): string {
   let s = input;
   const start = s.startsWith("^");
   const end = s.endsWith("$");
@@ -105,29 +172,29 @@ export function streamPatternToLike(input: string): string {
   if (end) s = s.slice(0, -1);
   if (!PORTABLE_BODY.test(s))
     throw new ValidationError(
-      `stream filter pattern "${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to LIKE; use stream_exact/source_exact for literal names`,
+      `stream filter pattern "${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to GLOB; use stream_exact/source_exact for literal names`,
       input,
       "non-portable stream filter pattern"
     );
   const tokens: string[] = [];
-  if (!start) tokens.push("%");
+  if (!start) tokens.push("*");
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === ".") {
       if (s[i + 1] === "*") {
-        tokens.push("%");
+        tokens.push("*");
         i++;
-      } else tokens.push("_");
-    } else if (c === "%" || c === "_") tokens.push(`\\${c}`);
-    else tokens.push(c);
+      } else tokens.push("?");
+    } else tokens.push(c);
   }
-  if (!end) tokens.push("%");
-  // Collapse adjacent `%` wildcards — e.g. `^a.*` would otherwise yield
-  // `a%%`. Token-level so escaped literals (`\%`) are never merged.
+  if (!end) tokens.push("*");
+  // Collapse adjacent `*` wildcards — e.g. `^a.*` would otherwise yield
+  // `a**`. GLOB treats `**` as `*`, but collapsing keeps the output
+  // minimal and matches the pre-#1197 LIKE behavior.
   let out = "";
   let prev = "";
   for (const t of tokens) {
-    if (t === "%" && prev === "%") continue;
+    if (t === "*" && prev === "*") continue;
     out += t;
     prev = t;
   }
@@ -331,18 +398,20 @@ export class SqliteStore implements Store {
     expectedVersion?: number
   ): Promise<Committed<E, keyof E>[]> {
     const tx = await this.client.transaction("write");
+    // Hoisted so the catch can build a ConcurrencyError with the head
+    // version on a (stream, version) unique collision (#1202).
+    let current_version = -1;
     try {
       const version_row = await tx.execute({
         sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
         args: [stream],
       });
-      const current_version = Number(version_row.rows[0].v);
+      current_version = Number(version_row.rows[0].v);
 
       if (
         typeof expectedVersion === "number" &&
         current_version !== expectedVersion
       ) {
-        const { ConcurrencyError } = await import("@rotorsoft/act");
         throw new ConcurrencyError(
           stream,
           current_version,
@@ -386,7 +455,22 @@ export class SqliteStore implements Store {
       return committed;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      // #1202: map the (stream, version) unique collision to
+      // ConcurrencyError — the same signal PG raises from 23505 — so a
+      // caller retries on the framework contract, not a raw libsql error.
+      // This is the race where the version probe passed but a concurrent
+      // INSERT (a second store on the same file, tooling, the act CLI)
+      // beat this one to the row. Every other driver error is wrapped in
+      // StoreError('commit') for parity with the adapter's other methods.
+      if (e instanceof ConcurrencyError) throw e;
+      if (is_unique_violation(e))
+        throw new ConcurrencyError(
+          stream,
+          current_version,
+          msgs as Message<Schemas, keyof Schemas>[],
+          expectedVersion ?? -1
+        );
+      throw new StoreError("commit", { cause: e });
     }
   }
 
@@ -403,11 +487,15 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ? ESCAPE '\\'";
-        args.push(streamPatternToLike(query.stream));
+        sql += " AND stream GLOB ?";
+        args.push(streamPatternToGlob(query.stream));
       }
     }
-    if (query?.names) {
+    if (query?.names !== undefined) {
+      // #1199: `names: []` means "match no event names". An empty
+      // placeholder list yields `name IN ()` which SQLite evaluates as
+      // always-false — matching the PG (`= ANY('{}')`) / InMemory
+      // semantics. `!== undefined` (not truthiness) keeps that explicit.
       sql += ` AND name IN (${query.names.map(() => "?").join(",")})`;
       args.push(...query.names);
     }
@@ -461,8 +549,8 @@ export class SqliteStore implements Store {
           version: Number(row.version),
           created: new Date(row.created as string),
           name: row.name as string,
-          data: JSON.parse(row.data as string),
-          meta: JSON.parse(row.meta as string),
+          data: parse_json(row.data as string) as any,
+          meta: parse_json(row.meta as string) as any,
           pii: pii_value,
         })
       );
@@ -485,15 +573,15 @@ export class SqliteStore implements Store {
     }>
   ) {
     // Fail loud at registration for a claim source this adapter cannot
-    // match: libsql has no `REGEXP`, and the portable LIKE grammar cannot
+    // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
     // subset (e.g. `^(A|B)$`) would otherwise silently never claim its
-    // stream, so `streamPatternToLike` throws `ValidationError` here —
+    // stream, so `streamPatternToGlob` throws `ValidationError` here —
     // pointing operators to InMemory/PG for full regex claim sources —
     // before any row is written. Literal sources skip the check entirely.
     for (const { source } of streams) {
       if (source !== undefined && !is_literal_source(source))
-        streamPatternToLike(source);
+        streamPatternToGlob(source);
     }
     const tx = await this.client.transaction("write");
     try {
@@ -575,9 +663,9 @@ export class SqliteStore implements Store {
           // Has-work probe. A literal `source` (no regex metacharacter)
           // matches by equality — index-friendly, and exact so "s1" never
           // claims "s12". A portable pattern (anchors, `.`, `.*`) matches
-          // via the same LIKE translation the StreamFilter surfaces use.
+          // via the same GLOB translation the StreamFilter surfaces use.
           // Non-portable patterns (alternation/grouping) never reach here:
-          // `subscribe` rejects them up front, so `streamPatternToLike`
+          // `subscribe` rejects them up front, so `streamPatternToGlob`
           // below only sees the portable subset.
           const check = is_literal_source(source)
             ? await tx.execute({
@@ -585,8 +673,8 @@ export class SqliteStore implements Store {
                 args: [at, source],
               })
             : await tx.execute({
-                sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\' LIMIT 1`,
-                args: [at, streamPatternToLike(source)],
+                sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream GLOB ? LIMIT 1`,
+                args: [at, streamPatternToGlob(source)],
               });
           has_events = check.rows.length > 0;
         } else {
@@ -755,8 +843,8 @@ export class SqliteStore implements Store {
         conditions.push("stream = ?");
         args.push(filter.stream);
       } else {
-        conditions.push("stream LIKE ? ESCAPE '\\'");
-        args.push(streamPatternToLike(filter.stream));
+        conditions.push("stream GLOB ?");
+        args.push(streamPatternToGlob(filter.stream));
       }
     }
     if (filter.source !== undefined) {
@@ -765,8 +853,8 @@ export class SqliteStore implements Store {
         conditions.push("source = ?");
         args.push(filter.source);
       } else {
-        conditions.push("source LIKE ? ESCAPE '\\'");
-        args.push(streamPatternToLike(filter.source));
+        conditions.push("source GLOB ?");
+        args.push(streamPatternToGlob(filter.source));
       }
     }
     if (filter.blocked !== undefined) {
@@ -865,8 +953,8 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ? ESCAPE '\\'";
-        args.push(streamPatternToLike(query.stream));
+        sql += " AND stream GLOB ?";
+        args.push(streamPatternToGlob(query.stream));
       }
     }
     if (query?.source !== undefined) {
@@ -875,8 +963,8 @@ export class SqliteStore implements Store {
         sql += " AND source = ?";
         args.push(query.source);
       } else {
-        sql += " AND source LIKE ? ESCAPE '\\'";
-        args.push(streamPatternToLike(query.source));
+        sql += " AND source GLOB ?";
+        args.push(streamPatternToGlob(query.source));
       }
     }
     if (query?.blocked !== undefined) {
@@ -978,8 +1066,8 @@ export class SqliteStore implements Store {
         where.push(`e.stream = ?`);
         args.push(input.stream);
       } else {
-        where.push(`e.stream LIKE ? ESCAPE '\\'`);
-        args.push(streamPatternToLike(input.stream));
+        where.push(`e.stream GLOB ?`);
+        args.push(streamPatternToGlob(input.stream));
       }
     }
     if (exclude.length) {
@@ -1081,8 +1169,8 @@ export class SqliteStore implements Store {
         stream: row.stream as string,
         version: Number(row.version),
         name: row.name as string,
-        data: JSON.parse(row.data as string),
-        meta: JSON.parse(row.meta as string),
+        data: parse_json(row.data as string) as any,
+        meta: parse_json(row.meta as string) as any,
         created: new Date(row.created as string),
         pii: await this._parse_pii_from_read(row.pii),
       }) as Committed<E, keyof E>;
@@ -1194,8 +1282,8 @@ export class SqliteStore implements Store {
         stream: stream as string,
         version: Number(version),
         name: name as string,
-        data: JSON.parse(data as string),
-        meta: JSON.parse(meta as string),
+        data: parse_json(data as string) as any,
+        meta: parse_json(meta as string) as any,
         created: new Date(created as string),
         pii: await this._parse_pii_from_read(pii),
       }) as Committed<E, keyof E>;
@@ -1311,8 +1399,8 @@ export class SqliteStore implements Store {
             version: Number(row.version),
             created: new Date(row.created as string),
             name: row.name as string,
-            data: JSON.parse(row.data as string),
-            meta: JSON.parse(row.meta as string),
+            data: parse_json(row.data as string) as any,
+            meta: parse_json(row.meta as string) as any,
           },
           before,
         });
