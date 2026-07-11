@@ -126,7 +126,7 @@ serve({ fetch: api.fetch, port: 4000 });
 // POST /api/actions/OpenTicket  body: { title }  → 200 Snapshot[] | 4xx ApiError
 ```
 
-The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; failures short-circuit with `400`. Errors map through `toApiError` to `412 / CONCURRENCY`, `409 / INVARIANT`, `422 / VALIDATION`, `410 / STREAM_CLOSED`, `400 / NON_RETRYABLE`, and `500 / INTERNAL` for unknown throws.
+The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; a body-schema failure short-circuits with `422 / VALIDATION` and the shared `ApiError` envelope — the same status and shape a `ValidationError` thrown inside `app.do` maps to, so a client parsing `ApiError` sees one shape for both. Errors map through `toApiError` to `412 / CONCURRENCY`, `409 / INVARIANT`, `422 / VALIDATION`, `410 / STREAM_CLOSED`, `400 / NON_RETRYABLE`, and `500 / INTERNAL` for unknown throws.
 
 Edge-runtime ready — Hono runs unchanged on Node, Bun, Cloudflare Workers, Vercel Edge, AWS Lambda, Deno. If you wire `idempotency`, verify the `IdempotencyStore` is edge-compatible: in-memory works per worker, cross-worker requires a distributed store.
 
@@ -151,6 +151,8 @@ api.get("/openapi.json", (c) => c.json(doc));
 **The doc describes the Hono REST surface, not tRPC.** tRPC's URL convention (`POST /trpc/<procedure>`, JSON-RPC-style body framing, batching) doesn't model cleanly as OpenAPI operations; tRPC consumers share types directly via `typeof router` and don't need a doc. The path shape this emitter produces matches `@rotorsoft/act-http/hono` by construction: same default `basePath` (`/api`), same request/response shapes, same error envelope. If you override `basePath` on the Hono adapter, pass the same value here so the doc keeps describing the live routes.
 
 Zod 4's native `z.toJSONSchema` does the schema conversion — OpenAPI 3.1 uses JSON Schema 2020-12 as its dialect, so there's no lossy translation layer. The output is deterministic given the same registry (entries land in `Object.entries(app.registry.actions)` iteration order), so CI can snapshot the result and catch unintended API-surface changes in the same PR that introduced them.
+
+**Sensitive input fields are marked.** `z.toJSONSchema` has no knowledge of the `sensitive()` registry — the marker lives out-of-band in a `WeakMap`. So the emitter walks each action's sensitive fields (via `pii_fields` from `@rotorsoft/act`) and annotates every matching request-body property `writeOnly: true` + `format: password`. A field declared `email: sensitive(z.string())` surfaces in the doc as a write-only secret, so codegen tools and Swagger UI's "Try It" panel treat it as a password rather than echoing it in cleartext. Response schemas carry no PII (the success shape is a fixed generic `SnapshotArray`), so the marking is request-side only.
 
 A clean way to serve the doc plus an interactive explorer in one shot — Scalar reads the live document from the same server:
 
@@ -239,6 +241,10 @@ const actor: ActorExtractor = (ctx) => {
 ```
 
 Whatever the extractor returns becomes `Target.actor` in every `app.do(...)` call the generator dispatches. The actor flows all the way into the event committed to the store — `events.actor_id` / `events.actor_name` come from this seam, end of trace.
+
+:::warning Never ship a constant actor
+Because every generated mutation trusts whatever the extractor returns, a hardcoded resolver — `actor: () => ({ id: "1", name: "Alice" })` — grants every caller the same identity with no authentication. That's a privilege-escalation footgun, not a starting point. The `packages/server` demo isolates its fake resolver in a `resolveDemoActor()` that logs a one-time warning on use and carries a `// DEMO ONLY — no auth` marker precisely so it reads as scaffolding to replace, not to copy. Production hosts **must** resolve a verified actor from a JWT, session, mTLS identity, or API key as shown above.
+:::
 
 Errors thrown from the extractor surface as `401 / UNAUTHORIZED` on the Hono adapter and as `UNAUTHORIZED` on the tRPC adapter. Both honor the message text in the `detail` field of the envelope.
 
