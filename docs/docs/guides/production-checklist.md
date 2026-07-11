@@ -263,12 +263,17 @@ const app = act()
 - **`streamLimit`** — bounds the per-cycle parallel handler budget. With slow handlers (100 ms+), keep this low so an erroring batch doesn't tie up a wide pool of leases. With fast handlers, raise it to amortize the claim round-trip.
 - **`cycleMs`** — when set, the lane's controller drives itself at this cadence (independent of the Act's settle loop). Best for "always-on" lanes that need low commit-to-ack latency without callers explicitly driving `settle()`. Omit for lanes that are fine running on the settle debounce.
 
+**Process-per-lane and the coverage invariant.** When you deploy one process per lane with `onlyLanes`, no single instance drains every lane — that's the point. What each instance can't see is whether some *other* instance is covering the lanes it skipped. The cluster invariant is that the union of every worker's `onlyLanes` must cover every declared lane: `∪ onlyLanes ⊇ declared lanes`. A lane left out of every worker's set has no `DrainController` anywhere, so its streams are subscribed but never claimed, and its reactions silently stall.
+
+To catch a half-configured rollout early, each instance logs a one-line startup advisory when its `onlyLanes` excludes a declared lane (the default lane or any `.withLane` name) — `Act declared N orphaned lane(s) on this instance: "slow", …`. On a correctly sharded cluster this line is expected on each instance (every worker orphans the lanes its peers own), so treat it as a per-instance signal, not a per-cluster alarm: reconcile the advisories across all your instances and confirm the union covers every declared lane. An orphaned lane that appears on *every* instance's advisory is the real bug. The advisory stays silent when `onlyLanes` is unset or already covers every declared lane.
+
 **Sanity checks for the sizing:**
 
 - [ ] Slow lane's `leaseMillis` ≥ the longest expected handler runtime in that lane
 - [ ] Fast lane's `cycleMs` matches the responsiveness target (e.g., 10 ms for sub-100 ms acks)
 - [ ] No reaction targets the same stream via two reactions with different lanes (the build-time scan throws on this)
 - [ ] If running process-per-lane, `ACT_ONLY_LANES` / `ActOptions.onlyLanes` is wired from env so the same image deploys to every lane
+- [ ] Across the whole cluster, the union of every worker's `onlyLanes` covers every declared lane (`∪ onlyLanes ⊇ declared lanes`) — reconcile the per-instance orphaned-lane advisories to confirm
 - [ ] Inspector / dashboards filter by `lease.lane` and `position.lane` — every lifecycle event now carries it
 
 See [Configuration → Lanes](../concepts/configuration.md#lanes) for the full API surface, and `libs/act/PERFORMANCE.md § Lane Fan-out` for the headline number: ~7× faster fast-event latency under slow-lane backpressure on Postgres.

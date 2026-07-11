@@ -48,7 +48,12 @@
  * `express.raw({ type: "application/json" })` (or whatever
  * content-type your webhooks use) ahead of the receiver middleware.
  * The middleware reads `req.body` as a `Buffer | string` and converts
- * to a UTF-8 string for hashing. Skip when unsigned.
+ * to a UTF-8 string for hashing. Skip when unsigned. If the raw parser
+ * isn't mounted (the default `express.json()` ate the bytes, leaving a
+ * parsed object the adapter can't hash), the middleware short-circuits
+ * with `400 { error: "empty-body" }` instead of hashing an empty string
+ * and rejecting every valid request with a misleading `401
+ * bad-signature`.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";

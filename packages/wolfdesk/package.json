@@ -10,7 +10,8 @@
     "dev": "pnpm drizzle:migrate && tsx watch src/main.ts",
     "drizzle:migrate": "drizzle-kit generate && drizzle-kit migrate",
     "drizzle:push": "drizzle-kit push",
-    "drizzle:studio": "drizzle-kit studio"
+    "drizzle:studio": "drizzle-kit studio",
+    "test": "vitest run"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

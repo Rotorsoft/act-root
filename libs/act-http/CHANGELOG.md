@@ -1,3 +1,12 @@
+# [@rotorsoft/act-http-v1.8.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.4...@rotorsoft/act-http-v1.8.5) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** funnel hono validation failures through the ApiError envelope at 422 ([#1226](https://github.com/rotorsoft/act-root/issues/1226)) ([65096c3](https://github.com/rotorsoft/act-root/commit/65096c33137daf98ff274766ee46f430a5c6891a))
+* **act-http:** mark sensitive() action-input fields in the openapi request schema ([#1228](https://github.com/rotorsoft/act-root/issues/1228)) ([003eea2](https://github.com/rotorsoft/act-root/commit/003eea2bfd97c35641ee585a0a26cab40fa1c564))
+* **act-http:** surface a distinct empty-body error when raw body is not captured ([#1227](https://github.com/rotorsoft/act-root/issues/1227)) ([15db895](https://github.com/rotorsoft/act-root/commit/15db895113e6124966d4812b062fd5b975edf6eb))
+
 # [@rotorsoft/act-http-v1.8.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.3...@rotorsoft/act-http-v1.8.4) (2026-07-11)
 
 

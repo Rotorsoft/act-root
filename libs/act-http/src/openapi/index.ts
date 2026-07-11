@@ -57,6 +57,7 @@
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
+import { pii_fields } from "@rotorsoft/act";
 import { z } from "zod";
 
 /**
@@ -307,6 +308,46 @@ function strip_json_schema_meta(
   return rest;
 }
 
+/**
+ * Annotate the emitted request-body schema's sensitive properties so
+ * codegen / Swagger UI treat them as secrets rather than echoing them
+ * freely. `z.toJSONSchema` has no knowledge of the sensitive registry
+ * (`sensitive()` marks schemas out-of-band in a WeakMap), so we walk the
+ * action's declared sensitive fields — via `pii_fields`, the same lookup
+ * the orchestrator uses — and mark each matching property `writeOnly:
+ * true` + `format: password`. Non-object schemas and actions with no
+ * sensitive fields pass through untouched (the zero-cost common path).
+ *
+ * `pii_fields` only reports top-level keys of a `z.object`, and Zod's
+ * JSON Schema emit always renders those as members of `properties` — so
+ * once `fields` is non-empty, `body_schema.properties[field]` is
+ * guaranteed present. No defensive fallback needed.
+ *
+ * @internal
+ */
+function mark_sensitive_fields(
+  body_schema: Record<string, unknown>,
+  zod_schema: z.ZodType
+): Record<string, unknown> {
+  const fields = pii_fields(zod_schema);
+  if (fields.length === 0) return body_schema;
+  const properties = body_schema.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const next_properties: Record<string, Record<string, unknown>> = {
+    ...properties,
+  };
+  for (const field of fields) {
+    next_properties[field] = {
+      ...properties[field],
+      writeOnly: true,
+      format: "password",
+    };
+  }
+  return { ...body_schema, properties: next_properties };
+}
+
 function build_operation(
   action_name: string,
   body_schema: Record<string, unknown>,
@@ -419,9 +460,12 @@ export function openapi<TApp extends ActRegistryView>(
   const paths: Record<string, OpenAPIPathItem> = {};
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
-    const zod_schema = state.actions[action_name];
-    const body_schema = strip_json_schema_meta(
-      z.toJSONSchema(zod_schema as z.ZodType) as Record<string, unknown>
+    const zod_schema = state.actions[action_name] as z.ZodType;
+    const body_schema = mark_sensitive_fields(
+      strip_json_schema_meta(
+        z.toJSONSchema(zod_schema) as Record<string, unknown>
+      ),
+      zod_schema
     );
     paths[`${base_path}/actions/${action_name}`] = {
       post: build_operation(action_name, body_schema, options),

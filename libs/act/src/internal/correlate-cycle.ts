@@ -82,6 +82,16 @@ export class CorrelateCycle<
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
   /**
+   * Async cold-start hook (#1221). Runs once, after the sync `on_init`,
+   * inside the same `init()` await. The orchestrator uses it to re-seed the
+   * process-local defer timers from the store's persisted `deferred_at` so
+   * an idle deferred stream re-arms its drain across a restart. Kept
+   * separate from `on_init` because seeding is an async store read; `init`
+   * already awaits, so folding it in here preserves the "runs exactly once"
+   * guarantee without a second gate on the Act side.
+   */
+  private readonly _on_init_async: (() => Promise<void>) | undefined;
+  /**
    * Scope runner (#1191). The periodic `start_polling` timer fires
    * outside any caller frame, so its `correlate()` must be re-wrapped in
    * the Act's `_scoped` bag or `store()`/`cache()` resolve to the
@@ -104,6 +114,7 @@ export class CorrelateCycle<
     maxSubscribedStreams: number,
     on_init: (() => void) | undefined,
     run_scoped: <T>(fn: () => Promise<T>) => Promise<T>,
+    on_init_async?: () => Promise<void>,
     cold_start_back_scan: number = DEFAULT_COLD_START_BACK_SCAN
   ) {
     this._subscribed = new LruSet(maxSubscribedStreams);
@@ -113,6 +124,7 @@ export class CorrelateCycle<
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
+    this._on_init_async = on_init_async;
     this._cold_start_back_scan = cold_start_back_scan;
   }
 
@@ -148,6 +160,9 @@ export class CorrelateCycle<
     for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
     }
+    // Cold-start defer re-seed (#1221) — after the static targets are
+    // subscribed, so a walk of the streams table sees them.
+    await this._on_init_async?.();
   }
 
   /**

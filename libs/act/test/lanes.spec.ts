@@ -1,5 +1,6 @@
+import { vi } from "vitest";
 import { z } from "zod";
-import { act, dispose, slice, state, ZodEmpty } from "../src/index.js";
+import { act, dispose, log, slice, state, ZodEmpty } from "../src/index.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
@@ -344,6 +345,54 @@ describe("lanes (ACT-1103, slice 1)", () => {
       app as unknown as { _drain_controllers: Map<string, unknown> }
     )._drain_controllers;
     expect([...controllers.keys()]).toEqual(["slow"]);
+  });
+
+  it("logs an orphaned-lane advisory when onlyLanes excludes a declared lane (#1220)", () => {
+    const infoSpy = vi.spyOn(log(), "info");
+    act()
+      .withState(Counter)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .build({ onlyLanes: ["fast"] });
+
+    const advisory = infoSpy.mock.calls.find((c) =>
+      String(c[0] ?? "").includes("orphaned lane")
+    );
+    expect(advisory).toBeDefined();
+    const msg = String(advisory![0]);
+    expect(msg).toMatch(/"slow"/);
+    expect(msg).not.toMatch(/"fast"/);
+    infoSpy.mockRestore();
+  });
+
+  it("does not log the orphaned-lane advisory when onlyLanes covers every declared lane (#1220)", () => {
+    const infoSpy = vi.spyOn(log(), "info");
+    act()
+      .withState(Counter)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .build({ onlyLanes: ["default", "slow", "fast"] });
+
+    const advisory = infoSpy.mock.calls.find((c) =>
+      String(c[0] ?? "").includes("orphaned lane")
+    );
+    expect(advisory).toBeUndefined();
+    infoSpy.mockRestore();
+  });
+
+  it("does not log the orphaned-lane advisory when onlyLanes is unset (#1220)", () => {
+    const infoSpy = vi.spyOn(log(), "info");
+    act()
+      .withState(Counter)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .build();
+
+    const advisory = infoSpy.mock.calls.find((c) =>
+      String(c[0] ?? "").includes("orphaned lane")
+    );
+    expect(advisory).toBeUndefined();
+    infoSpy.mockRestore();
   });
 
   it("auto-starts a per-lane worker when cycleMs is declared", async () => {

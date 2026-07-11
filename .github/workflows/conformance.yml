@@ -14,6 +14,7 @@ on:
     paths:
       - "libs/act-pg/**"
       - "libs/act-sqlite/**"
+      - "libs/act-notify/**"
       - "libs/act-tck/**"
       - "libs/act/src/types/ports.ts"
       - ".github/workflows/conformance.yml"
@@ -22,6 +23,7 @@ on:
     paths:
       - "libs/act-pg/**"
       - "libs/act-sqlite/**"
+      - "libs/act-notify/**"
       - "libs/act-tck/**"
       - "libs/act/src/types/ports.ts"
       - ".github/workflows/conformance.yml"
@@ -42,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         # PostgreSQL 13 went EOL 2025-11. 14 is the oldest still
-        # security-patched line; 17 is what `ci-cd.yml` uses as the
+        # security-patched line; 18 is what `ci-cd.yml` uses as the
         # ground-truth single-version run.
         pg: ["14", "15", "16", "17"]
     services:
@@ -69,6 +71,11 @@ jobs:
       - run: pnpm install
       - name: Run TCK against PostgreSQL ${{ matrix.pg }}
         run: pnpm -F @rotorsoft/act-pg exec vitest run test/store-tck.spec.ts
+      # act-notify runs the full Store TCK over withBroker(PostgresStore),
+      # so a with-broker.ts change gets the same multi-version PG coverage
+      # as the base adapter (its correctness rides on PG semantics).
+      - name: Run act-notify TCK against PostgreSQL ${{ matrix.pg }}
+        run: pnpm -F @rotorsoft/act-notify exec vitest run test/store-tck.spec.ts
 
   sqlite:
     name: libsql-${{ matrix.libsql }}

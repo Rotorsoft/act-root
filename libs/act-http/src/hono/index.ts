@@ -312,7 +312,25 @@ export function hono<TApp extends ActSurface = ActSurface>(
     const schema = state.actions[action_name];
     api.post(
       `/actions/${action_name}`,
-      zValidator("json", schema as never),
+      // Custom hook funnels body-schema failures through the same
+      // ApiError envelope + 422 status an in-`do` ValidationError maps
+      // to (ERROR_MAP.ValidationError). Without it, @hono/zod-validator
+      // short-circuits with its own 400 + raw body — two statuses and
+      // two shapes for the same "malformed input" failure class on one
+      // endpoint. The OpenAPI doc only documents the 422/ApiError path.
+      zValidator("json", schema as never, (result, c) => {
+        if (!result.success) {
+          // `result.error` is a ZodError; the schema's `never` typing
+          // erases its shape, so read `.message` through a narrow cast.
+          const message = (result.error as { message?: string }).message;
+          const body: ApiError = {
+            error: "ValidationError",
+            detail: message,
+            code: "VALIDATION",
+          };
+          return c.json(body, 422);
+        }
+      }),
       async (c) => {
         try {
           const input = c.req.valid("json" as never) as unknown;

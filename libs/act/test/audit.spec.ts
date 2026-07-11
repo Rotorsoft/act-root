@@ -735,6 +735,28 @@ describe("audit", () => {
       });
     });
 
+    it("does not flag a legitimately-excluded lane on an onlyLanes instance (#1224)", async () => {
+      // A worker deployed with onlyLanes:['fast'] builds no controller
+      // for the 'slow' lane — but 'slow' is still a DECLARED lane of the
+      // app (another worker drains it). A stream correctly assigned
+      // lane 'slow' must NOT be flagged as unknown-lane: the audit
+      // compares against the declared universe (default + every
+      // .withLane name), not this instance's active controller set.
+      const app = act()
+        .withState(widget)
+        .withLane({ name: "slow" })
+        .withLane({ name: "fast" })
+        .build({ onlyLanes: ["fast"] });
+      await store().subscribe([{ stream: "w1", source: "w1", lane: "slow" }]);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const unknownLane = findings.filter(
+        (f) => f.category === "routing-health" && f.reason === "unknown-lane"
+      );
+      expect(unknownLane).toEqual([]);
+    });
+
     it("flags events whose name has no registered reaction", async () => {
       // widget declares events but no reactions — every event name
       // is "unrouted" from a reaction perspective.

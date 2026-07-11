@@ -106,6 +106,22 @@ describe("webhookMiddleware (Fastify)", () => {
     expect(send).toHaveBeenCalledWith({ error: "missing-signature" });
   });
 
+  it("replies 400 empty-body when secret is set but rawBody was not captured", async () => {
+    const store = freshStore();
+    // secret set + no rawBody (default JSON parser ate the bytes) →
+    // don't hash an empty body and 401 with a misleading bad-signature.
+    // Surface the distinct configuration error instead.
+    const req = mockRequest(
+      { "idempotency-key": "req-1", "x-webhook-signature": "sha256=deadbeef" },
+      undefined
+    );
+    const { reply, send } = mockReply();
+    const middleware = webhookMiddleware({ store, secret: "test-secret" });
+    await middleware(req, reply);
+    expect(reply.status).toHaveBeenCalledWith(400);
+    expect(send).toHaveBeenCalledWith({ error: "empty-body" });
+  });
+
   it("handles a missing rawBody (unsigned mode)", async () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" });

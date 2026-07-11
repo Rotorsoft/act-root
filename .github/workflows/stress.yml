@@ -14,7 +14,7 @@ name: Stress (Postgres)
 # runners that PR-level signal is noise. On-demand only.
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:

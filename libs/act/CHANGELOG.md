@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.22.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.6...@rotorsoft/act-v1.22.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** mark sensitive() action-input fields in the openapi request schema ([#1228](https://github.com/rotorsoft/act-root/issues/1228)) ([003eea2](https://github.com/rotorsoft/act-root/commit/003eea2bfd97c35641ee585a0a26cab40fa1c564))
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
 # [@rotorsoft/act-v1.22.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.5...@rotorsoft/act-v1.22.6) (2026-07-11)
 
 
