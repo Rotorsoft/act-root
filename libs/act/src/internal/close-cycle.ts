@@ -49,6 +49,25 @@ export type CloseCycleDeps = {
    * it, tests set a small value to exercise the multi-page path.
    */
   readonly probe_page_size?: number;
+  /**
+   * Per-stream critical section (#1222). The windowed branch is
+   * deliberately guard-free at the store level — a past cutoff makes the
+   * boundary immutable, so a concurrent append can never race the prune.
+   * But that assumes a *single* closer per stream. A manual
+   * `app.close([{stream, before}])` runs `run_close_cycle` directly,
+   * bypassing the `__autoclose__:X` lease that would otherwise exclude a
+   * concurrent autoclose windowed close, so both closers can archive the
+   * same prefix — a double S3 upload / double JSONL append. This runs the
+   * given work under a process-local per-stream lock so the two closers
+   * serialize; the second sees the already-pruned prefix and skips its
+   * archive. Provided by the Act orchestrator (shared across `app.close`
+   * and the drain's `on_close`); defaults to identity (no serialization)
+   * when the cycle is exercised in isolation.
+   */
+  readonly with_stream_lock?: <T>(
+    stream: string,
+    work: () => Promise<T>
+  ) => Promise<T>;
 };
 
 /**
@@ -191,27 +210,79 @@ async function run_windowed_closes(
         )
       : new Map<string, number>();
 
-  // 2. Archive: user callbacks against the cutoff. Sequential for the
-  // same reason as the full path — shared resources, fail-fast. The
-  // pre-cutoff prefix is immutable, so no guard is needed; archiving a
-  // superset of what the boundary truncate deletes is by design
-  // (archive + live stream = full history).
+  // 2 + 3. Per stream, under a process-local lock (#1222): probe the
+  // boundary, archive against intact history only when the prune would
+  // actually delete a prefix, then truncate. Serialization + the
+  // "prune is non-empty" gate together make the archive fire at most
+  // once per pruned range when a manual `app.close` races an autoclose
+  // windowed close for the same stream — the second closer, run behind
+  // the lock, sees the already-pruned prefix (boundary is now the
+  // earliest event) and skips its archive. Each stream is independent,
+  // so `truncate` is called per stream inside its own lock rather than
+  // once for the batch; a windowed truncate touches only its own stream.
+  const with_lock = deps.with_stream_lock ?? ((_stream, work) => work());
+  const truncated: CloseResult["truncated"] = new Map();
   for (const t of windowed) {
-    if (t.archive) await t.archive();
-  }
-
-  // 3. Boundary truncate: atomic per-store transaction; no seed.
-  const truncated = await store().truncate(
-    windowed.map((t) => ({
-      stream: t.stream,
-      before: t.before!,
-      max_id: min_at.get(t.stream),
-    }))
-  );
-  for (const t of windowed) {
-    if (!truncated.has(t.stream)) skipped.push(t.stream);
+    const entry = await with_lock(t.stream, async () => {
+      const max_id = min_at.get(t.stream);
+      // Boundary probe: will a windowed truncate prune anything? The
+      // store deletes events with `id < boundary.id`, where `boundary`
+      // is the latest `__snapshot__` with `created < before` (and, when
+      // capped, `id <= max_id`). No such prefix ⇒ archive is skipped and
+      // the stream is reported skipped, exactly as a no-op truncate would.
+      if (!(await windowed_prune_pending(t.stream, t.before!, max_id)))
+        return undefined;
+      // Archive: user callback against the cutoff, run while the prefix
+      // is still present. Sequential/fail-fast: a throw propagates to the
+      // caller and leaves the stream un-truncated (no data loss).
+      if (t.archive) await t.archive();
+      // Boundary truncate: atomic per-store transaction; no seed.
+      const result = await store().truncate([
+        { stream: t.stream, before: t.before!, max_id },
+      ]);
+      return result.get(t.stream);
+    });
+    if (entry) truncated.set(t.stream, entry);
+    else skipped.push(t.stream);
   }
   return truncated;
+}
+
+/**
+ * Read-only probe: would a windowed truncate of `stream` at `before`
+ * (optionally capped at `max_id`) delete a prefix? Mirrors the store's
+ * boundary rule — the latest `__snapshot__` with `created < before` and,
+ * when capped, `id <= max_id` — then reports whether any event sorts
+ * strictly below that boundary. False when no snapshot qualifies (a
+ * no-op truncate) or when the boundary is already the earliest event
+ * (the prefix was pruned by a prior closer). This is the guard that
+ * makes the windowed archive fire at most once per pruned range (#1222).
+ *
+ * @internal
+ */
+async function windowed_prune_pending(
+  stream: string,
+  before: Date,
+  max_id: number | undefined
+): Promise<boolean> {
+  let boundary_id: number | undefined;
+  let min_id: number | undefined;
+  await store().query(
+    (event) => {
+      if (min_id === undefined || event.id < min_id) min_id = event.id;
+      if (
+        event.name === SNAP_EVENT &&
+        event.created < before &&
+        (max_id === undefined || event.id <= max_id) &&
+        (boundary_id === undefined || event.id > boundary_id)
+      )
+        boundary_id = event.id;
+    },
+    { stream, stream_exact: true, with_snaps: true, after: -1 }
+  );
+  // No qualifying snapshot → nothing to prune behind. Otherwise a prune
+  // is pending only when some event sorts below the boundary.
+  return boundary_id !== undefined && min_id! < boundary_id;
 }
 
 /**

@@ -242,6 +242,31 @@ describe("windowed close", () => {
     expect(result.skipped.sort()).toEqual(["w10", "w12"]);
   });
 
+  it("fires the archive callback at most once when two windowed closes race the same stream", async () => {
+    // Ticket #1222: a manual `app.close([{stream, before}])` racing an
+    // `.autocloses` windowed close for the same stream both take the
+    // guard-free windowed branch, so the archive callback (double S3
+    // upload / double JSONL append) fires TWICE for the overlapping
+    // prefix. Reproduce with two concurrent `app.close` calls — the manual
+    // path bypasses the autoclose lease, so both run `run_close_cycle`
+    // directly against the same stream.
+    await tick("w13", 6);
+    await drainAll();
+    let archived = 0;
+    const before = future();
+    const archive = async () => {
+      // Simulate a real archiver's async I/O so both closers interleave
+      // between the archive step and the truncate.
+      await Promise.resolve();
+      archived++;
+    };
+    await Promise.all([
+      app.close([{ stream: "w13", before, archive }]),
+      app.close([{ stream: "w13", before, archive }]),
+    ]);
+    expect(archived).toBe(1);
+  });
+
   it("prunes purely by date when the app has no reactions", async () => {
     const solo = act().withState(counter).build();
     for (let i = 0; i < 5; i++)
