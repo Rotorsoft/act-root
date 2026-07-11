@@ -168,23 +168,40 @@ const traced = <F extends AsyncFn>(
  */
 export function build_es(
   logger: Logger,
-  correlator: Correlator = default_correlator
+  correlator: Correlator = default_correlator,
+  validate_state = false
 ): EsOps {
   // Bake the orchestrator-level `correlator` into every `action()` call
   // so EsOps callers don't need to thread it. A per-call
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
+  //
+  // ACT-1238: the app-wide `validateFoldedState` flag is baked in the
+  // same way — every `action()`/`load()` this EsOps drives folds with
+  // the flag, so state-fold and close-cycle callers inherit it without
+  // threading a boolean through their own signatures. Default `false`
+  // keeps the hot path a bare `patch()`.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
     options
-  ) => es.action(me, action_name, target, payload, { correlator, ...options });
+  ) =>
+    es.action(
+      me,
+      action_name,
+      target,
+      payload,
+      { correlator, ...options },
+      validate_state
+    );
+  const bound_load: EsOps["load"] = (me, target, callback) =>
+    es.load(me, target, callback, validate_state);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
+      load: bound_load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -199,7 +216,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, target) => {
+    load: traced(bound_load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,

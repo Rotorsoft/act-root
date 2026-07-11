@@ -15,7 +15,7 @@
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -43,6 +43,47 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
+ * Apply a reducer's {@link Patch} to `state`, then — when
+ * `validate_state` is set (the opt-in `ActOptions.validateFoldedState`,
+ * ACT-1238) — parse the merged full state against the owning state's
+ * declared Zod schema. A reducer that produces schema-violating state
+ * (the calculator divide-by-zero NaN class, #1230) fails here, at the
+ * triggering event, instead of propagating and surfacing hops later as
+ * a confusing downstream error.
+ *
+ * The `target` string names the state and the triggering event
+ * (`"<state>.<event>#<id>"`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state.
+ *
+ * When `validate_state` is falsy the schema parse is skipped entirely —
+ * the fold is a bare `patch()` and the hot path is byte-for-byte the
+ * pre-ACT-1238 behavior. This is a debugging / CI aid, not a production
+ * guard.
+ *
+ * @internal
+ */
+export function fold_state<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  patched: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>,
+  validate_state?: boolean
+): TState {
+  const next = patch(state, patched) as TState;
+  if (validate_state)
+    return validate(
+      `${me.name}.${String(event.name)}#${event.id}`,
+      next,
+      me.state
+    );
+  return next;
+}
+
+/**
  * Default per-batch row count for the {@link scan} pagination loop
  * (ACT-1133). Callers override via {@link ScanOptions.batch_size}.
  *
@@ -66,7 +107,8 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  validate_state?: boolean
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -396,7 +438,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  validate_state?: boolean
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -421,7 +464,13 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = fold_state(
+          me,
+          state,
+          me.patch[event.name](event, state),
+          event,
+          validate_state
+        );
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -539,7 +588,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  validate_state?: boolean
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -553,7 +603,12 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        validate_state
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       // snapshot.version is the frontier even on a warm cache hit,
@@ -651,7 +706,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = fold_state(me, state, p, event, validate_state);
         patches++;
         return {
           event,

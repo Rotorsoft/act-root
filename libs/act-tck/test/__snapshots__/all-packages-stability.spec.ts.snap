@@ -493,7 +493,12 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config)
+              make_fold_handler(
+                merged,
+                fold.flush,
+                fold.config,
+                options?.validateFoldedState === true
+              )
             );
           }
           finalize_deprecations();
@@ -930,6 +935,28 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When \`true\`, each time an event is folded into state — on the
+   * command path (\`do\`), on \`load\`/replay, and inside state-fold
+   * projections — the merged full state is parsed against the owning
+   * state's \`state({ Name: schema })\` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose \`target\` names the state and the event (\`<state>.<event>#<id>\`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. When \`false\` (the
+   * default) the fold path is a bare merge with zero added cost — the
+   * schema is never touched.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject \`onlyLanes\` entries that reference undeclared lanes. */
@@ -1146,7 +1173,11 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(
+      this._logger,
+      this._correlator,
+      options.validateFoldedState === true
+    );
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside \`act-builder\`:
     // reactions registered against an event with \`sensitive(...)\` fields get
@@ -8732,7 +8763,7 @@ export class NonRetryableError extends Error {
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -8760,6 +8791,47 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
+ * Apply a reducer's {@link Patch} to \`state\`, then — when
+ * \`validate_state\` is set (the opt-in \`ActOptions.validateFoldedState\`,
+ * ACT-1238) — parse the merged full state against the owning state's
+ * declared Zod schema. A reducer that produces schema-violating state
+ * (the calculator divide-by-zero NaN class, #1230) fails here, at the
+ * triggering event, instead of propagating and surfacing hops later as
+ * a confusing downstream error.
+ *
+ * The \`target\` string names the state and the triggering event
+ * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state.
+ *
+ * When \`validate_state\` is falsy the schema parse is skipped entirely —
+ * the fold is a bare \`patch()\` and the hot path is byte-for-byte the
+ * pre-ACT-1238 behavior. This is a debugging / CI aid, not a production
+ * guard.
+ *
+ * @internal
+ */
+export function fold_state<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  patched: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>,
+  validate_state?: boolean
+): TState {
+  const next = patch(state, patched) as TState;
+  if (validate_state)
+    return validate(
+      \`\${me.name}.\${String(event.name)}#\${event.id}\`,
+      next,
+      me.state
+    );
+  return next;
+}
+
+/**
  * Default per-batch row count for the {@link scan} pagination loop
  * (ACT-1133). Callers override via {@link ScanOptions.batch_size}.
  *
@@ -8783,7 +8855,8 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  validate_state?: boolean
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -9113,7 +9186,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  validate_state?: boolean
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -9138,7 +9212,13 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = fold_state(
+          me,
+          state,
+          me.patch[event.name](event, state),
+          event,
+          validate_state
+        );
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -9256,7 +9336,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  validate_state?: boolean
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -9270,7 +9351,12 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        validate_state
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       // snapshot.version is the frontier even on a warm cache hit,
@@ -9368,7 +9454,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = fold_state(me, state, p, event, validate_state);
         patches++;
         return {
           event,
@@ -15969,7 +16055,6 @@ function action_builder<
  * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 import { cache as state_cache } from "../ports.js";
 import type {
@@ -15980,7 +16065,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import { load } from "./event-sourcing.js";
+import { fold_state, load } from "./event-sourcing.js";
 
 export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 export const DEFAULT_MAX_CACHED_STATES = 10_000;
@@ -16020,7 +16105,8 @@ export function make_fold_handler<
 >(
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig
+  config: FoldConfig,
+  validate_state = false
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
@@ -16065,7 +16151,7 @@ export function make_fold_handler<
         // snapshot carries no event (nothing replayed) — the frontier
         // lives in the cache entry, so read it back. Dirty from the
         // start: the row must be written at least once.
-        const snapshot = await load(me, { stream });
+        const snapshot = await load(me, { stream }, undefined, validate_state);
         const entry = await state_cache().get<TState>(stream);
         // The engine only sees streams with committed events, so when the
         // cache has no entry (pii-aware states never cache) the load
@@ -16089,10 +16175,13 @@ export function make_fold_handler<
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch(
+        fold.state = fold_state(
+          me,
           fold.state,
-          reducer(event as never, fold.state)
-        ) as TState;
+          reducer(event as never, fold.state),
+          event as never,
+          validate_state
+        );
         fold.version = event.version;
         fold.event_id = event.id;
         fold.patches++;
@@ -16285,23 +16374,40 @@ const traced = <F extends AsyncFn>(
  */
 export function build_es(
   logger: Logger,
-  correlator: Correlator = default_correlator
+  correlator: Correlator = default_correlator,
+  validate_state = false
 ): EsOps {
   // Bake the orchestrator-level \`correlator\` into every \`action()\` call
   // so EsOps callers don't need to thread it. A per-call
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
+  //
+  // ACT-1238: the app-wide \`validateFoldedState\` flag is baked in the
+  // same way — every \`action()\`/\`load()\` this EsOps drives folds with
+  // the flag, so state-fold and close-cycle callers inherit it without
+  // threading a boolean through their own signatures. Default \`false\`
+  // keeps the hot path a bare \`patch()\`.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
     options
-  ) => es.action(me, action_name, target, payload, { correlator, ...options });
+  ) =>
+    es.action(
+      me,
+      action_name,
+      target,
+      payload,
+      { correlator, ...options },
+      validate_state
+    );
+  const bound_load: EsOps["load"] = (me, target, callback) =>
+    es.load(me, target, callback, validate_state);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
+      load: bound_load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -16316,7 +16422,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, target) => {
+    load: traced(bound_load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -16931,6 +17037,28 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When \`true\`, each time an event is folded into state — on the
+   * command path (\`do\`), on \`load\`/replay, and inside state-fold
+   * projections — the merged full state is parsed against the owning
+   * state's \`state({ Name: schema })\` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose \`target\` names the state and the event (\`<state>.<event>#<id>\`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. When \`false\` (the
+   * default) the fold path is a bare merge with zero added cost — the
+   * schema is never touched.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject \`onlyLanes\` entries that reference undeclared lanes. */
@@ -17147,7 +17275,11 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(
+      this._logger,
+      this._correlator,
+      options.validateFoldedState === true
+    );
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside \`act-builder\`:
     // reactions registered against an event with \`sensitive(...)\` fields get
@@ -24390,7 +24522,7 @@ export class NonRetryableError extends Error {
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -24418,6 +24550,47 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
+ * Apply a reducer's {@link Patch} to \`state\`, then — when
+ * \`validate_state\` is set (the opt-in \`ActOptions.validateFoldedState\`,
+ * ACT-1238) — parse the merged full state against the owning state's
+ * declared Zod schema. A reducer that produces schema-violating state
+ * (the calculator divide-by-zero NaN class, #1230) fails here, at the
+ * triggering event, instead of propagating and surfacing hops later as
+ * a confusing downstream error.
+ *
+ * The \`target\` string names the state and the triggering event
+ * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state.
+ *
+ * When \`validate_state\` is falsy the schema parse is skipped entirely —
+ * the fold is a bare \`patch()\` and the hot path is byte-for-byte the
+ * pre-ACT-1238 behavior. This is a debugging / CI aid, not a production
+ * guard.
+ *
+ * @internal
+ */
+export function fold_state<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  patched: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>,
+  validate_state?: boolean
+): TState {
+  const next = patch(state, patched) as TState;
+  if (validate_state)
+    return validate(
+      \`\${me.name}.\${String(event.name)}#\${event.id}\`,
+      next,
+      me.state
+    );
+  return next;
+}
+
+/**
  * Default per-batch row count for the {@link scan} pagination loop
  * (ACT-1133). Callers override via {@link ScanOptions.batch_size}.
  *
@@ -24441,7 +24614,8 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  validate_state?: boolean
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -24771,7 +24945,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  validate_state?: boolean
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -24796,7 +24971,13 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = fold_state(
+          me,
+          state,
+          me.patch[event.name](event, state),
+          event,
+          validate_state
+        );
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -24914,7 +25095,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  validate_state?: boolean
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -24928,7 +25110,12 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        validate_state
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       // snapshot.version is the frontier even on a warm cache hit,
@@ -25026,7 +25213,7 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = fold_state(me, state, p, event, validate_state);
         patches++;
         return {
           event,
@@ -30620,7 +30807,6 @@ export class SettleLoop<TEvents extends Schemas> {
  * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 import { cache as state_cache } from "../ports.js";
 import type {
@@ -30631,7 +30817,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import { load } from "./event-sourcing.js";
+import { fold_state, load } from "./event-sourcing.js";
 
 export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 export const DEFAULT_MAX_CACHED_STATES = 10_000;
@@ -30671,7 +30857,8 @@ export function make_fold_handler<
 >(
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig
+  config: FoldConfig,
+  validate_state = false
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
@@ -30716,7 +30903,7 @@ export function make_fold_handler<
         // snapshot carries no event (nothing replayed) — the frontier
         // lives in the cache entry, so read it back. Dirty from the
         // start: the row must be written at least once.
-        const snapshot = await load(me, { stream });
+        const snapshot = await load(me, { stream }, undefined, validate_state);
         const entry = await state_cache().get<TState>(stream);
         // The engine only sees streams with committed events, so when the
         // cache has no entry (pii-aware states never cache) the load
@@ -30740,10 +30927,13 @@ export function make_fold_handler<
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch(
+        fold.state = fold_state(
+          me,
           fold.state,
-          reducer(event as never, fold.state)
-        ) as TState;
+          reducer(event as never, fold.state),
+          event as never,
+          validate_state
+        );
         fold.version = event.version;
         fold.event_id = event.id;
         fold.patches++;
@@ -30936,23 +31126,40 @@ const traced = <F extends AsyncFn>(
  */
 export function build_es(
   logger: Logger,
-  correlator: Correlator = default_correlator
+  correlator: Correlator = default_correlator,
+  validate_state = false
 ): EsOps {
   // Bake the orchestrator-level \`correlator\` into every \`action()\` call
   // so EsOps callers don't need to thread it. A per-call
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
+  //
+  // ACT-1238: the app-wide \`validateFoldedState\` flag is baked in the
+  // same way — every \`action()\`/\`load()\` this EsOps drives folds with
+  // the flag, so state-fold and close-cycle callers inherit it without
+  // threading a boolean through their own signatures. Default \`false\`
+  // keeps the hot path a bare \`patch()\`.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
     options
-  ) => es.action(me, action_name, target, payload, { correlator, ...options });
+  ) =>
+    es.action(
+      me,
+      action_name,
+      target,
+      payload,
+      { correlator, ...options },
+      validate_state
+    );
+  const bound_load: EsOps["load"] = (me, target, callback) =>
+    es.load(me, target, callback, validate_state);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
+      load: bound_load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -30967,7 +31174,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, target) => {
+    load: traced(bound_load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,

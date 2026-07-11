@@ -52,15 +52,15 @@ describe("tracing", () => {
   });
 
   describe("build_es", () => {
-    it("returns bare ops for non-trace levels (action still wrapped to bind correlator)", () => {
+    it("returns bare ops for non-trace levels (action and load still wrapped to bind orchestrator options)", () => {
       const ops = build_es(withLevel("info"));
       expect(ops.snap).toBe(es.snap);
       // ACT-404: action always carries a bound correlator, so it's a
-      // closure regardless of trace level. After the #855 decorator
-      // refactor moved the PII machinery off the action/load signatures
-      // onto per-state closures, load no longer needs a build_es binding
-      // and is bare at non-trace levels.
-      expect(ops.load).toBe(es.load);
+      // closure regardless of trace level. ACT-1238: load and action both
+      // bake in the app-wide `validateFoldedState` flag, so both are
+      // closures at non-trace levels — a bare `es.load`/`es.action` would
+      // fold without the flag.
+      expect(ops.load).not.toBe(es.load);
       expect(ops.action).not.toBe(es.action);
     });
 

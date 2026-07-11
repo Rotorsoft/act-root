@@ -141,6 +141,7 @@ const app = act()
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
 - **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
 - **`circuitBreaker`** (defaults: `failureThreshold` 5, `cooldownMs` 30_000) — see [Circuit breaker](#circuit-breaker) below. Out-of-range values throw a `ZodError` at `build()`.
+- **`validateFoldedState`** (default `false`) — a debugging aid that parses folded state against its declared schema after every reduction. See [Debugging: validating folded state](#debugging-validating-folded-state) below.
 
 ### Circuit breaker
 
@@ -166,6 +167,24 @@ const app = act()
 - **`cooldownMs`** (default `30_000`) — how long it stays open before a half-open trial.
 
 A single-node deployment rarely needs to tune this; raise the threshold for flaky networks, lower the cooldown for faster recovery probing.
+
+### Debugging: validating folded state
+
+Act validates action inputs (against their `.on({...})` schema) and emitted events (against their `.emits({...})` schema), but it does **not** validate the state a reducer folds those events into — reducers are trusted to be total. A reducer that produces schema-violating state (the calculator divide-by-zero that folds `result: NaN` into a `z.number()` field, #1230) fails silently at the source and surfaces hops later as a confusing downstream error.
+
+`validateFoldedState` closes that gap. When set, every reduction — on the command path (`do`), on `load`/cold-replay, and inside `projection(...).of(state)` state-fold — parses the merged full state against the owning state's declared schema. A bad reduction throws a `ValidationError` **at the triggering event**, whose `target` names the state and the event (`"<state>.<event>#<id>"`), so you see the reducer that produced the bad value instead of the symptom downstream.
+
+```typescript no-check
+const app = act()
+  .withState(Calculator)
+  .build({ validateFoldedState: true }); // dev / CI only
+```
+
+This is a **debugging and CI aid, not a production guard**. Turn it on while developing new reducers or in CI to catch total-reducer bugs at the source; leave it off in production.
+
+- **Zero cost when off.** The default (`false`) keeps the fold path a bare merge — the schema is never touched, not even constructed. Flipping the flag is the entire opt-in; there is no per-state wiring.
+- **On the projection path**, a bad reduction throws inside the fold batch handler, which blocks the stream — the `ValidationError` message rides the [`blocked`](./error-handling#blocked-streams) lifecycle event's `error`. Recover the same way you recover any blocked stream once the reducer is fixed.
+- **Warm cache reads fold nothing**, so they are never validated — the flag guards reductions, not reads. A cold replay (a fresh `load`, a `reset`, or a time-travel `asOf` query) is what re-runs the reducers.
 
 ### Deployment shapes via `listen` / `drain`
 

@@ -291,6 +291,28 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When `true`, each time an event is folded into state — on the
+   * command path (`do`), on `load`/replay, and inside state-fold
+   * projections — the merged full state is parsed against the owning
+   * state's `state({ Name: schema })` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose `target` names the state and the event (`<state>.<event>#<id>`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. When `false` (the
+   * default) the fold path is a bare merge with zero added cost — the
+   * schema is never touched.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
@@ -507,7 +529,11 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(
+      this._logger,
+      this._correlator,
+      options.validateFoldedState === true
+    );
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside `act-builder`:
     // reactions registered against an event with `sensitive(...)` fields get

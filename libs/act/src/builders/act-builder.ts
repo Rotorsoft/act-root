@@ -489,7 +489,12 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config)
+              make_fold_handler(
+                merged,
+                fold.flush,
+                fold.config,
+                options?.validateFoldedState === true
+              )
             );
           }
           finalize_deprecations();
