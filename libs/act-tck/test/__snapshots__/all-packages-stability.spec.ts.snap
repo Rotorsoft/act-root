@@ -35968,9 +35968,16 @@ export type IdempotencyResult<T> =
 
 /**
  * Wrap an action handler so the framework honors \`Idempotency-Key\`
- * dedup. Acquires the key via {@link IdempotencyStore.claim}, runs
- * the handler exactly when the claim was fresh, and skips the
- * handler entirely on a duplicate.
+ * dedup. Acquires the key via {@link IdempotencyStore.claim} (a
+ * *tentative* reservation), runs the handler exactly when the claim
+ * was fresh, and skips the handler entirely on a duplicate.
+ *
+ * The claim is finalized two-phase: on handler success the key is
+ * {@link IdempotencyStore.commit committed} so later retries dedup;
+ * on handler failure it is {@link IdempotencyStore.release released}
+ * and the rejection re-thrown, so the sender's retry re-processes
+ * instead of the delivery being permanently dropped. The tentative
+ * claim still dedups a concurrent duplicate mid-flight.
  *
  * Reuses the contract \`@rotorsoft/act-ops/idempotency\` already
  * defines for the receiver-side \`Idempotency-Key\` story. A single
@@ -35986,7 +35993,15 @@ export async function withIdempotency<T>(
   if (!fresh) {
     return { deduped: true };
   }
-  return { deduped: false, result: await handler() };
+  let result: T;
+  try {
+    result = await handler();
+  } catch (err) {
+    await store.release(key);
+    throw err;
+  }
+  await store.commit(key);
+  return { deduped: false, result };
 }
 
 // === index.ts ===
@@ -36710,9 +36725,16 @@ export type IdempotencyResult<T> =
 
 /**
  * Wrap an action handler so the framework honors \`Idempotency-Key\`
- * dedup. Acquires the key via {@link IdempotencyStore.claim}, runs
- * the handler exactly when the claim was fresh, and skips the
- * handler entirely on a duplicate.
+ * dedup. Acquires the key via {@link IdempotencyStore.claim} (a
+ * *tentative* reservation), runs the handler exactly when the claim
+ * was fresh, and skips the handler entirely on a duplicate.
+ *
+ * The claim is finalized two-phase: on handler success the key is
+ * {@link IdempotencyStore.commit committed} so later retries dedup;
+ * on handler failure it is {@link IdempotencyStore.release released}
+ * and the rejection re-thrown, so the sender's retry re-processes
+ * instead of the delivery being permanently dropped. The tentative
+ * claim still dedups a concurrent duplicate mid-flight.
  *
  * Reuses the contract \`@rotorsoft/act-ops/idempotency\` already
  * defines for the receiver-side \`Idempotency-Key\` story. A single
@@ -36728,7 +36750,15 @@ export async function withIdempotency<T>(
   if (!fresh) {
     return { deduped: true };
   }
-  return { deduped: false, result: await handler() };
+  let result: T;
+  try {
+    result = await handler();
+  } catch (err) {
+    await store.release(key);
+    throw err;
+  }
+  await store.commit(key);
+  return { deduped: false, result };
 }
 
 // === index.ts ===
@@ -38100,6 +38130,61 @@ export function extractIdempotencyKey(
   return undefined;
 }
 
+// === finalize.ts ===
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/**
+ * The two-phase finalizers a receiver adapter binds to a single
+ * inbound delivery. The claim \`checkWebhook\` makes is *tentative*;
+ * exactly one of these promotes or drops it once the business handler
+ * resolves its outcome.
+ */
+export type Finalizers = {
+  /**
+   * Promote the tentative claim to a durable record so every later
+   * retry of this key dedups. Call on handler success.
+   */
+  commit: () => void | Promise<void>;
+  /**
+   * Drop the tentative claim so the sender's retry re-processes.
+   * Call on transient handler failure.
+   */
+  release: () => void | Promise<void>;
+};
+
+/**
+ * Build the {@link Finalizers} for one delivery.
+ *
+ * Guarantees:
+ *
+ * - **Deduped deliveries are inert.** When \`deduped\` is \`true\` the key
+ *   was already committed by an earlier delivery; both finalizers are
+ *   no-ops so a duplicate can never release someone else's committed
+ *   claim.
+ * - **Finalize-once.** After the first \`commit\` or \`release\` fires,
+ *   further calls are no-ops — an adapter that both auto-finalizes and
+ *   lets the operator call \`commit()\`/\`release()\` can't double-fire.
+ */
+export function make_finalizers(
+  store: IdempotencyStore,
+  key: string,
+  deduped: boolean
+): Finalizers {
+  let settled = deduped;
+  return {
+    async commit() {
+      if (settled) return;
+      settled = true;
+      await store.commit(key);
+    },
+    async release() {
+      if (settled) return;
+      settled = true;
+      await store.release(key);
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -38184,21 +38269,40 @@ export {
  * success: stashes \`c.set("idempotency", { key, deduped })\` and
  * continues with \`await next()\`.
  *
+ * **Two-phase dedup**: the claim \`checkWebhook\` makes is *tentative*.
+ * Because Hono middleware wraps the downstream chain, this adapter
+ * finalizes the claim automatically after \`await next()\`: a downstream
+ * 2xx **commits** the key (later retries dedup); a 5xx or a thrown
+ * handler **releases** it (the sender's retry re-processes instead of
+ * being silently dropped). Operators who need explicit control can
+ * still call \`c.get("idempotency").commit()\` / \`.release()\`.
+ *
  * **Raw body**: Hono exposes \`await c.req.text()\` natively, which
  * the middleware reads when \`secret\` is configured. No extra setup
  * needed.
  */
 import type { MiddlewareHandler } from "hono";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { make_finalizers } from "../finalize.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
  * generic on the returned {@link MiddlewareHandler} threads it
  * through so route handlers downstream of \`app.post(..., webhookMiddleware(...), handler)\`
  * see \`c.get("idempotency")\` typed without a manual cast.
+ *
+ * \`commit\` / \`release\` finalize the tentative claim — call one after
+ * the handler resolves its outcome. This adapter also finalizes
+ * automatically based on the response status, so explicit calls are
+ * only needed when the auto-detection doesn't fit.
  */
 export type WebhookVariables = {
-  idempotency: { key: string; deduped: boolean };
+  idempotency: {
+    key: string;
+    deduped: boolean;
+    commit: () => void | Promise<void>;
+    release: () => void | Promise<void>;
+  };
 };
 
 /**
@@ -38216,8 +38320,25 @@ export function webhookMiddleware(
     if (!result.ok) {
       return c.json({ error: result.reason }, result.status);
     }
-    c.set("idempotency", { key: result.key, deduped: result.deduped });
-    await next();
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    c.set("idempotency", {
+      key: result.key,
+      deduped: result.deduped,
+      commit,
+      release,
+    });
+    try {
+      await next();
+    } catch (err) {
+      await release();
+      throw err;
+    }
+    if (c.res.status >= 500) await release();
+    else await commit();
   };
 }
 
@@ -38331,6 +38452,10 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
           try {
             await handler(validated, { key: idem.key });
           } catch (err) {
+            // Transient failure: release the tentative claim so the
+            // sender's retry re-processes instead of being deduped
+            // into a silent success and permanently lost.
+            await options.store.release(idem.key);
             return c.json(
               {
                 error: "handler-failed",
@@ -38339,6 +38464,9 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
               500
             );
           }
+          // Success: promote the tentative claim to a durable record
+          // so every later retry of this key dedups.
+          await options.store.commit(idem.key);
         }
 
         return c.body(null, 204);
@@ -38635,6 +38763,61 @@ export function extractIdempotencyKey(
   return undefined;
 }
 
+// === finalize.ts ===
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/**
+ * The two-phase finalizers a receiver adapter binds to a single
+ * inbound delivery. The claim \`checkWebhook\` makes is *tentative*;
+ * exactly one of these promotes or drops it once the business handler
+ * resolves its outcome.
+ */
+export type Finalizers = {
+  /**
+   * Promote the tentative claim to a durable record so every later
+   * retry of this key dedups. Call on handler success.
+   */
+  commit: () => void | Promise<void>;
+  /**
+   * Drop the tentative claim so the sender's retry re-processes.
+   * Call on transient handler failure.
+   */
+  release: () => void | Promise<void>;
+};
+
+/**
+ * Build the {@link Finalizers} for one delivery.
+ *
+ * Guarantees:
+ *
+ * - **Deduped deliveries are inert.** When \`deduped\` is \`true\` the key
+ *   was already committed by an earlier delivery; both finalizers are
+ *   no-ops so a duplicate can never release someone else's committed
+ *   claim.
+ * - **Finalize-once.** After the first \`commit\` or \`release\` fires,
+ *   further calls are no-ops — an adapter that both auto-finalizes and
+ *   lets the operator call \`commit()\`/\`release()\` can't double-fire.
+ */
+export function make_finalizers(
+  store: IdempotencyStore,
+  key: string,
+  deduped: boolean
+): Finalizers {
+  let settled = deduped;
+  return {
+    async commit() {
+      if (settled) return;
+      settled = true;
+      await store.commit(key);
+    },
+    async release() {
+      if (settled) return;
+      settled = true;
+      await store.release(key);
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -38670,7 +38853,17 @@ export function extractIdempotencyKey(
  * On failure: responds with the framework-idiomatic JSON shape
  * \`{ error: <reason> }\` at status 400 (missing-key) or 401
  * (verification failures), and does not call \`next()\`. On success:
- * attaches \`req.idempotency = { key, deduped }\` and calls \`next()\`.
+ * attaches \`req.idempotency = { key, deduped, commit, release }\` and
+ * calls \`next()\`.
+ *
+ * **Two-phase dedup**: the claim is *tentative*. Express runs the
+ * middleware to completion before the route handler, so — unlike the
+ * Hono adapter — it can't observe the handler's outcome to finalize
+ * automatically. The route handler **must** call
+ * \`req.idempotency.commit()\` on success or \`req.idempotency.release()\`
+ * on a transient failure. Skipping both leaves the claim tentative:
+ * it dedups concurrent duplicates but expires on TTL, so the delivery
+ * is never permanently lost — it just isn't durably deduped either.
  *
  * **Raw body requirement**: when \`secret\` is configured, mount
  * \`express.raw({ type: "application/json" })\` (or whatever
@@ -38680,6 +38873,13 @@ export function extractIdempotencyKey(
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type Finalizers, make_finalizers } from "../finalize.js";
+
+/** Shape attached to \`req.idempotency\` by the Express adapter. */
+export type ExpressIdempotency = {
+  key: string;
+  deduped: boolean;
+} & Finalizers;
 
 /**
  * Build an Express middleware that verifies the request signature
@@ -38704,11 +38904,16 @@ export function webhookMiddleware(
       res.status(result.status).json({ error: result.reason });
       return;
     }
-    (
-      req as Request & { idempotency: { key: string; deduped: boolean } }
-    ).idempotency = {
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    (req as Request & { idempotency: ExpressIdempotency }).idempotency = {
       key: result.key,
       deduped: result.deduped,
+      commit,
+      release,
     };
     next();
   };
@@ -38975,6 +39180,61 @@ export function extractIdempotencyKey(
   return undefined;
 }
 
+// === finalize.ts ===
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/**
+ * The two-phase finalizers a receiver adapter binds to a single
+ * inbound delivery. The claim \`checkWebhook\` makes is *tentative*;
+ * exactly one of these promotes or drops it once the business handler
+ * resolves its outcome.
+ */
+export type Finalizers = {
+  /**
+   * Promote the tentative claim to a durable record so every later
+   * retry of this key dedups. Call on handler success.
+   */
+  commit: () => void | Promise<void>;
+  /**
+   * Drop the tentative claim so the sender's retry re-processes.
+   * Call on transient handler failure.
+   */
+  release: () => void | Promise<void>;
+};
+
+/**
+ * Build the {@link Finalizers} for one delivery.
+ *
+ * Guarantees:
+ *
+ * - **Deduped deliveries are inert.** When \`deduped\` is \`true\` the key
+ *   was already committed by an earlier delivery; both finalizers are
+ *   no-ops so a duplicate can never release someone else's committed
+ *   claim.
+ * - **Finalize-once.** After the first \`commit\` or \`release\` fires,
+ *   further calls are no-ops — an adapter that both auto-finalizes and
+ *   lets the operator call \`commit()\`/\`release()\` can't double-fire.
+ */
+export function make_finalizers(
+  store: IdempotencyStore,
+  key: string,
+  deduped: boolean
+): Finalizers {
+  let settled = deduped;
+  return {
+    async commit() {
+      if (settled) return;
+      settled = true;
+      await store.commit(key);
+    },
+    async release() {
+      if (settled) return;
+      settled = true;
+      await store.release(key);
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -39011,8 +39271,17 @@ export function extractIdempotencyKey(
  *
  * On failure: replies with \`{ error: <reason> }\` at status 400
  * (missing-key) or 401 (verification failures). On success: attaches
- * \`request.idempotency = { key, deduped }\` and lets the route handler
- * run.
+ * \`request.idempotency = { key, deduped, commit, release }\` and lets
+ * the route handler run.
+ *
+ * **Two-phase dedup**: the claim is *tentative*. A Fastify
+ * \`preHandler\` runs to completion before the route handler, so — like
+ * the Express adapter — it can't finalize automatically. The route
+ * handler **must** call \`request.idempotency.commit()\` on success or
+ * \`request.idempotency.release()\` on a transient failure. Skipping
+ * both leaves the claim tentative: it dedups concurrent duplicates but
+ * expires on TTL, so a delivery is never permanently lost — it just
+ * isn't durably deduped either.
  *
  * **Raw body requirement**: when \`secret\` is configured, register a
  * content-type parser that preserves the raw body string. Fastify's
@@ -39023,10 +39292,17 @@ export function extractIdempotencyKey(
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type Finalizers, make_finalizers } from "../finalize.js";
+
+/** Shape attached to \`request.idempotency\` by the Fastify adapter. */
+export type FastifyIdempotency = {
+  key: string;
+  deduped: boolean;
+} & Finalizers;
 
 type WebhookRequest = FastifyRequest & {
   rawBody?: string;
-  idempotency?: { key: string; deduped: boolean };
+  idempotency?: FastifyIdempotency;
 };
 
 /**
@@ -39053,7 +39329,17 @@ export function webhookMiddleware(
       await reply.status(result.status).send({ error: result.reason });
       return;
     }
-    req.idempotency = { key: result.key, deduped: result.deduped };
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    req.idempotency = {
+      key: result.key,
+      deduped: result.deduped,
+      commit,
+      release,
+    };
   };
 }
 
@@ -39312,6 +39598,61 @@ export function extractIdempotencyKey(
   return undefined;
 }
 
+// === finalize.ts ===
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/**
+ * The two-phase finalizers a receiver adapter binds to a single
+ * inbound delivery. The claim \`checkWebhook\` makes is *tentative*;
+ * exactly one of these promotes or drops it once the business handler
+ * resolves its outcome.
+ */
+export type Finalizers = {
+  /**
+   * Promote the tentative claim to a durable record so every later
+   * retry of this key dedups. Call on handler success.
+   */
+  commit: () => void | Promise<void>;
+  /**
+   * Drop the tentative claim so the sender's retry re-processes.
+   * Call on transient handler failure.
+   */
+  release: () => void | Promise<void>;
+};
+
+/**
+ * Build the {@link Finalizers} for one delivery.
+ *
+ * Guarantees:
+ *
+ * - **Deduped deliveries are inert.** When \`deduped\` is \`true\` the key
+ *   was already committed by an earlier delivery; both finalizers are
+ *   no-ops so a duplicate can never release someone else's committed
+ *   claim.
+ * - **Finalize-once.** After the first \`commit\` or \`release\` fires,
+ *   further calls are no-ops — an adapter that both auto-finalizes and
+ *   lets the operator call \`commit()\`/\`release()\` can't double-fire.
+ */
+export function make_finalizers(
+  store: IdempotencyStore,
+  key: string,
+  deduped: boolean
+): Finalizers {
+  let settled = deduped;
+  return {
+    async commit() {
+      if (settled) return;
+      settled = true;
+      await store.commit(key);
+    },
+    async release() {
+      if (settled) return;
+      settled = true;
+      await store.release(key);
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -39346,21 +39687,40 @@ export function extractIdempotencyKey(
  * success: stashes \`c.set("idempotency", { key, deduped })\` and
  * continues with \`await next()\`.
  *
+ * **Two-phase dedup**: the claim \`checkWebhook\` makes is *tentative*.
+ * Because Hono middleware wraps the downstream chain, this adapter
+ * finalizes the claim automatically after \`await next()\`: a downstream
+ * 2xx **commits** the key (later retries dedup); a 5xx or a thrown
+ * handler **releases** it (the sender's retry re-processes instead of
+ * being silently dropped). Operators who need explicit control can
+ * still call \`c.get("idempotency").commit()\` / \`.release()\`.
+ *
  * **Raw body**: Hono exposes \`await c.req.text()\` natively, which
  * the middleware reads when \`secret\` is configured. No extra setup
  * needed.
  */
 import type { MiddlewareHandler } from "hono";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { make_finalizers } from "../finalize.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
  * generic on the returned {@link MiddlewareHandler} threads it
  * through so route handlers downstream of \`app.post(..., webhookMiddleware(...), handler)\`
  * see \`c.get("idempotency")\` typed without a manual cast.
+ *
+ * \`commit\` / \`release\` finalize the tentative claim — call one after
+ * the handler resolves its outcome. This adapter also finalizes
+ * automatically based on the response status, so explicit calls are
+ * only needed when the auto-detection doesn't fit.
  */
 export type WebhookVariables = {
-  idempotency: { key: string; deduped: boolean };
+  idempotency: {
+    key: string;
+    deduped: boolean;
+    commit: () => void | Promise<void>;
+    release: () => void | Promise<void>;
+  };
 };
 
 /**
@@ -39378,8 +39738,25 @@ export function webhookMiddleware(
     if (!result.ok) {
       return c.json({ error: result.reason }, result.status);
     }
-    c.set("idempotency", { key: result.key, deduped: result.deduped });
-    await next();
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    c.set("idempotency", {
+      key: result.key,
+      deduped: result.deduped,
+      commit,
+      release,
+    });
+    try {
+      await next();
+    } catch (err) {
+      await release();
+      throw err;
+    }
+    if (c.res.status >= 500) await release();
+    else await commit();
   };
 }
 
@@ -39648,6 +40025,61 @@ export function extractIdempotencyKey(
   return undefined;
 }
 
+// === finalize.ts ===
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/**
+ * The two-phase finalizers a receiver adapter binds to a single
+ * inbound delivery. The claim \`checkWebhook\` makes is *tentative*;
+ * exactly one of these promotes or drops it once the business handler
+ * resolves its outcome.
+ */
+export type Finalizers = {
+  /**
+   * Promote the tentative claim to a durable record so every later
+   * retry of this key dedups. Call on handler success.
+   */
+  commit: () => void | Promise<void>;
+  /**
+   * Drop the tentative claim so the sender's retry re-processes.
+   * Call on transient handler failure.
+   */
+  release: () => void | Promise<void>;
+};
+
+/**
+ * Build the {@link Finalizers} for one delivery.
+ *
+ * Guarantees:
+ *
+ * - **Deduped deliveries are inert.** When \`deduped\` is \`true\` the key
+ *   was already committed by an earlier delivery; both finalizers are
+ *   no-ops so a duplicate can never release someone else's committed
+ *   claim.
+ * - **Finalize-once.** After the first \`commit\` or \`release\` fires,
+ *   further calls are no-ops — an adapter that both auto-finalizes and
+ *   lets the operator call \`commit()\`/\`release()\` can't double-fire.
+ */
+export function make_finalizers(
+  store: IdempotencyStore,
+  key: string,
+  deduped: boolean
+): Finalizers {
+  let settled = deduped;
+  return {
+    async commit() {
+      if (settled) return;
+      settled = true;
+      await store.commit(key);
+    },
+    async release() {
+      if (settled) return;
+      settled = true;
+      await store.release(key);
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -39679,8 +40111,15 @@ export function extractIdempotencyKey(
  *
  * The middleware throws a \`TRPCError\` with \`BAD_REQUEST\` for
  * \`missing-key\` and \`UNAUTHORIZED\` for any verification failure.
- * On success it injects \`{ key, deduped }\` into the request context
- * under the \`idempotency\` property.
+ * On success it injects \`{ key, deduped, commit, release }\` into the
+ * request context under the \`idempotency\` property.
+ *
+ * **Two-phase dedup**: the claim is *tentative*. Because a tRPC
+ * middleware wraps \`next()\`, this adapter finalizes automatically:
+ * the downstream resolver returning **commits** the key, and a thrown
+ * error **releases** it so the sender's retry re-processes. The
+ * bound \`ctx.idempotency.commit()\` / \`.release()\` are exposed for
+ * resolvers that need to finalize a partial success explicitly.
  *
  * **Raw body requirement**: when \`secret\` is configured, the middleware
  * needs the raw request bytes for HMAC verification. Capture them in
@@ -39691,6 +40130,7 @@ export function extractIdempotencyKey(
  */
 import { TRPCError } from "@trpc/server";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { make_finalizers } from "../finalize.js";
 
 /**
  * Build a tRPC middleware that verifies the request signature (when
@@ -39726,12 +40166,43 @@ export function webhookMiddleware(options: CheckWebhookOptions): any {
         message: result.reason,
       });
     }
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        idempotency: { key: result.key, deduped: result.deduped },
-      },
-    });
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    let outcome: unknown;
+    try {
+      outcome = await opts.next({
+        ctx: {
+          ...opts.ctx,
+          idempotency: {
+            key: result.key,
+            deduped: result.deduped,
+            commit,
+            release,
+          },
+        },
+      });
+    } catch (err) {
+      // Resolver threw — release the tentative claim so a retry
+      // re-processes instead of being deduped into a silent success.
+      await release();
+      throw err;
+    }
+    // tRPC middleware results carry \`{ ok: boolean }\`; an \`ok: false\`
+    // result is an error the resolver returned rather than threw.
+    if (
+      typeof outcome === "object" &&
+      outcome !== null &&
+      "ok" in outcome &&
+      (outcome as { ok: unknown }).ok === false
+    ) {
+      await release();
+    } else {
+      await commit();
+    }
+    return outcome;
   };
 }
 
@@ -40597,9 +41068,16 @@ export type IdempotencyResult<T> =
 
 /**
  * Wrap an action handler so the framework honors \`Idempotency-Key\`
- * dedup. Acquires the key via {@link IdempotencyStore.claim}, runs
- * the handler exactly when the claim was fresh, and skips the
- * handler entirely on a duplicate.
+ * dedup. Acquires the key via {@link IdempotencyStore.claim} (a
+ * *tentative* reservation), runs the handler exactly when the claim
+ * was fresh, and skips the handler entirely on a duplicate.
+ *
+ * The claim is finalized two-phase: on handler success the key is
+ * {@link IdempotencyStore.commit committed} so later retries dedup;
+ * on handler failure it is {@link IdempotencyStore.release released}
+ * and the rejection re-thrown, so the sender's retry re-processes
+ * instead of the delivery being permanently dropped. The tentative
+ * claim still dedups a concurrent duplicate mid-flight.
  *
  * Reuses the contract \`@rotorsoft/act-ops/idempotency\` already
  * defines for the receiver-side \`Idempotency-Key\` story. A single
@@ -40615,7 +41093,15 @@ export async function withIdempotency<T>(
   if (!fresh) {
     return { deduped: true };
   }
-  return { deduped: false, result: await handler() };
+  let result: T;
+  try {
+    result = await handler();
+  } catch (err) {
+    await store.release(key);
+    throw err;
+  }
+  await store.commit(key);
+  return { deduped: false, result };
 }
 
 // === index.ts ===
@@ -42288,11 +42774,21 @@ export type InMemoryIdempotencyStoreOptions = {
  * - The oldest entry sits at \`keys().next().value\` (cheapest to evict).
  * - GC walks until the first non-expired entry and stops.
  *
+ * Each entry carries a \`committed\` flag so the two-phase contract
+ * holds: {@link claim} records a tentative entry (dedups concurrent
+ * duplicates but is droppable), {@link commit} marks it durable, and
+ * {@link release} drops it only while still tentative. GC treats
+ * tentative and committed entries identically — both expire on TTL,
+ * so a claim that neither committed nor released (the process died
+ * mid-handler) still frees the key when the window elapses.
+ *
  * \`claim\` is sync; durable adapters return a \`Promise<boolean>\` —
  * both satisfy the union return type in the port.
  */
+type IdemEntry = { expires_at: number; committed: boolean };
+
 export class InMemoryIdempotencyStore implements IdempotencyStore {
-  private readonly _seen = new Map<string, number>();
+  private readonly _seen = new Map<string, IdemEntry>();
   private readonly _ttl_ms: number;
   private readonly _max_entries: number;
 
@@ -42308,14 +42804,27 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   claim(key: string, now: number = Date.now()): boolean {
     this._gc(now);
     if (this._seen.has(key)) return false;
-    this._seen.set(key, now + this._ttl_ms);
+    this._record(key, now, false);
+    return true;
+  }
+
+  commit(key: string, now: number = Date.now()): void {
+    this._record(key, now, true);
+  }
+
+  release(key: string): void {
+    const entry = this._seen.get(key);
+    if (entry !== undefined && !entry.committed) this._seen.delete(key);
+  }
+
+  private _record(key: string, now: number, committed: boolean): void {
+    this._seen.set(key, { expires_at: now + this._ttl_ms, committed });
     if (this._seen.size > this._max_entries) {
       // Safe by construction: \`_seen.size > _max_entries >= 0\` implies at
       // least one entry, so \`.next().value\` resolves to a string key.
       const oldest = this._seen.keys().next().value as string;
       this._seen.delete(oldest);
     }
-    return true;
   }
 
   /** Number of entries currently tracked (post-GC at call time). */
@@ -42330,8 +42839,8 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   }
 
   private _gc(now: number): void {
-    for (const [key, expires_at] of this._seen) {
-      if (expires_at > now) break;
+    for (const [key, entry] of this._seen) {
+      if (entry.expires_at > now) break;
       this._seen.delete(key);
     }
   }
@@ -42502,10 +43011,43 @@ export interface IdempotencyStore {
    * \`false\` if another caller already claimed it — the request
    * should be treated as a duplicate.
    *
+   * The claim is **tentative** until the caller confirms the outcome
+   * with {@link commit} or {@link release}. A tentative claim still
+   * dedups a concurrent duplicate that arrives while the handler is
+   * in flight — the second caller sees \`false\` and serializes behind
+   * the first — but it is *not* durable across the caller's own
+   * retries until committed. This two-phase shape is what stops a
+   * transient handler failure from permanently dropping a delivery:
+   * the sender retries with the same key, and because the failed
+   * attempt released (or never committed) the claim, the retry
+   * re-processes instead of being deduped into a silent success.
+   *
    * \`now\` is exposed for tests; production callers should leave it
    * undefined so wall-clock is used.
    */
   claim(key: string, now?: number): boolean | Promise<boolean>;
+
+  /**
+   * Promote a tentative {@link claim} to a durable record so every
+   * later delivery of the same key dedups. Call this once the
+   * business handler has succeeded. Committing a key that was never
+   * claimed records it too, so a durable adapter that lost the
+   * tentative reservation (process crash between \`claim\` and
+   * \`commit\`) still lands in a consistent "seen" state.
+   *
+   * \`now\` is exposed for tests; production callers should leave it
+   * undefined so wall-clock is used.
+   */
+  commit(key: string, now?: number): void | Promise<void>;
+
+  /**
+   * Drop a tentative {@link claim} so a retry re-processes. Call this
+   * when the business handler failed transiently and the delivery
+   * should be re-attempted under the same key. Releasing a key that
+   * has already been {@link commit}ted is a no-op — a successful
+   * delivery stays deduped even if a late release arrives.
+   */
+  release(key: string): void | Promise<void>;
 }
 "
 `;
@@ -42733,10 +43275,43 @@ export interface IdempotencyStore {
    * \`false\` if another caller already claimed it — the request
    * should be treated as a duplicate.
    *
+   * The claim is **tentative** until the caller confirms the outcome
+   * with {@link commit} or {@link release}. A tentative claim still
+   * dedups a concurrent duplicate that arrives while the handler is
+   * in flight — the second caller sees \`false\` and serializes behind
+   * the first — but it is *not* durable across the caller's own
+   * retries until committed. This two-phase shape is what stops a
+   * transient handler failure from permanently dropping a delivery:
+   * the sender retries with the same key, and because the failed
+   * attempt released (or never committed) the claim, the retry
+   * re-processes instead of being deduped into a silent success.
+   *
    * \`now\` is exposed for tests; production callers should leave it
    * undefined so wall-clock is used.
    */
   claim(key: string, now?: number): boolean | Promise<boolean>;
+
+  /**
+   * Promote a tentative {@link claim} to a durable record so every
+   * later delivery of the same key dedups. Call this once the
+   * business handler has succeeded. Committing a key that was never
+   * claimed records it too, so a durable adapter that lost the
+   * tentative reservation (process crash between \`claim\` and
+   * \`commit\`) still lands in a consistent "seen" state.
+   *
+   * \`now\` is exposed for tests; production callers should leave it
+   * undefined so wall-clock is used.
+   */
+  commit(key: string, now?: number): void | Promise<void>;
+
+  /**
+   * Drop a tentative {@link claim} so a retry re-processes. Call this
+   * when the business handler failed transiently and the delivery
+   * should be re-attempted under the same key. Releasing a key that
+   * has already been {@link commit}ted is a no-op — a successful
+   * delivery stays deduped even if a late release arrives.
+   */
+  release(key: string): void | Promise<void>;
 }
 "
 `;

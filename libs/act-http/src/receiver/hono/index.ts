@@ -31,21 +31,40 @@
  * success: stashes `c.set("idempotency", { key, deduped })` and
  * continues with `await next()`.
  *
+ * **Two-phase dedup**: the claim `checkWebhook` makes is *tentative*.
+ * Because Hono middleware wraps the downstream chain, this adapter
+ * finalizes the claim automatically after `await next()`: a downstream
+ * 2xx **commits** the key (later retries dedup); a 5xx or a thrown
+ * handler **releases** it (the sender's retry re-processes instead of
+ * being silently dropped). Operators who need explicit control can
+ * still call `c.get("idempotency").commit()` / `.release()`.
+ *
  * **Raw body**: Hono exposes `await c.req.text()` natively, which
  * the middleware reads when `secret` is configured. No extra setup
  * needed.
  */
 import type { MiddlewareHandler } from "hono";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { make_finalizers } from "../finalize.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
  * generic on the returned {@link MiddlewareHandler} threads it
  * through so route handlers downstream of `app.post(..., webhookMiddleware(...), handler)`
  * see `c.get("idempotency")` typed without a manual cast.
+ *
+ * `commit` / `release` finalize the tentative claim — call one after
+ * the handler resolves its outcome. This adapter also finalizes
+ * automatically based on the response status, so explicit calls are
+ * only needed when the auto-detection doesn't fit.
  */
 export type WebhookVariables = {
-  idempotency: { key: string; deduped: boolean };
+  idempotency: {
+    key: string;
+    deduped: boolean;
+    commit: () => void | Promise<void>;
+    release: () => void | Promise<void>;
+  };
 };
 
 /**
@@ -63,8 +82,25 @@ export function webhookMiddleware(
     if (!result.ok) {
       return c.json({ error: result.reason }, result.status);
     }
-    c.set("idempotency", { key: result.key, deduped: result.deduped });
-    await next();
+    const { commit, release } = make_finalizers(
+      options.store,
+      result.key,
+      result.deduped
+    );
+    c.set("idempotency", {
+      key: result.key,
+      deduped: result.deduped,
+      commit,
+      release,
+    });
+    try {
+      await next();
+    } catch (err) {
+      await release();
+      throw err;
+    }
+    if (c.res.status >= 500) await release();
+    else await commit();
   };
 }
 

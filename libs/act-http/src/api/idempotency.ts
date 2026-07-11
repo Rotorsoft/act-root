@@ -22,9 +22,16 @@ export type IdempotencyResult<T> =
 
 /**
  * Wrap an action handler so the framework honors `Idempotency-Key`
- * dedup. Acquires the key via {@link IdempotencyStore.claim}, runs
- * the handler exactly when the claim was fresh, and skips the
- * handler entirely on a duplicate.
+ * dedup. Acquires the key via {@link IdempotencyStore.claim} (a
+ * *tentative* reservation), runs the handler exactly when the claim
+ * was fresh, and skips the handler entirely on a duplicate.
+ *
+ * The claim is finalized two-phase: on handler success the key is
+ * {@link IdempotencyStore.commit committed} so later retries dedup;
+ * on handler failure it is {@link IdempotencyStore.release released}
+ * and the rejection re-thrown, so the sender's retry re-processes
+ * instead of the delivery being permanently dropped. The tentative
+ * claim still dedups a concurrent duplicate mid-flight.
  *
  * Reuses the contract `@rotorsoft/act-ops/idempotency` already
  * defines for the receiver-side `Idempotency-Key` story. A single
@@ -40,5 +47,13 @@ export async function withIdempotency<T>(
   if (!fresh) {
     return { deduped: true };
   }
-  return { deduped: false, result: await handler() };
+  let result: T;
+  try {
+    result = await handler();
+  } catch (err) {
+    await store.release(key);
+    throw err;
+  }
+  await store.commit(key);
+  return { deduped: false, result };
 }

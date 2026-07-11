@@ -42,10 +42,60 @@ describe("webhookMiddleware (Express)", () => {
     const middleware = webhookMiddleware({ store });
     await middleware(req, res, next);
     expect(next).toHaveBeenCalled();
-    expect((req as Request & { idempotency: unknown }).idempotency).toEqual({
-      key: "req-1",
-      deduped: false,
-    });
+    const idem = (
+      req as Request & {
+        idempotency: {
+          key: string;
+          deduped: boolean;
+          commit: () => unknown;
+          release: () => unknown;
+        };
+      }
+    ).idempotency;
+    expect(idem.key).toBe("req-1");
+    expect(idem.deduped).toBe(false);
+    expect(typeof idem.commit).toBe("function");
+    expect(typeof idem.release).toBe("function");
+  });
+
+  it("commit() durably dedups; a retry after success skips re-processing", async () => {
+    const store = freshStore();
+    const middleware = webhookMiddleware({ store });
+    const { req, res, next } = mockTriplet(
+      { "idempotency-key": "req-commit" },
+      BODY
+    );
+    await middleware(req, res, next);
+    await (
+      req as Request & { idempotency: { commit: () => Promise<void> } }
+    ).idempotency.commit();
+    // Retry after a committed success — deduped.
+    const second = mockTriplet({ "idempotency-key": "req-commit" }, BODY);
+    await middleware(second.req, second.res, second.next);
+    expect(
+      (second.req as Request & { idempotency: { deduped: boolean } })
+        .idempotency.deduped
+    ).toBe(true);
+  });
+
+  it("release() frees the tentative claim; a retry after failure re-processes", async () => {
+    const store = freshStore();
+    const middleware = webhookMiddleware({ store });
+    const { req, res, next } = mockTriplet(
+      { "idempotency-key": "req-release" },
+      BODY
+    );
+    await middleware(req, res, next);
+    await (
+      req as Request & { idempotency: { release: () => Promise<void> } }
+    ).idempotency.release();
+    // Retry after a released failure — the key is fresh again.
+    const second = mockTriplet({ "idempotency-key": "req-release" }, BODY);
+    await middleware(second.req, second.res, second.next);
+    expect(
+      (second.req as Request & { idempotency: { deduped: boolean } })
+        .idempotency.deduped
+    ).toBe(false);
   });
 
   it("accepts a Buffer body (express.raw output)", async () => {

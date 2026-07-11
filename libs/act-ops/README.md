@@ -47,12 +47,18 @@ const sized = new InMemoryIdempotencyStore({
 
 // In any receiver — tRPC, Express, Fastify, Hono, a Kafka consumer, …
 const key = extractIdempotencyKeyFromHeaders(req);
-const fresh = dedup.claim(key);
+const fresh = dedup.claim(key);            // tentative reservation
 if (!fresh) return replyDedupedWithoutSideEffects();
-await applyEventToAggregate(event);
+try {
+  await applyEventToAggregate(event);
+  await dedup.commit(key);                 // success — later retries dedup
+} catch (err) {
+  await dedup.release(key);                // transient — allow re-processing
+  throw err;
+}
 ```
 
-`claim` is the entire contract — atomically acquire the right to process this key, return whether the caller won the claim. One call. No separate `has` / `put` dance. The verb mirrors `Store.claim`'s lease semantic from `@rotorsoft/act`: there, competing workers race for the right to drain a stream; here, competing requests race for the right to be the canonical first-time delivery for an `Idempotency-Key`. One caller wins; the others learn the claim is already taken and treat their request as a duplicate.
+`claim` acquires the *tentative* right to process this key — atomically, returning whether the caller won. `commit` promotes that reservation to durable on success; `release` drops it on a transient failure so the sender's retry re-processes instead of being deduped into a silent success. The `claim` verb mirrors `Store.claim`'s lease semantic from `@rotorsoft/act`: there, competing workers race for the right to drain a stream; here, competing requests race for the right to be the canonical first-time delivery for an `Idempotency-Key`. One caller wins the tentative claim (dedups any concurrent duplicate mid-flight); the caller then commits or releases based on the handler's outcome.
 
 The in-memory implementation is sync; durable adapters (Postgres, Redis) return a `Promise<boolean>` — the port's union return type covers both, so the call site is identical.
 
@@ -64,7 +70,7 @@ The package follows a subpath-export-per-domain shape, matching `@rotorsoft/act-
 
 ## API — `@rotorsoft/act-ops/idempotency`
 
-- **`IdempotencyStore`** — the contract. One method, `claim(key, now?): boolean | Promise<boolean>`. Returns `true` when the key was fresh (and is now recorded), `false` when it was already present. Implementations should preserve records for at least the sender's full retry envelope.
+- **`IdempotencyStore`** — the contract. Two-phase: `claim(key, now?): boolean | Promise<boolean>` reserves a key *tentatively* (returns `true` when fresh, `false` when already present), then the caller confirms the outcome with `commit(key, now?)` (promote to durable — later retries dedup) or `release(key)` (drop the tentative claim so a retry re-processes; a no-op once committed). The tentative claim still dedups a concurrent duplicate mid-flight; the split is what stops a transient handler failure from claiming-then-losing the delivery. Implementations should preserve committed records for at least the sender's full retry envelope.
 - **`InMemoryIdempotencyStore`** — bounded LRU + TTL reference implementation. Single-process only; for multi-process receivers swap for a durable adapter (Postgres unique index, Redis `SET NX`, …) without changing the call site.
 - **`InMemoryIdempotencyStoreOptions`** — `{ ttlMs?, retryProfile?, maxEntries? }`. Set `ttlMs` directly, or pass `retryProfile` and the store derives the safe window. When both are supplied, `ttlMs` wins.
 - **`RetryProfile`** — `{ maxRetries, backoff?, timeoutMs, safetyFactor? }`. The sender's retry shape, used by `InMemoryIdempotencyStore` to derive its window. The `backoff` field is typed structurally inline so it accepts the framework's `BackoffOptions` without a cast — but this package doesn't reinvent or re-export the type, preserving the zero-act-dep property.

@@ -113,6 +113,21 @@ pinned in `libs/act-pg/test/`.
 | A pending reconnect is cancelled by disposal (or a re-subscribe) — no reconnect fires after teardown | `cross-process-reactions.md` § Connection loss — the LISTEN client self-heals | `notify.resilience.spec.ts` (act-pg) → "dispose during a pending reconnect cancels it — no client is checked out after teardown" **(#1189)** |
 | The dead LISTEN client keeps an `error` listener across the whole reconnect window — a second socket `error` on teardown (in-flight `LISTEN` rejection, then `ECONNRESET`/`end`) is swallowed, not re-raised as an uncaught exception; a re-entrant reconnect cancels the pending timer so two never race to re-`LISTEN` | `cross-process-reactions.md` § Connection loss — the LISTEN client self-heals | `notify.resilience.spec.ts` (act-pg) → "a SECOND error on the dead client during the backoff window does not crash the process", "repeated reconnect cycles return the checked-out and listener counts to baseline", "a re-entrant reconnect cancels the pending timer instead of leaking a second one" **(regression fix — #1231)** |
 
+## Receiver idempotency (act-http / act-ops — two-phase claim)
+
+The receiver-side `IdempotencyStore` is two-phase: `claim` reserves a key
+tentatively, and the caller confirms the outcome with `commit` (durable) or
+`release` (drop). The load-bearing guarantee is that a **transient handler
+failure does not permanently drop the delivery** — the sender's retry
+re-processes instead of being deduped into a silent success ([#1193](https://github.com/Rotorsoft/act-root/issues/1193)).
+
+| Claim | Source | Backing test |
+|---|---|---|
+| `claim` is tentative; `commit` makes a key survive so a retry dedups, `release` drops an uncommitted claim so a retry re-processes, `release` after `commit` is a no-op, and committed entries still expire on TTL | `external-integration.md` § The `IdempotencyStore` port; `IdempotencyStore` doc-comment | act-ops `in-memory.spec.ts` → describe("two-phase commit / release"): "release drops an uncommitted claim so a retry re-processes", "commit makes a claim survive so a retry dedups", "release after commit is a no-op", "committed entries still expire after ttlMs" **(#1193)** |
+| The `receiver` builder releases the claim on a handler throw (retry re-runs the handler) and commits on success (retry dedups); a concurrent duplicate mid-flight is still deduped | `external-integration.md` § status table (500 row); `receiver` builder | act-http `receiver/start.spec.ts` → "re-runs the handler on retry after a transient handler failure (no lost delivery)", "dedups a retry after a successful delivery (handler runs exactly once)", "dedups a concurrent duplicate that arrives while the handler is in flight" **(#1193)** |
+| The wrapping adapters (Hono, tRPC) auto-finalize off the downstream outcome — commit on a 2xx / resolved result, release on a 5xx / thrown / `{ ok: false }` result; Express and Fastify expose `commit`/`release` on the request context for the handler to call | `external-integration.md` § Composing into an existing app | act-http `receiver/{hono,trpc,express,fastify}/index.spec.ts` (auto-commit/release + commit/release finalize cases); `receiver/finalize.spec.ts` → make_finalizers finalize-once + deduped-inert **(#1193)** |
+| `withIdempotency` (generated API) commits after the handler resolves and releases + re-throws when it rejects | `api/idempotency.ts` `withIdempotency` doc-comment | act-http `api/idempotency.spec.ts` → "commits the key after the handler succeeds", "releases the key and propagates handler rejections after a fresh claim" **(#1193)** |
+
 ## Orchestrator and builders
 
 | Claim | Source | Backing test |
