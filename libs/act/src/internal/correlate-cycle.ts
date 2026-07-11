@@ -67,6 +67,28 @@ export type StaticTarget = {
  *
  * @internal
  */
+/**
+ * Constructor dependencies for {@link CorrelateCycle}. A named bag rather
+ * than a positional list: the trailing hooks (`on_init`, `on_init_async`)
+ * plus `cold_start_back_scan` are all optional and easy to transpose
+ * positionally, so callers pass them by name.
+ */
+export type CorrelateCycleDeps<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+> = {
+  registry: Registry<TSchemaReg, TEvents, TActions>;
+  static_targets: ReadonlyArray<StaticTarget>;
+  has_dynamic_resolvers: boolean;
+  cd: DrainOps<TEvents>;
+  max_subscribed_streams: number;
+  run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  on_init?: () => void;
+  on_init_async?: () => Promise<void>;
+  cold_start_back_scan?: number;
+};
+
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -106,18 +128,18 @@ export class CorrelateCycle<
    */
   private readonly _cold_start_back_scan: number;
 
-  constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
-    static_targets: ReadonlyArray<StaticTarget>,
-    has_dynamic_resolvers: boolean,
-    cd: DrainOps<TEvents>,
-    maxSubscribedStreams: number,
-    on_init: (() => void) | undefined,
-    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>,
-    on_init_async?: () => Promise<void>,
-    cold_start_back_scan: number = DEFAULT_COLD_START_BACK_SCAN
-  ) {
-    this._subscribed = new LruSet(maxSubscribedStreams);
+  constructor({
+    registry,
+    static_targets,
+    has_dynamic_resolvers,
+    cd,
+    max_subscribed_streams,
+    run_scoped,
+    on_init,
+    on_init_async,
+    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
+  }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
+    this._subscribed = new LruSet(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
     this._has_dynamic_resolvers = has_dynamic_resolvers;
