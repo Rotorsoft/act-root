@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.2...@rotorsoft/act-http-v1.8.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** require integer sse maxConnections and heartbeatMs ([7f3a502](https://github.com/rotorsoft/act-root/commit/7f3a502b4cae638b998df9d3389909eb71c5f60a)), closes [#1235](https://github.com/rotorsoft/act-root/issues/1235)
+
 # [@rotorsoft/act-http-v1.8.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.1...@rotorsoft/act-http-v1.8.2) (2026-07-06)
 
 
