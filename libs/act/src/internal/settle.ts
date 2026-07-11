@@ -56,6 +56,16 @@ export type SettleDeps<TEvents extends Schemas> = {
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
+  /**
+   * Set when a `schedule()` timer fires while a cycle is still running
+   * (ACT-1205). The in-flight cycle's `finally` re-arms one more pass so
+   * the wake-up isn't dropped — a commit landing during the final
+   * no-progress drain pass would otherwise leave armed controllers with
+   * nothing to re-drain on an instance with no lane `cycleMs` and no
+   * polling. Carries the options of the dropped call so the re-armed
+   * pass honors its `debounceMs`/`maxPasses`/drain overrides.
+   */
+  private _pending: SettleOptions | undefined = undefined;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
   private readonly _default_debounce_ms: number;
@@ -83,7 +93,13 @@ export class SettleLoop<TEvents extends Schemas> {
     if (this._timer) clearTimeout(this._timer);
     this._timer = setTimeout(() => {
       this._timer = undefined;
-      if (this._running) return;
+      // A cycle is already running. Record this wake-up as pending rather
+      // than dropping it (ACT-1205) — the running cycle's `finally`
+      // re-schedules it so armed controllers always get one more drain.
+      if (this._running) {
+        this._pending = options;
+        return;
+      }
       this._running = true;
 
       (async () => {
@@ -117,12 +133,22 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          // A wake-up arrived mid-cycle. Re-arm one more pass with its
+          // options so the requested drain actually happens (ACT-1205).
+          const pending = this._pending;
+          if (pending !== undefined) {
+            this._pending = undefined;
+            this.schedule(pending);
+          }
         });
     }, debounceMs);
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
   stop(): void {
+    // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
+    // the running cycle's `finally` (ACT-1205).
+    this._pending = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;

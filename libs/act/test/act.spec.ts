@@ -422,11 +422,12 @@ describe("act", () => {
       app.off("settled", settledListener);
     });
 
-    it("should be a no-op when already settling", async () => {
+    it("re-arms a wake-up requested while a cycle is running (ACT-1205)", async () => {
       const settledListener = vi.fn();
       app.on("settled", settledListener);
 
-      // Slow down correlate so the first settle is still running when the second fires
+      // Slow down correlate so the first settle is still running when the
+      // second fires.
       const originalCorrelate = app.correlate.bind(app);
       const spy = vi.spyOn(app, "correlate").mockImplementation(async (q) => {
         await sleep(200);
@@ -434,15 +435,18 @@ describe("act", () => {
       });
 
       await app.do("increment", { stream: "settle-guard", actor }, {});
-      // First call starts the cycle
+      // First call starts the cycle.
       app.settle({ debounceMs: 1 });
-      await sleep(50); // Let the timer fire and settle begin
-      // Second call while settling — timer fires but guard returns
+      await sleep(50); // let the timer fire and the settle begin
+      // Second call while the first cycle is still running. The mid-cycle
+      // wake-up is no longer dropped (ACT-1205): the running cycle's
+      // finally re-arms it, so a second cycle runs and emits `settled`
+      // again — armed controllers never starve on a lost wake-up.
       app.settle({ debounceMs: 1 });
       await sleep(800);
 
-      // Only 1 settled emission — second was guarded
-      expect(settledListener).toHaveBeenCalledTimes(1);
+      // The wake-up was honored: a second settled emission followed.
+      expect(settledListener).toHaveBeenCalledTimes(2);
 
       spy.mockRestore();
       app.off("settled", settledListener);
