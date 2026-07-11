@@ -14516,14 +14516,25 @@ import { _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
+ * Sensitive-data foundation re-exports (#855 / epic #566).
  *
- * Part of the sensitive-data foundation (#855 / epic #566).
+ * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
+ *   when the caller isn't authorized to see a sensitive field
+ *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
+ *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
+ *   irrecoverable).
+ * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
+ *   top-level field names marked via {@link sensitive}. A pure,
+ *   read-only helper that inspects the out-of-band sensitive registry (a
+ *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
+ *   unreachable from outside the package. Surfaced for adapters and
+ *   tooling that must reflect input sensitivity on their own wire
+ *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
+ *   fields \`writeOnly\` + \`format: password\` so generated clients and
+ *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
+ *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -30506,14 +30517,25 @@ import { _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
+ * Sensitive-data foundation re-exports (#855 / epic #566).
  *
- * Part of the sensitive-data foundation (#855 / epic #566).
+ * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
+ *   when the caller isn't authorized to see a sensitive field
+ *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
+ *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
+ *   irrecoverable).
+ * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
+ *   top-level field names marked via {@link sensitive}. A pure,
+ *   read-only helper that inspects the out-of-band sensitive registry (a
+ *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
+ *   unreachable from outside the package. Surfaced for adapters and
+ *   tooling that must reflect input sensitivity on their own wire
+ *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
+ *   fields \`writeOnly\` + \`format: password\` so generated clients and
+ *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
+ *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -35362,14 +35384,25 @@ import { _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
+ * Sensitive-data foundation re-exports (#855 / epic #566).
  *
- * Part of the sensitive-data foundation (#855 / epic #566).
+ * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
+ *   when the caller isn't authorized to see a sensitive field
+ *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
+ *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
+ *   irrecoverable).
+ * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
+ *   top-level field names marked via {@link sensitive}. A pure,
+ *   read-only helper that inspects the out-of-band sensitive registry (a
+ *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
+ *   unreachable from outside the package. Surfaced for adapters and
+ *   tooling that must reflect input sensitivity on their own wire
+ *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
+ *   fields \`writeOnly\` + \`format: password\` so generated clients and
+ *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
+ *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -37333,7 +37366,25 @@ export function hono<TApp extends ActSurface = ActSurface>(
     const schema = state.actions[action_name];
     api.post(
       \`/actions/\${action_name}\`,
-      zValidator("json", schema as never),
+      // Custom hook funnels body-schema failures through the same
+      // ApiError envelope + 422 status an in-\`do\` ValidationError maps
+      // to (ERROR_MAP.ValidationError). Without it, @hono/zod-validator
+      // short-circuits with its own 400 + raw body — two statuses and
+      // two shapes for the same "malformed input" failure class on one
+      // endpoint. The OpenAPI doc only documents the 422/ApiError path.
+      zValidator("json", schema as never, (result, c) => {
+        if (!result.success) {
+          // \`result.error\` is a ZodError; the schema's \`never\` typing
+          // erases its shape, so read \`.message\` through a narrow cast.
+          const message = (result.error as { message?: string }).message;
+          const body: ApiError = {
+            error: "ValidationError",
+            detail: message,
+            code: "VALIDATION",
+          };
+          return c.json(body, 422);
+        }
+      }),
       async (c) => {
         try {
           const input = c.req.valid("json" as never) as unknown;
@@ -37867,6 +37918,7 @@ exports[`@rotorsoft/act-http — public API stability > stable public surface fo
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
+import { pii_fields } from "@rotorsoft/act";
 import { z } from "zod";
 
 /**
@@ -38117,6 +38169,46 @@ function strip_json_schema_meta(
   return rest;
 }
 
+/**
+ * Annotate the emitted request-body schema's sensitive properties so
+ * codegen / Swagger UI treat them as secrets rather than echoing them
+ * freely. \`z.toJSONSchema\` has no knowledge of the sensitive registry
+ * (\`sensitive()\` marks schemas out-of-band in a WeakMap), so we walk the
+ * action's declared sensitive fields — via \`pii_fields\`, the same lookup
+ * the orchestrator uses — and mark each matching property \`writeOnly:
+ * true\` + \`format: password\`. Non-object schemas and actions with no
+ * sensitive fields pass through untouched (the zero-cost common path).
+ *
+ * \`pii_fields\` only reports top-level keys of a \`z.object\`, and Zod's
+ * JSON Schema emit always renders those as members of \`properties\` — so
+ * once \`fields\` is non-empty, \`body_schema.properties[field]\` is
+ * guaranteed present. No defensive fallback needed.
+ *
+ * @internal
+ */
+function mark_sensitive_fields(
+  body_schema: Record<string, unknown>,
+  zod_schema: z.ZodType
+): Record<string, unknown> {
+  const fields = pii_fields(zod_schema);
+  if (fields.length === 0) return body_schema;
+  const properties = body_schema.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const next_properties: Record<string, Record<string, unknown>> = {
+    ...properties,
+  };
+  for (const field of fields) {
+    next_properties[field] = {
+      ...properties[field],
+      writeOnly: true,
+      format: "password",
+    };
+  }
+  return { ...body_schema, properties: next_properties };
+}
+
 function build_operation(
   action_name: string,
   body_schema: Record<string, unknown>,
@@ -38229,9 +38321,12 @@ export function openapi<TApp extends ActRegistryView>(
   const paths: Record<string, OpenAPIPathItem> = {};
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
-    const zod_schema = state.actions[action_name];
-    const body_schema = strip_json_schema_meta(
-      z.toJSONSchema(zod_schema as z.ZodType) as Record<string, unknown>
+    const zod_schema = state.actions[action_name] as z.ZodType;
+    const body_schema = mark_sensitive_fields(
+      strip_json_schema_meta(
+        z.toJSONSchema(zod_schema) as Record<string, unknown>
+      ),
+      zod_schema
     );
     paths[\`\${base_path}/actions/\${action_name}\`] = {
       post: build_operation(action_name, body_schema, options),
@@ -38265,12 +38360,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -38334,6 +38434,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -38898,12 +39005,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -38967,6 +39079,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -39126,7 +39245,12 @@ export function make_finalizers(
  * \`express.raw({ type: "application/json" })\` (or whatever
  * content-type your webhooks use) ahead of the receiver middleware.
  * The middleware reads \`req.body\` as a \`Buffer | string\` and converts
- * to a UTF-8 string for hashing. Skip when unsigned.
+ * to a UTF-8 string for hashing. Skip when unsigned. If the raw parser
+ * isn't mounted (the default \`express.json()\` ate the bytes, leaving a
+ * parsed object the adapter can't hash), the middleware short-circuits
+ * with \`400 { error: "empty-body" }\` instead of hashing an empty string
+ * and rejecting every valid request with a misleading \`401
+ * bad-signature\`.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
@@ -39315,12 +39439,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -39384,6 +39513,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -39545,7 +39681,11 @@ export function make_finalizers(
  * default JSON parser eats the bytes — register a custom parser via
  * \`app.addContentTypeParser("application/json", { parseAs: "string" }, …)\`
  * and stash the string on \`request.rawBody\` (Fastify pattern). The
- * middleware reads \`request.rawBody\` for hashing. Skip when unsigned.
+ * middleware reads \`request.rawBody\` for hashing. Skip when unsigned. If
+ * \`request.rawBody\` is empty because the parser wasn't registered, the
+ * middleware short-circuits with \`400 { error: "empty-body" }\` instead
+ * of hashing an empty string and rejecting every valid request with a
+ * misleading \`401 bad-signature\`.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
@@ -39733,12 +39873,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -39802,6 +39947,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -40160,12 +40312,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -40229,6 +40386,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
