@@ -73,6 +73,7 @@ describe("event-sourcing", () => {
         patches: 0,
         snaps: 0,
         version: 1,
+        id: 1,
         cache_hit: false,
         replayed: 0,
       })
@@ -101,6 +102,7 @@ describe("event-sourcing", () => {
         patches: 0,
         snaps: 0,
         version: 1,
+        id: 1,
         cache_hit: false,
         replayed: 0,
       })
@@ -125,6 +127,7 @@ describe("event-sourcing", () => {
       patches: 1,
       snaps: 0,
       version: 1,
+      id: 1,
       cache_hit: false,
       replayed: 0,
     });
@@ -434,6 +437,7 @@ describe("event-sourcing", () => {
       patches: 1,
       snaps: 0,
       version: 1,
+      id: 1,
       cache_hit: false,
       replayed: 0,
     };
@@ -567,6 +571,7 @@ describe("event-sourcing", () => {
       patches: 0,
       snaps: 0,
       version: 1,
+      id: 1,
       cache_hit: false,
       replayed: 0,
     });

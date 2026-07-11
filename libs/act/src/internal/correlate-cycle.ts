@@ -26,6 +26,25 @@ import type { DrainOps } from "./drain.js";
 import { LruSet } from "./lru-map.js";
 
 /**
+ * Cold-start back-scan window (ACT-1207). On init the correlate cursor
+ * would otherwise jump straight to the store watermark (`max(at)` across
+ * every subscribed stream). A dynamic-resolver event committed but not
+ * yet correlated before a crash sits *below* that watermark whenever a
+ * busier stream has since advanced — so a plain `max(at)` cold start
+ * skips it forever, and a one-shot dynamic target is never subscribed.
+ *
+ * Flooring the cold-start checkpoint at `watermark - BACK_SCAN` re-scans
+ * the tail on restart so those in-flight events are re-discovered.
+ * Re-scanning already-correlated events is harmless: `_subscribed`
+ * dedups and `subscribe` is an idempotent UPSERT. The window bounds the
+ * one-time restart cost; steady-state correlation still advances the
+ * checkpoint forward normally.
+ *
+ * @internal
+ */
+const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
  * Static resolver target collected at build time. Subscribed once during
  * init; never re-evaluated.
  *
@@ -48,6 +67,28 @@ export type StaticTarget = {
  *
  * @internal
  */
+/**
+ * Constructor dependencies for {@link CorrelateCycle}. A named bag rather
+ * than a positional list: the trailing hooks (`on_init`, `on_init_async`)
+ * plus `cold_start_back_scan` are all optional and easy to transpose
+ * positionally, so callers pass them by name.
+ */
+export type CorrelateCycleDeps<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+> = {
+  registry: Registry<TSchemaReg, TEvents, TActions>;
+  static_targets: ReadonlyArray<StaticTarget>;
+  has_dynamic_resolvers: boolean;
+  cd: DrainOps<TEvents>;
+  max_subscribed_streams: number;
+  run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  on_init?: () => void;
+  on_init_async?: () => Promise<void>;
+  cold_start_back_scan?: number;
+};
+
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -63,6 +104,16 @@ export class CorrelateCycle<
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
   /**
+   * Async cold-start hook (#1221). Runs once, after the sync `on_init`,
+   * inside the same `init()` await. The orchestrator uses it to re-seed the
+   * process-local defer timers from the store's persisted `deferred_at` so
+   * an idle deferred stream re-arms its drain across a restart. Kept
+   * separate from `on_init` because seeding is an async store read; `init`
+   * already awaits, so folding it in here preserves the "runs exactly once"
+   * guarantee without a second gate on the Act side.
+   */
+  private readonly _on_init_async: (() => Promise<void>) | undefined;
+  /**
    * Scope runner (#1191). The periodic `start_polling` timer fires
    * outside any caller frame, so its `correlate()` must be re-wrapped in
    * the Act's `_scoped` bag or `store()`/`cache()` resolve to the
@@ -70,23 +121,33 @@ export class CorrelateCycle<
    * `_scoped` (identity for a non-scoped Act), so it's required.
    */
   private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Tail re-scan window applied to the cold-start checkpoint (ACT-1207).
+   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
+   * public option) so tests can shrink it; defaults otherwise.
+   */
+  private readonly _cold_start_back_scan: number;
 
-  constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
-    static_targets: ReadonlyArray<StaticTarget>,
-    has_dynamic_resolvers: boolean,
-    cd: DrainOps<TEvents>,
-    maxSubscribedStreams: number,
-    on_init: (() => void) | undefined,
-    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>
-  ) {
-    this._subscribed = new LruSet(maxSubscribedStreams);
+  constructor({
+    registry,
+    static_targets,
+    has_dynamic_resolvers,
+    cd,
+    max_subscribed_streams,
+    run_scoped,
+    on_init,
+    on_init_async,
+    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
+  }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
+    this._subscribed = new LruSet(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
     this._has_dynamic_resolvers = has_dynamic_resolvers;
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
+    this._on_init_async = on_init_async;
+    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -96,7 +157,10 @@ export class CorrelateCycle<
 
   /**
    * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
+   * - Reads max(at) from store, then floors the cold-start checkpoint at
+   *   `watermark - back_scan` when dynamic resolvers exist, so an event
+   *   committed-but-not-correlated before a crash is re-scanned on
+   *   restart instead of skipped (ACT-1207)
    * - Subscribes static resolver targets (idempotent upsert)
    * - Populates the subscribed-streams LRU
    * - Fires `on_init` once (Act uses this to flag a cold-start drain)
@@ -106,11 +170,21 @@ export class CorrelateCycle<
     this._initialized = true;
 
     const { watermark } = await store().subscribe([...this._static_targets]);
-    this._checkpoint = watermark;
+    // Without dynamic resolvers correlate never scans, so the checkpoint
+    // is inert — keep the plain `max(at)` cold start. With dynamic
+    // resolvers, back the cursor off the watermark by a bounded window so
+    // the crash-window tail (an uncorrelated event now below a busier
+    // stream's watermark) is re-discovered. Never floor below -1.
+    this._checkpoint = this._has_dynamic_resolvers
+      ? Math.max(-1, watermark - this._cold_start_back_scan)
+      : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
     }
+    // Cold-start defer re-seed (#1221) — after the static targets are
+    // subscribed, so a walk of the streams table sees them.
+    await this._on_init_async?.();
   }
 
   /**

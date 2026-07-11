@@ -31,7 +31,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps } from "./event-sourcing.js";
+import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -168,23 +168,42 @@ const traced = <F extends AsyncFn>(
  */
 export function build_es(
   logger: Logger,
-  correlator: Correlator = default_correlator
+  correlator: Correlator = default_correlator,
+  patch_fn: PatchFn = es.bare_patch
 ): EsOps {
   // Bake the orchestrator-level `correlator` into every `action()` call
   // so EsOps callers don't need to thread it. A per-call
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
+  //
+  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // (`act-builder.ts`) — bare vs validating — and passed in here already
+  // bound, so this factory stays agnostic to `validateFoldedState`. It
+  // just bakes the given `patch_fn` into the load/action closures, so
+  // the projection-fold engine and close-cycle callers inherit the same
+  // choice without threading anything through their own signatures. The
+  // default (`bare_patch`) keeps direct callers on the pre-#1238 path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
     options
-  ) => es.action(me, action_name, target, payload, { correlator, ...options });
+  ) =>
+    es.action(
+      me,
+      action_name,
+      target,
+      payload,
+      { correlator, ...options },
+      patch_fn
+    );
+  const bound_load: EsOps["load"] = (me, target, callback) =>
+    es.load(me, target, callback, patch_fn);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
+      load: bound_load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -199,7 +218,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, target) => {
+    load: traced(bound_load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,

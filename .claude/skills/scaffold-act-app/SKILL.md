@@ -179,7 +179,7 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 4. **Partial patches** — Patch handlers return only changed fields, not the full state.
 5. **Causation tracking** — Inside reaction handlers, `app.do()` auto-injects the triggering event as `reactingTo`, maintaining the correlation chain by default. Pass an explicit `reactingTo` to override: `app.do(action, target, payload, customEvent)`.
 6. **Domain isolation** — `packages/domain` has zero infrastructure deps (except `@rotorsoft/act` and `zod`).
-7. **InMemoryStore + InMemoryCache for tests** — Default store and cache. Call `store().seed()` in `beforeEach` and `dispose()()` in `afterAll`. Call `clear*()` for each projection in `beforeEach`.
+7. **Isolate tests with `fixture()` / `sandbox()`** — Use `fixture(builder)` from `@rotorsoft/act/test` for the common case: each test gets a fresh, auto-seeded InMemoryStore + InMemoryCache and auto-cleanup, parallel-safe under `test.concurrent`. Reach for `sandbox(builder)` for `beforeAll`-shared setups, multi-Act tests, or when you need the `store`/`cache` handles. Still call `clear*()` for each in-memory projection at the start of each test (projection Maps aren't part of the store). Legacy `store().seed()` in `beforeEach` + `dispose()()` in `afterAll` remains valid only for tests that exercise the singleton port mechanism itself.
 8. **TypeScript strict mode** — All packages use `"strict": true`.
 9. **ESM only** — All packages use `"type": "module"` and `.js` import extensions.
 10. **Single-key records** — `state({})`, `.on({})`, `.emits({})` take single-key records. Multi-key throws at runtime.
@@ -207,7 +207,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
 - [ ] Projections register only lifecycle event handlers when using @rotorsoft/act-http/sse broadcast
-- [ ] Tests use InMemoryStore with `store().seed()` and `clear*()` in `beforeEach`, `dispose()()` in `afterAll`
+- [ ] Tests use `fixture(builder)` / `sandbox(builder)` from `@rotorsoft/act/test` for isolation, clearing in-memory projections with `clear*()` at the start of each test
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] tRPC API decomposed into route files with typed middleware

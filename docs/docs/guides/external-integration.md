@@ -401,6 +401,7 @@ Naming convention: the type is `Receiver` (PascalCase), the factory is `receiver
 |---:|---|---|
 | **204** | (empty) | Handler ran successfully, or dedup-skipped silently. Sender stops retrying. |
 | **400** | `{ "error": "missing-key" }` | No `Idempotency-Key` header |
+| **400** | `{ "error": "empty-body" }` | `secret` is set but the resolved raw body is empty — the raw-body parser isn't mounted (see below). Distinct from a signature failure so the misconfiguration is diagnosable. |
 | **401** | `{ "error": "missing-signature" \| "missing-timestamp" \| "stale" \| "future" \| "bad-signature" }` | Signature/timestamp verification failed |
 | **422** | `{ "error": "validation-failed", "detail": "..." }` | Schema rejected the body |
 | **500** | `{ "error": "handler-failed", "detail": "..." }` | Handler threw — the claim is released, and the sender's retry re-processes |
@@ -571,6 +572,8 @@ Separating the reasons lets your dashboards distinguish "clients losing secrets"
 #### Why the receiver needs the raw body, not the parsed one
 
 The signature is over the bytes the sender wrote. Pre-parse normalization on the receiver — JSON re-stringification, whitespace trimming, key reordering — produces a different byte sequence, so the recomputed HMAC won't match. Framework adapters in #744 (tRPC / Express / Fastify / Hono) will provide the raw body alongside the parsed one; until then, capture the raw body in your framework's first middleware (`req.rawBody` in most ecosystems) and pass it to `verifyWebhook` directly.
+
+If the raw-body parser isn't mounted — a `secret` is configured but the default JSON parser (`express.json()`, Fastify's built-in) consumed the bytes, leaving nothing to hash — the Express and Fastify adapters short-circuit with a distinct `400 { "error": "empty-body" }` rather than computing an HMAC over an empty string and rejecting every valid request with a misleading `401 bad-signature`. The fix is to mount the raw parser: `app.use(express.raw({ type: "application/json" }))` on Express, or a `parseAs: "string"` content-type parser stashing `request.rawBody` on Fastify. (Hono's adapter reads `await c.req.text()` and is immune.)
 
 #### Timestamp window sizing
 

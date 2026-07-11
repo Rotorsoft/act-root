@@ -1,3 +1,28 @@
+# [@rotorsoft/act-v1.22.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.8...@rotorsoft/act-v1.22.9) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act:** floor correlate cold-start checkpoint below the watermark ([4d3eb30](https://github.com/rotorsoft/act-root/commit/4d3eb30456a09f208cf752308997276d7aa8b1bc)), closes [#1207](https://github.com/rotorsoft/act-root/issues/1207)
+* **act:** fold TOCTOU frontier, load cache-error, expectedVersion retry ([611c425](https://github.com/rotorsoft/act-root/commit/611c425c1c20de62adc4b761b7026498835a4c16)), closes [#1204](https://github.com/rotorsoft/act-root/issues/1204) [#1206](https://github.com/rotorsoft/act-root/issues/1206) [#1208](https://github.com/rotorsoft/act-root/issues/1208)
+* **act:** re-arm settle wake-ups requested during a running cycle ([8876082](https://github.com/rotorsoft/act-root/commit/887608240d5be14616e6c7e067b6065103eff1ef)), closes [#1205](https://github.com/rotorsoft/act-root/issues/1205)
+
+# [@rotorsoft/act-v1.22.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.7...@rotorsoft/act-v1.22.8) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** per-pool jsonb parser, names:[]/before guards, TCK + docs (ACT-1198/1199) ([1043227](https://github.com/rotorsoft/act-root/commit/10432274edc0ce583563d0902056fd6d6ed7955c)), closes [#1197](https://github.com/rotorsoft/act-root/issues/1197) [#1199](https://github.com/rotorsoft/act-root/issues/1199)
+* **act:** honor names:[] and falsy-zero before/after in query (ACT-1199) ([c78e57b](https://github.com/rotorsoft/act-root/commit/c78e57b04a71326d47c39a77263aecfa2fbdf27a))
+
+# [@rotorsoft/act-v1.22.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.6...@rotorsoft/act-v1.22.7) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-http:** mark sensitive() action-input fields in the openapi request schema ([#1228](https://github.com/rotorsoft/act-root/issues/1228)) ([003eea2](https://github.com/rotorsoft/act-root/commit/003eea2bfd97c35641ee585a0a26cab40fa1c564))
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
 # [@rotorsoft/act-v1.22.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.22.5...@rotorsoft/act-v1.22.6) (2026-07-11)
 
 

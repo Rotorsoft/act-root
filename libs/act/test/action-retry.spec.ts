@@ -202,6 +202,37 @@ describe("per-action retry policy", () => {
     });
   });
 
+  describe("caller-pinned expectedVersion (ACT-1208)", () => {
+    it("rethrows immediately without consuming the retry budget or sleeping", async () => {
+      // A caller-pinned expectedVersion is a fixed target: reloading and
+      // re-committing against the same pinned version is guaranteed to
+      // conflict again, so retrying only burns the budget and sleeps out
+      // the backoff. The conflict must surface on the first attempt.
+      const flaky = new FlakyStore(1);
+      store(flaky);
+      const app = act().withState(PacedCounter).build();
+      const t0 = Date.now();
+      await expect(
+        app.do("increment", { ...target, expectedVersion: 5 }, { by: 1 })
+      ).rejects.toThrow(ConcurrencyError);
+      const elapsed = Date.now() - t0;
+      expect(flaky.attempts).toBe(1); // no retry — budget untouched
+      expect(elapsed).toBeLessThan(60); // no backoff sleep
+    });
+
+    it("still retries framework-derived versions (no caller expectedVersion)", async () => {
+      // The retry loop stays live when the version was framework-derived:
+      // a concurrent writer advanced the head, the reload picks up the new
+      // frontier, and the next attempt succeeds.
+      const flaky = new FlakyStore(1);
+      store(flaky);
+      const app = act().withState(RetryCounter).build();
+      const snaps = await app.do("increment", target, { by: 1 });
+      expect(flaky.attempts).toBe(2);
+      expect(snaps[0].event?.name).toBe("Incremented");
+    });
+  });
+
   describe("backoff", () => {
     it("paces retries using compute_backoff_delay when backoff is declared", async () => {
       const flaky = new FlakyStore(1);

@@ -4,12 +4,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * `missing-key` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (`missing-key`, `empty-body` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. `empty-body` is the
+ * misconfigured-raw-parser signal: `secret` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over `${ts}.` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -73,6 +78,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,

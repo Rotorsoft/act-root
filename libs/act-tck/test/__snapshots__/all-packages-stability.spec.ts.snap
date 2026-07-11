@@ -10,11 +10,13 @@ exports[`@rotorsoft/act — public API stability > stable public surface for (ro
  */
 import { Act, type ActOptions } from "../act.js";
 import {
+  bare_patch,
   current_version_of,
   deprecated_event_names,
   make_fold_handler,
   merge_event_register,
   merge_projection,
+  type PatchFn,
   pii_fields,
   pii_gate,
   pii_split,
@@ -24,6 +26,7 @@ import {
   register_state,
   resolveAutocloseConfig,
   synthesize_autoclose_reactions,
+  validating_patch,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -459,6 +462,15 @@ export function act<
       on: <TKey extends keyof TEvents>(event: TKey) =>
         reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
+        // ACT-1238: select the per-event patch step ONCE here — the
+        // single selection site. \`bare_patch\` (the literal pre-#1238
+        // \`patch()\` merge) when \`validateFoldedState\` is off, else
+        // \`validating_patch\`. The same selected value feeds BOTH the
+        // projection-fold handlers below and \`build_es\` (via the Act
+        // constructor), so the command/load paths and the projection
+        // path share one choice and neither branches per event.
+        const patch_fn: PatchFn =
+          options?.validateFoldedState === true ? validating_patch : bare_patch;
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
         // \`.build({scoped: ...})\` repeatedly (e.g., per tenant) is
@@ -477,6 +489,8 @@ export function act<
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
+          // The \`patch_fn\` selected once at the top of \`build()\` feeds the
+          // fold handlers, matching the command/load paths (ACT-1238).
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -493,7 +507,7 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config)
+              make_fold_handler(merged, fold.flush, fold.config, patch_fn)
             );
           }
           finalize_deprecations();
@@ -628,7 +642,8 @@ export function act<
           states,
           batch_handlers,
           options,
-          lanes
+          lanes,
+          patch_fn
         );
       },
       events: registry.events,
@@ -642,6 +657,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -659,6 +675,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -930,6 +947,31 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When \`true\`, each time an event is folded into state — on the
+   * command path (\`do\`), on \`load\`/replay, and inside projection-fold
+   * projections — the merged full state is parsed against the owning
+   * state's \`state({ Name: schema })\` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose \`target\` names the state and the event (\`<state>.<event>#<id>\`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at \`build()\`** (the same way the
+   * orchestrator picks bare vs trace-decorated store ops from the log
+   * level): when \`false\` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject \`onlyLanes\` entries that reference undeclared lanes. */
@@ -1129,13 +1171,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from \`.withLane(...)\` calls. Slice 1 records them on the
    *   instance; later slices fan out one \`DrainController\` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from \`ActOptions.validateFoldedState\` (ACT-1238) — \`bare_patch\` by
+   *   default, \`validating_patch\` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to \`bare_patch\` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -1146,7 +1195,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside \`act-builder\`:
     // reactions registered against an event with \`sensitive(...)\` fields get
@@ -1178,6 +1227,7 @@ export class Act<
     // correlate cycle.
     this._breaker = this._build_breaker(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
+    this._advise_orphaned_lanes(options, lanes);
     this._audit_deps = this._build_audit_deps();
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
@@ -1297,6 +1347,40 @@ export class Act<
   }
 
   /**
+   * Orphaned-lane startup advisory (#1220). When \`onlyLanes\` is set, this
+   * instance builds a controller only for its slice of the declared lane
+   * universe — every OTHER declared lane's stream is persisted (correlate
+   * subscribes all static targets regardless of \`onlyLanes\`) but never
+   * claimed here. If no peer worker deploys with those lanes in ITS
+   * \`onlyLanes\`, their reactions accumulate forever, silently. A single
+   * process can't verify the cluster invariant \`∪ onlyLanes ⊇ declared
+   * lanes\`, so we surface the per-instance signal — "these declared lanes
+   * have no controller here" — the same way the deprecated-event advisory
+   * surfaces legacy events. No advisory when \`onlyLanes\` is unset (every
+   * lane gets a controller) or covers every declared lane.
+   */
+  private _advise_orphaned_lanes(
+    options: ActOptions,
+    lanes: ReadonlyArray<LaneConfig>
+  ): void {
+    if (!options.onlyLanes || options.onlyLanes.length === 0) return;
+    const active = new Set(this._drain_controllers.keys());
+    const orphaned = ["default", ...lanes.map((l) => l.name)].filter(
+      (name) => !active.has(name)
+    );
+    if (orphaned.length === 0) return;
+    const list = orphaned.map((name) => \`"\${name}"\`).join(", ");
+    this._logger.info(
+      \`Act declared \${orphaned.length} orphaned lane(s) on this instance: \${list}. \` +
+        \`onlyLanes excludes them, so no DrainController claims their streams here — \` +
+        \`their reactions accumulate un-drained unless a peer worker deploys with these \` +
+        \`lanes in its onlyLanes. Ensure the cluster invariant holds: the union of every \` +
+        \`worker's onlyLanes must cover every declared lane. \` +
+        \`See docs/docs/guides/production-checklist.md § Sizing lanes.\`
+    );
+  }
+
+  /**
    * Audit deps bag. Snapshotted after registry classification and
    * drain-controller build so the audit module sees the finalized lane
    * set. Held as an immutable bag — the orchestrator never carries audit
@@ -1309,7 +1393,14 @@ export class Act<
       event_to_state: this._event_to_state,
       states: this._states,
       known_events: new Set(this._event_to_state.keys()),
-      declared_lanes: new Set(this._drain_controllers.keys()),
+      // The DECLARED lane universe — the implicit "default" plus every
+      // \`.withLane(...)\` name — NOT \`_drain_controllers.keys()\` (#1224).
+      // An \`onlyLanes\`-filtered instance builds a controller only for its
+      // slice of lanes, so keying off the active controller set would flag
+      // a stream correctly assigned to an excluded-but-declared lane (one
+      // another worker drains) as \`unknown-lane\`. The audit reports what's
+      // structurally routable across the cluster, not what this process runs.
+      declared_lanes: new Set(["default", ...this._lanes.map((l) => l.name)]),
       routed_events: new Set(this._event_to_lanes.keys()),
     };
   }
@@ -1325,19 +1416,56 @@ export class Act<
       typeof classify_registry<TSchemaReg, TEvents, TActions>
     >
   ): CorrelateCycle<TSchemaReg, TEvents, TActions> {
-    return new CorrelateCycle(
-      this.registry,
-      classification.static_targets,
-      classification.has_dynamic_resolvers,
-      this._cd,
-      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      () => {
+    return new CorrelateCycle({
+      registry: this.registry,
+      static_targets: classification.static_targets,
+      has_dynamic_resolvers: classification.has_dynamic_resolvers,
+      cd: this._cd,
+      max_subscribed_streams:
+        options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
       // Re-scope the background \`start_correlations\` timer so its
       // correlate resolves the scoped ports, not the singleton (#1191).
-      this._scoped
-    );
+      run_scoped: this._scoped,
+      // Cold-start defer re-seed (#1221). Skipped on writer-only instances
+      // (\`drain: false\`) — they run no local controllers to re-arm.
+      on_init_async: this._drain
+        ? () => this._seed_persisted_defers()
+        : undefined,
+    });
+  }
+
+  /**
+   * Re-seed every active lane controller's process-local defer timer from
+   * the store's persisted \`deferred_at\` (#1221). Runs once at cold start,
+   * inside \`CorrelateCycle.init\`, after static targets are subscribed.
+   *
+   * The defer timer is worker memory: empty after a restart. A stream
+   * deferred to a future due-time (the classic case: an idle autoclose
+   * aggregate that deferred its terminal close) is durable in the store but
+   * has nothing in memory to re-arm the drain — the controller disarms on
+   * the first empty claim and, since the aggregate is idle, no commit ever
+   * re-arms it. Reading the persisted schedule and seeding the owning lane's
+   * timer restores the wake, so the close fires at the due-time.
+   *
+   * Streams whose lane has no controller on this instance (excluded by
+   * \`onlyLanes\`) are skipped — a peer worker owns that lane's timer.
+   */
+  private async _seed_persisted_defers(): Promise<void> {
+    const now = Date.now();
+    await store().query_streams((pos) => {
+      // Only future defers matter — a past-due schedule is claimable
+      // already, so the ordinary armed drain picks it up.
+      if (pos.deferred_at === undefined || pos.deferred_at <= now) return;
+      // Route to the controller that owns the stream's lane. A missing
+      // controller means the lane is excluded on this instance (onlyLanes) —
+      // skip it, a peer worker owns that timer. The default lane's
+      // controller is keyed "default" and matches an undefined stored lane.
+      const controller = this._drain_controllers.get(pos.lane ?? "default");
+      controller?.seed_defer(pos.stream, pos.deferred_at);
+    });
   }
 
   /** Settle loop driving correlate + drain to quiescence. */
@@ -2570,9 +2698,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
- * @property \`names?\` - Filter by event names
- * @property \`before?\` - Filter events before this id
- * @property \`after?\` - Filter events after this id
+ * @property \`names?\` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting \`names\`, which matches all. All adapters honor this identically.
+ * @property \`before?\` - Filter events strictly before this id (\`id < before\`). Honored even when \`0\` (\`before: 0\` matches nothing).
+ * @property \`after?\` - Filter events strictly after this id (\`id > after\`). Honored even when \`0\` (\`after: 0\` excludes an id-0 event on adapters whose ids start at 0).
  * @property \`limit?\` - Limit the number of events to return
  * @property \`created_before?\` - Filter events created before this date/time
  * @property \`created_after?\` - Filter events created after this date/time
@@ -2789,6 +2917,19 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Global event id (cross-stream sequence) of the stream-head event this
+   * snapshot folds to — the same value as \`event?.id\`, but always defined
+   * even on a warm cache hit where \`event\` is undefined. \`-1\` for a
+   * brand-new stream with no events. Populated atomically with \`state\`
+   * inside \`load()\`: from the cached checkpoint's \`event_id\` on a
+   * hit-with-no-new-events, or from the last replayed event on a cache
+   * miss. Consumers that pair a loaded state with its head event id (the
+   * fold engine's first-sight path) read this instead of a separate cache
+   * lookup, which would open a TOCTOU window where a concurrent commit
+   * lands between the two reads and pairs older \`state\` with a newer id.
+   */
+  readonly id: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
@@ -6823,6 +6964,25 @@ import type { DrainOps } from "./drain.js";
 import { LruSet } from "./lru-map.js";
 
 /**
+ * Cold-start back-scan window (ACT-1207). On init the correlate cursor
+ * would otherwise jump straight to the store watermark (\`max(at)\` across
+ * every subscribed stream). A dynamic-resolver event committed but not
+ * yet correlated before a crash sits *below* that watermark whenever a
+ * busier stream has since advanced — so a plain \`max(at)\` cold start
+ * skips it forever, and a one-shot dynamic target is never subscribed.
+ *
+ * Flooring the cold-start checkpoint at \`watermark - BACK_SCAN\` re-scans
+ * the tail on restart so those in-flight events are re-discovered.
+ * Re-scanning already-correlated events is harmless: \`_subscribed\`
+ * dedups and \`subscribe\` is an idempotent UPSERT. The window bounds the
+ * one-time restart cost; steady-state correlation still advances the
+ * checkpoint forward normally.
+ *
+ * @internal
+ */
+const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
  * Static resolver target collected at build time. Subscribed once during
  * init; never re-evaluated.
  *
@@ -6845,6 +7005,28 @@ export type StaticTarget = {
  *
  * @internal
  */
+/**
+ * Constructor dependencies for {@link CorrelateCycle}. A named bag rather
+ * than a positional list: the trailing hooks (\`on_init\`, \`on_init_async\`)
+ * plus \`cold_start_back_scan\` are all optional and easy to transpose
+ * positionally, so callers pass them by name.
+ */
+export type CorrelateCycleDeps<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+> = {
+  registry: Registry<TSchemaReg, TEvents, TActions>;
+  static_targets: ReadonlyArray<StaticTarget>;
+  has_dynamic_resolvers: boolean;
+  cd: DrainOps<TEvents>;
+  max_subscribed_streams: number;
+  run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  on_init?: () => void;
+  on_init_async?: () => Promise<void>;
+  cold_start_back_scan?: number;
+};
+
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -6860,6 +7042,16 @@ export class CorrelateCycle<
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
   /**
+   * Async cold-start hook (#1221). Runs once, after the sync \`on_init\`,
+   * inside the same \`init()\` await. The orchestrator uses it to re-seed the
+   * process-local defer timers from the store's persisted \`deferred_at\` so
+   * an idle deferred stream re-arms its drain across a restart. Kept
+   * separate from \`on_init\` because seeding is an async store read; \`init\`
+   * already awaits, so folding it in here preserves the "runs exactly once"
+   * guarantee without a second gate on the Act side.
+   */
+  private readonly _on_init_async: (() => Promise<void>) | undefined;
+  /**
    * Scope runner (#1191). The periodic \`start_polling\` timer fires
    * outside any caller frame, so its \`correlate()\` must be re-wrapped in
    * the Act's \`_scoped\` bag or \`store()\`/\`cache()\` resolve to the
@@ -6867,23 +7059,33 @@ export class CorrelateCycle<
    * \`_scoped\` (identity for a non-scoped Act), so it's required.
    */
   private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Tail re-scan window applied to the cold-start checkpoint (ACT-1207).
+   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
+   * public option) so tests can shrink it; defaults otherwise.
+   */
+  private readonly _cold_start_back_scan: number;
 
-  constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
-    static_targets: ReadonlyArray<StaticTarget>,
-    has_dynamic_resolvers: boolean,
-    cd: DrainOps<TEvents>,
-    maxSubscribedStreams: number,
-    on_init: (() => void) | undefined,
-    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>
-  ) {
-    this._subscribed = new LruSet(maxSubscribedStreams);
+  constructor({
+    registry,
+    static_targets,
+    has_dynamic_resolvers,
+    cd,
+    max_subscribed_streams,
+    run_scoped,
+    on_init,
+    on_init_async,
+    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
+  }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
+    this._subscribed = new LruSet(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
     this._has_dynamic_resolvers = has_dynamic_resolvers;
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
+    this._on_init_async = on_init_async;
+    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -6893,7 +7095,10 @@ export class CorrelateCycle<
 
   /**
    * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
+   * - Reads max(at) from store, then floors the cold-start checkpoint at
+   *   \`watermark - back_scan\` when dynamic resolvers exist, so an event
+   *   committed-but-not-correlated before a crash is re-scanned on
+   *   restart instead of skipped (ACT-1207)
    * - Subscribes static resolver targets (idempotent upsert)
    * - Populates the subscribed-streams LRU
    * - Fires \`on_init\` once (Act uses this to flag a cold-start drain)
@@ -6903,11 +7108,21 @@ export class CorrelateCycle<
     this._initialized = true;
 
     const { watermark } = await store().subscribe([...this._static_targets]);
-    this._checkpoint = watermark;
+    // Without dynamic resolvers correlate never scans, so the checkpoint
+    // is inert — keep the plain \`max(at)\` cold start. With dynamic
+    // resolvers, back the cursor off the watermark by a bounded window so
+    // the crash-window tail (an uncorrelated event now below a busier
+    // stream's watermark) is re-discovered. Never floor below -1.
+    this._checkpoint = this._has_dynamic_resolvers
+      ? Math.max(-1, watermark - this._cold_start_back_scan)
+      : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
     }
+    // Cold-start defer re-seed (#1221) — after the static targets are
+    // subscribed, so a walk of the streams table sees them.
+    await this._on_init_async?.();
   }
 
   /**
@@ -7541,7 +7756,11 @@ export class DeferSignal extends Error {
  * Lives in process memory, per worker — the same per-worker pacing trade-off
  * documented for backoff. Durability comes from the data the due-time is
  * *derived* from (an un-advanced watermark, an event's \`created\` timestamp),
- * not from the map: a restart rebuilds it from the log.
+ * not from the map. A restart empties the map, so the cold-start rebuild is
+ * explicit: \`CorrelateCycle.init\` seeds each still-future \`deferred_at\` back
+ * onto the owning lane's timer via {@link "drain-cycle".DrainController.seed_defer}
+ * (#1221), so an idle deferred stream re-arms at its due-time with no
+ * intervening commit.
  *
  * @internal
  */
@@ -8050,6 +8269,23 @@ export class DrainController<
    */
   arm(): void {
     this._armed = true;
+  }
+
+  /**
+   * Re-seed a persisted defer schedule into the process-local timer at cold
+   * start (#1221). The \`_defer\` map lives in worker memory and is empty
+   * after a restart; a stream deferred to a future due-time (e.g. an idle
+   * autoclose aggregate) is durable in the store's \`deferred_at\` but has
+   * nothing in memory to re-arm the drain at the due-time. The orchestrator
+   * reads the persisted \`deferred_at\` for this controller's lane and calls
+   * this to park the stream + (re)schedule the shared wake — so the drain
+   * re-arms at the due-time with no intervening commit. \`schedule()\`
+   * collapses many seeds into one timer, so callers may seed in a loop and
+   * let the earliest due-time win.
+   */
+  seed_defer(stream: string, at: number): void {
+    this._defer.set(stream, at);
+    this._defer.schedule();
   }
 
   /** Read-only flag — true while a commit / reset is unprocessed. */
@@ -8790,7 +9026,7 @@ export class NonRetryableError extends Error {
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -8816,6 +9052,82 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
+
+/**
+ * The reduction pipeline names three distinct things, and each word means
+ * exactly one of them:
+ *
+ * - a **reducer** is a state's \`.patch()\` handler — it takes one event and
+ *   returns a {@link Patch} *partial*;
+ * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
+ *   that partial into the current state, yielding the next full state;
+ * - the **fold** is the loop that applies the patch step across a stream's
+ *   events (the reader loop in {@link load} / {@link action}, and the
+ *   projection engine in {@link "projection-fold"}).
+ *
+ * \`PatchFn\` is the per-event patch step. The fold loop calls one of two
+ * implementations, selected **once** at construction (in
+ * {@link "tracing".build_es}) — never branched per event:
+ *
+ * - {@link bare_patch} — the default. Literally \`patch(state, partial)\`,
+ *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
+ * - {@link validating_patch} — the opt-in \`ActOptions.validateFoldedState\`
+ *   path. Merges, then parses the merged full state against the state's
+ *   declared Zod schema.
+ *
+ * The \`me\`/\`event\` arguments are unused by the bare implementation but
+ * carried on the shared signature so the fold loop is call-shape-identical
+ * regardless of which patch step was selected — the validating
+ * implementation needs them to name the failing reduction.
+ *
+ * @internal
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
+/**
+ * The default patch step: a bare \`patch()\` merge with no wrapper and no
+ * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * app that leaves \`validateFoldedState\` off pays nothing — not even a
+ * comparison.
+ *
+ * @internal
+ */
+export const bare_patch: PatchFn = (_me, state, partial) =>
+  patch(state, partial) as typeof state;
+
+/**
+ * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * parse the merged full state against the owning state's declared Zod
+ * schema. A reducer that produces schema-violating state (the calculator
+ * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * instead of propagating and surfacing hops later as a confusing
+ * downstream error.
+ *
+ * The \`target\` string names the state and the triggering event
+ * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state. A debugging /
+ * CI aid, not a production guard — selected only when the operator opts
+ * in.
+ *
+ * @internal
+ */
+export const validating_patch: PatchFn = (me, state, partial, event) => {
+  const next = patch(state, partial) as typeof state;
+  return validate(
+    \`\${me.name}.\${String(event.name)}#\${event.id}\`,
+    next,
+    me.state
+  );
+};
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -9171,7 +9483,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -9196,7 +9509,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = patch_fn(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -9212,6 +9525,7 @@ export async function load<
         event,
         state,
         version: event.version,
+        id: event.id,
         patches,
         snaps,
         cache_hit,
@@ -9252,20 +9566,33 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache().set(stream, {
-      stream,
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
+    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
+    // the state is already correctly computed, so a transient failure in a
+    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
+    // would break plain reads, reaction bound_load dispatches, and the fold
+    // engine's first-sight load. The cache is self-correcting: a subsequent
+    // load queries past \`event_id\`, replays what it missed, and re-warms.
+    await cache()
+      .set(stream, {
+        stream,
+        state,
+        version: event.version,
+        event_id: event.id,
+        patches,
+        snaps,
+      })
+      .catch((err) => log().error(err));
   }
 
   return {
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
+    // Head event id, captured atomically with \`state\`: the last replayed
+    // event's id on a cache miss, or the cached checkpoint's event_id on a
+    // warm hit with no new events. Consumers read this instead of a
+    // separate cache lookup that could race a concurrent commit (ACT-1204).
+    id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -9314,7 +9641,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -9328,10 +9656,15 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        patch_fn
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      // snapshot.version is the frontier even on a warm cache hit,
+      // snapshot.version is the head version even on a warm cache hit,
       // where snapshot.event is undefined — using the event would
       // silently drop the optimistic guard for every cached stream.
       // A brand-new stream (-1) stays unguarded: creations append.
@@ -9426,12 +9759,13 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = patch_fn(me, state, p, event);
         patches++;
         return {
           event,
           state,
           version: event.version,
+          id: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -9445,19 +9779,19 @@ export async function action<
       // Guardless commits (reactions append at head by design) can land
       // past events this fold never saw. A gapped fold must not become
       // a snapshot event or a cache entry — both would lie at the head
-      // frontier. Contiguity is cheap to prove: the first committed
+      // position. Contiguity is cheap to prove: the first committed
       // version extends the loaded one.
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
       // Persist the snapshot before caching. Awaited on purpose: the
       // snapshot event occupies the next version slot, so a follow-up
-      // action loading a pre-snap frontier from the cache would collide
-      // with the framework's own bookkeeping. Caching the snap frontier
+      // action loading a pre-snap checkpoint from the cache would collide
+      // with the framework's own bookkeeping. Caching the snap checkpoint
       // before the action returns keeps sequential callers from ever
       // seeing a conflict they didn't cause. Failures are still
       // swallowed inside snap() — the action never fails on it, and the
-      // cache then keeps the pre-snap frontier, which stays correct.
+      // cache then keeps the pre-snap checkpoint, which stays correct.
       const snap_event = snapped ? await snap(last) : undefined;
 
       // #861: pii-aware states (any event declaring \`sensitive(...)\`
@@ -9478,7 +9812,7 @@ export async function action<
               snaps: snap_event ? last.snaps + 1 : last.snaps,
             })
             .catch((err) => log().error(err));
-        // A gapped entry would sit at the head frontier with unfolded
+        // A gapped entry would sit at the head position with unfolded
         // events baked in — drop the checkpoint and let the next load
         // replay to truth instead.
         else
@@ -9490,6 +9824,15 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // A caller-pinned expectedVersion is a fixed target: every retry
+      // reloads and re-commits against the SAME pinned version, so the
+      // conflict is guaranteed to recur — retrying only burns the budget
+      // and sleeps out the backoff before surfacing the same terminal
+      // error. Rethrow immediately (ACT-1208). The retry loop exists to
+      // absorb races on framework-derived versions (a concurrent writer
+      // advanced the head), where the reload picks up the new head
+      // version and the next attempt can succeed.
+      if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
@@ -9812,6 +10155,11 @@ class InMemoryStream {
     return this._leased_until;
   }
 
+  /** Persisted next-visit time (#1090/#1221), or undefined when no active defer. */
+  get deferred_at() {
+    return this._deferred_at;
+  }
+
   /**
    * Attempt to lease this stream for processing.
    * @param lease - The lease request.
@@ -10112,7 +10460,7 @@ export class InMemoryStore implements Store {
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_before && e.created >= query.created_before)
           continue;
-        if (query.after && e.id <= query.after) break;
+        if (query.after !== undefined && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -10144,7 +10492,7 @@ export class InMemoryStore implements Store {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before && e.id >= query.before) break;
+        if (query?.before !== undefined && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -10624,6 +10972,7 @@ export class InMemoryStore implements Store {
         leased_by: s.leased_by,
         leased_until: s.leased_until,
         lane: s.lane,
+        deferred_at: s.deferred_at,
       });
       count++;
       if (count >= limit) break;
@@ -10986,8 +11335,8 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps } from "./event-sourcing.js";
-export { scan } from "./event-sourcing.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -10998,6 +11347,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
+export * from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -11009,7 +11359,6 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export * from "./state-fold.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
 
 // === index.ts ===
@@ -11608,6 +11957,12 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier \`claim()\` ordering — see {@link Store.prioritize}.
  * @property lane - Drain lane bound to the stream (ACT-1103)
+ * @property deferred_at - Persisted next-visit time (ms since epoch) when
+ *   the stream is held out of {@link claim} by a \`defer\` outcome; omitted
+ *   when the stream carries no active defer schedule. Read at cold start to
+ *   re-seed the in-process defer timer so an idle deferred stream re-arms
+ *   its drain across a restart (#1221) — the schedule outlives the process
+ *   memory it was derived from.
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -11620,6 +11975,7 @@ export type StreamPosition = {
   readonly leased_by?: string;
   readonly leased_until?: Date;
   readonly lane?: string;
+  readonly deferred_at?: number;
 };
 
 /**
@@ -11959,6 +12315,14 @@ export interface Store extends Disposable, EventSource {
    *
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
+   *
+   * **Payload dates round-trip as \`Date\`.** A \`Date\` committed inside event
+   * \`data\` (or \`meta\`) is returned as a \`Date\`, not an ISO string — every
+   * adapter revives ISO-8601 strings on read. A consequence: a plain string
+   * that happens to match ISO-8601 exactly is revived to a \`Date\` too, and a
+   * timezone-less ISO string is parsed in the reader's local time. Keep
+   * ISO-shaped strings you want to stay strings out of event payloads, or
+   * carry them in a wrapper field.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
@@ -13514,6 +13878,176 @@ export function projection<TEvents extends Schemas = {}>(
   return _projection<TEvents, string | undefined>(target);
 }
 
+// === projection-fold.ts ===
+/**
+ * @module projection-fold
+ * @category Internal
+ *
+ * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
+ * folded states in a bounded in-memory cache and flushes one row per dirty
+ * stream per round, so write amplification tracks the distinct-key count
+ * instead of the event count.
+ *
+ * The flush payload deliberately has no type of its own: a state
+ * projection flushes the cache layer outward — the rows ARE the
+ * streams' {@link CacheEntry} values.
+ *
+ * Correctness discipline:
+ * - The engine runs as the projection's batch handler, so the watermark
+ *   acks only after a fully-flushed batch — fold work is never
+ *   acknowledged before it is durable.
+ * - On first sight of a stream the engine loads its head state through
+ *   the same \`load()\` the command path uses (cache, snapshots and all).
+ *   The loaded snapshot carries its own head position (\`version\` and the
+ *   global event \`id\`), captured atomically with \`state\`, so the engine
+ *   never pairs a stale state with a newer head id read separately from
+ *   the cache (ACT-1204). Fetched events at or below the loaded id are
+ *   skipped, later ones fold through the state's own patch reducers.
+ * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
+ *   (flush-before-evict) — eviction never loses folded work.
+ */
+import { z } from "zod";
+import type {
+  BatchHandler,
+  CacheEntry,
+  FoldOptions,
+  Schema,
+  Schemas,
+  State,
+} from "../types/index.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
+
+export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+export const DEFAULT_MAX_CACHED_STATES = 10_000;
+
+const FoldOptionsSchema = z.object({
+  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
+  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+});
+
+export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
+
+export function resolveFoldConfig(options: FoldOptions): FoldConfig {
+  return FoldOptionsSchema.parse(options);
+}
+
+/**
+ * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
+ * engine's \`dirty\` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever
+ * re-applying history. Stripping \`dirty\` at the flush boundary yields
+ * the entry — the flush payload IS the cache entry.
+ */
+type Fold<TState extends Schema> = {
+  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
+} & { dirty: boolean };
+
+/**
+ * Build the batch handler that folds a state's events into per-stream rows.
+ * The returned closure is long-lived (one per built projection): its cache
+ * survives across drain cycles, so warm streams fold without I/O.
+ */
+export function make_fold_handler<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
+  config: FoldConfig,
+  patch_fn: PatchFn = bare_patch
+): BatchHandler<TEvents> {
+  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
+  // delete + re-insert. Not the shared LruMap — eviction here must await
+  // a flush, and a sync auto-evicting set() would drop folded work.
+  const cache = new Map<string, Fold<TState>>();
+
+  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
+
+  const flush_dirty = async () => {
+    const rows: CacheEntry<TState>[] = [];
+    const flushed: Fold<TState>[] = [];
+    for (const f of cache.values())
+      if (f.dirty) {
+        rows.push(row(f));
+        flushed.push(f);
+      }
+    if (rows.length === 0) return;
+    await flush(rows);
+    for (const f of flushed) f.dirty = false;
+  };
+
+  return async (events) => {
+    let folded_since_flush = 0;
+    for (const event of events) {
+      const stream = event.stream;
+      let fold = cache.get(stream);
+      if (fold) {
+        // promote to most-recent
+        cache.delete(stream);
+        cache.set(stream, fold);
+      } else {
+        if (cache.size >= config.maxCachedStates) {
+          // flush-before-evict: the oldest entry leaves only after its
+          // folded work is durable.
+          const oldest = cache.keys().next().value as string;
+          const evictee = cache.get(oldest) as Fold<TState>;
+          if (evictee.dirty) await flush([row(evictee)]);
+          cache.delete(oldest);
+        }
+        // First sight of this stream: load its head state through the
+        // regular load path (cache, snapshots). The loaded state and its
+        // head position (\`version\`, global \`id\`, \`patches\`, \`snaps\`) are
+        // captured atomically inside \`load()\` — even on a warm cache hit
+        // where \`snapshot.event\` is undefined. Reading the head id back
+        // from the cache separately (ACT-1204) opened a TOCTOU window: a
+        // concurrent \`action()\` committing between the two awaits pairs
+        // this OLDER state with a NEWER event_id, and the
+        // \`event.id > fold.event_id\` guard below then permanently skips
+        // the intervening events. Dirty from the start: the row must be
+        // written at least once.
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
+        fold = {
+          stream,
+          state: snapshot.state,
+          version: snapshot.version,
+          event_id: snapshot.id,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
+          dirty: true,
+        };
+        cache.set(stream, fold);
+      }
+      if (event.id > fold.event_id) {
+        const reducer = me.patch[event.name as keyof TEvents];
+        fold.state = patch_fn(
+          me,
+          fold.state,
+          reducer(event as never, fold.state),
+          event as never
+        );
+        fold.version = event.version;
+        fold.event_id = event.id;
+        fold.patches++;
+        fold.dirty = true;
+      } else {
+        // Already folded (head load or redelivery) — mark dirty anyway
+        // so replays repopulate the read table: this is what keeps a
+        // rebuild at one upsert per stream instead of zero.
+        fold.dirty = true;
+      }
+      if (++folded_since_flush >= config.flushEvery) {
+        await flush_dirty();
+        folded_since_flush = 0;
+      }
+    }
+    // Flush before returning: the drain acks this batch's watermark only
+    // after the handler resolves, so rows are durable before the ack.
+    await flush_dirty();
+  };
+}
+
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -14391,14 +14925,25 @@ import { _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
+ * Sensitive-data foundation re-exports (#855 / epic #566).
  *
- * Part of the sensitive-data foundation (#855 / epic #566).
+ * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
+ *   when the caller isn't authorized to see a sensitive field
+ *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
+ *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
+ *   irrecoverable).
+ * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
+ *   top-level field names marked via {@link sensitive}. A pure,
+ *   read-only helper that inspects the out-of-band sensitive registry (a
+ *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
+ *   unreachable from outside the package. Surfaced for adapters and
+ *   tooling that must reflect input sensitivity on their own wire
+ *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
+ *   fields \`writeOnly\` + \`format: password\` so generated clients and
+ *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
+ *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -14806,6 +15351,16 @@ export type SettleDeps<TEvents extends Schemas> = {
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
+  /**
+   * Set when a \`schedule()\` timer fires while a cycle is still running
+   * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
+   * the wake-up isn't dropped — a commit landing during the final
+   * no-progress drain pass would otherwise leave armed controllers with
+   * nothing to re-drain on an instance with no lane \`cycleMs\` and no
+   * polling. Carries the options of the dropped call so the re-armed
+   * pass honors its \`debounceMs\`/\`maxPasses\`/drain overrides.
+   */
+  private _pending: SettleOptions | undefined = undefined;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via \`SettleOptions.debounceMs\`. */
   private readonly _default_debounce_ms: number;
@@ -14833,7 +15388,13 @@ export class SettleLoop<TEvents extends Schemas> {
     if (this._timer) clearTimeout(this._timer);
     this._timer = setTimeout(() => {
       this._timer = undefined;
-      if (this._running) return;
+      // A cycle is already running. Record this wake-up as pending rather
+      // than dropping it (ACT-1205) — the running cycle's \`finally\`
+      // re-schedules it so armed controllers always get one more drain.
+      if (this._running) {
+        this._pending = options;
+        return;
+      }
       this._running = true;
 
       (async () => {
@@ -14867,12 +15428,22 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          // A wake-up arrived mid-cycle. Re-arm one more pass with its
+          // options so the requested drain actually happens (ACT-1205).
+          const pending = this._pending;
+          if (pending !== undefined) {
+            this._pending = undefined;
+            this.schedule(pending);
+          }
         });
     }, debounceMs);
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
   stop(): void {
+    // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
+    // the running cycle's \`finally\` (ACT-1205).
+    this._pending = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;
@@ -16019,176 +16590,6 @@ function action_builder<
   return builder;
 }
 
-// === state-fold.ts ===
-/**
- * @module state-fold
- * @category Internal
- *
- * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
- * folded states in a bounded in-memory cache and flushes one row per dirty
- * stream per round, so write amplification tracks the distinct-key count
- * instead of the event count.
- *
- * The flush payload deliberately has no type of its own: a state
- * projection flushes the cache layer outward — the rows ARE the
- * streams' {@link CacheEntry} values.
- *
- * Correctness discipline:
- * - The engine runs as the projection's batch handler, so the watermark
- *   acks only after a fully-flushed batch — fold work is never
- *   acknowledged before it is durable.
- * - On first sight of a stream the engine loads its head state through
- *   the same \`load()\` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
- * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
- *   (flush-before-evict) — eviction never loses folded work.
- */
-import { patch } from "@rotorsoft/act-patch";
-import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
-import type {
-  BatchHandler,
-  CacheEntry,
-  FoldOptions,
-  Schema,
-  Schemas,
-  State,
-} from "../types/index.js";
-import { load } from "./event-sourcing.js";
-
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
-
-/**
- * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
- * engine's \`dirty\` flag. Mutable because the hot loop updates one
- * object per stream rather than allocating per event; the required
- * frontier fields are what keep a warm-cache load from ever
- * re-applying history. Stripping \`dirty\` at the flush boundary yields
- * the entry — the flush payload IS the cache entry.
- */
-type Fold<TState extends Schema> = {
-  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
-} & { dirty: boolean };
-
-/**
- * Build the batch handler that folds a state's events into per-stream rows.
- * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
- */
-export function make_fold_handler<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
->(
-  me: State<TState, TEvents, TActions>,
-  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig
-): BatchHandler<TEvents> {
-  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
-  // delete + re-insert. Not the shared LruMap — eviction here must await
-  // a flush, and a sync auto-evicting set() would drop folded work.
-  const cache = new Map<string, Fold<TState>>();
-
-  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
-
-  const flush_dirty = async () => {
-    const rows: CacheEntry<TState>[] = [];
-    const flushed: Fold<TState>[] = [];
-    for (const f of cache.values())
-      if (f.dirty) {
-        rows.push(row(f));
-        flushed.push(f);
-      }
-    if (rows.length === 0) return;
-    await flush(rows);
-    for (const f of flushed) f.dirty = false;
-  };
-
-  return async (events) => {
-    let folded_since_flush = 0;
-    for (const event of events) {
-      const stream = event.stream;
-      let fold = cache.get(stream);
-      if (fold) {
-        // promote to most-recent
-        cache.delete(stream);
-        cache.set(stream, fold);
-      } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
-        const snapshot = await load(me, { stream });
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
-      }
-      if (event.id > fold.event_id) {
-        const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch(
-          fold.state,
-          reducer(event as never, fold.state)
-        ) as TState;
-        fold.version = event.version;
-        fold.event_id = event.id;
-        fold.patches++;
-        fold.dirty = true;
-      } else {
-        // Already folded (head load or redelivery) — mark dirty anyway
-        // so replays repopulate the read table: this is what keeps a
-        // rebuild at one upsert per stream instead of zero.
-        fold.dirty = true;
-      }
-      if (++folded_since_flush >= config.flushEvery) {
-        await flush_dirty();
-        folded_since_flush = 0;
-      }
-    }
-    // Flush before returning: the drain acks this batch's watermark only
-    // after the handler resolves, so rows are durable before the ack.
-    await flush_dirty();
-  };
-}
-
 // === tracing.ts ===
 /**
  * @module tracing
@@ -16223,7 +16624,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps } from "./event-sourcing.js";
+import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -16360,23 +16761,42 @@ const traced = <F extends AsyncFn>(
  */
 export function build_es(
   logger: Logger,
-  correlator: Correlator = default_correlator
+  correlator: Correlator = default_correlator,
+  patch_fn: PatchFn = es.bare_patch
 ): EsOps {
   // Bake the orchestrator-level \`correlator\` into every \`action()\` call
   // so EsOps callers don't need to thread it. A per-call
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
+  //
+  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // (\`act-builder.ts\`) — bare vs validating — and passed in here already
+  // bound, so this factory stays agnostic to \`validateFoldedState\`. It
+  // just bakes the given \`patch_fn\` into the load/action closures, so
+  // the projection-fold engine and close-cycle callers inherit the same
+  // choice without threading anything through their own signatures. The
+  // default (\`bare_patch\`) keeps direct callers on the pre-#1238 path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
     options
-  ) => es.action(me, action_name, target, payload, { correlator, ...options });
+  ) =>
+    es.action(
+      me,
+      action_name,
+      target,
+      payload,
+      { correlator, ...options },
+      patch_fn
+    );
+  const bound_load: EsOps["load"] = (me, target, callback) =>
+    es.load(me, target, callback, patch_fn);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
+      load: bound_load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -16391,7 +16811,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, target) => {
+    load: traced(bound_load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -16718,6 +17138,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -16735,6 +17156,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -17006,6 +17428,31 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When \`true\`, each time an event is folded into state — on the
+   * command path (\`do\`), on \`load\`/replay, and inside projection-fold
+   * projections — the merged full state is parsed against the owning
+   * state's \`state({ Name: schema })\` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose \`target\` names the state and the event (\`<state>.<event>#<id>\`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at \`build()\`** (the same way the
+   * orchestrator picks bare vs trace-decorated store ops from the log
+   * level): when \`false\` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject \`onlyLanes\` entries that reference undeclared lanes. */
@@ -17205,13 +17652,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from \`.withLane(...)\` calls. Slice 1 records them on the
    *   instance; later slices fan out one \`DrainController\` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from \`ActOptions.validateFoldedState\` (ACT-1238) — \`bare_patch\` by
+   *   default, \`validating_patch\` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to \`bare_patch\` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -17222,7 +17676,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside \`act-builder\`:
     // reactions registered against an event with \`sensitive(...)\` fields get
@@ -17254,6 +17708,7 @@ export class Act<
     // correlate cycle.
     this._breaker = this._build_breaker(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
+    this._advise_orphaned_lanes(options, lanes);
     this._audit_deps = this._build_audit_deps();
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
@@ -17373,6 +17828,40 @@ export class Act<
   }
 
   /**
+   * Orphaned-lane startup advisory (#1220). When \`onlyLanes\` is set, this
+   * instance builds a controller only for its slice of the declared lane
+   * universe — every OTHER declared lane's stream is persisted (correlate
+   * subscribes all static targets regardless of \`onlyLanes\`) but never
+   * claimed here. If no peer worker deploys with those lanes in ITS
+   * \`onlyLanes\`, their reactions accumulate forever, silently. A single
+   * process can't verify the cluster invariant \`∪ onlyLanes ⊇ declared
+   * lanes\`, so we surface the per-instance signal — "these declared lanes
+   * have no controller here" — the same way the deprecated-event advisory
+   * surfaces legacy events. No advisory when \`onlyLanes\` is unset (every
+   * lane gets a controller) or covers every declared lane.
+   */
+  private _advise_orphaned_lanes(
+    options: ActOptions,
+    lanes: ReadonlyArray<LaneConfig>
+  ): void {
+    if (!options.onlyLanes || options.onlyLanes.length === 0) return;
+    const active = new Set(this._drain_controllers.keys());
+    const orphaned = ["default", ...lanes.map((l) => l.name)].filter(
+      (name) => !active.has(name)
+    );
+    if (orphaned.length === 0) return;
+    const list = orphaned.map((name) => \`"\${name}"\`).join(", ");
+    this._logger.info(
+      \`Act declared \${orphaned.length} orphaned lane(s) on this instance: \${list}. \` +
+        \`onlyLanes excludes them, so no DrainController claims their streams here — \` +
+        \`their reactions accumulate un-drained unless a peer worker deploys with these \` +
+        \`lanes in its onlyLanes. Ensure the cluster invariant holds: the union of every \` +
+        \`worker's onlyLanes must cover every declared lane. \` +
+        \`See docs/docs/guides/production-checklist.md § Sizing lanes.\`
+    );
+  }
+
+  /**
    * Audit deps bag. Snapshotted after registry classification and
    * drain-controller build so the audit module sees the finalized lane
    * set. Held as an immutable bag — the orchestrator never carries audit
@@ -17385,7 +17874,14 @@ export class Act<
       event_to_state: this._event_to_state,
       states: this._states,
       known_events: new Set(this._event_to_state.keys()),
-      declared_lanes: new Set(this._drain_controllers.keys()),
+      // The DECLARED lane universe — the implicit "default" plus every
+      // \`.withLane(...)\` name — NOT \`_drain_controllers.keys()\` (#1224).
+      // An \`onlyLanes\`-filtered instance builds a controller only for its
+      // slice of lanes, so keying off the active controller set would flag
+      // a stream correctly assigned to an excluded-but-declared lane (one
+      // another worker drains) as \`unknown-lane\`. The audit reports what's
+      // structurally routable across the cluster, not what this process runs.
+      declared_lanes: new Set(["default", ...this._lanes.map((l) => l.name)]),
       routed_events: new Set(this._event_to_lanes.keys()),
     };
   }
@@ -17401,19 +17897,56 @@ export class Act<
       typeof classify_registry<TSchemaReg, TEvents, TActions>
     >
   ): CorrelateCycle<TSchemaReg, TEvents, TActions> {
-    return new CorrelateCycle(
-      this.registry,
-      classification.static_targets,
-      classification.has_dynamic_resolvers,
-      this._cd,
-      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      () => {
+    return new CorrelateCycle({
+      registry: this.registry,
+      static_targets: classification.static_targets,
+      has_dynamic_resolvers: classification.has_dynamic_resolvers,
+      cd: this._cd,
+      max_subscribed_streams:
+        options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
       // Re-scope the background \`start_correlations\` timer so its
       // correlate resolves the scoped ports, not the singleton (#1191).
-      this._scoped
-    );
+      run_scoped: this._scoped,
+      // Cold-start defer re-seed (#1221). Skipped on writer-only instances
+      // (\`drain: false\`) — they run no local controllers to re-arm.
+      on_init_async: this._drain
+        ? () => this._seed_persisted_defers()
+        : undefined,
+    });
+  }
+
+  /**
+   * Re-seed every active lane controller's process-local defer timer from
+   * the store's persisted \`deferred_at\` (#1221). Runs once at cold start,
+   * inside \`CorrelateCycle.init\`, after static targets are subscribed.
+   *
+   * The defer timer is worker memory: empty after a restart. A stream
+   * deferred to a future due-time (the classic case: an idle autoclose
+   * aggregate that deferred its terminal close) is durable in the store but
+   * has nothing in memory to re-arm the drain — the controller disarms on
+   * the first empty claim and, since the aggregate is idle, no commit ever
+   * re-arms it. Reading the persisted schedule and seeding the owning lane's
+   * timer restores the wake, so the close fires at the due-time.
+   *
+   * Streams whose lane has no controller on this instance (excluded by
+   * \`onlyLanes\`) are skipped — a peer worker owns that lane's timer.
+   */
+  private async _seed_persisted_defers(): Promise<void> {
+    const now = Date.now();
+    await store().query_streams((pos) => {
+      // Only future defers matter — a past-due schedule is claimable
+      // already, so the ordinary armed drain picks it up.
+      if (pos.deferred_at === undefined || pos.deferred_at <= now) return;
+      // Route to the controller that owns the stream's lane. A missing
+      // controller means the lane is excluded on this instance (onlyLanes) —
+      // skip it, a peer worker owns that timer. The default lane's
+      // controller is keyed "default" and matches an undefined stored lane.
+      const controller = this._drain_controllers.get(pos.lane ?? "default");
+      controller?.seed_defer(pos.stream, pos.deferred_at);
+    });
   }
 
   /** Settle loop driving correlate + drain to quiescence. */
@@ -18646,9 +19179,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
- * @property \`names?\` - Filter by event names
- * @property \`before?\` - Filter events before this id
- * @property \`after?\` - Filter events after this id
+ * @property \`names?\` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting \`names\`, which matches all. All adapters honor this identically.
+ * @property \`before?\` - Filter events strictly before this id (\`id < before\`). Honored even when \`0\` (\`before: 0\` matches nothing).
+ * @property \`after?\` - Filter events strictly after this id (\`id > after\`). Honored even when \`0\` (\`after: 0\` excludes an id-0 event on adapters whose ids start at 0).
  * @property \`limit?\` - Limit the number of events to return
  * @property \`created_before?\` - Filter events created before this date/time
  * @property \`created_after?\` - Filter events created after this date/time
@@ -18865,6 +19398,19 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Global event id (cross-stream sequence) of the stream-head event this
+   * snapshot folds to — the same value as \`event?.id\`, but always defined
+   * even on a warm cache hit where \`event\` is undefined. \`-1\` for a
+   * brand-new stream with no events. Populated atomically with \`state\`
+   * inside \`load()\`: from the cached checkpoint's \`event_id\` on a
+   * hit-with-no-new-events, or from the last replayed event on a cache
+   * miss. Consumers that pair a loaded state with its head event id (the
+   * fold engine's first-sight path) read this instead of a separate cache
+   * lookup, which would open a TOCTOU window where a concurrent commit
+   * lands between the two reads and pairs older \`state\` with a newer id.
+   */
+  readonly id: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
@@ -22779,6 +23325,25 @@ import type { DrainOps } from "./drain.js";
 import { LruSet } from "./lru-map.js";
 
 /**
+ * Cold-start back-scan window (ACT-1207). On init the correlate cursor
+ * would otherwise jump straight to the store watermark (\`max(at)\` across
+ * every subscribed stream). A dynamic-resolver event committed but not
+ * yet correlated before a crash sits *below* that watermark whenever a
+ * busier stream has since advanced — so a plain \`max(at)\` cold start
+ * skips it forever, and a one-shot dynamic target is never subscribed.
+ *
+ * Flooring the cold-start checkpoint at \`watermark - BACK_SCAN\` re-scans
+ * the tail on restart so those in-flight events are re-discovered.
+ * Re-scanning already-correlated events is harmless: \`_subscribed\`
+ * dedups and \`subscribe\` is an idempotent UPSERT. The window bounds the
+ * one-time restart cost; steady-state correlation still advances the
+ * checkpoint forward normally.
+ *
+ * @internal
+ */
+const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
  * Static resolver target collected at build time. Subscribed once during
  * init; never re-evaluated.
  *
@@ -22801,6 +23366,28 @@ export type StaticTarget = {
  *
  * @internal
  */
+/**
+ * Constructor dependencies for {@link CorrelateCycle}. A named bag rather
+ * than a positional list: the trailing hooks (\`on_init\`, \`on_init_async\`)
+ * plus \`cold_start_back_scan\` are all optional and easy to transpose
+ * positionally, so callers pass them by name.
+ */
+export type CorrelateCycleDeps<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+> = {
+  registry: Registry<TSchemaReg, TEvents, TActions>;
+  static_targets: ReadonlyArray<StaticTarget>;
+  has_dynamic_resolvers: boolean;
+  cd: DrainOps<TEvents>;
+  max_subscribed_streams: number;
+  run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  on_init?: () => void;
+  on_init_async?: () => Promise<void>;
+  cold_start_back_scan?: number;
+};
+
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -22816,6 +23403,16 @@ export class CorrelateCycle<
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
   /**
+   * Async cold-start hook (#1221). Runs once, after the sync \`on_init\`,
+   * inside the same \`init()\` await. The orchestrator uses it to re-seed the
+   * process-local defer timers from the store's persisted \`deferred_at\` so
+   * an idle deferred stream re-arms its drain across a restart. Kept
+   * separate from \`on_init\` because seeding is an async store read; \`init\`
+   * already awaits, so folding it in here preserves the "runs exactly once"
+   * guarantee without a second gate on the Act side.
+   */
+  private readonly _on_init_async: (() => Promise<void>) | undefined;
+  /**
    * Scope runner (#1191). The periodic \`start_polling\` timer fires
    * outside any caller frame, so its \`correlate()\` must be re-wrapped in
    * the Act's \`_scoped\` bag or \`store()\`/\`cache()\` resolve to the
@@ -22823,23 +23420,33 @@ export class CorrelateCycle<
    * \`_scoped\` (identity for a non-scoped Act), so it's required.
    */
   private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Tail re-scan window applied to the cold-start checkpoint (ACT-1207).
+   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
+   * public option) so tests can shrink it; defaults otherwise.
+   */
+  private readonly _cold_start_back_scan: number;
 
-  constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
-    static_targets: ReadonlyArray<StaticTarget>,
-    has_dynamic_resolvers: boolean,
-    cd: DrainOps<TEvents>,
-    maxSubscribedStreams: number,
-    on_init: (() => void) | undefined,
-    run_scoped: <T>(fn: () => Promise<T>) => Promise<T>
-  ) {
-    this._subscribed = new LruSet(maxSubscribedStreams);
+  constructor({
+    registry,
+    static_targets,
+    has_dynamic_resolvers,
+    cd,
+    max_subscribed_streams,
+    run_scoped,
+    on_init,
+    on_init_async,
+    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
+  }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
+    this._subscribed = new LruSet(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
     this._has_dynamic_resolvers = has_dynamic_resolvers;
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
+    this._on_init_async = on_init_async;
+    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -22849,7 +23456,10 @@ export class CorrelateCycle<
 
   /**
    * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
+   * - Reads max(at) from store, then floors the cold-start checkpoint at
+   *   \`watermark - back_scan\` when dynamic resolvers exist, so an event
+   *   committed-but-not-correlated before a crash is re-scanned on
+   *   restart instead of skipped (ACT-1207)
    * - Subscribes static resolver targets (idempotent upsert)
    * - Populates the subscribed-streams LRU
    * - Fires \`on_init\` once (Act uses this to flag a cold-start drain)
@@ -22859,11 +23469,21 @@ export class CorrelateCycle<
     this._initialized = true;
 
     const { watermark } = await store().subscribe([...this._static_targets]);
-    this._checkpoint = watermark;
+    // Without dynamic resolvers correlate never scans, so the checkpoint
+    // is inert — keep the plain \`max(at)\` cold start. With dynamic
+    // resolvers, back the cursor off the watermark by a bounded window so
+    // the crash-window tail (an uncorrelated event now below a busier
+    // stream's watermark) is re-discovered. Never floor below -1.
+    this._checkpoint = this._has_dynamic_resolvers
+      ? Math.max(-1, watermark - this._cold_start_back_scan)
+      : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
     }
+    // Cold-start defer re-seed (#1221) — after the static targets are
+    // subscribed, so a walk of the streams table sees them.
+    await this._on_init_async?.();
   }
 
   /**
@@ -23274,7 +23894,11 @@ export class DeferSignal extends Error {
  * Lives in process memory, per worker — the same per-worker pacing trade-off
  * documented for backoff. Durability comes from the data the due-time is
  * *derived* from (an un-advanced watermark, an event's \`created\` timestamp),
- * not from the map: a restart rebuilds it from the log.
+ * not from the map. A restart empties the map, so the cold-start rebuild is
+ * explicit: \`CorrelateCycle.init\` seeds each still-future \`deferred_at\` back
+ * onto the owning lane's timer via {@link "drain-cycle".DrainController.seed_defer}
+ * (#1221), so an idle deferred stream re-arms at its due-time with no
+ * intervening commit.
  *
  * @internal
  */
@@ -23783,6 +24407,23 @@ export class DrainController<
    */
   arm(): void {
     this._armed = true;
+  }
+
+  /**
+   * Re-seed a persisted defer schedule into the process-local timer at cold
+   * start (#1221). The \`_defer\` map lives in worker memory and is empty
+   * after a restart; a stream deferred to a future due-time (e.g. an idle
+   * autoclose aggregate) is durable in the store's \`deferred_at\` but has
+   * nothing in memory to re-arm the drain at the due-time. The orchestrator
+   * reads the persisted \`deferred_at\` for this controller's lane and calls
+   * this to park the stream + (re)schedule the shared wake — so the drain
+   * re-arms at the due-time with no intervening commit. \`schedule()\`
+   * collapses many seeds into one timer, so callers may seed in a loop and
+   * let the earliest due-time win.
+   */
+  seed_defer(stream: string, at: number): void {
+    this._defer.set(stream, at);
+    this._defer.schedule();
   }
 
   /** Read-only flag — true while a commit / reset is unprocessed. */
@@ -24523,7 +25164,7 @@ export class NonRetryableError extends Error {
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -24549,6 +25190,82 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
+
+/**
+ * The reduction pipeline names three distinct things, and each word means
+ * exactly one of them:
+ *
+ * - a **reducer** is a state's \`.patch()\` handler — it takes one event and
+ *   returns a {@link Patch} *partial*;
+ * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
+ *   that partial into the current state, yielding the next full state;
+ * - the **fold** is the loop that applies the patch step across a stream's
+ *   events (the reader loop in {@link load} / {@link action}, and the
+ *   projection engine in {@link "projection-fold"}).
+ *
+ * \`PatchFn\` is the per-event patch step. The fold loop calls one of two
+ * implementations, selected **once** at construction (in
+ * {@link "tracing".build_es}) — never branched per event:
+ *
+ * - {@link bare_patch} — the default. Literally \`patch(state, partial)\`,
+ *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
+ * - {@link validating_patch} — the opt-in \`ActOptions.validateFoldedState\`
+ *   path. Merges, then parses the merged full state against the state's
+ *   declared Zod schema.
+ *
+ * The \`me\`/\`event\` arguments are unused by the bare implementation but
+ * carried on the shared signature so the fold loop is call-shape-identical
+ * regardless of which patch step was selected — the validating
+ * implementation needs them to name the failing reduction.
+ *
+ * @internal
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
+/**
+ * The default patch step: a bare \`patch()\` merge with no wrapper and no
+ * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * app that leaves \`validateFoldedState\` off pays nothing — not even a
+ * comparison.
+ *
+ * @internal
+ */
+export const bare_patch: PatchFn = (_me, state, partial) =>
+  patch(state, partial) as typeof state;
+
+/**
+ * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * parse the merged full state against the owning state's declared Zod
+ * schema. A reducer that produces schema-violating state (the calculator
+ * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * instead of propagating and surfacing hops later as a confusing
+ * downstream error.
+ *
+ * The \`target\` string names the state and the triggering event
+ * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state. A debugging /
+ * CI aid, not a production guard — selected only when the operator opts
+ * in.
+ *
+ * @internal
+ */
+export const validating_patch: PatchFn = (me, state, partial, event) => {
+  const next = patch(state, partial) as typeof state;
+  return validate(
+    \`\${me.name}.\${String(event.name)}#\${event.id}\`,
+    next,
+    me.state
+  );
+};
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -24904,7 +25621,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -24929,7 +25647,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = patch_fn(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -24945,6 +25663,7 @@ export async function load<
         event,
         state,
         version: event.version,
+        id: event.id,
         patches,
         snaps,
         cache_hit,
@@ -24985,20 +25704,33 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache().set(stream, {
-      stream,
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
+    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
+    // the state is already correctly computed, so a transient failure in a
+    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
+    // would break plain reads, reaction bound_load dispatches, and the fold
+    // engine's first-sight load. The cache is self-correcting: a subsequent
+    // load queries past \`event_id\`, replays what it missed, and re-warms.
+    await cache()
+      .set(stream, {
+        stream,
+        state,
+        version: event.version,
+        event_id: event.id,
+        patches,
+        snaps,
+      })
+      .catch((err) => log().error(err));
   }
 
   return {
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
+    // Head event id, captured atomically with \`state\`: the last replayed
+    // event's id on a cache miss, or the cached checkpoint's event_id on a
+    // warm hit with no new events. Consumers read this instead of a
+    // separate cache lookup that could race a concurrent commit (ACT-1204).
+    id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -25047,7 +25779,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -25061,10 +25794,15 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        patch_fn
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      // snapshot.version is the frontier even on a warm cache hit,
+      // snapshot.version is the head version even on a warm cache hit,
       // where snapshot.event is undefined — using the event would
       // silently drop the optimistic guard for every cached stream.
       // A brand-new stream (-1) stays unguarded: creations append.
@@ -25159,12 +25897,13 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = patch_fn(me, state, p, event);
         patches++;
         return {
           event,
           state,
           version: event.version,
+          id: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -25178,19 +25917,19 @@ export async function action<
       // Guardless commits (reactions append at head by design) can land
       // past events this fold never saw. A gapped fold must not become
       // a snapshot event or a cache entry — both would lie at the head
-      // frontier. Contiguity is cheap to prove: the first committed
+      // position. Contiguity is cheap to prove: the first committed
       // version extends the loaded one.
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
       // Persist the snapshot before caching. Awaited on purpose: the
       // snapshot event occupies the next version slot, so a follow-up
-      // action loading a pre-snap frontier from the cache would collide
-      // with the framework's own bookkeeping. Caching the snap frontier
+      // action loading a pre-snap checkpoint from the cache would collide
+      // with the framework's own bookkeeping. Caching the snap checkpoint
       // before the action returns keeps sequential callers from ever
       // seeing a conflict they didn't cause. Failures are still
       // swallowed inside snap() — the action never fails on it, and the
-      // cache then keeps the pre-snap frontier, which stays correct.
+      // cache then keeps the pre-snap checkpoint, which stays correct.
       const snap_event = snapped ? await snap(last) : undefined;
 
       // #861: pii-aware states (any event declaring \`sensitive(...)\`
@@ -25211,7 +25950,7 @@ export async function action<
               snaps: snap_event ? last.snaps + 1 : last.snaps,
             })
             .catch((err) => log().error(err));
-        // A gapped entry would sit at the head frontier with unfolded
+        // A gapped entry would sit at the head position with unfolded
         // events baked in — drop the checkpoint and let the next load
         // replay to truth instead.
         else
@@ -25223,6 +25962,15 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // A caller-pinned expectedVersion is a fixed target: every retry
+      // reloads and re-commits against the SAME pinned version, so the
+      // conflict is guaranteed to recur — retrying only burns the budget
+      // and sleeps out the backoff before surfacing the same terminal
+      // error. Rethrow immediately (ACT-1208). The retry loop exists to
+      // absorb races on framework-derived versions (a concurrent writer
+      // advanced the head), where the reload picks up the new head
+      // version and the next attempt can succeed.
+      if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
@@ -25545,6 +26293,11 @@ class InMemoryStream {
     return this._leased_until;
   }
 
+  /** Persisted next-visit time (#1090/#1221), or undefined when no active defer. */
+  get deferred_at() {
+    return this._deferred_at;
+  }
+
   /**
    * Attempt to lease this stream for processing.
    * @param lease - The lease request.
@@ -25845,7 +26598,7 @@ export class InMemoryStore implements Store {
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_before && e.created >= query.created_before)
           continue;
-        if (query.after && e.id <= query.after) break;
+        if (query.after !== undefined && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -25877,7 +26630,7 @@ export class InMemoryStore implements Store {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before && e.id >= query.before) break;
+        if (query?.before !== undefined && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -26357,6 +27110,7 @@ export class InMemoryStore implements Store {
         leased_by: s.leased_by,
         leased_until: s.leased_until,
         lane: s.lane,
+        deferred_at: s.deferred_at,
       });
       count++;
       if (count >= limit) break;
@@ -26701,8 +27455,8 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps } from "./event-sourcing.js";
-export { scan } from "./event-sourcing.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -26713,6 +27467,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
+export * from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -26724,7 +27479,6 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export * from "./state-fold.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
 
 // === index.ts ===
@@ -27304,6 +28058,12 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier \`claim()\` ordering — see {@link Store.prioritize}.
  * @property lane - Drain lane bound to the stream (ACT-1103)
+ * @property deferred_at - Persisted next-visit time (ms since epoch) when
+ *   the stream is held out of {@link claim} by a \`defer\` outcome; omitted
+ *   when the stream carries no active defer schedule. Read at cold start to
+ *   re-seed the in-process defer timer so an idle deferred stream re-arms
+ *   its drain across a restart (#1221) — the schedule outlives the process
+ *   memory it was derived from.
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -27316,6 +28076,7 @@ export type StreamPosition = {
   readonly leased_by?: string;
   readonly leased_until?: Date;
   readonly lane?: string;
+  readonly deferred_at?: number;
 };
 
 /**
@@ -27655,6 +28416,14 @@ export interface Store extends Disposable, EventSource {
    *
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
+   *
+   * **Payload dates round-trip as \`Date\`.** A \`Date\` committed inside event
+   * \`data\` (or \`meta\`) is returned as a \`Date\`, not an ISO string — every
+   * adapter revives ISO-8601 strings on read. A consequence: a plain string
+   * that happens to match ISO-8601 exactly is revived to a \`Date\` too, and a
+   * timezone-less ISO string is parsed in the reader's local time. Keep
+   * ISO-shaped strings you want to stay strings out of event payloads, or
+   * carry them in a wrapper field.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
@@ -29210,6 +29979,176 @@ export function projection<TEvents extends Schemas = {}>(
   return _projection<TEvents, string | undefined>(target);
 }
 
+// === projection-fold.ts ===
+/**
+ * @module projection-fold
+ * @category Internal
+ *
+ * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
+ * folded states in a bounded in-memory cache and flushes one row per dirty
+ * stream per round, so write amplification tracks the distinct-key count
+ * instead of the event count.
+ *
+ * The flush payload deliberately has no type of its own: a state
+ * projection flushes the cache layer outward — the rows ARE the
+ * streams' {@link CacheEntry} values.
+ *
+ * Correctness discipline:
+ * - The engine runs as the projection's batch handler, so the watermark
+ *   acks only after a fully-flushed batch — fold work is never
+ *   acknowledged before it is durable.
+ * - On first sight of a stream the engine loads its head state through
+ *   the same \`load()\` the command path uses (cache, snapshots and all).
+ *   The loaded snapshot carries its own head position (\`version\` and the
+ *   global event \`id\`), captured atomically with \`state\`, so the engine
+ *   never pairs a stale state with a newer head id read separately from
+ *   the cache (ACT-1204). Fetched events at or below the loaded id are
+ *   skipped, later ones fold through the state's own patch reducers.
+ * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
+ *   (flush-before-evict) — eviction never loses folded work.
+ */
+import { z } from "zod";
+import type {
+  BatchHandler,
+  CacheEntry,
+  FoldOptions,
+  Schema,
+  Schemas,
+  State,
+} from "../types/index.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
+
+export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+export const DEFAULT_MAX_CACHED_STATES = 10_000;
+
+const FoldOptionsSchema = z.object({
+  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
+  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+});
+
+export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
+
+export function resolveFoldConfig(options: FoldOptions): FoldConfig {
+  return FoldOptionsSchema.parse(options);
+}
+
+/**
+ * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
+ * engine's \`dirty\` flag. Mutable because the hot loop updates one
+ * object per stream rather than allocating per event; the required
+ * frontier fields are what keep a warm-cache load from ever
+ * re-applying history. Stripping \`dirty\` at the flush boundary yields
+ * the entry — the flush payload IS the cache entry.
+ */
+type Fold<TState extends Schema> = {
+  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
+} & { dirty: boolean };
+
+/**
+ * Build the batch handler that folds a state's events into per-stream rows.
+ * The returned closure is long-lived (one per built projection): its cache
+ * survives across drain cycles, so warm streams fold without I/O.
+ */
+export function make_fold_handler<
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
+  config: FoldConfig,
+  patch_fn: PatchFn = bare_patch
+): BatchHandler<TEvents> {
+  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
+  // delete + re-insert. Not the shared LruMap — eviction here must await
+  // a flush, and a sync auto-evicting set() would drop folded work.
+  const cache = new Map<string, Fold<TState>>();
+
+  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
+
+  const flush_dirty = async () => {
+    const rows: CacheEntry<TState>[] = [];
+    const flushed: Fold<TState>[] = [];
+    for (const f of cache.values())
+      if (f.dirty) {
+        rows.push(row(f));
+        flushed.push(f);
+      }
+    if (rows.length === 0) return;
+    await flush(rows);
+    for (const f of flushed) f.dirty = false;
+  };
+
+  return async (events) => {
+    let folded_since_flush = 0;
+    for (const event of events) {
+      const stream = event.stream;
+      let fold = cache.get(stream);
+      if (fold) {
+        // promote to most-recent
+        cache.delete(stream);
+        cache.set(stream, fold);
+      } else {
+        if (cache.size >= config.maxCachedStates) {
+          // flush-before-evict: the oldest entry leaves only after its
+          // folded work is durable.
+          const oldest = cache.keys().next().value as string;
+          const evictee = cache.get(oldest) as Fold<TState>;
+          if (evictee.dirty) await flush([row(evictee)]);
+          cache.delete(oldest);
+        }
+        // First sight of this stream: load its head state through the
+        // regular load path (cache, snapshots). The loaded state and its
+        // head position (\`version\`, global \`id\`, \`patches\`, \`snaps\`) are
+        // captured atomically inside \`load()\` — even on a warm cache hit
+        // where \`snapshot.event\` is undefined. Reading the head id back
+        // from the cache separately (ACT-1204) opened a TOCTOU window: a
+        // concurrent \`action()\` committing between the two awaits pairs
+        // this OLDER state with a NEWER event_id, and the
+        // \`event.id > fold.event_id\` guard below then permanently skips
+        // the intervening events. Dirty from the start: the row must be
+        // written at least once.
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
+        fold = {
+          stream,
+          state: snapshot.state,
+          version: snapshot.version,
+          event_id: snapshot.id,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
+          dirty: true,
+        };
+        cache.set(stream, fold);
+      }
+      if (event.id > fold.event_id) {
+        const reducer = me.patch[event.name as keyof TEvents];
+        fold.state = patch_fn(
+          me,
+          fold.state,
+          reducer(event as never, fold.state),
+          event as never
+        );
+        fold.version = event.version;
+        fold.event_id = event.id;
+        fold.patches++;
+        fold.dirty = true;
+      } else {
+        // Already folded (head load or redelivery) — mark dirty anyway
+        // so replays repopulate the read table: this is what keeps a
+        // rebuild at one upsert per stream instead of zero.
+        fold.dirty = true;
+      }
+      if (++folded_since_flush >= config.flushEvery) {
+        await flush_dirty();
+        folded_since_flush = 0;
+      }
+    }
+    // Flush before returning: the drain acks this batch's watermark only
+    // after the handler resolves, so rows are durable before the ack.
+    await flush_dirty();
+  };
+}
+
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -30256,14 +31195,25 @@ import { _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
+ * Sensitive-data foundation re-exports (#855 / epic #566).
  *
- * Part of the sensitive-data foundation (#855 / epic #566).
+ * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
+ *   when the caller isn't authorized to see a sensitive field
+ *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
+ *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
+ *   irrecoverable).
+ * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
+ *   top-level field names marked via {@link sensitive}. A pure,
+ *   read-only helper that inspects the out-of-band sensitive registry (a
+ *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
+ *   unreachable from outside the package. Surfaced for adapters and
+ *   tooling that must reflect input sensitivity on their own wire
+ *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
+ *   fields \`writeOnly\` + \`format: password\` so generated clients and
+ *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
+ *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -30671,6 +31621,16 @@ export type SettleDeps<TEvents extends Schemas> = {
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
+  /**
+   * Set when a \`schedule()\` timer fires while a cycle is still running
+   * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
+   * the wake-up isn't dropped — a commit landing during the final
+   * no-progress drain pass would otherwise leave armed controllers with
+   * nothing to re-drain on an instance with no lane \`cycleMs\` and no
+   * polling. Carries the options of the dropped call so the re-armed
+   * pass honors its \`debounceMs\`/\`maxPasses\`/drain overrides.
+   */
+  private _pending: SettleOptions | undefined = undefined;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via \`SettleOptions.debounceMs\`. */
   private readonly _default_debounce_ms: number;
@@ -30698,7 +31658,13 @@ export class SettleLoop<TEvents extends Schemas> {
     if (this._timer) clearTimeout(this._timer);
     this._timer = setTimeout(() => {
       this._timer = undefined;
-      if (this._running) return;
+      // A cycle is already running. Record this wake-up as pending rather
+      // than dropping it (ACT-1205) — the running cycle's \`finally\`
+      // re-schedules it so armed controllers always get one more drain.
+      if (this._running) {
+        this._pending = options;
+        return;
+      }
       this._running = true;
 
       (async () => {
@@ -30732,187 +31698,27 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          // A wake-up arrived mid-cycle. Re-arm one more pass with its
+          // options so the requested drain actually happens (ACT-1205).
+          const pending = this._pending;
+          if (pending !== undefined) {
+            this._pending = undefined;
+            this.schedule(pending);
+          }
         });
     }, debounceMs);
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
   stop(): void {
+    // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
+    // the running cycle's \`finally\` (ACT-1205).
+    this._pending = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;
     }
   }
-}
-
-// === state-fold.ts ===
-/**
- * @module state-fold
- * @category Internal
- *
- * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
- * folded states in a bounded in-memory cache and flushes one row per dirty
- * stream per round, so write amplification tracks the distinct-key count
- * instead of the event count.
- *
- * The flush payload deliberately has no type of its own: a state
- * projection flushes the cache layer outward — the rows ARE the
- * streams' {@link CacheEntry} values.
- *
- * Correctness discipline:
- * - The engine runs as the projection's batch handler, so the watermark
- *   acks only after a fully-flushed batch — fold work is never
- *   acknowledged before it is durable.
- * - On first sight of a stream the engine loads its head state through
- *   the same \`load()\` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
- * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
- *   (flush-before-evict) — eviction never loses folded work.
- */
-import { patch } from "@rotorsoft/act-patch";
-import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
-import type {
-  BatchHandler,
-  CacheEntry,
-  FoldOptions,
-  Schema,
-  Schemas,
-  State,
-} from "../types/index.js";
-import { load } from "./event-sourcing.js";
-
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
-
-/**
- * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
- * engine's \`dirty\` flag. Mutable because the hot loop updates one
- * object per stream rather than allocating per event; the required
- * frontier fields are what keep a warm-cache load from ever
- * re-applying history. Stripping \`dirty\` at the flush boundary yields
- * the entry — the flush payload IS the cache entry.
- */
-type Fold<TState extends Schema> = {
-  -readonly [K in keyof CacheEntry<TState>]: CacheEntry<TState>[K];
-} & { dirty: boolean };
-
-/**
- * Build the batch handler that folds a state's events into per-stream rows.
- * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
- */
-export function make_fold_handler<
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
->(
-  me: State<TState, TEvents, TActions>,
-  flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig
-): BatchHandler<TEvents> {
-  // Insertion-ordered Map as LRU: first key is the oldest. A promote is
-  // delete + re-insert. Not the shared LruMap — eviction here must await
-  // a flush, and a sync auto-evicting set() would drop folded work.
-  const cache = new Map<string, Fold<TState>>();
-
-  const row = ({ dirty: _, ...row }: Fold<TState>): CacheEntry<TState> => row;
-
-  const flush_dirty = async () => {
-    const rows: CacheEntry<TState>[] = [];
-    const flushed: Fold<TState>[] = [];
-    for (const f of cache.values())
-      if (f.dirty) {
-        rows.push(row(f));
-        flushed.push(f);
-      }
-    if (rows.length === 0) return;
-    await flush(rows);
-    for (const f of flushed) f.dirty = false;
-  };
-
-  return async (events) => {
-    let folded_since_flush = 0;
-    for (const event of events) {
-      const stream = event.stream;
-      let fold = cache.get(stream);
-      if (fold) {
-        // promote to most-recent
-        cache.delete(stream);
-        cache.set(stream, fold);
-      } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
-        const snapshot = await load(me, { stream });
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
-      }
-      if (event.id > fold.event_id) {
-        const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch(
-          fold.state,
-          reducer(event as never, fold.state)
-        ) as TState;
-        fold.version = event.version;
-        fold.event_id = event.id;
-        fold.patches++;
-        fold.dirty = true;
-      } else {
-        // Already folded (head load or redelivery) — mark dirty anyway
-        // so replays repopulate the read table: this is what keeps a
-        // rebuild at one upsert per stream instead of zero.
-        fold.dirty = true;
-      }
-      if (++folded_since_flush >= config.flushEvery) {
-        await flush_dirty();
-        folded_since_flush = 0;
-      }
-    }
-    // Flush before returning: the drain acks this batch's watermark only
-    // after the handler resolves, so rows are durable before the ack.
-    await flush_dirty();
-  };
 }
 
 // === tracing.ts ===
@@ -30949,7 +31755,7 @@ import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
 import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import type { EsOps } from "./event-sourcing.js";
+import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
@@ -31086,23 +31892,42 @@ const traced = <F extends AsyncFn>(
  */
 export function build_es(
   logger: Logger,
-  correlator: Correlator = default_correlator
+  correlator: Correlator = default_correlator,
+  patch_fn: PatchFn = es.bare_patch
 ): EsOps {
   // Bake the orchestrator-level \`correlator\` into every \`action()\` call
   // so EsOps callers don't need to thread it. A per-call
   // \`options.correlator\` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
+  //
+  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // (\`act-builder.ts\`) — bare vs validating — and passed in here already
+  // bound, so this factory stays agnostic to \`validateFoldedState\`. It
+  // just bakes the given \`patch_fn\` into the load/action closures, so
+  // the projection-fold engine and close-cycle callers inherit the same
+  // choice without threading anything through their own signatures. The
+  // default (\`bare_patch\`) keeps direct callers on the pre-#1238 path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
     options
-  ) => es.action(me, action_name, target, payload, { correlator, ...options });
+  ) =>
+    es.action(
+      me,
+      action_name,
+      target,
+      payload,
+      { correlator, ...options },
+      patch_fn
+    );
+  const bound_load: EsOps["load"] = (me, target, callback) =>
+    es.load(me, target, callback, patch_fn);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
+      load: bound_load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -31117,7 +31942,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, target) => {
+    load: traced(bound_load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -31559,9 +32384,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
- * @property \`names?\` - Filter by event names
- * @property \`before?\` - Filter events before this id
- * @property \`after?\` - Filter events after this id
+ * @property \`names?\` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting \`names\`, which matches all. All adapters honor this identically.
+ * @property \`before?\` - Filter events strictly before this id (\`id < before\`). Honored even when \`0\` (\`before: 0\` matches nothing).
+ * @property \`after?\` - Filter events strictly after this id (\`id > after\`). Honored even when \`0\` (\`after: 0\` excludes an id-0 event on adapters whose ids start at 0).
  * @property \`limit?\` - Limit the number of events to return
  * @property \`created_before?\` - Filter events created before this date/time
  * @property \`created_after?\` - Filter events created after this date/time
@@ -31778,6 +32603,19 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Global event id (cross-stream sequence) of the stream-head event this
+   * snapshot folds to — the same value as \`event?.id\`, but always defined
+   * even on a warm cache hit where \`event\` is undefined. \`-1\` for a
+   * brand-new stream with no events. Populated atomically with \`state\`
+   * inside \`load()\`: from the cached checkpoint's \`event_id\` on a
+   * hit-with-no-new-events, or from the last replayed event on a cache
+   * miss. Consumers that pair a loaded state with its head event id (the
+   * fold engine's first-sight path) read this instead of a separate cache
+   * lookup, which would open a TOCTOU window where a concurrent commit
+   * lands between the two reads and pairs older \`state\` with a newer id.
+   */
+  readonly id: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
@@ -33394,6 +34232,12 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier \`claim()\` ordering — see {@link Store.prioritize}.
  * @property lane - Drain lane bound to the stream (ACT-1103)
+ * @property deferred_at - Persisted next-visit time (ms since epoch) when
+ *   the stream is held out of {@link claim} by a \`defer\` outcome; omitted
+ *   when the stream carries no active defer schedule. Read at cold start to
+ *   re-seed the in-process defer timer so an idle deferred stream re-arms
+ *   its drain across a restart (#1221) — the schedule outlives the process
+ *   memory it was derived from.
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -33406,6 +34250,7 @@ export type StreamPosition = {
   readonly leased_by?: string;
   readonly leased_until?: Date;
   readonly lane?: string;
+  readonly deferred_at?: number;
 };
 
 /**
@@ -33745,6 +34590,14 @@ export interface Store extends Disposable, EventSource {
    *
    * Calls the callback for each matching event. The callback approach allows
    * processing large result sets without loading everything into memory.
+   *
+   * **Payload dates round-trip as \`Date\`.** A \`Date\` committed inside event
+   * \`data\` (or \`meta\`) is returned as a \`Date\`, not an ISO string — every
+   * adapter revives ISO-8601 strings on read. A consequence: a plain string
+   * that happens to match ISO-8601 exactly is revived to a \`Date\` too, and a
+   * timezone-less ISO string is parsed in the reader's local time. Keep
+   * ISO-shaped strings you want to stay strings out of event payloads, or
+   * carry them in a wrapper field.
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
@@ -35105,14 +35958,25 @@ import { _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
+ * Sensitive-data foundation re-exports (#855 / epic #566).
  *
- * Part of the sensitive-data foundation (#855 / epic #566).
+ * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
+ *   when the caller isn't authorized to see a sensitive field
+ *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
+ *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
+ *   irrecoverable).
+ * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
+ *   top-level field names marked via {@link sensitive}. A pure,
+ *   read-only helper that inspects the out-of-band sensitive registry (a
+ *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
+ *   unreachable from outside the package. Surfaced for adapters and
+ *   tooling that must reflect input sensitivity on their own wire
+ *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
+ *   fields \`writeOnly\` + \`format: password\` so generated clients and
+ *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
+ *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -37076,7 +37940,25 @@ export function hono<TApp extends ActSurface = ActSurface>(
     const schema = state.actions[action_name];
     api.post(
       \`/actions/\${action_name}\`,
-      zValidator("json", schema as never),
+      // Custom hook funnels body-schema failures through the same
+      // ApiError envelope + 422 status an in-\`do\` ValidationError maps
+      // to (ERROR_MAP.ValidationError). Without it, @hono/zod-validator
+      // short-circuits with its own 400 + raw body — two statuses and
+      // two shapes for the same "malformed input" failure class on one
+      // endpoint. The OpenAPI doc only documents the 422/ApiError path.
+      zValidator("json", schema as never, (result, c) => {
+        if (!result.success) {
+          // \`result.error\` is a ZodError; the schema's \`never\` typing
+          // erases its shape, so read \`.message\` through a narrow cast.
+          const message = (result.error as { message?: string }).message;
+          const body: ApiError = {
+            error: "ValidationError",
+            detail: message,
+            code: "VALIDATION",
+          };
+          return c.json(body, 422);
+        }
+      }),
       async (c) => {
         try {
           const input = c.req.valid("json" as never) as unknown;
@@ -37610,6 +38492,7 @@ exports[`@rotorsoft/act-http — public API stability > stable public surface fo
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
+import { pii_fields } from "@rotorsoft/act";
 import { z } from "zod";
 
 /**
@@ -37860,6 +38743,46 @@ function strip_json_schema_meta(
   return rest;
 }
 
+/**
+ * Annotate the emitted request-body schema's sensitive properties so
+ * codegen / Swagger UI treat them as secrets rather than echoing them
+ * freely. \`z.toJSONSchema\` has no knowledge of the sensitive registry
+ * (\`sensitive()\` marks schemas out-of-band in a WeakMap), so we walk the
+ * action's declared sensitive fields — via \`pii_fields\`, the same lookup
+ * the orchestrator uses — and mark each matching property \`writeOnly:
+ * true\` + \`format: password\`. Non-object schemas and actions with no
+ * sensitive fields pass through untouched (the zero-cost common path).
+ *
+ * \`pii_fields\` only reports top-level keys of a \`z.object\`, and Zod's
+ * JSON Schema emit always renders those as members of \`properties\` — so
+ * once \`fields\` is non-empty, \`body_schema.properties[field]\` is
+ * guaranteed present. No defensive fallback needed.
+ *
+ * @internal
+ */
+function mark_sensitive_fields(
+  body_schema: Record<string, unknown>,
+  zod_schema: z.ZodType
+): Record<string, unknown> {
+  const fields = pii_fields(zod_schema);
+  if (fields.length === 0) return body_schema;
+  const properties = body_schema.properties as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const next_properties: Record<string, Record<string, unknown>> = {
+    ...properties,
+  };
+  for (const field of fields) {
+    next_properties[field] = {
+      ...properties[field],
+      writeOnly: true,
+      format: "password",
+    };
+  }
+  return { ...body_schema, properties: next_properties };
+}
+
 function build_operation(
   action_name: string,
   body_schema: Record<string, unknown>,
@@ -37972,9 +38895,12 @@ export function openapi<TApp extends ActRegistryView>(
   const paths: Record<string, OpenAPIPathItem> = {};
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
-    const zod_schema = state.actions[action_name];
-    const body_schema = strip_json_schema_meta(
-      z.toJSONSchema(zod_schema as z.ZodType) as Record<string, unknown>
+    const zod_schema = state.actions[action_name] as z.ZodType;
+    const body_schema = mark_sensitive_fields(
+      strip_json_schema_meta(
+        z.toJSONSchema(zod_schema) as Record<string, unknown>
+      ),
+      zod_schema
     );
     paths[\`\${base_path}/actions/\${action_name}\`] = {
       post: build_operation(action_name, body_schema, options),
@@ -38008,12 +38934,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -38077,6 +39008,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -38641,12 +39579,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -38710,6 +39653,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -38869,7 +39819,12 @@ export function make_finalizers(
  * \`express.raw({ type: "application/json" })\` (or whatever
  * content-type your webhooks use) ahead of the receiver middleware.
  * The middleware reads \`req.body\` as a \`Buffer | string\` and converts
- * to a UTF-8 string for hashing. Skip when unsigned.
+ * to a UTF-8 string for hashing. Skip when unsigned. If the raw parser
+ * isn't mounted (the default \`express.json()\` ate the bytes, leaving a
+ * parsed object the adapter can't hash), the middleware short-circuits
+ * with \`400 { error: "empty-body" }\` instead of hashing an empty string
+ * and rejecting every valid request with a misleading \`401
+ * bad-signature\`.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
@@ -39058,12 +40013,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -39127,6 +40087,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -39288,7 +40255,11 @@ export function make_finalizers(
  * default JSON parser eats the bytes — register a custom parser via
  * \`app.addContentTypeParser("application/json", { parseAs: "string" }, …)\`
  * and stash the string on \`request.rawBody\` (Fastify pattern). The
- * middleware reads \`request.rawBody\` for hashing. Skip when unsigned.
+ * middleware reads \`request.rawBody\` for hashing. Skip when unsigned. If
+ * \`request.rawBody\` is empty because the parser wasn't registered, the
+ * middleware short-circuits with \`400 { error: "empty-body" }\` instead
+ * of hashing an empty string and rejecting every valid request with a
+ * misleading \`401 bad-signature\`.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
@@ -39476,12 +40447,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -39545,6 +40521,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -39903,12 +40886,17 @@ import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link checkWebhook}. The shape splits
- * \`missing-key\` (a client error, mapped to HTTP 400) from the five
- * verification failures (authentication errors, HTTP 401) so each
- * maps to its own telemetry bucket.
+ * client/configuration errors (\`missing-key\`, \`empty-body\` — HTTP 400)
+ * from the five verification failures (authentication errors, HTTP 401)
+ * so each maps to its own telemetry bucket. \`empty-body\` is the
+ * misconfigured-raw-parser signal: \`secret\` is set but the resolved
+ * body is empty, so hashing it would compute an HMAC over \`\${ts}.\` and
+ * reject every otherwise-valid signed request with a misleading
+ * bad-signature — a distinct config error is far easier to diagnose.
  */
 export type CheckFailureReason =
   | "missing-key"
+  | "empty-body"
   | "missing-signature"
   | "missing-timestamp"
   | "stale"
@@ -39972,6 +40960,13 @@ export async function checkWebhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
+    // Raw body not captured (default JSON parser ate the bytes) but a
+    // secret is configured — hashing the empty string is a guaranteed
+    // bad-signature. Surface a distinct configuration error instead of a
+    // misleading 401 so the operator mounts the raw-body parser.
+    if (body === "") {
+      return { ok: false, status: 400, reason: "empty-body" };
+    }
     const verification = verifyWebhook(
       headers,
       body,
@@ -43901,9 +44896,26 @@ const logger: Logger = log();
 const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\\\\\]";
 
 const { Pool, types } = pg;
-types.setTypeParser(types.builtins.JSONB, (val) =>
-  JSON.parse(val, dateReviver)
-);
+
+/**
+ * Per-Pool type parser (#1198). Overrides ONLY the JSONB parser to revive
+ * ISO-date strings in event payloads to \`Date\`, delegating every other
+ * OID to pg's global default. Passed as the Pool's \`types\` option so the
+ * Date coercion is scoped to this store's connections — it never mutates
+ * the process-global \`pg.types\` registry, so a host app's other pg usage
+ * (Drizzle projections, ad-hoc queries) reads jsonb with the stock
+ * parser. This is the shape pg threads down to each pooled client.
+ */
+const JSONB_OID = types.builtins.JSONB;
+const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
+  getTypeParser: ((oid: number, format?: unknown) =>
+    oid === JSONB_OID
+      ? (val: string) => JSON.parse(val, dateReviver)
+      : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
+          oid,
+          format
+        )) as typeof types.getTypeParser,
+};
 
 type Config = Readonly<{
   schema: string;
@@ -44247,7 +45259,8 @@ export class PostgresStore implements Store {
       pii_encryption: ___,
       ...poolConfig
     } = this.config;
-    this._pool = new Pool(poolConfig);
+    // Per-Pool JSONB reviver (#1198): scoped here, never global.
+    this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = \`"\${this.config.schema}"."\${this.config.table}"\`;
     this._fqs = \`"\${this.config.schema}"."\${this.config.table}_streams"\`;
     this._channel = notify_channel(this.config.schema, this.config.table);
@@ -44568,11 +45581,17 @@ export class PostgresStore implements Store {
             : \`stream ~ $\${values.length}\`
         );
       }
-      if (names?.length) {
+      if (names !== undefined) {
+        // #1199: \`names: []\` means "match no event names" — an empty
+        // allow-list. \`name = ANY('{}')\` is always false, matching the
+        // InMemory/SQLite semantics. Historically a truthy \`names?.length\`
+        // guard dropped the empty filter and returned ALL — the opposite.
         values.push(names);
         conditions.push(\`name = ANY($\${values.length})\`);
       }
-      if (before) {
+      if (before !== undefined) {
+        // #1199: \`!== undefined\` so a falsy-zero \`before: 0\` (strictly
+        // "id < 0", i.e. match nothing) is honored, not dropped.
         values.push(before);
         conditions.push(\`id<$\${values.length}\`);
       }
@@ -45326,7 +46345,7 @@ export class PostgresStore implements Store {
       values.push(query.after);
       conditions.push(\`stream > $\${values.length}\`);
     }
-    let sql = \`SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM \${this._fqs}\`;
+    let sql = \`SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM \${this._fqs}\`;
     if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += \` ORDER BY stream LIMIT $\${values.length}\`;
@@ -45345,6 +46364,7 @@ export class PostgresStore implements Store {
           leased_until: Date | null;
           priority: number;
           lane: string;
+          deferred_at: Date | null;
         }>(sql, values),
         client.query<{ m: number | null }>(
           \`SELECT COALESCE(MAX(id), -1) AS m FROM \${this._fqt}\`
@@ -45364,6 +46384,9 @@ export class PostgresStore implements Store {
           leased_by: row.leased_by ?? undefined,
           leased_until: row.leased_until ?? undefined,
           lane: row.lane,
+          // Persisted as timestamptz; surface as ms since epoch (#1221) so
+          // the cold-start re-seed can re-arm the drain at the due-time.
+          deferred_at: row.deferred_at ? row.deferred_at.getTime() : undefined,
         });
         count++;
       }
@@ -46240,7 +47263,12 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { is_literal_source, StoreError, ValidationError } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  is_literal_source,
+  StoreError,
+  ValidationError,
+} from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -46289,20 +47317,82 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/**
+ * ISO-8601 shape (optional fractional seconds, optional timezone). Kept
+ * in sync with the PostgresStore reviver so payload dates round-trip
+ * identically across adapters (#1198).
+ * @internal
+ */
+const ISO_8601 =
+  /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
+
+/**
+ * \`JSON.parse\` reviver that revives ISO-date strings to \`Date\`. Parity
+ * with PG's JSONB reviver (#1198): a \`Date\` committed into event \`data\`
+ * reads back as a \`Date\`, not an ISO string — so an InMemory/PG → SQLite
+ * migration doesn't silently break reducers calling \`.getTime()\`.
+ * @internal
+ */
+const date_reviver = (_key: string, value: unknown): unknown =>
+  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
+/**
+ * Parse a JSON-encoded TEXT column, reviving ISO-date strings to \`Date\`
+ * for cross-adapter payload parity (#1198).
+ * @internal
+ */
+const parse_json = (raw: string): unknown => JSON.parse(raw, date_reviver);
+
+/**
+ * SQLite extended result code for a UNIQUE constraint violation
+ * (\`SQLITE_CONSTRAINT_UNIQUE\`). libsql surfaces it on the error's
+ * \`rawCode\`.
+ * @internal
+ */
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/**
+ * Recognize a \`(stream, version)\` unique-constraint violation from a
+ * libsql commit error (#1202). Detects via the extended result code when
+ * present, falling back to the message text (\`UNIQUE constraint failed\`)
+ * for drivers that surface only the message.
+ * @internal
+ */
+const is_unique_violation = (e: unknown): boolean => {
+  const err = e as { rawCode?: number; message?: unknown };
+  return (
+    err?.rawCode === SQLITE_CONSTRAINT_UNIQUE ||
+    (typeof err?.message === "string" &&
+      err.message.includes("UNIQUE constraint failed"))
+  );
+};
+
 /** Portable stream-filter body grammar: literal characters, \`.\` (any
  *  single character), and \`.*\` (any run). Everything else — escapes
  *  (\`\\.\`), character classes (\`[0-9]\`), grouping/alternation (\`(a|b)\`),
  *  quantifiers (\`+ ? { }\`), and mid-pattern anchors — has no faithful
- *  \`LIKE\` translation and must throw instead of silently mis-matching.
+ *  \`GLOB\` translation and must throw instead of silently mis-matching.
  *  @internal
  */
 const PORTABLE_BODY = /^(?:\\.\\*|\\.|[^\\\\^$.()[\\]{}|+?*])*$/;
 
 /** Translate a stream filter (regex-shaped or plain substring) into a
- *  SQL LIKE pattern. Honors \`^\` / \`$\` anchors and converts \`.*\` → \`%\`,
- *  \`.\` → \`_\`. Unanchored input gets \`%\` wildcards on both sides.
- *  Literal \`%\` / \`_\` in the pattern are escaped with \`\\\` so they match
- *  themselves — every consumer appends \`ESCAPE '\\'\` to its \`LIKE\`.
+ *  SQLite \`GLOB\` pattern.
+ *
+ *  #1197: \`GLOB\` — not \`LIKE\` — because \`GLOB\` is **case-sensitive**,
+ *  matching PG's \`~\` and InMemory's \`RegExp\`. SQLite's \`LIKE\` is ASCII
+ *  case-insensitive, and its per-connection \`PRAGMA case_sensitive_like\`
+ *  override is unreliable under libsql's pooled connections (a
+ *  transaction and a follow-up read can land on different connections).
+ *  \`GLOB\` carries its case-sensitivity in the operator itself, so it is
+ *  correct regardless of which pooled connection runs the statement.
+ *
+ *  Honors \`^\` / \`$\` anchors and converts \`.*\` → \`*\`, \`.\` → \`?\`.
+ *  Unanchored input gets \`*\` wildcards on both sides. \`GLOB\` has no
+ *  ESCAPE clause and \`%\` / \`_\` are ordinary literals under it — so no
+ *  escaping is needed. The portable grammar rejects \`*\`, \`?\`, and \`[\`
+ *  as literals (they are metacharacters), so a literal can never collide
+ *  with a \`GLOB\` wildcard.
  *
  *  Only the portable filter grammar documented on
  *  {@link QueryStreams.stream} is convertible: \`^\` / \`$\` anchors, \`.\`,
@@ -46313,16 +47403,16 @@ const PORTABLE_BODY = /^(?:\\.\\*|\\.|[^\\\\^$.()[\\]{}|+?*])*$/;
  *
  *  Examples:
  *  - \`^abc$\`  → \`abc\`        (exact)
- *  - \`^abc.*\` → \`abc%\`       (starts-with)
- *  - \`.*abc$\` → \`%abc\`       (ends-with)
- *  - \`abc\`    → \`%abc%\`      (contains)
- *  - \`a.c\`    → \`%a_c%\`      (single-char wildcard, contains)
- *  - \`^a_c$\`  → \`a\\_c\`       (literal underscore, escaped for LIKE)
+ *  - \`^abc.*\` → \`abc*\`       (starts-with)
+ *  - \`.*abc$\` → \`*abc\`       (ends-with)
+ *  - \`abc\`    → \`*abc*\`      (contains)
+ *  - \`a.c\`    → \`*a?c*\`      (single-char wildcard, contains)
+ *  - \`^a_c$\`  → \`a_c\`        (literal underscore — ordinary under GLOB)
  *  - \`(a|b)\`  → throws {@link ValidationError}
  *
  *  @internal exported for testing
  */
-export function streamPatternToLike(input: string): string {
+export function streamPatternToGlob(input: string): string {
   let s = input;
   const start = s.startsWith("^");
   const end = s.endsWith("$");
@@ -46330,29 +47420,29 @@ export function streamPatternToLike(input: string): string {
   if (end) s = s.slice(0, -1);
   if (!PORTABLE_BODY.test(s))
     throw new ValidationError(
-      \`stream filter pattern "\${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to LIKE; use stream_exact/source_exact for literal names\`,
+      \`stream filter pattern "\${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to GLOB; use stream_exact/source_exact for literal names\`,
       input,
       "non-portable stream filter pattern"
     );
   const tokens: string[] = [];
-  if (!start) tokens.push("%");
+  if (!start) tokens.push("*");
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c === ".") {
       if (s[i + 1] === "*") {
-        tokens.push("%");
+        tokens.push("*");
         i++;
-      } else tokens.push("_");
-    } else if (c === "%" || c === "_") tokens.push(\`\\\\\${c}\`);
-    else tokens.push(c);
+      } else tokens.push("?");
+    } else tokens.push(c);
   }
-  if (!end) tokens.push("%");
-  // Collapse adjacent \`%\` wildcards — e.g. \`^a.*\` would otherwise yield
-  // \`a%%\`. Token-level so escaped literals (\`\\%\`) are never merged.
+  if (!end) tokens.push("*");
+  // Collapse adjacent \`*\` wildcards — e.g. \`^a.*\` would otherwise yield
+  // \`a**\`. GLOB treats \`**\` as \`*\`, but collapsing keeps the output
+  // minimal and matches the pre-#1197 LIKE behavior.
   let out = "";
   let prev = "";
   for (const t of tokens) {
-    if (t === "%" && prev === "%") continue;
+    if (t === "*" && prev === "*") continue;
     out += t;
     prev = t;
   }
@@ -46556,18 +47646,20 @@ export class SqliteStore implements Store {
     expectedVersion?: number
   ): Promise<Committed<E, keyof E>[]> {
     const tx = await this.client.transaction("write");
+    // Hoisted so the catch can build a ConcurrencyError with the head
+    // version on a (stream, version) unique collision (#1202).
+    let current_version = -1;
     try {
       const version_row = await tx.execute({
         sql: "SELECT COALESCE(MAX(version), -1) as v FROM events WHERE stream = ?",
         args: [stream],
       });
-      const current_version = Number(version_row.rows[0].v);
+      current_version = Number(version_row.rows[0].v);
 
       if (
         typeof expectedVersion === "number" &&
         current_version !== expectedVersion
       ) {
-        const { ConcurrencyError } = await import("@rotorsoft/act");
         throw new ConcurrencyError(
           stream,
           current_version,
@@ -46611,7 +47703,22 @@ export class SqliteStore implements Store {
       return committed;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      // #1202: map the (stream, version) unique collision to
+      // ConcurrencyError — the same signal PG raises from 23505 — so a
+      // caller retries on the framework contract, not a raw libsql error.
+      // This is the race where the version probe passed but a concurrent
+      // INSERT (a second store on the same file, tooling, the act CLI)
+      // beat this one to the row. Every other driver error is wrapped in
+      // StoreError('commit') for parity with the adapter's other methods.
+      if (e instanceof ConcurrencyError) throw e;
+      if (is_unique_violation(e))
+        throw new ConcurrencyError(
+          stream,
+          current_version,
+          msgs as Message<Schemas, keyof Schemas>[],
+          expectedVersion ?? -1
+        );
+      throw new StoreError("commit", { cause: e });
     }
   }
 
@@ -46628,11 +47735,15 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ? ESCAPE '\\\\'";
-        args.push(streamPatternToLike(query.stream));
+        sql += " AND stream GLOB ?";
+        args.push(streamPatternToGlob(query.stream));
       }
     }
-    if (query?.names) {
+    if (query?.names !== undefined) {
+      // #1199: \`names: []\` means "match no event names". An empty
+      // placeholder list yields \`name IN ()\` which SQLite evaluates as
+      // always-false — matching the PG (\`= ANY('{}')\`) / InMemory
+      // semantics. \`!== undefined\` (not truthiness) keeps that explicit.
       sql += \` AND name IN (\${query.names.map(() => "?").join(",")})\`;
       args.push(...query.names);
     }
@@ -46686,8 +47797,8 @@ export class SqliteStore implements Store {
           version: Number(row.version),
           created: new Date(row.created as string),
           name: row.name as string,
-          data: JSON.parse(row.data as string),
-          meta: JSON.parse(row.meta as string),
+          data: parse_json(row.data as string) as any,
+          meta: parse_json(row.meta as string) as any,
           pii: pii_value,
         })
       );
@@ -46710,15 +47821,15 @@ export class SqliteStore implements Store {
     }>
   ) {
     // Fail loud at registration for a claim source this adapter cannot
-    // match: libsql has no \`REGEXP\`, and the portable LIKE grammar cannot
+    // match: libsql has no \`REGEXP\`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
     // subset (e.g. \`^(A|B)$\`) would otherwise silently never claim its
-    // stream, so \`streamPatternToLike\` throws \`ValidationError\` here —
+    // stream, so \`streamPatternToGlob\` throws \`ValidationError\` here —
     // pointing operators to InMemory/PG for full regex claim sources —
     // before any row is written. Literal sources skip the check entirely.
     for (const { source } of streams) {
       if (source !== undefined && !is_literal_source(source))
-        streamPatternToLike(source);
+        streamPatternToGlob(source);
     }
     const tx = await this.client.transaction("write");
     try {
@@ -46800,9 +47911,9 @@ export class SqliteStore implements Store {
           // Has-work probe. A literal \`source\` (no regex metacharacter)
           // matches by equality — index-friendly, and exact so "s1" never
           // claims "s12". A portable pattern (anchors, \`.\`, \`.*\`) matches
-          // via the same LIKE translation the StreamFilter surfaces use.
+          // via the same GLOB translation the StreamFilter surfaces use.
           // Non-portable patterns (alternation/grouping) never reach here:
-          // \`subscribe\` rejects them up front, so \`streamPatternToLike\`
+          // \`subscribe\` rejects them up front, so \`streamPatternToGlob\`
           // below only sees the portable subset.
           const check = is_literal_source(source)
             ? await tx.execute({
@@ -46810,8 +47921,8 @@ export class SqliteStore implements Store {
                 args: [at, source],
               })
             : await tx.execute({
-                sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\\\' LIMIT 1\`,
-                args: [at, streamPatternToLike(source)],
+                sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream GLOB ? LIMIT 1\`,
+                args: [at, streamPatternToGlob(source)],
               });
           has_events = check.rows.length > 0;
         } else {
@@ -46980,8 +48091,8 @@ export class SqliteStore implements Store {
         conditions.push("stream = ?");
         args.push(filter.stream);
       } else {
-        conditions.push("stream LIKE ? ESCAPE '\\\\'");
-        args.push(streamPatternToLike(filter.stream));
+        conditions.push("stream GLOB ?");
+        args.push(streamPatternToGlob(filter.stream));
       }
     }
     if (filter.source !== undefined) {
@@ -46990,8 +48101,8 @@ export class SqliteStore implements Store {
         conditions.push("source = ?");
         args.push(filter.source);
       } else {
-        conditions.push("source LIKE ? ESCAPE '\\\\'");
-        args.push(streamPatternToLike(filter.source));
+        conditions.push("source GLOB ?");
+        args.push(streamPatternToGlob(filter.source));
       }
     }
     if (filter.blocked !== undefined) {
@@ -47082,7 +48193,7 @@ export class SqliteStore implements Store {
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
     let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM streams WHERE 1=1";
+      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM streams WHERE 1=1";
     const args: unknown[] = [];
 
     if (query?.stream !== undefined) {
@@ -47090,8 +48201,8 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ? ESCAPE '\\\\'";
-        args.push(streamPatternToLike(query.stream));
+        sql += " AND stream GLOB ?";
+        args.push(streamPatternToGlob(query.stream));
       }
     }
     if (query?.source !== undefined) {
@@ -47100,8 +48211,8 @@ export class SqliteStore implements Store {
         sql += " AND source = ?";
         args.push(query.source);
       } else {
-        sql += " AND source LIKE ? ESCAPE '\\\\'";
-        args.push(streamPatternToLike(query.source));
+        sql += " AND source GLOB ?";
+        args.push(streamPatternToGlob(query.source));
       }
     }
     if (query?.blocked !== undefined) {
@@ -47127,6 +48238,9 @@ export class SqliteStore implements Store {
     let count = 0;
     for (const row of streamsResult.rows) {
       const leased_until = row.leased_until as string | null;
+      // Persisted as an ISO string (like leased_until); surface as ms since
+      // epoch (#1221) so the cold-start re-seed re-arms at the due-time.
+      const deferred_at = row.deferred_at as string | null;
       callback({
         stream: row.stream as string,
         source: (row.source as string | null) ?? undefined,
@@ -47138,6 +48252,7 @@ export class SqliteStore implements Store {
         leased_by: (row.leased_by as string | null) ?? undefined,
         leased_until: leased_until ? new Date(leased_until) : undefined,
         lane: row.lane as string,
+        deferred_at: deferred_at ? new Date(deferred_at).getTime() : undefined,
       });
       count++;
     }
@@ -47203,8 +48318,8 @@ export class SqliteStore implements Store {
         where.push(\`e.stream = ?\`);
         args.push(input.stream);
       } else {
-        where.push(\`e.stream LIKE ? ESCAPE '\\\\'\`);
-        args.push(streamPatternToLike(input.stream));
+        where.push(\`e.stream GLOB ?\`);
+        args.push(streamPatternToGlob(input.stream));
       }
     }
     if (exclude.length) {
@@ -47306,8 +48421,8 @@ export class SqliteStore implements Store {
         stream: row.stream as string,
         version: Number(row.version),
         name: row.name as string,
-        data: JSON.parse(row.data as string),
-        meta: JSON.parse(row.meta as string),
+        data: parse_json(row.data as string) as any,
+        meta: parse_json(row.meta as string) as any,
         created: new Date(row.created as string),
         pii: await this._parse_pii_from_read(row.pii),
       }) as Committed<E, keyof E>;
@@ -47419,8 +48534,8 @@ export class SqliteStore implements Store {
         stream: stream as string,
         version: Number(version),
         name: name as string,
-        data: JSON.parse(data as string),
-        meta: JSON.parse(meta as string),
+        data: parse_json(data as string) as any,
+        meta: parse_json(meta as string) as any,
         created: new Date(created as string),
         pii: await this._parse_pii_from_read(pii),
       }) as Committed<E, keyof E>;
@@ -47536,8 +48651,8 @@ export class SqliteStore implements Store {
             version: Number(row.version),
             created: new Date(row.created as string),
             name: row.name as string,
-            data: JSON.parse(row.data as string),
-            meta: JSON.parse(row.meta as string),
+            data: parse_json(row.data as string) as any,
+            meta: parse_json(row.meta as string) as any,
           },
           before,
         });
@@ -48671,7 +49786,13 @@ async function load_surface(entry: string): Promise<string> {
 
 // === store-differential-tck.ts ===
 import { SNAP_EVENT } from "@rotorsoft/act";
-import type { Committed, Schemas, Store } from "@rotorsoft/act/types";
+import type {
+  BlockedLease,
+  Committed,
+  Lease,
+  Schemas,
+  Store,
+} from "@rotorsoft/act/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
 import {
@@ -48697,6 +49818,33 @@ export type DifferentialStore = {
    * harness owns its lifecycle (\`drop\` + \`seed\`, then \`dispose\`).
    */
   readonly factory: () => Store | Promise<Store>;
+};
+
+/**
+ * Known cross-adapter divergences the caller wants the differential to
+ * skip until the backing fix lands. Each flag suppresses exactly the
+ * assertions that a currently-filed bug makes red, so the differential
+ * stays green on master and the gate un-gates itself (delete the flag)
+ * when the fix merges. Every flag names its issue so the reason is
+ * auditable at the call site.
+ */
+export type DifferentialSkips = {
+  /**
+   * #1197 — SQLite \`LIKE\` is ASCII-case-insensitive, so a **mixed-case
+   * regex pattern** filter overmatches vs PG (\`~\`) / InMemory (\`RegExp\`),
+   * which are case-sensitive. Skips only the pattern-driven mixed-case
+   * assertions; exact-match (\`stream_exact\`) mixed-case still runs, since
+   * that path is case-exact on every adapter. Un-gate when #1197 lands.
+   */
+  readonly caseInsensitivePatterns?: boolean;
+  /**
+   * #1199 — \`names: []\` and falsy-zero \`before\`/\`after: 0\` guards differ
+   * across adapters (\`names: []\` → PG returns all, InMemory/SQLite return
+   * none; \`before: 0\` / \`after: 0\` are dropped by some adapters' truthy
+   * guards). Skips only those specific edge-input query assertions.
+   * Un-gate when #1199 lands.
+   */
+  readonly queryEdgeInputs?: boolean;
 };
 
 /**
@@ -48731,6 +49879,22 @@ export type StoreDifferentialTckOptions = {
    * explores; fewer keep durable-adapter suites fast. Default \`8\`.
    */
   readonly runs?: number;
+  /**
+   * Whether the comparand adapters support the optional {@link Store.forget_pii}
+   * surface (and the \`pii\` field on commit). When \`true\`, the workload
+   * commits PII-bearing events and the differential asserts that
+   * \`forget_pii\` wipes them identically across adapters. All in-tree
+   * adapters implement it, so it defaults to \`true\`; a third-party store
+   * that opts out sets it \`false\`. Default \`true\`.
+   */
+  readonly piiIsolation?: boolean;
+  /**
+   * Known-divergence gates — see {@link DifferentialSkips}. Each flag
+   * suppresses the assertions a currently-filed bug makes red so the
+   * differential stays green until the fix merges. Default: nothing
+   * skipped.
+   */
+  readonly skip?: DifferentialSkips;
 };
 
 /**
@@ -48753,18 +49917,44 @@ type NormalizedEvent = {
   readonly version: number;
   readonly name: string;
   readonly data: unknown;
+  /** \`true\` when the event carried PII on load, \`false\`/absent otherwise. */
+  readonly pii?: boolean;
 };
 
 /**
  * Strip the fields that legitimately differ between adapters — absolute
  * event \`id\`, \`created\` timestamp, and \`meta\` (correlation/causation
  * uuids) — leaving only what defines "the right events in the right
- * order": stream, version, name, and data. Event ordering is preserved
- * by the position of each normalized event in the collected array.
+ * order": stream, version, name, data, and whether PII was present. Event
+ * ordering is preserved by the position of each normalized event in the
+ * collected array.
+ *
+ * PII is normalized to a boolean presence flag rather than its plaintext:
+ * the differential's job is "did \`forget_pii\` erase the same rows on every
+ * adapter", not "does every adapter round-trip the same ciphertext" (which
+ * the per-adapter \`pii_isolation\` suite already pins).
  */
 const normalize_event = (
   e: Committed<Schemas, keyof Schemas>
 ): NormalizedEvent => ({
+  stream: e.stream,
+  version: e.version,
+  name: e.name,
+  data: e.data,
+  pii: e.pii != null,
+});
+
+/**
+ * Identity-only view (no PII flag). \`query_stats\` head/tail is a
+ * stream-shape summary — whether an adapter hydrates the isolated PII
+ * column on the head/tail rows it returns is not part of that contract
+ * (the per-adapter \`pii_isolation\` suite pins hydration on \`query\` /
+ * \`commit\`, not on \`query_stats\`). Comparing PII presence here would
+ * over-specify and flag a legitimate adapter freedom as a divergence.
+ */
+const normalize_identity = (
+  e: Committed<Schemas, keyof Schemas>
+): Omit<NormalizedEvent, "pii"> => ({
   stream: e.stream,
   version: e.version,
   name: e.name,
@@ -48777,9 +49967,40 @@ type PlanOp =
       readonly t: "commit";
       readonly stream: string;
       readonly msgs: CounterMessage[];
+      /** When set, the batch's first message carries this PII payload. */
+      readonly pii?: Record<string, unknown>;
     }
   | { readonly t: "snapshot"; readonly stream: string; readonly count: number }
-  | { readonly t: "truncate"; readonly stream: string; readonly count: number };
+  | { readonly t: "truncate"; readonly stream: string; readonly count: number }
+  // Windowed truncate: prefix-delete below the closest safe boundary
+  // snapshot with \`created < before\` (and \`id <= max_id\` when set). The
+  // op writes a snapshot first (in \`apply_plan\`) so a boundary always
+  // exists, making the prune deterministic across adapters.
+  | {
+      readonly t: "truncate_windowed";
+      readonly stream: string;
+      readonly max_id: boolean;
+    }
+  // Lease lifecycle against a subscription stream (indexed into
+  // \`plan.subs\`). \`claim\` leases every claimable stream under a fresh
+  // holder; \`apply_plan\` records which holder now owns each stream so the
+  // finalize verbs (\`ack\` / \`defer\` / \`block\`) target the *real* current
+  // holder on each adapter. That makes the durable outcome (watermark,
+  // retry, blocked, error, deferred) a deterministic function of the op
+  // sequence — independent of the exact holder UUID (normalized away) and
+  // of any adapter's claim-frontier tie-break. A verb whose target stream
+  // is not currently held is a no-op on every adapter, identically.
+  | { readonly t: "claim"; readonly millis: number }
+  | { readonly t: "ack"; readonly sub: number }
+  | { readonly t: "defer"; readonly sub: number; readonly due: number }
+  | { readonly t: "block"; readonly sub: number; readonly error: string }
+  | { readonly t: "unblock"; readonly sub: number }
+  | { readonly t: "reset_sub"; readonly sub: number }
+  | {
+      readonly t: "prioritize";
+      readonly sub: number;
+      readonly priority: number;
+    };
 
 /** A subscription registered for the \`query_streams\` comparison. */
 type SubSpec = {
@@ -48789,6 +50010,18 @@ type SubSpec = {
   readonly priority: number;
 };
 
+/** A query-option matrix entry compared under a global forward scan. */
+type QueryCase = {
+  readonly label: string;
+  readonly query: Record<string, unknown>;
+  /**
+   * When set, this case is only well-defined once the named fix lands;
+   * the harness skips it while the matching {@link DifferentialSkips}
+   * flag is on.
+   */
+  readonly gated?: keyof DifferentialSkips;
+};
+
 /** The full generated workload, built once and replayed per store. */
 type Plan = {
   readonly event_prefix: string;
@@ -48796,16 +50029,26 @@ type Plan = {
   readonly sub_prefix: string;
   readonly ops: PlanOp[];
   readonly subs: SubSpec[];
+  readonly correlation: string;
+  readonly pii_stream: string;
+  readonly query_cases: QueryCase[];
+  /** The single event name guaranteed to appear (for \`names\` filters). */
+  readonly filter_name: string;
 };
 
 /**
  * Build a deterministic, seeded workload with a **randomized** operation
  * sequence. Unlike a fixed script, the middle of each plan is a seeded
- * shuffle of \`commit\` / \`snapshot\` / \`truncate\` across random streams, so
- * different seeds probe different interleavings — pre/post-snapshot
- * commits, back-to-back truncates, a snapshot landing immediately after a
- * truncate, and so on. The same seed always reproduces the same sequence,
- * so any divergence the fuzz finds is replayable.
+ * shuffle of \`commit\` / \`snapshot\` / \`truncate\` (full + windowed) plus the
+ * **lease lifecycle** (\`claim\` / \`ack\` / \`defer\` / \`block\` / \`unblock\` /
+ * \`reset\` / \`prioritize\`) across random streams, so different seeds probe
+ * different interleavings — pre/post-snapshot commits, a claim landing
+ * between two truncates, a block-then-unblock, and so on. The same seed
+ * always reproduces the same sequence, so any divergence the fuzz finds is
+ * replayable.
+ *
+ * Stream names carry **mixed case** so a case-sensitivity divergence in a
+ * pattern filter surfaces as a diff (the whole point of #1197's coverage).
  *
  * Two invariants are pinned regardless of seed so the comparison stays
  * well-defined across adapters:
@@ -48819,15 +50062,24 @@ type Plan = {
  * Event types cycle inc → dec → reset via a shared cursor, so all three
  * payload shapes appear in every plan.
  */
-const build_plan = (seed: number, stream_count: number): Plan => {
+const build_plan = (
+  seed: number,
+  stream_count: number,
+  pii_isolation: boolean
+): Plan => {
   const rng = mulberry32(seed);
   const tag = uid();
-  const event_prefix = \`diff-\${tag}-evt-\`;
-  const sub_prefix = \`diff-\${tag}-sub-\`;
+  // Mixed-case prefixes: an upper-cased segment lands inside every stream
+  // and subscription name, so a case-insensitive pattern filter (SQLite
+  // LIKE, #1197) overmatches and diverges from the case-sensitive
+  // reference. A lower-only corpus can never surface that class of bug.
+  const event_prefix = \`Diff-\${tag}-Evt-\`;
+  const sub_prefix = \`Diff-\${tag}-Sub-\`;
   const event_streams = Array.from(
     { length: stream_count },
-    (_, i) => \`\${event_prefix}\${i}\`
+    (_, i) => \`\${event_prefix}S\${i}\`
   );
+  const correlation = \`corr-\${tag}\`;
 
   let type_cursor = 0;
   const next_msg = (): CounterMessage => {
@@ -48839,67 +50091,183 @@ const build_plan = (seed: number, stream_count: number): Plan => {
     Array.from({ length: 1 + Math.floor(rng() * 3) }, next_msg);
   const pick_stream = (): string =>
     event_streams[Math.floor(rng() * event_streams.length)];
-
-  const ops: PlanOp[] = [];
-  // Opening: every stream commits a batch so it exists before any
-  // snapshot/truncate references it.
-  for (const stream of event_streams)
-    ops.push({ t: "commit", stream, msgs: batch() });
-
-  // Randomized middle: a seeded sequence of commits, inline snapshots, and
-  // truncates against random streams. Length varies by seed (8..23) so the
-  // operation count itself is part of the explored input space.
-  const middle = 8 + Math.floor(rng() * 16);
-  for (let i = 0; i < middle; i++) {
-    const stream = pick_stream();
-    const kind = Math.floor(rng() * 3);
-    if (kind === 0) ops.push({ t: "commit", stream, msgs: batch() });
-    else if (kind === 1)
-      ops.push({ t: "snapshot", stream, count: Math.floor(rng() * 1000) });
-    else ops.push({ t: "truncate", stream, count: Math.floor(rng() * 1000) });
-  }
-
-  // Closing: every stream commits a final batch so it ends with real
-  // events — keeps query_stats head/tail well-defined after any truncate.
-  for (const stream of event_streams)
-    ops.push({ t: "commit", stream, msgs: batch() });
-
-  // Subscriptions for query_streams: each targets one event stream as its
-  // source, with a rotating lane and priority. No claims are issued, so
-  // every watermark stays at -1 and nothing is blocked — fully
-  // deterministic regardless of adapter clocks.
+  // Each subscription consumes from its **own dedicated source stream**
+  // that only ever receives a single opening commit and is never truncated.
+  // Decoupling the lease sources from the truncate-churned \`event_streams\`
+  // is what makes \`claim\` eligibility identical across adapters: every
+  // subscription has exactly one unit of work at watermark -1, so a wide-
+  // budget claim leases the same set on every store — the lease-lifecycle
+  // diff then reflects only the ack/block/unblock/reset ops, not adapter
+  // differences in "does this source still have events after a truncate".
   const lanes = ["default", "slow", "fast"];
-  const subs: SubSpec[] = event_streams.map((source, i) => ({
-    stream: \`\${sub_prefix}\${i}\`,
+  const lease_prefix = \`Diff-\${tag}-Src-\`;
+  const lease_sources = event_streams.map((_, i) => \`\${lease_prefix}S\${i}\`);
+  const subs: SubSpec[] = lease_sources.map((source, i) => ({
+    stream: \`\${sub_prefix}S\${i}\`,
     source,
     lane: lanes[i % lanes.length],
     priority: i % 4,
   }));
+  const pick_sub = (): number => Math.floor(rng() * subs.length);
 
-  return { event_prefix, event_streams, sub_prefix, ops, subs };
+  const ops: PlanOp[] = [];
+  // Opening: every stream commits a batch so it exists before any
+  // snapshot/truncate references it. The first stream's opening batch
+  // carries PII (when the adapter supports it) so \`forget_pii\` has
+  // something to erase.
+  const pii_stream = event_streams[0];
+  event_streams.forEach((stream, i) => {
+    ops.push({
+      t: "commit",
+      stream,
+      msgs: batch(),
+      pii:
+        pii_isolation && i === 0
+          ? { email: \`u-\${tag}@example.com\`, name: "Ursula" }
+          : undefined,
+    });
+  });
+  // One commit per lease source so every subscription starts with exactly
+  // one unit of work at watermark -1. These streams are never truncated.
+  for (const src of lease_sources)
+    ops.push({ t: "commit", stream: src, msgs: [inc(1)] });
+
+  // Register every subscription up front so the lease-lifecycle ops in the
+  // middle have claimable streams. A fresh subscription's watermark is -1.
+  // (Applied via \`subscribe\` before the ops loop in \`apply_plan\`.)
+
+  // Randomized middle: a seeded sequence over the full op vocabulary.
+  const middle = 12 + Math.floor(rng() * 20);
+  for (let i = 0; i < middle; i++) {
+    const kind = Math.floor(rng() * 10);
+    if (kind === 0) {
+      ops.push({ t: "commit", stream: pick_stream(), msgs: batch() });
+    } else if (kind === 1) {
+      ops.push({
+        t: "snapshot",
+        stream: pick_stream(),
+        count: Math.floor(rng() * 1000),
+      });
+    } else if (kind === 2) {
+      ops.push({
+        t: "truncate",
+        stream: pick_stream(),
+        count: Math.floor(rng() * 1000),
+      });
+    } else if (kind === 3) {
+      ops.push({
+        t: "truncate_windowed",
+        stream: pick_stream(),
+        max_id: rng() < 0.5,
+      });
+    } else if (kind === 4) {
+      // Large lease window so the claim holds; retry counters advance
+      // deterministically (claim increments, ack resets).
+      ops.push({ t: "claim", millis: 100_000 });
+    } else if (kind === 5) {
+      ops.push({ t: "ack", sub: pick_sub() });
+    } else if (kind === 6) {
+      // Deterministic due-time relative to a fixed epoch so \`deferred_at\`
+      // is identical on every adapter. Far in the future so the deferred
+      // stream stays held-out.
+      ops.push({
+        t: "defer",
+        sub: pick_sub(),
+        due: 4_102_444_800_000 + Math.floor(rng() * 1000),
+      });
+    } else if (kind === 7) {
+      ops.push({
+        t: "block",
+        sub: pick_sub(),
+        error: \`boom-\${Math.floor(rng() * 100)}\`,
+      });
+    } else if (kind === 8) {
+      ops.push({ t: "unblock", sub: pick_sub() });
+    } else {
+      // reset / prioritize share the last bucket via a sub-toss.
+      if (rng() < 0.5) ops.push({ t: "reset_sub", sub: pick_sub() });
+      else
+        ops.push({
+          t: "prioritize",
+          sub: pick_sub(),
+          priority: Math.floor(rng() * 10),
+        });
+    }
+  }
+
+  // Closing: every stream commits a final batch so it ends with real
+  // events — keeps query_stats head/tail well-defined after any truncate.
+  const filter_name = "Incremented";
+  for (const stream of event_streams)
+    ops.push({ t: "commit", stream, msgs: [inc(1)] });
+
+  // Query-option matrix compared under a global forward/backward scan.
+  // Each case exercises a distinct filter dimension; the normalized event
+  // list must match across adapters. Edge-input cases (\`names: []\`,
+  // falsy-zero bounds) are gated behind #1199 until the guards converge.
+  const query_cases: QueryCase[] = [
+    {
+      label: "names filter (single event name)",
+      query: { stream: \`^\${event_prefix}\`, names: [filter_name] },
+    },
+    {
+      label: "correlation filter",
+      query: { stream: \`^\${event_prefix}\`, correlation },
+    },
+    {
+      label: "limit bound",
+      query: { stream: \`^\${event_prefix}\`, limit: 3 },
+    },
+    {
+      label: "backward + limit",
+      query: { stream: \`^\${event_prefix}\`, backward: true, limit: 4 },
+    },
+    // Absolute \`id\` bounds (\`after\`/\`before\` with positive ids) are
+    // deliberately absent: event ids are the canonical "legitimately
+    // differs between adapters" field (see \`normalize_event\`), and full
+    // truncates renumber them differently per store, so a positive id
+    // bound selects a different absolute window on each adapter. The
+    // gated falsy-zero cases below compare only the *guard* behavior
+    // (filter applied → subset, vs filter dropped → all), which stays a
+    // well-defined divergence regardless of the concrete id values.
+    // #1199 edge inputs — opposite semantics across adapters today.
+    {
+      label: "empty names filter",
+      query: { stream: \`^\${event_prefix}\`, names: [] as string[] },
+      gated: "queryEdgeInputs",
+    },
+    {
+      label: "before: 0 (falsy-zero guard)",
+      query: { stream: \`^\${event_prefix}\`, before: 0 },
+      gated: "queryEdgeInputs",
+    },
+    {
+      label: "backward + after: 0 (falsy-zero guard)",
+      query: { stream: \`^\${event_prefix}\`, backward: true, after: 0 },
+      gated: "queryEdgeInputs",
+    },
+  ];
+
+  return {
+    event_prefix,
+    event_streams,
+    sub_prefix,
+    ops,
+    subs,
+    correlation,
+    pii_stream,
+    query_cases,
+    filter_name,
+  };
 };
 
 /** Replay the generated workload against a single store. */
-const apply_plan = async (store: Store, plan: Plan): Promise<void> => {
-  for (const op of plan.ops) {
-    if (op.t === "commit") {
-      await store.commit<CounterEvents>(
-        op.stream,
-        op.msgs,
-        make_meta({ stream: op.stream })
-      );
-    } else if (op.t === "snapshot") {
-      await store.commit(
-        op.stream,
-        [{ name: SNAP_EVENT, data: { count: op.count } }],
-        make_meta({ stream: op.stream })
-      );
-    } else {
-      await store.truncate([
-        { stream: op.stream, snapshot: { count: op.count } },
-      ]);
-    }
-  }
+const apply_plan = async (
+  store: Store,
+  plan: Plan,
+  pii_isolation: boolean
+): Promise<void> => {
+  // Register subscriptions first so the lease-lifecycle ops have targets.
   await store.subscribe(
     plan.subs.map((s) => ({
       stream: s.stream,
@@ -48908,16 +50276,134 @@ const apply_plan = async (store: Store, plan: Plan): Promise<void> => {
       priority: s.priority,
     }))
   );
+
+  // Adapter-local map of the lease holder currently owning each of *this
+  // plan's* subscription streams, kept in sync from \`claim\` results. The
+  // finalize verbs read the real current holder so their durable effect is
+  // a deterministic function of the op sequence — the holder UUID itself is
+  // an adapter detail (normalized away in the assertions). A verb whose
+  // target isn't held is skipped, exactly as an unheld \`ack\`/\`block\` would
+  // no-op inside the adapter.
+  const held = new Map<string, string>();
+  const owned = new Set(plan.subs.map((s) => s.stream));
+
+  for (const op of plan.ops) {
+    if (op.t === "commit") {
+      const msgs =
+        op.pii && pii_isolation
+          ? op.msgs.map((m, i) => (i === 0 ? { ...m, pii: op.pii } : m))
+          : op.msgs;
+      await store.commit<CounterEvents>(
+        op.stream,
+        msgs as CounterMessage[],
+        make_meta({ stream: op.stream, correlation: plan.correlation })
+      );
+    } else if (op.t === "snapshot") {
+      await store.commit(
+        op.stream,
+        [{ name: SNAP_EVENT, data: { count: op.count } }],
+        make_meta({ stream: op.stream, correlation: plan.correlation })
+      );
+    } else if (op.t === "truncate") {
+      await store.truncate([
+        { stream: op.stream, snapshot: { count: op.count } },
+      ]);
+    } else if (op.t === "truncate_windowed") {
+      // Write a boundary snapshot, then prefix-delete below it. \`before\`
+      // sits just after the snapshot's commit time; \`max_id\` (when set) is
+      // wide so it never excludes the boundary. Deterministic across
+      // adapters: the boundary is a real event the workload wrote.
+      await store.commit(
+        op.stream,
+        [{ name: SNAP_EVENT, data: { count: 1 } }],
+        make_meta({ stream: op.stream, correlation: plan.correlation })
+      );
+      await store.truncate([
+        {
+          stream: op.stream,
+          before: new Date(Date.now() + 60_000),
+          // A wide cap that still fits a 32-bit event-id column, so it
+          // never excludes the boundary snapshot on any adapter.
+          ...(op.max_id ? { max_id: 2_147_483_647 } : {}),
+        },
+      ]);
+    } else if (op.t === "claim") {
+      // Budget wide enough to lease every claimable stream in one call, so
+      // *which* streams get leased never depends on an adapter's frontier
+      // tie-break order — every unleased, unblocked, non-deferred stream is
+      // claimed under a fresh holder. Record the new holder for this plan's
+      // streams; the finalize verbs read it back.
+      const by = uid();
+      const leased = await store.claim(100_000, 100_000, by, op.millis);
+      for (const l of leased) if (owned.has(l.stream)) held.set(l.stream, by);
+    } else if (op.t === "ack") {
+      const stream = plan.subs[op.sub].stream;
+      const by = held.get(stream);
+      if (by) {
+        // Advance the watermark to 0 (the opening event) and release.
+        await store.ack([{ stream, at: 0, by, retry: 0, lagging: true }]);
+        held.delete(stream);
+      }
+    } else if (op.t === "defer") {
+      const stream = plan.subs[op.sub].stream;
+      const by = held.get(stream);
+      if (by) {
+        const lease: Lease = {
+          stream,
+          at: 0,
+          by,
+          retry: 0,
+          lagging: true,
+          due: op.due,
+        };
+        await store.ack([lease]);
+        held.delete(stream);
+      }
+    } else if (op.t === "block") {
+      const stream = plan.subs[op.sub].stream;
+      const by = held.get(stream);
+      if (by) {
+        const lease: BlockedLease = {
+          stream,
+          at: 0,
+          by,
+          retry: 0,
+          lagging: true,
+          error: op.error,
+        };
+        await store.block([lease]);
+        held.delete(stream);
+      }
+    } else if (op.t === "unblock") {
+      const stream = plan.subs[op.sub].stream;
+      await store.unblock([stream]);
+      held.delete(stream);
+    } else if (op.t === "reset_sub") {
+      const stream = plan.subs[op.sub].stream;
+      await store.reset([stream]);
+      held.delete(stream);
+    } else {
+      await store.prioritize(
+        { stream: plan.subs[op.sub].stream, stream_exact: true },
+        op.priority
+      );
+    }
+  }
 };
 
 /**
- * Cross-adapter differential contract (#1030, fuzz workloads #1057).
+ * Cross-adapter differential contract (#1030, fuzz workloads #1057,
+ * lease/truncate/pii/query fuzz #1200).
  *
  * Adapters can drift in ways per-adapter cases don't catch — event
  * ordering, the \`with_snaps\` snapshot floor, the exact shape of
- * \`query_stats\` / \`query_streams\` output. This harness drives a **family
- * of randomized, seeded workloads** (commits, inline snapshots, truncates,
- * subscriptions) against every store in \`options.stores\`, then asserts
+ * \`query_stats\` / \`query_streams\` output, the lease lifecycle's effect on
+ * a stream's \`retry\`/\`blocked\`/\`error\`, windowed-truncate boundaries,
+ * \`forget_pii\` erasure, and query-option edge cases. This harness drives a
+ * **family of randomized, seeded workloads** — commits (some PII-bearing),
+ * inline + windowed truncates, subscriptions, and the full lease lifecycle
+ * (\`claim\` / \`ack\` / \`defer\` / \`block\` / \`unblock\` / \`reset\` /
+ * \`prioritize\`) — against every store in \`options.stores\`, then asserts
  * their **normalized** outputs are byte-for-byte identical for every
  * workload.
  *
@@ -48928,10 +50414,12 @@ const apply_plan = async (store: Store, plan: Plan): Promise<void> => {
  *
  * Normalization drops only the fields that legitimately differ between
  * stores (absolute event ids, \`created\` timestamps, correlation/causation
- * uuids) and keeps everything that defines correctness (stream, version,
- * name, data, and emission order). A one-adapter \`with_snaps\` regression —
- * the canonical failure mode — surfaces as a diff against the in-memory
- * reference, with the offending seed in the describe block.
+ * uuids, lease holder UUIDs, and wall-clock lease expiries) and keeps
+ * everything that defines correctness (stream, version, name, data,
+ * emission order, and the durable subscription state a lease op leaves
+ * behind: watermark, retry, blocked, error, priority, lane). Stream names
+ * carry mixed case so a case-insensitive pattern filter (#1197) surfaces as
+ * a diff.
  *
  * Wire it with the in-memory store as the reference and one or more
  * durable adapters as comparands:
@@ -48958,8 +50446,13 @@ export const runStoreDifferentialTck = (
   describe(\`TCK / Store differential / \${options.name}\`, () => {
     const base_seed = options.seed ?? 0xac7;
     const stream_count = options.streams ?? 4;
+    const pii_isolation = options.piiIsolation ?? true;
+    // Spread-merge (not \`?? {}\`) so an absent \`skip\` carries no branch: the
+    // spread of \`undefined\` yields \`{}\` with nothing for coverage to owe —
+    // mirrors \`store-tck.ts\`'s \`{ ...options.capabilities }\`.
+    const skip: DifferentialSkips = { ...options.skip };
     const plans = Array.from({ length: options.runs ?? 8 }, (_, r) =>
-      build_plan(base_seed + r, stream_count)
+      build_plan(base_seed + r, stream_count, pii_isolation)
     );
     const live: Array<{ name: string; store: Store }> = [];
 
@@ -48971,7 +50464,7 @@ export const runStoreDifferentialTck = (
         // Each plan namespaces its streams with a unique tag, so every
         // workload coexists in one store — a single drop+seed per store
         // keeps the durable-adapter cost flat regardless of \`runs\`.
-        for (const plan of plans) await apply_plan(store, plan);
+        for (const plan of plans) await apply_plan(store, plan, pii_isolation);
         live.push({ name: spec.name, store });
       }
     });
@@ -49050,6 +50543,25 @@ export const runStoreDifferentialTck = (
           });
         });
 
+        // Query-option matrix (#1200): each filter dimension must select
+        // the same normalized events on every adapter. Gated edge-input
+        // cases (#1199) are skipped while the matching flag is on.
+        plan.query_cases.forEach((qc) => {
+          const gated = qc.gated && skip[qc.gated];
+          it.skipIf(gated)(
+            \`yields identical events under \${qc.label}\`,
+            async () => {
+              await assert_identical(\`query / \${qc.label}\`, async (store) => {
+                const out: NormalizedEvent[] = [];
+                await store.query<Schemas>((e) => {
+                  out.push(normalize_event(e));
+                }, qc.query);
+                return out;
+              });
+            }
+          );
+        });
+
         it("yields identical query_stats output (head/tail/count/names)", async () => {
           await assert_identical("query_stats", async (store) => {
             const stats = await store.query_stats<Schemas>(
@@ -49062,8 +50574,8 @@ export const runStoreDifferentialTck = (
             const content: Record<
               string,
               {
-                head: NormalizedEvent;
-                tail: NormalizedEvent;
+                head: Omit<NormalizedEvent, "pii">;
+                tail: Omit<NormalizedEvent, "pii">;
                 count: number | undefined;
                 names: Readonly<Record<string, number>> | undefined;
               }
@@ -49074,8 +50586,8 @@ export const runStoreDifferentialTck = (
               // the non-null access surface it loudly rather than masking it
               // with a fallback the workload can never otherwise reach.
               content[stream] = {
-                head: normalize_event(s.head),
-                tail: normalize_event(
+                head: normalize_identity(s.head),
+                tail: normalize_identity(
                   s.tail as Committed<Schemas, keyof Schemas>
                 ),
                 count: s.count,
@@ -49086,7 +50598,7 @@ export const runStoreDifferentialTck = (
           });
         });
 
-        it("yields identical query_streams output", async () => {
+        it("yields identical query_streams output (incl. lease-lifecycle state)", async () => {
           await assert_identical("query_streams", async (store) => {
             const rows: Array<{
               stream: string;
@@ -49095,11 +50607,13 @@ export const runStoreDifferentialTck = (
               blocked: boolean;
               priority: number;
               lane: string | undefined;
+              retry: number;
+              error: string;
+              // Lease holder UUID + expiry are non-portable; normalize to
+              // a presence flag so "is this stream currently leased" is
+              // compared without depending on the exact holder/clock.
+              leased: boolean;
             }> = [];
-            // Every subscription in the plan carries an explicit source and
-            // lane, so both are always present here — read them straight
-            // through. The differential still catches drift in how a
-            // provided source/lane is stored and returned across adapters.
             const { count } = await store.query_streams(
               (p) => {
                 rows.push({
@@ -49109,6 +50623,9 @@ export const runStoreDifferentialTck = (
                   blocked: p.blocked,
                   priority: p.priority,
                   lane: p.lane,
+                  retry: p.retry,
+                  error: p.error,
+                  leased: p.leased_by != null,
                 });
               },
               { stream: \`^\${plan.sub_prefix}\`, limit: 1000 }
@@ -49119,6 +50636,91 @@ export const runStoreDifferentialTck = (
             return { count, rows };
           });
         });
+
+        // Case-sensitivity of the pattern filter (#1197): the subscription
+        // streams are mixed-case (\`Diff-…-Sub-S{i}\`); filtering with the
+        // **lower-cased** form of the same pattern must select the *same*
+        // set on every adapter. On case-sensitive engines (PG \`~\`, InMemory
+        // \`RegExp\`) that set is empty — the case doesn't match. SQLite's
+        // ASCII-case-insensitive \`LIKE\` overmatches and returns the whole
+        // family, so the differential goes red until #1197 flips it to a
+        // case-sensitive matcher. Gated behind \`caseInsensitivePatterns\`.
+        it.skipIf(skip.caseInsensitivePatterns)(
+          "matches case-sensitively under a lower-cased pattern filter",
+          async () => {
+            await assert_identical(
+              "query_streams lower-cased pattern",
+              async (store) => {
+                const collect_streams = async (
+                  pattern: string
+                ): Promise<string[]> => {
+                  const streams: string[] = [];
+                  await store.query_streams(
+                    (p) => {
+                      streams.push(p.stream);
+                    },
+                    { stream: pattern, limit: 1000 }
+                  );
+                  streams.sort((a, b) => a.localeCompare(b));
+                  return streams;
+                };
+                // Correctly-cased control: returns the whole sub family on
+                // every adapter (exercises the match path). Lower-cased
+                // discriminator: empty on a case-sensitive matcher,
+                // overmatched to the full family on SQLite's LIKE. Both
+                // ride in the compared payload so the control proves the
+                // corpus is matchable while the discriminator surfaces
+                // #1197.
+                const matched = await collect_streams(\`^\${plan.sub_prefix}S\`);
+                const lowered = await collect_streams(
+                  \`^\${plan.sub_prefix.toLowerCase()}s\`
+                );
+                return { matched, lowered };
+              }
+            );
+          }
+        );
+
+        // Exact-match mixed-case: case-exact on every adapter, so it runs
+        // unconditionally — the control that proves the mixed-case corpus
+        // itself round-trips even where the pattern path is gated.
+        it("yields identical events under an exact mixed-case stream lookup", async () => {
+          await assert_identical("query exact mixed-case", async (store) => {
+            const out: NormalizedEvent[] = [];
+            await store.query<Schemas>(
+              (e) => {
+                out.push(normalize_event(e));
+              },
+              { stream: plan.event_streams[0], stream_exact: true }
+            );
+            return out;
+          });
+        });
+
+        // forget_pii erasure (#1200): wipe PII on the seeded stream and
+        // assert every adapter reports the same erased-count and that the
+        // reload shows PII gone identically. Only runs when the adapters
+        // implement the optional surface.
+        it.skipIf(!pii_isolation)(
+          "erases pii identically via forget_pii",
+          async () => {
+            await assert_identical("forget_pii erase", async (store) => {
+              // forget_pii is capability-gated on the port; the caller
+              // declared support via \`piiIsolation\`, so it is present.
+              // Call it as a method (not a detached reference) so adapters
+              // that read \`this\` keep their binding.
+              const erased = await store.forget_pii!(plan.pii_stream);
+              const after: NormalizedEvent[] = [];
+              await store.query<Schemas>(
+                (e) => {
+                  after.push(normalize_event(e));
+                },
+                { stream: plan.pii_stream, stream_exact: true }
+              );
+              return { erased, after };
+            });
+          }
+        );
       });
     });
   });
@@ -49795,6 +51397,73 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
       });
 
+      // #1199: \`names: []\` means "match no event names" on every adapter.
+      // An empty allow-list is an explicit "nothing passes" — the opposite
+      // of an omitted \`names\` (which matches all). PG historically dropped
+      // the empty filter (returned ALL); this pins the sane semantics.
+      it("names:[] matches no events", async () => {
+        const s = \`q-names-empty-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), dec(1)],
+          make_meta({ stream: s })
+        );
+        const none = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          names: [],
+        });
+        expect(none).toHaveLength(0);
+        // Omitting \`names\` still returns everything — the contrast case.
+        const all = await collect(store, { stream: s, stream_exact: true });
+        expect(all).toHaveLength(2);
+      });
+
+      // #1199: falsy-zero \`after\`/\`before\` are honored, not dropped by a
+      // truthy guard. \`after: 0\` means strictly "id > 0"; \`before: 0\`
+      // means strictly "id < 0" (matches nothing). InMemory ids start at
+      // 0, so a truthy \`if (after)\` guard would leak id 0 on the backward
+      // path — this pins \`!== undefined\` semantics across adapters.
+      it("after:0 and before:0 are honored as id bounds", async () => {
+        const s = \`q-zero-bound-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2), inc(3)],
+          make_meta({ stream: s })
+        );
+        // before:0 → nothing has an id below 0.
+        expect(
+          await collect(store, { stream: s, stream_exact: true, before: 0 })
+        ).toHaveLength(0);
+        // before:0 on the backward path is equally empty.
+        expect(
+          await collect(store, {
+            stream: s,
+            stream_exact: true,
+            before: 0,
+            backward: true,
+          })
+        ).toHaveLength(0);
+        // after:0 → strictly id > 0. On adapters whose ids start at 0 the
+        // first event (id 0) is excluded; on 1-based adapters every event
+        // survives. Either way no event with id <= 0 is returned.
+        const forward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          after: 0,
+        });
+        expect(forward.every((e) => e.id > 0)).toBe(true);
+        // Backward path with after:0 must apply the same exclusive bound —
+        // never leak an id-0 event.
+        const backward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          after: 0,
+          backward: true,
+        });
+        expect(backward.every((e) => e.id > 0)).toBe(true);
+      });
+
       it("created_after/created_before filter by timestamp", async () => {
         const s = \`q-ts-\${uid()}\`;
         const committed = await store.commit<CounterEvents>(
@@ -50098,6 +51767,49 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
         if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
         else expect(count).toBe(1);
+      });
+
+      // #1197: stream filters are case-SENSITIVE across every adapter.
+      // PG (\`~\`) and InMemory (RegExp) are case-sensitive; a store that
+      // translates to \`LIKE\` must not let SQLite's ASCII-insensitive LIKE
+      // overmatch a differently-cased sibling. A \`^order-\` prefix must
+      // match \`order-x\` but never \`Order-x\`.
+      it("stream filters match case-sensitively (query)", async () => {
+        const tag = uid();
+        const lower = \`order-\${tag}\`;
+        const upper = \`Order-\${tag}\`;
+        await seed_streams([lower, upper]);
+
+        // ^prefix — only the lower-cased stream, never the capitalized one
+        expect(await streams_matching(\`^order-\${tag}\`)).toEqual([lower]);
+        // ^exact$ — the capitalized name never matches a lower-cased pattern
+        expect(await streams_matching(\`^Order-\${tag}$\`)).toEqual([upper]);
+        // contains — case-sensitive substring
+        expect(await streams_matching(\`order-\${tag}\`)).toEqual([lower]);
+      });
+
+      it("stream filters match case-sensitively (position filters)", async () => {
+        const tag = uid();
+        const lower = \`csp-order-\${tag}\`;
+        const upper = \`csp-Order-\${tag}\`;
+        await store.subscribe([{ stream: lower }, { stream: upper }]);
+
+        const got: string[] = [];
+        await store.query_streams((p) => got.push(p.stream), {
+          stream: \`^csp-order-\${tag}\`,
+        });
+        expect(got).toEqual([lower]);
+      });
+
+      it("bulk stream ops match case-sensitively", async () => {
+        const tag = uid();
+        const lower = \`bcs-order-\${tag}\`;
+        const upper = \`bcs-Order-\${tag}\`;
+        await store.subscribe([{ stream: lower }, { stream: upper }]);
+
+        // reset by pattern touches only the exactly-cased stream
+        const count = await store.reset({ stream: \`^bcs-order-\${tag}\` });
+        expect(count).toBe(1);
       });
     });
 
@@ -50850,6 +52562,37 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await store.reset([s])).toBe(1);
         const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
         expect(leased.find((l) => l.stream === s)).toBeDefined();
+      });
+
+      it("exposes a future deferred_at via query_streams (#1221)", async () => {
+        // The cold-start defer re-seed reads the persisted schedule back
+        // through query_streams: a stream with a future deferred_at must
+        // surface the ms-since-epoch value so the orchestrator can re-arm
+        // the drain at the due-time. A stream with no active defer omits it.
+        const deferred = \`defer-qs-\${uid()}\`;
+        const plain = \`defer-qs-plain-\${uid()}\`;
+        await store.subscribe([{ stream: deferred }, { stream: plain }]);
+        for (const s of [deferred, plain])
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        const due = Date.now() + 3_600_000;
+        await store.defer([deferred], due);
+
+        const seen = new Map<string, number | undefined>();
+        await store.query_streams((p) => {
+          if (p.stream === deferred || p.stream === plain)
+            seen.set(p.stream, p.deferred_at);
+        });
+        // The deferred stream reports its schedule; adapters persist at
+        // second/ms precision, so allow a small rounding tolerance.
+        const got = seen.get(deferred);
+        expect(got).toBeDefined();
+        expect(Math.abs((got as number) - due)).toBeLessThan(2_000);
+        // The undeferred stream omits the field.
+        expect(seen.get(plain)).toBeUndefined();
       });
 
       it("defers streams matching a filter and counts matches", async () => {

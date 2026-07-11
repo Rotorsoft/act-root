@@ -136,6 +136,11 @@ class InMemoryStream {
     return this._leased_until;
   }
 
+  /** Persisted next-visit time (#1090/#1221), or undefined when no active defer. */
+  get deferred_at() {
+    return this._deferred_at;
+  }
+
   /**
    * Attempt to lease this stream for processing.
    * @param lease - The lease request.
@@ -436,7 +441,7 @@ export class InMemoryStore implements Store {
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_before && e.created >= query.created_before)
           continue;
-        if (query.after && e.id <= query.after) break;
+        if (query.after !== undefined && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -468,7 +473,7 @@ export class InMemoryStore implements Store {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before && e.id >= query.before) break;
+        if (query?.before !== undefined && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
@@ -948,6 +953,7 @@ export class InMemoryStore implements Store {
         leased_by: s.leased_by,
         leased_until: s.leased_until,
         lane: s.lane,
+        deferred_at: s.deferred_at,
       });
       count++;
       if (count >= limit) break;

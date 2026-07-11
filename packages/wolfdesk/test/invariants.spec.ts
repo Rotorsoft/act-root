@@ -1,28 +1,50 @@
-import { dispose } from "@rotorsoft/act";
+import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
+import { builder, tenantCorrelator } from "../src/bootstrap.js";
 import {
   MessageNotFoundError,
   TicketCannotOpenTwiceError,
 } from "../src/errors.js";
-import {
-  acknowledgeMessage,
-  addMessage,
-  assignTicket,
-  closeTicket,
-  escalateTicket,
-  markMessageDelivered,
-  markTicketResolved,
-  openTicket,
-  reassignTicket,
-  requestTicketEscalation,
-  target,
-} from "./actions.js";
+import { type Actions, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
 
 describe("ticket invariants", () => {
+  // Per-suite isolated Act (fresh InMemoryStore + InMemoryCache) built from
+  // the shared wolfdesk builder — no singleton port, auto disposed below.
+  let dispose: () => Promise<void>;
+  let acknowledgeMessage: Actions["acknowledgeMessage"];
+  let addMessage: Actions["addMessage"];
+  let assignTicket: Actions["assignTicket"];
+  let closeTicket: Actions["closeTicket"];
+  let escalateTicket: Actions["escalateTicket"];
+  let markMessageDelivered: Actions["markMessageDelivered"];
+  let markTicketResolved: Actions["markTicketResolved"];
+  let openTicket: Actions["openTicket"];
+  let reassignTicket: Actions["reassignTicket"];
+  let requestTicketEscalation: Actions["requestTicketEscalation"];
+
+  beforeAll(async () => {
+    const ctx = await sandbox(builder, {
+      actOptions: { correlator: tenantCorrelator },
+    });
+    dispose = ctx.dispose;
+    ({
+      acknowledgeMessage,
+      addMessage,
+      assignTicket,
+      closeTicket,
+      escalateTicket,
+      markMessageDelivered,
+      markTicketResolved,
+      openTicket,
+      reassignTicket,
+      requestTicketEscalation,
+    } = makeActions(ctx.app));
+  });
+
   afterAll(async () => {
-    await dispose()();
+    await dispose();
   });
 
   it("should throw when trying to open twice", async () => {

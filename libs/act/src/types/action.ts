@@ -118,9 +118,9 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  * @property `stream?` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (`^foo` prefix, `foo$` suffix, `^foo$` whole-string). A plain string `foo` matches any stream containing it. The portable grammar guaranteed identical across all stores is `^` / `$` anchors, `.` (any single character), `.*` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw `ValidationError` rather than silently approximate.
  * @property `stream_exact?` - When true, treat `stream` as a literal string and use fast equality instead of regex compilation.
- * @property `names?` - Filter by event names
- * @property `before?` - Filter events before this id
- * @property `after?` - Filter events after this id
+ * @property `names?` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting `names`, which matches all. All adapters honor this identically.
+ * @property `before?` - Filter events strictly before this id (`id < before`). Honored even when `0` (`before: 0` matches nothing).
+ * @property `after?` - Filter events strictly after this id (`id > after`). Honored even when `0` (`after: 0` excludes an id-0 event on adapters whose ids start at 0).
  * @property `limit?` - Limit the number of events to return
  * @property `created_before?` - Filter events created before this date/time
  * @property `created_after?` - Filter events created after this date/time
@@ -337,6 +337,19 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
    * skipped the event replay entirely.
    */
   readonly version: number;
+  /**
+   * Global event id (cross-stream sequence) of the stream-head event this
+   * snapshot folds to — the same value as `event?.id`, but always defined
+   * even on a warm cache hit where `event` is undefined. `-1` for a
+   * brand-new stream with no events. Populated atomically with `state`
+   * inside `load()`: from the cached checkpoint's `event_id` on a
+   * hit-with-no-new-events, or from the last replayed event on a cache
+   * miss. Consumers that pair a loaded state with its head event id (the
+   * fold engine's first-sight path) read this instead of a separate cache
+   * lookup, which would open a TOCTOU window where a concurrent commit
+   * lands between the two reads and pairs older `state` with a newer id.
+   */
+  readonly id: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */

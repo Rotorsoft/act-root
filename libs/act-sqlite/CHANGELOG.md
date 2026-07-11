@@ -1,3 +1,11 @@
+# [@rotorsoft/act-sqlite-v1.12.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.2...@rotorsoft/act-sqlite-v1.12.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-sqlite:** case-sensitive filters, date revival, error mapping (ACT-1197/1198/1199/1202) ([a46158e](https://github.com/rotorsoft/act-root/commit/a46158e4ef0316a20cf9127d77a4dc359d2c861b))
+* **act:** orphaned-lane advisory, defer durability across restart, audit lane universe ([1dee16d](https://github.com/rotorsoft/act-root/commit/1dee16d09f4aab2efaef5447ca6c7d924419dd8c))
+
 # [@rotorsoft/act-sqlite-v1.12.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.1...@rotorsoft/act-sqlite-v1.12.2) (2026-07-11)
 
 

@@ -319,14 +319,18 @@ import type { AppActor } from "./schemas.js";
 import { ItemSlice } from "./item.js";
 import { InventorySlice } from "./inventory.js";
 
-export const app = act()
+// Export the unbuilt builder so tests can hand it to fixture()/sandbox().
+export const appBuilder = act()
   .withActor<AppActor>()    // generic actor type — enforces typed actors in app.do()
   .withSlice(ItemSlice)
-  .withSlice(InventorySlice)
-  .build();
+  .withSlice(InventorySlice);
+
+export const app = appBuilder.build();
 ```
 
 **`withActor<T>()`**: Sets the actor type for the entire app. All `app.do()` calls will require `target.actor` to satisfy `T`. Define `AppActor` extending `Actor` in schemas.ts.
+
+**Export the builder for tests**: `fixture()` / `sandbox()` need the *unbuilt* builder (they call `.build()` with a scoped store/cache themselves). Export `appBuilder` alongside the built `app` so tests get their own isolated Act per run.
 
 > **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §7 (Correlate Before Drain).
 
@@ -337,45 +341,39 @@ export const app = act()
 **Testing reactions requires two steps:** First `correlate()` to discover target streams, then `drain()` to process them. A common AI mistake is calling only `drain()` — it returns empty because no streams were registered. In tests, always call both explicitly. In production, `settle()` handles this automatically.
 
 ```typescript
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { store, dispose, type Target } from "@rotorsoft/act";
-import { app, Item, clearItems, getItems, type AppActor } from "../src/index.js";
+import { expect } from "vitest";
+import { fixture } from "@rotorsoft/act/test";
+import type { Target } from "@rotorsoft/act";
+import { appBuilder, Item, clearItems, getItems, type AppActor } from "../src/index.js";
 
 const actor: AppActor = { id: "user-1", name: "Test", role: "user" };
 const target = (stream = crypto.randomUUID()): Target => ({ stream, actor });
 
-describe("Item", () => {
-  beforeEach(async () => {
-    await store().seed();
-    clearItems();           // reset projections between tests
-  });
+// Each test gets its own isolated Act (fresh, auto-seeded store + cache).
+const test = fixture(appBuilder);
 
-  afterAll(async () => {
-    await dispose()();      // disposes all adapters (store, cache, etc.)
-  });
+test("creates an item", async ({ app }) => {
+  const t = target();
+  await app.do("CreateItem", t, { name: "Test" });
+  const snap = await app.load(Item, t.stream);
+  expect(snap.state.name).toBe("Test");
+});
 
-  it("should create", async () => {
-    const t = target();
-    await app.do("CreateItem", t, { name: "Test" });
-    const snap = await app.load(Item, t.stream);
-    expect(snap.state.name).toBe("Test");
-  });
+test("enforces invariants", async ({ app }) => {
+  await expect(app.do("CloseItem", target(), {})).rejects.toThrow();
+});
 
-  it("should enforce invariants", async () => {
-    await expect(app.do("CloseItem", target(), {})).rejects.toThrow();
-  });
+test("processes reactions and projections", async ({ app }) => {
+  clearItems();             // reset in-memory projection before this test
+  const t = target();
+  await app.do("CreateItem", t, { name: "Test" });
+  await app.correlate();    // discover reaction target streams first
+  await app.drain({ streamLimit: 10, eventLimit: 100 });
 
-  it("should process reactions and projections", async () => {
-    const t = target();
-    await app.do("CreateItem", t, { name: "Test" });
-    await app.correlate();  // discover reaction target streams first
-    await app.drain({ streamLimit: 10, eventLimit: 100 });
-
-    // Verify projection was updated
-    const items = getItems();
-    expect(items[t.stream]).toBeDefined();
-  });
+  // Verify projection was updated
+  const items = getItems();
+  expect(items[t.stream]).toBeDefined();
 });
 ```
 
-**Test isolation**: Always call `store().seed()` and `clear*()` for each projection in `beforeEach`. Use `dispose()()` in `afterAll` to clean up all adapters (store, cache, etc.).
+**Test isolation**: `fixture(appBuilder)` gives each test a fresh, auto-seeded store + cache and disposes them automatically — no `store().seed()` / `dispose()()` boilerplate. Reach for `sandbox(appBuilder)` when you need `beforeAll`-shared setup, multiple Acts in one test, or direct `store`/`cache` handles. In-memory projections live outside the store, so still call `clear*()` at the start of any test that asserts on them. Legacy `store().seed()` + `dispose()()` stays valid only for tests that exercise the singleton port mechanism itself.

@@ -1,5 +1,5 @@
 /**
- * @module state-fold
+ * @module projection-fold
  * @category Internal
  *
  * Fold engine behind `projection(name).of(state)` — maintains per-stream
@@ -16,15 +16,16 @@
  *   acks only after a fully-flushed batch — fold work is never
  *   acknowledged before it is durable.
  * - On first sight of a stream the engine loads its head state through
- *   the same `load()` the command path uses (cache, snapshots and all);
- *   fetched events at or below the loaded frontier are skipped, later
- *   ones fold through the state's own patch reducers.
+ *   the same `load()` the command path uses (cache, snapshots and all).
+ *   The loaded snapshot carries its own head position (`version` and the
+ *   global event `id`), captured atomically with `state`, so the engine
+ *   never pairs a stale state with a newer head id read separately from
+ *   the cache (ACT-1204). Fetched events at or below the loaded id are
+ *   skipped, later ones fold through the state's own patch reducers.
  * - Eviction under `maxCachedStates` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
-import { cache as state_cache } from "../ports.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -33,7 +34,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import { load } from "./event-sourcing.js";
+import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 
 export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 export const DEFAULT_MAX_CACHED_STATES = 10_000;
@@ -73,7 +74,8 @@ export function make_fold_handler<
 >(
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
-  config: FoldConfig
+  config: FoldConfig,
+  patch_fn: PatchFn = bare_patch
 ): BatchHandler<TEvents> {
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
@@ -114,38 +116,36 @@ export function make_fold_handler<
           cache.delete(oldest);
         }
         // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). On a warm cache hit the
-        // snapshot carries no event (nothing replayed) — the frontier
-        // lives in the cache entry, so read it back. Dirty from the
-        // start: the row must be written at least once.
-        const snapshot = await load(me, { stream });
-        const entry = await state_cache().get<TState>(stream);
-        // The engine only sees streams with committed events, so when the
-        // cache has no entry (pii-aware states never cache) the load
-        // replayed at least one event — snapshot.event is set.
-        const frontier = entry ?? {
-          version: (snapshot.event as { version: number }).version,
-          event_id: (snapshot.event as { id: number }).id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-        };
+        // regular load path (cache, snapshots). The loaded state and its
+        // head position (`version`, global `id`, `patches`, `snaps`) are
+        // captured atomically inside `load()` — even on a warm cache hit
+        // where `snapshot.event` is undefined. Reading the head id back
+        // from the cache separately (ACT-1204) opened a TOCTOU window: a
+        // concurrent `action()` committing between the two awaits pairs
+        // this OLDER state with a NEWER event_id, and the
+        // `event.id > fold.event_id` guard below then permanently skips
+        // the intervening events. Dirty from the start: the row must be
+        // written at least once.
+        const snapshot = await load(me, { stream }, undefined, patch_fn);
         fold = {
           stream,
           state: snapshot.state,
-          version: frontier.version,
-          event_id: frontier.event_id,
-          patches: frontier.patches,
-          snaps: frontier.snaps,
+          version: snapshot.version,
+          event_id: snapshot.id,
+          patches: snapshot.patches,
+          snaps: snapshot.snaps,
           dirty: true,
         };
         cache.set(stream, fold);
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
-        fold.state = patch(
+        fold.state = patch_fn(
+          me,
           fold.state,
-          reducer(event as never, fold.state)
-        ) as TState;
+          reducer(event as never, fold.state),
+          event as never
+        );
         fold.version = event.version;
         fold.event_id = event.id;
         fold.patches++;

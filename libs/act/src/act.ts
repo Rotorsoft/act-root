@@ -3,6 +3,7 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
+  bare_patch,
   build_drain,
   build_es,
   build_handle,
@@ -20,6 +21,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  type PatchFn,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -291,6 +293,31 @@ export type ActOptions<TLanes extends string = string> = {
     readonly end: number;
     readonly timeZone?: string;
   };
+  /**
+   * Validate folded state against its declared Zod schema after every
+   * reduction (ACT-1238). Off by default.
+   *
+   * When `true`, each time an event is folded into state — on the
+   * command path (`do`), on `load`/replay, and inside projection-fold
+   * projections — the merged full state is parsed against the owning
+   * state's `state({ Name: schema })` schema. A reducer that produces
+   * schema-violating state (the calculator divide-by-zero NaN class,
+   * #1230) throws a {@link ValidationError} at the triggering event,
+   * whose `target` names the state and the event (`<state>.<event>#<id>`)
+   * — instead of the bad value propagating and surfacing hops later as a
+   * confusing downstream error.
+   *
+   * This is a **debugging / CI aid, not a production guard**. Turn it on
+   * in development and CI to catch total-reducer bugs at the source; the
+   * framework already validates action inputs and emitted events, so the
+   * reduced state is the one shape it otherwise trusts. The per-event
+   * patch step is selected **once at `build()`** (the same way the
+   * orchestrator picks bare vs trace-decorated store ops from the log
+   * level): when `false` (the default) the fold loop is byte-identical to
+   * a bare reduction — the validating patch step is never selected, so
+   * there is no per-event cost, not even a branch.
+   */
+  readonly validateFoldedState?: boolean;
 };
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
@@ -490,13 +517,20 @@ export class Act<
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from `.withLane(...)` calls. Slice 1 records them on the
    *   instance; later slices fan out one `DrainController` per lane.
+   * @param patch_fn  The per-event patch step selected once by the builder
+   *   from `ActOptions.validateFoldedState` (ACT-1238) — `bare_patch` by
+   *   default, `validating_patch` when the flag is on. The builder uses
+   *   the same value for its projection-fold handlers, so there is a
+   *   single selection site. Defaults to `bare_patch` for direct
+   *   construction.
    */
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
-    lanes: ReadonlyArray<LaneConfig> = []
+    lanes: ReadonlyArray<LaneConfig> = [],
+    patch_fn: PatchFn = bare_patch
   ) {
     this.registry = registry;
     this._states = states;
@@ -507,7 +541,7 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? default_correlator;
-    this._es = build_es(this._logger, this._correlator);
+    this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside `act-builder`:
     // reactions registered against an event with `sensitive(...)` fields get
@@ -539,6 +573,7 @@ export class Act<
     // correlate cycle.
     this._breaker = this._build_breaker(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
+    this._advise_orphaned_lanes(options, lanes);
     this._audit_deps = this._build_audit_deps();
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
@@ -658,6 +693,40 @@ export class Act<
   }
 
   /**
+   * Orphaned-lane startup advisory (#1220). When `onlyLanes` is set, this
+   * instance builds a controller only for its slice of the declared lane
+   * universe — every OTHER declared lane's stream is persisted (correlate
+   * subscribes all static targets regardless of `onlyLanes`) but never
+   * claimed here. If no peer worker deploys with those lanes in ITS
+   * `onlyLanes`, their reactions accumulate forever, silently. A single
+   * process can't verify the cluster invariant `∪ onlyLanes ⊇ declared
+   * lanes`, so we surface the per-instance signal — "these declared lanes
+   * have no controller here" — the same way the deprecated-event advisory
+   * surfaces legacy events. No advisory when `onlyLanes` is unset (every
+   * lane gets a controller) or covers every declared lane.
+   */
+  private _advise_orphaned_lanes(
+    options: ActOptions,
+    lanes: ReadonlyArray<LaneConfig>
+  ): void {
+    if (!options.onlyLanes || options.onlyLanes.length === 0) return;
+    const active = new Set(this._drain_controllers.keys());
+    const orphaned = ["default", ...lanes.map((l) => l.name)].filter(
+      (name) => !active.has(name)
+    );
+    if (orphaned.length === 0) return;
+    const list = orphaned.map((name) => `"${name}"`).join(", ");
+    this._logger.info(
+      `Act declared ${orphaned.length} orphaned lane(s) on this instance: ${list}. ` +
+        `onlyLanes excludes them, so no DrainController claims their streams here — ` +
+        `their reactions accumulate un-drained unless a peer worker deploys with these ` +
+        `lanes in its onlyLanes. Ensure the cluster invariant holds: the union of every ` +
+        `worker's onlyLanes must cover every declared lane. ` +
+        `See docs/docs/guides/production-checklist.md § Sizing lanes.`
+    );
+  }
+
+  /**
    * Audit deps bag. Snapshotted after registry classification and
    * drain-controller build so the audit module sees the finalized lane
    * set. Held as an immutable bag — the orchestrator never carries audit
@@ -670,7 +739,14 @@ export class Act<
       event_to_state: this._event_to_state,
       states: this._states,
       known_events: new Set(this._event_to_state.keys()),
-      declared_lanes: new Set(this._drain_controllers.keys()),
+      // The DECLARED lane universe — the implicit "default" plus every
+      // `.withLane(...)` name — NOT `_drain_controllers.keys()` (#1224).
+      // An `onlyLanes`-filtered instance builds a controller only for its
+      // slice of lanes, so keying off the active controller set would flag
+      // a stream correctly assigned to an excluded-but-declared lane (one
+      // another worker drains) as `unknown-lane`. The audit reports what's
+      // structurally routable across the cluster, not what this process runs.
+      declared_lanes: new Set(["default", ...this._lanes.map((l) => l.name)]),
       routed_events: new Set(this._event_to_lanes.keys()),
     };
   }
@@ -686,19 +762,56 @@ export class Act<
       typeof classify_registry<TSchemaReg, TEvents, TActions>
     >
   ): CorrelateCycle<TSchemaReg, TEvents, TActions> {
-    return new CorrelateCycle(
-      this.registry,
-      classification.static_targets,
-      classification.has_dynamic_resolvers,
-      this._cd,
-      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      () => {
+    return new CorrelateCycle({
+      registry: this.registry,
+      static_targets: classification.static_targets,
+      has_dynamic_resolvers: classification.has_dynamic_resolvers,
+      cd: this._cd,
+      max_subscribed_streams:
+        options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
       // Re-scope the background `start_correlations` timer so its
       // correlate resolves the scoped ports, not the singleton (#1191).
-      this._scoped
-    );
+      run_scoped: this._scoped,
+      // Cold-start defer re-seed (#1221). Skipped on writer-only instances
+      // (`drain: false`) — they run no local controllers to re-arm.
+      on_init_async: this._drain
+        ? () => this._seed_persisted_defers()
+        : undefined,
+    });
+  }
+
+  /**
+   * Re-seed every active lane controller's process-local defer timer from
+   * the store's persisted `deferred_at` (#1221). Runs once at cold start,
+   * inside `CorrelateCycle.init`, after static targets are subscribed.
+   *
+   * The defer timer is worker memory: empty after a restart. A stream
+   * deferred to a future due-time (the classic case: an idle autoclose
+   * aggregate that deferred its terminal close) is durable in the store but
+   * has nothing in memory to re-arm the drain — the controller disarms on
+   * the first empty claim and, since the aggregate is idle, no commit ever
+   * re-arms it. Reading the persisted schedule and seeding the owning lane's
+   * timer restores the wake, so the close fires at the due-time.
+   *
+   * Streams whose lane has no controller on this instance (excluded by
+   * `onlyLanes`) are skipped — a peer worker owns that lane's timer.
+   */
+  private async _seed_persisted_defers(): Promise<void> {
+    const now = Date.now();
+    await store().query_streams((pos) => {
+      // Only future defers matter — a past-due schedule is claimable
+      // already, so the ordinary armed drain picks it up.
+      if (pos.deferred_at === undefined || pos.deferred_at <= now) return;
+      // Route to the controller that owns the stream's lane. A missing
+      // controller means the lane is excluded on this instance (onlyLanes) —
+      // skip it, a peer worker owns that timer. The default lane's
+      // controller is keyed "default" and matches an undefined stored lane.
+      const controller = this._drain_controllers.get(pos.lane ?? "default");
+      controller?.seed_defer(pos.stream, pos.deferred_at);
+    });
   }
 
   /** Settle loop driving correlate + drain to quiescence. */

@@ -15,7 +15,7 @@
  * @internal
  */
 
-import { patch } from "@rotorsoft/act-patch";
+import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -41,6 +41,82 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
+
+/**
+ * The reduction pipeline names three distinct things, and each word means
+ * exactly one of them:
+ *
+ * - a **reducer** is a state's `.patch()` handler — it takes one event and
+ *   returns a {@link Patch} *partial*;
+ * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
+ *   that partial into the current state, yielding the next full state;
+ * - the **fold** is the loop that applies the patch step across a stream's
+ *   events (the reader loop in {@link load} / {@link action}, and the
+ *   projection engine in {@link "projection-fold"}).
+ *
+ * `PatchFn` is the per-event patch step. The fold loop calls one of two
+ * implementations, selected **once** at construction (in
+ * {@link "tracing".build_es}) — never branched per event:
+ *
+ * - {@link bare_patch} — the default. Literally `patch(state, partial)`,
+ *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
+ * - {@link validating_patch} — the opt-in `ActOptions.validateFoldedState`
+ *   path. Merges, then parses the merged full state against the state's
+ *   declared Zod schema.
+ *
+ * The `me`/`event` arguments are unused by the bare implementation but
+ * carried on the shared signature so the fold loop is call-shape-identical
+ * regardless of which patch step was selected — the validating
+ * implementation needs them to name the failing reduction.
+ *
+ * @internal
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
+/**
+ * The default patch step: a bare `patch()` merge with no wrapper and no
+ * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * app that leaves `validateFoldedState` off pays nothing — not even a
+ * comparison.
+ *
+ * @internal
+ */
+export const bare_patch: PatchFn = (_me, state, partial) =>
+  patch(state, partial) as typeof state;
+
+/**
+ * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * parse the merged full state against the owning state's declared Zod
+ * schema. A reducer that produces schema-violating state (the calculator
+ * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * instead of propagating and surfacing hops later as a confusing
+ * downstream error.
+ *
+ * The `target` string names the state and the triggering event
+ * (`"<state>.<event>#<id>"`) so the resulting {@link ValidationError}
+ * points straight at the reduction that produced bad state. A debugging /
+ * CI aid, not a production guard — selected only when the operator opts
+ * in.
+ *
+ * @internal
+ */
+export const validating_patch: PatchFn = (me, state, partial, event) => {
+  const next = patch(state, partial) as typeof state;
+  return validate(
+    `${me.name}.${String(event.name)}#${event.id}`,
+    next,
+    me.state
+  );
+};
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -396,7 +472,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   target: LoadTarget,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>> {
   const { stream, actor, asOf } = target;
   const time_travel =
@@ -421,7 +498,7 @@ export async function load<
         patches = 0;
         replayed++;
       } else if (me.patch[event.name]) {
-        state = patch(state, me.patch[event.name](event, state));
+        state = patch_fn(me, state, me.patch[event.name](event, state), event);
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
@@ -437,6 +514,7 @@ export async function load<
         event,
         state,
         version: event.version,
+        id: event.id,
         patches,
         snaps,
         cache_hit,
@@ -477,20 +555,33 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache().set(stream, {
-      stream,
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
+    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
+    // the state is already correctly computed, so a transient failure in a
+    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
+    // would break plain reads, reaction bound_load dispatches, and the fold
+    // engine's first-sight load. The cache is self-correcting: a subsequent
+    // load queries past `event_id`, replays what it missed, and re-warms.
+    await cache()
+      .set(stream, {
+        stream,
+        state,
+        version: event.version,
+        event_id: event.id,
+        patches,
+        snaps,
+      })
+      .catch((err) => log().error(err));
   }
 
   return {
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
+    // Head event id, captured atomically with `state`: the last replayed
+    // event's id on a cache miss, or the cached checkpoint's event_id on a
+    // warm hit with no new events. Consumers read this instead of a
+    // separate cache lookup that could race a concurrent commit (ACT-1204).
+    id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
     cache_hit,
@@ -539,7 +630,8 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  options?: DoOptions<TEvents>
+  options?: DoOptions<TEvents>,
+  patch_fn: PatchFn = bare_patch
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -553,10 +645,15 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, { stream, actor: target.actor });
+      const snapshot = await load(
+        me,
+        { stream, actor: target.actor },
+        undefined,
+        patch_fn
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      // snapshot.version is the frontier even on a warm cache hit,
+      // snapshot.version is the head version even on a warm cache hit,
       // where snapshot.event is undefined — using the event would
       // silently drop the optimistic guard for every cached stream.
       // A brand-new stream (-1) stays unguarded: creations append.
@@ -651,12 +748,13 @@ export async function action<
         // is the only PII operation on the action path.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
-        state = patch(state, p);
+        state = patch_fn(me, state, p, event);
         patches++;
         return {
           event,
           state,
           version: event.version,
+          id: event.id,
           patches,
           snaps: snapshot.snaps,
           patch: p,
@@ -670,19 +768,19 @@ export async function action<
       // Guardless commits (reactions append at head by design) can land
       // past events this fold never saw. A gapped fold must not become
       // a snapshot event or a cache entry — both would lie at the head
-      // frontier. Contiguity is cheap to prove: the first committed
+      // position. Contiguity is cheap to prove: the first committed
       // version extends the loaded one.
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
       // Persist the snapshot before caching. Awaited on purpose: the
       // snapshot event occupies the next version slot, so a follow-up
-      // action loading a pre-snap frontier from the cache would collide
-      // with the framework's own bookkeeping. Caching the snap frontier
+      // action loading a pre-snap checkpoint from the cache would collide
+      // with the framework's own bookkeeping. Caching the snap checkpoint
       // before the action returns keeps sequential callers from ever
       // seeing a conflict they didn't cause. Failures are still
       // swallowed inside snap() — the action never fails on it, and the
-      // cache then keeps the pre-snap frontier, which stays correct.
+      // cache then keeps the pre-snap checkpoint, which stays correct.
       const snap_event = snapped ? await snap(last) : undefined;
 
       // #861: pii-aware states (any event declaring `sensitive(...)`
@@ -703,7 +801,7 @@ export async function action<
               snaps: snap_event ? last.snaps + 1 : last.snaps,
             })
             .catch((err) => log().error(err));
-        // A gapped entry would sit at the head frontier with unfolded
+        // A gapped entry would sit at the head position with unfolded
         // events baked in — drop the checkpoint and let the next load
         // replay to truth instead.
         else
@@ -715,6 +813,15 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
+      // A caller-pinned expectedVersion is a fixed target: every retry
+      // reloads and re-commits against the SAME pinned version, so the
+      // conflict is guaranteed to recur — retrying only burns the budget
+      // and sleeps out the backoff before surfacing the same terminal
+      // error. Rethrow immediately (ACT-1208). The retry loop exists to
+      // absorb races on framework-derived versions (a concurrent writer
+      // advanced the head), where the reload picks up the new head
+      // version and the next attempt can succeed.
+      if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
         const delay_ms = compute_backoff_delay(attempt, opts.backoff);
