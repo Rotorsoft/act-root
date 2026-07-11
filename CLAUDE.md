@@ -69,6 +69,7 @@ pnpm act -q TicketOpened                  # non-interactive: print one entity, e
 ## Important Constraints
 
 - **Node ≥ 22.23.1**, **pnpm ≥ 11.9.0** (not npm/yarn)
+- **TypeScript 7** (`typescript@^7.0.2`, the native Go compiler — `tsc` is the native binary) across the framework, libs, and example apps. The **`docs` package alone stays on `typescript@6`** — a documented, temporary island — because typedoc caps its `typescript` peer at `6.x` and the API-reference generation (`pnpm -F docs build:all`) can't run on TS7 yet. pnpm's per-package isolation resolves the docs symlink to its own TS6 install; the rest of the workspace hoists TS7. Revisit once typedoc supports TS7.
 - TypeScript strict mode everywhere
 - All actions, events, and state require Zod schemas
 - Events are immutable — never mutate event data; evolve via [versioned event names](docs/docs/architecture/event-schema-evolution.md)
