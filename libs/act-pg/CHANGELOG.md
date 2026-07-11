@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.5...@rotorsoft/act-pg-v1.13.6) (2026-07-11)
+
+
+### Bug Fixes
+
+* **act-pg:** per-pool jsonb parser, names:[]/before guards, TCK + docs (ACT-1198/1199) ([1043227](https://github.com/rotorsoft/act-root/commit/10432274edc0ce583563d0902056fd6d6ed7955c)), closes [#1197](https://github.com/rotorsoft/act-root/issues/1197) [#1199](https://github.com/rotorsoft/act-root/issues/1199)
+
 # [@rotorsoft/act-pg-v1.13.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.4...@rotorsoft/act-pg-v1.13.5) (2026-07-11)
 
 
