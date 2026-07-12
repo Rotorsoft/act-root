@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.0...@rotorsoft/act-tck-v1.27.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **act-http:** bound sse pending buffer and pair slot release with acquire ([29ad7bd](https://github.com/rotorsoft/act-root/commit/29ad7bddd907ddc007638b6d1b59fee500aed600)), closes [#1196](https://github.com/rotorsoft/act-root/issues/1196)
+
 # [@rotorsoft/act-tck-v1.27.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.26.10...@rotorsoft/act-tck-v1.27.0) (2026-07-11)
 
 
