@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.6...@rotorsoft/act-pg-v1.13.7) (2026-07-12)
+
+
+### Bug Fixes
+
+* **act-pg:** lock only claimed candidates in claim(), not the whole frontier ([4255ccf](https://github.com/rotorsoft/act-root/commit/4255ccf1f2194f1120beaf2f24c94514867fb5dc))
+
 # [@rotorsoft/act-pg-v1.13.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.5...@rotorsoft/act-pg-v1.13.6) (2026-07-11)
 
 
