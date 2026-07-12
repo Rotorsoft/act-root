@@ -378,3 +378,42 @@ Rejected along the way (decision record in
 (planner-hostile predicates on every hot read) and a shared-lock
 writers / exclusive-fence readers scheme (obviated — the shipped shape
 already restores full write parallelism without touching the port).
+
+### ACT-1201 — `claim()` locks only its candidates, not the whole frontier
+
+The pre-1201 `claim()` put `FOR UPDATE SKIP LOCKED` on the `available`
+CTE with no LIMIT. A CTE carrying `FOR UPDATE` never inlines, so PG
+fully materialized it and row-locked **every** claimable stream for the
+transaction; the lagging/leading LIMIT was applied only afterward. A
+worker claiming a handful of streams therefore locked the entire
+eligible frontier — and a competing worker running concurrently
+SKIP-LOCKed past all of it and got nothing, even when it wanted streams
+the first worker never claimed. The starvation window scaled with the
+registered-stream count.
+
+The fix drops the lock from `available` (now a plain read), keeps the
+lagging/leading selection producing `combined`, and adds a `locked` CTE
+that takes `FOR UPDATE OF … SKIP LOCKED` on **only** those `combined`
+candidates (re-asserting the lease-eligibility predicate under the lock
+so a lease acquired between the unlocked read and the lock is never
+stolen). The final `UPDATE … FROM combined` is gated on `stream IN
+(SELECT stream FROM locked)`.
+
+Measured with `scripts/claim-contention.ts` (docker PG :5431, M3 Pro,
+2 workers with disjoint frontiers — one claims the lagging slice, one
+the leading — over an increasingly large eligible frontier, 10 rounds,
+success = **both** workers won their full 5-stream slice in the same
+concurrent round):
+
+| Frontier size | Before (both won) | After (both won) |
+|---|---|---|
+| 10 streams | 0% | **100%** |
+| 50 streams | 0% | **100%** |
+| 200 streams | 50–60% | **100%** |
+
+Correctness is unchanged — `claim()` is still one statement plus an
+implicit commit, priority/lagging/leading ordering, lane filter, retry
+increment and the has-work probe all behave as before. This is a
+throughput-under-contention fix: competing consumers now claim disjoint
+slices of the frontier instead of serializing behind whoever locked it
+first.

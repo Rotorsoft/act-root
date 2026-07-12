@@ -242,6 +242,72 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
     expect(drained.map((l) => l.stream)).not.toContain(stream);
   });
 
+  it("locks only the claimed candidates, not the whole eligible frontier (ACT-1201)", async () => {
+    // Two workers whose candidate frontiers are DISJOINT must each claim their
+    // own slice concurrently. The buggy `available` CTE applies
+    // `FOR UPDATE SKIP LOCKED` with no LIMIT, so it materializes and row-locks
+    // EVERY eligible stream for the transaction — whichever worker executes
+    // first locks all 20, and the competing worker SKIP-LOCKs past everything
+    // and returns 0, even though it wanted entirely different streams. The fix
+    // locks only the <= lagging+leading candidate rows, so a worker claiming
+    // the lagging frontier and one claiming the leading frontier never collide.
+    //
+    // Runs in its own schema so the 20-stream eligible frontier is fully
+    // isolated — no leakage to/from the other tests in this file or the
+    // parallel act-tck suite, and the lagging/leading order is deterministic.
+    const SCHEMA = `contention_lock_${randomUUID().replace(/-/g, "")}`;
+    const own = new PostgresStore({ port: PG.port, schema: SCHEMA });
+    const A = new PostgresStore({ port: PG.port, schema: SCHEMA });
+    const B = new PostgresStore({ port: PG.port, schema: SCHEMA });
+    const setWatermark = (stream: string, at: number) =>
+      pool.query(
+        `UPDATE "${SCHEMA}"."events_streams" SET at = $2 WHERE stream = $1`,
+        [stream, at]
+      );
+    try {
+      await own.drop();
+      await own.seed();
+
+      const S = 20;
+      const streams = Array.from({ length: S }, (_, i) => `s${i}`);
+      // One event per stream is enough for the has-work probe (event ids are a
+      // global serial, always past the small watermarks set below). Distinct
+      // watermarks make the lagging (lowest `at`) and leading (highest `at`)
+      // frontiers disjoint.
+      for (let i = 0; i < S; i++) {
+        await own.commit(streams[i], batch(1), META);
+        await own.subscribe([{ stream: streams[i], source: streams[i] }]);
+        await setWatermark(streams[i], i); // at = 0..19, all < the event id
+      }
+
+      // A takes the 5 most-behind streams (at 0..4); B takes the 5 most-ahead
+      // (at 15..19). Disjoint candidate sets — on correct locking both succeed.
+      const [aLeases, bLeases] = await Promise.all([
+        A.claim(5, 0, "c-lock-A", 30_000),
+        B.claim(0, 5, "c-lock-B", 30_000),
+      ]);
+
+      const aStreams = new Set(aLeases.map((l) => l.stream));
+      const bStreams = new Set(bLeases.map((l) => l.stream));
+
+      // Both workers must claim their full non-empty slice — the whole point of
+      // competing consumers. On the buggy code one worker locks the entire
+      // frontier and the other gets zero.
+      expect(aStreams.size).toBe(5);
+      expect(bStreams.size).toBe(5);
+
+      // Disjoint: no stream is leased by both workers.
+      const overlap = [...aStreams].filter((s) => bStreams.has(s));
+      expect(overlap).toEqual([]);
+
+      // Combined they cover 10 distinct streams (5 lagging + 5 leading).
+      expect(new Set([...aStreams, ...bStreams]).size).toBe(10);
+    } finally {
+      await own.drop().catch(() => {});
+      await Promise.all([own.dispose(), A.dispose(), B.dispose()]);
+    }
+  });
+
   it("blocks a poison stream on induced fault and keeps healthy streams flowing", async () => {
     const prefix = uid("c3");
     const poison = `${prefix}-poison`;
