@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.1...@rotorsoft/act-tck-v1.27.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **act-pg:** lock only claimed candidates in claim(), not the whole frontier ([4255ccf](https://github.com/rotorsoft/act-root/commit/4255ccf1f2194f1120beaf2f24c94514867fb5dc))
+
 # [@rotorsoft/act-tck-v1.27.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.0...@rotorsoft/act-tck-v1.27.1) (2026-07-12)
 
 
