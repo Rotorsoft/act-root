@@ -1003,6 +1003,11 @@ export class PostgresStore implements Store {
       }>(
         `
         WITH
+        -- Plain read of the eligible frontier — no row lock here. A CTE
+        -- carrying FOR UPDATE never inlines, so locking it would materialize
+        -- and lock EVERY claimable stream for this transaction, starving
+        -- overlapping competing consumers. We only lock the small
+        -- lagging+leading candidate slice, down in the "locked" CTE.
         available AS (
           SELECT stream, source, at, priority, lane
           FROM ${this._fqs} s
@@ -1026,7 +1031,6 @@ export class PostgresStore implements Store {
                 )
               LIMIT 1
             ))
-          FOR UPDATE SKIP LOCKED
         ),
         -- Priority lanes (ACT-102): higher priority first, then
         -- lagging-watermark order. With everyone at priority=0 the
@@ -1048,6 +1052,20 @@ export class PostgresStore implements Store {
           SELECT DISTINCT ON (stream) stream, source, at, lane, lagging
           FROM (SELECT * FROM lag UNION ALL SELECT * FROM lead) t
           ORDER BY stream, at
+        ),
+        -- Lock ONLY the <= lagging+leading candidate rows. The
+        -- lease-eligibility predicate is re-asserted here under the lock so a
+        -- lease acquired by a competing worker between the unlocked read and
+        -- this lock is never stolen. Competing workers SKIP-LOCK just this
+        -- slice, not the whole frontier, and claim other eligible streams.
+        locked AS (
+          SELECT s2.stream
+          FROM ${this._fqs} s2
+          WHERE s2.stream IN (SELECT stream FROM combined)
+            AND s2.blocked = false
+            AND (s2.leased_by IS NULL OR s2.leased_until <= NOW())
+            AND (s2.deferred_at IS NULL OR s2.deferred_at <= NOW())
+          FOR UPDATE OF s2 SKIP LOCKED
         )
         UPDATE ${this._fqs} s
         SET
@@ -1056,6 +1074,7 @@ export class PostgresStore implements Store {
           retry = s.retry + 1
         FROM combined c
         WHERE s.stream = c.stream
+          AND s.stream IN (SELECT stream FROM locked)
         RETURNING s.stream, s.source, s.at, s.retry, c.lagging, s.lane
         `,
         params
