@@ -988,11 +988,16 @@ export class PostgresStore implements Store {
     const client = await this._client("claim");
     try {
       await client.query("BEGIN");
-      const lane_clause = lane !== undefined ? `AND s.lane = $5` : "";
+      const lane_clause = lane !== undefined ? `AND s.lane = $6` : "";
+      // Fairness reserve (ACT-1223): carve `fair` slots off the lagging
+      // budget for pure watermark-order claims so a default-priority
+      // lagging stream is never starved out by sustained higher-priority
+      // load. `fair` is always $5; the optional `lane` bind is last ($6).
+      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
       const params: unknown[] =
         lane !== undefined
-          ? [lagging, leading, by, millis, lane]
-          : [lagging, leading, by, millis];
+          ? [lagging, leading, by, millis, fair, lane]
+          : [lagging, leading, by, millis, fair];
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -1036,11 +1041,33 @@ export class PostgresStore implements Store {
         -- lagging-watermark order. With everyone at priority=0 the
         -- ORDER BY collapses to plain at ASC so existing workloads
         -- see no behavior change.
+        --
+        -- The lagging frontier is a UNION of two portions (ACT-1223): the
+        -- priority-ordered portion takes the first (lagging - fair) slots
+        -- by priority DESC, at ASC; a fairness reserve then fills fair more
+        -- slots by pure at ASC (priority ignored), excluding the ones
+        -- already chosen, so a default-priority lagging stream is never
+        -- starved out by sustained higher-priority load. With all
+        -- priorities equal both portions order by at, a no-op merge.
         lag AS (
-          SELECT stream, source, at, lane, TRUE AS lagging
-          FROM available
-          ORDER BY priority DESC, at ASC
-          LIMIT $1
+          (
+            SELECT stream, source, at, lane, TRUE AS lagging
+            FROM available
+            ORDER BY priority DESC, at ASC
+            LIMIT ($1::int - $5::int)
+          )
+          UNION
+          (
+            SELECT stream, source, at, lane, TRUE AS lagging
+            FROM available
+            WHERE stream NOT IN (
+              SELECT stream FROM available
+              ORDER BY priority DESC, at ASC
+              LIMIT ($1::int - $5::int)
+            )
+            ORDER BY at ASC
+            LIMIT $5
+          )
         ),
         lead AS (
           SELECT stream, source, at, lane, FALSE AS lagging

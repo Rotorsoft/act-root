@@ -698,11 +698,24 @@ export class SqliteStore implements Store {
 
       // Dual frontier: lagging (priority DESC, watermark ASC — ACT-102)
       // + leading (newest first). The candidates list arrives sorted
-      // by `priority DESC, at ASC` from the SELECT above, so the
-      // `slice(0, lagging)` already does the right thing.
-      const lag = candidates
-        .slice(0, lagging)
-        .map((c) => ({ ...c, lagging: true }));
+      // by `priority DESC, at ASC` from the SELECT above. The lagging
+      // budget is split (ACT-1223): the priority portion takes the first
+      // `lagging - fair` candidates in that order; a fairness reserve then
+      // fills `fair` more by pure `at ASC` (priority ignored), excluding
+      // the ones already picked, so a default-priority lagging stream is
+      // never starved out by sustained higher-priority load. With all
+      // priorities equal both portions order by `at`, a no-op split.
+      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      const priority_slice = candidates.slice(0, lagging - fair);
+      const picked = new Set(priority_slice.map((c) => c.stream));
+      const fair_slice = [...candidates]
+        .sort((a, b) => a.at - b.at)
+        .filter((c) => !picked.has(c.stream))
+        .slice(0, fair);
+      const lag = [...priority_slice, ...fair_slice].map((c) => ({
+        ...c,
+        lagging: true,
+      }));
       const lead = [...candidates]
         .sort((a, b) => b.at - a.at)
         .slice(0, leading)

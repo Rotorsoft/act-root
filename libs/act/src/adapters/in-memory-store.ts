@@ -8,6 +8,7 @@
  *
  * @category Adapters
  */
+
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
@@ -595,16 +596,28 @@ export class InMemoryStore implements Store {
     // Lagging frontier orders by priority DESC (higher first), then by
     // watermark ASC (most-behind first). Mirrors the PG `claim()` SQL
     // — see `libs/act-pg/PERFORMANCE.md` for the benchmark that
-    // motivated the priority dimension.
-    const lag = available
-      .sort((a, b) => b.priority - a.priority || a.at - b.at)
-      .slice(0, lagging)
-      .map((s) => ({
-        stream: s.stream,
-        source: s.source,
-        at: s.at,
-        lagging: true,
-      }));
+    // motivated the priority dimension. A fairness reserve (ACT-1223)
+    // carves `fair` slots off the budget and fills them by pure watermark
+    // order (priority ignored) so a default-priority lagging stream can
+    // never be starved out of the frontier by sustained higher-priority
+    // load. With everyone at the same priority both slices order by `at`,
+    // so this is a behavioral no-op for existing workloads.
+    const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+    const by_priority = [...available].sort(
+      (a, b) => b.priority - a.priority || a.at - b.at
+    );
+    const priority_slice = by_priority.slice(0, lagging - fair);
+    const picked = new Set(priority_slice.map((s) => s.stream));
+    const fair_slice = [...available]
+      .sort((a, b) => a.at - b.at)
+      .filter((s) => !picked.has(s.stream))
+      .slice(0, fair);
+    const lag = [...priority_slice, ...fair_slice].map((s) => ({
+      stream: s.stream,
+      source: s.source,
+      at: s.at,
+      lagging: true,
+    }));
     const lead = available
       .sort((a, b) => b.at - a.at)
       .slice(0, leading)
