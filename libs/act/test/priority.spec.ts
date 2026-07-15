@@ -69,6 +69,51 @@ describe("ACT-102 priority lanes — framework", () => {
       // "no priority bias."
       expect(leases.map((l) => l.stream).sort()).toEqual(["earlier", "later"]);
     });
+
+    it("does not starve a default-priority lagging stream under sustained high-priority load (ACT-1223)", async () => {
+      // Many priority-100 lagging streams that always have work, plus one
+      // priority-0 lagging stream. The pre-fix lagging selection orders by
+      // `priority DESC, at ASC`, so the four lagging slots are always taken
+      // by the high-priority streams and the low-priority stream starves
+      // forever. The fairness reserve (ACT-1223) carves one of the four
+      // slots for pure watermark order, so the most-behind stream — the
+      // never-processed low one — is claimed within a bounded window.
+      const meta = { correlation: "", causation: {} };
+      await store().commit("src", [{ name: "X", data: {} }], meta);
+
+      await store().subscribe([
+        { stream: "high-0", source: "src", priority: 100 },
+        { stream: "high-1", source: "src", priority: 100 },
+        { stream: "high-2", source: "src", priority: 100 },
+        { stream: "high-3", source: "src", priority: 100 },
+        { stream: "high-4", source: "src", priority: 100 },
+        { stream: "high-5", source: "src", priority: 100 },
+        { stream: "low", source: "src", priority: 0 },
+      ]);
+
+      const by = randomUUID();
+      let low_claimed_at = -1;
+      const MAX_CYCLES = 20;
+      for (let cycle = 0; cycle < MAX_CYCLES; cycle++) {
+        const leases = await store().claim(4, 0, by, 1000);
+        if (leases.some((l) => l.stream === "low")) {
+          low_claimed_at = cycle;
+          break;
+        }
+        // Ack each claimed stream forward to the current head so the
+        // high-priority streams catch up momentarily...
+        const head = leases
+          .map((l) => l.at)
+          .reduce((a, b) => Math.max(a, b), 0);
+        await store().ack(leases.map((l) => ({ ...l, at: head })));
+        // ...then commit a fresh source event so every subscribed stream
+        // is lagging again on the next cycle — sustained high-priority load.
+        await store().commit("src", [{ name: "X", data: {} }], meta);
+      }
+
+      expect(low_claimed_at).toBeGreaterThanOrEqual(0);
+      expect(low_claimed_at).toBeLessThan(MAX_CYCLES);
+    });
   });
 
   describe("InMemoryStore.prioritize", () => {

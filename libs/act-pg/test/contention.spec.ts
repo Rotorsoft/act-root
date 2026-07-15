@@ -171,7 +171,12 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
       // Mutual exclusion: no stream is held by two workers in one round.
       const claimedAcrossFleet = perWorker.flatMap((s) => [...s]);
       expect(new Set(claimedAcrossFleet).size).toBe(claimedAcrossFleet.length);
-      if (perWorker.every((s) => s.size === 0)) break;
+      // Terminate on actual convergence (every stream at head), not a single
+      // empty round: under concurrent claiming a round can transiently claim
+      // nothing while work remains. The round cap still catches a genuine
+      // non-convergence bug.
+      const settled = await watermarks(prefix);
+      if (streams.every((s) => settled.get(s)?.at === lastId.get(s))) break;
     }
     expect(rounds).toBeLessThan(S * E + 10); // terminated by drain, not the cap
 
@@ -360,7 +365,12 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
       const claimedAcrossFleet = perWorker.flatMap((s) => [...s]);
       expect(new Set(claimedAcrossFleet).size).toBe(claimedAcrossFleet.length);
       expect(claimedAcrossFleet).not.toContain(poison); // never re-served
-      if (perWorker.every((s) => s.size === 0)) break;
+      // Terminate on actual convergence (every healthy stream at head), not a
+      // single empty round: under concurrent claiming a round can transiently
+      // claim nothing while work remains, ending the loop prematurely. The
+      // round cap still catches a genuine non-convergence bug.
+      const settled = await watermarks(prefix);
+      if (healthy.every((s) => settled.get(s)?.at === lastId.get(s))) break;
     }
     expect(rounds).toBeLessThan(200);
 

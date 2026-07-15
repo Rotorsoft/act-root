@@ -43,6 +43,10 @@ Or for dynamic resolvers:
 
 `claim()`'s lagging CTE becomes `ORDER BY priority DESC, at ASC`. With everyone at `priority = 0` the ordering collapses to plain `at ASC` so existing workloads see no behavior change.
 
+## Fairness — priority biases, it does not starve
+
+Priority is a scheduling hint, not strict precedence. A large high-priority set that always has work must not be able to hold every lagging slot forever and shut a default-priority stream out indefinitely (ACT-1223). So each adapter reserves a small slice of the lagging budget — roughly a quarter of the slots, at least one whenever there are two or more to split — for the most-behind streams by pure watermark ascending, priority ignored. A stream that keeps being passed over falls ever further behind, so its watermark eventually becomes the smallest in the store and the reserve claims it within a bounded number of cycles. High-priority streams still win the majority of slots every cycle, so the bias holds; the reserve only bounds the worst case. Under equal priorities (`priority = 0`, the common case) the priority slice and the reserve both order by `at ASC`, so the split is a no-op. `claim()`'s signature is unchanged — the reserve is purely internal to how each adapter fills the lagging frontier.
+
 ## What stays inviolate
 
 **Per-stream event ordering.** Priority only biases *which streams `claim()` picks first*, never the order events within a stream are processed. Within a stream, events still drain by `id ASC`. That's a foundational ES guarantee — ACT-102 explicitly does not break it.
