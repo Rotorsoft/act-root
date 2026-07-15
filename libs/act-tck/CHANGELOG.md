@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.2...@rotorsoft/act-tck-v1.27.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* **act:** reserve a fairness slot in the lagging frontier ([ff4b47a](https://github.com/rotorsoft/act-root/commit/ff4b47ade333215d4758ab6dd588d95229868bf1)), closes [hi#priority](https://github.com/hi/issues/priority) [#1223](https://github.com/rotorsoft/act-root/issues/1223)
+
 # [@rotorsoft/act-tck-v1.27.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.1...@rotorsoft/act-tck-v1.27.2) (2026-07-12)
 
 
