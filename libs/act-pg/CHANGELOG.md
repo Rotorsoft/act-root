@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.7...@rotorsoft/act-pg-v1.13.8) (2026-07-15)
+
+
+### Bug Fixes
+
+* **act:** reserve a fairness slot in the lagging frontier ([ff4b47a](https://github.com/rotorsoft/act-root/commit/ff4b47ade333215d4758ab6dd588d95229868bf1)), closes [hi#priority](https://github.com/hi/issues/priority) [#1223](https://github.com/rotorsoft/act-root/issues/1223)
+
 # [@rotorsoft/act-pg-v1.13.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.6...@rotorsoft/act-pg-v1.13.7) (2026-07-12)
 
 
