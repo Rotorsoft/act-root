@@ -7170,11 +7170,13 @@ export class CorrelateCycle<
                 payloads: [],
               };
               // Multiple reactions targeting the same stream within a
-              // single correlate scan — keep the max priority so the
-              // highest-priority reaction sets the lane (matches the
-              // subscribe-side \`max()\` invariant).
-              if (incoming_priority > entry.priority)
+              // single correlate scan — keep the max priority, and carry the
+              // winning reaction's lane so the highest-priority reaction sets
+              // the lane (matches the subscribe-side \`max()\` invariant).
+              if (incoming_priority > entry.priority) {
                 entry.priority = incoming_priority;
+                entry.lane = resolved.lane;
+              }
               entry.payloads.push({
                 ...reaction,
                 source: resolved.source,
@@ -23531,11 +23533,13 @@ export class CorrelateCycle<
                 payloads: [],
               };
               // Multiple reactions targeting the same stream within a
-              // single correlate scan — keep the max priority so the
-              // highest-priority reaction sets the lane (matches the
-              // subscribe-side \`max()\` invariant).
-              if (incoming_priority > entry.priority)
+              // single correlate scan — keep the max priority, and carry the
+              // winning reaction's lane so the highest-priority reaction sets
+              // the lane (matches the subscribe-side \`max()\` invariant).
+              if (incoming_priority > entry.priority) {
                 entry.priority = incoming_priority;
+                entry.lane = resolved.lane;
+              }
               entry.payloads.push({
                 ...reaction,
                 source: resolved.source,
