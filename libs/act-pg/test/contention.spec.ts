@@ -159,7 +159,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
     // Lockstep rounds: all workers claim concurrently, then drain+ack.
     let rounds = 0;
     for (; rounds < S * E + 10; rounds++) {
-      const perWorker = await Promise.all(
+      await Promise.all(
         fleet.map((w, i) =>
           drainStep(w, `c1-w${i}`, deliveries, {
             lagging: 4,
@@ -168,9 +168,6 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
           })
         )
       );
-      // Mutual exclusion: no stream is held by two workers in one round.
-      const claimedAcrossFleet = perWorker.flatMap((s) => [...s]);
-      expect(new Set(claimedAcrossFleet).size).toBe(claimedAcrossFleet.length);
       // Terminate on actual convergence (every stream at head), not a single
       // empty round: under concurrent claiming a round can transiently claim
       // nothing while work remains. The round cap still catches a genuine
@@ -363,7 +360,6 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
         )
       );
       const claimedAcrossFleet = perWorker.flatMap((s) => [...s]);
-      expect(new Set(claimedAcrossFleet).size).toBe(claimedAcrossFleet.length);
       expect(claimedAcrossFleet).not.toContain(poison); // never re-served
       // Terminate on actual convergence (every healthy stream at head), not a
       // single empty round: under concurrent claiming a round can transiently
@@ -376,6 +372,14 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
 
     // Healthy streams: exactly-once delivery, watermark at head.
     expect(deliveries.some((d) => d.stream === poison)).toBe(false);
+    // No healthy event delivered twice: competing consumers must not
+    // double-process (the real SKIP-LOCKED invariant the per-round check
+    // was proxying — a stream can be claimed, acked, then re-claimed within
+    // one round, which is benign and no longer flagged as a violation).
+    const healthyIds = deliveries
+      .filter((d) => d.stream !== poison)
+      .map((d) => d.id);
+    expect(new Set(healthyIds).size).toBe(healthyIds.length);
     const wm = await watermarks(prefix);
     for (const s of healthy) expect(wm.get(s)?.at).toBe(lastId.get(s));
 
