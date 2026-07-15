@@ -939,6 +939,68 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(second.find((l) => l.stream === s)).toBeDefined();
       });
 
+      it("does not starve a default-priority lagging stream under sustained high-priority load (ACT-1223)", async () => {
+        // A fresh adapter so only these streams compete for the frontier.
+        // Six priority-100 streams that always have fresh work plus one
+        // never-processed priority-0 stream. The lagging selection orders
+        // by priority DESC, at ASC, so without a fairness reserve the four
+        // lagging slots are forever taken by the high-priority streams and
+        // the low one starves. The reserve (ACT-1223) carves one slot for
+        // pure watermark order, so the most-behind stream is claimed within
+        // a bounded window regardless of priority.
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const suffix = uid();
+          const highs = Array.from(
+            { length: 6 },
+            (_, i) => `hi-${i}-${suffix}`
+          );
+          const low = `lo-${suffix}`;
+          await fresh.subscribe([
+            ...highs.map((stream) => ({ stream, priority: 100 })),
+            { stream: low, priority: 0 },
+          ]);
+          for (const stream of highs)
+            await fresh.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          await fresh.commit<CounterEvents>(
+            low,
+            [inc(1)],
+            make_meta({ stream: low })
+          );
+
+          const by = `w-${uid()}`;
+          let low_claimed = false;
+          const MAX_CYCLES = 20;
+          for (let cycle = 0; cycle < MAX_CYCLES && !low_claimed; cycle++) {
+            const leases = await fresh.claim(4, 0, by, 1000);
+            if (leases.some((l) => l.stream === low)) {
+              low_claimed = true;
+              break;
+            }
+            // Ack each high stream forward, then commit a fresh event so it
+            // is lagging again next cycle — sustained high-priority load.
+            for (const l of leases) {
+              await fresh.ack([{ ...l, at: l.at + 1 }]);
+              await fresh.commit<CounterEvents>(
+                l.stream,
+                [inc(1)],
+                make_meta({ stream: l.stream })
+              );
+            }
+          }
+
+          expect(low_claimed).toBe(true);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
       it("dedupes when both frontiers would return the same stream", async () => {
         const s = `claim-dedup-${uid()}`;
         await store.subscribe([{ stream: s }]);

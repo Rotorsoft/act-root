@@ -10027,6 +10027,7 @@ export class InMemoryCache implements Cache {
  *
  * @category Adapters
  */
+
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
@@ -10614,16 +10615,28 @@ export class InMemoryStore implements Store {
     // Lagging frontier orders by priority DESC (higher first), then by
     // watermark ASC (most-behind first). Mirrors the PG \`claim()\` SQL
     // — see \`libs/act-pg/PERFORMANCE.md\` for the benchmark that
-    // motivated the priority dimension.
-    const lag = available
-      .sort((a, b) => b.priority - a.priority || a.at - b.at)
-      .slice(0, lagging)
-      .map((s) => ({
-        stream: s.stream,
-        source: s.source,
-        at: s.at,
-        lagging: true,
-      }));
+    // motivated the priority dimension. A fairness reserve (ACT-1223)
+    // carves \`fair\` slots off the budget and fills them by pure watermark
+    // order (priority ignored) so a default-priority lagging stream can
+    // never be starved out of the frontier by sustained higher-priority
+    // load. With everyone at the same priority both slices order by \`at\`,
+    // so this is a behavioral no-op for existing workloads.
+    const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+    const by_priority = [...available].sort(
+      (a, b) => b.priority - a.priority || a.at - b.at
+    );
+    const priority_slice = by_priority.slice(0, lagging - fair);
+    const picked = new Set(priority_slice.map((s) => s.stream));
+    const fair_slice = [...available]
+      .sort((a, b) => a.at - b.at)
+      .filter((s) => !picked.has(s.stream))
+      .slice(0, fair);
+    const lag = [...priority_slice, ...fair_slice].map((s) => ({
+      stream: s.stream,
+      source: s.source,
+      at: s.at,
+      lagging: true,
+    }));
     const lead = available
       .sort((a, b) => b.at - a.at)
       .slice(0, leading)
@@ -26165,6 +26178,7 @@ export class InMemoryCache implements Cache {
  *
  * @category Adapters
  */
+
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
@@ -26752,16 +26766,28 @@ export class InMemoryStore implements Store {
     // Lagging frontier orders by priority DESC (higher first), then by
     // watermark ASC (most-behind first). Mirrors the PG \`claim()\` SQL
     // — see \`libs/act-pg/PERFORMANCE.md\` for the benchmark that
-    // motivated the priority dimension.
-    const lag = available
-      .sort((a, b) => b.priority - a.priority || a.at - b.at)
-      .slice(0, lagging)
-      .map((s) => ({
-        stream: s.stream,
-        source: s.source,
-        at: s.at,
-        lagging: true,
-      }));
+    // motivated the priority dimension. A fairness reserve (ACT-1223)
+    // carves \`fair\` slots off the budget and fills them by pure watermark
+    // order (priority ignored) so a default-priority lagging stream can
+    // never be starved out of the frontier by sustained higher-priority
+    // load. With everyone at the same priority both slices order by \`at\`,
+    // so this is a behavioral no-op for existing workloads.
+    const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+    const by_priority = [...available].sort(
+      (a, b) => b.priority - a.priority || a.at - b.at
+    );
+    const priority_slice = by_priority.slice(0, lagging - fair);
+    const picked = new Set(priority_slice.map((s) => s.stream));
+    const fair_slice = [...available]
+      .sort((a, b) => a.at - b.at)
+      .filter((s) => !picked.has(s.stream))
+      .slice(0, fair);
+    const lag = [...priority_slice, ...fair_slice].map((s) => ({
+      stream: s.stream,
+      source: s.source,
+      at: s.at,
+      lagging: true,
+    }));
     const lead = available
       .sort((a, b) => b.at - a.at)
       .slice(0, leading)
@@ -46055,11 +46081,16 @@ export class PostgresStore implements Store {
     const client = await this._client("claim");
     try {
       await client.query("BEGIN");
-      const lane_clause = lane !== undefined ? \`AND s.lane = $5\` : "";
+      const lane_clause = lane !== undefined ? \`AND s.lane = $6\` : "";
+      // Fairness reserve (ACT-1223): carve \`fair\` slots off the lagging
+      // budget for pure watermark-order claims so a default-priority
+      // lagging stream is never starved out by sustained higher-priority
+      // load. \`fair\` is always $5; the optional \`lane\` bind is last ($6).
+      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
       const params: unknown[] =
         lane !== undefined
-          ? [lagging, leading, by, millis, lane]
-          : [lagging, leading, by, millis];
+          ? [lagging, leading, by, millis, fair, lane]
+          : [lagging, leading, by, millis, fair];
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -46103,11 +46134,33 @@ export class PostgresStore implements Store {
         -- lagging-watermark order. With everyone at priority=0 the
         -- ORDER BY collapses to plain at ASC so existing workloads
         -- see no behavior change.
+        --
+        -- The lagging frontier is a UNION of two portions (ACT-1223): the
+        -- priority-ordered portion takes the first (lagging - fair) slots
+        -- by priority DESC, at ASC; a fairness reserve then fills fair more
+        -- slots by pure at ASC (priority ignored), excluding the ones
+        -- already chosen, so a default-priority lagging stream is never
+        -- starved out by sustained higher-priority load. With all
+        -- priorities equal both portions order by at, a no-op merge.
         lag AS (
-          SELECT stream, source, at, lane, TRUE AS lagging
-          FROM available
-          ORDER BY priority DESC, at ASC
-          LIMIT $1
+          (
+            SELECT stream, source, at, lane, TRUE AS lagging
+            FROM available
+            ORDER BY priority DESC, at ASC
+            LIMIT ($1::int - $5::int)
+          )
+          UNION
+          (
+            SELECT stream, source, at, lane, TRUE AS lagging
+            FROM available
+            WHERE stream NOT IN (
+              SELECT stream FROM available
+              ORDER BY priority DESC, at ASC
+              LIMIT ($1::int - $5::int)
+            )
+            ORDER BY at ASC
+            LIMIT $5
+          )
         ),
         lead AS (
           SELECT stream, source, at, lane, FALSE AS lagging
@@ -48185,11 +48238,24 @@ export class SqliteStore implements Store {
 
       // Dual frontier: lagging (priority DESC, watermark ASC — ACT-102)
       // + leading (newest first). The candidates list arrives sorted
-      // by \`priority DESC, at ASC\` from the SELECT above, so the
-      // \`slice(0, lagging)\` already does the right thing.
-      const lag = candidates
-        .slice(0, lagging)
-        .map((c) => ({ ...c, lagging: true }));
+      // by \`priority DESC, at ASC\` from the SELECT above. The lagging
+      // budget is split (ACT-1223): the priority portion takes the first
+      // \`lagging - fair\` candidates in that order; a fairness reserve then
+      // fills \`fair\` more by pure \`at ASC\` (priority ignored), excluding
+      // the ones already picked, so a default-priority lagging stream is
+      // never starved out by sustained higher-priority load. With all
+      // priorities equal both portions order by \`at\`, a no-op split.
+      const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      const priority_slice = candidates.slice(0, lagging - fair);
+      const picked = new Set(priority_slice.map((c) => c.stream));
+      const fair_slice = [...candidates]
+        .sort((a, b) => a.at - b.at)
+        .filter((c) => !picked.has(c.stream))
+        .slice(0, fair);
+      const lag = [...priority_slice, ...fair_slice].map((c) => ({
+        ...c,
+        lagging: true,
+      }));
       const lead = [...candidates]
         .sort((a, b) => b.at - a.at)
         .slice(0, leading)
@@ -52153,6 +52219,68 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.ack([{ ...(mine as Lease), at: (mine as Lease).at + 1 }]);
         const second = await store.claim(0, 100, \`w-\${uid()}\`, 1);
         expect(second.find((l) => l.stream === s)).toBeDefined();
+      });
+
+      it("does not starve a default-priority lagging stream under sustained high-priority load (ACT-1223)", async () => {
+        // A fresh adapter so only these streams compete for the frontier.
+        // Six priority-100 streams that always have fresh work plus one
+        // never-processed priority-0 stream. The lagging selection orders
+        // by priority DESC, at ASC, so without a fairness reserve the four
+        // lagging slots are forever taken by the high-priority streams and
+        // the low one starves. The reserve (ACT-1223) carves one slot for
+        // pure watermark order, so the most-behind stream is claimed within
+        // a bounded window regardless of priority.
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const suffix = uid();
+          const highs = Array.from(
+            { length: 6 },
+            (_, i) => \`hi-\${i}-\${suffix}\`
+          );
+          const low = \`lo-\${suffix}\`;
+          await fresh.subscribe([
+            ...highs.map((stream) => ({ stream, priority: 100 })),
+            { stream: low, priority: 0 },
+          ]);
+          for (const stream of highs)
+            await fresh.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          await fresh.commit<CounterEvents>(
+            low,
+            [inc(1)],
+            make_meta({ stream: low })
+          );
+
+          const by = \`w-\${uid()}\`;
+          let low_claimed = false;
+          const MAX_CYCLES = 20;
+          for (let cycle = 0; cycle < MAX_CYCLES && !low_claimed; cycle++) {
+            const leases = await fresh.claim(4, 0, by, 1000);
+            if (leases.some((l) => l.stream === low)) {
+              low_claimed = true;
+              break;
+            }
+            // Ack each high stream forward, then commit a fresh event so it
+            // is lagging again next cycle — sustained high-priority load.
+            for (const l of leases) {
+              await fresh.ack([{ ...l, at: l.at + 1 }]);
+              await fresh.commit<CounterEvents>(
+                l.stream,
+                [inc(1)],
+                make_meta({ stream: l.stream })
+              );
+            }
+          }
+
+          expect(low_claimed).toBe(true);
+        } finally {
+          await fresh.dispose();
+        }
       });
 
       it("dedupes when both frontiers would return the same stream", async () => {
