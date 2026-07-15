@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.1...@rotorsoft/act-v1.23.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* **act:** carry the winning reaction's lane in dynamic-resolver correlation ([86ff024](https://github.com/rotorsoft/act-root/commit/86ff024e0a34d3a9fbb5c7ea2ae63bf9ba9605c3)), closes [#1255](https://github.com/rotorsoft/act-root/issues/1255)
+* **act:** serialize windowed closes so the archive fires at most once per pruned range ([15edb86](https://github.com/rotorsoft/act-root/commit/15edb86893b32b3c0db8913d2df6d9cd2755a748)), closes [#1222](https://github.com/rotorsoft/act-root/issues/1222)
+
 # [@rotorsoft/act-v1.23.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.0...@rotorsoft/act-v1.23.1) (2026-07-15)
 
 
