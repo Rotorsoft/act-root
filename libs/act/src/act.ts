@@ -499,6 +499,45 @@ export class Act<
   /** Declared drain lanes (ACT-1103). */
   private readonly _lanes: ReadonlyArray<LaneConfig>;
 
+  /**
+   * Per-stream close serialization tails (#1222). Chains each stream's
+   * windowed-close work behind the previous one so a manual
+   * `app.close([{stream, before}])` and an autoclose windowed close for
+   * the same stream never run their guard-free prune concurrently — the
+   * manual path bypasses the `__autoclose__:X` drain lease that would
+   * otherwise exclude them, so without this both closers archive the
+   * same prefix. Process-local: both racers run on the same Act
+   * instance. Entries are dropped once their tail resolves so the map
+   * doesn't grow with distinct stream names.
+   */
+  private readonly _close_locks = new Map<string, Promise<unknown>>();
+
+  /**
+   * Run `work` under the per-stream close lock (#1222). Serializes
+   * windowed-close critical sections for the same stream while letting
+   * different streams proceed in parallel.
+   */
+  private _with_close_lock<T>(
+    stream: string,
+    work: () => Promise<T>
+  ): Promise<T> {
+    const prev = this._close_locks.get(stream) ?? Promise.resolve();
+    // Chain after the previous holder regardless of how it settled — a
+    // failed close must not wedge the stream's lock forever. The next
+    // waiter chains off `next` (the work), so its start is gated on this
+    // work completing.
+    const next = prev.then(work, work);
+    this._close_locks.set(stream, next);
+    // Drop the tail once it settles, but only if it's still the current
+    // one — a later waiter that already replaced it owns the entry now.
+    const cleanup = () => {
+      if (this._close_locks.get(stream) === next)
+        this._close_locks.delete(stream);
+    };
+    next.then(cleanup, cleanup);
+    return next;
+  }
+
   /** Drain lanes declared via `.withLane(...)`. Implicit default not included. */
   get lanes(): ReadonlyArray<LaneConfig> {
     return this._lanes;
@@ -663,6 +702,8 @@ export class Act<
             tombstone: this._es.tombstone,
             logger: this._logger,
             correlation: close_correlation(this._correlator, close_actor),
+            with_stream_lock: (stream, work) =>
+              this._with_close_lock(stream, work),
           });
           this.emit("closed", result);
         },
@@ -1877,6 +1918,7 @@ export class Act<
         tombstone: this._es.tombstone,
         logger: this._logger,
         correlation: close_correlation(this._correlator, close_actor),
+        with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
       this.emit("closed", result);
