@@ -1569,6 +1569,30 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ]);
         expect(blocked).toHaveLength(0);
       });
+
+      it("re-blocking an already-blocked stream is a no-op (#1263)", async () => {
+        const s = `block-twice-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        await store.ack(leased.filter((l) => l.stream !== s));
+        const first = await store.block([
+          { ...(mine as Lease), error: "boom" },
+        ]);
+        expect(first).toHaveLength(1);
+        // Second block of the same already-blocked lease affects nothing —
+        // no spurious duplicate `blocked` event.
+        const second = await store.block([
+          { ...(mine as Lease), error: "boom" },
+        ]);
+        expect(second).toHaveLength(0);
+      });
     });
 
     describe("defer", () => {
@@ -3735,6 +3759,60 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           }
         );
         expect(bwd).toEqual([10]);
+      });
+
+      // #1261: a time-travel query (with_snaps + created_before) must ignore
+      // a snapshot newer than the cutoff. Restore lets us plant a snapshot
+      // with the highest id AND latest `created`, then prove the resume floor
+      // does not jump to it and skip the pre-cutoff events below it.
+      it("time-travel query ignores a snapshot newer than the created cutoff", async () => {
+        const s = `restore-tt-snap-${uid()}`;
+        const t0 = new Date("2020-01-01T00:00:00.000Z");
+        const t1 = new Date("2020-02-01T00:00:00.000Z");
+        const tSnap = new Date("2020-03-01T00:00:00.000Z");
+        await restore(
+          as_source([
+            event(1, s, 0, "Incremented", t0, { amount: 1 }),
+            event(2, s, 1, "Incremented", t1, { amount: 2 }),
+            // Snapshot committed last → highest id and latest `created`.
+            event(3, s, 2, SNAP_EVENT, tSnap, { count: 3 }),
+          ])
+        );
+        // Cutoff between t0 and t1: the fold must see only the t0 event, not
+        // jump to the newer snapshot (which would yield an empty result).
+        const cutoff = new Date("2020-01-15T00:00:00.000Z");
+        // `created_before` excludes the newer snapshot outright, so the
+        // callback only ever sees the pre-cutoff domain event.
+        const before: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            before.push((e.data as { amount: number }).amount);
+          },
+          {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            created_before: cutoff,
+          }
+        );
+        expect(before).toEqual([1]);
+        // Same for `created_after`: the floor must not jump past the t1 event
+        // to the newer snapshot. With the floor suppressed the snapshot itself
+        // is returned (with_snaps) and skipped by the name guard.
+        const after: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            if ((e.name as string) !== SNAP_EVENT)
+              after.push((e.data as { amount: number }).amount);
+          },
+          {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            created_after: cutoff,
+          }
+        );
+        expect(after).toEqual([2]);
       });
 
       // #1257: restore must split `pii` into the isolated store so
