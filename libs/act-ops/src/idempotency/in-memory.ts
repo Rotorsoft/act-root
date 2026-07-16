@@ -39,9 +39,18 @@ export type InMemoryIdempotencyStoreOptions = {
  * {@link IdempotencyStore} contract stays the same so the call site
  * doesn't change.
  *
- * Map iteration is insertion-ordered, so:
- * - The oldest entry sits at `keys().next().value` (cheapest to evict).
+ * Map iteration is ordered by **last touch** — every `_record` (a fresh
+ * `claim`, or a `commit` refreshing an existing key) moves the key to the
+ * tail. Since each touch also stamps a fresh `expires_at` and `now` is
+ * non-decreasing, iteration order tracks expiry order, so:
+ * - The least-recently-touched entry sits at `keys().next().value` (the
+ *   correct LRU eviction victim).
  * - GC walks until the first non-expired entry and stops.
+ *
+ * Keeping the key at a stale insertion position instead would let a
+ * `commit`-refreshed early entry shield genuinely-expired entries from the
+ * GC break-scan and make eviction drop a durable key before a staler
+ * tentative one (#1268).
  *
  * Each entry carries a `committed` flag so the two-phase contract
  * holds: {@link claim} records a tentative entry (dedups concurrent
@@ -87,6 +96,13 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   }
 
   private _record(key: string, now: number, committed: boolean): void {
+    // Re-touching an existing key (a `commit` after `claim`) must move it to
+    // the tail so iteration stays ordered by last touch. `Map.set` alone
+    // updates the value in place but preserves the original insertion
+    // position — a refreshed `expires_at` would then sit at a stale early
+    // slot and break both the `_gc` break-scan and `keys().next()` eviction
+    // (#1268). `delete` on an absent key is a harmless no-op.
+    this._seen.delete(key);
     this._seen.set(key, { expires_at: now + this._ttl_ms, committed });
     if (this._seen.size > this._max_entries) {
       // Safe by construction: `_seen.size > _max_entries >= 0` implies at
