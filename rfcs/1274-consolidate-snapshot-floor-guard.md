@@ -151,12 +151,12 @@ the **contract-semantics** decision (below), which the charter *does* cover.
 
 ## Open questions
 
-1. **Landing order.** #1267 is a high-severity data-corruption bug with an approved,
-   isolated fix already in review (PR #1271). Do we (a) merge #1267 now for the fast fix
-   and let this RFC's PR remove its guard as cleanup, or (b) close #1271/#1273 and ship
-   only the consolidation? Option (a) de-risks the high-sev bug; option (b) avoids
-   churn. Recommendation: (a) if the consolidation needs more than a day of review,
-   else (b).
+1. **Landing order.** *Decided: consolidation only.* PR #1271 (#1267) and PR #1273
+   (#1270) are closed as superseded; a single consolidation PR fixes all four instances
+   (#1261 / #1267 / #1270 / #1274) at once via the one-line orchestrator toggle and the
+   guard deletions. The high-severity #1267 fix rides in on that PR rather than landing
+   separately — accepted trade-off: it waits on this RFC's review instead of merging
+   immediately.
 2. **Residual store guard.** Should stores keep the minimal `stream_exact && stream`
    part of the trigger (defensive, cheap), or assume the orchestrator always loads one
    exact stream? Proposed: keep `with_snaps && stream_exact && stream` — it's not a
