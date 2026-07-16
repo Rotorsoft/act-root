@@ -3693,6 +3693,116 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // One callback per event; values monotonic.
         expect(calls).toEqual([1, 2]);
       });
+
+      // #1258: `created` bounds are pure WHERE filters, never early-breaks.
+      // Restore preserves the source `created` verbatim, so a restored
+      // dataset whose timestamp order diverges from id order proves the
+      // scan must not short-circuit on the first out-of-order event.
+      it("query created bounds are filters, not id-ordered breaks", async () => {
+        const s = `restore-created-order-${uid()}`;
+        // id 0 = newest, id 1 = oldest → created order ≠ id order.
+        const newest = new Date("2020-06-01T00:00:00.000Z");
+        const oldest = new Date("2020-01-01T00:00:00.000Z");
+        await restore(
+          as_source([
+            event(1, s, 0, "Incremented", newest, { amount: 10 }),
+            event(2, s, 1, "Incremented", oldest, { amount: 20 }),
+          ])
+        );
+        const cutoff = new Date("2020-03-01T00:00:00.000Z");
+        // Forward: the newest event (id 0) is scanned first and fails
+        // `created_before`; the older event (id 1) must still be found.
+        const fwd: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            fwd.push((e.data as { amount: number }).amount);
+          },
+          { stream: s, stream_exact: true, created_before: cutoff }
+        );
+        expect(fwd).toEqual([20]);
+        // Backward: the oldest event (id 1) is scanned first and fails
+        // `created_after`; the newer event (id 0) must still be found.
+        const bwd: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            bwd.push((e.data as { amount: number }).amount);
+          },
+          {
+            stream: s,
+            stream_exact: true,
+            created_after: cutoff,
+            backward: true,
+          }
+        );
+        expect(bwd).toEqual([10]);
+      });
+
+      // #1257: restore must split `pii` into the isolated store so
+      // `forget_pii` erases it — otherwise restored PII stays inline and
+      // erasure silently no-ops. Only meaningful when the adapter also
+      // isolates PII, so gate the assertion on that capability.
+      it.skipIf(!caps.pii_isolation)(
+        "isolates restored pii so forget_pii erases it",
+        async () => {
+          const s = `restore-pii-${uid()}`;
+          const t = new Date("2020-05-01T00:00:00.000Z");
+          // Two PII events on the same stream so isolation must survive
+          // across events, not just the first.
+          const result = await restore(
+            as_source([
+              {
+                id: 1,
+                stream: s,
+                version: 0,
+                name: "Incremented",
+                data: { amount: 1 },
+                pii: { email: "first@example.com" },
+                created: t,
+                meta: { correlation: "restore-tck", causation: {} },
+              },
+              {
+                id: 2,
+                stream: s,
+                version: 1,
+                name: "Incremented",
+                data: { amount: 2 },
+                pii: { email: "second@example.com" },
+                created: t,
+                meta: { correlation: "restore-tck", causation: {} },
+              },
+            ])
+          );
+          expect(result.kept).toBe(2);
+          // PII round-trips on read after restore.
+          const before: Committed<CounterEvents, keyof CounterEvents>[] = [];
+          await store.query<CounterEvents>(
+            (e) => {
+              before.push(e);
+            },
+            { stream: s, stream_exact: true }
+          );
+          expect(before.map((e) => e.pii)).toEqual([
+            { email: "first@example.com" },
+            { email: "second@example.com" },
+          ]);
+          // forget_pii sees the restored PII and wipes every event's copy.
+          const wiped = await store.forget_pii!.call(store, s);
+          expect(wiped).toBe(2);
+          const after: Committed<CounterEvents, keyof CounterEvents>[] = [];
+          await store.query<CounterEvents>(
+            (e) => {
+              after.push(e);
+            },
+            { stream: s, stream_exact: true }
+          );
+          expect(after).toHaveLength(2);
+          for (const e of after) expect(e.pii == null).toBe(true);
+          expect(after.map((e) => e.data)).toEqual([
+            { amount: 1 },
+            { amount: 2 },
+          ]);
+        }
+      );
     });
 
     // PII isolation — sensitive-data epic (#566). Same `skipIf` pattern as

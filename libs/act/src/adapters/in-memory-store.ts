@@ -443,7 +443,12 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         if (query.after !== undefined && e.id <= query.after) break;
-        if (query.created_after && e.created <= query.created_after) break;
+        // `created` is not monotonic with `id` (restore preserves the
+        // source timestamps verbatim), so a failing time bound skips the
+        // event rather than terminating the scan — matching PG/SQLite,
+        // which treat `created` bounds as pure WHERE filters. Only the
+        // id-ordered `after` bound above may short-circuit.
+        if (query.created_after && e.created <= query.created_after) continue;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
         );
@@ -475,7 +480,12 @@ export class InMemoryStore implements Store {
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_after && e.created <= query.created_after) continue;
         if (query?.before !== undefined && e.id >= query.before) break;
-        if (query?.created_before && e.created >= query.created_before) break;
+        // `created` is not monotonic with `id`, so a failing time bound
+        // skips the event rather than terminating the scan — matching
+        // PG/SQLite. Only the id-ordered `before` bound above may
+        // short-circuit.
+        if (query?.created_before && e.created >= query.created_before)
+          continue;
         await Promise.resolve(
           callback(this._with_pii(e as Committed<E, keyof E>))
         );
@@ -1208,6 +1218,7 @@ export class InMemoryStore implements Store {
     const prev_stream_versions = this._stream_versions;
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
+    const prev_pii = this._pii;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
     this._next_id = 0;
@@ -1215,11 +1226,26 @@ export class InMemoryStore implements Store {
     this._stream_versions = new Map();
     this._max_event_id_by_stream = new Map();
     this._max_non_snap_event_id = -1;
+    this._pii = new Map();
     try {
       await driver(async (event) => {
         const id = this._next_id++;
-        const committed: Committed<Schemas, keyof Schemas> = { ...event, id };
+        // Split `pii` out of the stored row into the isolated `_pii` map,
+        // mirroring `commit`. The stored event is the pii-less view so
+        // `forget_pii` — which only drops the `_pii` entry — actually
+        // erases restored PII (durable adapters restore into their
+        // isolated column for the same reason).
+        const { pii, ...rest } = event;
+        const committed: Committed<Schemas, keyof Schemas> = { ...rest, id };
         this._events.push(committed);
+        if (pii != null) {
+          let per_stream = this._pii.get(event.stream);
+          if (!per_stream) {
+            per_stream = new Map();
+            this._pii.set(event.stream, per_stream);
+          }
+          per_stream.set(id, structuredClone(pii) as Record<string, unknown>);
+        }
         // Last event per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also
         // the highest version. Out-of-order sources get last-wins,
@@ -1240,6 +1266,7 @@ export class InMemoryStore implements Store {
       this._stream_versions = prev_stream_versions;
       this._max_event_id_by_stream = prev_max_event_id_by_stream;
       this._max_non_snap_event_id = prev_max_non_snap_event_id;
+      this._pii = prev_pii;
       throw err;
     }
   }
