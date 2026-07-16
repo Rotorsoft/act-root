@@ -1,0 +1,39 @@
+# Debug Wave — invariants, ruled-out facts, and the bug log
+
+The "survive the domain model" gate depends on knowing what is *correct by design*. A hunter that flags a design choice as a bug wastes a wave; a hunter that dismisses a real bug as "probably intended" misses it. This file is the shared memory that keeps both from happening. Read it before a wave; append to it after.
+
+## Standing invariants a hunter must not violate
+
+These are load-bearing facts about the framework. A red test that only "works" by contradicting one of these is testing a fantasy, not a bug.
+
+- **Global event ids are strictly monotonic.** A later commit always gets a higher `id` than any earlier one. Any argument that depends on a future commit landing at a *lower* id — "the scan skips it", "the watermark advances past it" — is invalid. This single fact killed the #1254 false positive: advancing an empty-fetch stream to a window-max can never skip a future event, because a future event will have a higher id than the window-max.
+- **`fetch_window_at` fallback is load-bearing.** In `drain-cycle.ts`, `const at = entry.fetch.events.at(-1)?.id || fetch_window_at` — the `fetch_window_at` fallback is what lets an empty-fetch stream advance so settle converges. Changing it to `?? lease.at` (or similar) hangs the notify/scope suites in an infinite settle loop. Not a bug.
+- **The framework has no built-in dedup, by design.** See `docs/docs/architecture/concurrency-model.md` ("why no framework-level dedup"). Do not report "the same event could be delivered twice under X" as a bug — at-least-once with consumer-side idempotency is the deliberate contract.
+- **Reaction backoff is per-worker, in process memory.** The `retry_count` on the stream watermark is shared and climbs across N workers, so `blockOnError` can fire up to N× sooner than a single worker's strategy suggests. That cross-worker amplification is intentional (`docs/docs/concepts/error-handling.md` § Backoff). Do **not** confuse it with #1262, which is a *single* worker inflating retry via in-window re-claims that run no handler — that one is a real bug.
+- **`created` is not monotonic with `id`.** Restore preserves source timestamps verbatim, so timestamp order can diverge from insertion order. Time bounds (`created_before`/`created_after`) are pure filters, never id-ordered early-breaks. (This was #1258; the principle stands for any new code that touches `created`.)
+- **Fairness is store-internal by design.** The `Store.claim` signature did not change for the #1223/#1252 fairness reserve — each adapter infers the `fair = lagging>=2 ? max(1, floor(lagging/4)) : 0` split inline. Do not propose exposing fairness through the claim interface; that reshape was explicitly rejected.
+- **Close/autoclose surfaces are days-only.** Never ms/seconds/minutes on a close-facing API. The one-day floor is deliberate — close is low-cadence housekeeping. Not a bug.
+- **Windowed close prunes, it does not retire.** `close`/`.autocloses` delete only the prefix below the closest safe `__snapshot__`; no tombstone, subscriptions and cache untouched, stream stays live. No qualifying snapshot ⇒ `skipped`, not an error.
+- **Some InMemory shortcuts are legitimate.** InMemory is single-process and dev/test-only. `notify` is intentionally unimplemented. Not every InMemory-vs-SQL difference is a divergence — check whether the doc-comment declares the behavior best-effort or capability-gated (e.g. `query_streams.source_matches` MAY return a superset) before calling it a bug.
+
+## Confirmed bugs (regression anchors)
+
+Each of these was found red-first and filed. Future waves should confirm they stay fixed and look for siblings.
+
+- **#1257** — `InMemoryStore.restore` kept `pii` inline and never wrote/rolled-back `_pii`, so `forget_pii` no-opped on restored events. Fixed: split pii into `_pii` on restore. *Sibling to check:* any other path that writes events bypassing the `commit` pii-split.
+- **#1258** — InMemory `query` early-`break`ed on `created_before`/`created_after`, dropping matches when created order ≠ id order. Fixed: `continue`, not `break`. *Sibling:* any other loop that assumes `created` tracks `id`.
+- **#1261** — time-travel `load({ created_before })` returns wrong (empty) state when a snapshot exists after the cutoff; the `with_snaps` resume floor ignores the time bound (all three adapters). *Sibling:* the `created_after` half of the same branch.
+- **#1262** — backoff "phantom retry": claiming a stream inside its process-local backoff window bumps persisted `retry` with no handler run, silently halving effective `maxRetries`. *Sibling:* any finalize/claim path where `retry` advances without a real attempt.
+- **#1263** — `InMemoryStore.block()` on an already-blocked stream returns the lease again (spurious duplicate `blocked` event); PG/SQLite return `[]`. *Sibling:* other InMemory mutators missing a state-guard the SQL `WHERE` clause enforces.
+- **#1255** — correlate-cycle didn't update `entry.lane` when a higher-priority reaction won the priority merge. Fixed. *Sibling:* other per-entry fields that should follow the priority winner.
+
+## False positives (do not re-file)
+
+- **#1254** — claimed the drain-cycle watermark fallback (`|| fetch_window_at`) skipped events. Closed as false positive: monotonic ids make the skip impossible, and the "fix" hung notify/scope. The lesson: a proven-red behavior is not a bug until the fix survives the full suite *and* the domain model.
+- **PG `DISTINCT ON (stream)` tie-break for dual-frontier streams** (fairness hunt) — which `lagging` flag survives a `lag UNION ALL lead` collapse isn't pinned by SQL semantics, only by plan-dependent input order. Today all three adapters agree and the only consumer is a self-correcting heuristic (`compute_lag_lead_ratio`). Cosmetic, not a correctness fault. Flag for awareness only; don't file unless it starts producing an observable divergence.
+
+## Mechanics that bit us
+
+- Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.
+- Vitest ignores specs outside the project root — a probe in `/tmp` or the scratchpad reports `No test files found`. Write probes into the package's `test/` dir, run, delete.
+- Any *real* fix that changes source text of a public export (adapters, `runStoreTck`) shifts the stability snapshots. Regenerate them **after** biome formats the source (`npx biome check --write` then `vitest -u` on the stability spec), and expect the rfc-gate to want an `rfc-gate: exempt — ...` line when the snapshot grows only from embedded test/comment text.
