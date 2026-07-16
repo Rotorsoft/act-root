@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.2...@rotorsoft/act-v1.23.3) (2026-07-16)
+
+
+### Bug Fixes
+
+* **act:** align InMemoryStore restore + created filters with durable adapters ([acd797e](https://github.com/rotorsoft/act-root/commit/acd797e6efa3acaf2990da5281c228c6792e7a89)), closes [#1257](https://github.com/rotorsoft/act-root/issues/1257) [#1258](https://github.com/rotorsoft/act-root/issues/1258) [#1257](https://github.com/rotorsoft/act-root/issues/1257) [#1258](https://github.com/rotorsoft/act-root/issues/1258)
+
 # [@rotorsoft/act-v1.23.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.1...@rotorsoft/act-v1.23.2) (2026-07-15)
 
 
