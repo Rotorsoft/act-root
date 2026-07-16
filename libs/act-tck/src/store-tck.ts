@@ -3815,6 +3815,52 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(after).toEqual([2]);
       });
 
+      // #1267: the id-cursor sibling of #1261. A time-travel query
+      // (with_snaps + `before`) must ignore a snapshot whose id sits ABOVE
+      // the cutoff. The resume floor jumps to `MAX(snapshot id)`; if that id
+      // is above `before`, the `before` filter then drops it and every
+      // pre-cutoff event below it, yielding an empty fold. Suppressing the
+      // floor under a `before` bound is the fix — same shape as #1261.
+      it("time-travel query ignores a snapshot above the id cutoff (#1267)", async () => {
+        const s = `restore-tt-snap-before-${uid()}`;
+        const t = new Date("2020-01-01T00:00:00.000Z");
+        await restore(
+          as_source([
+            event(1, s, 0, "Incremented", t, { amount: 1 }),
+            event(2, s, 1, "Incremented", t, { amount: 2 }),
+            // Snapshot committed last → highest id, above the cutoff below.
+            event(3, s, 2, SNAP_EVENT, t, { count: 3 }),
+          ])
+        );
+        // Discover the 2nd domain event's id from the store itself — ids are
+        // adapter-relative (InMemory is 0-based, the SQL adapters preserve the
+        // restored 1-based ids), so a hard-coded cutoff would test different
+        // things per adapter.
+        const ids: number[] = [];
+        await store.query<CounterEvents>((e) => ids.push(e.id), {
+          stream: s,
+          stream_exact: true,
+        });
+        const cutoff = ids[1];
+        // Cutoff at the 2nd domain event: the fold must see only the first
+        // event, not jump to the newer snapshot (which would yield empty).
+        // The snapshot's id is above the cutoff, so the `before` bound also
+        // excludes it outright — the callback only ever sees domain events.
+        const folded: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            folded.push((e.data as { amount: number }).amount);
+          },
+          {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            before: cutoff,
+          }
+        );
+        expect(folded).toEqual([1]);
+      });
+
       // #1257: restore must split `pii` into the isolated store so
       // `forget_pii` erases it — otherwise restored PII stays inline and
       // erasure silently no-ops. Only meaningful when the adapter also

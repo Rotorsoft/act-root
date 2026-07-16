@@ -719,15 +719,16 @@ export class PostgresStore implements Store {
         with_snaps &&
         query.stream_exact &&
         stream &&
+        before === undefined &&
         query.created_before === undefined &&
         query.created_after === undefined
       ) {
         // Resume at the latest snapshot for this stream so pre-snapshot
         // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-        // stream. An explicit `after` (above) wins. A `created_*` bound
-        // suppresses the floor: time-travel ignores snapshots after the
-        // cutoff (#1261), else the floor would skip pre-cutoff events below
-        // a newer snapshot.
+        // stream. An explicit `after` (above) wins. A `created_*` or `before`
+        // bound suppresses the floor: time-travel ignores snapshots after the
+        // cutoff (#1261/#1267), else the floor would skip pre-cutoff events
+        // below a snapshot that sits above the cutoff.
         values.push(stream);
         conditions.push(
           `id >= (SELECT COALESCE(MAX(id), -1) FROM ${this._fqt} WHERE stream=$${values.length} AND name='${SNAP_EVENT}')`

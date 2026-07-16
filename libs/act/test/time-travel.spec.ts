@@ -111,6 +111,39 @@ describe("time-travel load", () => {
     await dispose();
   });
 
+  it("should ignore a snapshot above the `before` id cutoff (#1267)", async () => {
+    // snap on EVERY event → a `__snapshot__` is committed above any early
+    // cutoff. The `with_snaps` resume floor must not jump to it and skip the
+    // pre-cutoff events below it (the id-cursor sibling of #1261).
+    const SnapEvery = state({ SnapEvery: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ Incremented })
+      .patch({
+        Incremented: ({ data }, s) => ({ count: s.count + data.by }),
+      })
+      .on({ increment: z.object({ by: z.number() }) })
+      .emit((action) => ["Incremented", { by: action.by }])
+      .snap(() => true)
+      .build();
+
+    const { app, dispose } = await sandbox(act().withState(SnapEvery));
+    const stream = nextStream();
+
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.do("increment", { stream, actor }, { by: 2 });
+    await app.do("increment", { stream, actor }, { by: 3 });
+
+    const events = await app.query_array({ stream, stream_exact: true });
+    // Before the 2nd domain event → only the first (by:1) folds, even though
+    // snapshots sit above the cutoff.
+    const past = await app.load(SnapEvery, stream, undefined, {
+      before: events[1].id,
+    });
+    expect(past.state.count).toBe(1);
+
+    await dispose();
+  });
+
   test("should return current state when as-of is in the future", async ({
     app,
   }) => {

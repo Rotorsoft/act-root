@@ -464,15 +464,17 @@ export class InMemoryStore implements Store {
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit `after`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit `after` wins. A `created_*` bound suppresses the
-      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
-      // the latest snapshot may be newer than the bound, and jumping to it
-      // would skip every pre-cutoff event below it. Falls back to full scan.
+      // scan; an explicit `after` wins. A `created_*` or `before` bound
+      // suppresses the floor: time-travel must ignore snapshots after the
+      // cutoff (#1261/#1267) — the latest snapshot may sit above the bound,
+      // and jumping to it would skip every pre-cutoff event below it. Falls
+      // back to full scan.
       if (
         query?.with_snaps &&
         query.stream_exact &&
         query.stream !== undefined &&
         query.after === undefined &&
+        query.before === undefined &&
         query.created_before === undefined &&
         query.created_after === undefined
       ) {

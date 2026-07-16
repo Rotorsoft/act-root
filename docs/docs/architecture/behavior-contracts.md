@@ -36,7 +36,7 @@ backed by unit/integration specs under `libs/act/test/`.
 | The cache is invalidated **only** on `ConcurrencyError` | `cache-and-snapshots.md` "Cache invalidation — narrow contract" | `cache.spec.ts` → "cache invalidated on ConcurrencyError" |
 | Invariant / validation failures (no commit) leave the warm cache **untouched** | `cache-and-snapshots.md` "Anything else … leaves the cache untouched" | `cache.spec.ts` → "invariant failure leaves the warm cache untouched", "validation failure leaves the warm cache untouched" **(gap filled — #1029)** |
 | A `cache.set` rejection is logged, not fatal to the action | `cache-and-snapshots.md` | `cache.spec.ts` → "cache.set rejection is logged but does not fail the action" |
-| Time-travel (`asOf`) bypasses cache read and write, and ignores snapshots after the cutoff | `cache-and-snapshots.md` "Time-travel reads" | `time-travel.spec.ts` → "should not read from cache…", "should not write to cache…", "should not use snapshots…" |
+| Time-travel (`asOf`) bypasses cache read and write, and ignores snapshots after the cutoff — for both `created_*` time bounds and the `before` id cutoff (a snapshot above the cutoff must not pull the resume floor past pre-cutoff events) | `cache-and-snapshots.md` "Time-travel reads" | `time-travel.spec.ts` → "should not read from cache…", "should not write to cache…", "should not use snapshots…", "should ignore a snapshot above the `before` id cutoff (#1267)"; `store-tck.ts` → "time-travel query ignores a snapshot above the id cutoff (#1267)" |
 
 ## Reactions, drain, and errors
 
