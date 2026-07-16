@@ -10337,7 +10337,11 @@ class InMemoryStream {
    * @param error Blocked error message.
    */
   block(lease: Lease, error: string) {
-    if (this._leased_by === lease.by) {
+    // Skip already-blocked streams so a redundant block is a no-op, mirroring
+    // the SQL adapters' \`WHERE ... AND blocked = false\` guard (#1263). Without
+    // this, re-blocking returns the lease again and emits a spurious duplicate
+    // \`blocked\` lifecycle event that the durable stores suppress.
+    if (this._leased_by === lease.by && !this._blocked) {
       this._blocked = true;
       this._error = error;
       // A blocked stream is poison; clear any pending defer (#1090).
@@ -10594,12 +10598,17 @@ export class InMemoryStore implements Store {
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit \`after\`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit \`after\` wins.
+      // scan; an explicit \`after\` wins. A \`created_*\` bound suppresses the
+      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
+      // the latest snapshot may be newer than the bound, and jumping to it
+      // would skip every pre-cutoff event below it. Falls back to full scan.
       if (
         query?.with_snaps &&
         query.stream_exact &&
         query.stream !== undefined &&
-        query.after === undefined
+        query.after === undefined &&
+        query.created_before === undefined &&
+        query.created_after === undefined
       ) {
         for (let j = this._events.length - 1; j >= 0; j--) {
           const e = this._events[j];
@@ -26630,7 +26639,11 @@ class InMemoryStream {
    * @param error Blocked error message.
    */
   block(lease: Lease, error: string) {
-    if (this._leased_by === lease.by) {
+    // Skip already-blocked streams so a redundant block is a no-op, mirroring
+    // the SQL adapters' \`WHERE ... AND blocked = false\` guard (#1263). Without
+    // this, re-blocking returns the lease again and emits a spurious duplicate
+    // \`blocked\` lifecycle event that the durable stores suppress.
+    if (this._leased_by === lease.by && !this._blocked) {
       this._blocked = true;
       this._error = error;
       // A blocked stream is poison; clear any pending defer (#1090).
@@ -26887,12 +26900,17 @@ export class InMemoryStore implements Store {
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit \`after\`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit \`after\` wins.
+      // scan; an explicit \`after\` wins. A \`created_*\` bound suppresses the
+      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
+      // the latest snapshot may be newer than the bound, and jumping to it
+      // would skip every pre-cutoff event below it. Falls back to full scan.
       if (
         query?.with_snaps &&
         query.stream_exact &&
         query.stream !== undefined &&
-        query.after === undefined
+        query.after === undefined &&
+        query.created_before === undefined &&
+        query.created_after === undefined
       ) {
         for (let j = this._events.length - 1; j >= 0; j--) {
           const e = this._events[j];
@@ -46092,10 +46110,19 @@ export class PostgresStore implements Store {
       if (typeof after !== "undefined") {
         values.push(after);
         conditions.push(\`id>$\${values.length}\`);
-      } else if (with_snaps && query.stream_exact && stream) {
+      } else if (
+        with_snaps &&
+        query.stream_exact &&
+        stream &&
+        query.created_before === undefined &&
+        query.created_after === undefined
+      ) {
         // Resume at the latest snapshot for this stream so pre-snapshot
         // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-        // stream. An explicit \`after\` (above) wins.
+        // stream. An explicit \`after\` (above) wins. A \`created_*\` bound
+        // suppresses the floor: time-travel ignores snapshots after the
+        // cutoff (#1261), else the floor would skip pre-cutoff events below
+        // a newer snapshot.
         values.push(stream);
         conditions.push(
           \`id >= (SELECT COALESCE(MAX(id), -1) FROM \${this._fqt} WHERE stream=$\${values.length} AND name='\${SNAP_EVENT}')\`
@@ -48330,10 +48357,19 @@ export class SqliteStore implements Store {
     if (query?.after !== undefined) {
       sql += " AND id > ?";
       args.push(query.after);
-    } else if (query?.with_snaps && query.stream_exact && query.stream) {
+    } else if (
+      query?.with_snaps &&
+      query.stream_exact &&
+      query.stream &&
+      query.created_before === undefined &&
+      query.created_after === undefined
+    ) {
       // Resume at the latest snapshot for this stream so pre-snapshot
       // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-      // stream. An explicit \`after\` (above) wins.
+      // stream. An explicit \`after\` (above) wins. A \`created_*\` bound
+      // suppresses the floor: time-travel ignores snapshots after the
+      // cutoff (#1261), else the floor would skip pre-cutoff events below
+      // a newer snapshot.
       sql +=
         " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
       args.push(query.stream);
@@ -53135,6 +53171,30 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ]);
         expect(blocked).toHaveLength(0);
       });
+
+      it("re-blocking an already-blocked stream is a no-op (#1263)", async () => {
+        const s = \`block-twice-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 0, \`w-\${uid()}\`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        await store.ack(leased.filter((l) => l.stream !== s));
+        const first = await store.block([
+          { ...(mine as Lease), error: "boom" },
+        ]);
+        expect(first).toHaveLength(1);
+        // Second block of the same already-blocked lease affects nothing —
+        // no spurious duplicate \`blocked\` event.
+        const second = await store.block([
+          { ...(mine as Lease), error: "boom" },
+        ]);
+        expect(second).toHaveLength(0);
+      });
     });
 
     describe("defer", () => {
@@ -55301,6 +55361,60 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           }
         );
         expect(bwd).toEqual([10]);
+      });
+
+      // #1261: a time-travel query (with_snaps + created_before) must ignore
+      // a snapshot newer than the cutoff. Restore lets us plant a snapshot
+      // with the highest id AND latest \`created\`, then prove the resume floor
+      // does not jump to it and skip the pre-cutoff events below it.
+      it("time-travel query ignores a snapshot newer than the created cutoff", async () => {
+        const s = \`restore-tt-snap-\${uid()}\`;
+        const t0 = new Date("2020-01-01T00:00:00.000Z");
+        const t1 = new Date("2020-02-01T00:00:00.000Z");
+        const tSnap = new Date("2020-03-01T00:00:00.000Z");
+        await restore(
+          as_source([
+            event(1, s, 0, "Incremented", t0, { amount: 1 }),
+            event(2, s, 1, "Incremented", t1, { amount: 2 }),
+            // Snapshot committed last → highest id and latest \`created\`.
+            event(3, s, 2, SNAP_EVENT, tSnap, { count: 3 }),
+          ])
+        );
+        // Cutoff between t0 and t1: the fold must see only the t0 event, not
+        // jump to the newer snapshot (which would yield an empty result).
+        const cutoff = new Date("2020-01-15T00:00:00.000Z");
+        // \`created_before\` excludes the newer snapshot outright, so the
+        // callback only ever sees the pre-cutoff domain event.
+        const before: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            before.push((e.data as { amount: number }).amount);
+          },
+          {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            created_before: cutoff,
+          }
+        );
+        expect(before).toEqual([1]);
+        // Same for \`created_after\`: the floor must not jump past the t1 event
+        // to the newer snapshot. With the floor suppressed the snapshot itself
+        // is returned (with_snaps) and skipped by the name guard.
+        const after: number[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            if ((e.name as string) !== SNAP_EVENT)
+              after.push((e.data as { amount: number }).amount);
+          },
+          {
+            stream: s,
+            stream_exact: true,
+            with_snaps: true,
+            created_after: cutoff,
+          }
+        );
+        expect(after).toEqual([2]);
       });
 
       // #1257: restore must split \`pii\` into the isolated store so

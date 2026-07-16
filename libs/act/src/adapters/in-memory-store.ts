@@ -203,7 +203,11 @@ class InMemoryStream {
    * @param error Blocked error message.
    */
   block(lease: Lease, error: string) {
-    if (this._leased_by === lease.by) {
+    // Skip already-blocked streams so a redundant block is a no-op, mirroring
+    // the SQL adapters' `WHERE ... AND blocked = false` guard (#1263). Without
+    // this, re-blocking returns the lease again and emits a spurious duplicate
+    // `blocked` lifecycle event that the durable stores suppress.
+    if (this._leased_by === lease.by && !this._blocked) {
       this._blocked = true;
       this._error = error;
       // A blocked stream is poison; clear any pending defer (#1090).
@@ -460,12 +464,17 @@ export class InMemoryStore implements Store {
       // with_snaps resumes at the latest snapshot for an exact single
       // stream (no explicit `after`): start the scan at that snapshot's
       // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit `after` wins.
+      // scan; an explicit `after` wins. A `created_*` bound suppresses the
+      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
+      // the latest snapshot may be newer than the bound, and jumping to it
+      // would skip every pre-cutoff event below it. Falls back to full scan.
       if (
         query?.with_snaps &&
         query.stream_exact &&
         query.stream !== undefined &&
-        query.after === undefined
+        query.after === undefined &&
+        query.created_before === undefined &&
+        query.created_after === undefined
       ) {
         for (let j = this._events.length - 1; j >= 0; j--) {
           const e = this._events[j];
