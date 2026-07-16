@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.5...@rotorsoft/act-tck-v1.27.6) (2026-07-16)
+
+
+### Bug Fixes
+
+* **act:** suppress snapshot resume-floor under time bounds; guard InMemory re-block ([b0b3ea0](https://github.com/rotorsoft/act-root/commit/b0b3ea0861ac27a28373dff5b545b9b4bbd7b8f9)), closes [#1261](https://github.com/rotorsoft/act-root/issues/1261) [#1263](https://github.com/rotorsoft/act-root/issues/1263) [#1261](https://github.com/rotorsoft/act-root/issues/1261) [#1263](https://github.com/rotorsoft/act-root/issues/1263)
+
 # [@rotorsoft/act-tck-v1.27.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.4...@rotorsoft/act-tck-v1.27.5) (2026-07-16)
 
 
