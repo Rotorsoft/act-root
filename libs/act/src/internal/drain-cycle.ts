@@ -137,13 +137,9 @@ export type DrainCycle<TEvents extends Schemas> = {
  * Returns `undefined` when nothing was claimed — caller can short-circuit
  * the rest of the drain pass.
  *
- * **Deferred streams.** When `is_deferred(stream)` returns `true`, the
- * cycle skips dispatch for that lease — no handle, no ack, no block. The
- * lease holds for `leaseMillis` via the existing claim mechanism, which
- * blocks competing workers from re-attempting during the backoff window
- * and serves as the per-worker pacing timer. Subsequent claims after
- * `leased_until` expires will re-acquire the lease and re-skip until the
- * controller clears the entry.
+ * **Deferred streams** (backoff windows and explicit defers) are excluded
+ * upstream by `claim`: their persisted `deferred_at` gates re-dispatch, so
+ * they never reach this cycle until the schedule elapses.
  *
  * @internal
  */
@@ -161,7 +157,6 @@ export async function run_drain_cycle<
   leading: number,
   eventLimit: number,
   leaseMillis: number,
-  is_deferred?: (stream: string) => boolean,
   lane?: string
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
@@ -174,25 +169,11 @@ export async function run_drain_cycle<
   );
   if (!leased.length) return undefined;
 
-  // Partition out streams whose handler is in a backoff window. We hold
-  // their leases (no ack/block) so competing workers can't re-attempt
-  // during the configured delay.
-  const active = is_deferred
-    ? leased.filter((l) => !is_deferred(l.stream))
-    : leased;
-  if (!active.length) {
-    return {
-      leased,
-      fetched: [],
-      handled: [],
-      acked: [],
-      blocked: [],
-      closeable: [],
-    };
-  }
-
-  // Fetch events for each active leased stream
-  const fetched = await ops.fetch(active, eventLimit);
+  // Fetch events for each leased stream. Streams in a backoff window are
+  // already excluded here: the store persists `deferred_at` on a due-marked
+  // ack and `claim` skips streams whose schedule hasn't elapsed (#1262), so
+  // a paced retry never reaches dispatch and no local skip-gate is needed.
+  const fetched = await ops.fetch(leased, eventLimit);
 
   // Build a single index keyed by stream — collapses two passes
   // (payloads_map build + per-lease fetched.find) into one Map lookup.
@@ -227,7 +208,7 @@ export async function run_drain_cycle<
   }
 
   const handled = await Promise.all(
-    active.map((lease) => {
+    leased.map((lease) => {
       // fetch() returns one entry per leased stream — fetch_map.get is
       // always defined here (asserted with `!`).
       const entry = fetch_map.get(lease.stream)!;
@@ -250,13 +231,22 @@ export async function run_drain_cycle<
   // finalize lands nothing — the catch in the controller covers every
   // outcome uniformly. Partial-success-then-block still lands in both
   // `acked` and `blocked` for the same stream — by design.
+  //
+  // A retry-with-backoff (`next_attempt_at` set, not blocking) also rides a
+  // `due` marker so the store persists the backoff window and excludes the
+  // stream from `claim` until it elapses — no worker re-claims and phantom-
+  // bumps `retry` mid-window (#1262). It carries the climbing `retry` so the
+  // budget still accrues, whereas an explicit defer passes `retry: -1`
+  // because a defer is not a failure.
   const acked = await ops.ack(
     handled.flatMap((h) =>
       h.defer !== undefined
-        ? { ...h.lease, due: h.defer }
+        ? { ...h.lease, due: h.defer, retry: -1 }
         : h.handled > 0 || !h.error
           ? { ...h.lease, at: h.acked_at }
-          : []
+          : h.next_attempt_at !== undefined
+            ? { ...h.lease, due: h.next_attempt_at }
+            : []
     )
   );
 
@@ -498,7 +488,6 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        this._defer.size > 0 ? this._defer.is_deferred : undefined,
         this._deps.lane
       );
 

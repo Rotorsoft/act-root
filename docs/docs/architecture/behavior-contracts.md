@@ -46,11 +46,12 @@ backed by unit/integration specs under `libs/act/test/`.
 | `reactingTo` is auto-injected when a reaction handler omits it; an explicit value is respected | CLAUDE.md safety one-liner; `state-management.md` | `reacting-to.spec.ts` → "should auto-inject reactingTo when handler omits it", "should respect explicit reactingTo when provided" |
 | `NonRetryableError` forces a block on the first attempt when `blockOnError` is true (default) | `error-handling.md` "Non-retryable errors" | `non-retryable.spec.ts` → "blocks on first attempt when blockOnError is true (default)" |
 | `NonRetryableError` does **not** override `blockOnError: false` | `error-handling.md`; CLAUDE.md safety one-liner | `non-retryable.spec.ts` → "ignores NonRetryableError when blockOnError is false" |
-| Per-reaction backoff defers retry until the window elapses (per-worker) | `error-handling.md` "Backoff" | `backoff.spec.ts` → "defers retry until backoff window elapses (per-worker)" |
+| Per-reaction backoff defers retry until the window elapses (persisted per-stream schedule) | `error-handling.md` "Backoff" | `backoff.spec.ts` → "defers retry until backoff window elapses (persisted schedule)" |
 | Backoff entry clears on a successful ack | `error-handling.md` | `backoff.spec.ts` → "clears backoff entry on successful ack" |
 | Backoff still blocks when retries are exhausted | `error-handling.md` | `backoff.spec.ts` → "preserves blocking behavior when retries are exhausted" |
 | `compute_backoff_delay` strategy/clamp/jitter semantics | `error-handling.md` | `backoff.spec.ts` → `compute_backoff_delay` unit block |
-| Backoff's effective floor is `max(configured, leaseMillis)` — when the lease outlasts the backoff window, the held lease (not the timer) gates the next attempt | `error-handling.md` "Backoff"; CLAUDE.md "Reaction backoff is per-worker" | `backoff.spec.ts` → "effective floor is max(configured, leaseMillis) — the held lease dominates a short backoff" **(gap filled — #1065)** |
+| Backoff persists `deferred_at` and is honored precisely — decoupled from `leaseMillis` (the due-ack releases the lease), so no mid-window re-claim phantom-bumps `retry` | `error-handling.md` "Backoff"; CLAUDE.md "Reaction backoff is a persisted per-stream schedule" | `backoff.spec.ts` → "backoff window is honored precisely via persisted deferred_at, not the lease duration (#1262)" |
+| A backoff-style due-ack persists the lease's `retry` (budget survives the window); an explicit defer passes `retry: -1` (a defer is not a failure) | `ports.ts` `ack` doc-comment; `error-handling.md` "Backoff" | store-tck → "persists the lease's retry on a backoff-style due lease (#1262)" / "holds the watermark and resets retry on an explicit-defer due lease (retry: -1)" |
 | `app.unblock` resumes a blocked stream from its watermark **without replaying history**; `app.reset` rewinds to -1 and replays everything (the resume-vs-rebuild distinction) | CLAUDE.md "Blocked-stream recovery"; `error-handling.md` | `non-retryable.spec.ts` → "recovers via app.unblock without replaying history"; `rebuild.spec.ts` → "should enable replay of projection after reset" **(gap filled — #1065)** |
 | `correlate()` arms the lane controllers when it subscribes new streams — the same contract `reset`/`unblock` honor — so a freshly-discovered dynamic target cannot starve on a lane whose worker disarmed before the subscription landed | `correlation-and-drain.md` | `correlate-arm.spec.ts` → "revives a lane that disarmed before the subscription landed" |
 | Correlate's cold-start checkpoint floors at `watermark - back_scan` (when dynamic resolvers exist) — a dynamic-resolver event committed but not correlated before a crash is re-scanned on restart instead of skipped past a busier stream's watermark | `correlation-and-drain.md` | `correlate-cold-start.spec.ts` → "still discovers a dynamic target committed-but-not-correlated before restart" **(#1207)** |
@@ -202,11 +203,13 @@ the cross-process `notify` auto-wiring contract (`notify.spec.ts`) are now
 mapped to their rows. Two guarantees had no executable backing and gained a
 focused test:
 
-- **Backoff's effective floor.** The docs guarantee the floor is
-  `max(configured, leaseMillis)` because the controller holds the lease for
-  the whole window. Every existing backoff test used `leaseMillis: 1`, so the
-  lease-dominates case was untested. Closed in `backoff.spec.ts` (a 20ms
-  backoff under a 500ms lease retries only after the lease expires).
+- **Backoff's effective window.** Backoff persists `deferred_at` on the
+  stream via a due-marked `ack` and releases the lease, so the effective
+  delay is the configured `backoff`, decoupled from `leaseMillis`. Pinned in
+  `backoff.spec.ts` (a 50ms backoff under a 500ms lease retries after 50ms,
+  not the lease). Earlier this was inverted — the held lease floored the
+  backoff up to `leaseMillis` and mid-window re-claims phantom-bumped the
+  retry counter (#1262).
 - **Lane drain parallelism.** `lanes.spec.ts` covered controller wiring,
   arming, and worker lifecycle but never the actual concurrency guarantee:
   that `_drain_all`'s `Promise.all` lets the fast lane complete while a

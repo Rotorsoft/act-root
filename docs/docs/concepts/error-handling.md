@@ -297,7 +297,7 @@ Set `maxRetries: 0` for handlers that should never retry — typically those tha
 
 ### Backoff
 
-Without `backoff`, the framework re-claims a failed stream on the next drain cycle — typically within milliseconds. For handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by deferring re-dispatch on this worker.
+Without `backoff`, the framework re-claims a failed stream on the next drain cycle — typically within milliseconds. For handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by persisting a defer schedule on the stream, so it isn't re-dispatched — by any worker — until the delay elapses.
 
 ```typescript no-check
 backoff: {
@@ -318,23 +318,19 @@ Delay computation, where `retry` is the lease's retry counter at the failed atte
 
 With `jitter: true`, the final delay is multiplied by `0.5 + random()` (range `[0.5, 1.5)`) to avoid lockstep thundering herds.
 
-#### Per-worker semantics
+#### Per-stream schedule
 
-Backoff state lives in process memory on each worker's `DrainController`. With N competing workers (each running its own controller against a shared store):
+A retry-with-backoff persists `deferred_at = now + delay` on the stream through a due-marked `ack` — the same store-level mechanism as an explicit defer, with one difference: the due-ack carries the *climbing* `retry` counter, so the retry budget keeps accruing toward `blockOnError`, whereas an explicit defer passes `retry: -1` (a defer is a deliberate re-visit, not a failure).
 
-- Each worker only paces *its own* re-attempts.
-- The shared `retry_count` on the stream watermark climbs across workers — so the `blockOnError` threshold is hit up to N× faster than the configured strategy suggests.
+Because the schedule lives in the store rather than in worker memory:
 
-This is intentional: transient per-worker faults (one bad DNS resolver, one network blip) recover faster, and genuine poison messages get quarantined sooner. If you need cross-worker pacing for very long backoffs, forward events to an external bus rather than holding drain leases for minutes — see [external integration](../guides/external-integration).
+- **Every** competing worker honors the window — the stream is excluded from `claim` until `deferred_at`, so no worker re-attempts or re-dispatches during the delay.
+- No worker re-claims the stream mid-window, so `retry` advances exactly once per real attempt. A stream blocks after exactly `maxRetries` attempts, independent of worker count.
+- The schedule is durable: a worker that restarts re-arms its drain at the persisted `deferred_at`.
 
-#### Interaction with `leaseMillis`
+#### Independent of `leaseMillis`
 
-While a stream is in its backoff window, the controller claims its lease but skips dispatch — no `ack`, no `block`. The lease holds for `leaseMillis` via the existing claim mechanism, which prevents competing workers from re-attempting during the configured delay.
-
-- If your `backoff` delay is **shorter** than `leaseMillis`, the lease still holds until `leaseMillis` expires. Effective backoff is `max(configured, leaseMillis)`.
-- If your `backoff` delay is **longer** than `leaseMillis`, the lease expires partway through; subsequent claims (by this controller or competing workers) re-acquire the lease and re-skip until the delay elapses.
-
-This means **`backoff` is always at-least-as-long-as configured**, never shorter. To tighten backoff floors, lower `leaseMillis` (with the trade-off that overlapping workers can race more aggressively).
+The due-ack **releases** the lease and hands the store the schedule, so the backoff window is decoupled from `leaseMillis`: the effective delay is exactly the configured `backoff`, whether that's shorter or longer than the lease. (Earlier versions held the lease through the window, which floored the effective backoff up to `leaseMillis` and let mid-window re-claims phantom-bump the retry counter; the persisted schedule is now the sole gate — see #1262.)
 
 ## Webhook delivery — `@rotorsoft/act-http/webhook`
 

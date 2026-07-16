@@ -82,7 +82,7 @@ describe("per-reaction backoff (integration)", () => {
     await dispose()();
   });
 
-  it("defers retry until backoff window elapses (per-worker)", async () => {
+  it("defers retry until backoff window elapses (persisted schedule)", async () => {
     let attempts = 0;
     const handler = vi.fn().mockImplementation(async () => {
       attempts++;
@@ -227,31 +227,31 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts.late).toBe(1);
   });
 
-  it("effective floor is max(configured, leaseMillis) — the held lease dominates a short backoff", async () => {
-    // CLAUDE.md / error-handling.md guarantee: because the controller
-    // holds the lease for `leaseMillis` while a stream is deferred, the
-    // effective retry floor is `max(configured backoff, leaseMillis)`.
-    // Here the 20ms backoff is far shorter than the 500ms lease, so the
-    // held lease — not the backoff timer — gates the next attempt.
+  it("backoff window is honored precisely via persisted deferred_at, not the lease duration (#1262)", async () => {
+    // A retry-with-backoff persists `deferred_at = now + backoff` and
+    // releases the lease, so the store gates the next attempt on the backoff
+    // window — independent of `leaseMillis`. A backoff far shorter than the
+    // lease is honored (the released lease no longer floors it), and no
+    // in-window re-claim can phantom-bump the retry counter.
     let attempts = 0;
     const handler = vi.fn().mockImplementation(async () => {
       attempts++;
       throw new Error("transient");
     });
-    Object.defineProperty(handler, "name", { value: "leaseFloored" });
+    Object.defineProperty(handler, "name", { value: "backoffPaced" });
 
     const app = act()
       .withState(counter)
       .on("ticked")
       .do(handler, {
         maxRetries: 5,
-        backoff: { strategy: "fixed", baseMs: 20 },
+        backoff: { strategy: "fixed", baseMs: 50 },
       })
       .build();
 
     // A real worker/commit keeps the controller armed; once a drain claims
-    // nothing (because the lease is still held) it self-disarms, so we
-    // re-arm before each probe to isolate the lease gate from the arm flag.
+    // nothing (the stream is deferred) it self-disarms, so we re-arm before
+    // each probe to isolate the backoff gate from the arm flag.
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<string, { arm: () => void }>;
@@ -261,21 +261,21 @@ describe("per-reaction backoff (integration)", () => {
     await app.do("tick", { stream: "floor", actor }, {});
     await app.correlate();
 
-    // First attempt fails — stream is deferred AND leased for 500ms.
+    // First attempt fails — the stream is deferred for 50ms and the 500ms
+    // lease is released (the due-ack persists the schedule and frees it).
     await app.drain({ leaseMillis: 500 });
     expect(attempts).toBe(1);
 
-    // 120ms later: well past the 20ms backoff window, but the 500ms
-    // lease still holds the stream, so claim() can't return it. The
-    // backoff window expiring does NOT shorten the effective floor.
-    await sleep(120);
+    // 20ms later: still inside the 50ms backoff window → deferred_at excludes
+    // it from claim, so no re-attempt and no phantom retry bump.
+    await sleep(20);
     ctrl.arm();
     await app.drain({ leaseMillis: 500 });
     expect(attempts).toBe(1);
 
-    // Once the lease expires (>500ms total) the stream is claimable
-    // again → an armed drain re-attempts. Floor = max(20ms, 500ms).
-    await sleep(500);
+    // 80ms total: past the 50ms backoff, well under the 500ms lease. The
+    // short backoff is honored — the released lease does not floor it up.
+    await sleep(60);
     ctrl.arm();
     await app.drain({ leaseMillis: 500 });
     expect(attempts).toBe(2);
