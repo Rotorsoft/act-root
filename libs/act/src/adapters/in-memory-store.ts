@@ -441,12 +441,39 @@ export class InMemoryStore implements Store {
         (query?.before !== undefined
           ? this._first_index_after(query.before - 1)
           : this._events.length) - 1;
+      // with_snaps stops the DESC scan at the latest snapshot for an exact
+      // single stream (no explicit id/time bound), so pre-snapshot events
+      // aren't read — the backward mirror of the forward resume floor, and
+      // of the SQL adapters' direction-agnostic `id >= MAX(snapshot id)`.
+      // Any explicit `after`/`before`/`created_*` bound suppresses the floor
+      // (time-travel must ignore snapshots outside the cutoff — #1261/#1267).
+      let floor_id = -1;
+      if (
+        query.with_snaps &&
+        query.stream_exact &&
+        query.stream !== undefined &&
+        query.after === undefined &&
+        query.before === undefined &&
+        query.created_before === undefined &&
+        query.created_after === undefined
+      ) {
+        for (let j = this._events.length - 1; j >= 0; j--) {
+          const e = this._events[j];
+          if (e.stream === query.stream && e.name === SNAP_EVENT) {
+            floor_id = e.id;
+            break;
+          }
+        }
+      }
       while (i >= 0) {
         const e = this._events[i--];
         if (query && !this.in_query(query, e)) continue;
         if (query?.created_before && e.created >= query.created_before)
           continue;
         if (query.after !== undefined && e.id <= query.after) break;
+        // Below the resume floor → every remaining (lower-id) event is too,
+        // so stop the DESC scan.
+        if (floor_id >= 0 && e.id < floor_id) break;
         // `created` is not monotonic with `id` (restore preserves the
         // source timestamps verbatim), so a failing time bound skips the
         // event rather than terminating the scan — matching PG/SQLite,
