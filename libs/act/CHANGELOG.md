@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.3...@rotorsoft/act-v1.23.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* **act:** suppress snapshot resume-floor under time bounds; guard InMemory re-block ([b0b3ea0](https://github.com/rotorsoft/act-root/commit/b0b3ea0861ac27a28373dff5b545b9b4bbd7b8f9)), closes [#1261](https://github.com/rotorsoft/act-root/issues/1261) [#1263](https://github.com/rotorsoft/act-root/issues/1263) [#1261](https://github.com/rotorsoft/act-root/issues/1261) [#1263](https://github.com/rotorsoft/act-root/issues/1263)
+
 # [@rotorsoft/act-v1.23.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.2...@rotorsoft/act-v1.23.3) (2026-07-16)
 
 
