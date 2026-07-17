@@ -23,6 +23,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
+import { resolveBackoffConfig } from "./backoff.js";
 import {
   assert_defer_when,
   type DeferSchedule,
@@ -85,7 +86,9 @@ export function reaction_on<
       options: {
         blockOnError: options?.blockOnError ?? true,
         maxRetries: options?.maxRetries ?? 3,
-        backoff: options?.backoff,
+        // #1269: validate at the declaration site so a bad strategy/baseMs
+        // throws ZodError at build, not a NaN delay on the first retry.
+        backoff: resolveBackoffConfig(options?.backoff),
       },
     };
     // Register once with the default _this_ resolver. If `.to()` is chained

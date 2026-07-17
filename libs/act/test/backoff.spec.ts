@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { act, dispose, sleep, state, ZodEmpty } from "../src/index.js";
-import { compute_backoff_delay } from "../src/internal/backoff.js";
+import {
+  compute_backoff_delay,
+  resolveBackoffConfig,
+} from "../src/internal/backoff.js";
 import type { BackoffOptions } from "../src/types/index.js";
 
 describe("compute_backoff_delay", () => {
@@ -64,6 +67,88 @@ describe("compute_backoff_delay", () => {
     const opts: BackoffOptions = { strategy: "exponential", baseMs: 100 };
     expect(compute_backoff_delay(-1, opts)).toBe(100);
     expect(compute_backoff_delay(-99, opts)).toBe(100);
+  });
+
+  it("throws on an off-union strategy instead of returning NaN (#1269)", () => {
+    // Defensive default: reachable only via an unvalidated direct call — the
+    // builder validates at declaration. Must never silently emit NaN.
+    expect(() =>
+      compute_backoff_delay(0, {
+        strategy: "expontential" as never,
+        baseMs: 100,
+      })
+    ).toThrow(/unknown backoff strategy/);
+  });
+});
+
+describe("resolveBackoffConfig (#1269)", () => {
+  it("passes undefined through untouched", () => {
+    expect(resolveBackoffConfig(undefined)).toBeUndefined();
+  });
+
+  it("returns the validated config for a good bag", () => {
+    const ok: BackoffOptions = {
+      strategy: "exponential",
+      baseMs: 10,
+      maxMs: 200,
+      jitter: true,
+    };
+    expect(resolveBackoffConfig(ok)).toEqual(ok);
+    // baseMs: 0 is legal (means no delay).
+    expect(resolveBackoffConfig({ strategy: "fixed", baseMs: 0 })).toEqual({
+      strategy: "fixed",
+      baseMs: 0,
+    });
+  });
+
+  it("rejects an off-union strategy, non-finite/negative baseMs, and non-positive maxMs", () => {
+    const bad: BackoffOptions[] = [
+      { strategy: "expontential" as never, baseMs: 100 },
+      { strategy: "fixed", baseMs: Number.NaN },
+      { strategy: "fixed", baseMs: Number.POSITIVE_INFINITY },
+      { strategy: "fixed", baseMs: -1 },
+      { strategy: "exponential", baseMs: 10, maxMs: 0 },
+      { strategy: "exponential", baseMs: 10, maxMs: Number.NaN },
+    ];
+    for (const b of bad) expect(() => resolveBackoffConfig(b)).toThrow();
+  });
+});
+
+describe("backoff config is validated at build (#1269)", () => {
+  const counter = state({ Counter: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ ticked: ZodEmpty })
+    .patch({ ticked: () => ({}) })
+    .on({ tick: ZodEmpty })
+    .emit(() => ["ticked", {}])
+    .build();
+
+  it("throws on a reaction with a bad backoff strategy", () => {
+    async function react() {}
+    expect(() =>
+      act()
+        .withState(counter)
+        .on("ticked")
+        .do(react, {
+          backoff: { strategy: "expontential" as never, baseMs: 1 },
+        })
+        .build()
+    ).toThrow();
+  });
+
+  it("throws on an action with a NaN baseMs backoff", () => {
+    expect(() =>
+      state({ S: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ e: ZodEmpty })
+        .patch({ e: () => ({}) })
+        .on(
+          { act: ZodEmpty },
+          { backoff: { strategy: "fixed", baseMs: Number.NaN } }
+        )
+        .emit(() => ["e", {}])
+        .build()
+    ).toThrow();
   });
 });
 

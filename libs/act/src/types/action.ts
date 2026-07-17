@@ -514,9 +514,14 @@ export type BackoffStrategy = "fixed" | "linear" | "exponential";
 /**
  * Retry backoff configuration.
  *
+ * Validated at its declaration site (reaction `.do(...)` / action
+ * `.on(...)`): an off-union `strategy`, a non-finite/negative `baseMs`, or a
+ * non-finite/non-positive `maxMs` throws `ZodError` at `act().build()` rather
+ * than producing a `NaN` delay that silently disables pacing (ACT-1269).
+ *
  * @property strategy - {@link BackoffStrategy}
- * @property baseMs - Base delay (must be ≥ 0)
- * @property maxMs - Optional cap; only used by `exponential`
+ * @property baseMs - Base delay (must be finite and ≥ 0)
+ * @property maxMs - Optional cap (finite, > 0); only used by `exponential`
  * @property jitter - Multiply final delay by `0.5 + random()` (range
  *   `[0.5, 1.5)`) to avoid thundering herds when many callers retry in
  *   lockstep

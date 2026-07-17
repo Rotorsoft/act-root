@@ -3136,9 +3136,14 @@ export type BackoffStrategy = "fixed" | "linear" | "exponential";
 /**
  * Retry backoff configuration.
  *
+ * Validated at its declaration site (reaction \`.do(...)\` / action
+ * \`.on(...)\`): an off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a
+ * non-finite/non-positive \`maxMs\` throws \`ZodError\` at \`act().build()\` rather
+ * than producing a \`NaN\` delay that silently disables pacing (ACT-1269).
+ *
  * @property strategy - {@link BackoffStrategy}
- * @property baseMs - Base delay (must be ≥ 0)
- * @property maxMs - Optional cap; only used by \`exponential\`
+ * @property baseMs - Base delay (must be finite and ≥ 0)
+ * @property maxMs - Optional cap (finite, > 0); only used by \`exponential\`
  * @property jitter - Multiply final delay by \`0.5 + random()\` (range
  *   \`[0.5, 1.5)\`) to avoid thundering herds when many callers retry in
  *   lockstep
@@ -5436,7 +5441,44 @@ export function synthesize_autoclose_reactions<
  * @internal
  */
 
+import { z } from "zod";
 import type { BackoffOptions } from "../types/action.js";
+
+/**
+ * Config-validation schema for {@link BackoffOptions} (ACT-1269). Follows the
+ * config-schema standard: internal const, never re-exported. Rejects an
+ * off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a non-finite/
+ * non-positive \`maxMs\` at the declaration site — so a typo or a \`NaN\` from
+ * JSON/env config surfaces as a \`ZodError\` at \`act().build()\` instead of
+ * silently producing a \`NaN\` delay that disables pacing on the first retry.
+ *
+ * No \`maxMs >= baseMs\` constraint: \`maxMs\` is a cap, and \`exponential\`
+ * clamping to a sub-\`baseMs\` cap is documented behavior, not an error.
+ * @internal
+ */
+const BackoffOptionsSchema = z.object({
+  // z.number() rejects NaN/±Infinity by default in Zod 4, so \`.min(0)\` /
+  // \`.gt(0)\` also close the non-finite gap.
+  strategy: z.enum(["fixed", "linear", "exponential"]),
+  baseMs: z.number().min(0),
+  maxMs: z.number().gt(0).optional(),
+  jitter: z.boolean().optional(),
+});
+
+/**
+ * Validate a backoff bag at its declaration site (reaction \`.do(...)\` /
+ * action \`.on(...)\`). Passes \`undefined\` through untouched; otherwise parses
+ * and returns the validated config, throwing \`ZodError\` on a bad value so
+ * misconfiguration surfaces at build, not on the first cycle tick.
+ * @internal
+ */
+export function resolveBackoffConfig(
+  options: BackoffOptions | undefined
+): BackoffOptions | undefined {
+  return options === undefined
+    ? undefined
+    : BackoffOptionsSchema.parse(options);
+}
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on
@@ -5466,6 +5508,13 @@ export function compute_backoff_delay(
       delay = opts.baseMs * 2 ** r;
       if (opts.maxMs !== undefined) delay = Math.min(delay, opts.maxMs);
       break;
+    default: {
+      // Unreachable once options pass \`resolveBackoffConfig\` at their
+      // declaration site. Defensive so the pure function is total and can
+      // never emit \`NaN\` from an unvalidated strategy — throw instead.
+      const _never: never = opts.strategy;
+      throw new Error(\`unknown backoff strategy: \${String(_never)}\`);
+    }
   }
   if (opts.jitter) delay = delay * (0.5 + Math.random());
   return Math.max(0, Math.floor(delay));
@@ -5766,6 +5815,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
+import { resolveBackoffConfig } from "./backoff.js";
 import {
   assert_defer_when,
   type DeferSchedule,
@@ -5828,7 +5878,9 @@ export function reaction_on<
       options: {
         blockOnError: options?.blockOnError ?? true,
         maxRetries: options?.maxRetries ?? 3,
-        backoff: options?.backoff,
+        // #1269: validate at the declaration site so a bad strategy/baseMs
+        // throws ZodError at build, not a NaN delay on the first retry.
+        backoff: resolveBackoffConfig(options?.backoff),
       },
     };
     // Register once with the default _this_ resolver. If \`.to()\` is chained
@@ -11493,6 +11545,7 @@ export {
   AUTOCLOSE_TARGET_PREFIX,
   synthesize_autoclose_reactions,
 } from "./autoclose-reaction.js";
+export { resolveBackoffConfig } from "./backoff.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { reaction_on, register_lane } from "./builder-utils.js";
@@ -15868,6 +15921,7 @@ import {
   compile_autoclose_policy,
   policy_keep_days,
   policy_min_after_days,
+  resolveBackoffConfig,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -16648,6 +16702,9 @@ function action_builder<
       type MergedActions = TActions & { [P in TKey]: TNewActions };
       (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
       if (options) {
+        // #1269: validate the action's backoff at declaration so a bad
+        // strategy/baseMs throws ZodError at build, not a NaN retry delay.
+        resolveBackoffConfig(options.backoff);
         internal.options ??= {};
         (internal.options as Record<string, ActionOptions>)[action] = options;
       }
@@ -19799,9 +19856,14 @@ export type BackoffStrategy = "fixed" | "linear" | "exponential";
 /**
  * Retry backoff configuration.
  *
+ * Validated at its declaration site (reaction \`.do(...)\` / action
+ * \`.on(...)\`): an off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a
+ * non-finite/non-positive \`maxMs\` throws \`ZodError\` at \`act().build()\` rather
+ * than producing a \`NaN\` delay that silently disables pacing (ACT-1269).
+ *
  * @property strategy - {@link BackoffStrategy}
- * @property baseMs - Base delay (must be ≥ 0)
- * @property maxMs - Optional cap; only used by \`exponential\`
+ * @property baseMs - Base delay (must be finite and ≥ 0)
+ * @property maxMs - Optional cap (finite, > 0); only used by \`exponential\`
  * @property jitter - Multiply final delay by \`0.5 + random()\` (range
  *   \`[0.5, 1.5)\`) to avoid thundering herds when many callers retry in
  *   lockstep
@@ -22099,7 +22161,44 @@ export function synthesize_autoclose_reactions<
  * @internal
  */
 
+import { z } from "zod";
 import type { BackoffOptions } from "../types/action.js";
+
+/**
+ * Config-validation schema for {@link BackoffOptions} (ACT-1269). Follows the
+ * config-schema standard: internal const, never re-exported. Rejects an
+ * off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a non-finite/
+ * non-positive \`maxMs\` at the declaration site — so a typo or a \`NaN\` from
+ * JSON/env config surfaces as a \`ZodError\` at \`act().build()\` instead of
+ * silently producing a \`NaN\` delay that disables pacing on the first retry.
+ *
+ * No \`maxMs >= baseMs\` constraint: \`maxMs\` is a cap, and \`exponential\`
+ * clamping to a sub-\`baseMs\` cap is documented behavior, not an error.
+ * @internal
+ */
+const BackoffOptionsSchema = z.object({
+  // z.number() rejects NaN/±Infinity by default in Zod 4, so \`.min(0)\` /
+  // \`.gt(0)\` also close the non-finite gap.
+  strategy: z.enum(["fixed", "linear", "exponential"]),
+  baseMs: z.number().min(0),
+  maxMs: z.number().gt(0).optional(),
+  jitter: z.boolean().optional(),
+});
+
+/**
+ * Validate a backoff bag at its declaration site (reaction \`.do(...)\` /
+ * action \`.on(...)\`). Passes \`undefined\` through untouched; otherwise parses
+ * and returns the validated config, throwing \`ZodError\` on a bad value so
+ * misconfiguration surfaces at build, not on the first cycle tick.
+ * @internal
+ */
+export function resolveBackoffConfig(
+  options: BackoffOptions | undefined
+): BackoffOptions | undefined {
+  return options === undefined
+    ? undefined
+    : BackoffOptionsSchema.parse(options);
+}
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on
@@ -22129,6 +22228,13 @@ export function compute_backoff_delay(
       delay = opts.baseMs * 2 ** r;
       if (opts.maxMs !== undefined) delay = Math.min(delay, opts.maxMs);
       break;
+    default: {
+      // Unreachable once options pass \`resolveBackoffConfig\` at their
+      // declaration site. Defensive so the pure function is total and can
+      // never emit \`NaN\` from an unvalidated strategy — throw instead.
+      const _never: never = opts.strategy;
+      throw new Error(\`unknown backoff strategy: \${String(_never)}\`);
+    }
   }
   if (opts.jitter) delay = delay * (0.5 + Math.random());
   return Math.max(0, Math.floor(delay));
@@ -22309,6 +22415,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
+import { resolveBackoffConfig } from "./backoff.js";
 import {
   assert_defer_when,
   type DeferSchedule,
@@ -22371,7 +22478,9 @@ export function reaction_on<
       options: {
         blockOnError: options?.blockOnError ?? true,
         maxRetries: options?.maxRetries ?? 3,
-        backoff: options?.backoff,
+        // #1269: validate at the declaration site so a bad strategy/baseMs
+        // throws ZodError at build, not a NaN delay on the first retry.
+        backoff: resolveBackoffConfig(options?.backoff),
       },
     };
     // Register once with the default _this_ resolver. If \`.to()\` is chained
@@ -27795,6 +27904,7 @@ export {
   AUTOCLOSE_TARGET_PREFIX,
   synthesize_autoclose_reactions,
 } from "./autoclose-reaction.js";
+export { resolveBackoffConfig } from "./backoff.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { reaction_on, register_lane } from "./builder-utils.js";
@@ -33144,9 +33254,14 @@ export type BackoffStrategy = "fixed" | "linear" | "exponential";
 /**
  * Retry backoff configuration.
  *
+ * Validated at its declaration site (reaction \`.do(...)\` / action
+ * \`.on(...)\`): an off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a
+ * non-finite/non-positive \`maxMs\` throws \`ZodError\` at \`act().build()\` rather
+ * than producing a \`NaN\` delay that silently disables pacing (ACT-1269).
+ *
  * @property strategy - {@link BackoffStrategy}
- * @property baseMs - Base delay (must be ≥ 0)
- * @property maxMs - Optional cap; only used by \`exponential\`
+ * @property baseMs - Base delay (must be finite and ≥ 0)
+ * @property maxMs - Optional cap (finite, > 0); only used by \`exponential\`
  * @property jitter - Multiply final delay by \`0.5 + random()\` (range
  *   \`[0.5, 1.5)\`) to avoid thundering herds when many callers retry in
  *   lockstep

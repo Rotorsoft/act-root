@@ -309,7 +309,7 @@ Any options bag that ships to `act().build()` / `openapi(app, ...)` / similar en
 | Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth |
 | Custom error messages | `{ message: "..." }` on the individual constraint when callers depend on the wording (test assertions, structured logs). Don't override Zod's default for shape errors callers don't read. |
 
-Precedents: `libs/act/src/internal/autoclose-config.ts`, `libs/act-http/src/api/sse-wiring.ts`, `libs/act-http/src/openapi/index.ts`. New config bags follow the same shape — never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
+Precedents: `libs/act/src/internal/autoclose-config.ts`, `libs/act/src/internal/backoff.ts` (`BackoffOptionsSchema` / `resolveBackoffConfig`, validated at the reaction/action declaration site), `libs/act-http/src/api/sse-wiring.ts`, `libs/act-http/src/openapi/index.ts`. New config bags follow the same shape — never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
 
 ## Troubleshooting
 
