@@ -175,15 +175,19 @@ class InMemoryStream {
     if (this._leased_by === lease.by) {
       this._leased_by = undefined;
       this._leased_until = undefined;
-      this._retry = -1;
       if (lease.due !== undefined) {
-        // Defer marker: schedule the re-visit, keep the watermark.
+        // Due marker: schedule the re-visit, keep the watermark, and persist
+        // the caller's retry. An explicit defer passes `retry: -1` (a defer
+        // is not a failure); a backoff retry passes the climbing counter so
+        // it keeps accruing toward the block threshold across windows (#1262).
         // Deferred entries are not part of ack's return value.
+        this._retry = lease.retry;
         this._deferred_at = lease.due;
         return undefined;
       }
+      // A successful ack clears the retry budget and any pending defer.
+      this._retry = -1;
       this._at = lease.at;
-      // Advancing the watermark ends any active defer schedule.
       this._deferred_at = undefined;
       return {
         stream: this.stream,

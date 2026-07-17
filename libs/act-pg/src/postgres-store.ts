@@ -1222,11 +1222,12 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       // One statement finalizes the whole batch, so acks and defer
       // schedules land all-or-nothing per the Store.ack contract: an
-      // entry without `due` acks (watermark advances, schedule cleared),
-      // an entry with `due` defers (schedule set, watermark untouched).
-      // A defer is a deliberate "come back later," not a failure, so
-      // retry resets on both paths. Deferred rows are filtered out of
-      // the returned acked leases.
+      // entry without `due` acks (watermark advances, retry cleared,
+      // schedule cleared), an entry with `due` defers (schedule set,
+      // watermark untouched, retry set to the entry's own `retry`). An
+      // explicit defer passes retry -1 (not a failure); a backoff retry
+      // passes the climbing counter so the budget keeps accruing across
+      // windows (#1262). Deferred rows are filtered out of the returned acks.
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -1240,12 +1241,12 @@ export class PostgresStore implements Store {
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, by text, at int, lagging boolean, due bigint)
+        AS x(stream text, by text, at int, lagging boolean, due bigint, retry int)
       )
       UPDATE ${this._fqs} AS s
       SET
         at = CASE WHEN i.due IS NULL THEN i.at ELSE s.at END,
-        retry = -1,
+        retry = CASE WHEN i.due IS NULL THEN -1 ELSE i.retry END,
         leased_by = NULL,
         leased_until = NULL,
         deferred_at = CASE WHEN i.due IS NULL THEN NULL

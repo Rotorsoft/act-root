@@ -768,12 +768,13 @@ export class SqliteStore implements Store {
     try {
       // The whole batch finalizes in one transaction, so acks and defer
       // schedules land all-or-nothing per the Store.ack contract: an
-      // entry without `due` acks (watermark advances, schedule cleared),
-      // an entry with `due` defers (schedule set, watermark untouched).
-      // The bound schedule doubles as the branch discriminator — NULL
-      // means ack. A defer is a deliberate "come back later," not a
-      // failure, so retry resets on both paths. Only acked entries are
-      // returned.
+      // entry without `due` acks (watermark advances, retry cleared,
+      // schedule cleared), an entry with `due` defers (schedule set,
+      // watermark untouched, retry set to the entry's own `retry`). The
+      // bound schedule doubles as the branch discriminator — NULL means
+      // ack. An explicit defer passes retry -1 (not a failure); a backoff
+      // retry passes the climbing counter so the budget keeps accruing
+      // across windows (#1262). Only acked entries are returned.
       const result: Lease[] = [];
       for (const l of leases) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
@@ -781,9 +782,10 @@ export class SqliteStore implements Store {
           sql: `UPDATE streams
                 SET at = CASE WHEN ? IS NULL THEN ? ELSE at END,
                     deferred_at = ?,
-                    leased_by = NULL, leased_until = NULL, retry = -1
+                    leased_by = NULL, leased_until = NULL,
+                    retry = CASE WHEN ? IS NULL THEN -1 ELSE ? END
                 WHERE stream = ? AND leased_by = ?`,
-          args: [due, l.at, due, l.stream, l.by],
+          args: [due, l.at, due, due, l.retry, l.stream, l.by],
         });
         if (due === null && r.rowsAffected > 0) result.push(l);
       }

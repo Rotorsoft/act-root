@@ -1781,10 +1781,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(again.find((l) => l.stream === s)).toBeUndefined();
       });
 
-      it("holds the watermark and resets retry on a due-marked lease", async () => {
+      it("holds the watermark and resets retry on an explicit-defer due lease (retry: -1)", async () => {
         // A due-time already in the past makes the stream immediately
-        // re-claimable — proving the finalize released the lease, kept the
-        // watermark, and reset retry (a defer is not a failure).
+        // re-claimable — proving the finalize released the lease and kept the
+        // watermark. An explicit defer passes `retry: -1` (a defer is not a
+        // failure), so the persisted retry resets and the next claim bumps
+        // it to 0.
         const s = `ackdefer-past-${uid()}`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -1794,12 +1796,36 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
-        await store.ack([{ ...mine, due: Date.now() - 1_000 }]);
+        await store.ack([{ ...mine, due: Date.now() - 1_000, retry: -1 }]);
         const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const re = again.find((l) => l.stream === s);
         expect(re).toBeDefined();
         expect(re!.at).toBe(mine.at); // watermark held — events still pending
-        expect(re!.retry).toBe(0); // reset by the finalize, bumped by claim
+        expect(re!.retry).toBe(0); // reset by the defer, bumped by claim
+        await store.ack([{ ...re!, at: 1_000_000 }]);
+      });
+
+      it("persists the lease's retry on a backoff-style due lease (#1262)", async () => {
+        // A retry-with-backoff passes the climbing counter (not -1) on the
+        // due-marked lease, so the retry budget survives the defer window —
+        // the persisted value plus the next claim's bump keep it accruing
+        // toward the block threshold across windows.
+        const s = `ackdefer-retry-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s)!;
+        // Persist retry 3 with a past due-time so it's immediately re-claimable.
+        await store.ack([{ ...mine, due: Date.now() - 1_000, retry: 3 }]);
+        const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const re = again.find((l) => l.stream === s);
+        expect(re).toBeDefined();
+        expect(re!.at).toBe(mine.at); // watermark still held
+        expect(re!.retry).toBe(4); // persisted 3, bumped to 4 by claim
         await store.ack([{ ...re!, at: 1_000_000 }]);
       });
 

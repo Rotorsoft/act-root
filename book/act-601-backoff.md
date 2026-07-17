@@ -1,5 +1,7 @@
 # ACT-601 — per-reaction retry backoff
 
+> **Superseded by [ACT-1262](act-1262-backoff-persist.md).** The design below — holding the lease to pace retries, per-worker backoff state, and the `effective_backoff = max(configured, leaseMillis)` floor — was reversed once the "hold the lease" trick was found to leak the retry budget. Backoff now persists `deferred_at` on the stream like an explicit defer. Read this essay for the original reasoning and its appeal; read ACT-1262 for why it didn't hold and what replaced it.
+
 ACT-601 ships per-reaction retry backoff on top of the existing drain pipeline. Material for the error-handling / reactions chapter.
 
 **The gap drain didn't close.** Drain already provided ordered, at-least-once delivery, retries (`maxRetries`), and dead-lettering (`blockOnError` → blocked streams), plus competing-consumer semantics via `SKIP LOCKED`. The one missing primitive: **time between attempts**. A flaky receiver got hammered milliseconds apart, exhausting the retry budget in under a second. Block thresholds fired on what were 200ms transient outages.
