@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.6...@rotorsoft/act-tck-v1.27.7) (2026-07-17)
+
+
+### Bug Fixes
+
+* **act-ops:** move idempotency keys to tail on touch so commit can't corrupt gc/eviction ([#1268](https://github.com/rotorsoft/act-root/issues/1268)) ([5c08f11](https://github.com/rotorsoft/act-root/commit/5c08f11b6583292c70b4239a2d55e2541d3bffa9))
+* **act:** persist backoff windows to deferred_at, ending the phantom-retry bug ([ecca43e](https://github.com/rotorsoft/act-root/commit/ecca43e04a77311ab0f81e03e3b9feba1197bced)), closes [#1262](https://github.com/rotorsoft/act-root/issues/1262)
+
 # [@rotorsoft/act-tck-v1.27.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.5...@rotorsoft/act-tck-v1.27.6) (2026-07-16)
 
 
