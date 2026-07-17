@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.5...@rotorsoft/act-sqlite-v1.12.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **act:** persist backoff windows to deferred_at, ending the phantom-retry bug ([ecca43e](https://github.com/rotorsoft/act-root/commit/ecca43e04a77311ab0f81e03e3b9feba1197bced)), closes [#1262](https://github.com/rotorsoft/act-root/issues/1262)
+
 # [@rotorsoft/act-sqlite-v1.12.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.4...@rotorsoft/act-sqlite-v1.12.5) (2026-07-16)
 
 
