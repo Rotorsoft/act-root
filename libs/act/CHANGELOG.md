@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.5...@rotorsoft/act-v1.23.6) (2026-07-17)
+
+
+### Bug Fixes
+
+* **act:** move snapshot-floor eligibility to the orchestrator; delete per-adapter guards ([69c3f09](https://github.com/rotorsoft/act-root/commit/69c3f09a384054f03c4dc1e77dd83fe831f46eb7)), closes [#1261](https://github.com/rotorsoft/act-root/issues/1261) [#1267](https://github.com/rotorsoft/act-root/issues/1267) [#1270](https://github.com/rotorsoft/act-root/issues/1270) [#1274](https://github.com/rotorsoft/act-root/issues/1274) [#1267](https://github.com/rotorsoft/act-root/issues/1267) [#1270](https://github.com/rotorsoft/act-root/issues/1270) [#1274](https://github.com/rotorsoft/act-root/issues/1274)
+
 # [@rotorsoft/act-v1.23.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.4...@rotorsoft/act-v1.23.5) (2026-07-17)
 
 
