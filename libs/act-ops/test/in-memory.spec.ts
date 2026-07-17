@@ -128,6 +128,36 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("fresh", t0 + 1_500)).toBe(false);
   });
 
+  describe("commit must not corrupt iteration order (#1268)", () => {
+    it("a commit-refreshed entry does not shield an expired one from gc", () => {
+      const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
+      store.claim("a", 0); // expires 1_000
+      store.claim("b", 1); // expires 1_001
+      // Commit refreshes "a" to expires 1_900. If it kept "a" at its early
+      // insertion slot, the gc break-scan would stop at the still-fresh "a"
+      // and never reach the expired "b" behind it.
+      store.commit("a", 900);
+      // At t=1_500 "b" (1_001) has elapsed but "a" (1_900) has not — only
+      // "a" must remain, and "b" must be collectable/fresh again.
+      expect(store.size(1_500)).toBe(1);
+      expect(store.claim("b", 1_500)).toBe(true);
+    });
+
+    it("commit does not evict a durable key before a staler tentative one", () => {
+      const store = new InMemoryIdempotencyStore({ maxEntries: 2 });
+      const t0 = 1_000_000;
+      store.claim("a", t0); // [a]
+      store.claim("b", t0); // [a, b]
+      // Commit touches "a" → it becomes most-recently-used, so the next
+      // eviction must drop the stale tentative "b", not the durable "a".
+      store.commit("a", t0); // [b, a]
+      store.claim("c", t0); // size 3 > 2 → evict oldest ("b") → [a, c]
+      expect(store.claim("a", t0)).toBe(false); // durable "a" survived
+      expect(store.claim("c", t0)).toBe(false); // "c" survived
+      expect(store.claim("b", t0)).toBe(true); // stale "b" was evicted
+    });
+  });
+
   describe("ttl source resolution", () => {
     it("derives ttlMs from retryProfile when ttlMs isn't supplied", () => {
       // Worked example: backoff (linear, base 100, 4 retries) → 1_000,
