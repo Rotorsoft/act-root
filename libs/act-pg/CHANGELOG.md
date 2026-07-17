@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.9...@rotorsoft/act-pg-v1.13.10) (2026-07-17)
+
+
+### Bug Fixes
+
+* **act:** persist backoff windows to deferred_at, ending the phantom-retry bug ([ecca43e](https://github.com/rotorsoft/act-root/commit/ecca43e04a77311ab0f81e03e3b9feba1197bced)), closes [#1262](https://github.com/rotorsoft/act-root/issues/1262)
+
 # [@rotorsoft/act-pg-v1.13.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.8...@rotorsoft/act-pg-v1.13.9) (2026-07-16)
 
 
