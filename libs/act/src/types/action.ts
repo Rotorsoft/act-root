@@ -132,7 +132,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   read) — so `load()` rebuilds state from the last snapshot without
  *   scanning prior history. No snapshot → full stream; an explicit
  *   `after` overrides the snapshot floor. Defaults to false (snapshot
- *   rows excluded).
+ *   rows excluded). The floor is applied whenever `with_snaps` is set —
+ *   the store does **not** cross-check it against a time/id bound. The
+ *   caller owns that eligibility: `load()` requests `with_snaps` only
+ *   for a current-state read and drops it under any `asOf` bound, so a
+ *   time-travel read full-scans under its filter rather than jumping to
+ *   a snapshot outside the window (RFC 1274). Do not combine `with_snaps`
+ *   with `before`/`created_*`/`limit` in a direct `query()` call.
  */
 export type Query = z.infer<typeof QuerySchema>;
 

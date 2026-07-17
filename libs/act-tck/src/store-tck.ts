@@ -365,6 +365,55 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(full).toHaveLength(2);
       });
 
+      it("with_snaps applies the resume floor on a backward scan too", async () => {
+        const s = `q-snap-back-${uid()}`;
+        // 2 pre-snapshot events, a snapshot, then 3 after it.
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+        const [snap] = await store.commit(
+          s,
+          [{ name: SNAP_EVENT, data: { count: 2 } }],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+
+        // The floor is direction-agnostic: forward resumes AT the snapshot,
+        // backward stops AT it. Either way, only the snapshot + the 3 events
+        // after it — never the 2 pre-snapshot events.
+        const backward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+          backward: true,
+        });
+        expect(backward).toHaveLength(4);
+        // DESC → the snapshot (lowest id in the floored set) comes last.
+        expect(backward[backward.length - 1].name).toBe(SNAP_EVENT);
+        expect(backward.every((e) => e.id >= snap.id)).toBe(true);
+
+        // No snapshot → full history under with_snaps + backward.
+        const s2 = `q-nosnap-back-${uid()}`;
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1), inc(1)],
+          make_meta({ stream: s2 })
+        );
+        const full = await collect(store, {
+          stream: s2,
+          stream_exact: true,
+          with_snaps: true,
+          backward: true,
+        });
+        expect(full).toHaveLength(2);
+      });
+
       it("supports backward traversal", async () => {
         const s = `q-back-${uid()}`;
         const committed = await store.commit<CounterEvents>(
@@ -3761,59 +3810,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(bwd).toEqual([10]);
       });
 
-      // #1261: a time-travel query (with_snaps + created_before) must ignore
-      // a snapshot newer than the cutoff. Restore lets us plant a snapshot
-      // with the highest id AND latest `created`, then prove the resume floor
-      // does not jump to it and skip the pre-cutoff events below it.
-      it("time-travel query ignores a snapshot newer than the created cutoff", async () => {
-        const s = `restore-tt-snap-${uid()}`;
-        const t0 = new Date("2020-01-01T00:00:00.000Z");
-        const t1 = new Date("2020-02-01T00:00:00.000Z");
-        const tSnap = new Date("2020-03-01T00:00:00.000Z");
-        await restore(
-          as_source([
-            event(1, s, 0, "Incremented", t0, { amount: 1 }),
-            event(2, s, 1, "Incremented", t1, { amount: 2 }),
-            // Snapshot committed last → highest id and latest `created`.
-            event(3, s, 2, SNAP_EVENT, tSnap, { count: 3 }),
-          ])
-        );
-        // Cutoff between t0 and t1: the fold must see only the t0 event, not
-        // jump to the newer snapshot (which would yield an empty result).
-        const cutoff = new Date("2020-01-15T00:00:00.000Z");
-        // `created_before` excludes the newer snapshot outright, so the
-        // callback only ever sees the pre-cutoff domain event.
-        const before: number[] = [];
-        await store.query<CounterEvents>(
-          (e) => {
-            before.push((e.data as { amount: number }).amount);
-          },
-          {
-            stream: s,
-            stream_exact: true,
-            with_snaps: true,
-            created_before: cutoff,
-          }
-        );
-        expect(before).toEqual([1]);
-        // Same for `created_after`: the floor must not jump past the t1 event
-        // to the newer snapshot. With the floor suppressed the snapshot itself
-        // is returned (with_snaps) and skipped by the name guard.
-        const after: number[] = [];
-        await store.query<CounterEvents>(
-          (e) => {
-            if ((e.name as string) !== SNAP_EVENT)
-              after.push((e.data as { amount: number }).amount);
-          },
-          {
-            stream: s,
-            stream_exact: true,
-            with_snaps: true,
-            created_after: cutoff,
-          }
-        );
-        expect(after).toEqual([2]);
-      });
+      // Note (RFC 1274): floor-vs-time-bound suppression is no longer a
+      // store-level concern. The store applies the resume floor whenever
+      // `with_snaps` is set; the orchestrator is the single owner of floor
+      // eligibility and never combines `with_snaps` with an `asOf` bound. The
+      // suppression contract (#1261 `created_*`, #1267 `before`, #1274 `limit`)
+      // is now enforced at the orchestrator level in
+      // `libs/act/test/time-travel.spec.ts`.
 
       // #1257: restore must split `pii` into the isolated store so
       // `forget_pii` erases it — otherwise restored PII stays inline and

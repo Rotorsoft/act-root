@@ -506,19 +506,13 @@ export class SqliteStore implements Store {
     if (query?.after !== undefined) {
       sql += " AND id > ?";
       args.push(query.after);
-    } else if (
-      query?.with_snaps &&
-      query.stream_exact &&
-      query.stream &&
-      query.created_before === undefined &&
-      query.created_after === undefined
-    ) {
+    } else if (query?.with_snaps && query.stream_exact && query.stream) {
       // Resume at the latest snapshot for this stream so pre-snapshot
       // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-      // stream. An explicit `after` (above) wins. A `created_*` bound
-      // suppresses the floor: time-travel ignores snapshots after the
-      // cutoff (#1261), else the floor would skip pre-cutoff events below
-      // a newer snapshot.
+      // stream. An explicit `after` (above) wins. The orchestrator only sets
+      // `with_snaps` for an unbounded current-state load — it suppresses the
+      // flag under any `asOf` bound (RFC 1274) — so the floor never needs to
+      // re-check `before`/`created_*`/`limit` here.
       sql +=
         " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
       args.push(query.stream);
