@@ -1,3 +1,10 @@
+# [@rotorsoft/act-ops-v0.2.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.3...@rotorsoft/act-ops-v0.2.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **act-ops:** move idempotency keys to tail on touch so commit can't corrupt gc/eviction ([#1268](https://github.com/rotorsoft/act-root/issues/1268)) ([5c08f11](https://github.com/rotorsoft/act-root/commit/5c08f11b6583292c70b4239a2d55e2541d3bffa9))
+
 # [@rotorsoft/act-ops-v0.2.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.2...@rotorsoft/act-ops-v0.2.3) (2026-07-11)
 
 

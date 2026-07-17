@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-ops",
   "type": "module",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Operational primitives for act apps and act-independent receivers — idempotency, retry budgets, poison-message classifiers",
   "keywords": [
     "typescript",
