@@ -524,7 +524,16 @@ export async function load<
     {
       stream,
       stream_exact: true,
-      ...(cached ? { after: cached.event_id } : { with_snaps: true, ...asOf }),
+      // The snapshot resume floor is a current-state optimization: it only
+      // holds when the load has no window of its own. `time_travel` already
+      // captures that (any `asOf` bound set), so request `with_snaps` only for
+      // a non-time-travel cold load — a bounded load full-scans real events
+      // under its `asOf` filter. This is the single floor-eligibility decision
+      // for the whole system; the stores apply the floor whenever asked and
+      // never re-derive it (RFC 1274). The warm path resumes from `after`.
+      ...(cached
+        ? { after: cached.event_id }
+        : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
 

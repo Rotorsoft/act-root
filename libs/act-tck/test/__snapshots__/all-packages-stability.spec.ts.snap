@@ -2754,7 +2754,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   read) — so \`load()\` rebuilds state from the last snapshot without
  *   scanning prior history. No snapshot → full stream; an explicit
  *   \`after\` overrides the snapshot floor. Defaults to false (snapshot
- *   rows excluded).
+ *   rows excluded). The floor is applied whenever \`with_snaps\` is set —
+ *   the store does **not** cross-check it against a time/id bound. The
+ *   caller owns that eligibility: \`load()\` requests \`with_snaps\` only
+ *   for a current-state read and drops it under any \`asOf\` bound, so a
+ *   time-travel read full-scans under its filter rather than jumping to
+ *   a snapshot outside the window (RFC 1274). Do not combine \`with_snaps\`
+ *   with \`before\`/\`created_*\`/\`limit\` in a direct \`query()\` call.
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -9639,7 +9645,16 @@ export async function load<
     {
       stream,
       stream_exact: true,
-      ...(cached ? { after: cached.event_id } : { with_snaps: true, ...asOf }),
+      // The snapshot resume floor is a current-state optimization: it only
+      // holds when the load has no window of its own. \`time_travel\` already
+      // captures that (any \`asOf\` bound set), so request \`with_snaps\` only for
+      // a non-time-travel cold load — a bounded load full-scans real events
+      // under its \`asOf\` filter. This is the single floor-eligibility decision
+      // for the whole system; the stores apply the floor whenever asked and
+      // never re-derive it (RFC 1274). The warm path resumes from \`after\`.
+      ...(cached
+        ? { after: cached.event_id }
+        : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
 
@@ -10563,7 +10578,30 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     let count = 0;
+    // Snapshot resume floor: \`with_snaps\` requests a resume at the latest
+    // snapshot for an exact single stream, so pre-snapshot events aren't read.
+    // The orchestrator sets \`with_snaps\` only for an unbounded current-state
+    // load — it suppresses the flag under any \`asOf\` bound (RFC 1274) — so the
+    // store applies the floor whenever asked and never re-checks bounds. An
+    // explicit \`after\` is a separate resume point that wins. No snapshot → -1,
+    // i.e. a full scan. Forward starts at the snapshot; backward stops at it.
+    let floor_index = -1;
+    if (
+      query?.with_snaps &&
+      query.stream_exact &&
+      query.stream !== undefined &&
+      query.after === undefined
+    ) {
+      for (let j = this._events.length - 1; j >= 0; j--) {
+        const e = this._events[j];
+        if (e.stream === query.stream && e.name === SNAP_EVENT) {
+          floor_index = j;
+          break;
+        }
+      }
+    }
     if (query?.backward) {
+      const floor_id = floor_index >= 0 ? this._events[floor_index].id : -1;
       let i =
         (query?.before !== undefined
           ? this._first_index_after(query.before - 1)
@@ -10574,6 +10612,9 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         if (query.after !== undefined && e.id <= query.after) break;
+        // Below the resume floor → every remaining (lower-id) event is too,
+        // so stop the DESC scan.
+        if (floor_id >= 0 && e.id < floor_id) break;
         // \`created\` is not monotonic with \`id\` (restore preserves the
         // source timestamps verbatim), so a failing time bound skips the
         // event rather than terminating the scan — matching PG/SQLite,
@@ -10587,30 +10628,10 @@ export class InMemoryStore implements Store {
         if (query?.limit && count >= query.limit) break;
       }
     } else {
-      let i = this._first_index_after(query?.after ?? -1);
-      // with_snaps resumes at the latest snapshot for an exact single
-      // stream (no explicit \`after\`): start the scan at that snapshot's
-      // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit \`after\` wins. A \`created_*\` bound suppresses the
-      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
-      // the latest snapshot may be newer than the bound, and jumping to it
-      // would skip every pre-cutoff event below it. Falls back to full scan.
-      if (
-        query?.with_snaps &&
-        query.stream_exact &&
-        query.stream !== undefined &&
-        query.after === undefined &&
-        query.created_before === undefined &&
-        query.created_after === undefined
-      ) {
-        for (let j = this._events.length - 1; j >= 0; j--) {
-          const e = this._events[j];
-          if (e.stream === query.stream && e.name === SNAP_EVENT) {
-            i = j;
-            break;
-          }
-        }
-      }
+      let i =
+        floor_index >= 0
+          ? floor_index
+          : this._first_index_after(query?.after ?? -1);
       while (i < this._events.length) {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
@@ -19396,7 +19417,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   read) — so \`load()\` rebuilds state from the last snapshot without
  *   scanning prior history. No snapshot → full stream; an explicit
  *   \`after\` overrides the snapshot floor. Defaults to false (snapshot
- *   rows excluded).
+ *   rows excluded). The floor is applied whenever \`with_snaps\` is set —
+ *   the store does **not** cross-check it against a time/id bound. The
+ *   caller owns that eligibility: \`load()\` requests \`with_snaps\` only
+ *   for a current-state read and drops it under any \`asOf\` bound, so a
+ *   time-travel read full-scans under its filter rather than jumping to
+ *   a snapshot outside the window (RFC 1274). Do not combine \`with_snaps\`
+ *   with \`before\`/\`created_*\`/\`limit\` in a direct \`query()\` call.
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -25938,7 +25965,16 @@ export async function load<
     {
       stream,
       stream_exact: true,
-      ...(cached ? { after: cached.event_id } : { with_snaps: true, ...asOf }),
+      // The snapshot resume floor is a current-state optimization: it only
+      // holds when the load has no window of its own. \`time_travel\` already
+      // captures that (any \`asOf\` bound set), so request \`with_snaps\` only for
+      // a non-time-travel cold load — a bounded load full-scans real events
+      // under its \`asOf\` filter. This is the single floor-eligibility decision
+      // for the whole system; the stores apply the floor whenever asked and
+      // never re-derive it (RFC 1274). The warm path resumes from \`after\`.
+      ...(cached
+        ? { after: cached.event_id }
+        : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
 
@@ -26862,7 +26898,30 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     let count = 0;
+    // Snapshot resume floor: \`with_snaps\` requests a resume at the latest
+    // snapshot for an exact single stream, so pre-snapshot events aren't read.
+    // The orchestrator sets \`with_snaps\` only for an unbounded current-state
+    // load — it suppresses the flag under any \`asOf\` bound (RFC 1274) — so the
+    // store applies the floor whenever asked and never re-checks bounds. An
+    // explicit \`after\` is a separate resume point that wins. No snapshot → -1,
+    // i.e. a full scan. Forward starts at the snapshot; backward stops at it.
+    let floor_index = -1;
+    if (
+      query?.with_snaps &&
+      query.stream_exact &&
+      query.stream !== undefined &&
+      query.after === undefined
+    ) {
+      for (let j = this._events.length - 1; j >= 0; j--) {
+        const e = this._events[j];
+        if (e.stream === query.stream && e.name === SNAP_EVENT) {
+          floor_index = j;
+          break;
+        }
+      }
+    }
     if (query?.backward) {
+      const floor_id = floor_index >= 0 ? this._events[floor_index].id : -1;
       let i =
         (query?.before !== undefined
           ? this._first_index_after(query.before - 1)
@@ -26873,6 +26932,9 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         if (query.after !== undefined && e.id <= query.after) break;
+        // Below the resume floor → every remaining (lower-id) event is too,
+        // so stop the DESC scan.
+        if (floor_id >= 0 && e.id < floor_id) break;
         // \`created\` is not monotonic with \`id\` (restore preserves the
         // source timestamps verbatim), so a failing time bound skips the
         // event rather than terminating the scan — matching PG/SQLite,
@@ -26886,30 +26948,10 @@ export class InMemoryStore implements Store {
         if (query?.limit && count >= query.limit) break;
       }
     } else {
-      let i = this._first_index_after(query?.after ?? -1);
-      // with_snaps resumes at the latest snapshot for an exact single
-      // stream (no explicit \`after\`): start the scan at that snapshot's
-      // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit \`after\` wins. A \`created_*\` bound suppresses the
-      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
-      // the latest snapshot may be newer than the bound, and jumping to it
-      // would skip every pre-cutoff event below it. Falls back to full scan.
-      if (
-        query?.with_snaps &&
-        query.stream_exact &&
-        query.stream !== undefined &&
-        query.after === undefined &&
-        query.created_before === undefined &&
-        query.created_after === undefined
-      ) {
-        for (let j = this._events.length - 1; j >= 0; j--) {
-          const e = this._events[j];
-          if (e.stream === query.stream && e.name === SNAP_EVENT) {
-            i = j;
-            break;
-          }
-        }
-      }
+      let i =
+        floor_index >= 0
+          ? floor_index
+          : this._first_index_after(query?.after ?? -1);
       while (i < this._events.length) {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
@@ -32720,7 +32762,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   read) — so \`load()\` rebuilds state from the last snapshot without
  *   scanning prior history. No snapshot → full stream; an explicit
  *   \`after\` overrides the snapshot floor. Defaults to false (snapshot
- *   rows excluded).
+ *   rows excluded). The floor is applied whenever \`with_snaps\` is set —
+ *   the store does **not** cross-check it against a time/id bound. The
+ *   caller owns that eligibility: \`load()\` requests \`with_snaps\` only
+ *   for a current-state read and drops it under any \`asOf\` bound, so a
+ *   time-travel read full-scans under its filter rather than jumping to
+ *   a snapshot outside the window (RFC 1274). Do not combine \`with_snaps\`
+ *   with \`before\`/\`created_*\`/\`limit\` in a direct \`query()\` call.
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -46124,19 +46172,13 @@ export class PostgresStore implements Store {
       if (typeof after !== "undefined") {
         values.push(after);
         conditions.push(\`id>$\${values.length}\`);
-      } else if (
-        with_snaps &&
-        query.stream_exact &&
-        stream &&
-        query.created_before === undefined &&
-        query.created_after === undefined
-      ) {
+      } else if (with_snaps && query.stream_exact && stream) {
         // Resume at the latest snapshot for this stream so pre-snapshot
         // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-        // stream. An explicit \`after\` (above) wins. A \`created_*\` bound
-        // suppresses the floor: time-travel ignores snapshots after the
-        // cutoff (#1261), else the floor would skip pre-cutoff events below
-        // a newer snapshot.
+        // stream. An explicit \`after\` (above) wins. The orchestrator only
+        // sets \`with_snaps\` for an unbounded current-state load — it
+        // suppresses the flag under any \`asOf\` bound (RFC 1274) — so the
+        // floor never needs to re-check \`before\`/\`created_*\`/\`limit\` here.
         values.push(stream);
         conditions.push(
           \`id >= (SELECT COALESCE(MAX(id), -1) FROM \${this._fqt} WHERE stream=$\${values.length} AND name='\${SNAP_EVENT}')\`
@@ -48372,19 +48414,13 @@ export class SqliteStore implements Store {
     if (query?.after !== undefined) {
       sql += " AND id > ?";
       args.push(query.after);
-    } else if (
-      query?.with_snaps &&
-      query.stream_exact &&
-      query.stream &&
-      query.created_before === undefined &&
-      query.created_after === undefined
-    ) {
+    } else if (query?.with_snaps && query.stream_exact && query.stream) {
       // Resume at the latest snapshot for this stream so pre-snapshot
       // events aren't scanned. No snapshot → MAX is NULL → -1 → full
-      // stream. An explicit \`after\` (above) wins. A \`created_*\` bound
-      // suppresses the floor: time-travel ignores snapshots after the
-      // cutoff (#1261), else the floor would skip pre-cutoff events below
-      // a newer snapshot.
+      // stream. An explicit \`after\` (above) wins. The orchestrator only sets
+      // \`with_snaps\` for an unbounded current-state load — it suppresses the
+      // flag under any \`asOf\` bound (RFC 1274) — so the floor never needs to
+      // re-check \`before\`/\`created_*\`/\`limit\` here.
       sql +=
         " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
       args.push(query.stream);
@@ -51984,6 +52020,55 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(full).toHaveLength(2);
       });
 
+      it("with_snaps applies the resume floor on a backward scan too", async () => {
+        const s = \`q-snap-back-\${uid()}\`;
+        // 2 pre-snapshot events, a snapshot, then 3 after it.
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+        const [snap] = await store.commit(
+          s,
+          [{ name: SNAP_EVENT, data: { count: 2 } }],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+
+        // The floor is direction-agnostic: forward resumes AT the snapshot,
+        // backward stops AT it. Either way, only the snapshot + the 3 events
+        // after it — never the 2 pre-snapshot events.
+        const backward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+          backward: true,
+        });
+        expect(backward).toHaveLength(4);
+        // DESC → the snapshot (lowest id in the floored set) comes last.
+        expect(backward[backward.length - 1].name).toBe(SNAP_EVENT);
+        expect(backward.every((e) => e.id >= snap.id)).toBe(true);
+
+        // No snapshot → full history under with_snaps + backward.
+        const s2 = \`q-nosnap-back-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1), inc(1)],
+          make_meta({ stream: s2 })
+        );
+        const full = await collect(store, {
+          stream: s2,
+          stream_exact: true,
+          with_snaps: true,
+          backward: true,
+        });
+        expect(full).toHaveLength(2);
+      });
+
       it("supports backward traversal", async () => {
         const s = \`q-back-\${uid()}\`;
         const committed = await store.commit<CounterEvents>(
@@ -55406,59 +55491,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(bwd).toEqual([10]);
       });
 
-      // #1261: a time-travel query (with_snaps + created_before) must ignore
-      // a snapshot newer than the cutoff. Restore lets us plant a snapshot
-      // with the highest id AND latest \`created\`, then prove the resume floor
-      // does not jump to it and skip the pre-cutoff events below it.
-      it("time-travel query ignores a snapshot newer than the created cutoff", async () => {
-        const s = \`restore-tt-snap-\${uid()}\`;
-        const t0 = new Date("2020-01-01T00:00:00.000Z");
-        const t1 = new Date("2020-02-01T00:00:00.000Z");
-        const tSnap = new Date("2020-03-01T00:00:00.000Z");
-        await restore(
-          as_source([
-            event(1, s, 0, "Incremented", t0, { amount: 1 }),
-            event(2, s, 1, "Incremented", t1, { amount: 2 }),
-            // Snapshot committed last → highest id and latest \`created\`.
-            event(3, s, 2, SNAP_EVENT, tSnap, { count: 3 }),
-          ])
-        );
-        // Cutoff between t0 and t1: the fold must see only the t0 event, not
-        // jump to the newer snapshot (which would yield an empty result).
-        const cutoff = new Date("2020-01-15T00:00:00.000Z");
-        // \`created_before\` excludes the newer snapshot outright, so the
-        // callback only ever sees the pre-cutoff domain event.
-        const before: number[] = [];
-        await store.query<CounterEvents>(
-          (e) => {
-            before.push((e.data as { amount: number }).amount);
-          },
-          {
-            stream: s,
-            stream_exact: true,
-            with_snaps: true,
-            created_before: cutoff,
-          }
-        );
-        expect(before).toEqual([1]);
-        // Same for \`created_after\`: the floor must not jump past the t1 event
-        // to the newer snapshot. With the floor suppressed the snapshot itself
-        // is returned (with_snaps) and skipped by the name guard.
-        const after: number[] = [];
-        await store.query<CounterEvents>(
-          (e) => {
-            if ((e.name as string) !== SNAP_EVENT)
-              after.push((e.data as { amount: number }).amount);
-          },
-          {
-            stream: s,
-            stream_exact: true,
-            with_snaps: true,
-            created_after: cutoff,
-          }
-        );
-        expect(after).toEqual([2]);
-      });
+      // Note (RFC 1274): floor-vs-time-bound suppression is no longer a
+      // store-level concern. The store applies the resume floor whenever
+      // \`with_snaps\` is set; the orchestrator is the single owner of floor
+      // eligibility and never combines \`with_snaps\` with an \`asOf\` bound. The
+      // suppression contract (#1261 \`created_*\`, #1267 \`before\`, #1274 \`limit\`)
+      // is now enforced at the orchestrator level in
+      // \`libs/act/test/time-travel.spec.ts\`.
 
       // #1257: restore must split \`pii\` into the isolated store so
       // \`forget_pii\` erases it — otherwise restored PII stays inline and

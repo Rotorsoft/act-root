@@ -60,7 +60,7 @@ cache(new RedisCache({ url: "redis://localhost:6379" }));
 
 ### Time-travel queries
 
-`load()` accepts an optional `asOf` argument for reading historical state. The framework bypasses the cache, replays events from the start with snapshots, and applies the cutoff filters:
+`load()` accepts an optional `asOf` argument for reading historical state. The framework bypasses the cache and replays the stream's real events from the start under the cutoff filters — it does *not* jump to the snapshot resume floor, which could sit outside the requested window (RFC 1274):
 
 ```typescript
 import { act, state } from "@rotorsoft/act";

@@ -173,4 +173,83 @@ describe("time-travel load", () => {
     const snap = await app.load(Counter, stream);
     expect(snap.state.count).toBe(7);
   });
+
+  // RFC 1274: the snapshot resume floor is a current-state optimization. On a
+  // stream that snapshots on every event, a snapshot always sits ABOVE any
+  // early cutoff — so for every `asOf` bound the orchestrator must suppress the
+  // floor (drop `with_snaps`) and full-scan under the bound, never jump to a
+  // snapshot outside the window. This one toggle covers all four historical
+  // instances (#1261 created_*, #1267 before, #1270 backward, #1274 limit).
+  describe("time-travel ignores snapshots outside the cutoff (RFC 1274)", () => {
+    // Snapshot after every event → a `__snapshot__` above every early cutoff.
+    const SnapEvery = state({ SnapEvery: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ Incremented })
+      .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.by }) })
+      .on({ increment: z.object({ by: z.number() }) })
+      .emit((action) => ["Incremented", { by: action.by }])
+      .snap(() => true)
+      .build();
+
+    const makeApp = () => sandbox(act().withState(SnapEvery));
+    type SnapApp = Awaited<ReturnType<typeof makeApp>>["app"];
+
+    const seed = async (app: SnapApp, stream: string, bys: number[]) => {
+      for (const by of bys) {
+        await app.do("increment", { stream, actor }, { by });
+        // Distinct `created` per event so timestamp cutoffs are unambiguous.
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      return app.query_array({ stream, stream_exact: true });
+    };
+
+    it("`before` id cutoff — folds only pre-cutoff events (#1267)", async () => {
+      const { app, dispose } = await makeApp();
+      const stream = nextStream();
+      const events = await seed(app, stream, [1, 2, 3]);
+      const past = await app.load(SnapEvery, stream, undefined, {
+        before: events[1].id,
+      });
+      expect(past.state.count).toBe(1);
+      await dispose();
+    });
+
+    it("`limit` — folds the first N events, not N from the snapshot (#1274)", async () => {
+      const { app, dispose } = await makeApp();
+      const stream = nextStream();
+      await seed(app, stream, [1, 2, 3, 4]);
+      const past = await app.load(SnapEvery, stream, undefined, { limit: 2 });
+      expect(past.state.count).toBe(3);
+      await dispose();
+    });
+
+    it("`created_before` timestamp cutoff — folds only pre-cutoff events (#1261)", async () => {
+      const { app, dispose } = await makeApp();
+      const stream = nextStream();
+      const events = await seed(app, stream, [1, 2, 3]);
+      const cutoff = new Date(
+        (events[0].created.getTime() + events[1].created.getTime()) / 2
+      );
+      const past = await app.load(SnapEvery, stream, undefined, {
+        created_before: cutoff,
+      });
+      expect(past.state.count).toBe(1);
+      await dispose();
+    });
+
+    it("`created_after` timestamp cutoff — folds only post-cutoff events (#1261)", async () => {
+      const { app, dispose } = await makeApp();
+      const stream = nextStream();
+      const events = await seed(app, stream, [1, 2, 3]);
+      const cutoff = new Date(
+        (events[0].created.getTime() + events[1].created.getTime()) / 2
+      );
+      const past = await app.load(SnapEvery, stream, undefined, {
+        created_after: cutoff,
+      });
+      // Events 2 and 3 (created after the cutoff) fold from init: 2 + 3.
+      expect(past.state.count).toBe(5);
+      await dispose();
+    });
+  });
 });

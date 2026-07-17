@@ -440,7 +440,30 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     let count = 0;
+    // Snapshot resume floor: `with_snaps` requests a resume at the latest
+    // snapshot for an exact single stream, so pre-snapshot events aren't read.
+    // The orchestrator sets `with_snaps` only for an unbounded current-state
+    // load — it suppresses the flag under any `asOf` bound (RFC 1274) — so the
+    // store applies the floor whenever asked and never re-checks bounds. An
+    // explicit `after` is a separate resume point that wins. No snapshot → -1,
+    // i.e. a full scan. Forward starts at the snapshot; backward stops at it.
+    let floor_index = -1;
+    if (
+      query?.with_snaps &&
+      query.stream_exact &&
+      query.stream !== undefined &&
+      query.after === undefined
+    ) {
+      for (let j = this._events.length - 1; j >= 0; j--) {
+        const e = this._events[j];
+        if (e.stream === query.stream && e.name === SNAP_EVENT) {
+          floor_index = j;
+          break;
+        }
+      }
+    }
     if (query?.backward) {
+      const floor_id = floor_index >= 0 ? this._events[floor_index].id : -1;
       let i =
         (query?.before !== undefined
           ? this._first_index_after(query.before - 1)
@@ -451,6 +474,9 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         if (query.after !== undefined && e.id <= query.after) break;
+        // Below the resume floor → every remaining (lower-id) event is too,
+        // so stop the DESC scan.
+        if (floor_id >= 0 && e.id < floor_id) break;
         // `created` is not monotonic with `id` (restore preserves the
         // source timestamps verbatim), so a failing time bound skips the
         // event rather than terminating the scan — matching PG/SQLite,
@@ -464,30 +490,10 @@ export class InMemoryStore implements Store {
         if (query?.limit && count >= query.limit) break;
       }
     } else {
-      let i = this._first_index_after(query?.after ?? -1);
-      // with_snaps resumes at the latest snapshot for an exact single
-      // stream (no explicit `after`): start the scan at that snapshot's
-      // position so pre-snapshot events aren't read. No snapshot → full
-      // scan; an explicit `after` wins. A `created_*` bound suppresses the
-      // floor: time-travel must ignore snapshots after the cutoff (#1261) —
-      // the latest snapshot may be newer than the bound, and jumping to it
-      // would skip every pre-cutoff event below it. Falls back to full scan.
-      if (
-        query?.with_snaps &&
-        query.stream_exact &&
-        query.stream !== undefined &&
-        query.after === undefined &&
-        query.created_before === undefined &&
-        query.created_after === undefined
-      ) {
-        for (let j = this._events.length - 1; j >= 0; j--) {
-          const e = this._events[j];
-          if (e.stream === query.stream && e.name === SNAP_EVENT) {
-            i = j;
-            break;
-          }
-        }
-      }
+      let i =
+        floor_index >= 0
+          ? floor_index
+          : this._first_index_after(query?.after ?? -1);
       while (i < this._events.length) {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;

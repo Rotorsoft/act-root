@@ -132,8 +132,9 @@ When any field is set, the framework treats this as a historical read:
 
 - Cache is bypassed (cached state may include events past the cutoff)
 - Cache write at the end is skipped (don't pollute with a historical view)
-- Query uses `with_snaps: true` so any snapshot before the cutoff serves as a replay anchor
-- Snapshots *after* the cutoff are filtered out by the same `before` / `created_before` predicate
+- Query drops `with_snaps`, so the read full-scans the stream's real events under the `asOf` filter and folds from `init` — it never jumps to the snapshot resume floor, which might sit *outside* the window (a snapshot above a `before`/`created`/`limit` cutoff would otherwise skip every pre-cutoff event below it). Snapshot rows are excluded from a time-travel read.
+
+The snapshot floor is a current-state optimization, and its eligibility is decided in exactly one place — `load()` requests `with_snaps` only when there is no `asOf` bound. The stores apply the floor whenever asked and never re-derive that decision (RFC 1274); this is why the same "floor jumped past the cutoff" bug does not have to be re-fixed per adapter for each new bound.
 
 The time-travel path is read-only by design — the framework's mutation API (`action()`) always operates on current state and never accepts `asOf`.
 
