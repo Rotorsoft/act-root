@@ -12,26 +12,48 @@ const message: BrokerMessage = {
 };
 
 describe("RedisBroker", () => {
-  /** node-redis(v4+)-shaped fakes capturing the wire protocol. */
+  /**
+   * node-redis(v4+)-shaped fakes capturing the wire protocol faithfully:
+   * `subscribe(channel, listener)` **adds** a listener (multiple allowed per
+   * channel), `unsubscribe(channel, listener)` removes only that one, and
+   * `unsubscribe(channel)` with no listener removes **all** of them. Modelling
+   * a single overwrite-listener would mask the shared-broker bug (#1279).
+   */
   function fakes() {
     const published: Array<{ channel: string; message: string }> = [];
-    const listeners = new Map<string, (raw: string) => void>();
+    const listeners = new Map<string, Set<(raw: string) => void>>();
+    const emit = (channel: string, raw: string) => {
+      for (const l of listeners.get(channel) ?? []) l(raw);
+    };
     return {
       published,
       listeners,
+      emit,
       publisher: {
         publish: async (channel: string, msg: string) => {
           published.push({ channel, message: msg });
-          listeners.get(channel)?.(msg);
+          emit(channel, msg);
           return 1;
         },
       },
       subscriber: {
         subscribe: async (channel: string, listener: (raw: string) => void) => {
-          listeners.set(channel, listener);
+          const set = listeners.get(channel) ?? new Set();
+          set.add(listener);
+          listeners.set(channel, set);
         },
-        unsubscribe: async (channel: string) => {
-          listeners.delete(channel);
+        unsubscribe: async (
+          channel: string,
+          listener?: (raw: string) => void
+        ) => {
+          const set = listeners.get(channel);
+          if (!set) return;
+          if (listener) {
+            set.delete(listener);
+            if (set.size === 0) listeners.delete(channel);
+          } else {
+            listeners.delete(channel);
+          }
         },
       },
     };
@@ -72,8 +94,39 @@ describe("RedisBroker", () => {
     });
     const seen: BrokerMessage[] = [];
     await broker.subscribe((m) => seen.push(m));
-    f.listeners.get(DEFAULT_NOTIFY_CHANNEL)?.("not-json{");
+    f.emit(DEFAULT_NOTIFY_CHANNEL, "not-json{");
     expect(seen).toEqual([]);
+  });
+
+  it("disposing one subscriber leaves co-subscribers on a shared broker intact (#1279)", async () => {
+    // The sidecar+worker / one-broker-N-workers topology: two orchestrators
+    // share a single RedisBroker. Disposing one must remove only its own
+    // listener — a channel-wide unsubscribe would silence the other, dropping
+    // it to poll-cycle latency until restart.
+    const f = fakes();
+    const broker = new RedisBroker({
+      publisher: f.publisher,
+      subscriber: f.subscriber,
+    });
+    const seenA: BrokerMessage[] = [];
+    const seenB: BrokerMessage[] = [];
+    const offA = await broker.subscribe((m) => seenA.push(m));
+    await broker.subscribe((m) => seenB.push(m));
+
+    // Both wake on the first commit.
+    await broker.publish(message);
+    expect(seenA).toHaveLength(1);
+    expect(seenB).toHaveLength(1);
+
+    // A disposes (graceful sidecar shutdown).
+    await offA();
+
+    // A subsequent commit still wakes B — A's dispose removed only A's listener.
+    await broker.publish(message);
+    expect(seenA).toHaveLength(1); // control: A stopped
+    expect(seenB).toHaveLength(2); // B still receiving (bug: was 1)
+    // B's listener remains registered on the channel; A's is gone.
+    expect(f.listeners.get(DEFAULT_NOTIFY_CHANNEL)?.size).toBe(1);
   });
 });
 
