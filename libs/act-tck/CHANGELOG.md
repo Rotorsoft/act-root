@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.10...@rotorsoft/act-tck-v1.27.11) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act-http:** map tRPC error codes by identity so wire status matches Hono/OpenAPI ([#1280](https://github.com/rotorsoft/act-root/issues/1280)) ([8cbd4c4](https://github.com/rotorsoft/act-root/commit/8cbd4c4c91b24f625ce7cdcf42c5126653cadc18))
+* **act:** advance the watermark past the succeeded prefix on partial-progress defers ([#1278](https://github.com/rotorsoft/act-root/issues/1278)) ([4bfd833](https://github.com/rotorsoft/act-root/commit/4bfd83313f375403031c6781b0f7eb01169f74d7))
+
 # [@rotorsoft/act-tck-v1.27.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.9...@rotorsoft/act-tck-v1.27.10) (2026-07-18)
 
 
