@@ -676,6 +676,7 @@ import {
   type Handle,
   type HandleBatch,
   type PatchFn,
+  pii_gate,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -1880,12 +1881,32 @@ export class Act<
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
       const count = await store().query<TEvents>((e) => {
-        if (!first) first = e;
-        last = e;
-        callback?.(e);
+        const gated = this._gate_query_event(e);
+        if (!first) first = gated;
+        last = gated;
+        callback?.(gated);
       }, query);
       return { first, last, count };
     });
+  }
+
+  /**
+   * Default-deny PII gate for the read-only query surfaces (#1277). \`query\` /
+   * \`query_array\` carry no actor, so — mirroring a bare-string \`load\` — every
+   * declared \`sensitive(...)\` field comes back \`[REDACTED]\` (or \`[SHREDDED]\`
+   * once forgotten) and the isolated \`pii\` sidecar is dropped from the event.
+   * Events with no sensitive fields pass through untouched (the common case;
+   * a single \`Map\` lookup). There is no actor-authorized query path — that
+   * would be a charter addition; the store's raw column is correct, the gate
+   * belongs here in the orchestrator.
+   */
+  private _gate_query_event(
+    e: Committed<TEvents, keyof TEvents>
+  ): Committed<TEvents, keyof TEvents> {
+    const fields = this.registry.sensitive_fields(e.name as string);
+    if (fields.length === 0) return e;
+    const { pii: _pii, ...gated } = pii_gate(e, fields, null, undefined);
+    return gated as Committed<TEvents, keyof TEvents>;
   }
 
   /**
@@ -1919,7 +1940,10 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>((e) => events.push(e), query);
+      await store().query<TEvents>(
+        (e) => events.push(this._gate_query_event(e)),
+        query
+      );
       return events;
     });
   }
@@ -17339,6 +17363,7 @@ import {
   type Handle,
   type HandleBatch,
   type PatchFn,
+  pii_gate,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -18543,12 +18568,32 @@ export class Act<
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
       const count = await store().query<TEvents>((e) => {
-        if (!first) first = e;
-        last = e;
-        callback?.(e);
+        const gated = this._gate_query_event(e);
+        if (!first) first = gated;
+        last = gated;
+        callback?.(gated);
       }, query);
       return { first, last, count };
     });
+  }
+
+  /**
+   * Default-deny PII gate for the read-only query surfaces (#1277). \`query\` /
+   * \`query_array\` carry no actor, so — mirroring a bare-string \`load\` — every
+   * declared \`sensitive(...)\` field comes back \`[REDACTED]\` (or \`[SHREDDED]\`
+   * once forgotten) and the isolated \`pii\` sidecar is dropped from the event.
+   * Events with no sensitive fields pass through untouched (the common case;
+   * a single \`Map\` lookup). There is no actor-authorized query path — that
+   * would be a charter addition; the store's raw column is correct, the gate
+   * belongs here in the orchestrator.
+   */
+  private _gate_query_event(
+    e: Committed<TEvents, keyof TEvents>
+  ): Committed<TEvents, keyof TEvents> {
+    const fields = this.registry.sensitive_fields(e.name as string);
+    if (fields.length === 0) return e;
+    const { pii: _pii, ...gated } = pii_gate(e, fields, null, undefined);
+    return gated as Committed<TEvents, keyof TEvents>;
   }
 
   /**
@@ -18582,7 +18627,10 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>((e) => events.push(e), query);
+      await store().query<TEvents>(
+        (e) => events.push(this._gate_query_event(e)),
+        query
+      );
       return events;
     });
   }
