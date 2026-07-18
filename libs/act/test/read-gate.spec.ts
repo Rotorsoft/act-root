@@ -177,6 +177,24 @@ describe("read-path PII gate (#855 slice 4)", () => {
     });
   });
 
+  it("the gated load event drops the pii sidecar — plaintext never rides in event.pii (#1277)", async () => {
+    const app = act().withState(User).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    await cache().invalidate("user-1");
+    // Unauthorized: data redacted AND no sidecar.
+    const denied = await app.load(User, { stream: "user-1", actor: stranger });
+    expect((denied.event as { pii?: unknown }).pii).toBeUndefined();
+    await cache().invalidate("user-1");
+    // Authorized: plaintext merged into data, still no raw sidecar.
+    const allowed = await app.load(User, { stream: "user-1", actor: owner });
+    expect(allowed.event?.data.email).toBe("u@example.com");
+    expect((allowed.event as { pii?: unknown }).pii).toBeUndefined();
+  });
+
   // --- SHREDDED — irrecoverable post-forget ---
 
   it("after Store.forget_pii, reads return SHREDDED regardless of authorization", async () => {
@@ -239,7 +257,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
 
   // --- Pii-aware state with a non-sensitive event mixed in ---
   // Exercises the `fields_by_event.get(name) ?? []` fallback in
-  // `state.view` and `pii_gate`'s empty-fields short-circuit.
+  // `state.view`'s IDENTITY_GATE fallback for the non-sensitive event.
 
   it("pii-aware state with a non-sensitive event — load() passes it through unchanged", async () => {
     const registeredSchema = z.object({
@@ -304,5 +322,158 @@ describe("read-path PII gate (#855 slice 4)", () => {
     const loadSnap = await app.load(Counter, "c-1");
     expect(loadSnap.event?.data).toEqual({ by: 5 });
     expect(loadSnap.state).toEqual({ count: 5 });
+  });
+});
+
+// --- query / query_array carry no actor → default-deny, mirroring a
+//     bare-string load. The store returns the raw pii column; the gate
+//     lives in the orchestrator (#1277). ---
+
+describe("query / query_array default-deny PII gate (#1277)", () => {
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("query_array redacts sensitive fields and drops the pii sidecar — even with a permissive .discloses", async () => {
+    const app = act().withState(User).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "pro" }
+    );
+    const events = await app.query_array({
+      stream: "user-1",
+      stream_exact: true,
+    });
+    const reg = events.find((e) => e.name === "UserRegistered");
+    expect(reg?.data).toEqual({ email: REDACTED, name: REDACTED, plan: "pro" });
+    // The isolated pii sidecar must not ride along.
+    expect((reg as { pii?: unknown }).pii).toBeUndefined();
+  });
+
+  it("query (streaming callback) redacts + drops the sidecar too", async () => {
+    const app = act().withState(User).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    let seen: { data?: Record<string, unknown>; pii?: unknown } | undefined;
+    const { first } = await app.query(
+      { stream: "user-1", stream_exact: true },
+      (e) => {
+        if (e.name === "UserRegistered") seen = e;
+      }
+    );
+    expect(seen?.data).toEqual({
+      email: REDACTED,
+      name: REDACTED,
+      plan: "free",
+    });
+    expect(seen?.pii).toBeUndefined();
+    // `first`/`last` returned to the caller are gated too.
+    expect((first as { data?: { email?: string } })?.data?.email).toBe(
+      REDACTED
+    );
+  });
+
+  it("a default-deny state (no .discloses) is redacted on query too", async () => {
+    const app = act().withState(UserNoPolicy).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    const events = await app.query_array({
+      stream: "user-1",
+      stream_exact: true,
+    });
+    const reg = events.find((e) => e.name === "NoPolicyRegistered");
+    expect(reg?.data.email).toBe(REDACTED);
+  });
+
+  it("after forget_pii, query returns SHREDDED", async () => {
+    const app = act().withState(User).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "pro" }
+    );
+    await store().forget_pii?.("user-1");
+    const events = await app.query_array({
+      stream: "user-1",
+      stream_exact: true,
+    });
+    const reg = events.find((e) => e.name === "UserRegistered");
+    expect(reg?.data).toEqual({
+      email: SHREDDED,
+      name: SHREDDED,
+      plan: "pro",
+    });
+  });
+
+  it("non-sensitive events pass through query unchanged", async () => {
+    const Counter = state({ Counter: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ Incremented: z.object({ by: z.number() }) })
+      .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.by }) })
+      .on({ increment: z.object({ by: z.number() }) })
+      .emit((p) => ["Incremented", p])
+      .build();
+    const app = act().withState(Counter).build();
+    await app.do("increment", { stream: "c-1", actor: owner }, { by: 5 });
+    const [e] = await app.query_array({ stream: "c-1", stream_exact: true });
+    expect(e.data).toEqual({ by: 5 });
+  });
+
+  it("mixed stream: query gates only the sensitive event, passes the non-sensitive one through", async () => {
+    // The crux of the prebuilt-gate design — in an app that DOES declare
+    // sensitive events, a non-sensitive event on the same stream resolves to
+    // the shared IDENTITY_GATE and is handed back untouched; only the
+    // sensitive event pays the redaction.
+    const registeredSchema = z.object({
+      email: sensitive(z.string()),
+      name: sensitive(z.string()),
+      plan: z.enum(["free", "pro"]),
+    });
+    const promotedSchema = z.object({ plan: z.enum(["free", "pro"]) });
+    const MixedUser = state({ MixedUser: userSchema })
+      .init(() => ({}))
+      .emits({
+        UserRegistered3: registeredSchema,
+        UserPromoted3: promotedSchema,
+      })
+      .patch({
+        UserRegistered3: ({ data }) => ({ email: data.email, name: data.name }),
+        UserPromoted3: ({ data }, s) => ({ ...s, plan: data.plan }),
+      })
+      .on({ register: registeredSchema })
+      .emit((p) => ["UserRegistered3", p])
+      .on({ promote: promotedSchema })
+      .emit((p) => ["UserPromoted3", p])
+      .discloses(() => true)
+      .build();
+    const app = act().withState(MixedUser).build();
+    await app.do(
+      "register",
+      { stream: "u-mix", actor: owner },
+      { email: "m@example.com", name: "Mira", plan: "free" }
+    );
+    await app.do("promote", { stream: "u-mix", actor: owner }, { plan: "pro" });
+    const events = await app.query_array({
+      stream: "u-mix",
+      stream_exact: true,
+    });
+    // Sensitive event redacted despite the permissive `.discloses` — query is
+    // actor-less, so default-deny.
+    const registered = events.find((e) => e.name === "UserRegistered3");
+    expect(registered?.data).toEqual({
+      email: REDACTED,
+      name: REDACTED,
+      plan: "free",
+    });
+    // Non-sensitive event passes through — same object, untouched.
+    const promoted = events.find((e) => e.name === "UserPromoted3");
+    expect(promoted?.data).toEqual({ plan: "pro" });
   });
 });

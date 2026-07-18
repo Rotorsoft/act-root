@@ -67,6 +67,15 @@ export type SchemaRegister<TSchemaReg> = {
  * @property sensitive_fields - Lookup of `sensitive(...)`-marked fields per
  *   event name. Derived once at build time. Returns the empty array for
  *   unknown events.
+ * @property query_gate - Prebuilt per-event read gate for the actor-less read
+ *   surfaces (`query` / `query_array`). Every event resolves to a gate: a
+ *   non-sensitive event returns the shared identity gate (the event is handed
+ *   back untouched, zero allocation); a sensitive event returns a redactor
+ *   built once at build time that closes over the field list and applies
+ *   default-deny (`[REDACTED]`, or `[SHREDDED]` once the pii column is
+ *   forgotten) while dropping the isolated `pii` sidecar. The gate is prebuilt
+ *   so the read path never recomputes the sensitive-field lookup per event —
+ *   only the sensitive events pay any cost.
  * @property disclosure_predicate - Lookup of the `.discloses(predicate)`
  *   declaration per state name. Returns `null` when no predicate was set
  *   (framework default-deny).
@@ -93,6 +102,11 @@ export type Registry<
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (event_name: string) => readonly string[];
+  readonly query_gate: (
+    event_name: string
+  ) => (
+    event: Committed<TEvents, keyof TEvents>
+  ) => Committed<TEvents, keyof TEvents>;
   readonly disclosure_predicate: (
     state_name: TStateNames
   ) =>

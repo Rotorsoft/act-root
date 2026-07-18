@@ -134,11 +134,14 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  * Build the **external view** of a committed event — the form returned by
  * `load()`, `query()`, `query_array()`, and the snapshot in `do()`'s reply.
  *
- * - Event with no schema-declared sensitive fields → returned unchanged
- *   (zero-cost path).
- * - Event whose `pii` payload is null/undefined AND schema declares sensitive
- *   fields → substitute {@link SHREDDED} for each declared field. Irrecoverable,
- *   so no predicate check.
+ * Only ever reached for events that declare sensitive fields — the sole caller
+ * is {@link make_gate}, which the builder invokes exclusively for sensitive
+ * events; non-sensitive events short-circuit to {@link IDENTITY_GATE} before
+ * they get here. `fields` is therefore guaranteed non-empty (same contract as
+ * {@link pii_strip}).
+ *
+ * - Event whose `pii` payload is null/undefined → substitute {@link SHREDDED}
+ *   for each declared field. Irrecoverable, so no predicate check.
  * - Event with a `pii` payload, predicate returns `true` → merge `pii` into
  *   `data` (plaintext).
  * - Event with a `pii` payload, predicate returns `false` OR no predicate
@@ -153,34 +156,85 @@ export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  if (fields.length === 0) return event;
   const data = event.data as Record<string, unknown>;
-  if (event.pii == null) {
+  // The external view NEVER carries the isolated `pii` sidecar — dropping it
+  // is the whole point of the gate. Keeping it (an earlier `...event` spread)
+  // leaked plaintext PII on every gated read surface (`load`, `query`,
+  // `query_array`) even while `data` was correctly redacted (#1277). Strip it
+  // once here; the plaintext lives in `data` only on the authorized path.
+  const { pii, ...rest } = event as Committed<TEvents, TKey> & {
+    pii?: Record<string, unknown> | null;
+  };
+  if (pii == null) {
     const shredded: Record<string, unknown> = { ...data };
     for (const f of fields) shredded[f] = SHREDDED;
-    return {
-      ...event,
-      data: shredded as Committed<TEvents, TKey>["data"],
-    };
+    return { ...rest, data: shredded as Committed<TEvents, TKey>["data"] };
   }
   // Plaintext path requires both an actor AND a predicate that allows. Missing
   // either → default-deny → REDACTED.
   const allowed = !!actor && !!predicate && predicate(event, actor);
   if (allowed) {
     return {
-      ...event,
-      data: {
-        ...data,
-        ...(event.pii as Record<string, unknown>),
-      } as Committed<TEvents, TKey>["data"],
+      ...rest,
+      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
     };
   }
   const redacted: Record<string, unknown> = { ...data };
   for (const f of fields) redacted[f] = REDACTED;
-  return {
-    ...event,
-    data: redacted as Committed<TEvents, TKey>["data"],
-  };
+  return { ...rest, data: redacted as Committed<TEvents, TKey>["data"] };
+}
+
+/**
+ * A prebuilt per-event read gate: given a committed event and the reading
+ * actor, return the caller-visible form. This is the single gating primitive
+ * the builder prebuilds for **every** read surface — both the actor-less
+ * `query` / `query_array` (which pass no actor → default-deny) and the
+ * actor-aware `load` / `do`-return view (which pass the reader). Non-sensitive
+ * events use the shared {@link IDENTITY_GATE}; sensitive events use a redactor
+ * built by {@link make_gate} that closes over the field list and the state's
+ * disclosure predicate, so the read path never recomputes the sensitive-field
+ * lookup nor allocates per event.
+ *
+ * The `actor` is optional so the actor-less surfaces can call `gate(event)`.
+ *
+ * @internal
+ */
+export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
+  event: Committed<TEvents, TKey>,
+  actor?: Actor
+) => Committed<TEvents, TKey>;
+
+/**
+ * Shared zero-cost gate for every event with no `sensitive(...)` fields — a
+ * single frozen reference the builder hands back for non-sensitive events, so
+ * the common path is one `Map` miss and an identity call, no allocation. This
+ * is the "by default, return the event" half of the prebuilt per-event gate.
+ *
+ * @internal
+ */
+export const IDENTITY_GATE: EventGate = (event) => event;
+
+/**
+ * Prebuild a read gate for a sensitive event, capturing its field list and the
+ * disclosure predicate once at build time. The returned closure defers to
+ * {@link pii_gate} with the reading actor supplied per call:
+ *
+ * - `predicate = null` (the actor-less `query` surfaces, or a state that never
+ *   declared `.discloses`) → default-deny: declared fields come back
+ *   {@link REDACTED} (or {@link SHREDDED} once the pii column is forgotten).
+ * - `predicate` set + an authorized actor → plaintext merged into `data`.
+ *
+ * Either way the isolated `pii` sidecar is dropped. The builder stores one gate
+ * per sensitive event (per state for the load path; predicate-less for the
+ * query path); non-sensitive events fall back to {@link IDENTITY_GATE}.
+ *
+ * @internal
+ */
+export function make_gate(
+  fields: readonly string[],
+  predicate: ((event: any, actor: Actor) => boolean) | null
+): EventGate {
+  return (event, actor) => pii_gate(event, fields, predicate, actor);
 }
 
 /**
