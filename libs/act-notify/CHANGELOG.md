@@ -1,3 +1,10 @@
+# [@rotorsoft/act-notify-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.1.1...@rotorsoft/act-notify-v0.1.2) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act-notify:** unsubscribe only the disposing listener on a shared broker ([#1279](https://github.com/rotorsoft/act-root/issues/1279)) ([e1be8ef](https://github.com/rotorsoft/act-root/commit/e1be8efaa557309d42e65cd87c9703b6d16b37ad))
+
 # [@rotorsoft/act-notify-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.1.0...@rotorsoft/act-notify-v0.1.1) (2026-07-11)
 
 
