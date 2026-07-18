@@ -761,25 +761,27 @@ export class SqliteStore implements Store {
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
-      // schedules land all-or-nothing per the Store.ack contract: an
-      // entry without `due` acks (watermark advances, retry cleared,
-      // schedule cleared), an entry with `due` defers (schedule set,
-      // watermark untouched, retry set to the entry's own `retry`). The
-      // bound schedule doubles as the branch discriminator — NULL means
-      // ack. An explicit defer passes retry -1 (not a failure); a backoff
-      // retry passes the climbing counter so the budget keeps accruing
-      // across windows (#1262). Only acked entries are returned.
+      // schedules land all-or-nothing per the Store.ack contract. Every
+      // entry advances the watermark to its `at` (the last event handled
+      // this cycle); an entry without `due` also clears retry + schedule,
+      // while an entry with `due` additionally sets the schedule and the
+      // entry's own `retry` — advance and defer are independent legs
+      // (#1278), so a partial-progress defer keeps the handled prefix. The
+      // bound schedule doubles as the ack-vs-defer discriminator — NULL
+      // means ack. An explicit defer passes retry -1 (not a failure); a
+      // backoff retry passes the climbing counter so the budget keeps
+      // accruing across windows (#1262). Only acked entries are returned.
       const result: Lease[] = [];
       for (const l of leases) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
           sql: `UPDATE streams
-                SET at = CASE WHEN ? IS NULL THEN ? ELSE at END,
+                SET at = ?,
                     deferred_at = ?,
                     leased_by = NULL, leased_until = NULL,
                     retry = CASE WHEN ? IS NULL THEN -1 ELSE ? END
                 WHERE stream = ? AND leased_by = ?`,
-          args: [due, l.at, due, due, l.retry, l.stream, l.by],
+          args: [l.at, due, due, l.retry, l.stream, l.by],
         });
         if (due === null && r.rowsAffected > 0) result.push(l);
       }

@@ -223,31 +223,37 @@ export async function run_drain_cycle<
     })
   );
 
-  // Finalize the cycle in one atomic store call: results that made
-  // progress (`handled > 0 || !error` — full success, empty payloads, or
-  // partial success before a failure) ack at their new watermark, and
-  // deferred results ride the same batch marked with `due` (watermark
-  // held, schedule persisted, excluded from the returned acks). A failed
-  // finalize lands nothing — the catch in the controller covers every
-  // outcome uniformly. Partial-success-then-block still lands in both
-  // `acked` and `blocked` for the same stream — by design.
+  // Finalize the cycle in one atomic store call. Every entry advances the
+  // watermark to the last event fully handled this cycle, and a deferred or
+  // backing-off entry rides the same batch marked with `due` so the store
+  // ALSO persists the schedule — advance and defer are independent legs of
+  // one ack (#1278). A failed finalize lands nothing — the catch in the
+  // controller covers every outcome uniformly. Partial-success-then-block
+  // still lands in both `acked` and `blocked` for the same stream — by design.
   //
-  // A retry-with-backoff (`next_attempt_at` set, not blocking) also rides a
-  // `due` marker so the store persists the backoff window and excludes the
-  // stream from `claim` until it elapses — no worker re-claims and phantom-
-  // bumps `retry` mid-window (#1262). It carries the climbing `retry` so the
-  // budget still accrues, whereas an explicit defer passes `retry: -1`
-  // because a defer is not a failure.
+  // The advance target is `acked_at` (the last fully-handled event) when the
+  // batch made progress, and the pre-fetch watermark `floor` (`leased[i].at`,
+  // a no-op advance) when it did not — because on a no-progress failure
+  // `acked_at` is initialized to the fetch ceiling and would skip the failed
+  // event. `leased[i]` pairs with `handled[i]` (Promise.all preserves order),
+  // so `floor` is the untouched claim watermark.
+  //
+  // Deferring past the succeeded prefix (rather than holding the whole batch)
+  // is the point: the handled events never re-run on redelivery. A backoff
+  // retry carries the climbing `retry` so the budget keeps accruing toward
+  // `blockOnError` and the durable cross-worker window (#1262) survives; an
+  // explicit defer passes `retry: -1` because a defer is not a failure.
   const acked = await ops.ack(
-    handled.flatMap((h) =>
-      h.defer !== undefined
-        ? { ...h.lease, due: h.defer, retry: -1 }
-        : h.handled > 0 || !h.error
-          ? { ...h.lease, at: h.acked_at }
-          : h.next_attempt_at !== undefined
-            ? { ...h.lease, due: h.next_attempt_at }
-            : []
-    )
+    handled.flatMap((h, i) => {
+      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+      return h.defer !== undefined
+        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+        : h.next_attempt_at !== undefined
+          ? { ...h.lease, at: advance, due: h.next_attempt_at }
+          : h.handled > 0 || !h.error
+            ? { ...h.lease, at: h.acked_at }
+            : [];
+    })
   );
 
   const blocked = await ops.block(

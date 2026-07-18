@@ -63,7 +63,7 @@ interface Store extends Disposable, EventSource {
 }
 ```
 
-`ack` is the drain's atomic finalize: a lease without `due` acks (watermark advances, schedule cleared), a lease *with* `due` defers (schedule set to `due`, watermark held, retry reset) — all entries in one transaction, so a cycle's acks can never land without its schedules or vice versa. Deferred entries are excluded from the return value. The standalone `defer` verb remains for operator-driven bulk scheduling.
+`ack` is the drain's atomic finalize: every entry advances the watermark to `at`, and a lease *with* `due` additionally defers (schedule set to `due`, `retry` set to the entry's own value) — advance and defer are independent legs, so a partial-progress backoff/defer keeps the events it handled (they never re-run) while the failing tail waits for `deferred_at`; a lease without `due` also clears the schedule and resets `retry`. All entries land in one transaction, so a cycle's acks can never land without its schedules or vice versa. Deferred entries are excluded from the return value. The standalone `defer` verb (which parks a stream *without* advancing its watermark) remains for operator-driven bulk scheduling.
 
 `seed()` is the schema story — there is no migration framework, by design. The method is additive, idempotent, and lossless on any prior released shape: every schema change ships as an `IF NOT EXISTS` step that re-asserts on every boot, which is precisely what makes it self-healing (a version table would break that property — see the decision record in [#1140](https://github.com/Rotorsoft/act-root/issues/1140)). Adopting existing event data means importing into a fresh Act-owned store via `scan`/`restore`, never adapting a foreign table in place.
 
