@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.8...@rotorsoft/act-tck-v1.27.9) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act:** validate BackoffOptions at declaration so a bad config throws at build ([#1269](https://github.com/rotorsoft/act-root/issues/1269)) ([e181e78](https://github.com/rotorsoft/act-root/commit/e181e78d4bab10f14b335510da3f56cb656a7cdb))
+
 # [@rotorsoft/act-tck-v1.27.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.7...@rotorsoft/act-tck-v1.27.8) (2026-07-17)
 
 
