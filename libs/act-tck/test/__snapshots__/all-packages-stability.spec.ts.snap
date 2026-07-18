@@ -24,7 +24,9 @@ import {
   reaction_on,
   register_lane,
   register_state,
+  resolveActConfig,
   resolveAutocloseConfig,
+  resolveLaneConfig,
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
@@ -456,12 +458,18 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
-        register_lane(config, lanes);
+        // Validate the lane bag at declaration (a bad leaseMillis/streamLimit
+        // throws ZodError at build, not on the first cycle).
+        register_lane(resolveLaneConfig(config), lanes);
         return builder as never;
       },
       on: <TKey extends keyof TEvents>(event: TKey) =>
         reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
+        // Validate the top-level scalar knobs at build (the nested autoclose /
+        // circuitBreaker bags are validated by their own resolvers). A bad
+        // maxSubscribedStreams / settleDebounceMs throws ZodError here.
+        resolveActConfig(options);
         // ACT-1238: select the per-event patch step ONCE here — the
         // single selection site. \`bare_patch\` (the literal pre-#1238
         // \`patch()\` merge) when \`validateFoldedState\` is off, else
@@ -677,6 +685,8 @@ import {
   type HandleBatch,
   type PatchFn,
   resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveSettleConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -769,8 +779,8 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 // Re-export the autoclose config surface so operators can
 // \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"\`. The implementation lives in
-// \`internal/autoclose-config.ts\` to keep this orchestrator file
-// focused on the \`Act\` class.
+// \`internal/config.ts\` (the single home for builder-facing config bags)
+// to keep this orchestrator file focused on the \`Act\` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -1992,6 +2002,9 @@ export class Act<
    * @see {@link start_correlations} for automatic correlation
    */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    // Validate the runtime knobs before anything runs (a bad leaseMillis /
+    // streamLimit / eventLimit throws ZodError here, not on the first cycle).
+    resolveDrainConfig(options);
     // #803: writer-only instances skip the local reaction pipeline.
     // Return an empty Drain result so call sites that aggregate (e.g.,
     // \`settle\` listeners) keep working without special-casing.
@@ -2611,6 +2624,9 @@ export class Act<
    * @see {@link correlate} for manual correlation
    */
   settle(options: SettleOptions = {}): void {
+    // Validate the runtime knobs before anything runs (a bad debounceMs /
+    // leaseMillis / maxPasses throws ZodError here, not on the first pass).
+    resolveSettleConfig(options);
     // #803: writer-only instances skip settle entirely. The bootstrap
     // pattern \`app.on("committed", () => app.settle())\` keeps working —
     // it just runs zero work on writers.
@@ -4644,294 +4660,6 @@ export type AuditFinding =
       reason: "future-created" | "out-of-order";
     };
 
-// === autoclose-config.ts ===
-/**
- * @module autoclose-config
- * @category Internal
- *
- * Defaults, Zod schema, and resolver for the autoclose knobs on
- * {@link ActOptions} (#837 / epic #802). Split out of \`act.ts\` so the
- * orchestrator file stays focused on the \`Act\` class and the
- * autoclose surface lives with the cycle + controller that consume
- * it. The validation pattern matches the rest of the framework —
- * Zod schema with \`.min().max().default(...)\` per field — so the
- * upcoming policy-factory subs (#838 retention, #839 terminal,
- * #840 cardinality) can \`.extend(...)\` it for their own
- * per-policy options without reinventing range checks.
- *
- * @internal
- */
-
-import { z } from "zod";
-import type { ActOptions } from "../act.js";
-
-/**
- * Default {@link ActOptions.autocloseCycleMinutes}: 720 (12 h).
- *
- * @deprecated The knob it defaults is deprecated (#1175) — the
- * off-window re-check is derived from \`autocloseWindow\` via
- * {@link next_window_open}, so nothing consumes the cadence. Kept so
- * existing imports and the compat validation keep working; removed in
- * the next major.
- */
-export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-
-/**
- * Default {@link ActOptions.closeBatchSize}: 64.
- *
- * @deprecated Dead since #1090 removed the autoclose sweep — nothing
- * pages the store in batches. Kept for compat; removed in the next
- * major.
- */
-export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-
-/**
- * Default {@link ActOptions.closeYieldMs}: 0.
- *
- * @deprecated Dead since #1090 removed the autoclose sweep — there is
- * no truncate loop to yield between. Kept for compat; removed in the
- * next major.
- */
-export const DEFAULT_CLOSE_YIELD_MS = 0;
-
-/**
- * Default time zone for {@link ActOptions.autocloseWindow} when the
- * operator declares a window without one. UTC keeps the contract
- * timezone-explicit; operators who think in local off-hours pass an
- * IANA name.
- */
-export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
-
-/**
- * True when \`tz\` is a time zone the runtime's \`Intl\` accepts. Used to
- * reject typos in {@link ActOptions.autocloseWindow} at build time.
- *
- * @internal
- */
-function is_valid_time_zone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Zod schema for the optional off-hours window. Hours are \`[0, 23]\`
- * integers; \`start === end\` is rejected because the half-open
- * \`[start, end)\` window it would describe is empty (and would silently
- * disable autoclose). \`start > end\` is allowed and means an overnight
- * window (e.g. \`{ start: 22, end: 6 }\` is 22:00 through 06:00).
- *
- * @internal
- */
-const AutocloseWindowSchema = z
-  .object({
-    start: z
-      .number()
-      .int()
-      .min(0)
-      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
-    end: z
-      .number()
-      .int()
-      .min(0)
-      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
-    timeZone: z
-      .string()
-      .refine(is_valid_time_zone, {
-        message: "autocloseWindow.timeZone must be a valid IANA time zone",
-      })
-      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
-  })
-  .refine((w) => w.start !== w.end, {
-    message:
-      "autocloseWindow.start and end must differ — an empty window disables autoclose",
-  });
-
-/**
- * Zod schema for the autoclose knobs on {@link ActOptions}. Same
- * declarative-validation pattern the framework uses elsewhere
- * (\`libs/act/src/config.ts\`, every event/action schema, every
- * reaction-option shape). Defaults, ranges, and integer constraints
- * live in one place — no parallel \`DEFAULT_*\` + \`*_MIN\` / \`*_MAX\`
- * declarations to keep in sync. Out-of-range values throw \`ZodError\`
- * at \`act().build()\` so misconfiguration surfaces at startup, not
- * on the first cycle tick.
- *
- * @internal
- */
-const AutocloseOptionsSchema = z.object({
-  autocloseCycleMinutes: z
-    .number()
-    .int()
-    .min(1)
-    .max(1440)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
-  closeBatchSize: z
-    .number()
-    .int()
-    .min(1)
-    .max(1024)
-    .default(DEFAULT_CLOSE_BATCH_SIZE),
-  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
-  closeOnError: z.boolean().default(false),
-  autocloseWindow: AutocloseWindowSchema.optional(),
-});
-
-/**
- * Resolved autoclose configuration after validation and default
- * expansion. Reachable through the public root (\`@rotorsoft/act\`) so
- * fields follow the public-camelCase convention and mirror the
- * \`ActOptions\` knob names directly — no per-resolver renaming layer.
- */
-export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
-
-/**
- * Validate and apply defaults for the autoclose knobs on
- * {@link ActOptions}. Called from \`act().build()\`. Out-of-range
- * values throw \`ZodError\` at startup, not on the first cycle tick.
- */
-export function resolveAutocloseConfig(
-  options: ActOptions | undefined
-): AutocloseConfig {
-  return AutocloseOptionsSchema.parse({
-    autocloseCycleMinutes: options?.autocloseCycleMinutes,
-    closeBatchSize: options?.closeBatchSize,
-    closeYieldMs: options?.closeYieldMs,
-    closeOnError: options?.closeOnError,
-    autocloseWindow: options?.autocloseWindow,
-  });
-}
-
-/**
- * The current hour \`[0, 23]\` in the given IANA time zone, DST-correct
- * via \`Intl\`. Split out so the window check can be unit-tested without
- * spinning a controller.
- *
- * @internal
- */
-export function hour_in_zone(now: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  return Number(parts.find((p) => p.type === "hour")?.value);
-}
-
-/**
- * True when a plain \`[start, end)\` hour comparison places \`hour\` inside
- * the window. Half-open on hour boundaries and wrapping past midnight
- * when \`start > end\`.
- *
- * @internal
- */
-function hour_in_range(hour: number, start: number, end: number): boolean {
-  return start < end
-    ? hour >= start && hour < end
-    : hour >= start || hour < end;
-}
-
-/**
- * True when \`now\` is the instant a DST spring-forward gap skipped over
- * the window's \`start\` hour. On such a day the local \`start\` hour never
- * occurs — the clock jumps from \`start - 1\` straight past \`start\` — so a
- * plain hour comparison would report the window closed all day. The gap
- * surfaces as a one-hour boundary where the local hour jumps from below
- * \`start\` to above it; that boundary instant is the window's replacement
- * opening. Detected by comparing the hour at \`now\` with the hour one
- * hour earlier: a jump of more than one hour that steps over \`start\`.
- *
- * @internal
- */
-function is_dst_gap_open(now: Date, timeZone: string, start: number): boolean {
-  const hour = hour_in_zone(now, timeZone);
-  if (hour <= start) return false;
-  const prev = hour_in_zone(new Date(now.getTime() - 3_600_000), timeZone);
-  // A normal step advances one local hour; a spring-forward gap advances
-  // two, skipping exactly one local hour. This instant is the gap opening
-  // only when the skipped hour is the window's \`start\`: the previous hour
-  // sits just below \`start\` and this hour just above it.
-  return prev === start - 1 && hour === start + 1;
-}
-
-/**
- * Whether \`now\` falls inside the configured off-hours window. The
- * window is half-open on hour boundaries — \`[start, end)\` — and wraps
- * past midnight when \`start > end\`. With no window configured every
- * tick runs, so callers treat \`undefined\` as "always in window."
- *
- * On a DST spring-forward day whose \`start\` hour is skipped, the window
- * would otherwise be closed for the whole day (the \`start\` hour never
- * occurs). The gap's replacement instant is admitted so autoclose still
- * runs — see {@link is_dst_gap_open}.
- *
- * @internal
- */
-export function in_autoclose_window(
-  window: AutocloseConfig["autocloseWindow"],
-  now: Date
-): boolean {
-  if (!window) return true;
-  const hour = hour_in_zone(now, window.timeZone);
-  return (
-    hour_in_range(hour, window.start, window.end) ||
-    is_dst_gap_open(now, window.timeZone, window.start)
-  );
-}
-
-/**
- * The next instant the off-hours window opens at or after \`now\`. The
- * synthesized autoclose reaction defers to this when a tick lands
- * outside the window — parking until the window actually opens instead
- * of blind-polling on a configured cadence (the pre-#1175 behavior,
- * where a poll interval longer than the window could oscillate around
- * it and miss it repeatedly).
- *
- * Walks forward hour by hour and asks \`Intl\` for the local hour at each
- * step, so DST transitions resolve exactly the way the runtime's zone
- * database says they do — a 23- or 25-hour day never desynchronizes the
- * walk. The window validates as non-empty at build, and every zone hits
- * each \`[0, 23]\` hour label within any 48-hour span, so the walk always
- * terminates; the bound is a defensive backstop, with "one day out" as
- * the fallback no real zone can reach.
- *
- * Minute/second offsets within the opening hour are preserved from
- * \`now\` shifted by whole hours — the contract is hour-granular, matching
- * the window's own \`[start, end)\` hour semantics.
- *
- * On a DST spring-forward day whose \`start\` hour is skipped, the \`start\`
- * hour never occurs, so the minute-preserving walk would never match and
- * the window would defer ~24 h. The walk also checks each hour-aligned
- * boundary for the gap opening (see {@link is_dst_gap_open}) and returns
- * that boundary instant — deferring ~1 h to the replacement instant
- * rather than a full day. The boundary is returned as-is (no minute
- * offset): the gap opening is a single transition instant, not a range.
- *
- * @internal
- */
-export function next_window_open(
-  window: NonNullable<AutocloseConfig["autocloseWindow"]>,
-  now: Date
-): Date {
-  const start_ms = now.getTime();
-  for (let h = 0; h <= 48; h++) {
-    const candidate = new Date(start_ms + h * 3_600_000);
-    if (hour_in_zone(candidate, window.timeZone) === window.start)
-      return candidate;
-    // The \`start\` hour may be unreachable on a spring-forward day; catch
-    // the gap boundary at the top of this candidate's hour.
-    const boundary = new Date(
-      candidate.getTime() - (candidate.getTime() % 3_600_000)
-    );
-    if (is_dst_gap_open(boundary, window.timeZone, window.start))
-      return boundary;
-  }
-  return new Date(start_ms + 86_400_000);
-}
-
 // === autoclose-policy.ts ===
 /**
  * @module autoclose-policy
@@ -5298,13 +5026,10 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import {
-  type AutocloseConfig,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-config.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
+import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { CloseSignal } from "./close-signal.js";
+import type { AutocloseConfig } from "./config.js";
 import { DeferSignal } from "./defer-signal.js";
 
 /**
@@ -5430,6 +5155,148 @@ export function synthesize_autoclose_reactions<
   }
 }
 
+// === autoclose-window.ts ===
+/**
+ * @module autoclose-window
+ * @category Internal
+ *
+ * Off-hours window math for autoclose — hour-in-zone, DST-gap handling, and
+ * "next time the window opens". The autoclose **config** (defaults, schema,
+ * resolver) lives in \`./config.js\`, the single home for builder-facing config
+ * bags; this module is the runtime window logic those knobs drive.
+ *
+ * @internal
+ */
+
+import type { AutocloseConfig } from "./config.js";
+
+/**
+ * The current hour \`[0, 23]\` in the given IANA time zone, DST-correct
+ * via \`Intl\`. Split out so the window check can be unit-tested without
+ * spinning a controller.
+ *
+ * @internal
+ */
+export function hour_in_zone(now: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  return Number(parts.find((p) => p.type === "hour")?.value);
+}
+
+/**
+ * True when a plain \`[start, end)\` hour comparison places \`hour\` inside
+ * the window. Half-open on hour boundaries and wrapping past midnight
+ * when \`start > end\`.
+ *
+ * @internal
+ */
+function hour_in_range(hour: number, start: number, end: number): boolean {
+  return start < end
+    ? hour >= start && hour < end
+    : hour >= start || hour < end;
+}
+
+/**
+ * True when \`now\` is the instant a DST spring-forward gap skipped over
+ * the window's \`start\` hour. On such a day the local \`start\` hour never
+ * occurs — the clock jumps from \`start - 1\` straight past \`start\` — so a
+ * plain hour comparison would report the window closed all day. The gap
+ * surfaces as a one-hour boundary where the local hour jumps from below
+ * \`start\` to above it; that boundary instant is the window's replacement
+ * opening. Detected by comparing the hour at \`now\` with the hour one
+ * hour earlier: a jump of more than one hour that steps over \`start\`.
+ *
+ * @internal
+ */
+function is_dst_gap_open(now: Date, timeZone: string, start: number): boolean {
+  const hour = hour_in_zone(now, timeZone);
+  if (hour <= start) return false;
+  const prev = hour_in_zone(new Date(now.getTime() - 3_600_000), timeZone);
+  // A normal step advances one local hour; a spring-forward gap advances
+  // two, skipping exactly one local hour. This instant is the gap opening
+  // only when the skipped hour is the window's \`start\`: the previous hour
+  // sits just below \`start\` and this hour just above it.
+  return prev === start - 1 && hour === start + 1;
+}
+
+/**
+ * Whether \`now\` falls inside the configured off-hours window. The
+ * window is half-open on hour boundaries — \`[start, end)\` — and wraps
+ * past midnight when \`start > end\`. With no window configured every
+ * tick runs, so callers treat \`undefined\` as "always in window."
+ *
+ * On a DST spring-forward day whose \`start\` hour is skipped, the window
+ * would otherwise be closed for the whole day (the \`start\` hour never
+ * occurs). The gap's replacement instant is admitted so autoclose still
+ * runs — see {@link is_dst_gap_open}.
+ *
+ * @internal
+ */
+export function in_autoclose_window(
+  window: AutocloseConfig["autocloseWindow"],
+  now: Date
+): boolean {
+  if (!window) return true;
+  const hour = hour_in_zone(now, window.timeZone);
+  return (
+    hour_in_range(hour, window.start, window.end) ||
+    is_dst_gap_open(now, window.timeZone, window.start)
+  );
+}
+
+/**
+ * The next instant the off-hours window opens at or after \`now\`. The
+ * synthesized autoclose reaction defers to this when a tick lands
+ * outside the window — parking until the window actually opens instead
+ * of blind-polling on a configured cadence (the pre-#1175 behavior,
+ * where a poll interval longer than the window could oscillate around
+ * it and miss it repeatedly).
+ *
+ * Walks forward hour by hour and asks \`Intl\` for the local hour at each
+ * step, so DST transitions resolve exactly the way the runtime's zone
+ * database says they do — a 23- or 25-hour day never desynchronizes the
+ * walk. The window validates as non-empty at build, and every zone hits
+ * each \`[0, 23]\` hour label within any 48-hour span, so the walk always
+ * terminates; the bound is a defensive backstop, with "one day out" as
+ * the fallback no real zone can reach.
+ *
+ * Minute/second offsets within the opening hour are preserved from
+ * \`now\` shifted by whole hours — the contract is hour-granular, matching
+ * the window's own \`[start, end)\` hour semantics.
+ *
+ * On a DST spring-forward day whose \`start\` hour is skipped, the \`start\`
+ * hour never occurs, so the minute-preserving walk would never match and
+ * the window would defer ~24 h. The walk also checks each hour-aligned
+ * boundary for the gap opening (see {@link is_dst_gap_open}) and returns
+ * that boundary instant — deferring ~1 h to the replacement instant
+ * rather than a full day. The boundary is returned as-is (no minute
+ * offset): the gap opening is a single transition instant, not a range.
+ *
+ * @internal
+ */
+export function next_window_open(
+  window: NonNullable<AutocloseConfig["autocloseWindow"]>,
+  now: Date
+): Date {
+  const start_ms = now.getTime();
+  for (let h = 0; h <= 48; h++) {
+    const candidate = new Date(start_ms + h * 3_600_000);
+    if (hour_in_zone(candidate, window.timeZone) === window.start)
+      return candidate;
+    // The \`start\` hour may be unreachable on a spring-forward day; catch
+    // the gap boundary at the top of this candidate's hour.
+    const boundary = new Date(
+      candidate.getTime() - (candidate.getTime() % 3_600_000)
+    );
+    if (is_dst_gap_open(boundary, window.timeZone, window.start))
+      return boundary;
+  }
+  return new Date(start_ms + 86_400_000);
+}
+
 // === backoff.ts ===
 /**
  * @module backoff
@@ -5441,44 +5308,11 @@ export function synthesize_autoclose_reactions<
  * @internal
  */
 
-import { z } from "zod";
 import type { BackoffOptions } from "../types/action.js";
 
-/**
- * Config-validation schema for {@link BackoffOptions} (ACT-1269). Follows the
- * config-schema standard: internal const, never re-exported. Rejects an
- * off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a non-finite/
- * non-positive \`maxMs\` at the declaration site — so a typo or a \`NaN\` from
- * JSON/env config surfaces as a \`ZodError\` at \`act().build()\` instead of
- * silently producing a \`NaN\` delay that disables pacing on the first retry.
- *
- * No \`maxMs >= baseMs\` constraint: \`maxMs\` is a cap, and \`exponential\`
- * clamping to a sub-\`baseMs\` cap is documented behavior, not an error.
- * @internal
- */
-const BackoffOptionsSchema = z.object({
-  // z.number() rejects NaN/±Infinity by default in Zod 4, so \`.min(0)\` /
-  // \`.gt(0)\` also close the non-finite gap.
-  strategy: z.enum(["fixed", "linear", "exponential"]),
-  baseMs: z.number().min(0),
-  maxMs: z.number().gt(0).optional(),
-  jitter: z.boolean().optional(),
-});
-
-/**
- * Validate a backoff bag at its declaration site (reaction \`.do(...)\` /
- * action \`.on(...)\`). Passes \`undefined\` through untouched; otherwise parses
- * and returns the validated config, throwing \`ZodError\` on a bad value so
- * misconfiguration surfaces at build, not on the first cycle tick.
- * @internal
- */
-export function resolveBackoffConfig(
-  options: BackoffOptions | undefined
-): BackoffOptions | undefined {
-  return options === undefined
-    ? undefined
-    : BackoffOptionsSchema.parse(options);
-}
+// The \`BackoffOptions\` config schema + resolver live in \`./config.ts\` (the
+// single home for every builder-facing config bag). This module keeps only
+// the runtime delay math, which stays hot-path and dependency-free.
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on
@@ -5815,7 +5649,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
-import { resolveBackoffConfig } from "./backoff.js";
+import { resolveReactionConfig } from "./config.js";
 import {
   assert_defer_when,
   type DeferSchedule,
@@ -5875,13 +5709,14 @@ export function reaction_on<
     const reaction: Reaction<TEvents, TKey> = {
       handler: schedule ? make_deferred(handler, schedule) : handler,
       resolver: _this_,
-      options: {
+      // #1269: validate the whole bag at the declaration site so a bad
+      // \`maxRetries\`/\`backoff\`/\`blockOnError\` throws ZodError at build,
+      // not a NaN gate on the first retry.
+      options: resolveReactionConfig({
         blockOnError: options?.blockOnError ?? true,
         maxRetries: options?.maxRetries ?? 3,
-        // #1269: validate at the declaration site so a bad strategy/baseMs
-        // throws ZodError at build, not a NaN delay on the first retry.
-        backoff: resolveBackoffConfig(options?.backoff),
-      },
+        backoff: options?.backoff,
+      }),
     };
     // Register once with the default _this_ resolver. If \`.to()\` is chained
     // next, it patches the same reaction's resolver in place — no second
@@ -5930,43 +5765,14 @@ export function reaction_on<
  * machine is deterministic under test.
  */
 
-import { z } from "zod";
+import type { CircuitBreakerConfig } from "./config.js";
 
 /** Circuit breaker state. */
 export type CircuitState = "closed" | "open" | "half-open";
 
-/** Resolved circuit-breaker configuration. */
-export type CircuitBreakerConfig = {
-  /** Consecutive store failures that trip the breaker open. */
-  readonly failureThreshold: number;
-  /** Milliseconds the breaker stays open before allowing a half-open trial. */
-  readonly cooldownMs: number;
-};
-
-export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
-export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
-
-const CircuitBreakerOptionsSchema = z.object({
-  failureThreshold: z
-    .number()
-    .int()
-    .min(1)
-    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
-  cooldownMs: z
-    .number()
-    .int()
-    .min(100)
-    .max(3_600_000)
-    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
-});
-
-/** Public, all-optional circuit-breaker options bag for \`act().build()\`. */
-export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
-
-/** Parse + apply defaults. Throws \`ZodError\` on out-of-range values. */
-export const resolveCircuitBreakerConfig = (
-  options?: CircuitBreakerOptions
-): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+// The circuit-breaker config schema, defaults, and resolver live in
+// \`./config.js\` (the single home for builder-facing config bags). This
+// module keeps only the state machine that consumes the resolved config.
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers
@@ -6918,6 +6724,351 @@ export const config = (): Config => {
   }
   return _validated;
 };
+
+// === config.ts ===
+/**
+ * @module internal/config
+ * @category Internal
+ *
+ * **The single home for every builder-facing config bag in act-core.** Any
+ * options object an operator hands to \`act().build()\`, a builder method
+ * (\`.on(...)\`, \`.do(...)\`, \`.withLane(...)\`), or a runtime cycle
+ * (\`drain(...)\` / \`settle(...)\`) is validated here with Zod — never with a
+ * hand-written \`if (x < min) throw\` ladder — so misconfiguration surfaces as
+ * a \`ZodError\` at the entry point, not as \`NaN\` arithmetic on the first cycle
+ * tick.
+ *
+ * Layout: one section per bag, each with its \`DEFAULT_*\` constants, an
+ * internal \`<Type>OptionsSchema\`, an inferred \`<Type>Config\`, and a
+ * \`resolve<Type>Config(options): <Type>Config\`. The schema is never
+ * re-exported — the public surface is the inferred type + resolver.
+ *
+ * Index of bags owned here:
+ * - **Backoff** — retry pacing (\`BackoffOptions\`), nested in reaction/action.
+ * - **Reaction** — \`.do(handler, options)\` (\`blockOnError\` / \`maxRetries\` / \`backoff\`).
+ * - **Action** — \`.on(entry, options)\` (\`maxRetries\` / \`backoff\`).
+ * - **Lane** — \`.withLane({...})\` (\`leaseMillis\` / \`streamLimit\` / \`cycleMs\`).
+ * - **Drain / Settle** — \`drain(...)\` / \`settle(...)\` runtime knobs.
+ * - **Autoclose** — the \`.autocloses\` / \`ActOptions\` autoclose knobs (+ window).
+ * - **CircuitBreaker** — the store-op breaker on \`ActOptions\`.
+ * - **Fold** — \`projection(...).of(...)\` batch-fold knobs.
+ *
+ * Sibling env/package config (\`config()\`, \`NODE_ENV\`, log level) lives in the
+ * public \`../config.ts\` — a different concern (process environment, not
+ * builder input). The \`@rotorsoft/act-http\` transport bags (\`SseOptions\`,
+ * \`OpenAPIOptions\`) live in that package; core cannot own another package's
+ * surface.
+ *
+ * Validation philosophy: reject only what is genuinely broken — \`NaN\`,
+ * \`±Infinity\` (Zod 4's \`z.number()\` rejects both by default), and negatives
+ * where nonsensical. A value that works today is never newly rejected. The
+ * real strictness lands on \`maxRetries\` and \`backoff\`, the knobs whose bad
+ * values silently corrupt the poison-quarantine and retry-loop-exit gates.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { ActOptions } from "../act.js";
+import type {
+  ActionOptions,
+  BackoffOptions,
+  DrainOptions,
+  FoldOptions,
+  LaneConfig,
+  ReactionOptions,
+  SettleOptions,
+} from "../types/index.js";
+
+// ---------------------------------------------------------------------------
+// Backoff — retry pacing. Nested inside the reaction/action bags below; also
+// resolvable on its own (\`resolveBackoffConfig\`) for direct callers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Rejects an off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a
+ * non-finite/non-positive \`maxMs\` (ACT-1269). Zod 4's \`z.number()\` rejects
+ * \`NaN\`/\`±Infinity\` by default, so \`.min(0)\` / \`.gt(0)\` also close the
+ * non-finite gap. No \`maxMs >= baseMs\` constraint — a sub-\`baseMs\` cap on
+ * \`exponential\` is documented behavior, not an error.
+ * @internal
+ */
+const BackoffOptionsSchema = z.object({
+  strategy: z.enum(["fixed", "linear", "exponential"]),
+  baseMs: z.number().min(0),
+  maxMs: z.number().gt(0).optional(),
+  jitter: z.boolean().optional(),
+});
+
+/** Validate a backoff bag, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveBackoffConfig(
+  options: BackoffOptions | undefined
+): BackoffOptions | undefined {
+  return options === undefined
+    ? undefined
+    : BackoffOptionsSchema.parse(options);
+}
+
+// ---------------------------------------------------------------------------
+// Reaction — \`.do(handler, options)\`. \`maxRetries\` gates the poison-quarantine
+// decision (\`retry >= maxRetries\`), so a \`NaN\` here silently disables
+// \`blockOnError\` (a poison message retries forever). Validate the whole bag.
+// ---------------------------------------------------------------------------
+
+const ReactionOptionsSchema = z.object({
+  blockOnError: z.boolean(),
+  maxRetries: z.number().int().min(0),
+  backoff: BackoffOptionsSchema.optional(),
+});
+
+/** Resolved reaction options. */
+export type ReactionConfig = z.infer<typeof ReactionOptionsSchema>;
+
+/** Validate a fully-defaulted reaction options bag. Throws \`ZodError\`. */
+export function resolveReactionConfig(
+  options: ReactionOptions
+): ReactionConfig {
+  return ReactionOptionsSchema.parse(options);
+}
+
+// ---------------------------------------------------------------------------
+// Action — \`.on(entry, options)\`. \`maxRetries\` gates the command retry loop's
+// exit (\`attempt >= maxRetries\`), so a \`NaN\` here can spin the loop forever on
+// a contended stream. All fields optional (the argument itself is optional).
+// ---------------------------------------------------------------------------
+
+const ActionOptionsSchema = z.object({
+  maxRetries: z.number().int().min(0).optional(),
+  backoff: BackoffOptionsSchema.optional(),
+});
+
+/** Resolved action options. */
+export type ActionConfig = z.infer<typeof ActionOptionsSchema>;
+
+/** Validate an action options bag. Throws \`ZodError\`. */
+export function resolveActionConfig(options: ActionOptions): ActionConfig {
+  return ActionOptionsSchema.parse(options);
+}
+
+// ---------------------------------------------------------------------------
+// Lane — \`.withLane({...})\`. Per-lane overrides of the drain budget. Time
+// knobs (\`leaseMillis\` / \`cycleMs\`) accept any non-negative ms; \`streamLimit\`
+// is an integer count. Reject NaN/Infinity/negative; allow 0 (as today).
+// ---------------------------------------------------------------------------
+
+const LaneConfigSchema = z.object({
+  name: z.string().min(1),
+  leaseMillis: z.number().min(0).optional(),
+  streamLimit: z.number().int().min(0).optional(),
+  cycleMs: z.number().min(0).optional(),
+});
+
+/** Validate a lane config. Throws \`ZodError\`. Returns the input shape. */
+export function resolveLaneConfig<TName extends string>(
+  options: LaneConfig<TName>
+): LaneConfig<TName> {
+  LaneConfigSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Drain / Settle — runtime knobs for \`drain(...)\` / \`settle(...)\`. Parsed once
+// per call (cheap). Reject NaN/Infinity/negative; allow 0. \`correlate\` is a
+// pass-through query filter (validated by the store), so it is not reshaped.
+// ---------------------------------------------------------------------------
+
+const DrainOptionsSchema = z.object({
+  streamLimit: z.number().int().min(0).optional(),
+  eventLimit: z.number().int().min(0).optional(),
+  leaseMillis: z.number().min(0).optional(),
+});
+
+/** Validate drain options, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveDrainConfig(
+  options: DrainOptions | undefined
+): DrainOptions | undefined {
+  if (options === undefined) return undefined;
+  DrainOptionsSchema.parse(options);
+  return options;
+}
+
+const SettleOptionsSchema = DrainOptionsSchema.extend({
+  debounceMs: z.number().min(0).optional(),
+  // \`maxPasses\` defaults to Infinity (no cap) when omitted; a present value is
+  // a non-negative integer — \`0\` is legal and means "run no passes".
+  maxPasses: z.number().int().min(0).optional(),
+}).loose();
+
+/** Validate settle options, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveSettleConfig(
+  options: SettleOptions | undefined
+): SettleOptions | undefined {
+  if (options === undefined) return undefined;
+  SettleOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Act — the top-level \`act().build(options)\` scalar knobs. The nested bags
+// (\`autocloseWindow\`, \`circuitBreaker\`) are resolved by their own resolvers
+// below; the \`scoped\`/\`correlator\` fields are objects/functions passed
+// through untouched (\`.loose()\`), so only the scalar knobs are checked here.
+// ---------------------------------------------------------------------------
+
+const ActOptionsSchema = z
+  .object({
+    maxSubscribedStreams: z.number().int().min(1).optional(),
+    settleDebounceMs: z.number().int().min(0).optional(),
+  })
+  .loose();
+
+/** Validate the scalar \`ActOptions\` knobs at build. Throws \`ZodError\`. */
+export function resolveActConfig(
+  options: ActOptions | undefined
+): ActOptions | undefined {
+  if (options === undefined) return undefined;
+  ActOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Autoclose — the autoclose knobs on \`ActOptions\` (+ the off-hours window).
+// The window *logic* (DST, hour math) stays in \`autoclose-window.ts\`; only
+// the schema, defaults, and resolver live here.
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated The cadence knob is derived from \`autocloseWindow\` now (#1175);
+ * nothing consumes it. Kept for compat; removed in the next major.
+ */
+export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
+/** @deprecated Dead since #1090 removed the autoclose sweep. */
+export const DEFAULT_CLOSE_BATCH_SIZE = 64;
+/** @deprecated Dead since #1090 removed the autoclose sweep. */
+export const DEFAULT_CLOSE_YIELD_MS = 0;
+/** Default IANA zone for \`autocloseWindow\` when the operator omits one. */
+export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+
+/** True when \`tz\` is a zone the runtime's \`Intl\` accepts. @internal */
+function is_valid_time_zone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const AutocloseWindowSchema = z
+  .object({
+    start: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
+    end: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
+    timeZone: z
+      .string()
+      .refine(is_valid_time_zone, {
+        message: "autocloseWindow.timeZone must be a valid IANA time zone",
+      })
+      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
+  })
+  .refine((w) => w.start !== w.end, {
+    message:
+      "autocloseWindow.start and end must differ — an empty window disables autoclose",
+  });
+
+const AutocloseOptionsSchema = z.object({
+  autocloseCycleMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(1440)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
+  closeBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(1024)
+    .default(DEFAULT_CLOSE_BATCH_SIZE),
+  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
+  closeOnError: z.boolean().default(false),
+  autocloseWindow: AutocloseWindowSchema.optional(),
+});
+
+/** Resolved autoclose configuration after validation + default expansion. */
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
+
+/** Validate + default the autoclose knobs on \`ActOptions\`. Throws \`ZodError\`. */
+export function resolveAutocloseConfig(
+  options: ActOptions | undefined
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
+    autocloseCycleMinutes: options?.autocloseCycleMinutes,
+    closeBatchSize: options?.closeBatchSize,
+    closeYieldMs: options?.closeYieldMs,
+    closeOnError: options?.closeOnError,
+    autocloseWindow: options?.autocloseWindow,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// CircuitBreaker — the store-op breaker on \`ActOptions\`. The \`CircuitBreaker\`
+// state machine stays in \`circuit-breaker.ts\` and imports the resolved type.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
+
+const CircuitBreakerOptionsSchema = z.object({
+  failureThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
+  cooldownMs: z
+    .number()
+    .int()
+    .min(100)
+    .max(3_600_000)
+    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
+});
+
+/** Public, all-optional circuit-breaker options bag for \`act().build()\`. */
+export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
+
+/** Resolved circuit-breaker configuration. */
+export type CircuitBreakerConfig = z.infer<typeof CircuitBreakerOptionsSchema>;
+
+/** Parse + apply defaults. Throws \`ZodError\` on out-of-range values. */
+export const resolveCircuitBreakerConfig = (
+  options?: CircuitBreakerOptions
+): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+
+// ---------------------------------------------------------------------------
+// Fold — \`projection(name).of(state)\` batch-fold knobs.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+export const DEFAULT_MAX_CACHED_STATES = 10_000;
+
+const FoldOptionsSchema = z.object({
+  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
+  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+});
+
+/** Resolved fold configuration. */
+export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
+
+/** Validate + default the fold knobs. Throws \`ZodError\`. */
+export function resolveFoldConfig(options: FoldOptions): FoldConfig {
+  return FoldOptionsSchema.parse(options);
+}
 
 // === console-logger.ts ===
 /**
@@ -11524,16 +11675,6 @@ export * from "./utils.js";
 
 export { type AuditDeps, audit } from "./audit.js";
 export {
-  type AutocloseConfig,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-  resolveAutocloseConfig,
-} from "./autoclose-config.js";
-export {
   type AutoclosePolicy,
   compile_autoclose_policy,
   days_after,
@@ -11545,18 +11686,42 @@ export {
   AUTOCLOSE_TARGET_PREFIX,
   synthesize_autoclose_reactions,
 } from "./autoclose-reaction.js";
-export { resolveBackoffConfig } from "./backoff.js";
+export {
+  hour_in_zone,
+  in_autoclose_window,
+  next_window_open,
+} from "./autoclose-window.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { reaction_on, register_lane } from "./builder-utils.js";
-export {
-  CircuitBreaker,
-  type CircuitBreakerOptions,
-  type CircuitState,
-  resolveCircuitBreakerConfig,
-} from "./circuit-breaker.js";
+export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
+// Every builder-facing config bag (schemas + resolvers + defaults) lives in
+// one place — see ./config.js.
+export {
+  type ActionConfig,
+  type AutocloseConfig,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_MAX_CACHED_STATES,
+  type FoldConfig,
+  type ReactionConfig,
+  resolveActConfig,
+  resolveActionConfig,
+  resolveAutocloseConfig,
+  resolveBackoffConfig,
+  resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveFoldConfig,
+  resolveLaneConfig,
+  resolveReactionConfig,
+  resolveSettleConfig,
+} from "./config.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
@@ -11578,7 +11743,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export * from "./projection-fold.js";
+export { make_fold_handler } from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -14141,30 +14306,19 @@ export function projection<TEvents extends Schemas = {}>(
  * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { z } from "zod";
 import type {
   BatchHandler,
   CacheEntry,
-  FoldOptions,
   Schema,
   Schemas,
   State,
 } from "../types/index.js";
+import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
+// The fold config schema, defaults, and resolver live in \`./config.js\` (the
+// single home for builder-facing config bags). This module keeps the fold
+// engine that consumes the resolved config.
 
 /**
  * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
@@ -15921,7 +16075,7 @@ import {
   compile_autoclose_policy,
   policy_keep_days,
   policy_min_after_days,
-  resolveBackoffConfig,
+  resolveActionConfig,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -16702,9 +16856,9 @@ function action_builder<
       type MergedActions = TActions & { [P in TKey]: TNewActions };
       (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
       if (options) {
-        // #1269: validate the action's backoff at declaration so a bad
-        // strategy/baseMs throws ZodError at build, not a NaN retry delay.
-        resolveBackoffConfig(options.backoff);
+        // #1269: validate the whole action bag at declaration so a bad
+        // \`maxRetries\`/\`backoff\` throws ZodError at build, not a NaN gate.
+        resolveActionConfig(options);
         internal.options ??= {};
         (internal.options as Record<string, ActionOptions>)[action] = options;
       }
@@ -17397,6 +17551,8 @@ import {
   type HandleBatch,
   type PatchFn,
   resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveSettleConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -17489,8 +17645,8 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 // Re-export the autoclose config surface so operators can
 // \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"\`. The implementation lives in
-// \`internal/autoclose-config.ts\` to keep this orchestrator file
-// focused on the \`Act\` class.
+// \`internal/config.ts\` (the single home for builder-facing config bags)
+// to keep this orchestrator file focused on the \`Act\` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -18712,6 +18868,9 @@ export class Act<
    * @see {@link start_correlations} for automatic correlation
    */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    // Validate the runtime knobs before anything runs (a bad leaseMillis /
+    // streamLimit / eventLimit throws ZodError here, not on the first cycle).
+    resolveDrainConfig(options);
     // #803: writer-only instances skip the local reaction pipeline.
     // Return an empty Drain result so call sites that aggregate (e.g.,
     // \`settle\` listeners) keep working without special-casing.
@@ -19331,6 +19490,9 @@ export class Act<
    * @see {@link correlate} for manual correlation
    */
   settle(options: SettleOptions = {}): void {
+    // Validate the runtime knobs before anything runs (a bad debounceMs /
+    // leaseMillis / maxPasses throws ZodError here, not on the first pass).
+    resolveSettleConfig(options);
     // #803: writer-only instances skip settle entirely. The bootstrap
     // pattern \`app.on("committed", () => app.settle())\` keeps working —
     // it just runs zero work on writers.
@@ -21364,294 +21526,6 @@ export type AuditFinding =
       reason: "future-created" | "out-of-order";
     };
 
-// === autoclose-config.ts ===
-/**
- * @module autoclose-config
- * @category Internal
- *
- * Defaults, Zod schema, and resolver for the autoclose knobs on
- * {@link ActOptions} (#837 / epic #802). Split out of \`act.ts\` so the
- * orchestrator file stays focused on the \`Act\` class and the
- * autoclose surface lives with the cycle + controller that consume
- * it. The validation pattern matches the rest of the framework —
- * Zod schema with \`.min().max().default(...)\` per field — so the
- * upcoming policy-factory subs (#838 retention, #839 terminal,
- * #840 cardinality) can \`.extend(...)\` it for their own
- * per-policy options without reinventing range checks.
- *
- * @internal
- */
-
-import { z } from "zod";
-import type { ActOptions } from "../act.js";
-
-/**
- * Default {@link ActOptions.autocloseCycleMinutes}: 720 (12 h).
- *
- * @deprecated The knob it defaults is deprecated (#1175) — the
- * off-window re-check is derived from \`autocloseWindow\` via
- * {@link next_window_open}, so nothing consumes the cadence. Kept so
- * existing imports and the compat validation keep working; removed in
- * the next major.
- */
-export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-
-/**
- * Default {@link ActOptions.closeBatchSize}: 64.
- *
- * @deprecated Dead since #1090 removed the autoclose sweep — nothing
- * pages the store in batches. Kept for compat; removed in the next
- * major.
- */
-export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-
-/**
- * Default {@link ActOptions.closeYieldMs}: 0.
- *
- * @deprecated Dead since #1090 removed the autoclose sweep — there is
- * no truncate loop to yield between. Kept for compat; removed in the
- * next major.
- */
-export const DEFAULT_CLOSE_YIELD_MS = 0;
-
-/**
- * Default time zone for {@link ActOptions.autocloseWindow} when the
- * operator declares a window without one. UTC keeps the contract
- * timezone-explicit; operators who think in local off-hours pass an
- * IANA name.
- */
-export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
-
-/**
- * True when \`tz\` is a time zone the runtime's \`Intl\` accepts. Used to
- * reject typos in {@link ActOptions.autocloseWindow} at build time.
- *
- * @internal
- */
-function is_valid_time_zone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Zod schema for the optional off-hours window. Hours are \`[0, 23]\`
- * integers; \`start === end\` is rejected because the half-open
- * \`[start, end)\` window it would describe is empty (and would silently
- * disable autoclose). \`start > end\` is allowed and means an overnight
- * window (e.g. \`{ start: 22, end: 6 }\` is 22:00 through 06:00).
- *
- * @internal
- */
-const AutocloseWindowSchema = z
-  .object({
-    start: z
-      .number()
-      .int()
-      .min(0)
-      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
-    end: z
-      .number()
-      .int()
-      .min(0)
-      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
-    timeZone: z
-      .string()
-      .refine(is_valid_time_zone, {
-        message: "autocloseWindow.timeZone must be a valid IANA time zone",
-      })
-      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
-  })
-  .refine((w) => w.start !== w.end, {
-    message:
-      "autocloseWindow.start and end must differ — an empty window disables autoclose",
-  });
-
-/**
- * Zod schema for the autoclose knobs on {@link ActOptions}. Same
- * declarative-validation pattern the framework uses elsewhere
- * (\`libs/act/src/config.ts\`, every event/action schema, every
- * reaction-option shape). Defaults, ranges, and integer constraints
- * live in one place — no parallel \`DEFAULT_*\` + \`*_MIN\` / \`*_MAX\`
- * declarations to keep in sync. Out-of-range values throw \`ZodError\`
- * at \`act().build()\` so misconfiguration surfaces at startup, not
- * on the first cycle tick.
- *
- * @internal
- */
-const AutocloseOptionsSchema = z.object({
-  autocloseCycleMinutes: z
-    .number()
-    .int()
-    .min(1)
-    .max(1440)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
-  closeBatchSize: z
-    .number()
-    .int()
-    .min(1)
-    .max(1024)
-    .default(DEFAULT_CLOSE_BATCH_SIZE),
-  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
-  closeOnError: z.boolean().default(false),
-  autocloseWindow: AutocloseWindowSchema.optional(),
-});
-
-/**
- * Resolved autoclose configuration after validation and default
- * expansion. Reachable through the public root (\`@rotorsoft/act\`) so
- * fields follow the public-camelCase convention and mirror the
- * \`ActOptions\` knob names directly — no per-resolver renaming layer.
- */
-export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
-
-/**
- * Validate and apply defaults for the autoclose knobs on
- * {@link ActOptions}. Called from \`act().build()\`. Out-of-range
- * values throw \`ZodError\` at startup, not on the first cycle tick.
- */
-export function resolveAutocloseConfig(
-  options: ActOptions | undefined
-): AutocloseConfig {
-  return AutocloseOptionsSchema.parse({
-    autocloseCycleMinutes: options?.autocloseCycleMinutes,
-    closeBatchSize: options?.closeBatchSize,
-    closeYieldMs: options?.closeYieldMs,
-    closeOnError: options?.closeOnError,
-    autocloseWindow: options?.autocloseWindow,
-  });
-}
-
-/**
- * The current hour \`[0, 23]\` in the given IANA time zone, DST-correct
- * via \`Intl\`. Split out so the window check can be unit-tested without
- * spinning a controller.
- *
- * @internal
- */
-export function hour_in_zone(now: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  return Number(parts.find((p) => p.type === "hour")?.value);
-}
-
-/**
- * True when a plain \`[start, end)\` hour comparison places \`hour\` inside
- * the window. Half-open on hour boundaries and wrapping past midnight
- * when \`start > end\`.
- *
- * @internal
- */
-function hour_in_range(hour: number, start: number, end: number): boolean {
-  return start < end
-    ? hour >= start && hour < end
-    : hour >= start || hour < end;
-}
-
-/**
- * True when \`now\` is the instant a DST spring-forward gap skipped over
- * the window's \`start\` hour. On such a day the local \`start\` hour never
- * occurs — the clock jumps from \`start - 1\` straight past \`start\` — so a
- * plain hour comparison would report the window closed all day. The gap
- * surfaces as a one-hour boundary where the local hour jumps from below
- * \`start\` to above it; that boundary instant is the window's replacement
- * opening. Detected by comparing the hour at \`now\` with the hour one
- * hour earlier: a jump of more than one hour that steps over \`start\`.
- *
- * @internal
- */
-function is_dst_gap_open(now: Date, timeZone: string, start: number): boolean {
-  const hour = hour_in_zone(now, timeZone);
-  if (hour <= start) return false;
-  const prev = hour_in_zone(new Date(now.getTime() - 3_600_000), timeZone);
-  // A normal step advances one local hour; a spring-forward gap advances
-  // two, skipping exactly one local hour. This instant is the gap opening
-  // only when the skipped hour is the window's \`start\`: the previous hour
-  // sits just below \`start\` and this hour just above it.
-  return prev === start - 1 && hour === start + 1;
-}
-
-/**
- * Whether \`now\` falls inside the configured off-hours window. The
- * window is half-open on hour boundaries — \`[start, end)\` — and wraps
- * past midnight when \`start > end\`. With no window configured every
- * tick runs, so callers treat \`undefined\` as "always in window."
- *
- * On a DST spring-forward day whose \`start\` hour is skipped, the window
- * would otherwise be closed for the whole day (the \`start\` hour never
- * occurs). The gap's replacement instant is admitted so autoclose still
- * runs — see {@link is_dst_gap_open}.
- *
- * @internal
- */
-export function in_autoclose_window(
-  window: AutocloseConfig["autocloseWindow"],
-  now: Date
-): boolean {
-  if (!window) return true;
-  const hour = hour_in_zone(now, window.timeZone);
-  return (
-    hour_in_range(hour, window.start, window.end) ||
-    is_dst_gap_open(now, window.timeZone, window.start)
-  );
-}
-
-/**
- * The next instant the off-hours window opens at or after \`now\`. The
- * synthesized autoclose reaction defers to this when a tick lands
- * outside the window — parking until the window actually opens instead
- * of blind-polling on a configured cadence (the pre-#1175 behavior,
- * where a poll interval longer than the window could oscillate around
- * it and miss it repeatedly).
- *
- * Walks forward hour by hour and asks \`Intl\` for the local hour at each
- * step, so DST transitions resolve exactly the way the runtime's zone
- * database says they do — a 23- or 25-hour day never desynchronizes the
- * walk. The window validates as non-empty at build, and every zone hits
- * each \`[0, 23]\` hour label within any 48-hour span, so the walk always
- * terminates; the bound is a defensive backstop, with "one day out" as
- * the fallback no real zone can reach.
- *
- * Minute/second offsets within the opening hour are preserved from
- * \`now\` shifted by whole hours — the contract is hour-granular, matching
- * the window's own \`[start, end)\` hour semantics.
- *
- * On a DST spring-forward day whose \`start\` hour is skipped, the \`start\`
- * hour never occurs, so the minute-preserving walk would never match and
- * the window would defer ~24 h. The walk also checks each hour-aligned
- * boundary for the gap opening (see {@link is_dst_gap_open}) and returns
- * that boundary instant — deferring ~1 h to the replacement instant
- * rather than a full day. The boundary is returned as-is (no minute
- * offset): the gap opening is a single transition instant, not a range.
- *
- * @internal
- */
-export function next_window_open(
-  window: NonNullable<AutocloseConfig["autocloseWindow"]>,
-  now: Date
-): Date {
-  const start_ms = now.getTime();
-  for (let h = 0; h <= 48; h++) {
-    const candidate = new Date(start_ms + h * 3_600_000);
-    if (hour_in_zone(candidate, window.timeZone) === window.start)
-      return candidate;
-    // The \`start\` hour may be unreachable on a spring-forward day; catch
-    // the gap boundary at the top of this candidate's hour.
-    const boundary = new Date(
-      candidate.getTime() - (candidate.getTime() % 3_600_000)
-    );
-    if (is_dst_gap_open(boundary, window.timeZone, window.start))
-      return boundary;
-  }
-  return new Date(start_ms + 86_400_000);
-}
-
 // === autoclose-policy.ts ===
 /**
  * @module autoclose-policy
@@ -22018,13 +21892,10 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import {
-  type AutocloseConfig,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-config.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
+import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { CloseSignal } from "./close-signal.js";
+import type { AutocloseConfig } from "./config.js";
 import { DeferSignal } from "./defer-signal.js";
 
 /**
@@ -22150,6 +22021,148 @@ export function synthesize_autoclose_reactions<
   }
 }
 
+// === autoclose-window.ts ===
+/**
+ * @module autoclose-window
+ * @category Internal
+ *
+ * Off-hours window math for autoclose — hour-in-zone, DST-gap handling, and
+ * "next time the window opens". The autoclose **config** (defaults, schema,
+ * resolver) lives in \`./config.js\`, the single home for builder-facing config
+ * bags; this module is the runtime window logic those knobs drive.
+ *
+ * @internal
+ */
+
+import type { AutocloseConfig } from "./config.js";
+
+/**
+ * The current hour \`[0, 23]\` in the given IANA time zone, DST-correct
+ * via \`Intl\`. Split out so the window check can be unit-tested without
+ * spinning a controller.
+ *
+ * @internal
+ */
+export function hour_in_zone(now: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  return Number(parts.find((p) => p.type === "hour")?.value);
+}
+
+/**
+ * True when a plain \`[start, end)\` hour comparison places \`hour\` inside
+ * the window. Half-open on hour boundaries and wrapping past midnight
+ * when \`start > end\`.
+ *
+ * @internal
+ */
+function hour_in_range(hour: number, start: number, end: number): boolean {
+  return start < end
+    ? hour >= start && hour < end
+    : hour >= start || hour < end;
+}
+
+/**
+ * True when \`now\` is the instant a DST spring-forward gap skipped over
+ * the window's \`start\` hour. On such a day the local \`start\` hour never
+ * occurs — the clock jumps from \`start - 1\` straight past \`start\` — so a
+ * plain hour comparison would report the window closed all day. The gap
+ * surfaces as a one-hour boundary where the local hour jumps from below
+ * \`start\` to above it; that boundary instant is the window's replacement
+ * opening. Detected by comparing the hour at \`now\` with the hour one
+ * hour earlier: a jump of more than one hour that steps over \`start\`.
+ *
+ * @internal
+ */
+function is_dst_gap_open(now: Date, timeZone: string, start: number): boolean {
+  const hour = hour_in_zone(now, timeZone);
+  if (hour <= start) return false;
+  const prev = hour_in_zone(new Date(now.getTime() - 3_600_000), timeZone);
+  // A normal step advances one local hour; a spring-forward gap advances
+  // two, skipping exactly one local hour. This instant is the gap opening
+  // only when the skipped hour is the window's \`start\`: the previous hour
+  // sits just below \`start\` and this hour just above it.
+  return prev === start - 1 && hour === start + 1;
+}
+
+/**
+ * Whether \`now\` falls inside the configured off-hours window. The
+ * window is half-open on hour boundaries — \`[start, end)\` — and wraps
+ * past midnight when \`start > end\`. With no window configured every
+ * tick runs, so callers treat \`undefined\` as "always in window."
+ *
+ * On a DST spring-forward day whose \`start\` hour is skipped, the window
+ * would otherwise be closed for the whole day (the \`start\` hour never
+ * occurs). The gap's replacement instant is admitted so autoclose still
+ * runs — see {@link is_dst_gap_open}.
+ *
+ * @internal
+ */
+export function in_autoclose_window(
+  window: AutocloseConfig["autocloseWindow"],
+  now: Date
+): boolean {
+  if (!window) return true;
+  const hour = hour_in_zone(now, window.timeZone);
+  return (
+    hour_in_range(hour, window.start, window.end) ||
+    is_dst_gap_open(now, window.timeZone, window.start)
+  );
+}
+
+/**
+ * The next instant the off-hours window opens at or after \`now\`. The
+ * synthesized autoclose reaction defers to this when a tick lands
+ * outside the window — parking until the window actually opens instead
+ * of blind-polling on a configured cadence (the pre-#1175 behavior,
+ * where a poll interval longer than the window could oscillate around
+ * it and miss it repeatedly).
+ *
+ * Walks forward hour by hour and asks \`Intl\` for the local hour at each
+ * step, so DST transitions resolve exactly the way the runtime's zone
+ * database says they do — a 23- or 25-hour day never desynchronizes the
+ * walk. The window validates as non-empty at build, and every zone hits
+ * each \`[0, 23]\` hour label within any 48-hour span, so the walk always
+ * terminates; the bound is a defensive backstop, with "one day out" as
+ * the fallback no real zone can reach.
+ *
+ * Minute/second offsets within the opening hour are preserved from
+ * \`now\` shifted by whole hours — the contract is hour-granular, matching
+ * the window's own \`[start, end)\` hour semantics.
+ *
+ * On a DST spring-forward day whose \`start\` hour is skipped, the \`start\`
+ * hour never occurs, so the minute-preserving walk would never match and
+ * the window would defer ~24 h. The walk also checks each hour-aligned
+ * boundary for the gap opening (see {@link is_dst_gap_open}) and returns
+ * that boundary instant — deferring ~1 h to the replacement instant
+ * rather than a full day. The boundary is returned as-is (no minute
+ * offset): the gap opening is a single transition instant, not a range.
+ *
+ * @internal
+ */
+export function next_window_open(
+  window: NonNullable<AutocloseConfig["autocloseWindow"]>,
+  now: Date
+): Date {
+  const start_ms = now.getTime();
+  for (let h = 0; h <= 48; h++) {
+    const candidate = new Date(start_ms + h * 3_600_000);
+    if (hour_in_zone(candidate, window.timeZone) === window.start)
+      return candidate;
+    // The \`start\` hour may be unreachable on a spring-forward day; catch
+    // the gap boundary at the top of this candidate's hour.
+    const boundary = new Date(
+      candidate.getTime() - (candidate.getTime() % 3_600_000)
+    );
+    if (is_dst_gap_open(boundary, window.timeZone, window.start))
+      return boundary;
+  }
+  return new Date(start_ms + 86_400_000);
+}
+
 // === backoff.ts ===
 /**
  * @module backoff
@@ -22161,44 +22174,11 @@ export function synthesize_autoclose_reactions<
  * @internal
  */
 
-import { z } from "zod";
 import type { BackoffOptions } from "../types/action.js";
 
-/**
- * Config-validation schema for {@link BackoffOptions} (ACT-1269). Follows the
- * config-schema standard: internal const, never re-exported. Rejects an
- * off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a non-finite/
- * non-positive \`maxMs\` at the declaration site — so a typo or a \`NaN\` from
- * JSON/env config surfaces as a \`ZodError\` at \`act().build()\` instead of
- * silently producing a \`NaN\` delay that disables pacing on the first retry.
- *
- * No \`maxMs >= baseMs\` constraint: \`maxMs\` is a cap, and \`exponential\`
- * clamping to a sub-\`baseMs\` cap is documented behavior, not an error.
- * @internal
- */
-const BackoffOptionsSchema = z.object({
-  // z.number() rejects NaN/±Infinity by default in Zod 4, so \`.min(0)\` /
-  // \`.gt(0)\` also close the non-finite gap.
-  strategy: z.enum(["fixed", "linear", "exponential"]),
-  baseMs: z.number().min(0),
-  maxMs: z.number().gt(0).optional(),
-  jitter: z.boolean().optional(),
-});
-
-/**
- * Validate a backoff bag at its declaration site (reaction \`.do(...)\` /
- * action \`.on(...)\`). Passes \`undefined\` through untouched; otherwise parses
- * and returns the validated config, throwing \`ZodError\` on a bad value so
- * misconfiguration surfaces at build, not on the first cycle tick.
- * @internal
- */
-export function resolveBackoffConfig(
-  options: BackoffOptions | undefined
-): BackoffOptions | undefined {
-  return options === undefined
-    ? undefined
-    : BackoffOptionsSchema.parse(options);
-}
+// The \`BackoffOptions\` config schema + resolver live in \`./config.ts\` (the
+// single home for every builder-facing config bag). This module keeps only
+// the runtime delay math, which stays hot-path and dependency-free.
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on
@@ -22415,7 +22395,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
-import { resolveBackoffConfig } from "./backoff.js";
+import { resolveReactionConfig } from "./config.js";
 import {
   assert_defer_when,
   type DeferSchedule,
@@ -22475,13 +22455,14 @@ export function reaction_on<
     const reaction: Reaction<TEvents, TKey> = {
       handler: schedule ? make_deferred(handler, schedule) : handler,
       resolver: _this_,
-      options: {
+      // #1269: validate the whole bag at the declaration site so a bad
+      // \`maxRetries\`/\`backoff\`/\`blockOnError\` throws ZodError at build,
+      // not a NaN gate on the first retry.
+      options: resolveReactionConfig({
         blockOnError: options?.blockOnError ?? true,
         maxRetries: options?.maxRetries ?? 3,
-        // #1269: validate at the declaration site so a bad strategy/baseMs
-        // throws ZodError at build, not a NaN delay on the first retry.
-        backoff: resolveBackoffConfig(options?.backoff),
-      },
+        backoff: options?.backoff,
+      }),
     };
     // Register once with the default _this_ resolver. If \`.to()\` is chained
     // next, it patches the same reaction's resolver in place — no second
@@ -22530,43 +22511,14 @@ export function reaction_on<
  * machine is deterministic under test.
  */
 
-import { z } from "zod";
+import type { CircuitBreakerConfig } from "./config.js";
 
 /** Circuit breaker state. */
 export type CircuitState = "closed" | "open" | "half-open";
 
-/** Resolved circuit-breaker configuration. */
-export type CircuitBreakerConfig = {
-  /** Consecutive store failures that trip the breaker open. */
-  readonly failureThreshold: number;
-  /** Milliseconds the breaker stays open before allowing a half-open trial. */
-  readonly cooldownMs: number;
-};
-
-export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
-export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
-
-const CircuitBreakerOptionsSchema = z.object({
-  failureThreshold: z
-    .number()
-    .int()
-    .min(1)
-    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
-  cooldownMs: z
-    .number()
-    .int()
-    .min(100)
-    .max(3_600_000)
-    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
-});
-
-/** Public, all-optional circuit-breaker options bag for \`act().build()\`. */
-export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
-
-/** Parse + apply defaults. Throws \`ZodError\` on out-of-range values. */
-export const resolveCircuitBreakerConfig = (
-  options?: CircuitBreakerOptions
-): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+// The circuit-breaker config schema, defaults, and resolver live in
+// \`./config.js\` (the single home for builder-facing config bags). This
+// module keeps only the state machine that consumes the resolved config.
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers
@@ -23518,6 +23470,351 @@ export const config = (): Config => {
   }
   return _validated;
 };
+
+// === config.ts ===
+/**
+ * @module internal/config
+ * @category Internal
+ *
+ * **The single home for every builder-facing config bag in act-core.** Any
+ * options object an operator hands to \`act().build()\`, a builder method
+ * (\`.on(...)\`, \`.do(...)\`, \`.withLane(...)\`), or a runtime cycle
+ * (\`drain(...)\` / \`settle(...)\`) is validated here with Zod — never with a
+ * hand-written \`if (x < min) throw\` ladder — so misconfiguration surfaces as
+ * a \`ZodError\` at the entry point, not as \`NaN\` arithmetic on the first cycle
+ * tick.
+ *
+ * Layout: one section per bag, each with its \`DEFAULT_*\` constants, an
+ * internal \`<Type>OptionsSchema\`, an inferred \`<Type>Config\`, and a
+ * \`resolve<Type>Config(options): <Type>Config\`. The schema is never
+ * re-exported — the public surface is the inferred type + resolver.
+ *
+ * Index of bags owned here:
+ * - **Backoff** — retry pacing (\`BackoffOptions\`), nested in reaction/action.
+ * - **Reaction** — \`.do(handler, options)\` (\`blockOnError\` / \`maxRetries\` / \`backoff\`).
+ * - **Action** — \`.on(entry, options)\` (\`maxRetries\` / \`backoff\`).
+ * - **Lane** — \`.withLane({...})\` (\`leaseMillis\` / \`streamLimit\` / \`cycleMs\`).
+ * - **Drain / Settle** — \`drain(...)\` / \`settle(...)\` runtime knobs.
+ * - **Autoclose** — the \`.autocloses\` / \`ActOptions\` autoclose knobs (+ window).
+ * - **CircuitBreaker** — the store-op breaker on \`ActOptions\`.
+ * - **Fold** — \`projection(...).of(...)\` batch-fold knobs.
+ *
+ * Sibling env/package config (\`config()\`, \`NODE_ENV\`, log level) lives in the
+ * public \`../config.ts\` — a different concern (process environment, not
+ * builder input). The \`@rotorsoft/act-http\` transport bags (\`SseOptions\`,
+ * \`OpenAPIOptions\`) live in that package; core cannot own another package's
+ * surface.
+ *
+ * Validation philosophy: reject only what is genuinely broken — \`NaN\`,
+ * \`±Infinity\` (Zod 4's \`z.number()\` rejects both by default), and negatives
+ * where nonsensical. A value that works today is never newly rejected. The
+ * real strictness lands on \`maxRetries\` and \`backoff\`, the knobs whose bad
+ * values silently corrupt the poison-quarantine and retry-loop-exit gates.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { ActOptions } from "../act.js";
+import type {
+  ActionOptions,
+  BackoffOptions,
+  DrainOptions,
+  FoldOptions,
+  LaneConfig,
+  ReactionOptions,
+  SettleOptions,
+} from "../types/index.js";
+
+// ---------------------------------------------------------------------------
+// Backoff — retry pacing. Nested inside the reaction/action bags below; also
+// resolvable on its own (\`resolveBackoffConfig\`) for direct callers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Rejects an off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a
+ * non-finite/non-positive \`maxMs\` (ACT-1269). Zod 4's \`z.number()\` rejects
+ * \`NaN\`/\`±Infinity\` by default, so \`.min(0)\` / \`.gt(0)\` also close the
+ * non-finite gap. No \`maxMs >= baseMs\` constraint — a sub-\`baseMs\` cap on
+ * \`exponential\` is documented behavior, not an error.
+ * @internal
+ */
+const BackoffOptionsSchema = z.object({
+  strategy: z.enum(["fixed", "linear", "exponential"]),
+  baseMs: z.number().min(0),
+  maxMs: z.number().gt(0).optional(),
+  jitter: z.boolean().optional(),
+});
+
+/** Validate a backoff bag, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveBackoffConfig(
+  options: BackoffOptions | undefined
+): BackoffOptions | undefined {
+  return options === undefined
+    ? undefined
+    : BackoffOptionsSchema.parse(options);
+}
+
+// ---------------------------------------------------------------------------
+// Reaction — \`.do(handler, options)\`. \`maxRetries\` gates the poison-quarantine
+// decision (\`retry >= maxRetries\`), so a \`NaN\` here silently disables
+// \`blockOnError\` (a poison message retries forever). Validate the whole bag.
+// ---------------------------------------------------------------------------
+
+const ReactionOptionsSchema = z.object({
+  blockOnError: z.boolean(),
+  maxRetries: z.number().int().min(0),
+  backoff: BackoffOptionsSchema.optional(),
+});
+
+/** Resolved reaction options. */
+export type ReactionConfig = z.infer<typeof ReactionOptionsSchema>;
+
+/** Validate a fully-defaulted reaction options bag. Throws \`ZodError\`. */
+export function resolveReactionConfig(
+  options: ReactionOptions
+): ReactionConfig {
+  return ReactionOptionsSchema.parse(options);
+}
+
+// ---------------------------------------------------------------------------
+// Action — \`.on(entry, options)\`. \`maxRetries\` gates the command retry loop's
+// exit (\`attempt >= maxRetries\`), so a \`NaN\` here can spin the loop forever on
+// a contended stream. All fields optional (the argument itself is optional).
+// ---------------------------------------------------------------------------
+
+const ActionOptionsSchema = z.object({
+  maxRetries: z.number().int().min(0).optional(),
+  backoff: BackoffOptionsSchema.optional(),
+});
+
+/** Resolved action options. */
+export type ActionConfig = z.infer<typeof ActionOptionsSchema>;
+
+/** Validate an action options bag. Throws \`ZodError\`. */
+export function resolveActionConfig(options: ActionOptions): ActionConfig {
+  return ActionOptionsSchema.parse(options);
+}
+
+// ---------------------------------------------------------------------------
+// Lane — \`.withLane({...})\`. Per-lane overrides of the drain budget. Time
+// knobs (\`leaseMillis\` / \`cycleMs\`) accept any non-negative ms; \`streamLimit\`
+// is an integer count. Reject NaN/Infinity/negative; allow 0 (as today).
+// ---------------------------------------------------------------------------
+
+const LaneConfigSchema = z.object({
+  name: z.string().min(1),
+  leaseMillis: z.number().min(0).optional(),
+  streamLimit: z.number().int().min(0).optional(),
+  cycleMs: z.number().min(0).optional(),
+});
+
+/** Validate a lane config. Throws \`ZodError\`. Returns the input shape. */
+export function resolveLaneConfig<TName extends string>(
+  options: LaneConfig<TName>
+): LaneConfig<TName> {
+  LaneConfigSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Drain / Settle — runtime knobs for \`drain(...)\` / \`settle(...)\`. Parsed once
+// per call (cheap). Reject NaN/Infinity/negative; allow 0. \`correlate\` is a
+// pass-through query filter (validated by the store), so it is not reshaped.
+// ---------------------------------------------------------------------------
+
+const DrainOptionsSchema = z.object({
+  streamLimit: z.number().int().min(0).optional(),
+  eventLimit: z.number().int().min(0).optional(),
+  leaseMillis: z.number().min(0).optional(),
+});
+
+/** Validate drain options, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveDrainConfig(
+  options: DrainOptions | undefined
+): DrainOptions | undefined {
+  if (options === undefined) return undefined;
+  DrainOptionsSchema.parse(options);
+  return options;
+}
+
+const SettleOptionsSchema = DrainOptionsSchema.extend({
+  debounceMs: z.number().min(0).optional(),
+  // \`maxPasses\` defaults to Infinity (no cap) when omitted; a present value is
+  // a non-negative integer — \`0\` is legal and means "run no passes".
+  maxPasses: z.number().int().min(0).optional(),
+}).loose();
+
+/** Validate settle options, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveSettleConfig(
+  options: SettleOptions | undefined
+): SettleOptions | undefined {
+  if (options === undefined) return undefined;
+  SettleOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Act — the top-level \`act().build(options)\` scalar knobs. The nested bags
+// (\`autocloseWindow\`, \`circuitBreaker\`) are resolved by their own resolvers
+// below; the \`scoped\`/\`correlator\` fields are objects/functions passed
+// through untouched (\`.loose()\`), so only the scalar knobs are checked here.
+// ---------------------------------------------------------------------------
+
+const ActOptionsSchema = z
+  .object({
+    maxSubscribedStreams: z.number().int().min(1).optional(),
+    settleDebounceMs: z.number().int().min(0).optional(),
+  })
+  .loose();
+
+/** Validate the scalar \`ActOptions\` knobs at build. Throws \`ZodError\`. */
+export function resolveActConfig(
+  options: ActOptions | undefined
+): ActOptions | undefined {
+  if (options === undefined) return undefined;
+  ActOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Autoclose — the autoclose knobs on \`ActOptions\` (+ the off-hours window).
+// The window *logic* (DST, hour math) stays in \`autoclose-window.ts\`; only
+// the schema, defaults, and resolver live here.
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated The cadence knob is derived from \`autocloseWindow\` now (#1175);
+ * nothing consumes it. Kept for compat; removed in the next major.
+ */
+export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
+/** @deprecated Dead since #1090 removed the autoclose sweep. */
+export const DEFAULT_CLOSE_BATCH_SIZE = 64;
+/** @deprecated Dead since #1090 removed the autoclose sweep. */
+export const DEFAULT_CLOSE_YIELD_MS = 0;
+/** Default IANA zone for \`autocloseWindow\` when the operator omits one. */
+export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+
+/** True when \`tz\` is a zone the runtime's \`Intl\` accepts. @internal */
+function is_valid_time_zone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const AutocloseWindowSchema = z
+  .object({
+    start: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
+    end: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
+    timeZone: z
+      .string()
+      .refine(is_valid_time_zone, {
+        message: "autocloseWindow.timeZone must be a valid IANA time zone",
+      })
+      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
+  })
+  .refine((w) => w.start !== w.end, {
+    message:
+      "autocloseWindow.start and end must differ — an empty window disables autoclose",
+  });
+
+const AutocloseOptionsSchema = z.object({
+  autocloseCycleMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(1440)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
+  closeBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(1024)
+    .default(DEFAULT_CLOSE_BATCH_SIZE),
+  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
+  closeOnError: z.boolean().default(false),
+  autocloseWindow: AutocloseWindowSchema.optional(),
+});
+
+/** Resolved autoclose configuration after validation + default expansion. */
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
+
+/** Validate + default the autoclose knobs on \`ActOptions\`. Throws \`ZodError\`. */
+export function resolveAutocloseConfig(
+  options: ActOptions | undefined
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
+    autocloseCycleMinutes: options?.autocloseCycleMinutes,
+    closeBatchSize: options?.closeBatchSize,
+    closeYieldMs: options?.closeYieldMs,
+    closeOnError: options?.closeOnError,
+    autocloseWindow: options?.autocloseWindow,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// CircuitBreaker — the store-op breaker on \`ActOptions\`. The \`CircuitBreaker\`
+// state machine stays in \`circuit-breaker.ts\` and imports the resolved type.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
+
+const CircuitBreakerOptionsSchema = z.object({
+  failureThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
+  cooldownMs: z
+    .number()
+    .int()
+    .min(100)
+    .max(3_600_000)
+    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
+});
+
+/** Public, all-optional circuit-breaker options bag for \`act().build()\`. */
+export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
+
+/** Resolved circuit-breaker configuration. */
+export type CircuitBreakerConfig = z.infer<typeof CircuitBreakerOptionsSchema>;
+
+/** Parse + apply defaults. Throws \`ZodError\` on out-of-range values. */
+export const resolveCircuitBreakerConfig = (
+  options?: CircuitBreakerOptions
+): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+
+// ---------------------------------------------------------------------------
+// Fold — \`projection(name).of(state)\` batch-fold knobs.
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+export const DEFAULT_MAX_CACHED_STATES = 10_000;
+
+const FoldOptionsSchema = z.object({
+  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
+  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
+});
+
+/** Resolved fold configuration. */
+export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
+
+/** Validate + default the fold knobs. Throws \`ZodError\`. */
+export function resolveFoldConfig(options: FoldOptions): FoldConfig {
+  return FoldOptionsSchema.parse(options);
+}
 
 // === console-logger.ts ===
 /**
@@ -27883,16 +28180,6 @@ export * from "./sandbox.js";
 
 export { type AuditDeps, audit } from "./audit.js";
 export {
-  type AutocloseConfig,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-  resolveAutocloseConfig,
-} from "./autoclose-config.js";
-export {
   type AutoclosePolicy,
   compile_autoclose_policy,
   days_after,
@@ -27904,18 +28191,42 @@ export {
   AUTOCLOSE_TARGET_PREFIX,
   synthesize_autoclose_reactions,
 } from "./autoclose-reaction.js";
-export { resolveBackoffConfig } from "./backoff.js";
+export {
+  hour_in_zone,
+  in_autoclose_window,
+  next_window_open,
+} from "./autoclose-window.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { reaction_on, register_lane } from "./builder-utils.js";
-export {
-  CircuitBreaker,
-  type CircuitBreakerOptions,
-  type CircuitState,
-  resolveCircuitBreakerConfig,
-} from "./circuit-breaker.js";
+export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
+// Every builder-facing config bag (schemas + resolvers + defaults) lives in
+// one place — see ./config.js.
+export {
+  type ActionConfig,
+  type AutocloseConfig,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_MAX_CACHED_STATES,
+  type FoldConfig,
+  type ReactionConfig,
+  resolveActConfig,
+  resolveActionConfig,
+  resolveAutocloseConfig,
+  resolveBackoffConfig,
+  resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveFoldConfig,
+  resolveLaneConfig,
+  resolveReactionConfig,
+  resolveSettleConfig,
+} from "./config.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
@@ -27937,7 +28248,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export * from "./projection-fold.js";
+export { make_fold_handler } from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -30481,30 +30792,19 @@ export function projection<TEvents extends Schemas = {}>(
  * - Eviction under \`maxCachedStates\` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { z } from "zod";
 import type {
   BatchHandler,
   CacheEntry,
-  FoldOptions,
   Schema,
   Schemas,
   State,
 } from "../types/index.js";
+import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
+// The fold config schema, defaults, and resolver live in \`./config.js\` (the
+// single home for builder-facing config bags). This module keeps the fold
+// engine that consumes the resolved config.
 
 /**
  * A stream's in-flight fold: a mutable {@link CacheEntry} plus the

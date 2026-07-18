@@ -23,6 +23,8 @@ import {
   type HandleBatch,
   type PatchFn,
   resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveSettleConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -115,8 +117,8 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 // Re-export the autoclose config surface so operators can
 // `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"`. The implementation lives in
-// `internal/autoclose-config.ts` to keep this orchestrator file
-// focused on the `Act` class.
+// `internal/config.ts` (the single home for builder-facing config bags)
+// to keep this orchestrator file focused on the `Act` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -1338,6 +1340,9 @@ export class Act<
    * @see {@link start_correlations} for automatic correlation
    */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    // Validate the runtime knobs before anything runs (a bad leaseMillis /
+    // streamLimit / eventLimit throws ZodError here, not on the first cycle).
+    resolveDrainConfig(options);
     // #803: writer-only instances skip the local reaction pipeline.
     // Return an empty Drain result so call sites that aggregate (e.g.,
     // `settle` listeners) keep working without special-casing.
@@ -1957,6 +1962,9 @@ export class Act<
    * @see {@link correlate} for manual correlation
    */
   settle(options: SettleOptions = {}): void {
+    // Validate the runtime knobs before anything runs (a bad debounceMs /
+    // leaseMillis / maxPasses throws ZodError here, not on the first pass).
+    resolveSettleConfig(options);
     // #803: writer-only instances skip settle entirely. The bootstrap
     // pattern `app.on("committed", () => app.settle())` keeps working —
     // it just runs zero work on writers.

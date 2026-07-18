@@ -8,44 +8,11 @@
  * @internal
  */
 
-import { z } from "zod";
 import type { BackoffOptions } from "../types/action.js";
 
-/**
- * Config-validation schema for {@link BackoffOptions} (ACT-1269). Follows the
- * config-schema standard: internal const, never re-exported. Rejects an
- * off-union `strategy`, a non-finite/negative `baseMs`, or a non-finite/
- * non-positive `maxMs` at the declaration site — so a typo or a `NaN` from
- * JSON/env config surfaces as a `ZodError` at `act().build()` instead of
- * silently producing a `NaN` delay that disables pacing on the first retry.
- *
- * No `maxMs >= baseMs` constraint: `maxMs` is a cap, and `exponential`
- * clamping to a sub-`baseMs` cap is documented behavior, not an error.
- * @internal
- */
-const BackoffOptionsSchema = z.object({
-  // z.number() rejects NaN/±Infinity by default in Zod 4, so `.min(0)` /
-  // `.gt(0)` also close the non-finite gap.
-  strategy: z.enum(["fixed", "linear", "exponential"]),
-  baseMs: z.number().min(0),
-  maxMs: z.number().gt(0).optional(),
-  jitter: z.boolean().optional(),
-});
-
-/**
- * Validate a backoff bag at its declaration site (reaction `.do(...)` /
- * action `.on(...)`). Passes `undefined` through untouched; otherwise parses
- * and returns the validated config, throwing `ZodError` on a bad value so
- * misconfiguration surfaces at build, not on the first cycle tick.
- * @internal
- */
-export function resolveBackoffConfig(
-  options: BackoffOptions | undefined
-): BackoffOptions | undefined {
-  return options === undefined
-    ? undefined
-    : BackoffOptionsSchema.parse(options);
-}
+// The `BackoffOptions` config schema + resolver live in `./config.ts` (the
+// single home for every builder-facing config bag). This module keeps only
+// the runtime delay math, which stays hot-path and dependency-free.
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on

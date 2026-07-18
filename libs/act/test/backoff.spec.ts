@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { act, dispose, sleep, state, ZodEmpty } from "../src/index.js";
-import {
-  compute_backoff_delay,
-  resolveBackoffConfig,
-} from "../src/internal/backoff.js";
+import { compute_backoff_delay } from "../src/internal/backoff.js";
+import { resolveBackoffConfig } from "../src/internal/config.js";
 import type { BackoffOptions } from "../src/types/index.js";
 
 describe("compute_backoff_delay", () => {

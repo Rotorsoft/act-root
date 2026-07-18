@@ -18,43 +18,14 @@
  * machine is deterministic under test.
  */
 
-import { z } from "zod";
+import type { CircuitBreakerConfig } from "./config.js";
 
 /** Circuit breaker state. */
 export type CircuitState = "closed" | "open" | "half-open";
 
-/** Resolved circuit-breaker configuration. */
-export type CircuitBreakerConfig = {
-  /** Consecutive store failures that trip the breaker open. */
-  readonly failureThreshold: number;
-  /** Milliseconds the breaker stays open before allowing a half-open trial. */
-  readonly cooldownMs: number;
-};
-
-export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
-export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
-
-const CircuitBreakerOptionsSchema = z.object({
-  failureThreshold: z
-    .number()
-    .int()
-    .min(1)
-    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
-  cooldownMs: z
-    .number()
-    .int()
-    .min(100)
-    .max(3_600_000)
-    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
-});
-
-/** Public, all-optional circuit-breaker options bag for `act().build()`. */
-export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
-
-/** Parse + apply defaults. Throws `ZodError` on out-of-range values. */
-export const resolveCircuitBreakerConfig = (
-  options?: CircuitBreakerOptions
-): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+// The circuit-breaker config schema, defaults, and resolver live in
+// `./config.js` (the single home for builder-facing config bags). This
+// module keeps only the state machine that consumes the resolved config.
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers
