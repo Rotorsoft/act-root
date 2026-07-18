@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.6...@rotorsoft/act-http-v1.8.7) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act-http:** map tRPC error codes by identity so wire status matches Hono/OpenAPI ([#1280](https://github.com/rotorsoft/act-root/issues/1280)) ([8cbd4c4](https://github.com/rotorsoft/act-root/commit/8cbd4c4c91b24f625ce7cdcf42c5126653cadc18))
+
 # [@rotorsoft/act-http-v1.8.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.5...@rotorsoft/act-http-v1.8.6) (2026-07-12)
 
 
