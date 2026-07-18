@@ -76,6 +76,9 @@ export * from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
+  type EventGate,
+  IDENTITY_GATE,
+  make_gate,
   pii_fields,
   pii_gate,
   pii_split,

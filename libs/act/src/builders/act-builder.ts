@@ -9,12 +9,14 @@ import {
   bare_patch,
   current_version_of,
   deprecated_event_names,
+  type EventGate,
+  IDENTITY_GATE,
   make_fold_handler,
+  make_gate,
   merge_event_register,
   merge_projection,
   type PatchFn,
   pii_fields,
-  pii_gate,
   pii_split,
   pii_strip,
   reaction_on,
@@ -314,6 +316,9 @@ export function act<
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
+  // Prebuilt default-deny read gates, one per sensitive event. Non-sensitive
+  // events are absent → `query_gate` falls back to the shared IDENTITY_GATE.
+  const _qg = new Map<string, EventGate>();
   const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
   const _de = new Map<string, ReadonlySet<string>>();
   const _ac = new Map<
@@ -326,6 +331,7 @@ export function act<
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
+    query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
     autoclose_policy: (state_name) => _ac.get(state_name) ?? null,
@@ -550,6 +556,11 @@ export function act<
             const fields = pii_fields(reg.schema);
             if (fields.length === 0) continue;
             _sf.set(event_name, fields);
+            // Prebuild the default-deny read gate once, capturing `fields`.
+            // The actor-less read surfaces (`query`/`query_array`) resolve it
+            // by name; non-sensitive events never reach here, so they fall
+            // back to the shared IDENTITY_GATE — zero per-event cost.
+            _qg.set(event_name, make_gate(fields, null));
             // Strip PII from the event payload before reactions see it.
             for (const [name, reaction] of reg.reactions) {
               const inner = reaction.handler;
@@ -585,15 +596,19 @@ export function act<
             }
             const disclose = state.disclose ?? null;
             state.pii_aware = true;
-            // A pii-aware state can still declare events with no
-            // sensitive markers — `fields_by_event` only contains the
-            // sensitive ones. The non-sensitive lookup hits `?? []`,
-            // and `pii_gate` short-circuits on empty fields.
+            // Prebuild one actor-aware read gate per sensitive event, capturing
+            // this state's disclosure predicate — the same `make_gate`
+            // primitive the query path uses (predicate-less there). A pii-aware
+            // state can still declare non-sensitive events; those aren't in
+            // `view_gates`, so `state.view` falls back to the shared
+            // IDENTITY_GATE — no per-event field lookup, no `?? []` allocation.
+            const view_gates = new Map<string, EventGate>();
+            for (const [event_name, fields] of fields_by_event) {
+              view_gates.set(event_name, make_gate(fields, disclose));
+            }
             state.view = (event, actor) =>
-              pii_gate(
+              (view_gates.get(event.name as string) ?? IDENTITY_GATE)(
                 event,
-                fields_by_event.get(event.name as string) ?? [],
-                disclose,
                 actor
               );
             state.message = (validated) => {

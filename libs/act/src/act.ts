@@ -22,7 +22,6 @@ import {
   type Handle,
   type HandleBatch,
   type PatchFn,
-  pii_gate,
   resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
@@ -1227,34 +1226,13 @@ export class Act<
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
       const count = await store().query<TEvents>((e) => {
-        const gated = this._gate_query_event(e);
+        const gated = this.registry.query_gate(e.name as string)(e);
         if (!first) first = gated;
         last = gated;
         callback?.(gated);
       }, query);
       return { first, last, count };
     });
-  }
-
-  /**
-   * Default-deny PII gate for the read-only query surfaces (#1277). `query` /
-   * `query_array` carry no actor, so — mirroring a bare-string `load` — this
-   * runs each event through the same `pii_gate` the load path uses: declared
-   * `sensitive(...)` fields come back `[REDACTED]` (`[SHREDDED]` once
-   * forgotten) and the isolated `pii` sidecar is dropped. `pii_gate`
-   * short-circuits on events with no sensitive fields (a single `Map`
-   * lookup). There is no actor-authorized query path — a handler needing
-   * plaintext reads through `load(stream, { actor })`.
-   */
-  private _gate_query_event(
-    e: Committed<TEvents, keyof TEvents>
-  ): Committed<TEvents, keyof TEvents> {
-    return pii_gate(
-      e,
-      this.registry.sensitive_fields(e.name as string),
-      null,
-      undefined
-    );
   }
 
   /**
@@ -1289,7 +1267,7 @@ export class Act<
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
       await store().query<TEvents>(
-        (e) => events.push(this._gate_query_event(e)),
+        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
         query
       );
       return events;
