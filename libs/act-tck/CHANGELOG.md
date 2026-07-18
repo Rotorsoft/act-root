@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.11...@rotorsoft/act-tck-v1.27.12) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act-notify:** unsubscribe only the disposing listener on a shared broker ([#1279](https://github.com/rotorsoft/act-root/issues/1279)) ([e1be8ef](https://github.com/rotorsoft/act-root/commit/e1be8efaa557309d42e65cd87c9703b6d16b37ad))
+
 # [@rotorsoft/act-tck-v1.27.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.10...@rotorsoft/act-tck-v1.27.11) (2026-07-18)
 
 
