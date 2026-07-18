@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.9...@rotorsoft/act-tck-v1.27.10) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act:** drop the pii sidecar inside pii_gate, fixing load's leak and de-duplicating the query gate ([29073b6](https://github.com/rotorsoft/act-root/commit/29073b6bf4766c4b746bdb3adf486c8f52ac1f2e))
+* **act:** gate query/query_array with default-deny PII redaction ([#1277](https://github.com/rotorsoft/act-root/issues/1277)) ([a26c5b9](https://github.com/rotorsoft/act-root/commit/a26c5b9661d9f254ce3efac7599a3af33ff6cfa2))
+
 # [@rotorsoft/act-tck-v1.27.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.8...@rotorsoft/act-tck-v1.27.9) (2026-07-18)
 
 
