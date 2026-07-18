@@ -22,7 +22,16 @@ export type RedisSubscriber = {
     channel: string,
     listener: (message: string) => void
   ): Promise<unknown>;
-  unsubscribe(channel: string): Promise<unknown>;
+  /**
+   * node-redis v4: with a `listener` argument, removes only that listener;
+   * without it, removes **every** listener on the channel. The broker always
+   * passes the specific listener so co-subscribers on a shared client survive
+   * one subscriber's dispose (#1279).
+   */
+  unsubscribe(
+    channel: string,
+    listener?: (message: string) => void
+  ): Promise<unknown>;
 };
 
 /** Options for {@link RedisBroker}. */
@@ -58,7 +67,10 @@ export class RedisBroker implements Broker {
   async subscribe(
     handler: (message: BrokerMessage) => void
   ): Promise<BrokerDisposer> {
-    await this._subscriber.subscribe(this._channel, (raw) => {
+    // Capture this subscriber's own listener so dispose removes exactly it —
+    // never the co-subscribers sharing this client (#1279). A channel-wide
+    // `unsubscribe(channel)` would silence every worker on a shared broker.
+    const listener = (raw: string) => {
       try {
         handler(JSON.parse(raw) as BrokerMessage);
       } catch {
@@ -66,9 +78,10 @@ export class RedisBroker implements Broker {
           `Dropping malformed notify payload on "${this._channel}" — remote workers wake on their next poll cycle.`
         );
       }
-    });
+    };
+    await this._subscriber.subscribe(this._channel, listener);
     return async () => {
-      await this._subscriber.unsubscribe(this._channel);
+      await this._subscriber.unsubscribe(this._channel, listener);
     };
   }
 }
