@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.11...@rotorsoft/act-pg-v1.13.12) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act:** advance the watermark past the succeeded prefix on partial-progress defers ([#1278](https://github.com/rotorsoft/act-root/issues/1278)) ([4bfd833](https://github.com/rotorsoft/act-root/commit/4bfd83313f375403031c6781b0f7eb01169f74d7))
+
 # [@rotorsoft/act-pg-v1.13.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.10...@rotorsoft/act-pg-v1.13.11) (2026-07-17)
 
 
