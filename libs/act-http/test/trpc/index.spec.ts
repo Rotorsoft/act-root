@@ -25,8 +25,10 @@ import {
 import { fixture } from "@rotorsoft/act/test";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
+import { getHTTPStatusCodeFromError } from "@trpc/server/unstable-core-do-not-import";
 import { describe, expect, expectTypeOf, vi } from "vitest";
 import { z } from "zod";
+import { toApiError } from "../../src/api/errors.js";
 import { authenticated, type TrpcOptions, trpc } from "../../src/trpc/index.js";
 
 const Calculator = state({
@@ -224,9 +226,9 @@ describe("trpc(app, options) — generated router", () => {
       readonly code: string;
     }> = [
       {
-        label: "ConcurrencyError → CONFLICT (412)",
+        label: "ConcurrencyError → PRECONDITION_FAILED (412, matches Hono)",
         throws: () => new ConcurrencyError("tenant-acme", 0, [], 1),
-        code: "CONFLICT",
+        code: "PRECONDITION_FAILED",
       },
       {
         label: "InvariantError → CONFLICT (409)",
@@ -241,9 +243,9 @@ describe("trpc(app, options) — generated router", () => {
         code: "CONFLICT",
       },
       {
-        label: "StreamClosedError → PRECONDITION_FAILED (410)",
+        label: "StreamClosedError → NOT_FOUND (410 Gone; tRPC has no 410)",
         throws: () => new StreamClosedError("tenant-acme"),
-        code: "PRECONDITION_FAILED",
+        code: "NOT_FOUND",
       },
       {
         label: "NonRetryableError → BAD_REQUEST (400)",
@@ -301,6 +303,86 @@ describe("trpc(app, options) — generated router", () => {
     await expect(caller.PressKey({ key: "5" })).rejects.toBeInstanceOf(
       TRPCError
     );
+  });
+
+  // A client speaking both tRPC and Hono/OpenAPI must see the same HTTP status
+  // for the same framework error (#1280). tRPC serializes each mapped code to a
+  // status via getHTTPStatusCodeFromError; assert it equals what Hono/OpenAPI
+  // produce through the shared `toApiError` table — the one unavoidable
+  // exception is StreamClosedError (410 Gone), which tRPC has no code for and
+  // surfaces as 404 Not Found.
+  describe("cross-transport wire-status parity (#1280)", () => {
+    const parity: ReadonlyArray<{
+      label: string;
+      throws: () => Error;
+      trpcStatus: number;
+      sameAsHono: boolean;
+    }> = [
+      {
+        label: "ConcurrencyError",
+        throws: () => new ConcurrencyError("tenant-acme", 0, [], 1),
+        trpcStatus: 412,
+        sameAsHono: true,
+      },
+      {
+        label: "InvariantError",
+        throws: () =>
+          new InvariantError(
+            "PressKey",
+            { key: "5" },
+            { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },
+            {} as never,
+            "calculator must be open"
+          ),
+        trpcStatus: 409,
+        sameAsHono: true,
+      },
+      {
+        label: "ValidationError",
+        throws: () =>
+          new ValidationError("PressKey", { key: "5" }, {
+            issues: [],
+          } as never),
+        trpcStatus: 422,
+        sameAsHono: true,
+      },
+      {
+        label: "NonRetryableError",
+        throws: () => new NonRetryableError("permanently busted"),
+        trpcStatus: 400,
+        sameAsHono: true,
+      },
+      {
+        label: "StreamClosedError (410 → 404, the documented exception)",
+        throws: () => new StreamClosedError("tenant-acme"),
+        trpcStatus: 404,
+        sameAsHono: false,
+      },
+    ];
+
+    for (const { label, throws, trpcStatus, sameAsHono } of parity) {
+      test(`${label} → tRPC HTTP ${trpcStatus}`, async ({ app }) => {
+        const router = trpc<Ctx>(app as never, default_options());
+        const t = initTRPC.context<Ctx>().create();
+        const caller = t.createCallerFactory(router)(
+          make_ctx()
+        ) as unknown as AnyCaller;
+        const thrown = throws();
+        vi.spyOn(app, "do").mockRejectedValueOnce(thrown);
+        const err = await caller.PressKey({ key: "5" }).catch((e) => e);
+        expect(err).toBeInstanceOf(TRPCError);
+        const wire = getHTTPStatusCodeFromError(err as TRPCError);
+        expect(wire).toBe(trpcStatus);
+        // Parity with the Hono/OpenAPI wire status via the shared table.
+        const hono = toApiError(thrown).status;
+        if (sameAsHono) {
+          expect(wire).toBe(hono);
+        } else {
+          expect(hono).toBe(410); // Gone on REST
+          expect(wire).toBe(404); // Not Found on tRPC — no 410 code
+        }
+      });
+    }
   });
 
   describe("idempotency", () => {

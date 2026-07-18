@@ -95,7 +95,7 @@ await client.OpenTicket.mutate({ title: "support" });
 
 The router is **flat by design**. State-name grouping (e.g. `client.Tickets.OpenTicket`) was considered and dropped — action names are unique across a registry (the framework enforces no duplicates at build), and the extra nesting was overhead that bought nothing.
 
-Errors map through `toApiError(...)` from `@rotorsoft/act-http/api` to the conventional tRPC codes: `ConcurrencyError → CONFLICT`, `InvariantError → CONFLICT`, `ValidationError → UNPROCESSABLE_CONTENT`, `StreamClosedError → PRECONDITION_FAILED`, `NonRetryableError → BAD_REQUEST`, anything else → `INTERNAL_SERVER_ERROR`.
+Errors map through `toApiError(...)` from `@rotorsoft/act-http/api` **by error identity**, so the tRPC wire status matches the Hono/OpenAPI status for the same framework error: `ConcurrencyError → PRECONDITION_FAILED` (412), `InvariantError → CONFLICT` (409), `ValidationError → UNPROCESSABLE_CONTENT` (422), `NonRetryableError → BAD_REQUEST` (400), anything else → `INTERNAL_SERVER_ERROR` (500). The one unavoidable difference is `StreamClosedError`: it's HTTP **410 Gone** on REST, but tRPC has no 410 code, so it maps to `NOT_FOUND` (**404**) — the closest "the resource is gone" semantics (#1280). Mapping by identity rather than by round-tripping the HTTP status is what keeps the two transports in agreement.
 
 #### One caveat to know about
 
