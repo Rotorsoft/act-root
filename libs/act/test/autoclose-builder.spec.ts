@@ -23,7 +23,7 @@ import {
   hour_in_zone,
   in_autoclose_window,
   next_window_open,
-} from "../src/internal/autoclose-config.js";
+} from "../src/internal/autoclose-window.js";
 
 const make_ticket = () =>
   state({

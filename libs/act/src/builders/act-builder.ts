@@ -20,7 +20,9 @@ import {
   reaction_on,
   register_lane,
   register_state,
+  resolveActConfig,
   resolveAutocloseConfig,
+  resolveLaneConfig,
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
@@ -452,12 +454,18 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
-        register_lane(config, lanes);
+        // Validate the lane bag at declaration (a bad leaseMillis/streamLimit
+        // throws ZodError at build, not on the first cycle).
+        register_lane(resolveLaneConfig(config), lanes);
         return builder as never;
       },
       on: <TKey extends keyof TEvents>(event: TKey) =>
         reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
+        // Validate the top-level scalar knobs at build (the nested autoclose /
+        // circuitBreaker bags are validated by their own resolvers). A bad
+        // maxSubscribedStreams / settleDebounceMs throws ZodError here.
+        resolveActConfig(options);
         // ACT-1238: select the per-event patch step ONCE here — the
         // single selection site. `bare_patch` (the literal pre-#1238
         // `patch()` merge) when `validateFoldedState` is off, else

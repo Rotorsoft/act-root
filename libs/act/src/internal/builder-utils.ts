@@ -23,6 +23,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
+import { resolveReactionConfig } from "./config.js";
 import {
   assert_defer_when,
   type DeferSchedule,
@@ -82,11 +83,14 @@ export function reaction_on<
     const reaction: Reaction<TEvents, TKey> = {
       handler: schedule ? make_deferred(handler, schedule) : handler,
       resolver: _this_,
-      options: {
+      // #1269: validate the whole bag at the declaration site so a bad
+      // `maxRetries`/`backoff`/`blockOnError` throws ZodError at build,
+      // not a NaN gate on the first retry.
+      options: resolveReactionConfig({
         blockOnError: options?.blockOnError ?? true,
         maxRetries: options?.maxRetries ?? 3,
         backoff: options?.backoff,
-      },
+      }),
     };
     // Register once with the default _this_ resolver. If `.to()` is chained
     // next, it patches the same reaction's resolver in place — no second

@@ -10,6 +10,7 @@ import {
   compile_autoclose_policy,
   policy_keep_days,
   policy_min_after_days,
+  resolveActionConfig,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -790,6 +791,9 @@ function action_builder<
       type MergedActions = TActions & { [P in TKey]: TNewActions };
       (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
       if (options) {
+        // #1269: validate the whole action bag at declaration so a bad
+        // `maxRetries`/`backoff` throws ZodError at build, not a NaN gate.
+        resolveActionConfig(options);
         internal.options ??= {};
         (internal.options as Record<string, ActionOptions>)[action] = options;
       }

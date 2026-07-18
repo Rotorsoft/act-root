@@ -19,16 +19,6 @@
 
 export { type AuditDeps, audit } from "./audit.js";
 export {
-  type AutocloseConfig,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-  resolveAutocloseConfig,
-} from "./autoclose-config.js";
-export {
   type AutoclosePolicy,
   compile_autoclose_policy,
   days_after,
@@ -40,17 +30,42 @@ export {
   AUTOCLOSE_TARGET_PREFIX,
   synthesize_autoclose_reactions,
 } from "./autoclose-reaction.js";
+export {
+  hour_in_zone,
+  in_autoclose_window,
+  next_window_open,
+} from "./autoclose-window.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { reaction_on, register_lane } from "./builder-utils.js";
-export {
-  CircuitBreaker,
-  type CircuitBreakerOptions,
-  type CircuitState,
-  resolveCircuitBreakerConfig,
-} from "./circuit-breaker.js";
+export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
+// Every builder-facing config bag (schemas + resolvers + defaults) lives in
+// one place — see ./config.js.
+export {
+  type ActionConfig,
+  type AutocloseConfig,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_MAX_CACHED_STATES,
+  type FoldConfig,
+  type ReactionConfig,
+  resolveActConfig,
+  resolveActionConfig,
+  resolveAutocloseConfig,
+  resolveBackoffConfig,
+  resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveFoldConfig,
+  resolveLaneConfig,
+  resolveReactionConfig,
+  resolveSettleConfig,
+} from "./config.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
@@ -72,7 +87,7 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export * from "./projection-fold.js";
+export { make_fold_handler } from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,

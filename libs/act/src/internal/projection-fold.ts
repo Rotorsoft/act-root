@@ -25,30 +25,19 @@
  * - Eviction under `maxCachedStates` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
  */
-import { z } from "zod";
 import type {
   BatchHandler,
   CacheEntry,
-  FoldOptions,
   Schema,
   Schemas,
   State,
 } from "../types/index.js";
+import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
-
-const FoldOptionsSchema = z.object({
-  flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
-  maxCachedStates: z.number().int().min(1).default(DEFAULT_MAX_CACHED_STATES),
-});
-
-export type FoldConfig = z.infer<typeof FoldOptionsSchema>;
-
-export function resolveFoldConfig(options: FoldOptions): FoldConfig {
-  return FoldOptionsSchema.parse(options);
-}
+// The fold config schema, defaults, and resolver live in `./config.js` (the
+// single home for builder-facing config bags). This module keeps the fold
+// engine that consumes the resolved config.
 
 /**
  * A stream's in-flight fold: a mutable {@link CacheEntry} plus the

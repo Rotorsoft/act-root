@@ -26,13 +26,10 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import {
-  type AutocloseConfig,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-config.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
+import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { CloseSignal } from "./close-signal.js";
+import type { AutocloseConfig } from "./config.js";
 import { DeferSignal } from "./defer-signal.js";
 
 /**
