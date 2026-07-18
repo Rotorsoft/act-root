@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.7...@rotorsoft/act-v1.23.8) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act:** drop the pii sidecar inside pii_gate, fixing load's leak and de-duplicating the query gate ([29073b6](https://github.com/rotorsoft/act-root/commit/29073b6bf4766c4b746bdb3adf486c8f52ac1f2e))
+* **act:** gate query/query_array with default-deny PII redaction ([#1277](https://github.com/rotorsoft/act-root/issues/1277)) ([a26c5b9](https://github.com/rotorsoft/act-root/commit/a26c5b9661d9f254ce3efac7599a3af33ff6cfa2))
+
 # [@rotorsoft/act-v1.23.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.6...@rotorsoft/act-v1.23.7) (2026-07-18)
 
 
