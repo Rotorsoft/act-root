@@ -43496,9 +43496,16 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
     case 409:
       return "CONFLICT";
     case 410:
-      return "PRECONDITION_FAILED";
+      // StreamClosedError is HTTP 410 Gone. tRPC has no 410 code, so map to
+      // NOT_FOUND (404) — its closest "resource is gone" semantics. This is
+      // the one unavoidable cross-transport status difference (Hono/OpenAPI
+      // keep 410); see auto-generated-api.md.
+      return "NOT_FOUND";
     case 412:
-      return "CONFLICT";
+      // ConcurrencyError is HTTP 412 Precondition Failed. Map by error
+      // identity, not by round-tripping the status: PRECONDITION_FAILED
+      // serializes back to 412, matching Hono/OpenAPI (#1280).
+      return "PRECONDITION_FAILED";
     case 422:
       return "UNPROCESSABLE_CONTENT";
     default:
