@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.6...@rotorsoft/act-v1.23.7) (2026-07-18)
+
+
+### Bug Fixes
+
+* **act:** validate BackoffOptions at declaration so a bad config throws at build ([#1269](https://github.com/rotorsoft/act-root/issues/1269)) ([e181e78](https://github.com/rotorsoft/act-root/commit/e181e78d4bab10f14b335510da3f56cb656a7cdb))
+
 # [@rotorsoft/act-v1.23.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.5...@rotorsoft/act-v1.23.6) (2026-07-17)
 
 
