@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, dispose, sleep, state, ZodEmpty } from "../src/index.js";
+import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { compute_backoff_delay } from "../src/internal/backoff.js";
 import { resolveBackoffConfig } from "../src/internal/config.js";
 import type { BackoffOptions } from "../src/types/index.js";
@@ -202,6 +202,77 @@ describe("per-reaction backoff (integration)", () => {
     await sleep(200);
     await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(2);
+  });
+
+  it("advances the watermark past the succeeded prefix AND persists the window on partial progress (#1278)", async () => {
+    // Two `ticked` events land on one stream for a single backoff reaction.
+    // The handler succeeds on the first event and throws on the second —
+    // partial progress (handled > 0 AND error AND next_attempt_at set). The
+    // finalize must (a) advance the watermark to the FIRST event (so the
+    // handled prefix never re-runs on redelivery) AND (b) ride a `due` marker
+    // so the durable, cross-worker backoff window from #1262 is persisted with
+    // the climbing retry. Advance and defer are independent ack legs (#1278).
+    let calls = 0;
+    const handler = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls >= 2) throw new Error("transient");
+    });
+    Object.defineProperty(handler, "name", { value: "partialThenFail" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, {
+        maxRetries: 5,
+        backoff: { strategy: "fixed", baseMs: 5000 },
+      })
+      .build();
+
+    const ack_spy = vi.spyOn(store(), "ack");
+
+    // Two events on the same stream → both fetched in one claim → one handle()
+    // runs the handler twice (partial progress).
+    await app.do("tick", { stream: "s-partial", actor }, {});
+    await app.do("tick", { stream: "s-partial", actor }, {});
+    await app.correlate();
+
+    // The first (succeeded) event's id — the watermark must land here.
+    const [firstEvent] = await app.query_array({
+      stream: "s-partial",
+      stream_exact: true,
+    });
+    const firstId = firstEvent.id;
+
+    await app.drain({ leaseMillis: 1 });
+
+    // Partial progress actually happened: first succeeded, second threw.
+    expect(calls).toBe(2);
+
+    // The finalize batch advances AND defers in one entry: exactly one entry
+    // carries a future `due`, advances `at` to the succeeded event, and is NOT
+    // a plain defer (retry !== -1, so the budget keeps accruing).
+    const ack_arg = (ack_spy.mock.calls.at(-1)?.[0] ?? []) as Array<{
+      stream: string;
+      at: number;
+      due?: number;
+      retry: number;
+    }>;
+    const deferred = ack_arg.filter((e) => e.due !== undefined);
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0].stream).toBe("s-partial");
+    expect(deferred[0].at).toBe(firstId); // advanced past the succeeded event
+    expect(deferred[0].due).toBeGreaterThan(Date.now());
+    expect(deferred[0].retry).not.toBe(-1);
+
+    // Durable state: query_streams surfaces BOTH the advanced watermark (the
+    // handled prefix won't re-run) and the persisted window (what a fresh
+    // worker's claim honors).
+    let pos: { at?: number; deferred_at?: number } | undefined;
+    await store().query_streams((p) => {
+      if (p.stream === "s-partial") pos = p;
+    });
+    expect(pos?.at).toBe(firstId);
+    expect(pos?.deferred_at).toBeGreaterThan(Date.now());
   });
 
   it("clears backoff entry on successful ack", async () => {

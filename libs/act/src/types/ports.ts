@@ -630,19 +630,22 @@ export interface Store extends Disposable, EventSource {
    * that processed successfully and persists defer schedules for the ones
    * that chose to be re-visited later — one call, one transaction.
    *
-   * An entry without {@link Lease.due} is an **ack**: its watermark advances
-   * to `at`, `retry` resets to `-1`, and the lease is released so other
-   * workers can process subsequent events. An entry *with* `due` is a
-   * **defer**: the stream's `deferred_at` is set to `due` (ms since epoch)
-   * and `retry` is set to the entry's own {@link Lease.retry}, while the
-   * watermark stays put. A caller deferring a *deliberate* re-visit passes
-   * `retry: -1` (the same semantics as {@link defer} — a defer is not a
-   * failure); a caller pacing a *retry* backoff passes the climbing counter
-   * so the retry budget keeps accruing across windows until it blocks. All-
-   * or-nothing is the contract: a failure must leave every watermark and
-   * every schedule untouched, so a drain cycle's outcomes can never land
-   * partially (an acked close request must not survive a lost defer, and
-   * vice versa).
+   * Every entry advances the watermark to `at` (the last event handled this
+   * cycle) and releases the lease. An entry without {@link Lease.due} is a
+   * plain **ack**: it also resets `retry` to `-1` and clears any schedule. An
+   * entry *with* `due` additionally **defers** the remainder: the stream's
+   * `deferred_at` is set to `due` (ms since epoch) and `retry` to the entry's
+   * own {@link Lease.retry}. Advance and defer are independent legs, so a
+   * partial-progress backoff/defer advances past the events it handled — that
+   * prefix never re-runs — while the failing tail waits for `deferred_at` (a
+   * hold passes `at` = the current watermark, making the advance a no-op). A
+   * caller deferring a *deliberate* re-visit passes `retry: -1` (the same
+   * semantics as {@link defer} — a defer is not a failure); a caller pacing a
+   * *retry* backoff passes the climbing counter so the retry budget keeps
+   * accruing across windows until it blocks. All-or-nothing is the contract: a
+   * failure must leave every watermark and every schedule untouched, so a drain
+   * cycle's outcomes can never land partially (an acked close request must not
+   * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; `due`-carrying entries defer, the
    * rest ack

@@ -1215,11 +1215,13 @@ export class PostgresStore implements Store {
     try {
       await client.query("BEGIN");
       // One statement finalizes the whole batch, so acks and defer
-      // schedules land all-or-nothing per the Store.ack contract: an
-      // entry without `due` acks (watermark advances, retry cleared,
-      // schedule cleared), an entry with `due` defers (schedule set,
-      // watermark untouched, retry set to the entry's own `retry`). An
-      // explicit defer passes retry -1 (not a failure); a backoff retry
+      // schedules land all-or-nothing per the Store.ack contract. Every
+      // entry advances the watermark to its `at` (the last event handled
+      // this cycle); an entry without `due` also clears retry + schedule,
+      // while an entry with `due` additionally sets the schedule and the
+      // entry's own `retry` — advance and defer are independent legs
+      // (#1278), so a partial-progress defer keeps the handled prefix.
+      // An explicit defer passes retry -1 (not a failure); a backoff retry
       // passes the climbing counter so the budget keeps accruing across
       // windows (#1262). Deferred rows are filtered out of the returned acks.
       const { rows } = await client.query<{
@@ -1239,7 +1241,7 @@ export class PostgresStore implements Store {
       )
       UPDATE ${this._fqs} AS s
       SET
-        at = CASE WHEN i.due IS NULL THEN i.at ELSE s.at END,
+        at = i.at,
         retry = CASE WHEN i.due IS NULL THEN -1 ELSE i.retry END,
         leased_by = NULL,
         leased_until = NULL,

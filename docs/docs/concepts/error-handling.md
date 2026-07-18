@@ -328,6 +328,8 @@ Because the schedule lives in the store rather than in worker memory:
 - No worker re-claims the stream mid-window, so `retry` advances exactly once per real attempt. A stream blocks after exactly `maxRetries` attempts, independent of worker count.
 - The schedule is durable: a worker that restarts re-arms its drain at the persisted `deferred_at`.
 
+On a **partial-progress** drain — a claimed stream carries several events and the handler succeeds on an earlier one before a later one fails — the due-ack advances the watermark to the last successfully-handled event *and* persists the window in one atomic entry (advance and defer are independent legs of `ack`). The succeeded prefix is never re-run when the stream is re-claimed after the window; only the failing tail is retried (#1278).
+
 #### Independent of `leaseMillis`
 
 The due-ack **releases** the lease and hands the store the schedule, so the backoff window is decoupled from `leaseMillis`: the effective delay is exactly the configured `backoff`, whether that's shorter or longer than the lease. (Earlier versions held the lease through the window, which floored the effective backoff up to `leaseMillis` and let mid-window re-claims phantom-bump the retry counter; the persisted schedule is now the sole gate — see #1262.)

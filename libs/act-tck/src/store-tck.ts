@@ -1832,10 +1832,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("holds the watermark and resets retry on an explicit-defer due lease (retry: -1)", async () => {
         // A due-time already in the past makes the stream immediately
-        // re-claimable — proving the finalize released the lease and kept the
-        // watermark. An explicit defer passes `retry: -1` (a defer is not a
-        // failure), so the persisted retry resets and the next claim bumps
-        // it to 0.
+        // re-claimable — proving the finalize released the lease. The lease
+        // carries `at` = the claim watermark (no events handled), so the
+        // advance is a no-op and the watermark holds. An explicit defer passes
+        // `retry: -1` (a defer is not a failure), so the persisted retry resets
+        // and the next claim bumps it to 0.
         const s = `ackdefer-past-${uid()}`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -1869,12 +1870,48 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
         // Persist retry 3 with a past due-time so it's immediately re-claimable.
+        // `at` = the claim watermark (no progress), so the advance is a no-op.
         await store.ack([{ ...mine, due: Date.now() - 1_000, retry: 3 }]);
         const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const re = again.find((l) => l.stream === s);
         expect(re).toBeDefined();
-        expect(re!.at).toBe(mine.at); // watermark still held
+        expect(re!.at).toBe(mine.at); // watermark unchanged — no-op advance
         expect(re!.retry).toBe(4); // persisted 3, bumped to 4 by claim
+        await store.ack([{ ...re!, at: 1_000_000 }]);
+      });
+
+      it("advances the watermark to `at` while persisting the schedule on a partial-progress due lease (#1278)", async () => {
+        // Advance and defer are independent ack legs: a partial-progress
+        // backoff/defer moves the watermark past the events handled this cycle
+        // (`at`) AND persists the window in one call, so the handled prefix
+        // never re-runs. Distinct from the hold cases above, which pass
+        // `at` = the claim watermark (a no-op advance).
+        const s = `ackadvance-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        // e1 is the "handled prefix"; a second event keeps the stream pending.
+        const [e1] = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s)!;
+        expect(mine.at).toBeLessThan(e1.id); // fresh stream — floor below e1
+        // Advance to e1 (last succeeded) AND defer with a past due-time (so it's
+        // immediately re-claimable) carrying the climbing retry.
+        await store.ack([
+          { ...mine, at: e1.id, due: Date.now() - 1_000, retry: 2 },
+        ]);
+        const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const re = again.find((l) => l.stream === s);
+        expect(re).toBeDefined();
+        expect(re!.at).toBe(e1.id); // advanced past the succeeded event, NOT held
+        expect(re!.retry).toBe(3); // persisted 2, bumped by claim
         await store.ack([{ ...re!, at: 1_000_000 }]);
       });
 

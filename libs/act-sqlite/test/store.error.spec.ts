@@ -232,7 +232,7 @@ describe("SqliteStore error paths", () => {
   });
 
   it("ack: rolls back and wraps UPDATE failure in StoreError", async () => {
-    const client = mockClientFailOn("SET at = CASE");
+    const client = mockClientFailOn("SET at = ?");
     (db as unknown as { client: unknown }).client = client;
     await expect(
       db.ack([{ stream: "x", at: 1, by: "w", retry: 0, lagging: false }])

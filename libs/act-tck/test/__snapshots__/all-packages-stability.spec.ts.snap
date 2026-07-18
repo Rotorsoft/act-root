@@ -8441,31 +8441,37 @@ export async function run_drain_cycle<
     })
   );
 
-  // Finalize the cycle in one atomic store call: results that made
-  // progress (\`handled > 0 || !error\` — full success, empty payloads, or
-  // partial success before a failure) ack at their new watermark, and
-  // deferred results ride the same batch marked with \`due\` (watermark
-  // held, schedule persisted, excluded from the returned acks). A failed
-  // finalize lands nothing — the catch in the controller covers every
-  // outcome uniformly. Partial-success-then-block still lands in both
-  // \`acked\` and \`blocked\` for the same stream — by design.
+  // Finalize the cycle in one atomic store call. Every entry advances the
+  // watermark to the last event fully handled this cycle, and a deferred or
+  // backing-off entry rides the same batch marked with \`due\` so the store
+  // ALSO persists the schedule — advance and defer are independent legs of
+  // one ack (#1278). A failed finalize lands nothing — the catch in the
+  // controller covers every outcome uniformly. Partial-success-then-block
+  // still lands in both \`acked\` and \`blocked\` for the same stream — by design.
   //
-  // A retry-with-backoff (\`next_attempt_at\` set, not blocking) also rides a
-  // \`due\` marker so the store persists the backoff window and excludes the
-  // stream from \`claim\` until it elapses — no worker re-claims and phantom-
-  // bumps \`retry\` mid-window (#1262). It carries the climbing \`retry\` so the
-  // budget still accrues, whereas an explicit defer passes \`retry: -1\`
-  // because a defer is not a failure.
+  // The advance target is \`acked_at\` (the last fully-handled event) when the
+  // batch made progress, and the pre-fetch watermark \`floor\` (\`leased[i].at\`,
+  // a no-op advance) when it did not — because on a no-progress failure
+  // \`acked_at\` is initialized to the fetch ceiling and would skip the failed
+  // event. \`leased[i]\` pairs with \`handled[i]\` (Promise.all preserves order),
+  // so \`floor\` is the untouched claim watermark.
+  //
+  // Deferring past the succeeded prefix (rather than holding the whole batch)
+  // is the point: the handled events never re-run on redelivery. A backoff
+  // retry carries the climbing \`retry\` so the budget keeps accruing toward
+  // \`blockOnError\` and the durable cross-worker window (#1262) survives; an
+  // explicit defer passes \`retry: -1\` because a defer is not a failure.
   const acked = await ops.ack(
-    handled.flatMap((h) =>
-      h.defer !== undefined
-        ? { ...h.lease, due: h.defer, retry: -1 }
-        : h.handled > 0 || !h.error
-          ? { ...h.lease, at: h.acked_at }
-          : h.next_attempt_at !== undefined
-            ? { ...h.lease, due: h.next_attempt_at }
-            : []
-    )
+    handled.flatMap((h, i) => {
+      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+      return h.defer !== undefined
+        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+        : h.next_attempt_at !== undefined
+          ? { ...h.lease, at: advance, due: h.next_attempt_at }
+          : h.handled > 0 || !h.error
+            ? { ...h.lease, at: h.acked_at }
+            : [];
+    })
   );
 
   const blocked = await ops.block(
@@ -10536,11 +10542,15 @@ class InMemoryStream {
       this._leased_by = undefined;
       this._leased_until = undefined;
       if (lease.due !== undefined) {
-        // Due marker: schedule the re-visit, keep the watermark, and persist
-        // the caller's retry. An explicit defer passes \`retry: -1\` (a defer
-        // is not a failure); a backoff retry passes the climbing counter so
-        // it keeps accruing toward the block threshold across windows (#1262).
-        // Deferred entries are not part of ack's return value.
+        // Due marker: advance the watermark past the events handled this cycle
+        // (\`lease.at\`) AND schedule the re-visit, persisting the caller's
+        // retry — advance and defer are independent legs (#1278). Advancing
+        // means the succeeded prefix never re-runs on redelivery. An explicit
+        // defer passes \`retry: -1\` (a defer is not a failure); a backoff retry
+        // passes the climbing counter so it keeps accruing toward the block
+        // threshold across windows (#1262). Deferred entries are not part of
+        // ack's return value.
+        this._at = lease.at;
         this._retry = lease.retry;
         this._deferred_at = lease.due;
         return undefined;
@@ -12872,19 +12882,22 @@ export interface Store extends Disposable, EventSource {
    * that processed successfully and persists defer schedules for the ones
    * that chose to be re-visited later — one call, one transaction.
    *
-   * An entry without {@link Lease.due} is an **ack**: its watermark advances
-   * to \`at\`, \`retry\` resets to \`-1\`, and the lease is released so other
-   * workers can process subsequent events. An entry *with* \`due\` is a
-   * **defer**: the stream's \`deferred_at\` is set to \`due\` (ms since epoch)
-   * and \`retry\` is set to the entry's own {@link Lease.retry}, while the
-   * watermark stays put. A caller deferring a *deliberate* re-visit passes
-   * \`retry: -1\` (the same semantics as {@link defer} — a defer is not a
-   * failure); a caller pacing a *retry* backoff passes the climbing counter
-   * so the retry budget keeps accruing across windows until it blocks. All-
-   * or-nothing is the contract: a failure must leave every watermark and
-   * every schedule untouched, so a drain cycle's outcomes can never land
-   * partially (an acked close request must not survive a lost defer, and
-   * vice versa).
+   * Every entry advances the watermark to \`at\` (the last event handled this
+   * cycle) and releases the lease. An entry without {@link Lease.due} is a
+   * plain **ack**: it also resets \`retry\` to \`-1\` and clears any schedule. An
+   * entry *with* \`due\` additionally **defers** the remainder: the stream's
+   * \`deferred_at\` is set to \`due\` (ms since epoch) and \`retry\` to the entry's
+   * own {@link Lease.retry}. Advance and defer are independent legs, so a
+   * partial-progress backoff/defer advances past the events it handled — that
+   * prefix never re-runs — while the failing tail waits for \`deferred_at\` (a
+   * hold passes \`at\` = the current watermark, making the advance a no-op). A
+   * caller deferring a *deliberate* re-visit passes \`retry: -1\` (the same
+   * semantics as {@link defer} — a defer is not a failure); a caller pacing a
+   * *retry* backoff passes the climbing counter so the retry budget keeps
+   * accruing across windows until it blocks. All-or-nothing is the contract: a
+   * failure must leave every watermark and every schedule untouched, so a drain
+   * cycle's outcomes can never land partially (an acked close request must not
+   * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; \`due\`-carrying entries defer, the
    * rest ack
@@ -14818,13 +14831,16 @@ export type Lease = {
   readonly lagging: boolean;
   readonly lane?: string;
   /**
-   * Defer marker on the finalize path. When set on a lease passed
-   * to {@link Store.ack}, the stream is being *deferred*, not acked: the
-   * adapter must persist \`due\` (ms since epoch) as the stream's
-   * \`deferred_at\` and reset \`retry\` — without advancing the watermark —
-   * atomically with the other entries' acks. Deferred entries are not part
-   * of ack's return value. Never set on leases returned by \`claim\` or
-   * carried by lifecycle events.
+   * Defer marker on the finalize path. When set on a lease passed to
+   * {@link Store.ack}, the entry is *deferred* alongside its watermark
+   * advance: the adapter advances the watermark to \`at\` (the last event
+   * handled this cycle) **and** persists \`due\` (ms since epoch) as the
+   * stream's \`deferred_at\`, setting \`retry\` to the entry's own value —
+   * atomically with the other entries' acks. Advance and defer are
+   * independent legs, so a partial-progress defer keeps the handled prefix
+   * (it never re-runs on redelivery) while the remainder waits for \`due\`
+   * (#1278). Deferred entries are not part of ack's return value. Never set
+   * on leases returned by \`claim\` or carried by lifecycle events.
    */
   readonly due?: number;
 };
@@ -25039,31 +25055,37 @@ export async function run_drain_cycle<
     })
   );
 
-  // Finalize the cycle in one atomic store call: results that made
-  // progress (\`handled > 0 || !error\` — full success, empty payloads, or
-  // partial success before a failure) ack at their new watermark, and
-  // deferred results ride the same batch marked with \`due\` (watermark
-  // held, schedule persisted, excluded from the returned acks). A failed
-  // finalize lands nothing — the catch in the controller covers every
-  // outcome uniformly. Partial-success-then-block still lands in both
-  // \`acked\` and \`blocked\` for the same stream — by design.
+  // Finalize the cycle in one atomic store call. Every entry advances the
+  // watermark to the last event fully handled this cycle, and a deferred or
+  // backing-off entry rides the same batch marked with \`due\` so the store
+  // ALSO persists the schedule — advance and defer are independent legs of
+  // one ack (#1278). A failed finalize lands nothing — the catch in the
+  // controller covers every outcome uniformly. Partial-success-then-block
+  // still lands in both \`acked\` and \`blocked\` for the same stream — by design.
   //
-  // A retry-with-backoff (\`next_attempt_at\` set, not blocking) also rides a
-  // \`due\` marker so the store persists the backoff window and excludes the
-  // stream from \`claim\` until it elapses — no worker re-claims and phantom-
-  // bumps \`retry\` mid-window (#1262). It carries the climbing \`retry\` so the
-  // budget still accrues, whereas an explicit defer passes \`retry: -1\`
-  // because a defer is not a failure.
+  // The advance target is \`acked_at\` (the last fully-handled event) when the
+  // batch made progress, and the pre-fetch watermark \`floor\` (\`leased[i].at\`,
+  // a no-op advance) when it did not — because on a no-progress failure
+  // \`acked_at\` is initialized to the fetch ceiling and would skip the failed
+  // event. \`leased[i]\` pairs with \`handled[i]\` (Promise.all preserves order),
+  // so \`floor\` is the untouched claim watermark.
+  //
+  // Deferring past the succeeded prefix (rather than holding the whole batch)
+  // is the point: the handled events never re-run on redelivery. A backoff
+  // retry carries the climbing \`retry\` so the budget keeps accruing toward
+  // \`blockOnError\` and the durable cross-worker window (#1262) survives; an
+  // explicit defer passes \`retry: -1\` because a defer is not a failure.
   const acked = await ops.ack(
-    handled.flatMap((h) =>
-      h.defer !== undefined
-        ? { ...h.lease, due: h.defer, retry: -1 }
-        : h.handled > 0 || !h.error
-          ? { ...h.lease, at: h.acked_at }
-          : h.next_attempt_at !== undefined
-            ? { ...h.lease, due: h.next_attempt_at }
-            : []
-    )
+    handled.flatMap((h, i) => {
+      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+      return h.defer !== undefined
+        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+        : h.next_attempt_at !== undefined
+          ? { ...h.lease, at: advance, due: h.next_attempt_at }
+          : h.handled > 0 || !h.error
+            ? { ...h.lease, at: h.acked_at }
+            : [];
+    })
   );
 
   const blocked = await ops.block(
@@ -27134,11 +27156,15 @@ class InMemoryStream {
       this._leased_by = undefined;
       this._leased_until = undefined;
       if (lease.due !== undefined) {
-        // Due marker: schedule the re-visit, keep the watermark, and persist
-        // the caller's retry. An explicit defer passes \`retry: -1\` (a defer
-        // is not a failure); a backoff retry passes the climbing counter so
-        // it keeps accruing toward the block threshold across windows (#1262).
-        // Deferred entries are not part of ack's return value.
+        // Due marker: advance the watermark past the events handled this cycle
+        // (\`lease.at\`) AND schedule the re-visit, persisting the caller's
+        // retry — advance and defer are independent legs (#1278). Advancing
+        // means the succeeded prefix never re-runs on redelivery. An explicit
+        // defer passes \`retry: -1\` (a defer is not a failure); a backoff retry
+        // passes the climbing counter so it keeps accruing toward the block
+        // threshold across windows (#1262). Deferred entries are not part of
+        // ack's return value.
+        this._at = lease.at;
         this._retry = lease.retry;
         this._deferred_at = lease.due;
         return undefined;
@@ -29433,19 +29459,22 @@ export interface Store extends Disposable, EventSource {
    * that processed successfully and persists defer schedules for the ones
    * that chose to be re-visited later — one call, one transaction.
    *
-   * An entry without {@link Lease.due} is an **ack**: its watermark advances
-   * to \`at\`, \`retry\` resets to \`-1\`, and the lease is released so other
-   * workers can process subsequent events. An entry *with* \`due\` is a
-   * **defer**: the stream's \`deferred_at\` is set to \`due\` (ms since epoch)
-   * and \`retry\` is set to the entry's own {@link Lease.retry}, while the
-   * watermark stays put. A caller deferring a *deliberate* re-visit passes
-   * \`retry: -1\` (the same semantics as {@link defer} — a defer is not a
-   * failure); a caller pacing a *retry* backoff passes the climbing counter
-   * so the retry budget keeps accruing across windows until it blocks. All-
-   * or-nothing is the contract: a failure must leave every watermark and
-   * every schedule untouched, so a drain cycle's outcomes can never land
-   * partially (an acked close request must not survive a lost defer, and
-   * vice versa).
+   * Every entry advances the watermark to \`at\` (the last event handled this
+   * cycle) and releases the lease. An entry without {@link Lease.due} is a
+   * plain **ack**: it also resets \`retry\` to \`-1\` and clears any schedule. An
+   * entry *with* \`due\` additionally **defers** the remainder: the stream's
+   * \`deferred_at\` is set to \`due\` (ms since epoch) and \`retry\` to the entry's
+   * own {@link Lease.retry}. Advance and defer are independent legs, so a
+   * partial-progress backoff/defer advances past the events it handled — that
+   * prefix never re-runs — while the failing tail waits for \`deferred_at\` (a
+   * hold passes \`at\` = the current watermark, making the advance a no-op). A
+   * caller deferring a *deliberate* re-visit passes \`retry: -1\` (the same
+   * semantics as {@link defer} — a defer is not a failure); a caller pacing a
+   * *retry* backoff passes the climbing counter so the retry budget keeps
+   * accruing across windows until it blocks. All-or-nothing is the contract: a
+   * failure must leave every watermark and every schedule untouched, so a drain
+   * cycle's outcomes can never land partially (an acked close request must not
+   * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; \`due\`-carrying entries defer, the
    * rest ack
@@ -31379,13 +31408,16 @@ export type Lease = {
   readonly lagging: boolean;
   readonly lane?: string;
   /**
-   * Defer marker on the finalize path. When set on a lease passed
-   * to {@link Store.ack}, the stream is being *deferred*, not acked: the
-   * adapter must persist \`due\` (ms since epoch) as the stream's
-   * \`deferred_at\` and reset \`retry\` — without advancing the watermark —
-   * atomically with the other entries' acks. Deferred entries are not part
-   * of ack's return value. Never set on leases returned by \`claim\` or
-   * carried by lifecycle events.
+   * Defer marker on the finalize path. When set on a lease passed to
+   * {@link Store.ack}, the entry is *deferred* alongside its watermark
+   * advance: the adapter advances the watermark to \`at\` (the last event
+   * handled this cycle) **and** persists \`due\` (ms since epoch) as the
+   * stream's \`deferred_at\`, setting \`retry\` to the entry's own value —
+   * atomically with the other entries' acks. Advance and defer are
+   * independent legs, so a partial-progress defer keeps the handled prefix
+   * (it never re-runs on redelivery) while the remainder waits for \`due\`
+   * (#1278). Deferred entries are not part of ack's return value. Never set
+   * on leases returned by \`claim\` or carried by lifecycle events.
    */
   readonly due?: number;
 };
@@ -35679,19 +35711,22 @@ export interface Store extends Disposable, EventSource {
    * that processed successfully and persists defer schedules for the ones
    * that chose to be re-visited later — one call, one transaction.
    *
-   * An entry without {@link Lease.due} is an **ack**: its watermark advances
-   * to \`at\`, \`retry\` resets to \`-1\`, and the lease is released so other
-   * workers can process subsequent events. An entry *with* \`due\` is a
-   * **defer**: the stream's \`deferred_at\` is set to \`due\` (ms since epoch)
-   * and \`retry\` is set to the entry's own {@link Lease.retry}, while the
-   * watermark stays put. A caller deferring a *deliberate* re-visit passes
-   * \`retry: -1\` (the same semantics as {@link defer} — a defer is not a
-   * failure); a caller pacing a *retry* backoff passes the climbing counter
-   * so the retry budget keeps accruing across windows until it blocks. All-
-   * or-nothing is the contract: a failure must leave every watermark and
-   * every schedule untouched, so a drain cycle's outcomes can never land
-   * partially (an acked close request must not survive a lost defer, and
-   * vice versa).
+   * Every entry advances the watermark to \`at\` (the last event handled this
+   * cycle) and releases the lease. An entry without {@link Lease.due} is a
+   * plain **ack**: it also resets \`retry\` to \`-1\` and clears any schedule. An
+   * entry *with* \`due\` additionally **defers** the remainder: the stream's
+   * \`deferred_at\` is set to \`due\` (ms since epoch) and \`retry\` to the entry's
+   * own {@link Lease.retry}. Advance and defer are independent legs, so a
+   * partial-progress backoff/defer advances past the events it handled — that
+   * prefix never re-runs — while the failing tail waits for \`deferred_at\` (a
+   * hold passes \`at\` = the current watermark, making the advance a no-op). A
+   * caller deferring a *deliberate* re-visit passes \`retry: -1\` (the same
+   * semantics as {@link defer} — a defer is not a failure); a caller pacing a
+   * *retry* backoff passes the climbing counter so the retry budget keeps
+   * accruing across windows until it blocks. All-or-nothing is the contract: a
+   * failure must leave every watermark and every schedule untouched, so a drain
+   * cycle's outcomes can never land partially (an acked close request must not
+   * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; \`due\`-carrying entries defer, the
    * rest ack
@@ -36666,13 +36701,16 @@ export type Lease = {
   readonly lagging: boolean;
   readonly lane?: string;
   /**
-   * Defer marker on the finalize path. When set on a lease passed
-   * to {@link Store.ack}, the stream is being *deferred*, not acked: the
-   * adapter must persist \`due\` (ms since epoch) as the stream's
-   * \`deferred_at\` and reset \`retry\` — without advancing the watermark —
-   * atomically with the other entries' acks. Deferred entries are not part
-   * of ack's return value. Never set on leases returned by \`claim\` or
-   * carried by lifecycle events.
+   * Defer marker on the finalize path. When set on a lease passed to
+   * {@link Store.ack}, the entry is *deferred* alongside its watermark
+   * advance: the adapter advances the watermark to \`at\` (the last event
+   * handled this cycle) **and** persists \`due\` (ms since epoch) as the
+   * stream's \`deferred_at\`, setting \`retry\` to the entry's own value —
+   * atomically with the other entries' acks. Advance and defer are
+   * independent legs, so a partial-progress defer keeps the handled prefix
+   * (it never re-runs on redelivery) while the remainder waits for \`due\`
+   * (#1278). Deferred entries are not part of ack's return value. Never set
+   * on leases returned by \`claim\` or carried by lifecycle events.
    */
   readonly due?: number;
 };
@@ -47320,11 +47358,13 @@ export class PostgresStore implements Store {
     try {
       await client.query("BEGIN");
       // One statement finalizes the whole batch, so acks and defer
-      // schedules land all-or-nothing per the Store.ack contract: an
-      // entry without \`due\` acks (watermark advances, retry cleared,
-      // schedule cleared), an entry with \`due\` defers (schedule set,
-      // watermark untouched, retry set to the entry's own \`retry\`). An
-      // explicit defer passes retry -1 (not a failure); a backoff retry
+      // schedules land all-or-nothing per the Store.ack contract. Every
+      // entry advances the watermark to its \`at\` (the last event handled
+      // this cycle); an entry without \`due\` also clears retry + schedule,
+      // while an entry with \`due\` additionally sets the schedule and the
+      // entry's own \`retry\` — advance and defer are independent legs
+      // (#1278), so a partial-progress defer keeps the handled prefix.
+      // An explicit defer passes retry -1 (not a failure); a backoff retry
       // passes the climbing counter so the budget keeps accruing across
       // windows (#1262). Deferred rows are filtered out of the returned acks.
       const { rows } = await client.query<{
@@ -47344,7 +47384,7 @@ export class PostgresStore implements Store {
       )
       UPDATE \${this._fqs} AS s
       SET
-        at = CASE WHEN i.due IS NULL THEN i.at ELSE s.at END,
+        at = i.at,
         retry = CASE WHEN i.due IS NULL THEN -1 ELSE i.retry END,
         leased_by = NULL,
         leased_until = NULL,
@@ -49317,25 +49357,27 @@ export class SqliteStore implements Store {
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
-      // schedules land all-or-nothing per the Store.ack contract: an
-      // entry without \`due\` acks (watermark advances, retry cleared,
-      // schedule cleared), an entry with \`due\` defers (schedule set,
-      // watermark untouched, retry set to the entry's own \`retry\`). The
-      // bound schedule doubles as the branch discriminator — NULL means
-      // ack. An explicit defer passes retry -1 (not a failure); a backoff
-      // retry passes the climbing counter so the budget keeps accruing
-      // across windows (#1262). Only acked entries are returned.
+      // schedules land all-or-nothing per the Store.ack contract. Every
+      // entry advances the watermark to its \`at\` (the last event handled
+      // this cycle); an entry without \`due\` also clears retry + schedule,
+      // while an entry with \`due\` additionally sets the schedule and the
+      // entry's own \`retry\` — advance and defer are independent legs
+      // (#1278), so a partial-progress defer keeps the handled prefix. The
+      // bound schedule doubles as the ack-vs-defer discriminator — NULL
+      // means ack. An explicit defer passes retry -1 (not a failure); a
+      // backoff retry passes the climbing counter so the budget keeps
+      // accruing across windows (#1262). Only acked entries are returned.
       const result: Lease[] = [];
       for (const l of leases) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
           sql: \`UPDATE streams
-                SET at = CASE WHEN ? IS NULL THEN ? ELSE at END,
+                SET at = ?,
                     deferred_at = ?,
                     leased_by = NULL, leased_until = NULL,
                     retry = CASE WHEN ? IS NULL THEN -1 ELSE ? END
                 WHERE stream = ? AND leased_by = ?\`,
-          args: [due, l.at, due, due, l.retry, l.stream, l.by],
+          args: [l.at, due, due, l.retry, l.stream, l.by],
         });
         if (due === null && r.rowsAffected > 0) result.push(l);
       }
@@ -54135,10 +54177,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("holds the watermark and resets retry on an explicit-defer due lease (retry: -1)", async () => {
         // A due-time already in the past makes the stream immediately
-        // re-claimable — proving the finalize released the lease and kept the
-        // watermark. An explicit defer passes \`retry: -1\` (a defer is not a
-        // failure), so the persisted retry resets and the next claim bumps
-        // it to 0.
+        // re-claimable — proving the finalize released the lease. The lease
+        // carries \`at\` = the claim watermark (no events handled), so the
+        // advance is a no-op and the watermark holds. An explicit defer passes
+        // \`retry: -1\` (a defer is not a failure), so the persisted retry resets
+        // and the next claim bumps it to 0.
         const s = \`ackdefer-past-\${uid()}\`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -54172,12 +54215,48 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
         // Persist retry 3 with a past due-time so it's immediately re-claimable.
+        // \`at\` = the claim watermark (no progress), so the advance is a no-op.
         await store.ack([{ ...mine, due: Date.now() - 1_000, retry: 3 }]);
         const again = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
         const re = again.find((l) => l.stream === s);
         expect(re).toBeDefined();
-        expect(re!.at).toBe(mine.at); // watermark still held
+        expect(re!.at).toBe(mine.at); // watermark unchanged — no-op advance
         expect(re!.retry).toBe(4); // persisted 3, bumped to 4 by claim
+        await store.ack([{ ...re!, at: 1_000_000 }]);
+      });
+
+      it("advances the watermark to \`at\` while persisting the schedule on a partial-progress due lease (#1278)", async () => {
+        // Advance and defer are independent ack legs: a partial-progress
+        // backoff/defer moves the watermark past the events handled this cycle
+        // (\`at\`) AND persists the window in one call, so the handled prefix
+        // never re-runs. Distinct from the hold cases above, which pass
+        // \`at\` = the claim watermark (a no-op advance).
+        const s = \`ackadvance-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        // e1 is the "handled prefix"; a second event keeps the stream pending.
+        const [e1] = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        const mine = leased.find((l) => l.stream === s)!;
+        expect(mine.at).toBeLessThan(e1.id); // fresh stream — floor below e1
+        // Advance to e1 (last succeeded) AND defer with a past due-time (so it's
+        // immediately re-claimable) carrying the climbing retry.
+        await store.ack([
+          { ...mine, at: e1.id, due: Date.now() - 1_000, retry: 2 },
+        ]);
+        const again = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        const re = again.find((l) => l.stream === s);
+        expect(re).toBeDefined();
+        expect(re!.at).toBe(e1.id); // advanced past the succeeded event, NOT held
+        expect(re!.retry).toBe(3); // persisted 2, bumped by claim
         await store.ack([{ ...re!, at: 1_000_000 }]);
       });
 
