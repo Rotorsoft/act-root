@@ -242,10 +242,23 @@ export async function run_drain_cycle<
     handled.flatMap((h) =>
       h.defer !== undefined
         ? { ...h.lease, due: h.defer, retry: -1 }
-        : h.handled > 0 || !h.error
-          ? { ...h.lease, at: h.acked_at }
-          : h.next_attempt_at !== undefined
-            ? { ...h.lease, due: h.next_attempt_at }
+        : // A backoff retry (`next_attempt_at` set, not blocking) defers the
+          // whole stream: ride a `due` marker so the store persists the window
+          // and holds the watermark, carrying the climbing `retry` so the
+          // budget still accrues toward `blockOnError` (a defer would pass
+          // `retry: -1`). Ordered BEFORE the plain advance so partial progress
+          // (`handled > 0`) with a failing backoff tail keeps the window —
+          // otherwise `handled > 0` wins, the entry acks without `due`, and the
+          // durable cross-worker window from #1262 is silently dropped (#1278).
+          // The succeeded prefix re-runs on redelivery after the window; that
+          // is safe under at-least-once and bounded by `maxRetries`. Advancing
+          // the watermark mid-window instead would require the store to honor
+          // `at` and `due` together (they are mutually exclusive today) — a
+          // larger, riskier reshape rejected for a recoverable degradation.
+          h.next_attempt_at !== undefined
+          ? { ...h.lease, due: h.next_attempt_at }
+          : h.handled > 0 || !h.error
+            ? { ...h.lease, at: h.acked_at }
             : []
     )
   );
