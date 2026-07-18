@@ -1238,21 +1238,23 @@ export class Act<
 
   /**
    * Default-deny PII gate for the read-only query surfaces (#1277). `query` /
-   * `query_array` carry no actor, so — mirroring a bare-string `load` — every
-   * declared `sensitive(...)` field comes back `[REDACTED]` (or `[SHREDDED]`
-   * once forgotten) and the isolated `pii` sidecar is dropped from the event.
-   * Events with no sensitive fields pass through untouched (the common case;
-   * a single `Map` lookup). There is no actor-authorized query path — that
-   * would be a charter addition; the store's raw column is correct, the gate
-   * belongs here in the orchestrator.
+   * `query_array` carry no actor, so — mirroring a bare-string `load` — this
+   * runs each event through the same `pii_gate` the load path uses: declared
+   * `sensitive(...)` fields come back `[REDACTED]` (`[SHREDDED]` once
+   * forgotten) and the isolated `pii` sidecar is dropped. `pii_gate`
+   * short-circuits on events with no sensitive fields (a single `Map`
+   * lookup). There is no actor-authorized query path — a handler needing
+   * plaintext reads through `load(stream, { actor })`.
    */
   private _gate_query_event(
     e: Committed<TEvents, keyof TEvents>
   ): Committed<TEvents, keyof TEvents> {
-    const fields = this.registry.sensitive_fields(e.name as string);
-    if (fields.length === 0) return e;
-    const { pii: _pii, ...gated } = pii_gate(e, fields, null, undefined);
-    return gated as Committed<TEvents, keyof TEvents>;
+    return pii_gate(
+      e,
+      this.registry.sensitive_fields(e.name as string),
+      null,
+      undefined
+    );
   }
 
   /**

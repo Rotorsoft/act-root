@@ -155,32 +155,31 @@ export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
 ): Committed<TEvents, TKey> {
   if (fields.length === 0) return event;
   const data = event.data as Record<string, unknown>;
-  if (event.pii == null) {
+  // The external view NEVER carries the isolated `pii` sidecar — dropping it
+  // is the whole point of the gate. Keeping it (an earlier `...event` spread)
+  // leaked plaintext PII on every gated read surface (`load`, `query`,
+  // `query_array`) even while `data` was correctly redacted (#1277). Strip it
+  // once here; the plaintext lives in `data` only on the authorized path.
+  const { pii, ...rest } = event as Committed<TEvents, TKey> & {
+    pii?: Record<string, unknown> | null;
+  };
+  if (pii == null) {
     const shredded: Record<string, unknown> = { ...data };
     for (const f of fields) shredded[f] = SHREDDED;
-    return {
-      ...event,
-      data: shredded as Committed<TEvents, TKey>["data"],
-    };
+    return { ...rest, data: shredded as Committed<TEvents, TKey>["data"] };
   }
   // Plaintext path requires both an actor AND a predicate that allows. Missing
   // either → default-deny → REDACTED.
   const allowed = !!actor && !!predicate && predicate(event, actor);
   if (allowed) {
     return {
-      ...event,
-      data: {
-        ...data,
-        ...(event.pii as Record<string, unknown>),
-      } as Committed<TEvents, TKey>["data"],
+      ...rest,
+      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
     };
   }
   const redacted: Record<string, unknown> = { ...data };
   for (const f of fields) redacted[f] = REDACTED;
-  return {
-    ...event,
-    data: redacted as Committed<TEvents, TKey>["data"],
-  };
+  return { ...rest, data: redacted as Committed<TEvents, TKey>["data"] };
 }
 
 /**

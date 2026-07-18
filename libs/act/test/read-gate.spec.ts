@@ -177,6 +177,24 @@ describe("read-path PII gate (#855 slice 4)", () => {
     });
   });
 
+  it("the gated load event drops the pii sidecar — plaintext never rides in event.pii (#1277)", async () => {
+    const app = act().withState(User).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    await cache().invalidate("user-1");
+    // Unauthorized: data redacted AND no sidecar.
+    const denied = await app.load(User, { stream: "user-1", actor: stranger });
+    expect((denied.event as { pii?: unknown }).pii).toBeUndefined();
+    await cache().invalidate("user-1");
+    // Authorized: plaintext merged into data, still no raw sidecar.
+    const allowed = await app.load(User, { stream: "user-1", actor: owner });
+    expect(allowed.event?.data.email).toBe("u@example.com");
+    expect((allowed.event as { pii?: unknown }).pii).toBeUndefined();
+  });
+
   // --- SHREDDED — irrecoverable post-forget ---
 
   it("after Store.forget_pii, reads return SHREDDED regardless of authorization", async () => {
