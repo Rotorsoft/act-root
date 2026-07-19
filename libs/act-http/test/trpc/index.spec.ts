@@ -305,6 +305,49 @@ describe("trpc(app, options) — generated router", () => {
     );
   });
 
+  test("actor 'throw to deny' surfaces as UNAUTHORIZED (401), matching Hono (#1286)", async ({
+    app,
+  }) => {
+    // The extractor denies with a plain Error. Before the fix this fell through
+    // to_trpc_error → toApiError(500) → INTERNAL_SERVER_ERROR; Hono's
+    // `authenticated` middleware returns 401. The guide promises they're
+    // identical, so the generated router must map an extractor throw to
+    // UNAUTHORIZED (401), preserving the message.
+    const router = trpc<Ctx>(app as never, {
+      ...default_options(),
+      actor: () => {
+        throw new Error("denied");
+      },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
+    const err = await caller.PressKey({ key: "5" }).catch((e) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect((err as TRPCError).code).toBe("UNAUTHORIZED");
+    expect((err as TRPCError).message).toBe("denied");
+    expect(getHTTPStatusCodeFromError(err as TRPCError)).toBe(401);
+  });
+
+  test("a non-Error actor deny still maps to UNAUTHORIZED (401)", async ({
+    app,
+  }) => {
+    const router = trpc<Ctx>(app as never, {
+      ...default_options(),
+      actor: () => {
+        throw "nope"; // non-Error throw
+      },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
+    const err = await caller.PressKey({ key: "5" }).catch((e) => e);
+    expect((err as TRPCError).code).toBe("UNAUTHORIZED");
+    expect(getHTTPStatusCodeFromError(err as TRPCError)).toBe(401);
+  });
+
   // A client speaking both tRPC and Hono/OpenAPI must see the same HTTP status
   // for the same framework error (#1280). tRPC serializes each mapped code to a
   // status via getHTTPStatusCodeFromError; assert it equals what Hono/OpenAPI
