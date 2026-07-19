@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.8...@rotorsoft/act-http-v1.8.9) (2026-07-19)
+
+
+### Bug Fixes
+
+* **act-http:** mark the OpenAPI Idempotency-Key header required ([#1287](https://github.com/rotorsoft/act-root/issues/1287)) ([3261f3e](https://github.com/rotorsoft/act-root/commit/3261f3e50415933456d1f8e3941f5510c8643edd))
+
 # [@rotorsoft/act-http-v1.8.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.7...@rotorsoft/act-http-v1.8.8) (2026-07-19)
 
 
