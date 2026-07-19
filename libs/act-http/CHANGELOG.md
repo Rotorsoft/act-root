@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.7...@rotorsoft/act-http-v1.8.8) (2026-07-19)
+
+
+### Bug Fixes
+
+* **act-http:** map a tRPC actor-extractor deny to UNAUTHORIZED, not 500 ([#1286](https://github.com/rotorsoft/act-root/issues/1286)) ([f16c971](https://github.com/rotorsoft/act-root/commit/f16c97182774edc2c64963358f912f4ada411b58))
+
 # [@rotorsoft/act-http-v1.8.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.6...@rotorsoft/act-http-v1.8.7) (2026-07-18)
 
 
