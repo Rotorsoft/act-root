@@ -144,5 +144,13 @@ describe("DeferTimer", () => {
     expect(wakes).toBe(1);
     expect(t.size).toBe(1);
     expect(t.is_deferred("far")).toBe(true);
+    // #1288: the timer must self-re-arm — the consumer's on_wake here does
+    // nothing. Advancing past the real due-time must fire again (through the
+    // intermediate ceiling clamps) and finally GC the entry. Without the
+    // re-arm, wakes stays 1 and the entry leaks in the parked set forever.
+    vi.advanceTimersByTime(90 * 86_400_000);
+    expect(wakes).toBeGreaterThan(1);
+    expect(t.size).toBe(0);
+    expect(t.is_deferred("far")).toBe(false);
   });
 });

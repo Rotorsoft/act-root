@@ -8199,9 +8199,22 @@ export class DeferTimer {
       // Garbage-collect the entries that have come due so the consumer's
       // next pass sees them as active again.
       const now = Date.now();
+      let came_due = false;
       for (const [stream, at] of this._due)
-        if (at <= now) this._due.delete(stream);
+        if (at <= now) {
+          this._due.delete(stream);
+          came_due = true;
+        }
       this._on_wake();
+      // Premature ceiling clamp: nothing came due, yet entries remain — the
+      // earliest due-time was past the 32-bit \`setTimeout\` ceiling, so this
+      // wake fired early. The consumer's \`on_wake\` won't re-arm (the drain's
+      // just sets its armed flag, and its next pass early-returns while the
+      // stream is still store-excluded), so the primitive must self-re-arm or
+      // a >ceiling defer/cooldown loses its precise wake (#1288). A normal wake
+      // (something came due) leaves re-arming to the consumer, preserving the
+      // fire-once-per-schedule model.
+      if (!came_due && this._due.size > 0) this.schedule();
     }, delay);
     this._timer.unref();
   }
@@ -24813,9 +24826,22 @@ export class DeferTimer {
       // Garbage-collect the entries that have come due so the consumer's
       // next pass sees them as active again.
       const now = Date.now();
+      let came_due = false;
       for (const [stream, at] of this._due)
-        if (at <= now) this._due.delete(stream);
+        if (at <= now) {
+          this._due.delete(stream);
+          came_due = true;
+        }
       this._on_wake();
+      // Premature ceiling clamp: nothing came due, yet entries remain — the
+      // earliest due-time was past the 32-bit \`setTimeout\` ceiling, so this
+      // wake fired early. The consumer's \`on_wake\` won't re-arm (the drain's
+      // just sets its armed flag, and its next pass early-returns while the
+      // stream is still store-excluded), so the primitive must self-re-arm or
+      // a >ceiling defer/cooldown loses its precise wake (#1288). A normal wake
+      // (something came due) leaves re-arming to the consumer, preserving the
+      // fire-once-per-schedule model.
+      if (!came_due && this._due.size > 0) this.schedule();
     }, delay);
     this._timer.unref();
   }
