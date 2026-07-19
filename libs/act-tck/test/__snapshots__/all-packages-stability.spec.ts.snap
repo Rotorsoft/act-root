@@ -39730,8 +39730,9 @@ export type OpenAPIDocument = {
  *   sibling's default so the doc describes the same paths the
  *   generated REST surface serves.
  * - \`idempotency\` — optional, default \`false\`. When \`true\`, every
- *   mutation operation documents an optional \`Idempotency-Key\`
- *   request header.
+ *   mutation operation documents a **required** \`Idempotency-Key\`
+ *   request header (the generated route fail-closes with 400 when the
+ *   header is absent, so the doc marks it required, not optional).
  * - \`expectedVersion\` — optional, default \`false\`. When \`true\`,
  *   every mutation operation documents an optional \`If-Match\`
  *   request header carrying the expected stream version.
@@ -39998,9 +39999,12 @@ function build_operation(
     parameters.push({
       name: "Idempotency-Key",
       in: "header",
-      required: false,
+      // Required: the generated route fail-closes with 400 when idempotency is
+      // enabled and the header is absent, so the doc must not advertise it as
+      // optional (#1287).
+      required: true,
       description:
-        "Optional idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+        "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
       schema: { type: "string" },
     });
   }
