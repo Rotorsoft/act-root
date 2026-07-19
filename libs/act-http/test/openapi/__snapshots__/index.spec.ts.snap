@@ -83,10 +83,10 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         "operationId": "Clear",
         "parameters": [
           {
-            "description": "Optional idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+            "description": "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string",
             },
@@ -158,10 +158,10 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         "operationId": "OpenTicket",
         "parameters": [
           {
-            "description": "Optional idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+            "description": "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string",
             },
@@ -236,10 +236,10 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         "operationId": "PressKey",
         "parameters": [
           {
-            "description": "Optional idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+            "description": "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
             "in": "header",
             "name": "Idempotency-Key",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string",
             },

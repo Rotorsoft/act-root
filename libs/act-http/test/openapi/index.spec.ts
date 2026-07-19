@@ -135,7 +135,9 @@ describe("openapi(app, options) — doc emitter", () => {
     const idempotency_param = params?.find((p) => p.name === "Idempotency-Key");
     expect(idempotency_param).toBeDefined();
     expect(idempotency_param?.in).toBe("header");
-    expect(idempotency_param?.required).toBe(false);
+    // Required: the route 400s when idempotency is on and the header is absent,
+    // so the doc must not advertise it as optional (#1287).
+    expect(idempotency_param?.required).toBe(true);
   });
 
   test("documents If-Match when expectedVersion is enabled", ({ app }) => {
