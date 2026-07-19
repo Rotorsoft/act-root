@@ -43652,8 +43652,21 @@ export function trpc<
       .input(state.actions[action_name] as never)
       .mutation(async ({ input, ctx }) => {
         const host_ctx = ctx as unknown as Ctx;
+        // Resolve the actor first, mirroring Hono's \`authenticated\` middleware:
+        // a "throw to deny" from the extractor is 401 UNAUTHORIZED, not a 500.
+        // The actor step is auth — distinct from a framework error inside
+        // \`app.do\`, which the main try below maps via \`to_trpc_error\` (#1286).
+        let actor: Actor;
         try {
-          const actor = await options.actor(host_ctx);
+          actor = await options.actor(host_ctx);
+        } catch (err) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: err instanceof Error ? err.message : undefined,
+            cause: err instanceof Error ? err : undefined,
+          });
+        }
+        try {
           const stream = await options.stream(action_name, input, host_ctx);
           const expected_version = options.expectedVersion
             ? await options.expectedVersion(action_name, input, host_ctx)
