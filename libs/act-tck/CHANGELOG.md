@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.13](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.12...@rotorsoft/act-tck-v1.27.13) (2026-07-19)
+
+
+### Bug Fixes
+
+* **act-http:** map a tRPC actor-extractor deny to UNAUTHORIZED, not 500 ([#1286](https://github.com/rotorsoft/act-root/issues/1286)) ([f16c971](https://github.com/rotorsoft/act-root/commit/f16c97182774edc2c64963358f912f4ada411b58))
+* **act:** self-re-arm DeferTimer on a premature ceiling clamp ([#1288](https://github.com/rotorsoft/act-root/issues/1288)) ([76cdb0a](https://github.com/rotorsoft/act-root/commit/76cdb0a54a0cba152006d966add715be6179017a))
+
 # [@rotorsoft/act-tck-v1.27.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.11...@rotorsoft/act-tck-v1.27.12) (2026-07-18)
 
 
