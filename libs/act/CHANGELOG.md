@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.9...@rotorsoft/act-v1.23.10) (2026-07-19)
+
+
+### Bug Fixes
+
+* **act:** self-re-arm DeferTimer on a premature ceiling clamp ([#1288](https://github.com/rotorsoft/act-root/issues/1288)) ([76cdb0a](https://github.com/rotorsoft/act-root/commit/76cdb0a54a0cba152006d966add715be6179017a))
+
 # [@rotorsoft/act-v1.23.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.8...@rotorsoft/act-v1.23.9) (2026-07-18)
 
 
