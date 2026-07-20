@@ -25,7 +25,7 @@ overrides:
   flatted: ">=3.4.2"
   picomatch: ">=4.0.5"
   yaml: ">=2.9.0"
-  undici: ">=8.6.0"
+  undici: ">=8.7.0"
   rollup: ">=4.62.2"
   "minimatch@<3.1.4": ">=10.2.5"
   serialize-javascript: ">=7.0.7"
