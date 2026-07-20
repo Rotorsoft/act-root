@@ -56,7 +56,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "lucide-react": "^1.23.0",
+    "lucide-react": "^1.25.0",
     "sucrase": "^3.35.1"
   },
   "peerDependencies": {
