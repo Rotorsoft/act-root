@@ -9,7 +9,7 @@ overrides:
   flatted: '>=3.4.2'
   picomatch: '>=4.0.5'
   yaml: '>=2.9.0'
-  undici: '>=8.6.0'
+  undici: '>=8.7.0'
   rollup: '>=4.62.2'
   minimatch@<3.1.4: '>=10.2.5'
   serialize-javascript: '>=7.0.7'
@@ -242,8 +242,8 @@ importers:
   libs/act-diagram:
     dependencies:
       lucide-react:
-        specifier: ^1.23.0
-        version: 1.23.0(react@19.2.7)
+        specifier: ^1.25.0
+        version: 1.25.0(react@19.2.7)
       sucrase:
         specifier: ^3.35.1
         version: 3.35.1
@@ -488,7 +488,7 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=1.17.0'
+        specifier: '>=1.23.4'
         version: link:../../libs/act
       '@trpc/server':
         specifier: 11.18.0
@@ -589,8 +589,8 @@ importers:
         specifier: ^3.1.0
         version: 3.1.0
       lucide-react:
-        specifier: ^1.23.0
-        version: 1.23.0(react@19.2.7)
+        specifier: ^1.25.0
+        version: 1.25.0(react@19.2.7)
       pg:
         specifier: ^8.22.0
         version: 8.22.0
@@ -721,10 +721,10 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^1.18.0
+        specifier: ^1.23.4
         version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: ^1.11.0
+        specifier: ^1.13.9
         version: link:../../libs/act-pg
       cli-table3:
         specifier: ^0.6.5
@@ -6899,8 +6899,8 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lucide-react@1.23.0:
-    resolution: {integrity: sha512-38BpJcD0JhFosxHApP/BYsBetLpQFRoTRzEzstM/XCc3jsAG7wqaY1lgVwxiUe3xqYE+lNxo2PkCmYwXWrwwIw==}
+  lucide-react@1.25.0:
+    resolution: {integrity: sha512-/mdJTRbiwcLOQ1NZZK1amZF9rIZyvO18D6r9TngE6TG1NmqHgFuT4eE7Xrkm9UsXMbBJD1NlfwHVltCDWHrOTw==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -16666,7 +16666,7 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
-  lucide-react@1.23.0(react@19.2.7):
+  lucide-react@1.25.0(react@19.2.7):
     dependencies:
       react: 19.2.7
 
