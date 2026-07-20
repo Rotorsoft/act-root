@@ -65,8 +65,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
-    "@clack/prompts": "^1.6.0",
+    "@anthropic-ai/sdk": "^0.112.1",
+    "@clack/prompts": "^1.7.0",
     "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.17",
