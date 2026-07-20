@@ -338,7 +338,7 @@ describe("SqliteStore pii_encryption", () => {
     expect(seen[1]!.pii).toBeNull();
   });
 
-  it("transparently decrypts pii on query_stats head/tail", async () => {
+  it("never carries pii on query_stats head/tail — the operator-introspection surface is pii-safe (#1294)", async () => {
     const key = randomBytes(32);
     const { store, raw, path } = await freshStore(key);
     track(store, raw, path);
@@ -361,21 +361,32 @@ describe("SqliteStore pii_encryption", () => {
       { correlation: "c8", causation: {} }
     );
 
+    // `query_stats` has no actor context and no disclosure gate, so it must
+    // not leak the plaintext pii the way `query`/`load` (gated) can. Matches
+    // PostgresStore and InMemoryStore, which omit the pii column entirely.
     const stats = await store.query_stats([stream], { tail: true });
     const entry = stats.get(stream);
-    expect(entry?.head?.pii).toEqual({ email: "tail@example.com" });
-    expect(entry?.tail?.pii).toEqual({ email: "head@example.com" });
+    expect(entry?.head?.pii).toBeUndefined();
+    expect(entry?.tail?.pii).toBeUndefined();
 
-    // Same shape on the full-scan code path (count + names → exercises
-    // the second `to_committed` closure).
+    // Same on the full-scan code path (count + names → exercises the second
+    // `to_committed` closure, including its tail branch).
     const full = await store.query_stats([stream], {
       tail: true,
       count: true,
       names: true,
     });
     const full_entry = full.get(stream);
-    expect(full_entry?.head?.pii).toEqual({ email: "tail@example.com" });
-    expect(full_entry?.tail?.pii).toEqual({ email: "head@example.com" });
+    expect(full_entry?.head?.pii).toBeUndefined();
+    expect(full_entry?.tail?.pii).toBeUndefined();
     expect(full_entry?.count).toBe(2);
+
+    // The pii is still durably stored (ciphertext on disk) — this surface
+    // just doesn't surface it. `query` (gated) still round-trips it.
+    const raw_rows = await raw.execute({
+      sql: "SELECT pii FROM events WHERE stream = ? ORDER BY version",
+      args: [stream],
+    });
+    expect(typeof raw_rows.rows[0]!.pii).toBe("string");
   });
 });

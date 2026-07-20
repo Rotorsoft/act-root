@@ -312,6 +312,11 @@ export type EventName<E extends Schemas = Schemas> =
  * - `tail` — the **earliest** event (lowest id), opt-in via
  *   {@link QueryStatsOptions.tail}.
  *
+ * `head`/`tail` never carry `pii`. `query_stats` is an operator-introspection
+ * surface with no actor context and no disclosure gate, so — like any
+ * un-gated read — it omits the pii sidecar on every adapter (#1294). Route
+ * pii through `load` (gated) instead.
+ *
  * @template E - Event schemas; defaults to {@link Schemas} when the caller
  *   does not narrow.
  * @property head - Latest non-excluded event for the stream.
