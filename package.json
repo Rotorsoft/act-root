@@ -81,7 +81,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "chance": "^1.1.13",
     "concurrently": "^10.0.3",
-    "fast-check": "^4.8.0",
+    "fast-check": "^4.9.0",
     "lint-staged": "^17.0.8",
     "semantic-release": "^25.0.7",
     "semantic-release-monorepo": "^8.0.2",
