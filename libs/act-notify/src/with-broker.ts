@@ -84,15 +84,24 @@ export function withBroker<S extends Store>(
           name: name as string,
         })),
       };
-      try {
-        await broker.publish({ origin, notification });
-      } catch (error) {
-        // Hint, not a contract: listeners fall back to the poll path.
+      // Hint, not a contract: the publish must never gate the durable
+      // write's return. Invoke it synchronously (so an in-process broker
+      // fans out before commit resolves) but do NOT await the result — a
+      // slow, hung, or rejecting broker degrades cross-process latency to
+      // the poll cycle, never a commit.
+      const warn = (error: unknown) =>
         log().warn(
           `Broker publish failed for stream "${stream}": ${
             error instanceof Error ? error.message : String(error)
           } — remote workers wake on their next poll cycle.`
         );
+      try {
+        void Promise.resolve(broker.publish({ origin, notification })).catch(
+          warn
+        );
+      } catch (error) {
+        // Synchronous throw from a synchronous broker (e.g. Loopback).
+        warn(error);
       }
     }
     return committed;

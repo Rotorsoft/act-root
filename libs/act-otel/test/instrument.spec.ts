@@ -256,4 +256,59 @@ describe("instrument", () => {
     await dispose1();
     await dispose2();
   });
+
+  // ACT-1313 — the streams_blocked gauge is shared/idempotent across
+  // bridges on one registry, so its single collect() must sum every live
+  // app, not just the first one instrumented.
+  test("streams_blocked gauge sums blocked streams across every app on a shared registry", async ({
+    app,
+  }) => {
+    void app;
+    const registry = new Registry();
+    const makeSurface = (blocked: number) => ({
+      on: () => {},
+      off: () => {},
+      blocked_streams: async () =>
+        Array.from({ length: blocked }, (_, i) => ({ stream: `s${i}` })),
+    });
+    // app1 healthy (0), app2 has 5 parked poison streams.
+    const dispose1 = instrument(makeSurface(0) as never, { registry });
+    const dispose2 = instrument(makeSurface(5) as never, { registry });
+
+    // The gauge's collect() runs on scrape; it must consult BOTH apps.
+    // Bound to the first app only, this would read 0.
+    expect(await value(registry, "act_streams_blocked")).toBe(5);
+
+    // Disposing both bridges empties the per-registry provider set.
+    await dispose2();
+    await dispose1();
+  });
+
+  test("a provider rejection is swallowed per-scrape and the other apps still report", async ({
+    app,
+  }) => {
+    void app;
+    const registry = new Registry();
+    const healthy = {
+      on: () => {},
+      off: () => {},
+      blocked_streams: async () => [{ stream: "s0" }, { stream: "s1" }],
+    };
+    const degraded = {
+      on: () => {},
+      off: () => {},
+      blocked_streams: async () => {
+        throw new Error("store unreachable");
+      },
+    };
+    const dispose1 = instrument(healthy as never, { registry });
+    const dispose2 = instrument(degraded as never, { registry });
+
+    // The degraded app's rejection must not poison the whole scrape —
+    // the healthy app's 2 blocked streams still report.
+    expect(await value(registry, "act_streams_blocked")).toBe(2);
+
+    await dispose1();
+    await dispose2();
+  });
 });

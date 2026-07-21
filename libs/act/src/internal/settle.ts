@@ -110,17 +110,25 @@ export class SettleLoop<TEvents extends Schemas> {
         // projection) without forcing callers to roll their own loop.
         // `maxPasses` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
-          const { subscribed } = await this._deps.correlate({
+          const after_before = this._deps.checkpoint();
+          const { subscribed, last_id } = await this._deps.correlate({
             ...correlate_query,
-            after: this._deps.checkpoint(),
+            after: after_before,
           });
           // correlate (subscribe + query) succeeded — the store responded.
           this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
+          // `last_id > after_before` counts correlate consuming events as
+          // progress even when nothing subscribed or drained this pass — a
+          // bounded correlate window (`limit`) full of inert events would
+          // otherwise break the loop before a reactive event just past the
+          // window is ever scanned. Terminates: ids are monotonic and
+          // finite, so once no events remain `last_id === after_before`.
           const made_progress =
             subscribed > 0 ||
             last_drain.acked.length > 0 ||
-            last_drain.blocked.length > 0;
+            last_drain.blocked.length > 0 ||
+            last_id > after_before;
           if (!made_progress) break;
         }
         if (last_drain) this._deps.on_settled(last_drain);

@@ -60,6 +60,16 @@ function gauge_on(
 }
 
 /**
+ * Per-registry set of `blocked_streams` providers, one per live bridge.
+ * The `streams_blocked` gauge is shared/idempotent across bridges on the
+ * same registry, so its single `collect()` cannot close over one app —
+ * it must sum every live provider, or a second `instrument()` on the same
+ * registry would leave that app's blocked streams invisible on the gauge.
+ * Keyed weakly so a discarded registry drops its providers with it.
+ */
+const blocked_providers = new WeakMap<Registry, Set<() => Promise<number>>>();
+
+/**
  * The slice of a built Act the bridge needs — kept structural (same
  * pattern as the `@rotorsoft/act-http` transports) so the package does
  * not couple to the orchestrator's generics.
@@ -241,23 +251,44 @@ export function instrument(
     labelNames: ["circuit"],
     registers,
   });
+  // Register this bridge's blocked-streams provider on the shared registry
+  // so the (idempotent) gauge's collect() sees every live app, not just the
+  // first one instrumented.
+  const blocked_provider = async () =>
+    (await app.blocked_streams({ limit: config.blockedStreamsLimit })).length;
+  let providers = blocked_providers.get(registry);
+  if (!providers) {
+    providers = new Set();
+    blocked_providers.set(registry, providers);
+  }
+  providers.add(blocked_provider);
+
   const blocked_gauge = gauge_on(registry, {
     name: `${p}streams_blocked`,
     help: "Streams currently blocked (evaluated per scrape; page on > 0)",
     registers,
     async collect() {
-      // A blocked_streams() rejection (degraded store) must not poison the
-      // whole scrape — prom-client rejects registry.metrics() if any
-      // collect() rejects, blinding every other metric. Swallow it here,
-      // leave the gauge at its last value, and log via the Logger port.
-      try {
-        const streams = await app.blocked_streams({
-          limit: config.blockedStreamsLimit,
-        });
-        this.set(streams.length);
-      } catch (error) {
-        log().error(error as Error);
+      // Sum blocked streams across EVERY bridge on this registry — the
+      // gauge is shared/idempotent, so its single collect() must consult
+      // all live providers, not just the app the first bridge closed over.
+      // A single provider's rejection (degraded store) is swallowed
+      // per-provider: prom-client rejects registry.metrics() if any
+      // collect() rejects, blinding every other metric, so a failing app
+      // contributes nothing this scrape (logged via the Logger port)
+      // rather than poisoning the whole gauge.
+      let total = 0;
+      // `providers` is the shared, per-registry set — a stable reference
+      // that every later bridge on this registry mutates in place, so this
+      // one collect() (only the first bridge's survives gauge_on) sees them
+      // all.
+      for (const provider of providers) {
+        try {
+          total += await provider();
+        } catch (error) {
+          log().error(error as Error);
+        }
       }
+      this.set(total);
     },
   });
 
@@ -306,6 +337,8 @@ export function instrument(
     blocked_gauge,
   ];
   return async () => {
+    providers.delete(blocked_provider);
+    if (providers.size === 0) blocked_providers.delete(registry);
     for (const [event, listener] of listeners)
       app.off(event as never, listener as never);
     for (const m of metrics)

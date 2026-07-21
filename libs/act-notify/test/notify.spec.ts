@@ -97,6 +97,42 @@ describe("withBroker", () => {
     ).resolves.toHaveLength(1);
   });
 
+  it("does not block commit on a hung broker publish — the hint never gates the durable write", async () => {
+    // Broker connected but unresponsive: publish returns a promise that
+    // never settles (network partition / overloaded Redis / GC pause).
+    const hung: Broker = {
+      publish: () => new Promise<void>(() => {}),
+      subscribe: () => () => {},
+    };
+    const base = new InMemoryStore();
+    const wrapped = withBroker(base, hung);
+    // Would hang forever if commit awaited the publish; resolves now.
+    const committed = await wrapped.commit(
+      "s1",
+      [{ name: "Incremented", data: { by: 1 } }],
+      meta
+    );
+    expect(committed).toHaveLength(1);
+    // The durable write landed regardless of the stalled hint channel.
+    const seen: string[] = [];
+    await base.query((e) => {
+      seen.push(e.name as string);
+    });
+    expect(seen).toEqual(["Incremented"]);
+  });
+
+  it("swallows an async publish rejection without failing the commit", async () => {
+    // node-redis-shaped broker whose publish rejects asynchronously.
+    const rejecting: Broker = {
+      publish: () => Promise.reject(new Error("redis unreachable")),
+      subscribe: () => () => {},
+    };
+    const wrapped = withBroker(new InMemoryStore(), rejecting);
+    await expect(
+      wrapped.commit("s1", [{ name: "Incremented", data: { by: 1 } }], meta)
+    ).resolves.toHaveLength(1);
+  });
+
   it("skips the publish when a commit lands no events", async () => {
     const broker = new LoopbackBroker();
     let published = 0;
