@@ -3987,6 +3987,46 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
+      it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {
+        const s = `pii-stats-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1 },
+              pii: { email: "head@example.com" },
+            },
+            {
+              name: "Incremented",
+              data: { amount: 2 },
+              pii: { email: "tail@example.com" },
+            },
+          ],
+          make_meta({ stream: s })
+        );
+
+        // `query_stats` has no actor context and no disclosure gate, so it
+        // must not surface pii — regardless of adapter or at-rest encryption.
+        // Both code paths: heads-only (no count/names) and full-scan.
+        const heads = await store.query_stats<CounterEvents>([s], {
+          tail: true,
+        });
+        const h = heads.get(s);
+        expect(h?.head?.pii == null).toBe(true);
+        expect(h?.tail?.pii == null).toBe(true);
+
+        const full = await store.query_stats<CounterEvents>([s], {
+          tail: true,
+          count: true,
+          names: true,
+        });
+        const f = full.get(s);
+        expect(f?.head?.pii == null).toBe(true);
+        expect(f?.tail?.pii == null).toBe(true);
+        expect(f?.count).toBe(2);
+      });
+
       it("passes through events without pii (pii is null or undefined on load)", async () => {
         const s = `pii-none-${uid()}`;
         await store.commit<CounterEvents>(

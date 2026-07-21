@@ -1147,7 +1147,11 @@ export class SqliteStore implements Store {
     want_tail: boolean,
     limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
-    const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta, e.pii`;
+    // `query_stats` is an operator-introspection surface with no actor
+    // context and no disclosure gate, so it never carries pii — heads/tails
+    // return the event shape without the pii sidecar, matching PostgresStore
+    // and InMemoryStore (#1294).
+    const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta`;
     // Keyset pagination (#1010): order heads by stream ascending so the
     // caller can use the last key as the next `after` cursor; cap with
     // LIMIT when set (unbounded otherwise).
@@ -1185,9 +1189,9 @@ export class SqliteStore implements Store {
         : null,
     ]);
 
-    const to_committed = async (
+    const to_committed = (
       row: Record<string, unknown>
-    ): Promise<Committed<E, keyof E>> =>
+    ): Committed<E, keyof E> =>
       ({
         id: Number(row.id),
         stream: row.stream as string,
@@ -1196,13 +1200,12 @@ export class SqliteStore implements Store {
         data: parse_json(row.data as string) as any,
         meta: parse_json(row.meta as string) as any,
         created: new Date(row.created as string),
-        pii: await this._parse_pii_from_read(row.pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
     for (const row of headRes.rows) {
       out.set(row.stream as string, {
-        head: await to_committed(row as Record<string, unknown>),
+        head: to_committed(row as Record<string, unknown>),
       });
     }
     if (tailRes) {
@@ -1214,7 +1217,7 @@ export class SqliteStore implements Store {
             head: Committed<E, keyof E>;
             tail?: Committed<E, keyof E>;
           }
-        ).tail = await to_committed(row as Record<string, unknown>);
+        ).tail = to_committed(row as Record<string, unknown>);
       }
     }
     return out;
@@ -1246,12 +1249,14 @@ export class SqliteStore implements Store {
       : "";
     const tail_cols = want_tail
       ? `, t.id AS t_id, t.stream AS t_stream, t.version AS t_version,
-           t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta, t.pii AS t_pii`
+           t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta`
       : "";
 
+    // No pii column: `query_stats` heads/tails are pii-free (#1294 — see
+    // `_query_stats_heads_only`).
     const sql = `
       WITH ef AS (
-        SELECT e.id, e.stream, e.version, e.name, e.data, e.created, e.meta, e.pii
+        SELECT e.id, e.stream, e.version, e.name, e.data, e.created, e.meta
         FROM ${from_clause}
         ${where_clause}
       ),
@@ -1274,7 +1279,7 @@ export class SqliteStore implements Store {
       )
       ${tail_cte}
       SELECT
-        h.id, h.stream, h.version, h.name, h.data, h.created, h.meta, h.pii,
+        h.id, h.stream, h.version, h.name, h.data, h.created, h.meta,
         a.cnt AS agg_count,
         a.names AS agg_names
         ${tail_cols}
@@ -1291,16 +1296,15 @@ export class SqliteStore implements Store {
     const full_args = limit !== undefined ? [...args, limit] : args;
     const res = await this.client.execute({ sql, args: full_args as any[] });
 
-    const to_committed = async (
+    const to_committed = (
       id: unknown,
       stream: unknown,
       version: unknown,
       name: unknown,
       data: unknown,
       meta: unknown,
-      created: unknown,
-      pii: unknown
-    ): Promise<Committed<E, keyof E>> =>
+      created: unknown
+    ): Committed<E, keyof E> =>
       ({
         id: Number(id),
         stream: stream as string,
@@ -1309,7 +1313,6 @@ export class SqliteStore implements Store {
         data: parse_json(data as string) as any,
         meta: parse_json(meta as string) as any,
         created: new Date(created as string),
-        pii: await this._parse_pii_from_read(pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
@@ -1321,27 +1324,25 @@ export class SqliteStore implements Store {
         count?: number;
         names?: Record<string, number>;
       } = {
-        head: await to_committed(
+        head: to_committed(
           r.id,
           r.stream,
           r.version,
           r.name,
           r.data,
           r.meta,
-          r.created,
-          r.pii
+          r.created
         ),
       };
       if (want_tail && r.t_id !== null && r.t_id !== undefined) {
-        stats.tail = await to_committed(
+        stats.tail = to_committed(
           r.t_id,
           r.t_stream,
           r.t_version,
           r.t_name,
           r.t_data,
           r.t_meta,
-          r.t_created,
-          r.t_pii
+          r.t_created
         );
       }
       if (want_count) stats.count = Number(r.agg_count);
