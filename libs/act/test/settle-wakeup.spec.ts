@@ -83,3 +83,59 @@ describe("settle loop wake-up during a running cycle (ACT-1205)", () => {
     loop.stop();
   });
 });
+
+/**
+ * ACT-1309 — SettleLoop must keep paginating while correlate advances its
+ * checkpoint, even when a window subscribes/drains nothing.
+ *
+ * The loop used to derive progress solely from subscribe/ack/block counts,
+ * discarding correlate's `last_id`. A bounded correlate window (`limit`)
+ * full of globally-inert events advanced the checkpoint but registered "no
+ * progress", so the loop broke before the next window — holding a reactive
+ * event — was ever scanned. Counting `last_id > after_before` as progress
+ * fixes it; it terminates because ids are monotonic and finite.
+ */
+describe("settle loop paginates past inert windows (ACT-1309)", () => {
+  it("keeps correlating while last_id advances, though nothing subscribes or drains", async () => {
+    const breaker = new CircuitBreaker({
+      failureThreshold: 5,
+      cooldownMs: 1000,
+    });
+
+    const MAX = 4; // inert events exist at ids 0..4
+    let checkpoint = -1;
+    let correlate_calls = 0;
+    let settled_signal!: () => void;
+    const settled = new Promise<void>((r) => {
+      settled_signal = r;
+    });
+
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => checkpoint,
+        correlate: async ({ after, limit }) => {
+          correlate_calls++;
+          // Scan a `limit`-sized window and advance the checkpoint, like the
+          // real CorrelateCycle — but subscribe nothing (all events inert).
+          const next = Math.min((after ?? -1) + (limit ?? 2), MAX);
+          checkpoint = next;
+          return { subscribed: 0, last_id: next };
+        },
+        drain: async () => empty_drain(),
+        on_settled: () => settled_signal(),
+        breaker,
+      },
+      0
+    );
+
+    loop.schedule({ correlate: { after: -1, limit: 2 }, debounceMs: 0 });
+    await settled;
+
+    // -1 → 1 → 3 → 4 → (4, no advance → stop): four correlate passes.
+    // On the old code the first inert pass broke the loop (1 call).
+    expect(correlate_calls).toBe(4);
+    expect(checkpoint).toBe(MAX);
+    loop.stop();
+  });
+});
