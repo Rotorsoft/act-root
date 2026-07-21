@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.15...@rotorsoft/act-tck-v1.27.16) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-sqlite:** omit pii from query_stats head/tail ([7a78379](https://github.com/rotorsoft/act-root/commit/7a78379df438cc2da19e11d20183f62e84fe52f1)), closes [#1294](https://github.com/rotorsoft/act-root/issues/1294)
+* **act:** block before ack so partial-progress-then-block lands the block ([7d59322](https://github.com/rotorsoft/act-root/commit/7d593229ca3cee55b6d10ed99a4098b79fcedbc9)), closes [#1296](https://github.com/rotorsoft/act-root/issues/1296)
+
 # [@rotorsoft/act-tck-v1.27.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.14...@rotorsoft/act-tck-v1.27.15) (2026-07-20)
 
 
