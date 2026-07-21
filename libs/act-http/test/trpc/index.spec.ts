@@ -156,18 +156,27 @@ describe("trpc(app, options) — generated router", () => {
     );
   });
 
-  test("maps ValidationError to a 4xx code", async ({ app }) => {
+  test("maps a malformed body to 422 UNPROCESSABLE_CONTENT (parity with Hono/OpenAPI)", async ({
+    app,
+  }) => {
     const router = trpc<Ctx>(app as never, default_options());
     const t = initTRPC.context<Ctx>().create();
     const caller = t.createCallerFactory(router)(
       make_ctx()
     ) as unknown as AnyCaller;
 
-    // Empty key violates the action's `.min(1)` Zod constraint. tRPC's
-    // own input parser catches it first as BAD_REQUEST.
-    await expect(caller.PressKey({ key: "" })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
+    // Empty key violates the action's `.min(1)` Zod constraint. The generator
+    // validates in-resolver (not via tRPC's `.input()`, which would hardcode a
+    // BAD_REQUEST 400), so the failure routes through `to_trpc_error` as the
+    // same ValidationError a malformed `app.do` payload raises → 422, matching
+    // the Hono/OpenAPI transports (#1295).
+    try {
+      await caller.PressKey({ key: "" });
+      throw new Error("expected the malformed body to reject");
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe("UNPROCESSABLE_CONTENT");
+      expect(getHTTPStatusCodeFromError(err as never)).toBe(422);
+    }
   });
 
   describe("expectedVersion (optimistic concurrency)", () => {
