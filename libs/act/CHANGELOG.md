@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.11...@rotorsoft/act-v1.23.12) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-sqlite:** omit pii from query_stats head/tail ([7a78379](https://github.com/rotorsoft/act-root/commit/7a78379df438cc2da19e11d20183f62e84fe52f1)), closes [#1294](https://github.com/rotorsoft/act-root/issues/1294)
+
 # [@rotorsoft/act-v1.23.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.10...@rotorsoft/act-v1.23.11) (2026-07-20)
 
 
