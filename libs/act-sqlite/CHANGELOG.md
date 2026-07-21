@@ -1,3 +1,11 @@
+# [@rotorsoft/act-sqlite-v1.12.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.7...@rotorsoft/act-sqlite-v1.12.8) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-sqlite:** omit pii from query_stats head/tail ([7a78379](https://github.com/rotorsoft/act-root/commit/7a78379df438cc2da19e11d20183f62e84fe52f1)), closes [#1294](https://github.com/rotorsoft/act-root/issues/1294)
+* **act:** advance the watermark past the succeeded prefix on partial-progress defers ([#1278](https://github.com/rotorsoft/act-root/issues/1278)) ([4bfd833](https://github.com/rotorsoft/act-root/commit/4bfd83313f375403031c6781b0f7eb01169f74d7))
+
 # [@rotorsoft/act-sqlite-v1.12.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.6...@rotorsoft/act-sqlite-v1.12.7) (2026-07-17)
 
 
