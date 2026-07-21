@@ -1,8 +1,35 @@
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { receiver } from "../../src/receiver/start.js";
 import { sign_request } from "../../src/webhook/sign.js";
+
+/**
+ * Wrap an idempotency store to record how many times each key is
+ * committed/released — the route and the mounted `webhookMiddleware`
+ * must together finalize a delivery exactly once (#1293).
+ */
+function countingStore(inner: IdempotencyStore): {
+  store: IdempotencyStore;
+  commits: string[];
+  releases: string[];
+} {
+  const commits: string[] = [];
+  const releases: string[] = [];
+  const store: IdempotencyStore = {
+    claim: (k) => inner.claim(k),
+    commit: (k) => {
+      commits.push(k);
+      return inner.commit(k);
+    },
+    release: (k) => {
+      releases.push(k);
+      return inner.release(k);
+    },
+  };
+  return { store, commits, releases };
+}
 
 const OrderSchema = z.object({
   orderId: z.string(),
@@ -239,6 +266,59 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     const second = await fire();
     expect(second.status).toBe(204);
     expect(attempts).toBe(2);
+  });
+
+  it("finalizes a successful delivery exactly once — no double commit (#1293)", async () => {
+    const { store, commits, releases } = countingStore(
+      new InMemoryIdempotencyStore()
+    );
+    const r = receiver({ port: 0, store })
+      .on("OrderConfirmed", OrderSchema, async () => {})
+      .build();
+
+    const response = await r.fetch(
+      new Request("http://localhost/OrderConfirmed", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "req-once-ok",
+        },
+        body: JSON.stringify({ orderId: "o-1", total: 1 }),
+      })
+    );
+
+    // The route's finalize and the middleware's auto-finalize collapse
+    // into a single store call via the `settled` guard.
+    expect(response.status).toBe(204);
+    expect(commits).toEqual(["req-once-ok"]);
+    expect(releases).toEqual([]);
+  });
+
+  it("finalizes a failed delivery exactly once — no double release (#1293)", async () => {
+    const { store, commits, releases } = countingStore(
+      new InMemoryIdempotencyStore()
+    );
+    const r = receiver({ port: 0, store })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        throw new Error("downstream unreachable");
+      })
+      .build();
+
+    const response = await r.fetch(
+      new Request("http://localhost/OrderConfirmed", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "req-once-fail",
+        },
+        body: JSON.stringify({ orderId: "o-1", total: 1 }),
+      })
+    );
+
+    // A second, stale release would delete a concurrent retry's live claim.
+    expect(response.status).toBe(500);
+    expect(releases).toEqual(["req-once-fail"]);
+    expect(commits).toEqual([]);
   });
 
   it("dedups a retry after a successful delivery (handler runs exactly once)", async () => {

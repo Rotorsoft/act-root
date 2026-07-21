@@ -40664,8 +40664,14 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
           } catch (err) {
             // Transient failure: release the tentative claim so the
             // sender's retry re-processes instead of being deduped
-            // into a silent success and permanently lost.
-            await options.store.release(idem.key);
+            // into a silent success and permanently lost. Finalize through
+            // the context's \`settled\`-guarded finalizer, NOT the raw store —
+            // the \`webhookMiddleware\` this route mounts auto-finalizes after
+            // \`next()\` too, and hitting the raw store here double-fires (a
+            // stale second \`release\` can delete a concurrent retry's live
+            // claim, breaking exactly-once). The guard collapses both into
+            // one store call (#1293).
+            await idem.release();
             return c.json(
               {
                 error: "handler-failed",
@@ -40674,9 +40680,10 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
               500
             );
           }
-          // Success: promote the tentative claim to a durable record
-          // so every later retry of this key dedups.
-          await options.store.commit(idem.key);
+          // Success: promote the tentative claim to a durable record so every
+          // later retry of this key dedups — again via the guarded finalizer,
+          // not the raw store (#1293).
+          await idem.commit();
         }
 
         return c.body(null, 204);
