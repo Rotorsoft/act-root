@@ -50,7 +50,7 @@
  * transports never sees two error shapes for the same framework
  * error.
  */
-import type { Actor, Target } from "@rotorsoft/act";
+import { type Actor, type Target, validate } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import {
   type AnyTRPCMiddlewareFunction,
@@ -341,8 +341,15 @@ export function trpc<
     ReturnType<ReturnType<typeof t.procedure.input>["mutation"]>
   > = {};
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
+    const action_schema = state.actions[action_name];
     handlers[action_name] = t.procedure
-      .input(state.actions[action_name] as never)
+      // Passthrough parser: tRPC's own `.input()` validation is deliberately
+      // bypassed because a Zod failure there surfaces as a hardcoded
+      // BAD_REQUEST (400) that never reaches `to_trpc_error`. Validation runs
+      // in the resolver (below) instead, so a malformed body maps to the SAME
+      // 422 / ApiError a `ValidationError` thrown inside `app.do` produces —
+      // cross-transport parity with Hono/OpenAPI (#1295).
+      .input((raw: unknown) => raw)
       .mutation(async ({ input, ctx }) => {
         const host_ctx = ctx as unknown as Ctx;
         // Resolve the actor first, mirroring Hono's `authenticated` middleware:
@@ -360,9 +367,19 @@ export function trpc<
           });
         }
         try {
-          const stream = await options.stream(action_name, input, host_ctx);
+          // Validate the payload before the stream / expectedVersion resolvers
+          // see it, mirroring Hono's zValidator-then-handler order. `validate`
+          // throws the framework `ValidationError`, which `to_trpc_error` maps
+          // to 422 / UNPROCESSABLE_CONTENT with the shared ApiError envelope
+          // (#1295).
+          const validated = validate(
+            action_name,
+            input as never,
+            action_schema as never
+          );
+          const stream = await options.stream(action_name, validated, host_ctx);
           const expected_version = options.expectedVersion
-            ? await options.expectedVersion(action_name, input, host_ctx)
+            ? await options.expectedVersion(action_name, validated, host_ctx)
             : undefined;
           const target =
             expected_version === undefined
@@ -381,7 +398,11 @@ export function trpc<
               options.idempotency.store,
               key,
               () =>
-                app.do(action_name as never, target as never, input as never)
+                app.do(
+                  action_name as never,
+                  target as never,
+                  validated as never
+                )
             );
             if (outcome.deduped) {
               throw new TRPCError({
@@ -396,7 +417,7 @@ export function trpc<
           return await app.do(
             action_name as never,
             target as never,
-            input as never
+            validated as never
           );
         } catch (err) {
           if (err instanceof TRPCError) throw err;
