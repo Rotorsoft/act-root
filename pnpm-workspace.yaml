@@ -41,7 +41,7 @@ overrides:
   "path-to-regexp@>=8.0.0 <8.4.0": ">=8.4.2"
   "lodash-es@<=4.17.23": ">=4.18.0"
   "follow-redirects@<=1.15.11": ">=1.16.0"
-  "fast-uri@<=3.1.1": ">=4.1.0"
+  "fast-uri@<=3.1.1": ">=4.1.1"
   "@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3": ">=8.0.1"
   "ws@>=8.0.0 <8.20.1": ">=8.21.1"
   "webpack-dev-server@<=5.2.3": ">=5.2.6"
