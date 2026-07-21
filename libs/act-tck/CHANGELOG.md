@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.18](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.17...@rotorsoft/act-tck-v1.27.18) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-http:** map tRPC malformed body to 422 via in-resolver validation ([c2517ea](https://github.com/rotorsoft/act-root/commit/c2517ea68a7521b2da90e658ebbd3697ada40693)), closes [#1295](https://github.com/rotorsoft/act-root/issues/1295)
+
 # [@rotorsoft/act-tck-v1.27.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.16...@rotorsoft/act-tck-v1.27.17) (2026-07-21)
 
 
