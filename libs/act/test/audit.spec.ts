@@ -272,6 +272,69 @@ describe("audit", () => {
         name: "Renamed",
       });
     });
+
+    // ACT-1310 — deprecation is classified per-state, never over the
+    // global event-name union. Two unrelated aggregates whose sole events
+    // share a `_v<n>` stem must not cross-contaminate the classifier.
+    const aStar = state({ AStar: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Approved: z.object({}) })
+      .patch({ Approved: (_e, s) => ({ n: s.n + 1 }) })
+      .on({ approve: z.object({}) })
+      .emit(() => ["Approved", {}])
+      .build();
+    const bStar = state({ BStar: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Approved_v2: z.object({}) })
+      .patch({ Approved_v2: (_e, s) => ({ n: s.n + 1 }) })
+      .on({ approve2: z.object({}) })
+      .emit(() => ["Approved_v2", {}])
+      .build();
+
+    it("does not flag a sole-version event deprecated by a same-stem event in another state", async () => {
+      const app = act().withState(aStar).withState(bStar).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      // Approved is the ONLY version of its family within AStar.
+      expect([...app.registry.deprecated_events("AStar")]).toEqual([]);
+      for (let i = 0; i < 10; i++) {
+        await store().commit("a1", [{ name: "Approved", data: {} }], meta);
+      }
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["deprecated-load"])) findings.push(f);
+      // No cross-state deprecation finding — Approved is current in AStar.
+      expect(findings).toEqual([]);
+    });
+
+    it("does not throw on a cross-state leading-zero version collision the builder accepted", async () => {
+      const cStar = state({ CStar: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ Gadget_v2: z.object({}) })
+        .patch({ Gadget_v2: (_e, s) => ({ n: s.n + 1 }) })
+        .on({ gc: z.object({}) })
+        .emit(() => ["Gadget_v2", {}])
+        .build();
+      const dStar = state({ DStar: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ Gadget_v02: z.object({}) })
+        .patch({ Gadget_v02: (_e, s) => ({ n: s.n + 1 }) })
+        .on({ gd: z.object({}) })
+        .emit(() => ["Gadget_v02", {}])
+        .build();
+      // Each state is valid in isolation, so build() accepts both.
+      const app = act().withState(cStar).withState(dStar).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit("c1", [{ name: "Gadget_v2", data: {} }], meta);
+      // The global set {Gadget_v2, Gadget_v02} would trip the collision
+      // guard; per-state classification never sees both together.
+      const findings: AuditFinding[] = [];
+      await expect(
+        (async () => {
+          for await (const f of app.audit(["deprecated-load"]))
+            findings.push(f);
+        })()
+      ).resolves.toBeUndefined();
+      expect(findings).toEqual([]);
+    });
   });
 
   describe("dispatcher", () => {

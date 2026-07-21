@@ -82,8 +82,6 @@ export type AuditDeps = {
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** state-name → state (for snapshot-supported check on restart-candidate). */
   readonly states: ReadonlyMap<string, State<any, any, any>>;
-  /** All event names the registry knows (for unknown-name detection). */
-  readonly known_events: ReadonlySet<string>;
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
   /**
@@ -271,6 +269,38 @@ const make_schema_pass: PassFactory = (deps) => {
  * emits one finding per deprecated event above the threshold during
  * `drain`.
  */
+/**
+ * Per-state deprecation classification — mirrors the builder/registry
+ * (`registry.deprecated_events(state_name)`), which group `_v<n>` families
+ * strictly within one state's own event set. Classifying over the global
+ * event-name union instead would conflate same-stem events across
+ * unrelated states (a false-positive migration finding) and even throw on
+ * a cross-state leading-zero version collision the builder accepted (#1310).
+ * Returns a map of deprecated event name → its current (highest) sibling.
+ */
+const classify_deprecated_by_state = (
+  deps: AuditDeps
+): ReadonlyMap<string, string> => {
+  const names_by_state = new Map<State<any, any, any>, Set<string>>();
+  for (const [name, state] of deps.event_to_state) {
+    let set = names_by_state.get(state);
+    if (!set) {
+      set = new Set();
+      names_by_state.set(state, set);
+    }
+    set.add(name);
+  }
+  const deprecated_to_current = new Map<string, string>();
+  for (const names of names_by_state.values()) {
+    for (const name of deprecated_event_names(names)) {
+      // `current_version_of` is guaranteed defined for a deprecated name
+      // within its own state's family.
+      deprecated_to_current.set(name, current_version_of(name, names)!);
+    }
+  }
+  return deprecated_to_current;
+};
+
 const make_deprecated_load_pass: PassFactory = (deps, options) => {
   const share_min =
     options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
@@ -296,18 +326,18 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
       const findings: AuditFinding[] = [];
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
-      // Registry-driven deprecation classification (not on-disk-driven).
-      const deprecated = deprecated_event_names(deps.known_events);
-      const sorted = [...deprecated]
+      // Per-state deprecation classification (not on-disk-driven, and not
+      // over the global event-name union — see #1310).
+      const deprecated = classify_deprecated_by_state(deps);
+      const sorted = [...deprecated.keys()]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))
         .sort((a, b) => b.count - a.count);
       for (const { name, count } of sorted) {
         if (count === 0) continue;
         if (count / grand < share_min) continue;
-        // Contract: `deprecated_event_names(registry)` only returns names
-        // that have a higher version in the same family, so
-        // `current_version_of(name, registry)` is guaranteed defined.
-        const current_version = current_version_of(name, deps.known_events)!;
+        // `classify_deprecated_by_state` maps every deprecated name to its
+        // current (highest-version) sibling within the same state.
+        const current_version = deprecated.get(name)!;
         // per_stream is populated in lockstep with totals — name is guaranteed present.
         const top_streams = [...per_stream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))

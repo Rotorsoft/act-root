@@ -781,7 +781,6 @@ export class Act<
       logger: this._logger,
       event_to_state: this._event_to_state,
       states: this._states,
-      known_events: new Set(this._event_to_state.keys()),
       // The DECLARED lane universe — the implicit "default" plus every
       // `.withLane(...)` name — NOT `_drain_controllers.keys()` (#1224).
       // An `onlyLanes`-filtered instance builds a controller only for its
