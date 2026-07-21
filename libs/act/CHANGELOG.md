@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.13](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.12...@rotorsoft/act-v1.23.13) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act:** block before ack so partial-progress-then-block lands the block ([7d59322](https://github.com/rotorsoft/act-root/commit/7d593229ca3cee55b6d10ed99a4098b79fcedbc9)), closes [#1296](https://github.com/rotorsoft/act-root/issues/1296)
+
 # [@rotorsoft/act-v1.23.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.11...@rotorsoft/act-v1.23.12) (2026-07-21)
 
 
