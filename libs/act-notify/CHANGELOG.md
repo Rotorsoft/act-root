@@ -1,3 +1,10 @@
+# [@rotorsoft/act-notify-v0.1.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.1.2...@rotorsoft/act-notify-v0.1.3) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-notify:** don't await the broker hint-publish on the commit path ([457dc2a](https://github.com/rotorsoft/act-root/commit/457dc2a83fc48c61c4676d7ed298f3f540335632)), closes [#1311](https://github.com/rotorsoft/act-root/issues/1311)
+
 # [@rotorsoft/act-notify-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.1.1...@rotorsoft/act-notify-v0.1.2) (2026-07-18)
 
 
