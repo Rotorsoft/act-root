@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.16...@rotorsoft/act-tck-v1.27.17) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-http:** finalize receiver deliveries through the guarded finalizers ([aea5c68](https://github.com/rotorsoft/act-root/commit/aea5c6813d56faf9a6187210030e96c7a16b9dd5)), closes [#1293](https://github.com/rotorsoft/act-root/issues/1293)
+
 # [@rotorsoft/act-tck-v1.27.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.15...@rotorsoft/act-tck-v1.27.16) (2026-07-21)
 
 
