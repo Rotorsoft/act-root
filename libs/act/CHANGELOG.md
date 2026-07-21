@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.13...@rotorsoft/act-v1.23.14) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act:** classify audit deprecation per-state, not over the global event set ([ca7acce](https://github.com/rotorsoft/act-root/commit/ca7acce23e944b4688fdf0f13e582b6628bb83a4)), closes [#1310](https://github.com/rotorsoft/act-root/issues/1310)
+* **act:** count correlate watermark advancement as settle progress ([ecf21a3](https://github.com/rotorsoft/act-root/commit/ecf21a31c2d1eefbf4e181263e164f08d2476e84)), closes [#1309](https://github.com/rotorsoft/act-root/issues/1309)
+
 # [@rotorsoft/act-v1.23.13](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.12...@rotorsoft/act-v1.23.13) (2026-07-21)
 
 
