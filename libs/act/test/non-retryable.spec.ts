@@ -303,4 +303,52 @@ describe("NonRetryableError (drain integration)", () => {
     await app.unblock({ stream: "^bad-" });
     expect((await app.blocked_streams()).length).toBe(0);
   });
+
+  it("blocks in the SAME cycle after partial progress — ack must not drop the block (#1296)", async () => {
+    // A batch that succeeds on the first event and throws NonRetryable on the
+    // second finalizes with `handled > 0` AND `block: true`. Because `ack`
+    // releases the lease that `block`'s WHERE clause requires, acking before
+    // blocking used to silently drop the block: the watermark advanced past
+    // the succeeded prefix but the stream stayed live and re-ran its
+    // permanently-failed tail on the next cycle. `block` now runs first.
+    let attempts = 0;
+    let seen = 0;
+    const handler = vi.fn().mockImplementation(async () => {
+      seen++;
+      // Second event in the batch is the permanent failure.
+      if (seen >= 2) {
+        attempts++;
+        throw new NonRetryableError("permanent on the tail");
+      }
+    });
+    Object.defineProperty(handler, "name", { value: "partialThenBlock" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, { maxRetries: 5 })
+      .build();
+
+    // Two events on ONE stream, fetched together in one drain cycle.
+    await app.do("tick", { stream: "partial-1", actor }, {});
+    await app.do("tick", { stream: "partial-1", actor }, {});
+    await app.correlate();
+
+    const drained = await app.drain({ leaseMillis: 1 });
+    // Lands in BOTH: the watermark advanced past the succeeded prefix AND the
+    // stream is blocked in the same cycle.
+    expect(drained.acked.length).toBe(1);
+    expect(drained.blocked.length).toBe(1);
+    expect(drained.blocked[0].error).toContain("permanent on the tail");
+    expect(attempts).toBe(1);
+
+    // The stream is blocked, so a second drain never re-invokes the
+    // permanently-failed handler on the tail event.
+    const again = await app.drain({ leaseMillis: 1 });
+    expect(again.blocked.length).toBe(0);
+    expect(attempts).toBe(1);
+    expect((await app.blocked_streams()).map((p) => p.stream)).toEqual([
+      "partial-1",
+    ]);
+  });
 });
