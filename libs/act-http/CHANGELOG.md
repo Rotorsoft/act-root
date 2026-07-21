@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.11...@rotorsoft/act-http-v1.8.12) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-http:** finalize receiver deliveries through the guarded finalizers ([aea5c68](https://github.com/rotorsoft/act-root/commit/aea5c6813d56faf9a6187210030e96c7a16b9dd5)), closes [#1293](https://github.com/rotorsoft/act-root/issues/1293)
+
 # [@rotorsoft/act-http-v1.8.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.10...@rotorsoft/act-http-v1.8.11) (2026-07-20)
 
 
