@@ -121,7 +121,8 @@ Eviction cost: a redundant `store.subscribe` call when an evicted-but-still-acti
                               dispatch via handle / handleBatch
                                              │
                                              ▼
-                              ops.ack(successes), ops.block(retries-exhausted)
+                              ops.block(retries-exhausted) then ops.ack(successes)
+                                (block first — ack releases the lease block needs)
                                              │
                                              ▼
                               update lag/lead ratio per pressure

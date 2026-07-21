@@ -8474,6 +8474,23 @@ export async function run_drain_cycle<
   // retry carries the climbing \`retry\` so the budget keeps accruing toward
   // \`blockOnError\` and the durable cross-worker window (#1262) survives; an
   // explicit defer passes \`retry: -1\` because a defer is not a failure.
+  //
+  // \`block\` runs BEFORE \`ack\` (#1296). Both stores gate \`block\` on the lease
+  // still being held (\`WHERE leased_by = by AND blocked = false\`), but \`ack\`
+  // releases the lease (\`leased_by = NULL\`). A partial-progress-then-block
+  // entry (\`handled > 0\` AND \`block: true\` — e.g. a \`NonRetryableError\` on the
+  // second event of a batch) is passed to BOTH: \`block\` marks it poison
+  // without touching the watermark, then \`ack\` advances past the handled
+  // prefix and releases the lease. Acking first would release the lease out
+  // from under \`block\`, silently dropping it — the stream would re-run its
+  // permanently-failed tail next cycle. Neither store clears the watermark on
+  // \`block\`, so the ordering leaves both legs intact.
+  const blocked = await ops.block(
+    handled
+      .filter(({ block }) => block)
+      .map(({ lease, error }) => ({ ...lease, error: error! }))
+  );
+
   const acked = await ops.ack(
     handled.flatMap((h, i) => {
       const advance = h.handled > 0 ? h.acked_at : leased[i].at;
@@ -8485,12 +8502,6 @@ export async function run_drain_cycle<
             ? { ...h.lease, at: h.acked_at }
             : [];
     })
-  );
-
-  const blocked = await ops.block(
-    handled
-      .filter(({ block }) => block)
-      .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
 
   // Collect close requests (#1090). A close result was already acked above
@@ -25101,6 +25112,23 @@ export async function run_drain_cycle<
   // retry carries the climbing \`retry\` so the budget keeps accruing toward
   // \`blockOnError\` and the durable cross-worker window (#1262) survives; an
   // explicit defer passes \`retry: -1\` because a defer is not a failure.
+  //
+  // \`block\` runs BEFORE \`ack\` (#1296). Both stores gate \`block\` on the lease
+  // still being held (\`WHERE leased_by = by AND blocked = false\`), but \`ack\`
+  // releases the lease (\`leased_by = NULL\`). A partial-progress-then-block
+  // entry (\`handled > 0\` AND \`block: true\` — e.g. a \`NonRetryableError\` on the
+  // second event of a batch) is passed to BOTH: \`block\` marks it poison
+  // without touching the watermark, then \`ack\` advances past the handled
+  // prefix and releases the lease. Acking first would release the lease out
+  // from under \`block\`, silently dropping it — the stream would re-run its
+  // permanently-failed tail next cycle. Neither store clears the watermark on
+  // \`block\`, so the ordering leaves both legs intact.
+  const blocked = await ops.block(
+    handled
+      .filter(({ block }) => block)
+      .map(({ lease, error }) => ({ ...lease, error: error! }))
+  );
+
   const acked = await ops.ack(
     handled.flatMap((h, i) => {
       const advance = h.handled > 0 ? h.acked_at : leased[i].at;
@@ -25112,12 +25140,6 @@ export async function run_drain_cycle<
             ? { ...h.lease, at: h.acked_at }
             : [];
     })
-  );
-
-  const blocked = await ops.block(
-    handled
-      .filter(({ block }) => block)
-      .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
 
   // Collect close requests (#1090). A close result was already acked above
