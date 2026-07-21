@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.18...@rotorsoft/act-tck-v1.27.19) (2026-07-21)
+
+
+### Bug Fixes
+
+* **act-otel:** sum streams_blocked across every app on a shared registry ([b20b57b](https://github.com/rotorsoft/act-root/commit/b20b57b85148e36f3ab07784f27d12cb7ae59f5e)), closes [#1313](https://github.com/rotorsoft/act-root/issues/1313)
+
 # [@rotorsoft/act-tck-v1.27.18](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.17...@rotorsoft/act-tck-v1.27.18) (2026-07-21)
 
 
