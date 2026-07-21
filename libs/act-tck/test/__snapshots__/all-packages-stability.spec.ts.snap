@@ -1458,7 +1458,6 @@ export class Act<
       logger: this._logger,
       event_to_state: this._event_to_state,
       states: this._states,
-      known_events: new Set(this._event_to_state.keys()),
       // The DECLARED lane universe — the implicit "default" plus every
       // \`.withLane(...)\` name — NOT \`_drain_controllers.keys()\` (#1224).
       // An \`onlyLanes\`-filtered instance builds a controller only for its
@@ -3956,8 +3955,6 @@ export type AuditDeps = {
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** state-name → state (for snapshot-supported check on restart-candidate). */
   readonly states: ReadonlyMap<string, State<any, any, any>>;
-  /** All event names the registry knows (for unknown-name detection). */
-  readonly known_events: ReadonlySet<string>;
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
   /**
@@ -4145,6 +4142,38 @@ const make_schema_pass: PassFactory = (deps) => {
  * emits one finding per deprecated event above the threshold during
  * \`drain\`.
  */
+/**
+ * Per-state deprecation classification — mirrors the builder/registry
+ * (\`registry.deprecated_events(state_name)\`), which group \`_v<n>\` families
+ * strictly within one state's own event set. Classifying over the global
+ * event-name union instead would conflate same-stem events across
+ * unrelated states (a false-positive migration finding) and even throw on
+ * a cross-state leading-zero version collision the builder accepted (#1310).
+ * Returns a map of deprecated event name → its current (highest) sibling.
+ */
+const classify_deprecated_by_state = (
+  deps: AuditDeps
+): ReadonlyMap<string, string> => {
+  const names_by_state = new Map<State<any, any, any>, Set<string>>();
+  for (const [name, state] of deps.event_to_state) {
+    let set = names_by_state.get(state);
+    if (!set) {
+      set = new Set();
+      names_by_state.set(state, set);
+    }
+    set.add(name);
+  }
+  const deprecated_to_current = new Map<string, string>();
+  for (const names of names_by_state.values()) {
+    for (const name of deprecated_event_names(names)) {
+      // \`current_version_of\` is guaranteed defined for a deprecated name
+      // within its own state's family.
+      deprecated_to_current.set(name, current_version_of(name, names)!);
+    }
+  }
+  return deprecated_to_current;
+};
+
 const make_deprecated_load_pass: PassFactory = (deps, options) => {
   const share_min =
     options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
@@ -4170,18 +4199,18 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
       const findings: AuditFinding[] = [];
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
-      // Registry-driven deprecation classification (not on-disk-driven).
-      const deprecated = deprecated_event_names(deps.known_events);
-      const sorted = [...deprecated]
+      // Per-state deprecation classification (not on-disk-driven, and not
+      // over the global event-name union — see #1310).
+      const deprecated = classify_deprecated_by_state(deps);
+      const sorted = [...deprecated.keys()]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))
         .sort((a, b) => b.count - a.count);
       for (const { name, count } of sorted) {
         if (count === 0) continue;
         if (count / grand < share_min) continue;
-        // Contract: \`deprecated_event_names(registry)\` only returns names
-        // that have a higher version in the same family, so
-        // \`current_version_of(name, registry)\` is guaranteed defined.
-        const current_version = current_version_of(name, deps.known_events)!;
+        // \`classify_deprecated_by_state\` maps every deprecated name to its
+        // current (highest-version) sibling within the same state.
+        const current_version = deprecated.get(name)!;
         // per_stream is populated in lockstep with totals — name is guaranteed present.
         const top_streams = [...per_stream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))
@@ -15929,17 +15958,25 @@ export class SettleLoop<TEvents extends Schemas> {
         // projection) without forcing callers to roll their own loop.
         // \`maxPasses\` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
-          const { subscribed } = await this._deps.correlate({
+          const after_before = this._deps.checkpoint();
+          const { subscribed, last_id } = await this._deps.correlate({
             ...correlate_query,
-            after: this._deps.checkpoint(),
+            after: after_before,
           });
           // correlate (subscribe + query) succeeded — the store responded.
           this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
+          // \`last_id > after_before\` counts correlate consuming events as
+          // progress even when nothing subscribed or drained this pass — a
+          // bounded correlate window (\`limit\`) full of inert events would
+          // otherwise break the loop before a reactive event just past the
+          // window is ever scanned. Terminates: ids are monotonic and
+          // finite, so once no events remain \`last_id === after_before\`.
           const made_progress =
             subscribed > 0 ||
             last_drain.acked.length > 0 ||
-            last_drain.blocked.length > 0;
+            last_drain.blocked.length > 0 ||
+            last_id > after_before;
           if (!made_progress) break;
         }
         if (last_drain) this._deps.on_settled(last_drain);
@@ -18444,7 +18481,6 @@ export class Act<
       logger: this._logger,
       event_to_state: this._event_to_state,
       states: this._states,
-      known_events: new Set(this._event_to_state.keys()),
       // The DECLARED lane universe — the implicit "default" plus every
       // \`.withLane(...)\` name — NOT \`_drain_controllers.keys()\` (#1224).
       // An \`onlyLanes\`-filtered instance builds a controller only for its
@@ -20942,8 +20978,6 @@ export type AuditDeps = {
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** state-name → state (for snapshot-supported check on restart-candidate). */
   readonly states: ReadonlyMap<string, State<any, any, any>>;
-  /** All event names the registry knows (for unknown-name detection). */
-  readonly known_events: ReadonlySet<string>;
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
   /**
@@ -21131,6 +21165,38 @@ const make_schema_pass: PassFactory = (deps) => {
  * emits one finding per deprecated event above the threshold during
  * \`drain\`.
  */
+/**
+ * Per-state deprecation classification — mirrors the builder/registry
+ * (\`registry.deprecated_events(state_name)\`), which group \`_v<n>\` families
+ * strictly within one state's own event set. Classifying over the global
+ * event-name union instead would conflate same-stem events across
+ * unrelated states (a false-positive migration finding) and even throw on
+ * a cross-state leading-zero version collision the builder accepted (#1310).
+ * Returns a map of deprecated event name → its current (highest) sibling.
+ */
+const classify_deprecated_by_state = (
+  deps: AuditDeps
+): ReadonlyMap<string, string> => {
+  const names_by_state = new Map<State<any, any, any>, Set<string>>();
+  for (const [name, state] of deps.event_to_state) {
+    let set = names_by_state.get(state);
+    if (!set) {
+      set = new Set();
+      names_by_state.set(state, set);
+    }
+    set.add(name);
+  }
+  const deprecated_to_current = new Map<string, string>();
+  for (const names of names_by_state.values()) {
+    for (const name of deprecated_event_names(names)) {
+      // \`current_version_of\` is guaranteed defined for a deprecated name
+      // within its own state's family.
+      deprecated_to_current.set(name, current_version_of(name, names)!);
+    }
+  }
+  return deprecated_to_current;
+};
+
 const make_deprecated_load_pass: PassFactory = (deps, options) => {
   const share_min =
     options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
@@ -21156,18 +21222,18 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
       const findings: AuditFinding[] = [];
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
-      // Registry-driven deprecation classification (not on-disk-driven).
-      const deprecated = deprecated_event_names(deps.known_events);
-      const sorted = [...deprecated]
+      // Per-state deprecation classification (not on-disk-driven, and not
+      // over the global event-name union — see #1310).
+      const deprecated = classify_deprecated_by_state(deps);
+      const sorted = [...deprecated.keys()]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))
         .sort((a, b) => b.count - a.count);
       for (const { name, count } of sorted) {
         if (count === 0) continue;
         if (count / grand < share_min) continue;
-        // Contract: \`deprecated_event_names(registry)\` only returns names
-        // that have a higher version in the same family, so
-        // \`current_version_of(name, registry)\` is guaranteed defined.
-        const current_version = current_version_of(name, deps.known_events)!;
+        // \`classify_deprecated_by_state\` maps every deprecated name to its
+        // current (highest-version) sibling within the same state.
+        const current_version = deprecated.get(name)!;
         // per_stream is populated in lockstep with totals — name is guaranteed present.
         const top_streams = [...per_stream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))
@@ -32704,17 +32770,25 @@ export class SettleLoop<TEvents extends Schemas> {
         // projection) without forcing callers to roll their own loop.
         // \`maxPasses\` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
-          const { subscribed } = await this._deps.correlate({
+          const after_before = this._deps.checkpoint();
+          const { subscribed, last_id } = await this._deps.correlate({
             ...correlate_query,
-            after: this._deps.checkpoint(),
+            after: after_before,
           });
           // correlate (subscribe + query) succeeded — the store responded.
           this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
+          // \`last_id > after_before\` counts correlate consuming events as
+          // progress even when nothing subscribed or drained this pass — a
+          // bounded correlate window (\`limit\`) full of inert events would
+          // otherwise break the loop before a reactive event just past the
+          // window is ever scanned. Terminates: ids are monotonic and
+          // finite, so once no events remain \`last_id === after_before\`.
           const made_progress =
             subscribed > 0 ||
             last_drain.acked.length > 0 ||
-            last_drain.blocked.length > 0;
+            last_drain.blocked.length > 0 ||
+            last_id > after_before;
           if (!made_progress) break;
         }
         if (last_drain) this._deps.on_settled(last_drain);
@@ -45096,15 +45170,24 @@ export function withBroker<S extends Store>(
           name: name as string,
         })),
       };
-      try {
-        await broker.publish({ origin, notification });
-      } catch (error) {
-        // Hint, not a contract: listeners fall back to the poll path.
+      // Hint, not a contract: the publish must never gate the durable
+      // write's return. Invoke it synchronously (so an in-process broker
+      // fans out before commit resolves) but do NOT await the result — a
+      // slow, hung, or rejecting broker degrades cross-process latency to
+      // the poll cycle, never a commit.
+      const warn = (error: unknown) =>
         log().warn(
           \`Broker publish failed for stream "\${stream}": \${
             error instanceof Error ? error.message : String(error)
           } — remote workers wake on their next poll cycle.\`
         );
+      try {
+        void Promise.resolve(broker.publish({ origin, notification })).catch(
+          warn
+        );
+      } catch (error) {
+        // Synchronous throw from a synchronous broker (e.g. Loopback).
+        warn(error);
       }
     }
     return committed;
@@ -45799,6 +45882,16 @@ function gauge_on(
 }
 
 /**
+ * Per-registry set of \`blocked_streams\` providers, one per live bridge.
+ * The \`streams_blocked\` gauge is shared/idempotent across bridges on the
+ * same registry, so its single \`collect()\` cannot close over one app —
+ * it must sum every live provider, or a second \`instrument()\` on the same
+ * registry would leave that app's blocked streams invisible on the gauge.
+ * Keyed weakly so a discarded registry drops its providers with it.
+ */
+const blocked_providers = new WeakMap<Registry, Set<() => Promise<number>>>();
+
+/**
  * The slice of a built Act the bridge needs — kept structural (same
  * pattern as the \`@rotorsoft/act-http\` transports) so the package does
  * not couple to the orchestrator's generics.
@@ -45980,23 +46073,44 @@ export function instrument(
     labelNames: ["circuit"],
     registers,
   });
+  // Register this bridge's blocked-streams provider on the shared registry
+  // so the (idempotent) gauge's collect() sees every live app, not just the
+  // first one instrumented.
+  const blocked_provider = async () =>
+    (await app.blocked_streams({ limit: config.blockedStreamsLimit })).length;
+  let providers = blocked_providers.get(registry);
+  if (!providers) {
+    providers = new Set();
+    blocked_providers.set(registry, providers);
+  }
+  providers.add(blocked_provider);
+
   const blocked_gauge = gauge_on(registry, {
     name: \`\${p}streams_blocked\`,
     help: "Streams currently blocked (evaluated per scrape; page on > 0)",
     registers,
     async collect() {
-      // A blocked_streams() rejection (degraded store) must not poison the
-      // whole scrape — prom-client rejects registry.metrics() if any
-      // collect() rejects, blinding every other metric. Swallow it here,
-      // leave the gauge at its last value, and log via the Logger port.
-      try {
-        const streams = await app.blocked_streams({
-          limit: config.blockedStreamsLimit,
-        });
-        this.set(streams.length);
-      } catch (error) {
-        log().error(error as Error);
+      // Sum blocked streams across EVERY bridge on this registry — the
+      // gauge is shared/idempotent, so its single collect() must consult
+      // all live providers, not just the app the first bridge closed over.
+      // A single provider's rejection (degraded store) is swallowed
+      // per-provider: prom-client rejects registry.metrics() if any
+      // collect() rejects, blinding every other metric, so a failing app
+      // contributes nothing this scrape (logged via the Logger port)
+      // rather than poisoning the whole gauge.
+      let total = 0;
+      // \`providers\` is the shared, per-registry set — a stable reference
+      // that every later bridge on this registry mutates in place, so this
+      // one collect() (only the first bridge's survives gauge_on) sees them
+      // all.
+      for (const provider of providers) {
+        try {
+          total += await provider();
+        } catch (error) {
+          log().error(error as Error);
+        }
       }
+      this.set(total);
     },
   });
 
@@ -46045,6 +46159,8 @@ export function instrument(
     blocked_gauge,
   ];
   return async () => {
+    providers.delete(blocked_provider);
+    if (providers.size === 0) blocked_providers.delete(registry);
     for (const [event, listener] of listeners)
       app.off(event as never, listener as never);
     for (const m of metrics)
