@@ -13,11 +13,18 @@ export type BroadcastState = Record<string, unknown> & {
  * SSE message: version-keyed domain patches.
  * Keys are stringified version numbers, values are domain patches (deep partials).
  * Multi-event commits produce multiple version-keyed entries.
+ *
+ * The optional `overlay` marker flags a version-neutral update (presence,
+ * computed-field refresh) emitted by {@link BroadcastChannel.overlay} — a
+ * single entry keyed at the *current* version. It tells `applyPatchMessage`
+ * to merge the entry on top of the client's caught-up state instead of
+ * rejecting it as stale (a same-version patch WITHOUT the marker stays
+ * stale). Ordinary version-bumping patches from `publish()` omit it.
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
->;
+> & { readonly overlay?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.

@@ -133,7 +133,7 @@ describe("BroadcastChannel", () => {
       bc.subscribe("s1", (m) => msgs.push(m));
       const msg = bc.publish_overlay("s1", { name: "overlayed" });
 
-      expect(msg).toEqual({ 5: { name: "overlayed" } });
+      expect(msg).toEqual({ 5: { name: "overlayed" }, overlay: true });
       expect(msgs).toHaveLength(1);
       expect(bc.state("s1")?.name).toBe("overlayed");
       expect(bc.publish_overlay("missing", { name: "x" })).toBeUndefined();
