@@ -42760,7 +42760,10 @@ export function applyPatchMessage<S extends BroadcastState>(
   // gap ahead (maxV > cachedV) means the client is behind — both fall through
   // to the normal logic below.
   if (msg.overlay && cached && maxV === cachedV) {
-    return { ok: true, state: { ...deep_merge(cached, msg[maxV]), _v: cachedV } };
+    return {
+      ok: true,
+      state: { ...deep_merge(cached, msg[maxV]), _v: cachedV },
+    };
   }
 
   if (maxV <= cachedV) return { ok: false, reason: "stale" };
