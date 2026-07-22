@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.5...@rotorsoft/act-patch-v1.2.6) (2026-07-22)
+
+
+### Bug Fixes
+
+* **act-patch:** return an ordinary-prototype object on the two-pass path ([50f3f85](https://github.com/rotorsoft/act-root/commit/50f3f8521d3882e37bf60b061754713422c905f1)), closes [#1318](https://github.com/rotorsoft/act-root/issues/1318)
+
 # [@rotorsoft/act-patch-v1.2.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.4...@rotorsoft/act-patch-v1.2.5) (2026-06-29)
 
 
