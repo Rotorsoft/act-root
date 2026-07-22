@@ -1801,11 +1801,24 @@ export class Act<
    * @param options - Query window + per-category thresholds.
    * @returns Async iterable of {@link AuditFinding}.
    */
-  audit(
+  async *audit(
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
-    return audit(this._audit_deps, categories, options);
+    // Drive the audit generator one step at a time INSIDE `_scoped`, so the
+    // `store()` calls in its body resolve the scoped bag during lazy
+    // iteration. A plain `return audit(...)` would run the generator body in
+    // the consumer's `for await` frame, outside any scope — resolving the
+    // singleton store and auditing the wrong tenant (#1317). For a
+    // non-scoped Act `_scoped(fn)` is just `fn()`, so this is a no-op.
+    const it = audit(this._audit_deps, categories, options)[
+      Symbol.asyncIterator
+    ]();
+    while (true) {
+      const { value, done } = await this._scoped(() => it.next());
+      if (done) break;
+      yield value;
+    }
   }
 
   /**
