@@ -56,6 +56,16 @@ describe("PinoLogger", () => {
     expect(parsed.key).toBe("val");
   });
 
+  it("keeps the context message when the payload is a string (#1319)", () => {
+    const logger = new PinoLogger({ level: "trace", pretty: false });
+    logger.error("db connection lost", "Unhandled Rejection");
+    const parsed = JSON.parse(output[0]);
+    // The caller's message must survive, not be dropped for the payload.
+    expect(parsed.msg).toBe("Unhandled Rejection");
+    expect(parsed.payload).toBe("db connection lost");
+    expect(parsed.level).toBe(50);
+  });
+
   it("logs all levels", () => {
     const logger = new PinoLogger({ level: "trace", pretty: false });
     logger.trace("t");
