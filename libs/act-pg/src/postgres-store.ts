@@ -1525,7 +1525,7 @@ export class PostgresStore implements Store {
           : `source ~ $${values.length}`
       );
     }
-    if (query?.source_matches !== undefined && query.source_matches.length) {
+    if (query?.source_matches?.length) {
       // Reverse-match narrowing: the inverse of the `source` filter.
       // The stored `source` is treated as the regex pattern, and a row
       // qualifies when any supplied candidate name matches it (`n ~ source`).
