@@ -320,5 +320,20 @@ describe("patch", () => {
       expect(result.nested).toEqual({ a: 10, b: 2 });
       expect(result.k0).toBe(0);
     });
+
+    // #1318 — the two-pass path must not return a prototype-less object.
+    it("returns an ordinary-prototype object (not Object.create(null))", () => {
+      const wide: Schema = {};
+      for (let i = 0; i < 20; i++) wide[`k${i}`] = i;
+      const result = patch(wide, { k0: 99 });
+      expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+      expect(result instanceof Object).toBe(true);
+      expect(typeof (result as object).hasOwnProperty).toBe("function");
+      // shape matches the small-object path for the same logical op
+      const narrow: Schema = { k0: 0, k1: 1 };
+      expect(Object.getPrototypeOf(patch(narrow, { k0: 99 }))).toBe(
+        Object.getPrototypeOf(result)
+      );
+    });
   });
 });
