@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.20](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.19...@rotorsoft/act-tck-v1.27.20) (2026-07-22)
+
+
+### Bug Fixes
+
+* **act-http:** mark SSE overlay frames so live clients apply them ([d8f4070](https://github.com/rotorsoft/act-root/commit/d8f4070e5ab5c9f5d1597e342c75f88c1535415c)), closes [#1312](https://github.com/rotorsoft/act-root/issues/1312)
+
 # [@rotorsoft/act-tck-v1.27.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.18...@rotorsoft/act-tck-v1.27.19) (2026-07-21)
 
 
