@@ -31,10 +31,14 @@ export const patch = <S extends Schema>(
   const patch_keys = Object.keys(patches);
   if (patch_keys.length === 0) return original;
 
-  // Spread is faster for small objects; two-pass avoids spread overhead on large ones
+  // Spread is faster for small objects; two-pass avoids spread overhead on
+  // large ones. Both branches must produce an ordinary-prototype object —
+  // `Object.create(null)` here would return a prototype-less state (breaking
+  // `instanceof`, `hasOwnProperty`, prototype-aware equality) for any state
+  // with >16 top-level keys (#1318).
   const orig_keys = Object.keys(original);
   const copy: Record<string, any> =
-    orig_keys.length <= 16 ? { ...original } : Object.create(null);
+    orig_keys.length <= 16 ? { ...original } : {};
 
   if (orig_keys.length > 16) {
     for (let i = 0; i < orig_keys.length; i++) {

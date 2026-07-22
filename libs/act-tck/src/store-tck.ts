@@ -2855,9 +2855,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const stats = await store.query_stats<CounterEvents>([sA, sB]);
         expect(stats.size).toBe(2);
         expect(stats.get(sA)?.head.name).toBe("Incremented");
-        expect((stats.get(sA)?.head.data as { amount: number }).amount).toBe(2);
+        expect((stats.get(sA)!.head.data as { amount: number }).amount).toBe(2);
         expect(stats.get(sB)?.head.name).toBe("Decremented");
-        expect((stats.get(sB)?.head.data as { amount: number }).amount).toBe(5);
+        expect((stats.get(sB)!.head.data as { amount: number }).amount).toBe(5);
         expect(stats.has(sUnasked)).toBe(false);
 
         // Empty input — empty result.
@@ -2893,9 +2893,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
         const r = stats.get(s);
         expect(r?.head.name).toBe("Incremented");
-        expect((r?.head.data as { amount: number }).amount).toBe(3);
+        expect((r!.head.data as { amount: number }).amount).toBe(3);
         expect(r?.tail?.name).toBe("Incremented");
-        expect((r?.tail?.data as { amount: number }).amount).toBe(1);
+        expect((r!.tail!.data as { amount: number }).amount).toBe(1);
       });
 
       it("count + names — full aggregates including framework markers", async () => {
@@ -2946,14 +2946,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // Without exclude — head is the latest Incremented.
         const all = await store.query_stats<CounterEvents>([s]);
         expect(all.get(s)?.head.name).toBe("Incremented");
-        expect((all.get(s)?.head.data as { amount: number }).amount).toBe(3);
+        expect((all.get(s)!.head.data as { amount: number }).amount).toBe(3);
 
         // Exclude Incremented — head is now Decremented (the next-latest).
         const excl = await store.query_stats<CounterEvents>([s], {
           exclude: ["Incremented"],
         });
         expect(excl.get(s)?.head.name).toBe("Decremented");
-        expect((excl.get(s)?.head.data as { amount: number }).amount).toBe(2);
+        expect((excl.get(s)!.head.data as { amount: number }).amount).toBe(2);
 
         // Exclude every name on a stream — that stream is absent from result.
         const wipe = await store.query_stats<CounterEvents>([sAllOut], {
@@ -3141,7 +3141,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // tail only → no count, no names. Cheap path (no full scan).
         const t = await store.query_stats<CounterEvents>([s], { tail: true });
         expect(t.get(s)?.tail?.name).toBe("Incremented");
-        expect((t.get(s)?.tail?.data as { amount: number }).amount).toBe(1);
+        expect((t.get(s)!.tail!.data as { amount: number }).amount).toBe(1);
         expect(t.get(s)?.count).toBeUndefined();
         expect(t.get(s)?.names).toBeUndefined();
       });

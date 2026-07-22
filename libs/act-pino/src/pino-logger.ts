@@ -78,7 +78,12 @@ export class PinoLogger implements Logger {
     msg?: string
   ): void {
     if (typeof obj === "string") {
-      this._pino[method](obj);
+      // A string payload is the message — unless a separate context message
+      // is ALSO supplied. Then keep the payload as a field so the caller's
+      // message isn't silently dropped (#1319). `Object(str)` is avoided: it
+      // would merge into indexed single-char fields.
+      if (msg === undefined) this._pino[method](obj);
+      else this._pino[method]({ payload: obj }, msg);
     } else if (msg !== undefined) {
       this._pino[method](Object(obj), msg);
     } else {

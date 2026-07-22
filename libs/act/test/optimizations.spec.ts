@@ -19,17 +19,9 @@
  * The EXPLAIN guards for the #1024 partial snapshot index live in the
  * adapter packages (act-pg / act-sqlite) — InMemoryStore has no planner.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import {
-  act,
-  dispose,
-  projection,
-  SNAP_EVENT,
-  state,
-  store,
-  ZodEmpty,
-} from "../src/index.js";
+import { act, projection, SNAP_EVENT, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 const actor = { id: "a", name: "a" };

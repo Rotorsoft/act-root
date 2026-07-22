@@ -122,8 +122,6 @@ export function assert_defer_when(when: DeferWhen): void {
  *
  * @internal
  */
-// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
-// handler signature so the builder step is type-transparent.
 export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
   handler: H,
   schedule: DeferSchedule<Parameters<H>[0]>

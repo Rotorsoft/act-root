@@ -56,6 +56,27 @@ describe("scoped ports (ACT-501)", () => {
     await b.dispose();
   });
 
+  it("audit() queries the scoped store, not the singleton (#1317)", async () => {
+    const s = await sandbox(counterBuilder);
+    // A schema-violating (unknown-name) event written straight into the
+    // SCOPED store — the default singleton store never sees it.
+    await s.store.commit("c-1", [{ name: "Vanished", data: { gone: true } }], {
+      correlation: "t",
+      causation: {},
+    });
+    const findings: unknown[] = [];
+    for await (const f of s.app.audit(["schema"])) findings.push(f);
+    // Before the fix the audit generator ran outside the scope and read the
+    // empty singleton → 0 findings.
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      category: "schema",
+      stream: "c-1",
+      name: "Vanished",
+    });
+    await s.dispose();
+  });
+
   counterTest(
     "invalidates the scoped cache on concurrency error",
     async ({ app }) => {

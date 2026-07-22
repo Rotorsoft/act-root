@@ -2478,11 +2478,24 @@ export class Act<
    * @param options - Query window + per-category thresholds.
    * @returns Async iterable of {@link AuditFinding}.
    */
-  audit(
+  async *audit(
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
-    return audit(this._audit_deps, categories, options);
+    // Drive the audit generator one step at a time INSIDE \`_scoped\`, so the
+    // \`store()\` calls in its body resolve the scoped bag during lazy
+    // iteration. A plain \`return audit(...)\` would run the generator body in
+    // the consumer's \`for await\` frame, outside any scope — resolving the
+    // singleton store and auditing the wrong tenant (#1317). For a
+    // non-scoped Act \`_scoped(fn)\` is just \`fn()\`, so this is a no-op.
+    const it = audit(this._audit_deps, categories, options)[
+      Symbol.asyncIterator
+    ]();
+    while (true) {
+      const { value, done } = await this._scoped(() => it.next());
+      if (done) break;
+      yield value;
+    }
   }
 
   /**
@@ -8042,8 +8055,6 @@ export function assert_defer_when(when: DeferWhen): void {
  *
  * @internal
  */
-// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
-// handler signature so the builder step is type-transparent.
 export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
   handler: H,
   schedule: DeferSchedule<Parameters<H>[0]>
@@ -19501,11 +19512,24 @@ export class Act<
    * @param options - Query window + per-category thresholds.
    * @returns Async iterable of {@link AuditFinding}.
    */
-  audit(
+  async *audit(
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
-    return audit(this._audit_deps, categories, options);
+    // Drive the audit generator one step at a time INSIDE \`_scoped\`, so the
+    // \`store()\` calls in its body resolve the scoped bag during lazy
+    // iteration. A plain \`return audit(...)\` would run the generator body in
+    // the consumer's \`for await\` frame, outside any scope — resolving the
+    // singleton store and auditing the wrong tenant (#1317). For a
+    // non-scoped Act \`_scoped(fn)\` is just \`fn()\`, so this is a no-op.
+    const it = audit(this._audit_deps, categories, options)[
+      Symbol.asyncIterator
+    ]();
+    while (true) {
+      const { value, done } = await this._scoped(() => it.next());
+      if (done) break;
+      yield value;
+    }
   }
 
   /**
@@ -24722,8 +24746,6 @@ export function assert_defer_when(when: DeferWhen): void {
  *
  * @internal
  */
-// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
-// handler signature so the builder step is type-transparent.
 export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
   handler: H,
   schedule: DeferSchedule<Parameters<H>[0]>
@@ -46370,10 +46392,14 @@ export const patch = <S extends Schema>(
   const patch_keys = Object.keys(patches);
   if (patch_keys.length === 0) return original;
 
-  // Spread is faster for small objects; two-pass avoids spread overhead on large ones
+  // Spread is faster for small objects; two-pass avoids spread overhead on
+  // large ones. Both branches must produce an ordinary-prototype object —
+  // \`Object.create(null)\` here would return a prototype-less state (breaking
+  // \`instanceof\`, \`hasOwnProperty\`, prototype-aware equality) for any state
+  // with >16 top-level keys (#1318).
   const orig_keys = Object.keys(original);
   const copy: Record<string, any> =
-    orig_keys.length <= 16 ? { ...original } : Object.create(null);
+    orig_keys.length <= 16 ? { ...original } : {};
 
   if (orig_keys.length > 16) {
     for (let i = 0; i < orig_keys.length; i++) {
@@ -47969,7 +47995,7 @@ export class PostgresStore implements Store {
           : \`source ~ $\${values.length}\`
       );
     }
-    if (query?.source_matches !== undefined && query.source_matches.length) {
+    if (query?.source_matches?.length) {
       // Reverse-match narrowing: the inverse of the \`source\` filter.
       // The stored \`source\` is treated as the regex pattern, and a row
       // qualifies when any supplied candidate name matches it (\`n ~ source\`).
@@ -48836,7 +48862,12 @@ export class PinoLogger implements Logger {
     msg?: string
   ): void {
     if (typeof obj === "string") {
-      this._pino[method](obj);
+      // A string payload is the message — unless a separate context message
+      // is ALSO supplied. Then keep the payload as a field so the caller's
+      // message isn't silently dropped (#1319). \`Object(str)\` is avoided: it
+      // would merge into indexed single-char fields.
+      if (msg === undefined) this._pino[method](obj);
+      else this._pino[method]({ payload: obj }, msg);
     } else if (msg !== undefined) {
       this._pino[method](Object(obj), msg);
     } else {
@@ -55502,9 +55533,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const stats = await store.query_stats<CounterEvents>([sA, sB]);
         expect(stats.size).toBe(2);
         expect(stats.get(sA)?.head.name).toBe("Incremented");
-        expect((stats.get(sA)?.head.data as { amount: number }).amount).toBe(2);
+        expect((stats.get(sA)!.head.data as { amount: number }).amount).toBe(2);
         expect(stats.get(sB)?.head.name).toBe("Decremented");
-        expect((stats.get(sB)?.head.data as { amount: number }).amount).toBe(5);
+        expect((stats.get(sB)!.head.data as { amount: number }).amount).toBe(5);
         expect(stats.has(sUnasked)).toBe(false);
 
         // Empty input — empty result.
@@ -55540,9 +55571,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
         const r = stats.get(s);
         expect(r?.head.name).toBe("Incremented");
-        expect((r?.head.data as { amount: number }).amount).toBe(3);
+        expect((r!.head.data as { amount: number }).amount).toBe(3);
         expect(r?.tail?.name).toBe("Incremented");
-        expect((r?.tail?.data as { amount: number }).amount).toBe(1);
+        expect((r!.tail!.data as { amount: number }).amount).toBe(1);
       });
 
       it("count + names — full aggregates including framework markers", async () => {
@@ -55593,14 +55624,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // Without exclude — head is the latest Incremented.
         const all = await store.query_stats<CounterEvents>([s]);
         expect(all.get(s)?.head.name).toBe("Incremented");
-        expect((all.get(s)?.head.data as { amount: number }).amount).toBe(3);
+        expect((all.get(s)!.head.data as { amount: number }).amount).toBe(3);
 
         // Exclude Incremented — head is now Decremented (the next-latest).
         const excl = await store.query_stats<CounterEvents>([s], {
           exclude: ["Incremented"],
         });
         expect(excl.get(s)?.head.name).toBe("Decremented");
-        expect((excl.get(s)?.head.data as { amount: number }).amount).toBe(2);
+        expect((excl.get(s)!.head.data as { amount: number }).amount).toBe(2);
 
         // Exclude every name on a stream — that stream is absent from result.
         const wipe = await store.query_stats<CounterEvents>([sAllOut], {
@@ -55788,7 +55819,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // tail only → no count, no names. Cheap path (no full scan).
         const t = await store.query_stats<CounterEvents>([s], { tail: true });
         expect(t.get(s)?.tail?.name).toBe("Incremented");
-        expect((t.get(s)?.tail?.data as { amount: number }).amount).toBe(1);
+        expect((t.get(s)!.tail!.data as { amount: number }).amount).toBe(1);
         expect(t.get(s)?.count).toBeUndefined();
         expect(t.get(s)?.names).toBeUndefined();
       });
