@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.14...@rotorsoft/act-v1.23.15) (2026-07-22)
+
+
+### Bug Fixes
+
+* **act:** run app.audit() inside the scoped-ports frame ([2cfa720](https://github.com/rotorsoft/act-root/commit/2cfa720bf3e8e7d17656a0935e1ba7922ce9be7d)), closes [#1317](https://github.com/rotorsoft/act-root/issues/1317)
+
 # [@rotorsoft/act-v1.23.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.13...@rotorsoft/act-v1.23.14) (2026-07-21)
 
 
