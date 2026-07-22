@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pino-v1.0.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.2...@rotorsoft/act-pino-v1.0.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **act-pino:** keep the context message when the payload is a string ([b853f04](https://github.com/rotorsoft/act-root/commit/b853f04a3de449adb5cb2e3037e13260dfe075cb)), closes [#1319](https://github.com/rotorsoft/act-root/issues/1319)
+
 # [@rotorsoft/act-pino-v1.0.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.1...@rotorsoft/act-pino-v1.0.2) (2026-06-29)
 
 
