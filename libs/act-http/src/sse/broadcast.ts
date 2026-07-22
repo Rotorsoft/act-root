@@ -101,7 +101,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
 
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    // `_overlay: true` marks this as a version-neutral update so a caught-up
+    // client applies it at the current version instead of dropping it as
+    // stale (the key equals the client's cachedV). Ordinary patches omit it.
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);

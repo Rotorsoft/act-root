@@ -93,15 +93,83 @@ describe("applyPatchMessage", () => {
     });
   });
 
-  describe("overlay patches (same version)", () => {
-    it("applies overlay patch at same version", () => {
-      const cached: TestState = { _v: 5, name: "original", count: 0 };
+  describe("overlay patches (ACT-1312)", () => {
+    it("merges a marked overlay at the current version, keeping _v", () => {
+      const cached: TestState = { _v: 5, name: "original", count: 3 };
       const msg: PatchMessage<TestState> = {
         5: { name: "overlayed" },
+        _overlay: true,
+      };
+      const result = applyPatchMessage(msg, cached);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.state._v).toBe(5); // version unchanged
+        expect(result.state.name).toBe("overlayed"); // overlay applied
+        expect(result.state.count).toBe(3); // untouched field preserved
+      }
+    });
+
+    it("still treats a same-version patch WITHOUT the marker as stale", () => {
+      const cached: TestState = { _v: 5, name: "original", count: 0 };
+      const msg: PatchMessage<TestState> = { 5: { name: "no-marker" } };
+      const result = applyPatchMessage(msg, cached);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("stale");
+    });
+
+    it("treats an older overlay as stale", () => {
+      const cached: TestState = { _v: 5, name: "ahead", count: 0 };
+      const msg: PatchMessage<TestState> = {
+        3: { name: "old-overlay" },
+        _overlay: true,
       };
       const result = applyPatchMessage(msg, cached);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe("stale");
+    });
+
+    it("treats an overlay ahead of the client as behind (must resync)", () => {
+      const cached: TestState = { _v: 2, name: "lagging", count: 0 };
+      const msg: PatchMessage<TestState> = {
+        5: { name: "future-overlay" },
+        _overlay: true,
+      };
+      const result = applyPatchMessage(msg, cached);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("behind");
+    });
+
+    it("treats an overlay with no cached baseline as behind (needs baseline)", () => {
+      const msg: PatchMessage<TestState> = {
+        5: { name: "overlay" },
+        _overlay: true,
+      };
+      const result = applyPatchMessage(msg, null);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("behind");
+    });
+
+    it("round-trips overlay() → applyPatchMessage for a live caught-up client", () => {
+      const bc = new BroadcastChannel<TestState>();
+      // Seat a caught-up client at _v=5.
+      bc.publish("room", { _v: 5, name: "seed", count: 1 }, []);
+      const clientCached = bc.state("room");
+      expect(clientCached?._v).toBe(5);
+
+      let frame: PatchMessage<TestState> | undefined;
+      bc.subscribe("room", (m) => {
+        frame = m;
+      });
+      bc.overlay("room", { name: "alice-online" });
+      expect(frame?._overlay).toBe(true);
+
+      const result = applyPatchMessage(frame!, clientCached);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.state.name).toBe("alice-online");
+        expect(result.state._v).toBe(5);
+        expect(result.state.count).toBe(1);
+      }
     });
   });
 

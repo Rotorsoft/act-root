@@ -37846,7 +37846,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
 
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    // \`_overlay: true\` marks this as a version-neutral update so a caught-up
+    // client applies it at the current version instead of dropping it as
+    // stale (the key equals the client's cachedV). Ordinary patches omit it.
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -38533,11 +38536,18 @@ export type BroadcastState = Record<string, unknown> & {
  * SSE message: version-keyed domain patches.
  * Keys are stringified version numbers, values are domain patches (deep partials).
  * Multi-event commits produce multiple version-keyed entries.
+ *
+ * The optional \`_overlay\` marker flags a version-neutral update (presence,
+ * computed-field refresh) emitted by {@link BroadcastChannel.overlay} — a
+ * single entry keyed at the *current* version. It tells \`applyPatchMessage\`
+ * to merge the entry on top of the client's caught-up state instead of
+ * rejecting it as stale (a same-version patch WITHOUT the marker stays
+ * stale). Ordinary version-bumping patches from \`publish()\` omit it.
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
->;
+> & { readonly _overlay?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -38675,7 +38685,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
 
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    // \`_overlay: true\` marks this as a version-neutral update so a caught-up
+    // client applies it at the current version instead of dropping it as
+    // stale (the key equals the client's cachedV). Ordinary patches omit it.
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -39758,11 +39771,18 @@ export type BroadcastState = Record<string, unknown> & {
  * SSE message: version-keyed domain patches.
  * Keys are stringified version numbers, values are domain patches (deep partials).
  * Multi-event commits produce multiple version-keyed entries.
+ *
+ * The optional \`_overlay\` marker flags a version-neutral update (presence,
+ * computed-field refresh) emitted by {@link BroadcastChannel.overlay} — a
+ * single entry keyed at the *current* version. It tells \`applyPatchMessage\`
+ * to merge the entry on top of the client's caught-up state instead of
+ * rejecting it as stale (a same-version patch WITHOUT the marker stays
+ * stale). Ordinary version-bumping patches from \`publish()\` omit it.
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
->;
+> & { readonly _overlay?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -42699,6 +42719,9 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  * - All patches older than cached → "stale" (client already ahead)
  * - Gap between cached version and first patch → "behind" (client missed versions, must resync)
  * - Contiguous from cached version → apply in order
+ * - Overlay frame ({@link PatchMessage._overlay}) at the current version →
+ *   merged on top of cached state, \`_v\` unchanged (presence / computed
+ *   fields reach caught-up clients instead of being dropped as stale)
  *
  * ## Usage (React Query)
  *
@@ -42720,14 +42743,28 @@ export function applyPatchMessage<S extends BroadcastState>(
   cached: S | null | undefined
 ): ApplyResult<S> {
   const cachedV = cached?._v ?? 0;
+  // \`overlay\` is a non-numeric marker key, not a version — exclude it.
   const versions = Object.keys(msg)
     .map(Number)
+    .filter((v) => Number.isInteger(v))
     .sort((a, b) => a - b);
 
   if (!versions.length) return { ok: false, reason: "stale" };
 
   const minV = versions[0];
   const maxV = versions[versions.length - 1];
+
+  // Overlay frame: a version-neutral update (presence, computed field) at the
+  // current version. A caught-up client (maxV === cachedV) merges it on top
+  // of its state, keeping _v. Older (maxV < cachedV) is genuinely stale; a
+  // gap ahead (maxV > cachedV) means the client is behind — both fall through
+  // to the normal logic below.
+  if (msg._overlay && cached && maxV === cachedV) {
+    return {
+      ok: true,
+      state: { ...deep_merge(cached, msg[maxV]), _v: cachedV },
+    };
+  }
 
   if (maxV <= cachedV) return { ok: false, reason: "stale" };
   if (!cached || minV > cachedV + 1) return { ok: false, reason: "behind" };
@@ -42844,7 +42881,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
 
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    // \`_overlay: true\` marks this as a version-neutral update so a caught-up
+    // client applies it at the current version instead of dropping it as
+    // stale (the key equals the client's cachedV). Ordinary patches omit it.
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -43091,11 +43131,18 @@ export type BroadcastState = Record<string, unknown> & {
  * SSE message: version-keyed domain patches.
  * Keys are stringified version numbers, values are domain patches (deep partials).
  * Multi-event commits produce multiple version-keyed entries.
+ *
+ * The optional \`_overlay\` marker flags a version-neutral update (presence,
+ * computed-field refresh) emitted by {@link BroadcastChannel.overlay} — a
+ * single entry keyed at the *current* version. It tells \`applyPatchMessage\`
+ * to merge the entry on top of the client's caught-up state instead of
+ * rejecting it as stale (a same-version patch WITHOUT the marker stays
+ * stale). Ordinary version-bumping patches from \`publish()\` omit it.
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
->;
+> & { readonly _overlay?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -43233,7 +43280,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
 
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    // \`_overlay: true\` marks this as a version-neutral update so a caught-up
+    // client applies it at the current version instead of dropping it as
+    // stale (the key equals the client's cachedV). Ordinary patches omit it.
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -44390,11 +44440,18 @@ export type BroadcastState = Record<string, unknown> & {
  * SSE message: version-keyed domain patches.
  * Keys are stringified version numbers, values are domain patches (deep partials).
  * Multi-event commits produce multiple version-keyed entries.
+ *
+ * The optional \`_overlay\` marker flags a version-neutral update (presence,
+ * computed-field refresh) emitted by {@link BroadcastChannel.overlay} — a
+ * single entry keyed at the *current* version. It tells \`applyPatchMessage\`
+ * to merge the entry on top of the client's caught-up state instead of
+ * rejecting it as stale (a same-version patch WITHOUT the marker stays
+ * stale). Ordinary version-bumping patches from \`publish()\` omit it.
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
->;
+> & { readonly _overlay?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.

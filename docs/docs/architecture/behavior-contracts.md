@@ -158,6 +158,7 @@ underflow the connection counter ([#1196](https://github.com/Rotorsoft/act-root/
 |---|---|---|
 | The per-connection pending backlog is bounded by `maxPendingPerConnection` (default 256, drop-oldest): a stalled consumer flooded past the bound retains only the newest N frames | `auto-generated-api.md` § Defaults and validation; `SseOptions.maxPendingPerConnection` doc-comment | act-http `api/sse-wiring.spec.ts` → "bounds the per-connection pending buffer, dropping the oldest when a slow consumer stalls" **(#1196)** |
 | A subscription that fails to acquire a slot (cap full, no `on_cap_exceeded`) releases nothing on teardown — only an acquired slot is released, so the counter never underflows below the true open count | `auto-generated-api.md` § SSE flow (teardown); `runSseSubscription` doc-comment | act-http `api/sse-wiring.spec.ts` → "does not release a slot it never acquired when the cap is full and no on_cap_exceeded is supplied" **(#1196)** |
+| An `overlay()` frame (`_overlay: true`, keyed at the current version) is merged onto a caught-up client's state by `applyPatchMessage`, keeping `_v`; a same-version message WITHOUT the marker is still `stale` | `real-time.md` § Overlays / § Client-side; `PatchMessage._overlay` + `applyPatchMessage` doc-comments | act-http `sse/apply-patch.spec.ts` → "merges a marked overlay at the current version, keeping _v" / "still treats a same-version patch WITHOUT the marker as stale" **(#1312)** |
 
 ## Orchestrator and builders
 
