@@ -16,7 +16,7 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  * - All patches older than cached → "stale" (client already ahead)
  * - Gap between cached version and first patch → "behind" (client missed versions, must resync)
  * - Contiguous from cached version → apply in order
- * - Overlay frame ({@link PatchMessage.overlay}) at the current version →
+ * - Overlay frame ({@link PatchMessage._overlay}) at the current version →
  *   merged on top of cached state, `_v` unchanged (presence / computed
  *   fields reach caught-up clients instead of being dropped as stale)
  *
@@ -56,7 +56,7 @@ export function applyPatchMessage<S extends BroadcastState>(
   // of its state, keeping _v. Older (maxV < cachedV) is genuinely stale; a
   // gap ahead (maxV > cachedV) means the client is behind — both fall through
   // to the normal logic below.
-  if (msg.overlay && cached && maxV === cachedV) {
+  if (msg._overlay && cached && maxV === cachedV) {
     return {
       ok: true,
       state: { ...deep_merge(cached, msg[maxV]), _v: cachedV },

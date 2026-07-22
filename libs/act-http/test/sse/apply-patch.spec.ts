@@ -98,7 +98,7 @@ describe("applyPatchMessage", () => {
       const cached: TestState = { _v: 5, name: "original", count: 3 };
       const msg: PatchMessage<TestState> = {
         5: { name: "overlayed" },
-        overlay: true,
+        _overlay: true,
       };
       const result = applyPatchMessage(msg, cached);
       expect(result.ok).toBe(true);
@@ -121,7 +121,7 @@ describe("applyPatchMessage", () => {
       const cached: TestState = { _v: 5, name: "ahead", count: 0 };
       const msg: PatchMessage<TestState> = {
         3: { name: "old-overlay" },
-        overlay: true,
+        _overlay: true,
       };
       const result = applyPatchMessage(msg, cached);
       expect(result.ok).toBe(false);
@@ -132,7 +132,7 @@ describe("applyPatchMessage", () => {
       const cached: TestState = { _v: 2, name: "lagging", count: 0 };
       const msg: PatchMessage<TestState> = {
         5: { name: "future-overlay" },
-        overlay: true,
+        _overlay: true,
       };
       const result = applyPatchMessage(msg, cached);
       expect(result.ok).toBe(false);
@@ -142,7 +142,7 @@ describe("applyPatchMessage", () => {
     it("treats an overlay with no cached baseline as behind (needs baseline)", () => {
       const msg: PatchMessage<TestState> = {
         5: { name: "overlay" },
-        overlay: true,
+        _overlay: true,
       };
       const result = applyPatchMessage(msg, null);
       expect(result.ok).toBe(false);
@@ -161,7 +161,7 @@ describe("applyPatchMessage", () => {
         frame = m;
       });
       bc.overlay("room", { name: "alice-online" });
-      expect(frame?.overlay).toBe(true);
+      expect(frame?._overlay).toBe(true);
 
       const result = applyPatchMessage(frame!, clientCached);
       expect(result.ok).toBe(true);

@@ -32,10 +32,10 @@ state" from "ignore, you're ahead" without a signal on the frame.
 ## Public surface added
 
 - **Public type field** — `PatchMessage<S>` gains an optional
-  `readonly overlay?: true` marker. Ordinary version-bumping patches from
+  `readonly _overlay?: true` marker. Ordinary version-bumping patches from
   `publish()` omit it; `overlay()` sets it.
 - **Changed semantics (additive)** — `applyPatchMessage(msg, cached)`: when
-  `msg.overlay` is set and the overlay's version equals `cachedV`, it now
+  `msg._overlay` is set and the overlay's version equals `cachedV`, it now
   deep-merges the overlay into the cached state and returns
   `{ ok: true, state }` with `_v` unchanged, instead of `{ ok: false,
   reason: "stale" }`. Every message **without** the marker keeps its exact

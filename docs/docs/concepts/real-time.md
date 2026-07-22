@@ -114,7 +114,7 @@ broadcast.overlay(streamId, {
 });
 ```
 
-This applies the overlay to the cached state, leaves `_v` unchanged, and emits a single-key patch message at the cached version, tagged with an `overlay: true` marker. The marker is what lets a live, caught-up client apply it: without it, a same-version message is indistinguishable from a stale patch the client already has, so `applyPatchMessage` would drop it. With it, `applyPatchMessage` merges the overlay on top of the client's current state (keeping `_v`), so presence reaches already-connected viewers, not just reconnecting ones.
+This applies the overlay to the cached state, leaves `_v` unchanged, and emits a single-key patch message at the cached version, tagged with an `_overlay: true` marker. The marker is what lets a live, caught-up client apply it: without it, a same-version message is indistinguishable from a stale patch the client already has, so `applyPatchMessage` would drop it. With it, `applyPatchMessage` merges the overlay on top of the client's current state (keeping `_v`), so presence reaches already-connected viewers, not just reconnecting ones.
 
 ### Presence
 
@@ -221,7 +221,7 @@ onData: (env) => {
 `applyPatchMessage(msg, cached)` returns `{ ok: true, state } | { ok: false, reason: "stale" | "behind" }`:
 
 - **Contiguous** — `min(msg.keys)` is exactly `cachedV + 1`. Apply patches in version order via the deep-merge from `@rotorsoft/act-patch`; final `_v` = `max(msg.keys)`.
-- **Overlay** — the message carries `overlay: true` (from `overlay()`) and its version equals `cachedV`. Merge it on top of the cached state, leaving `_v` unchanged. This is how presence and computed-field refreshes reach a caught-up client; an ordinary same-version message (no marker) stays **stale**.
+- **Overlay** — the message carries `_overlay: true` (from `overlay()`) and its version equals `cachedV`. Merge it on top of the cached state, leaving `_v` unchanged. This is how presence and computed-field refreshes reach a caught-up client; an ordinary same-version message (no marker) stays **stale**.
 - **Stale** — `max(msg.keys) <= cachedV` (and not a current-version overlay). The client is already ahead (e.g., a mutation response landed before the SSE patch arrived). No-op.
 - **Behind** — `min(msg.keys) > cachedV + 1`. The client missed versions and must resync via a full refetch.
 
