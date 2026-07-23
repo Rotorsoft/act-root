@@ -72,6 +72,51 @@ describe("lanes (ACT-1103, slice 1)", () => {
     });
   });
 
+  // #1325 — a stream drains on exactly one lane, so lane must agree across
+  // EVERY reaction to a target regardless of source. The guard used to key
+  // on (target, source), so two static reactions to one target from
+  // different sources with different lanes escaped it and the store silently
+  // re-laned the stream (starving an onlyLanes worker of the high-priority
+  // reaction).
+  it("rejects same-target reactions with different lanes across sources (#1325)", () => {
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "fast" })
+        .withLane({ name: "slow" })
+        .on("Incremented")
+        .do(function reactFast() {
+          return Promise.resolve();
+        })
+        .to({ target: "shared", source: "sA", priority: 7, lane: "fast" })
+        .on("Incremented")
+        .do(function reactSlow() {
+          return Promise.resolve();
+        })
+        .to({ target: "shared", source: "sB", priority: 1, lane: "slow" })
+        .build()
+    ).toThrow(/conflicting lane assignments/);
+  });
+
+  it("accepts same-target reactions on the SAME lane across sources (#1325)", () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast" })
+      .on("Incremented")
+      .do(function reactA() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA", priority: 1, lane: "fast" })
+      .on("Incremented")
+      .do(function reactB() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB", priority: 7, lane: "fast" })
+      .build();
+    // Same lane target-wide is fine; the build succeeds.
+    expect(app.lanes.map((l) => l.name)).toContain("fast");
+  });
+
   it("compile-time-rejects slice .to({lane}) referencing an undeclared lane", () => {
     // Slices now carry their own TLanes union via .withLane(...). The
     // builder narrows .to({lane}) against that union, so an undeclared

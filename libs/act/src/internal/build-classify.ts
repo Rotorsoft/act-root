@@ -80,6 +80,12 @@ export function classify_registry<
   states: ReadonlyMap<string, State<Schema, any, any>>
 ): Classification {
   const statics = new Map<string, StaticTarget>();
+  // Per-target lane, checked across EVERY reaction to a target regardless of
+  // source (#1325). A stream drains on exactly one lane, and `subscribe`
+  // keys lane per-target with last-writer-wins semantics, so lane must agree
+  // target-wide — the `(target, source)` scoping of `statics` is too narrow
+  // to catch a same-target/different-source lane disagreement.
+  const target_lanes = new Map<string, string | undefined>();
   const reactive_events = new Set<string>();
   const event_to_lanes = new Map<string, EventLaneSet>();
   let has_dynamic_resolvers = false;
@@ -103,26 +109,31 @@ export function classify_registry<
           set.add(lane_name);
           event_to_lanes.set(name, set);
         }
+        // ACT-1103 / #1325: lanes don't merge — any two reactions to the
+        // same target must declare the same lane, regardless of source.
+        // First reaction to a target records its lane; every later one must
+        // match or it's a config error caught at build time.
+        if (!target_lanes.has(target)) {
+          target_lanes.set(target, lane);
+        } else if (
+          (target_lanes.get(target) ?? undefined) !== (lane ?? undefined)
+        ) {
+          throw new Error(
+            `Stream "${target}" has conflicting lane assignments ` +
+              `("${target_lanes.get(target) ?? "default"}" vs "${lane ?? "default"}")`
+          );
+        }
         const key = `${target}|${source ?? ""}`;
         const existing = statics.get(key);
         if (!existing) {
           statics.set(key, { stream: target, source, priority, lane });
-        } else {
-          // ACT-1103: lanes don't merge — disagreement is a config error.
-          if ((existing.lane ?? undefined) !== (lane ?? undefined))
-            throw new Error(
-              `Stream "${target}" has conflicting lane assignments ` +
-                `("${existing.lane ?? "default"}" vs "${lane ?? "default"}")`
-            );
-          if (priority > (existing.priority as number)) {
-            // Multiple reactions with the same (target, source) — keep
-            // the max priority so the highest-priority registrant sets
-            // the scheduling lane (mirrors subscribe-side semantics).
-            // `existing.priority` is always defined here since we always
-            // set it when inserting, but the StaticTarget type marks it
-            // optional for backwards compat with external consumers.
-            statics.set(key, { ...existing, priority });
-          }
+        } else if (priority > (existing.priority as number)) {
+          // Multiple reactions with the same (target, source) — keep the max
+          // priority so the highest-priority registrant sets the scheduling
+          // priority (mirrors subscribe-side semantics). `existing.priority`
+          // is always defined here since we always set it when inserting, but
+          // the StaticTarget type marks it optional for external consumers.
+          statics.set(key, { ...existing, priority });
         }
       }
     }
