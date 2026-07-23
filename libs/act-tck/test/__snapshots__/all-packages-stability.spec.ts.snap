@@ -521,7 +521,16 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config, patch_fn)
+              make_fold_handler(
+                merged,
+                fold.flush,
+                fold.config,
+                patch_fn,
+                // Head loads strip sensitive keys like the warm path (#1320).
+                // \`_sf\` is populated in the events pass below; read lazily at
+                // fold time, by when the map is complete.
+                (event_name) => _sf.get(event_name) ?? []
+              )
             );
           }
           finalize_deprecations();
@@ -14408,6 +14417,7 @@ import type {
 } from "../types/index.js";
 import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
+import { pii_strip } from "./sensitive.js";
 
 // The fold config schema, defaults, and resolver live in \`./config.js\` (the
 // single home for builder-facing config bags). This module keeps the fold
@@ -14438,8 +14448,27 @@ export function make_fold_handler<
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
   config: FoldConfig,
-  patch_fn: PatchFn = bare_patch
+  patch_fn: PatchFn = bare_patch,
+  sensitive_fields: (event_name: string) => readonly string[]
 ): BatchHandler<TEvents> {
+  // First-sight head loads must apply the SAME PII treatment as the warm
+  // path (which folds \`pii_strip\`ped events handed in by the batch handler):
+  // sensitive keys removed entirely, not gated to \`[REDACTED]\`. \`load()\`
+  // folds over \`me.view\`, so compose the view with \`pii_strip\` for sensitive
+  // events — otherwise an actorless head load would gate to \`[REDACTED]\` and
+  // the projected row would differ from the warm path by cache warmth (#1320).
+  // For a non-PII projection every lookup is empty, so \`load_me === me\`
+  // behaviorally.
+  const load_me: State<TState, TEvents, TActions> = {
+    ...me,
+    view: (raw, actor) => {
+      const viewed = me.view(raw, actor);
+      const fields = sensitive_fields(viewed.name as string);
+      return fields.length
+        ? (pii_strip(viewed as never, fields) as typeof viewed)
+        : viewed;
+    },
+  };
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
   // a flush, and a sync auto-evicting set() would drop folded work.
@@ -14489,7 +14518,7 @@ export function make_fold_handler<
         // \`event.id > fold.event_id\` guard below then permanently skips
         // the intervening events. Dirty from the start: the row must be
         // written at least once.
-        const snapshot = await load(me, { stream }, undefined, patch_fn);
+        const snapshot = await load(load_me, { stream }, undefined, patch_fn);
         fold = {
           stream,
           state: snapshot.state,
@@ -31051,6 +31080,7 @@ import type {
 } from "../types/index.js";
 import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
+import { pii_strip } from "./sensitive.js";
 
 // The fold config schema, defaults, and resolver live in \`./config.js\` (the
 // single home for builder-facing config bags). This module keeps the fold
@@ -31081,8 +31111,27 @@ export function make_fold_handler<
   me: State<TState, TEvents, TActions>,
   flush: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>,
   config: FoldConfig,
-  patch_fn: PatchFn = bare_patch
+  patch_fn: PatchFn = bare_patch,
+  sensitive_fields: (event_name: string) => readonly string[]
 ): BatchHandler<TEvents> {
+  // First-sight head loads must apply the SAME PII treatment as the warm
+  // path (which folds \`pii_strip\`ped events handed in by the batch handler):
+  // sensitive keys removed entirely, not gated to \`[REDACTED]\`. \`load()\`
+  // folds over \`me.view\`, so compose the view with \`pii_strip\` for sensitive
+  // events — otherwise an actorless head load would gate to \`[REDACTED]\` and
+  // the projected row would differ from the warm path by cache warmth (#1320).
+  // For a non-PII projection every lookup is empty, so \`load_me === me\`
+  // behaviorally.
+  const load_me: State<TState, TEvents, TActions> = {
+    ...me,
+    view: (raw, actor) => {
+      const viewed = me.view(raw, actor);
+      const fields = sensitive_fields(viewed.name as string);
+      return fields.length
+        ? (pii_strip(viewed as never, fields) as typeof viewed)
+        : viewed;
+    },
+  };
   // Insertion-ordered Map as LRU: first key is the oldest. A promote is
   // delete + re-insert. Not the shared LruMap — eviction here must await
   // a flush, and a sync auto-evicting set() would drop folded work.
@@ -31132,7 +31181,7 @@ export function make_fold_handler<
         // \`event.id > fold.event_id\` guard below then permanently skips
         // the intervening events. Dirty from the start: the row must be
         // written at least once.
-        const snapshot = await load(me, { stream }, undefined, patch_fn);
+        const snapshot = await load(load_me, { stream }, undefined, patch_fn);
         fold = {
           stream,
           state: snapshot.state,

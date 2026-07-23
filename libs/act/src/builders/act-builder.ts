@@ -517,7 +517,16 @@ export function act<
               );
             batch_handlers.set(
               proj.target!,
-              make_fold_handler(merged, fold.flush, fold.config, patch_fn)
+              make_fold_handler(
+                merged,
+                fold.flush,
+                fold.config,
+                patch_fn,
+                // Head loads strip sensitive keys like the warm path (#1320).
+                // `_sf` is populated in the events pass below; read lazily at
+                // fold time, by when the map is complete.
+                (event_name) => _sf.get(event_name) ?? []
+              )
             );
           }
           finalize_deprecations();
