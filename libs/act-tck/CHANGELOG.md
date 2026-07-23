@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.21](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.20...@rotorsoft/act-tck-v1.27.21) (2026-07-23)
+
+
+### Bug Fixes
+
+* **act:** strip PII on the fold engine's cold path like the warm path ([97583f9](https://github.com/rotorsoft/act-root/commit/97583f9cd6d162d979065a6c1bdbb22754523e5d)), closes [#1320](https://github.com/rotorsoft/act-root/issues/1320)
+
 # [@rotorsoft/act-tck-v1.27.20](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.19...@rotorsoft/act-tck-v1.27.20) (2026-07-22)
 
 
