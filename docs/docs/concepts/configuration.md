@@ -277,7 +277,7 @@ Slices declare their own lanes via the same `.withLane(...)` method; `act().with
 
 ### Conflicting lane assignments
 
-Two reactions routing to the same `(target, source)` stream must declare the same lane. Lanes have no ordering, so there's no `max()` merge analogous to priority — the build-time scan throws on disagreement:
+Two reactions routing to the same `target` stream must declare the same lane — regardless of their `source`. A stream drains on exactly one lane, so lane must agree target-wide; lanes have no ordering, so there's no `max()` merge analogous to priority — the build-time scan throws on disagreement:
 
 ```typescript no-check
 // throws at act().build()
