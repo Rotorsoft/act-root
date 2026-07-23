@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.15...@rotorsoft/act-v1.23.16) (2026-07-23)
+
+
+### Bug Fixes
+
+* **act:** strip PII on the fold engine's cold path like the warm path ([97583f9](https://github.com/rotorsoft/act-root/commit/97583f9cd6d162d979065a6c1bdbb22754523e5d)), closes [#1320](https://github.com/rotorsoft/act-root/issues/1320)
+
 # [@rotorsoft/act-v1.23.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.14...@rotorsoft/act-v1.23.15) (2026-07-22)
 
 
