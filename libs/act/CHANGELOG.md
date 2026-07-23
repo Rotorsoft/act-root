@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.16...@rotorsoft/act-v1.23.17) (2026-07-23)
+
+
+### Bug Fixes
+
+* **act:** enforce lane agreement per-target, not per (target, source) ([76c9839](https://github.com/rotorsoft/act-root/commit/76c9839a8605c7a2d864e31927b9953245562524)), closes [#1325](https://github.com/rotorsoft/act-root/issues/1325)
+
 # [@rotorsoft/act-v1.23.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.15...@rotorsoft/act-v1.23.16) (2026-07-23)
 
 
