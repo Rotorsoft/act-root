@@ -26,11 +26,10 @@
  * (see the `check:snippets` npm script). Run `--list` to print the
  * extraction plan without writing anything.
  */
-import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as ts from "typescript";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOCS_ROOT = resolve(HERE, "..");
@@ -129,17 +128,37 @@ async function main() {
     for (const p of plan) console.log(`  ${p.name}  <-  docs/${p.rel} #${p.index}`);
 }
 
-/** Resolve the local `tsc` entry point without relying on `npx` network fetch. */
-function resolve_tsc() {
-  return createRequire(import.meta.url).resolve("typescript/bin/tsc");
+const run = process.argv.includes("--self-test")
+  ? self_test
+  : process.argv.includes("--check")
+  ? check
+  : main;
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+
+/** Extract snippets and type-check them using the TypeScript API. */
+async function check() {
+  await main(); // extract snippets first
+  const result = run_tsc();
+  if (result.stdout) console.log(result.stdout);
+  if (result.status !== 0) process.exit(result.status);
 }
 
+/** Type-check the extracted snippets using the TypeScript API (no tsc binary). */
 function run_tsc() {
-  return spawnSync(
-    process.execPath,
-    [resolve_tsc(), "--noEmit", "-p", SNIPPETS_TSCONFIG],
-    { cwd: DOCS_ROOT, encoding: "utf8" }
-  );
+  const program = ts.createProgram([], {
+    configFilePath: SNIPPETS_TSCONFIG,
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  const formatDiagnostic = (d) => {
+    if (!d.file) return ts.flattenDiagnosticMessageText(d.messageText, "\n");
+    const { line, character } = ts.getLineAndCharacterOfPosition(d.file, d.start);
+    return `${d.file.fileName}(${line + 1},${character + 1}): ${ts.flattenDiagnosticMessageText(d.messageText, "\n")}`;
+  };
+  const stdout = diagnostics.map(formatDiagnostic).join("\n");
+  return { status: diagnostics.length > 0 ? 1 : 0, stdout };
 }
 
 /**
@@ -161,7 +180,19 @@ async function self_test() {
       "",
     ].join("\n")
   );
-  const result = run_tsc();
+  // Check with explicit rootNames to ensure the broken file is included
+  const program = ts.createProgram([broken], {
+    configFilePath: SNIPPETS_TSCONFIG,
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  const formatDiagnostic = (d) => {
+    if (!d.file) return ts.flattenDiagnosticMessageText(d.messageText, "\n");
+    const { line, character } = ts.getLineAndCharacterOfPosition(d.file, d.start);
+    return `${d.file.fileName}(${line + 1},${character + 1}): ${ts.flattenDiagnosticMessageText(d.messageText, "\n")}`;
+  };
+  const stdout = diagnostics.map(formatDiagnostic).join("\n");
+  const result = { status: diagnostics.length > 0 ? 1 : 0, stdout };
+  console.error("DEBUG result:", result);
   await rm(broken, { force: true });
   const caught =
     result.status !== 0 && /__selftest_broken__/.test(result.stdout ?? "");
@@ -174,9 +205,3 @@ async function self_test() {
   }
   console.log("self-test ok: deliberately-broken snippet was rejected");
 }
-
-const run = process.argv.includes("--self-test") ? self_test : main;
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

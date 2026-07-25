@@ -5,7 +5,7 @@
   "scripts": {
     "build:all": "typedoc --options typedoc.json && docusaurus build",
     "snippets:extract": "node scripts/check-snippets.mjs",
-    "check:snippets": "node scripts/check-snippets.mjs && tsc --noEmit -p tsconfig.snippets.json",
+    "check:snippets": "node scripts/check-snippets.mjs --check",
     "check:snippets:selftest": "node scripts/check-snippets.mjs --self-test",
     "swizzle": "docusaurus swizzle",
     "clear": "docusaurus clear",
@@ -33,8 +33,8 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "docusaurus-plugin-typedoc": "^1.4.2",
-    "typedoc": "^0.28.20",
-    "typedoc-plugin-markdown": "^4.12.0",
+    "typedoc": "~0.28.20",
+    "typedoc-plugin-markdown": "~4.12.0",
     "typescript": "~6.0.3"
   },
   "browserslist": {
