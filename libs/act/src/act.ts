@@ -639,13 +639,14 @@ export class Act<
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // Re-probe the store when the cooldown elapses, so recovery is
         // automatic even on the default lane (which has no periodic poller).
-        // Any polling loop can trip the shared breaker — but a bare `drain()`
-        // only touches the store when the controller is armed, so a trip
-        // from a correlate failure could go unprobed. `settle()` always runs
-        // a correlate (a store query) before draining, so it re-probes
-        // regardless of which loop opened the breaker: one success closes it
-        // and every loop resumes on its own cadence. A failed probe re-opens
-        // the breaker and reschedules the wake.
+        // The wake fires `settle()`, which (in half-open) runs a real store
+        // probe: for a dynamic-resolver app the probe is settle's correlate
+        // (a store scan); for a static-reaction app correlate is a no-op that
+        // records no health, so the probe is settle's DRAIN claim — either
+        // way one success closes the breaker and every loop resumes, a
+        // failure re-opens it and reschedules the wake. Settle does NOT close
+        // the breaker off a no-op correlate (#1329) — only a real store op
+        // (correlate scan or drain claim) records `passed()`.
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
@@ -870,6 +871,10 @@ export class Act<
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
+        // Static-reaction apps' correlate is a no-op (no store call), so a
+        // settle pass carries no store-health signal — don't let it record a
+        // breaker success (#1329).
+        correlate_probes_store: this._correlate.has_dynamic_resolvers,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );

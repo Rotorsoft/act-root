@@ -157,6 +157,7 @@ describe("settle loop store-error handling (ACT-984)", () => {
             }),
             on_settled: () => {},
             breaker,
+            correlate_probes_store: true,
           },
           0
         );
