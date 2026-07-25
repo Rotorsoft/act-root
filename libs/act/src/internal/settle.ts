@@ -45,6 +45,16 @@ export type SettleDeps<TEvents extends Schemas> = {
    * to the `error` lifecycle event.
    */
   readonly breaker: CircuitBreaker;
+  /**
+   * Whether `correlate` actually probes the store (the app has dynamic
+   * resolvers). When false, correlate is a pure no-op early-return that
+   * touches no store — so a settle pass has NO store-health signal and must
+   * NOT record a breaker `passed()`. Recording a fictitious success there
+   * would re-close an OPEN breaker mid-outage on a static-reaction app and
+   * let the following drain hammer the down store (#1329). The drain loop's
+   * own `passed()`/`failed()` on its real claim keeps the breaker accurate.
+   */
+  readonly correlate_probes_store: boolean;
 };
 
 /**
@@ -116,7 +126,13 @@ export class SettleLoop<TEvents extends Schemas> {
             after: after_before,
           });
           // correlate (subscribe + query) succeeded — the store responded.
-          this._deps.breaker.passed();
+          // But only record the success when correlate actually PROBED the
+          // store: a static-reaction app's correlate is a no-op early-return
+          // that touches nothing, so a `passed()` here would fictitiously
+          // re-close an OPEN breaker mid-outage and let the drain below
+          // hammer the down store (#1329). drain's own passed()/failed() on
+          // its real claim keeps the breaker accurate for those apps.
+          if (this._deps.correlate_probes_store) this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
           // `last_id > after_before` counts correlate consuming events as
           // progress even when nothing subscribed or drained this pass — a

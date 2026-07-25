@@ -1325,13 +1325,14 @@ export class Act<
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // Re-probe the store when the cooldown elapses, so recovery is
         // automatic even on the default lane (which has no periodic poller).
-        // Any polling loop can trip the shared breaker — but a bare \`drain()\`
-        // only touches the store when the controller is armed, so a trip
-        // from a correlate failure could go unprobed. \`settle()\` always runs
-        // a correlate (a store query) before draining, so it re-probes
-        // regardless of which loop opened the breaker: one success closes it
-        // and every loop resumes on its own cadence. A failed probe re-opens
-        // the breaker and reschedules the wake.
+        // The wake fires \`settle()\`, which (in half-open) runs a real store
+        // probe: for a dynamic-resolver app the probe is settle's correlate
+        // (a store scan); for a static-reaction app correlate is a no-op that
+        // records no health, so the probe is settle's DRAIN claim — either
+        // way one success closes the breaker and every loop resumes, a
+        // failure re-opens it and reschedules the wake. Settle does NOT close
+        // the breaker off a no-op correlate (#1329) — only a real store op
+        // (correlate scan or drain claim) records \`passed()\`.
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
@@ -1556,6 +1557,10 @@ export class Act<
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
+        // Static-reaction apps' correlate is a no-op (no store call), so a
+        // settle pass carries no store-health signal — don't let it record a
+        // breaker success (#1329).
+        correlate_probes_store: this._correlate.has_dynamic_resolvers,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -7502,6 +7507,16 @@ export class CorrelateCycle<
   /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
+  }
+
+  /**
+   * Whether any reaction uses a dynamic resolver — i.e. whether \`correlate\`
+   * performs a store scan rather than the static no-op early-return. The
+   * settle loop reads this to avoid recording a fictitious circuit-breaker
+   * success on a static app whose correlate never touches the store (#1329).
+   */
+  get has_dynamic_resolvers(): boolean {
+    return this._has_dynamic_resolvers;
   }
 
   /**
@@ -15952,6 +15967,16 @@ export type SettleDeps<TEvents extends Schemas> = {
    * to the \`error\` lifecycle event.
    */
   readonly breaker: CircuitBreaker;
+  /**
+   * Whether \`correlate\` actually probes the store (the app has dynamic
+   * resolvers). When false, correlate is a pure no-op early-return that
+   * touches no store — so a settle pass has NO store-health signal and must
+   * NOT record a breaker \`passed()\`. Recording a fictitious success there
+   * would re-close an OPEN breaker mid-outage on a static-reaction app and
+   * let the following drain hammer the down store (#1329). The drain loop's
+   * own \`passed()\`/\`failed()\` on its real claim keeps the breaker accurate.
+   */
+  readonly correlate_probes_store: boolean;
 };
 
 /**
@@ -16023,7 +16048,13 @@ export class SettleLoop<TEvents extends Schemas> {
             after: after_before,
           });
           // correlate (subscribe + query) succeeded — the store responded.
-          this._deps.breaker.passed();
+          // But only record the success when correlate actually PROBED the
+          // store: a static-reaction app's correlate is a no-op early-return
+          // that touches nothing, so a \`passed()\` here would fictitiously
+          // re-close an OPEN breaker mid-outage and let the drain below
+          // hammer the down store (#1329). drain's own passed()/failed() on
+          // its real claim keeps the breaker accurate for those apps.
+          if (this._deps.correlate_probes_store) this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
           // \`last_id > after_before\` counts correlate consuming events as
           // progress even when nothing subscribed or drained this pass — a
@@ -18398,13 +18429,14 @@ export class Act<
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // Re-probe the store when the cooldown elapses, so recovery is
         // automatic even on the default lane (which has no periodic poller).
-        // Any polling loop can trip the shared breaker — but a bare \`drain()\`
-        // only touches the store when the controller is armed, so a trip
-        // from a correlate failure could go unprobed. \`settle()\` always runs
-        // a correlate (a store query) before draining, so it re-probes
-        // regardless of which loop opened the breaker: one success closes it
-        // and every loop resumes on its own cadence. A failed probe re-opens
-        // the breaker and reschedules the wake.
+        // The wake fires \`settle()\`, which (in half-open) runs a real store
+        // probe: for a dynamic-resolver app the probe is settle's correlate
+        // (a store scan); for a static-reaction app correlate is a no-op that
+        // records no health, so the probe is settle's DRAIN claim — either
+        // way one success closes the breaker and every loop resumes, a
+        // failure re-opens it and reschedules the wake. Settle does NOT close
+        // the breaker off a no-op correlate (#1329) — only a real store op
+        // (correlate scan or drain claim) records \`passed()\`.
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
@@ -18629,6 +18661,10 @@ export class Act<
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
+        // Static-reaction apps' correlate is a no-op (no store call), so a
+        // settle pass carries no store-health signal — don't let it record a
+        // breaker success (#1329).
+        correlate_probes_store: this._correlate.has_dynamic_resolvers,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -24455,6 +24491,16 @@ export class CorrelateCycle<
   /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
+  }
+
+  /**
+   * Whether any reaction uses a dynamic resolver — i.e. whether \`correlate\`
+   * performs a store scan rather than the static no-op early-return. The
+   * settle loop reads this to avoid recording a fictitious circuit-breaker
+   * success on a static app whose correlate never touches the store (#1329).
+   */
+  get has_dynamic_resolvers(): boolean {
+    return this._has_dynamic_resolvers;
   }
 
   /**
@@ -32814,6 +32860,16 @@ export type SettleDeps<TEvents extends Schemas> = {
    * to the \`error\` lifecycle event.
    */
   readonly breaker: CircuitBreaker;
+  /**
+   * Whether \`correlate\` actually probes the store (the app has dynamic
+   * resolvers). When false, correlate is a pure no-op early-return that
+   * touches no store — so a settle pass has NO store-health signal and must
+   * NOT record a breaker \`passed()\`. Recording a fictitious success there
+   * would re-close an OPEN breaker mid-outage on a static-reaction app and
+   * let the following drain hammer the down store (#1329). The drain loop's
+   * own \`passed()\`/\`failed()\` on its real claim keeps the breaker accurate.
+   */
+  readonly correlate_probes_store: boolean;
 };
 
 /**
@@ -32885,7 +32941,13 @@ export class SettleLoop<TEvents extends Schemas> {
             after: after_before,
           });
           // correlate (subscribe + query) succeeded — the store responded.
-          this._deps.breaker.passed();
+          // But only record the success when correlate actually PROBED the
+          // store: a static-reaction app's correlate is a no-op early-return
+          // that touches nothing, so a \`passed()\` here would fictitiously
+          // re-close an OPEN breaker mid-outage and let the drain below
+          // hammer the down store (#1329). drain's own passed()/failed() on
+          // its real claim keeps the breaker accurate for those apps.
+          if (this._deps.correlate_probes_store) this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
           // \`last_id > after_before\` counts correlate consuming events as
           // progress even when nothing subscribed or drained this pass — a

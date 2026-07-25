@@ -156,6 +156,16 @@ export class CorrelateCycle<
   }
 
   /**
+   * Whether any reaction uses a dynamic resolver — i.e. whether `correlate`
+   * performs a store scan rather than the static no-op early-return. The
+   * settle loop reads this to avoid recording a fictitious circuit-breaker
+   * success on a static app whose correlate never touches the store (#1329).
+   */
+  get has_dynamic_resolvers(): boolean {
+    return this._has_dynamic_resolvers;
+  }
+
+  /**
    * Initialize correlation state on first call.
    * - Reads max(at) from store, then floors the cold-start checkpoint at
    *   `watermark - back_scan` when dynamic resolvers exist, so an event
