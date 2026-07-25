@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.18](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.17...@rotorsoft/act-v1.23.18) (2026-07-25)
+
+
+### Bug Fixes
+
+* **act:** autoclose defers only to a future due-time, never a past one ([1d26d7e](https://github.com/rotorsoft/act-root/commit/1d26d7e213d112b5f43a4207f94142e1a35c4280)), closes [#1330](https://github.com/rotorsoft/act-root/issues/1330)
+
 # [@rotorsoft/act-v1.23.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.16...@rotorsoft/act-v1.23.17) (2026-07-23)
 
 
