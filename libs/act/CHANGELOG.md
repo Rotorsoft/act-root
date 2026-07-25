@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.18...@rotorsoft/act-v1.23.19) (2026-07-25)
+
+
+### Bug Fixes
+
+* **act:** record a settle circuit-breaker success only on a real store probe ([d528966](https://github.com/rotorsoft/act-root/commit/d52896621dcb03b22f564bf718c286441a8787fc)), closes [#1309](https://github.com/rotorsoft/act-root/issues/1309) [#1329](https://github.com/rotorsoft/act-root/issues/1329)
+
 # [@rotorsoft/act-v1.23.18](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.17...@rotorsoft/act-v1.23.18) (2026-07-25)
 
 
