@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.14...@rotorsoft/act-http-v1.8.15) (2026-07-25)
+
+
+### Bug Fixes
+
+* **act-http:** emit an open schema for unrepresentable Zod types in openapi() ([10c87f4](https://github.com/rotorsoft/act-root/commit/10c87f4488ad71b50598a17d6093f349ebeb127e)), closes [#1328](https://github.com/rotorsoft/act-root/issues/1328)
+
 # [@rotorsoft/act-http-v1.8.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.13...@rotorsoft/act-http-v1.8.14) (2026-07-22)
 
 
