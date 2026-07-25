@@ -467,7 +467,13 @@ export function openapi<TApp extends ActRegistryView>(
     const zod_schema = state.actions[action_name] as z.ZodType;
     const body_schema = mark_sensitive_fields(
       strip_json_schema_meta(
-        z.toJSONSchema(zod_schema) as Record<string, unknown>
+        // `unrepresentable: "any"` emits an open (`{}`) schema for a Zod type
+        // with no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of
+        // Zod 4's default `"throw"`, which would abort the WHOLE document over
+        // one such field — while hono() serves the same action fine (#1328).
+        z.toJSONSchema(zod_schema, {
+          unrepresentable: "any",
+        }) as Record<string, unknown>
       ),
       zod_schema
     );

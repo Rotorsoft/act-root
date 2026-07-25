@@ -331,3 +331,33 @@ describe("openapi — sensitive() request-field marking (#1228)", () => {
     }
   );
 });
+
+// #1328 — an action input with a Zod type that has no JSON-Schema form
+// (z.date/z.bigint/...) must not abort the whole document; hono() serves it.
+const Scheduler = state({ Scheduler: z.object({ at: z.string() }) })
+  .init(() => ({ at: "" }))
+  .emits({ Scheduled: z.object({ at: z.string() }) })
+  .patch({ Scheduled: ({ data }) => ({ at: data.at }) })
+  .on({ Schedule: z.object({ at: z.date(), note: z.string() }) })
+  .emit((a) => ["Scheduled", { at: a.at.toISOString() }])
+  .build();
+
+const scheduler_test = fixture(act().withState(Scheduler));
+
+describe("openapi — unrepresentable Zod types (#1328)", () => {
+  scheduler_test(
+    "emits an open schema for a z.date() field instead of aborting the doc",
+    ({ app }) => {
+      const doc = openapi(app as never, base_options());
+      const schema = doc.paths["/api/actions/Schedule"]?.post?.requestBody
+        ?.content["application/json"]?.schema as {
+        type: string;
+        properties: Record<string, Record<string, unknown>>;
+      };
+      // The unrepresentable field emits an open ({}) schema...
+      expect(schema.properties.at).toEqual({});
+      // ...while every representable field is preserved.
+      expect(schema.properties.note.type).toBe("string");
+    }
+  );
+});
