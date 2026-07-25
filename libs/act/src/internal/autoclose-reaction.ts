@@ -139,10 +139,18 @@ export function synthesize_autoclose_reactions<
           dues.push(days_after(head.created, after_days));
         if (keep_days !== undefined)
           dues.push(days_after(entry.tail!.created, keep_days));
-        if (dues.length)
-          throw new DeferSignal({
-            at: new Date(Math.min(...dues.map((d) => d.getTime()))),
-          });
+        // Only defer to a FUTURE due-time. A due already in the past (the
+        // stream idled longer than the cooldown while the AND-combined
+        // predicate stayed unmet) can never be excluded by `claim`, which
+        // skips only future `deferred_at` — so a past defer would be
+        // re-claimed every cycle (perpetual query_stats burn, #1330). When
+        // nothing is future, fall through and return: advance the watermark
+        // and wait for the next event to re-trigger.
+        const future = dues
+          .map((d) => d.getTime())
+          .filter((t) => t > Date.now());
+        if (future.length)
+          throw new DeferSignal({ at: new Date(Math.min(...future)) });
       },
     };
     const key = `__autoclose_${st.name}`;
