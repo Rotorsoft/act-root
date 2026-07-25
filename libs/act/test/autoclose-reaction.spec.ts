@@ -119,6 +119,39 @@ describe("autoclose as a synthesized reaction", () => {
     );
   });
 
+  it("does not defer to a PAST due-time when `after` has elapsed but the predicate is unmet (#1330)", async () => {
+    const app = act()
+      .withState(ticket({ is: "Resolved", after: { days: 1 } }))
+      .build();
+    // A non-terminal head (Opened) created 2 days ago — a long-lived open
+    // ticket idle past the 1-day cooldown, restored with its source timestamp.
+    const two_days_ago = new Date(Date.now() - 2 * 86_400_000);
+    await store().restore?.(async (commit) => {
+      await commit({
+        id: 0,
+        name: "Opened",
+        data: {},
+        stream: "t9",
+        version: 0,
+        created: two_days_ago,
+        meta: { correlation: "c", causation: {} },
+      } as never);
+    });
+
+    await app.correlate();
+    await app.drain();
+
+    // No stream may carry a deferred_at in the PAST — claim only excludes
+    // future deferred_at, so a past defer would be re-claimed every cycle
+    // (busy loop). The reaction returns and waits for the next event instead.
+    const now = Date.now();
+    let past_defer = false;
+    await store().query_streams((p) => {
+      if (p.deferred_at != null && p.deferred_at <= now) past_defer = true;
+    });
+    expect(past_defer).toBe(false);
+  });
+
   it("closes on the threshold event for a `reaches` policy", async () => {
     const closed: CloseResult[] = [];
     const app = act()
