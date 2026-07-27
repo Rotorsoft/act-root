@@ -12,12 +12,12 @@
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-http": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
-    "@tanstack/react-query": "^5.101.2",
-    "@tanstack/react-query-devtools": "^5.101.2",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-query-devtools": "^5.101.4",
     "@trpc/client": "11.18.0",
     "@trpc/react-query": "11.18.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
