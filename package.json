@@ -82,7 +82,7 @@
     "chance": "^1.1.13",
     "concurrently": "^10.0.3",
     "fast-check": "^4.9.0",
-    "lint-staged": "^17.0.8",
+    "lint-staged": "^17.2.0",
     "semantic-release": "^25.0.8",
     "semantic-release-monorepo": "^8.0.2",
     "simple-git-hooks": "^2.13.1",
