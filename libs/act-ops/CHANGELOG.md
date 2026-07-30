@@ -1,3 +1,10 @@
+# [@rotorsoft/act-ops-v0.2.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.4...@rotorsoft/act-ops-v0.2.5) (2026-07-30)
+
+
+### Bug Fixes
+
+* **act-ops:** protect committed keys and gc on commit/release ([7d9fe58](https://github.com/rotorsoft/act-root/commit/7d9fe58d0700998d756de947a3a6682e7d332882)), closes [#1335](https://github.com/rotorsoft/act-root/issues/1335) [#1336](https://github.com/rotorsoft/act-root/issues/1336) [#1335](https://github.com/rotorsoft/act-root/issues/1335) [#1336](https://github.com/rotorsoft/act-root/issues/1336)
+
 # [@rotorsoft/act-ops-v0.2.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.3...@rotorsoft/act-ops-v0.2.4) (2026-07-17)
 
 
