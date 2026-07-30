@@ -45494,8 +45494,10 @@ export type InMemoryIdempotencyStoreOptions = {
  * \`claim\`, or a \`commit\` refreshing an existing key) moves the key to the
  * tail. Since each touch also stamps a fresh \`expires_at\` and \`now\` is
  * non-decreasing, iteration order tracks expiry order, so:
- * - The least-recently-touched entry sits at \`keys().next().value\` (the
- *   correct LRU eviction victim).
+ * - The least-recently-touched *tentative* entry is the eviction victim —
+ *   \`_record\` walks from the front and drops the first tentative key.
+ *   Committed entries are skipped: they are durable within their TTL window
+ *   and must never be evicted (#1335).
  * - GC walks until the first non-expired entry and stops.
  *
  * Keeping the key at a stale insertion position instead would let a
@@ -45538,10 +45540,15 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   }
 
   commit(key: string, now: number = Date.now()): void {
+    // GC before recording so a commit-heavy, claim-light workload still
+    // reclaims expired entries promptly instead of parking them in the map
+    // until the next \`claim\`/\`size\` (#1336). \`now\` matches \`claim\`'s seam.
+    this._gc(now);
     this._record(key, now, true);
   }
 
-  release(key: string): void {
+  release(key: string, now: number = Date.now()): void {
+    this._gc(now);
     const entry = this._seen.get(key);
     if (entry !== undefined && !entry.committed) this._seen.delete(key);
   }
@@ -45556,10 +45563,21 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     this._seen.delete(key);
     this._seen.set(key, { expires_at: now + this._ttl_ms, committed });
     if (this._seen.size > this._max_entries) {
-      // Safe by construction: \`_seen.size > _max_entries >= 0\` implies at
-      // least one entry, so \`.next().value\` resolves to a string key.
-      const oldest = this._seen.keys().next().value as string;
-      this._seen.delete(oldest);
+      // Evict the least-recently-touched *tentative* entry. Committed
+      // entries are durable within their TTL window — dropping one would let
+      // a duplicate delivery reprocess as fresh (#1335), which durable
+      // adapters (Postgres unique index, Redis SET NX) never do. So eviction
+      // walks in LRU order, skips committed entries, and never targets the
+      // just-recorded \`key\` (it's the most-recently-used). When every other
+      // entry is committed, no eviction happens and the map sits transiently
+      // over budget until TTL reclaims a committed entry — correctness beats
+      // the soft memory cap.
+      for (const [k, entry] of this._seen) {
+        if (!entry.committed && k !== key) {
+          this._seen.delete(k);
+          break;
+        }
+      }
     }
   }
 

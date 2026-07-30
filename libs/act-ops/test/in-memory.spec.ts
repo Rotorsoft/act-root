@@ -49,6 +49,62 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("a")).toBe(true);
   });
 
+  it("eviction never drops a committed entry, even over budget (#1335)", () => {
+    const store = new InMemoryIdempotencyStore({ maxEntries: 2 });
+    store.claim("a");
+    store.commit("a"); // durable
+    store.claim("b");
+    store.commit("b"); // durable — fills the budget
+    store.claim("c");
+    store.commit("c"); // would push over budget: must NOT drop committed "a"
+    // Every committed key stays deduped — dropping one would let a
+    // duplicate delivery reprocess as fresh.
+    expect(store.claim("a")).toBe(false);
+    expect(store.claim("b")).toBe(false);
+    expect(store.claim("c")).toBe(false);
+  });
+
+  it("eviction targets the oldest tentative entry, skipping committed (#1335)", () => {
+    const store = new InMemoryIdempotencyStore({ maxEntries: 2 });
+    const t0 = 1_000_000;
+    store.claim("committed", t0);
+    store.commit("committed", t0); // durable, sits at the front
+    store.claim("tentative", t0); // droppable
+    store.claim("new", t0); // over budget → drops "tentative", not "committed"
+    expect(store.claim("committed", t0)).toBe(false); // durable survived
+    expect(store.claim("new", t0)).toBe(false); // just-added survived
+    expect(store.claim("tentative", t0)).toBe(true); // the tentative victim was dropped
+  });
+
+  // `claim` and `size` both gc before observing, so a lingering expired
+  // entry is invisible through the public API — these read the internal map
+  // directly to prove `commit`/`release` reclaim promptly on their own.
+  it("commit runs gc so expired entries don't linger (#1336)", () => {
+    const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
+    const seen = (store as unknown as { _seen: Map<string, unknown> })._seen;
+    const t0 = 1_000_000;
+    store.claim("expired", t0); // expires t0 + 1_000
+    store.claim("live", t0);
+    store.commit("live", t0);
+    expect(seen.has("expired")).toBe(true); // still parked before expiry
+    // A commit past "expired"'s TTL must reclaim it, not wait for the next
+    // claim/size.
+    store.commit("live", t0 + 5_000);
+    expect(seen.has("expired")).toBe(false);
+  });
+
+  it("release runs gc so expired entries don't linger (#1336)", () => {
+    const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
+    const seen = (store as unknown as { _seen: Map<string, unknown> })._seen;
+    const t0 = 1_000_000;
+    store.claim("expired", t0); // expires t0 + 1_000
+    store.claim("tentative", t0);
+    expect(seen.has("expired")).toBe(true);
+    // A release past "expired"'s TTL reclaims it too.
+    store.release("tentative", t0 + 5_000);
+    expect(seen.has("expired")).toBe(false);
+  });
+
   it("clear drops all entries", () => {
     const store = new InMemoryIdempotencyStore();
     store.claim("k");
