@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.24](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.23...@rotorsoft/act-tck-v1.27.24) (2026-07-30)
+
+
+### Bug Fixes
+
+* **act-ops:** protect committed keys and gc on commit/release ([7d9fe58](https://github.com/rotorsoft/act-root/commit/7d9fe58d0700998d756de947a3a6682e7d332882)), closes [#1335](https://github.com/rotorsoft/act-root/issues/1335) [#1336](https://github.com/rotorsoft/act-root/issues/1336) [#1335](https://github.com/rotorsoft/act-root/issues/1335) [#1336](https://github.com/rotorsoft/act-root/issues/1336)
+
 # [@rotorsoft/act-tck-v1.27.23](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.22...@rotorsoft/act-tck-v1.27.23) (2026-07-25)
 
 
