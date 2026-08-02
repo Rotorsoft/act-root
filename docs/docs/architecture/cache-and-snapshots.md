@@ -51,7 +51,7 @@ A long stream needs to be replayed *somewhere*. The cheapest place is RAM (cache
 
 Three distinct entry conditions, three different store-query shapes:
 
-- **Cache hit**: query `after: cached.event_id` (no `with_snaps`). Skip everything older — the cached state is correct as-of the cached event ID.
+- **Cache hit**: query `after: cached.event_id` **with `with_snaps: true`**. Skip everything older, but keep any `__snapshot__` in the after-window so the fold rebaselines off it. `after` and `with_snaps` are independent store conditions — `after` bounds the scan, `with_snaps` keeps snapshot rows. This matters when the cached checkpoint is stale (a lagging or cross-process entry) and a windowed close has pruned the domain events between the checkpoint and a newer snapshot: without `with_snaps` the snapshot is filtered out and the fold silently applies the surviving tail on top of stale state (#1345).
 - **Cache miss**: query from start with `with_snaps: true`. The query stream will surface any `__snapshot__` events; the reducer absorbs the snapshot's state and resets `patches` to 0.
 - **Time-travel** (`asOf` set): bypass cache entirely, query from start with snapshots, plus the `asOf` filter (`before`, `created_before`, `created_after`, `limit`). Time-travel reads must reflect history, not current cached state.
 

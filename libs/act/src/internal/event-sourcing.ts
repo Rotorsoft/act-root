@@ -530,9 +530,22 @@ export async function load<
       // a non-time-travel cold load — a bounded load full-scans real events
       // under its `asOf` filter. This is the single floor-eligibility decision
       // for the whole system; the stores apply the floor whenever asked and
-      // never re-derive it (RFC 1274). The warm path resumes from `after`.
+      // never re-derive it (RFC 1274).
+      //
+      // The warm path resumes from `after`, and MUST also carry `with_snaps`
+      // (#1345): `after` and `with_snaps` are independent store conditions —
+      // `after` bounds the scan (id > cached.event_id), `with_snaps` keeps
+      // `__snapshot__` rows in the result. A stale (lagging/cross-process)
+      // cache checkpoint can sit below a newer `__snapshot__` boundary, and a
+      // windowed close (`app.close`/`.autocloses({keep})`) may have pruned the
+      // domain events between the checkpoint and that snapshot. Without
+      // `with_snaps` the rebaselining snapshot is filtered out and the fold
+      // silently applies the surviving tail on top of stale state (wrong
+      // count, yet `version` still reports the true head — the concurrency
+      // guard passes). With it, the snapshot in the after-window rebaselines
+      // the fold; when no snapshot falls in the window it is a no-op.
       ...(cached
-        ? { after: cached.event_id }
+        ? { after: cached.event_id, with_snaps: true }
         : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
@@ -542,9 +555,11 @@ export async function load<
   // commits) miss the cache forever — only action() would ever warm it.
   // No race-protection re-check needed: the cache is a state checkpoint
   // at (version, event_id), and any subsequent load queries past
-  // event_id, picks up missed events, and replays — so an "older" cache
-  // write from a concurrent slower load is self-correcting on next access.
-  // Time-travel loads bypass cache entirely and skip this too.
+  // event_id (with `with_snaps`, so a rebaselining snapshot above the
+  // checkpoint is still folded even after a windowed close pruned the
+  // events between them — #1345), picks up missed events, and replays — so
+  // an "older" cache write from a concurrent slower load is self-correcting
+  // on next access. Time-travel loads bypass cache entirely and skip this too.
   //
   // Skip the write when the replayed head is the tombstone (ACT-1188).
   // During the close guard window (tombstone committed, truncate pending)
