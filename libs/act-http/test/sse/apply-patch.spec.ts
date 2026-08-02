@@ -61,6 +61,49 @@ describe("applyPatchMessage", () => {
     });
   });
 
+  describe("genesis event (version 0) — #1346", () => {
+    it("applies the genesis patch from init for a fresh client (no baseline)", () => {
+      const msg: PatchMessage<TestState> = {
+        0: { name: "born", count: 1 },
+      };
+      const result = applyPatchMessage(msg, null);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.state._v).toBe(0);
+        expect(result.state.name).toBe("born");
+        expect(result.state.count).toBe(1);
+      }
+    });
+
+    it("round-trips broadcast.publish genesis → apply for a fresh client", () => {
+      const bc = new BroadcastChannel<TestState>();
+      // Genesis commit: first event version 0, one domain patch.
+      const msg = bc.publish("s1", { _v: 0, name: "g", count: 1 }, [
+        { name: "g", count: 1 },
+      ]);
+      expect(Object.keys(msg)).toEqual(["0"]); // key is version 0
+
+      const result = applyPatchMessage(msg, null);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.state.count).toBe(1);
+    });
+
+    it("treats a re-sent genesis as stale for a client already at version 0", () => {
+      const cached: TestState = { _v: 0, name: "have-it", count: 1 };
+      const msg: PatchMessage<TestState> = { 0: { count: 999 } };
+      const result = applyPatchMessage(msg, cached);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("stale");
+    });
+
+    it("treats a version-1 first patch with no baseline as behind (can't build from init)", () => {
+      const msg: PatchMessage<TestState> = { 1: { count: 1 } };
+      const result = applyPatchMessage(msg, null);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe("behind");
+    });
+  });
+
   describe("multi-version patches", () => {
     it("applies multiple patches in version order", () => {
       const cached: TestState = { _v: 1, name: "start", count: 0 };

@@ -220,9 +220,9 @@ onData: (env) => {
 
 `applyPatchMessage(msg, cached)` returns `{ ok: true, state } | { ok: false, reason: "stale" | "behind" }`:
 
-- **Contiguous** — `min(msg.keys)` is exactly `cachedV + 1`. Apply patches in version order via the deep-merge from `@rotorsoft/act-patch`; final `_v` = `max(msg.keys)`.
+- **Contiguous** — `min(msg.keys)` is exactly `cachedV + 1`. Apply patches in version order via the deep-merge from `@rotorsoft/act-patch`; final `_v` = `max(msg.keys)`. A **fresh client with no baseline** resumes from `cachedV = -1`, so the genesis patch (version `0`, the first event of any stream) is contiguous and folds onto init state — a first patch at version ≥ 1 is instead **behind**, since it can't be built from init alone.
 - **Overlay** — the message carries `_overlay: true` (from `overlay()`) and its version equals `cachedV`. Merge it on top of the cached state, leaving `_v` unchanged. This is how presence and computed-field refreshes reach a caught-up client; an ordinary same-version message (no marker) stays **stale**.
-- **Stale** — `max(msg.keys) <= cachedV` (and not a current-version overlay). The client is already ahead (e.g., a mutation response landed before the SSE patch arrived). No-op.
+- **Stale** — `max(msg.keys) <= cachedV` for a client that **has** a baseline (and not a current-version overlay). The client is already ahead (e.g., a mutation response landed before the SSE patch arrived). No-op. A fresh client is never stale.
 - **Behind** — `min(msg.keys) > cachedV + 1`. The client missed versions and must resync via a full refetch.
 
 ## Key rules
