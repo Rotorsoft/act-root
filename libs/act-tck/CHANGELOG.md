@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.25](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.24...@rotorsoft/act-tck-v1.27.25) (2026-08-02)
+
+
+### Bug Fixes
+
+* **act-http:** apply SSE genesis event (version 0) for a fresh client ([9f3c0a1](https://github.com/rotorsoft/act-root/commit/9f3c0a1244234dd5d13553f926a4af780bf1dadc)), closes [#1346](https://github.com/rotorsoft/act-root/issues/1346)
+* **act-sqlite:** ack returns authoritative retry -1, not the stale input echo ([a9014e7](https://github.com/rotorsoft/act-root/commit/a9014e71dbf6a8c64fc8c64d150f8798f65a913b)), closes [#1347](https://github.com/rotorsoft/act-root/issues/1347)
+
 # [@rotorsoft/act-tck-v1.27.24](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.23...@rotorsoft/act-tck-v1.27.24) (2026-07-30)
 
 
