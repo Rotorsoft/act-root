@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.8...@rotorsoft/act-sqlite-v1.12.9) (2026-08-02)
+
+
+### Bug Fixes
+
+* **act-sqlite:** ack returns authoritative retry -1, not the stale input echo ([a9014e7](https://github.com/rotorsoft/act-root/commit/a9014e71dbf6a8c64fc8c64d150f8798f65a913b)), closes [#1347](https://github.com/rotorsoft/act-root/issues/1347)
+
 # [@rotorsoft/act-sqlite-v1.12.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.7...@rotorsoft/act-sqlite-v1.12.8) (2026-07-21)
 
 
