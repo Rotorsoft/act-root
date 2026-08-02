@@ -107,6 +107,40 @@ describe("windowed close", () => {
     expect(again.state.count).toBe(8);
   });
 
+  it("warm reload after a prune folds through the rebaselining snapshot (#1345)", async () => {
+    // A lagging/cross-process cache checkpoint sits below a newer snapshot,
+    // and a windowed close prunes the events between them. The warm reload
+    // must NOT silently fold the surviving tail on top of the stale state.
+    await tick("w-stale", 3);
+    // Capture the framework's own cache entry at the early checkpoint.
+    const stale = structuredClone(
+      await cache().get<{ count: number }>("w-stale")
+    );
+    expect(stale?.state.count).toBe(3);
+
+    // Advance to 7, minting newer snapshot boundaries above the checkpoint.
+    await tick("w-stale", 4);
+    await drainAll(); // reactions must be caught up so the prune is safe
+    const { skipped } = await app.close([
+      { stream: "w-stale", before: future() },
+    ]);
+    expect(skipped).toEqual([]);
+
+    // Control: a cold load (cache cleared) folds from the surviving snapshot.
+    await cache().clear();
+    const cold = await app.load(counter, "w-stale");
+    expect(cold.state.count).toBe(7);
+
+    // Restore the stale entry and reload on the warm path.
+    await cache().set("w-stale", stale!);
+    const warm = await app.load(counter, "w-stale");
+    // `version` reports the true head in both cases (fold runs through the
+    // surviving tail), so the concurrency guard would pass regardless — the
+    // state itself must be correct.
+    expect(warm.version).toBe(cold.version);
+    expect(warm.state.count).toBe(7);
+  });
+
   it("emits the closed lifecycle event with the windowed entry", async () => {
     const closed: unknown[] = [];
     app.on("closed", (r) => closed.push(r));

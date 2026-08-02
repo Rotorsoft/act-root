@@ -167,10 +167,17 @@ describe("ACT-1032 optimization guards", () => {
         const warm = await app.load(Counter, stream);
 
         // The optimization: resume strictly after the cached checkpoint.
+        // #1345: the warm path also carries `with_snaps` so a rebaselining
+        // snapshot landing above a stale checkpoint (after a windowed close
+        // pruned the events between them) is still folded — `after` and
+        // `with_snaps` are independent store conditions. With no snapshot in
+        // the after-window (as here) it is a no-op and zero rows still replay.
         expect(querySpy).toHaveBeenCalledTimes(1);
         const [, options] = querySpy.mock.calls[0];
-        expect(options).toMatchObject({ after: cachedEventId });
-        expect(options).not.toHaveProperty("with_snaps");
+        expect(options).toMatchObject({
+          after: cachedEventId,
+          with_snaps: true,
+        });
 
         expect(warm.cache_hit).toBe(true);
         expect(warm.replayed).toBe(0); // no pre-cache rows scanned
