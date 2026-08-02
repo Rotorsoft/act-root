@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.16...@rotorsoft/act-http-v1.8.17) (2026-08-02)
+
+
+### Bug Fixes
+
+* **act-http:** apply SSE genesis event (version 0) for a fresh client ([9f3c0a1](https://github.com/rotorsoft/act-root/commit/9f3c0a1244234dd5d13553f926a4af780bf1dadc)), closes [#1346](https://github.com/rotorsoft/act-root/issues/1346)
+
 # [@rotorsoft/act-http-v1.8.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.15...@rotorsoft/act-http-v1.8.16) (2026-07-27)
 
 
