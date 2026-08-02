@@ -941,7 +941,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
         expect(mine!.by).toBe(by);
-        await store.ack([{ ...(mine as Lease), at: mine!.at + 1 }]);
+        // claim bumped retry from -1 to 0; a non-due ack clears it back to -1.
+        expect(mine!.retry).toBe(0);
+        const acked = await store.ack([
+          { ...(mine as Lease), at: mine!.at + 1 },
+        ]);
+        // The returned lease reflects the post-ack row, not the caller's
+        // pre-ack echo — `retry` is the authoritative -1 on every adapter
+        // (#1347), and stream/source/lane carry through from the row.
+        const ackedMine = acked.find((l) => l.stream === s);
+        expect(ackedMine).toBeDefined();
+        expect(ackedMine!.retry).toBe(-1);
+        expect(ackedMine!.lane).toBe(mine!.lane);
       });
 
       it("does not double-claim a held lease", async () => {
