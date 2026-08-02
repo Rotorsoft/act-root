@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.20](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.19...@rotorsoft/act-v1.23.20) (2026-08-02)
+
+
+### Bug Fixes
+
+* **act:** warm cache load resumes with with_snaps to survive windowed prune ([55af63c](https://github.com/rotorsoft/act-root/commit/55af63c27dd9613d271fba3b0f33e640307593f1)), closes [#1345](https://github.com/rotorsoft/act-root/issues/1345)
+
 # [@rotorsoft/act-v1.23.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.18...@rotorsoft/act-v1.23.19) (2026-07-25)
 
 
