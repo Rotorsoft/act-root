@@ -775,15 +775,34 @@ export class SqliteStore implements Store {
       for (const l of leases) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
+          // RETURNING the post-ack `retry`/`source`/`lane` from the row so the
+          // returned lease reflects the authoritative state, not the caller's
+          // pre-ack echo (#1347). A non-due ack sets `retry = -1`; pushing the
+          // input lease verbatim leaked the claim-incremented value and
+          // diverged from PG (RETURNING s.retry) and InMemory (which return the
+          // reset -1). `at`/`by`/`lagging` still come from the input lease,
+          // matching both other adapters.
           sql: `UPDATE streams
                 SET at = ?,
                     deferred_at = ?,
                     leased_by = NULL, leased_until = NULL,
                     retry = CASE WHEN ? IS NULL THEN -1 ELSE ? END
-                WHERE stream = ? AND leased_by = ?`,
+                WHERE stream = ? AND leased_by = ?
+                RETURNING source, retry, lane`,
           args: [l.at, due, due, l.retry, l.stream, l.by],
         });
-        if (due === null && r.rowsAffected > 0) result.push(l);
+        if (due === null && r.rows.length > 0) {
+          const row = r.rows[0];
+          result.push({
+            stream: l.stream,
+            source: (row.source as string | null) ?? undefined,
+            at: l.at,
+            by: l.by,
+            retry: Number(row.retry),
+            lagging: l.lagging,
+            lane: row.lane as string,
+          });
+        }
       }
       await tx.commit();
       return result;

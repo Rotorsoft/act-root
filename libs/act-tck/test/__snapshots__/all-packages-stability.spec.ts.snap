@@ -49876,15 +49876,34 @@ export class SqliteStore implements Store {
       for (const l of leases) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
+          // RETURNING the post-ack \`retry\`/\`source\`/\`lane\` from the row so the
+          // returned lease reflects the authoritative state, not the caller's
+          // pre-ack echo (#1347). A non-due ack sets \`retry = -1\`; pushing the
+          // input lease verbatim leaked the claim-incremented value and
+          // diverged from PG (RETURNING s.retry) and InMemory (which return the
+          // reset -1). \`at\`/\`by\`/\`lagging\` still come from the input lease,
+          // matching both other adapters.
           sql: \`UPDATE streams
                 SET at = ?,
                     deferred_at = ?,
                     leased_by = NULL, leased_until = NULL,
                     retry = CASE WHEN ? IS NULL THEN -1 ELSE ? END
-                WHERE stream = ? AND leased_by = ?\`,
+                WHERE stream = ? AND leased_by = ?
+                RETURNING source, retry, lane\`,
           args: [l.at, due, due, l.retry, l.stream, l.by],
         });
-        if (due === null && r.rowsAffected > 0) result.push(l);
+        if (due === null && r.rows.length > 0) {
+          const row = r.rows[0];
+          result.push({
+            stream: l.stream,
+            source: (row.source as string | null) ?? undefined,
+            at: l.at,
+            by: l.by,
+            retry: Number(row.retry),
+            lagging: l.lagging,
+            lane: row.lane as string,
+          });
+        }
       }
       await tx.commit();
       return result;
@@ -53792,7 +53811,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
         expect(mine!.by).toBe(by);
-        await store.ack([{ ...(mine as Lease), at: mine!.at + 1 }]);
+        // claim bumped retry from -1 to 0; a non-due ack clears it back to -1.
+        expect(mine!.retry).toBe(0);
+        const acked = await store.ack([
+          { ...(mine as Lease), at: mine!.at + 1 },
+        ]);
+        // The returned lease reflects the post-ack row, not the caller's
+        // pre-ack echo — \`retry\` is the authoritative -1 on every adapter
+        // (#1347), and stream/source/lane carry through from the row.
+        const ackedMine = acked.find((l) => l.stream === s);
+        expect(ackedMine).toBeDefined();
+        expect(ackedMine!.retry).toBe(-1);
+        expect(ackedMine!.lane).toBe(mine!.lane);
       });
 
       it("does not double-claim a held lease", async () => {
