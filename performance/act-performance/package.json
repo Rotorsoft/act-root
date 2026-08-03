@@ -13,7 +13,7 @@
     "evidence:10m": "TIER=10M bash evidence/run.sh"
   },
   "dependencies": {
-    "@rotorsoft/act": "^1.23.17",
+    "@rotorsoft/act": "^1.23.19",
     "@rotorsoft/act-pg": "^1.13.12",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
