@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.9...@rotorsoft/act-sqlite-v1.12.10) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([f3b63d9](https://github.com/rotorsoft/act-root/commit/f3b63d98d9b9e262765700c503d55eec28c290cd))
+
 # [@rotorsoft/act-sqlite-v1.12.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.8...@rotorsoft/act-sqlite-v1.12.9) (2026-08-02)
 
 
