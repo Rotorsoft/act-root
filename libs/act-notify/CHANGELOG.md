@@ -1,3 +1,10 @@
+# [@rotorsoft/act-notify-v0.1.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.1.3...@rotorsoft/act-notify-v0.1.4) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([f3b63d9](https://github.com/rotorsoft/act-root/commit/f3b63d98d9b9e262765700c503d55eec28c290cd))
+
 # [@rotorsoft/act-notify-v0.1.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.1.2...@rotorsoft/act-notify-v0.1.3) (2026-07-21)
 
 
