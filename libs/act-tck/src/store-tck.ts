@@ -2900,15 +2900,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
         const visited: string[] = [];
         let after: string | undefined;
-        for (;;) {
-          const page = await store.query_stats<CounterEvents>(
+        // Terminates on the first empty page — a correct adapter yields one
+        // stream per page then an empty page; a comparator mismatch would drop
+        // rows but still exhaust the cursor and terminate.
+        let page = await store.query_stats<CounterEvents>(
+          { stream: tag },
+          { after, limit: 1 }
+        );
+        while (page.size > 0) {
+          for (const k of page.keys()) visited.push(k);
+          after = [...page.keys()].at(-1);
+          page = await store.query_stats<CounterEvents>(
             { stream: tag },
             { after, limit: 1 }
           );
-          if (page.size === 0) break;
-          for (const k of page.keys()) visited.push(k);
-          after = [...page.keys()].at(-1);
-          if (visited.length > names.length + 2) break; // runaway guard
         }
         expect([...visited].sort()).toEqual([...names].sort());
       });
