@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.21](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.20...@rotorsoft/act-v1.23.21) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([f3b63d9](https://github.com/rotorsoft/act-root/commit/f3b63d98d9b9e262765700c503d55eec28c290cd))
+
 # [@rotorsoft/act-v1.23.20](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.19...@rotorsoft/act-v1.23.20) (2026-08-02)
 
 
