@@ -11578,8 +11578,14 @@ export class InMemoryStore implements Store {
     }
 
     // Order by stream name so \`after\`/\`limit\` keyset-paginate
-    // deterministically (matches query_streams ordering).
-    const ordered = [...acc.keys()].sort((x, y) => x.localeCompare(y));
+    // deterministically. The sort MUST agree with the \`after\` cursor below
+    // (JS \`<=\`, i.e. UTF-16 code-unit order) — \`localeCompare\` disagrees with
+    // \`<=\` on mixed-case/accented names (\`B\`=66 < \`a\`=97 by code unit, but
+    // \`a\` < \`B\` by locale), which would let the cursor skip streams the sort
+    // placed after it (#1357). The default \`Array.sort()\` comparator IS
+    // code-unit order, so it matches \`<=\` exactly — and PG/SQLite, which
+    // paginate \`query_stats\` under their binary collation.
+    const ordered = [...acc.keys()].sort();
     const out = new Map<string, StreamStats<E>>();
     for (const stream of ordered) {
       if (after !== undefined && stream <= after) continue;
@@ -28354,8 +28360,14 @@ export class InMemoryStore implements Store {
     }
 
     // Order by stream name so \`after\`/\`limit\` keyset-paginate
-    // deterministically (matches query_streams ordering).
-    const ordered = [...acc.keys()].sort((x, y) => x.localeCompare(y));
+    // deterministically. The sort MUST agree with the \`after\` cursor below
+    // (JS \`<=\`, i.e. UTF-16 code-unit order) — \`localeCompare\` disagrees with
+    // \`<=\` on mixed-case/accented names (\`B\`=66 < \`a\`=97 by code unit, but
+    // \`a\` < \`B\` by locale), which would let the cursor skip streams the sort
+    // placed after it (#1357). The default \`Array.sort()\` comparator IS
+    // code-unit order, so it matches \`<=\` exactly — and PG/SQLite, which
+    // paginate \`query_stats\` under their binary collation.
+    const ordered = [...acc.keys()].sort();
     const out = new Map<string, StreamStats<E>>();
     for (const stream of ordered) {
       if (after !== undefined && stream <= after) continue;
@@ -55794,6 +55806,39 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // Unknown stream name — absent, not an error.
         const unknown = await store.query_stats([\`qst-\${tag}-missing\`]);
         expect(unknown.size).toBe(0);
+      });
+
+      it("keyset pagination visits every stream regardless of name case (#1357)", async () => {
+        // Mixed-case suffixes so the sort comparator and the \`after\` cursor
+        // must agree: code-unit order is B,C,a,d; a locale sort (a,B,C,d)
+        // paired with a code-unit \`<=\` cursor silently skips Bravo/Charlie.
+        const tag = uid();
+        const names = [
+          \`\${tag}-Bravo\`,
+          \`\${tag}-alpha\`,
+          \`\${tag}-Charlie\`,
+          \`\${tag}-delta\`,
+        ];
+        for (const s of names)
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+
+        const visited: string[] = [];
+        let after: string | undefined;
+        for (;;) {
+          const page = await store.query_stats<CounterEvents>(
+            { stream: tag },
+            { after, limit: 1 }
+          );
+          if (page.size === 0) break;
+          for (const k of page.keys()) visited.push(k);
+          after = [...page.keys()].at(-1);
+          if (visited.length > names.length + 2) break; // runaway guard
+        }
+        expect([...visited].sort()).toEqual([...names].sort());
       });
 
       it("tail returns the earliest event per stream", async () => {
