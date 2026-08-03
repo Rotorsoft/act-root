@@ -341,21 +341,30 @@ async function probe_min_watermarks(
 async function scan_stream_heads(
   streams: string[]
 ): Promise<Map<string, StreamHead>> {
-  // One round trip: query_stats returns the latest non-snap event per
-  // stream (heads-only cheap path, indexed). Streams whose latest non-snap
-  // event is a tombstone are filtered out in the loop — we don't want to
-  // re-tombstone an already-closed stream. Streams with no events (or
-  // only snap/tombstone events filtered out) are absent from the result
-  // map entirely.
+  // query_stats returns the latest non-snap event per stream (heads-only
+  // cheap path, indexed). Streams whose latest non-snap event is a tombstone
+  // are filtered out in the loop — we don't want to re-tombstone an
+  // already-closed stream. Streams with no events (or only snap/tombstone
+  // events filtered out) are absent from the result map entirely.
   const stats = await store().query_stats(streams, {
     exclude: [SNAP_EVENT],
   });
+  // The tombstone's optimistic lock must expect the stream's ACTUAL current
+  // version, which is one higher when a `__snapshot__` trails the domain head
+  // — `snap()` commits it into the next version slot (event-sourcing.ts). The
+  // domain head above still drives `max_id` (the safety probe: a subscription
+  // advances its watermark on domain events, never snapshots) and
+  // `last_event_name` (the restart-seed owner lookup). Only the guard version
+  // needs the true head, so a second heads-only pass reads it with snapshots
+  // included. Without this, a terminal commit that crossed a `.snap()`
+  // boundary makes the guard expect a stale version and skip the close (#1356).
+  const true_heads = await store().query_stats(streams, {});
   const out = new Map<string, StreamHead>();
   for (const [stream, { head }] of stats) {
     if (head.name === TOMBSTONE_EVENT) continue;
     out.set(stream, {
       max_id: head.id,
-      version: head.version,
+      version: true_heads.get(stream)!.head.version,
       last_event_name: head.name as string,
     });
   }

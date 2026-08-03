@@ -86,18 +86,22 @@ export function synthesize_autoclose_reactions<
           throw new DeferSignal({
             at: next_window_open(config.autocloseWindow!, new Date()),
           });
-        // Rolling-window policies also exclude snapshots and fetch the
-        // tail: the prune decision keys on the oldest *domain* event —
-        // after a prune the oldest surviving event is the boundary
-        // snapshot, whose age says nothing about whether another prune
-        // would be productive.
+        // Every policy keys on the *domain* head/count, so snapshots are
+        // excluded unconditionally (#1356) — matching `scan_stream_heads` in
+        // close-cycle.ts. `snap()` commits a `__snapshot__` at a higher id
+        // right after the triggering domain event, so a terminal commit that
+        // crosses a `.snap()` boundary would otherwise make the snapshot the
+        // head: `is` never matches (`head.name === "__snapshot__"`) and never
+        // recovers, `after` measures the cooldown from the snapshot's
+        // timestamp, and `reaches:N` counts snapshot events toward N. Only
+        // rolling-window (`keep`) policies additionally fetch the tail: the
+        // prune decision keys on the oldest *domain* event — after a prune the
+        // oldest surviving event is the boundary snapshot, whose age says
+        // nothing about whether another prune would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
           tail: keep_days !== undefined ? true : undefined,
-          exclude:
-            keep_days !== undefined
-              ? [TOMBSTONE_EVENT, SNAP_EVENT]
-              : [TOMBSTONE_EVENT],
+          exclude: [TOMBSTONE_EVENT, SNAP_EVENT],
         });
         const entry = stats.get(aggregate);
         // No live (non-tombstone) head → already closed, nothing to do.
