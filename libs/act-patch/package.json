@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-patch",
   "type": "module",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Immutable deep-merge patch utility for act apps",
   "keywords": [
     "typescript",
