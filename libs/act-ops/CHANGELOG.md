@@ -1,3 +1,10 @@
+# [@rotorsoft/act-ops-v0.2.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.5...@rotorsoft/act-ops-v0.2.6) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([f3b63d9](https://github.com/rotorsoft/act-root/commit/f3b63d98d9b9e262765700c503d55eec28c290cd))
+
 # [@rotorsoft/act-ops-v0.2.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.4...@rotorsoft/act-ops-v0.2.5) (2026-07-30)
 
 
