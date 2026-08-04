@@ -4036,6 +4036,29 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
+      it("revives a Date in a pii field to a Date, like data (#1365)", async () => {
+        const s = `pii-date-${uid()}`;
+        const dob = new Date("2000-03-04T05:06:07.000Z");
+        await store.commit<CounterEvents>(
+          s,
+          [{ name: "Incremented", data: { amount: 1 }, pii: { dob } }],
+          make_meta({ stream: s })
+        );
+
+        const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>((e) => seen.push(e), {
+          stream: s,
+          stream_exact: true,
+        });
+        expect(seen).toHaveLength(1);
+        // A Date in pii round-trips as a Date, matching the `data`/`meta`
+        // reviver — not an ISO string on JSON-storage adapters.
+        expect((seen[0].pii as { dob: unknown }).dob).toBeInstanceOf(Date);
+        expect((seen[0].pii as { dob: Date }).dob.getTime()).toBe(
+          dob.getTime()
+        );
+      });
+
       it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {
         const s = `pii-stats-${uid()}`;
         await store.commit<CounterEvents>(
