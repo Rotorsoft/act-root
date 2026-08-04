@@ -40821,10 +40821,14 @@ export {
  * **Two-phase dedup**: the claim \`checkWebhook\` makes is *tentative*.
  * Because Hono middleware wraps the downstream chain, this adapter
  * finalizes the claim automatically after \`await next()\`: a downstream
- * 2xx **commits** the key (later retries dedup); a 5xx or a thrown
- * handler **releases** it (the sender's retry re-processes instead of
- * being silently dropped). Operators who need explicit control can
- * still call \`c.get("idempotency").commit()\` / \`.release()\`.
+ * 2xx/3xx **commits** the key (later retries dedup); any **4xx or 5xx**
+ * (or a thrown handler) **releases** it, so the sender's corrected retry
+ * re-processes instead of being silently dropped (#1364). Fail-safe is
+ * toward reprocessing: releasing a deterministic 4xx costs bounded
+ * re-delivery, while committing it would lose a delivery the handler
+ * never accepted (the shipped \`receiver()\` returns 422 on a schema
+ * mismatch, where the handler never runs). Operators who need explicit
+ * control can still call \`c.get("idempotency").commit()\` / \`.release()\`.
  *
  * **Raw body**: Hono exposes \`await c.req.text()\` natively, which
  * the middleware reads when \`secret\` is configured. No extra setup
@@ -40886,7 +40890,10 @@ export function webhookMiddleware(
       await release();
       throw err;
     }
-    if (c.res.status >= 500) await release();
+    // Commit only a genuine success (2xx/3xx); release on any 4xx/5xx so a
+    // failed delivery's corrected same-key retry re-processes instead of being
+    // deduped into a silent success (#1364).
+    if (c.res.status >= 400) await release();
     else await commit();
   };
 }
@@ -42291,10 +42298,14 @@ export function make_finalizers(
  * **Two-phase dedup**: the claim \`checkWebhook\` makes is *tentative*.
  * Because Hono middleware wraps the downstream chain, this adapter
  * finalizes the claim automatically after \`await next()\`: a downstream
- * 2xx **commits** the key (later retries dedup); a 5xx or a thrown
- * handler **releases** it (the sender's retry re-processes instead of
- * being silently dropped). Operators who need explicit control can
- * still call \`c.get("idempotency").commit()\` / \`.release()\`.
+ * 2xx/3xx **commits** the key (later retries dedup); any **4xx or 5xx**
+ * (or a thrown handler) **releases** it, so the sender's corrected retry
+ * re-processes instead of being silently dropped (#1364). Fail-safe is
+ * toward reprocessing: releasing a deterministic 4xx costs bounded
+ * re-delivery, while committing it would lose a delivery the handler
+ * never accepted (the shipped \`receiver()\` returns 422 on a schema
+ * mismatch, where the handler never runs). Operators who need explicit
+ * control can still call \`c.get("idempotency").commit()\` / \`.release()\`.
  *
  * **Raw body**: Hono exposes \`await c.req.text()\` natively, which
  * the middleware reads when \`secret\` is configured. No extra setup
@@ -42356,7 +42367,10 @@ export function webhookMiddleware(
       await release();
       throw err;
     }
-    if (c.res.status >= 500) await release();
+    // Commit only a genuine success (2xx/3xx); release on any 4xx/5xx so a
+    // failed delivery's corrected same-key retry re-processes instead of being
+    // deduped into a silent success (#1364).
+    if (c.res.status >= 400) await release();
     else await commit();
   };
 }

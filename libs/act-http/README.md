@@ -141,7 +141,8 @@ app.post("/webhook", { preHandler: webhookMiddleware({ store, secret }) }, async
 import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
 app.post("/webhook", webhookMiddleware({ store, secret }), (c) => {
   const { key, deduped } = c.get("idempotency");
-  // Hono auto-finalizes off the response: a 2xx commits, a 5xx/throw releases.
+  // Hono auto-finalizes off the response: a 2xx/3xx commits, any 4xx/5xx (or a
+  // thrown handler) releases so a corrected same-key retry re-processes (#1364).
   // …
   return c.body(null, 204);
 });

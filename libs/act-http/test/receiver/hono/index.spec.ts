@@ -80,6 +80,35 @@ describe("webhookMiddleware (Hono)", () => {
     expect(sideEffects).toBe(2);
   });
 
+  it("auto-releases on a 4xx response — a corrected same-key retry re-processes (#1364)", async () => {
+    const store = freshStore();
+    let sideEffects = 0;
+    let hits = 0;
+    const app = new Hono();
+    app.post("/webhook", webhookMiddleware({ store }), (c) => {
+      const idem = c.get("idempotency");
+      hits++;
+      if (!idem.deduped) sideEffects++;
+      // First attempt fails with a 4xx (bad body / schema mismatch) — the
+      // handler never accepted the delivery, so the key must NOT commit.
+      if (hits === 1) return c.json({ error: "bad request" }, 422);
+      return c.body(null, 204);
+    });
+
+    const fire = () =>
+      app.request("/webhook", {
+        method: "POST",
+        headers: { "idempotency-key": "req-4xx" },
+        body: BODY,
+      });
+
+    expect((await fire()).status).toBe(422);
+    // Corrected same-key retry must re-process, not dedup into a silent 204.
+    const second = await fire();
+    expect(second.status).toBe(204);
+    expect(sideEffects).toBe(2);
+  });
+
   it("releases and re-throws when next() rejects (downstream error propagates)", async () => {
     const store = freshStore();
     const middleware = webhookMiddleware({ store });
