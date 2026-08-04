@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.10...@rotorsoft/act-sqlite-v1.12.11) (2026-08-04)
+
+
+### Bug Fixes
+
+* **act:** reset/defer array form counts distinct streams, matching PG ([bcb911a](https://github.com/rotorsoft/act-root/commit/bcb911a3132777b16e0ec06c75b009baf1db9f47)), closes [#1360](https://github.com/rotorsoft/act-root/issues/1360)
+
 # [@rotorsoft/act-sqlite-v1.12.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.9...@rotorsoft/act-sqlite-v1.12.10) (2026-08-03)
 
 
