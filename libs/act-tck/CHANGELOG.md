@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.27](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.26...@rotorsoft/act-tck-v1.27.27) (2026-08-04)
+
+
+### Bug Fixes
+
+* **act:** autoclose fires when a snapshot trails the terminal event ([4e9419c](https://github.com/rotorsoft/act-root/commit/4e9419c3ac83f586d938786c8896102269b503ad)), closes [#1356](https://github.com/rotorsoft/act-root/issues/1356)
+* **act:** query_stats pagination uses code-unit sort matching its cursor ([bbac425](https://github.com/rotorsoft/act-root/commit/bbac4255e2bc23a7e3f010955fff869b5fd1f44d)), closes [#1357](https://github.com/rotorsoft/act-root/issues/1357)
+
 # [@rotorsoft/act-tck-v1.27.26](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.25...@rotorsoft/act-tck-v1.27.26) (2026-08-03)
 
 
