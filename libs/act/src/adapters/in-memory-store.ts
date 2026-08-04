@@ -760,7 +760,9 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (Array.isArray(input)) {
-      for (const name of input) {
+      // De-dup the array so a repeated name counts once, matching PG's
+      // set-based `WHERE stream = ANY(...)` (#1360).
+      for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
           s.defer(deferred_at);
@@ -832,7 +834,9 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (Array.isArray(input)) {
-      for (const name of input) {
+      // De-dup the array so a repeated name counts once, matching PG's
+      // set-based `WHERE stream = ANY(...)` (#1360).
+      for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
           s.reset();

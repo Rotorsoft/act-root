@@ -1799,6 +1799,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await store.defer([`missing-${uid()}`], Date.now())).toBe(0);
         expect(await store.defer([], Date.now())).toBe(0);
       });
+
+      it("counts a duplicated stream name once (#1360)", async () => {
+        const s = `defer-dup-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // A repeated name matches one stream — the count is distinct streams,
+        // matching PG's set-based `WHERE stream = ANY(...)`.
+        expect(await store.defer([s, s], Date.now() + 3_600_000)).toBe(1);
+      });
     });
 
     describe("ack finalize (due-marked leases)", () => {
@@ -1988,6 +2001,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("returns 0 for unknown streams and empty input", async () => {
         expect(await store.reset([`missing-${uid()}`])).toBe(0);
         expect(await store.reset([])).toBe(0);
+      });
+
+      it("counts a duplicated stream name once (#1360)", async () => {
+        const s = `reset-dup-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // A repeated name matches one stream — the count is distinct streams,
+        // matching PG's set-based `WHERE stream = ANY(...)`.
+        expect(await store.reset([s, s])).toBe(1);
       });
     });
 

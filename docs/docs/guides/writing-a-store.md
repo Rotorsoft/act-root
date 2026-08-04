@@ -122,6 +122,8 @@ UPDATE streams
  WHERE stream = ANY($streams)      -- or the StreamFilter's compiled predicate
 ```
 
+The array form counts **distinct** streams: `reset`/`defer` return "the count of streams actually affected", so a repeated name in the input array counts once. A set-based `WHERE stream = ANY(...)` gets this for free; an adapter that instead **loops** the array and sums per-name `rowsAffected` must de-duplicate the input first (e.g. iterate a `Set`), or a caller passing `["s","s"]` sees `2` where the SQL adapters return `1` ([#1360](https://github.com/Rotorsoft/act-root/issues/1360)). The store-TCK pins `reset(["s","s"]) === 1` and the same for `defer`.
+
 Second, the `claim` query gains a guard that skips any stream still parked in the future:
 
 ```sql no-check
