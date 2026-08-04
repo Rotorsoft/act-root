@@ -7390,7 +7390,7 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { DrainOps } from "./drain.js";
-import { LruSet } from "./lru-map.js";
+import { LruMap } from "./lru-map.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -7464,7 +7464,12 @@ export class CorrelateCycle<
   private _checkpoint = -1;
   private _initialized = false;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
-  private readonly _subscribed: LruSet<string>;
+  // target → the priority it was last subscribed at. A dynamic target is
+  // re-subscribed (so the store's \`GREATEST\` upsert runs) only when a later
+  // scan resolves a *higher* priority for it — the runtime \`max()\` invariant
+  // (#1363). Static targets are recorded at +Infinity so a dynamic resolution
+  // never re-opens them (their priority is owned by the build-time subscribe).
+  private readonly _subscribed: LruMap<string, number>;
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _has_dynamic_resolvers: boolean;
@@ -7506,7 +7511,7 @@ export class CorrelateCycle<
     on_init_async,
     cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
-    this._subscribed = new LruSet(max_subscribed_streams);
+    this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
     this._has_dynamic_resolvers = has_dynamic_resolvers;
@@ -7557,7 +7562,9 @@ export class CorrelateCycle<
       : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
-      this._subscribed.add(stream);
+      // +Infinity: a dynamic resolution's priority can never exceed it, so a
+      // static target is never re-subscribed through the dynamic path (#1363).
+      this._subscribed.set(stream, Number.POSITIVE_INFINITY);
     }
     // Cold-start defer re-seed (#1221) — after the static targets are
     // subscribed, so a walk of the streams table sees them.
@@ -7600,7 +7607,18 @@ export class CorrelateCycle<
             // only evaluate dynamic resolvers — statics are subscribed at init
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
-            if (resolved && !this._subscribed.has(resolved.target)) {
+            // Let a target through when it's new OR a later scan resolves a
+            // strictly higher priority than it was last subscribed at, so the
+            // store's \`GREATEST\` upsert raises it — the documented runtime
+            // \`max()\` invariant, which the plain "already subscribed?" dedup
+            // silently froze at first discovery (#1363).
+            const recorded = resolved
+              ? this._subscribed.get(resolved.target)
+              : undefined;
+            if (
+              resolved &&
+              (recorded === undefined || (resolved.priority ?? 0) > recorded)
+            ) {
               const incoming_priority = resolved.priority ?? 0;
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
@@ -7642,9 +7660,11 @@ export class CorrelateCycle<
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {
-        // Track newly subscribed dynamic targets
-        for (const { stream } of streams) {
-          this._subscribed.add(stream);
+        // Record each target at the priority it was just subscribed at (the
+        // within-scan max), so a later lower-or-equal resolution dedups and a
+        // strictly-higher one re-opens the guard above (#1363).
+        for (const { stream, priority } of streams) {
+          this._subscribed.set(stream, priority);
         }
       }
       return { subscribed, last_id };
@@ -24408,7 +24428,7 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { DrainOps } from "./drain.js";
-import { LruSet } from "./lru-map.js";
+import { LruMap } from "./lru-map.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -24482,7 +24502,12 @@ export class CorrelateCycle<
   private _checkpoint = -1;
   private _initialized = false;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
-  private readonly _subscribed: LruSet<string>;
+  // target → the priority it was last subscribed at. A dynamic target is
+  // re-subscribed (so the store's \`GREATEST\` upsert runs) only when a later
+  // scan resolves a *higher* priority for it — the runtime \`max()\` invariant
+  // (#1363). Static targets are recorded at +Infinity so a dynamic resolution
+  // never re-opens them (their priority is owned by the build-time subscribe).
+  private readonly _subscribed: LruMap<string, number>;
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _has_dynamic_resolvers: boolean;
@@ -24524,7 +24549,7 @@ export class CorrelateCycle<
     on_init_async,
     cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
-    this._subscribed = new LruSet(max_subscribed_streams);
+    this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
     this._has_dynamic_resolvers = has_dynamic_resolvers;
@@ -24575,7 +24600,9 @@ export class CorrelateCycle<
       : watermark;
     this._on_init?.();
     for (const { stream } of this._static_targets) {
-      this._subscribed.add(stream);
+      // +Infinity: a dynamic resolution's priority can never exceed it, so a
+      // static target is never re-subscribed through the dynamic path (#1363).
+      this._subscribed.set(stream, Number.POSITIVE_INFINITY);
     }
     // Cold-start defer re-seed (#1221) — after the static targets are
     // subscribed, so a walk of the streams table sees them.
@@ -24618,7 +24645,18 @@ export class CorrelateCycle<
             // only evaluate dynamic resolvers — statics are subscribed at init
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
-            if (resolved && !this._subscribed.has(resolved.target)) {
+            // Let a target through when it's new OR a later scan resolves a
+            // strictly higher priority than it was last subscribed at, so the
+            // store's \`GREATEST\` upsert raises it — the documented runtime
+            // \`max()\` invariant, which the plain "already subscribed?" dedup
+            // silently froze at first discovery (#1363).
+            const recorded = resolved
+              ? this._subscribed.get(resolved.target)
+              : undefined;
+            if (
+              resolved &&
+              (recorded === undefined || (resolved.priority ?? 0) > recorded)
+            ) {
               const incoming_priority = resolved.priority ?? 0;
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
@@ -24660,9 +24698,11 @@ export class CorrelateCycle<
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {
-        // Track newly subscribed dynamic targets
-        for (const { stream } of streams) {
-          this._subscribed.add(stream);
+        // Record each target at the priority it was just subscribed at (the
+        // within-scan max), so a later lower-or-equal resolution dedups and a
+        // strictly-higher one re-opens the guard above (#1363).
+        for (const { stream, priority } of streams) {
+          this._subscribed.set(stream, priority);
         }
       }
       return { subscribed, last_id };
