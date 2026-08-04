@@ -2880,6 +2880,44 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(unknown.size).toBe(0);
       });
 
+      it("keyset pagination visits every stream regardless of name case (#1357)", async () => {
+        // Mixed-case suffixes so the sort comparator and the `after` cursor
+        // must agree: code-unit order is B,C,a,d; a locale sort (a,B,C,d)
+        // paired with a code-unit `<=` cursor silently skips Bravo/Charlie.
+        const tag = uid();
+        const names = [
+          `${tag}-Bravo`,
+          `${tag}-alpha`,
+          `${tag}-Charlie`,
+          `${tag}-delta`,
+        ];
+        for (const s of names)
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+
+        const visited: string[] = [];
+        let after: string | undefined;
+        // Terminates on the first empty page — a correct adapter yields one
+        // stream per page then an empty page; a comparator mismatch would drop
+        // rows but still exhaust the cursor and terminate.
+        let page = await store.query_stats<CounterEvents>(
+          { stream: tag },
+          { after, limit: 1 }
+        );
+        while (page.size > 0) {
+          for (const k of page.keys()) visited.push(k);
+          after = [...page.keys()].at(-1);
+          page = await store.query_stats<CounterEvents>(
+            { stream: tag },
+            { after, limit: 1 }
+          );
+        }
+        expect([...visited].sort()).toEqual([...names].sort());
+      });
+
       it("tail returns the earliest event per stream", async () => {
         const tag = uid();
         const s = `qst-tail-${tag}`;
