@@ -11261,7 +11261,9 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (Array.isArray(input)) {
-      for (const name of input) {
+      // De-dup the array so a repeated name counts once, matching PG's
+      // set-based \`WHERE stream = ANY(...)\` (#1360).
+      for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
           s.defer(deferred_at);
@@ -11333,7 +11335,9 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (Array.isArray(input)) {
-      for (const name of input) {
+      // De-dup the array so a repeated name counts once, matching PG's
+      // set-based \`WHERE stream = ANY(...)\` (#1360).
+      for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
           s.reset();
@@ -28056,7 +28060,9 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (Array.isArray(input)) {
-      for (const name of input) {
+      // De-dup the array so a repeated name counts once, matching PG's
+      // set-based \`WHERE stream = ANY(...)\` (#1360).
+      for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
           s.defer(deferred_at);
@@ -28128,7 +28134,9 @@ export class InMemoryStore implements Store {
     await sleep();
     let count = 0;
     if (Array.isArray(input)) {
-      for (const name of input) {
+      // De-dup the array so a repeated name counts once, matching PG's
+      // set-based \`WHERE stream = ANY(...)\` (#1360).
+      for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
           s.reset();
@@ -50028,7 +50036,9 @@ export class SqliteStore implements Store {
     try {
       let count = 0;
       if (Array.isArray(input)) {
-        for (const stream of input) {
+        // De-dup so a repeated name counts once, matching PG's set-based
+        // \`WHERE stream = ANY(...)\` (#1360).
+        for (const stream of new Set(input)) {
           const r = await tx.execute({
             sql: \`UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?\`,
             args: [at_iso, stream],
@@ -50100,7 +50110,9 @@ export class SqliteStore implements Store {
     try {
       let count = 0;
       if (Array.isArray(input)) {
-        for (const stream of input) {
+        // De-dup so a repeated name counts once, matching PG's set-based
+        // \`WHERE stream = ANY(...)\` (#1360).
+        for (const stream of new Set(input)) {
           const r = await tx.execute({
             sql: \`UPDATE streams \${set_clause} WHERE stream = ?\`,
             args: [stream],
@@ -54753,6 +54765,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await store.defer([\`missing-\${uid()}\`], Date.now())).toBe(0);
         expect(await store.defer([], Date.now())).toBe(0);
       });
+
+      it("counts a duplicated stream name once (#1360)", async () => {
+        const s = \`defer-dup-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // A repeated name matches one stream — the count is distinct streams,
+        // matching PG's set-based \`WHERE stream = ANY(...)\`.
+        expect(await store.defer([s, s], Date.now() + 3_600_000)).toBe(1);
+      });
     });
 
     describe("ack finalize (due-marked leases)", () => {
@@ -54942,6 +54967,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("returns 0 for unknown streams and empty input", async () => {
         expect(await store.reset([\`missing-\${uid()}\`])).toBe(0);
         expect(await store.reset([])).toBe(0);
+      });
+
+      it("counts a duplicated stream name once (#1360)", async () => {
+        const s = \`reset-dup-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // A repeated name matches one stream — the count is distinct streams,
+        // matching PG's set-based \`WHERE stream = ANY(...)\`.
+        expect(await store.reset([s, s])).toBe(1);
       });
     });
 

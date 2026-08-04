@@ -843,7 +843,9 @@ export class SqliteStore implements Store {
     try {
       let count = 0;
       if (Array.isArray(input)) {
-        for (const stream of input) {
+        // De-dup so a repeated name counts once, matching PG's set-based
+        // `WHERE stream = ANY(...)` (#1360).
+        for (const stream of new Set(input)) {
           const r = await tx.execute({
             sql: `UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?`,
             args: [at_iso, stream],
@@ -915,7 +917,9 @@ export class SqliteStore implements Store {
     try {
       let count = 0;
       if (Array.isArray(input)) {
-        for (const stream of input) {
+        // De-dup so a repeated name counts once, matching PG's set-based
+        // `WHERE stream = ANY(...)` (#1360).
+        for (const stream of new Set(input)) {
           const r = await tx.execute({
             sql: `UPDATE streams ${set_clause} WHERE stream = ?`,
             args: [stream],
