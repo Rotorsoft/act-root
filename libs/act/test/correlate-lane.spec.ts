@@ -126,5 +126,24 @@ describe("correlate dynamic-resolver lane (#1255)", () => {
       await app.correlate();
       expect((await sharedState()).priority).toBe(5);
     });
+
+    it("a resolver that omits priority dedups a re-seen target at default 0", async () => {
+      // No `priority` field on the resolver → defaults to 0 on both scans, so
+      // the second scan re-evaluates the guard (recorded is defined) and dedups.
+      const app = act()
+        .withState(tiered)
+        .on("ticked")
+        .do(async function react() {})
+        .to((e) => ({ target: "shared", source: e.stream }))
+        .build();
+
+      await app.do("tick", { stream: "a", actor }, { premium: false });
+      await app.correlate();
+      expect((await sharedState()).priority).toBe(0);
+
+      await app.do("tick", { stream: "b", actor }, { premium: true });
+      await app.correlate();
+      expect((await sharedState()).priority).toBe(0);
+    });
   });
 });

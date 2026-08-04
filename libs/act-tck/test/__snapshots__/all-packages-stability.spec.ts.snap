@@ -7607,17 +7607,18 @@ export class CorrelateCycle<
             // only evaluate dynamic resolvers — statics are subscribed at init
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
-            // Let a target through when it's new OR a later scan resolves a
-            // strictly higher priority than it was last subscribed at, so the
-            // store's \`GREATEST\` upsert raises it — the documented runtime
-            // \`max()\` invariant, which the plain "already subscribed?" dedup
-            // silently froze at first discovery (#1363).
-            const recorded = resolved
-              ? this._subscribed.get(resolved.target)
-              : undefined;
+            // Let a target through when a scan resolves a strictly higher
+            // priority than it was last subscribed at, so the store's
+            // \`GREATEST\` upsert raises it — the documented runtime \`max()\`
+            // invariant, which the plain "already subscribed?" dedup silently
+            // froze at first discovery (#1363). A never-seen target defaults to
+            // -Infinity so its first resolution always passes; static targets
+            // sit at +Infinity so a dynamic resolution never re-opens them.
             if (
               resolved &&
-              (recorded === undefined || (resolved.priority ?? 0) > recorded)
+              (resolved.priority ?? 0) >
+                (this._subscribed.get(resolved.target) ??
+                  Number.NEGATIVE_INFINITY)
             ) {
               const incoming_priority = resolved.priority ?? 0;
               const entry = correlated.get(resolved.target) || {
@@ -24645,17 +24646,18 @@ export class CorrelateCycle<
             // only evaluate dynamic resolvers — statics are subscribed at init
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
-            // Let a target through when it's new OR a later scan resolves a
-            // strictly higher priority than it was last subscribed at, so the
-            // store's \`GREATEST\` upsert raises it — the documented runtime
-            // \`max()\` invariant, which the plain "already subscribed?" dedup
-            // silently froze at first discovery (#1363).
-            const recorded = resolved
-              ? this._subscribed.get(resolved.target)
-              : undefined;
+            // Let a target through when a scan resolves a strictly higher
+            // priority than it was last subscribed at, so the store's
+            // \`GREATEST\` upsert raises it — the documented runtime \`max()\`
+            // invariant, which the plain "already subscribed?" dedup silently
+            // froze at first discovery (#1363). A never-seen target defaults to
+            // -Infinity so its first resolution always passes; static targets
+            // sit at +Infinity so a dynamic resolution never re-opens them.
             if (
               resolved &&
-              (recorded === undefined || (resolved.priority ?? 0) > recorded)
+              (resolved.priority ?? 0) >
+                (this._subscribed.get(resolved.target) ??
+                  Number.NEGATIVE_INFINITY)
             ) {
               const incoming_priority = resolved.priority ?? 0;
               const entry = correlated.get(resolved.target) || {
