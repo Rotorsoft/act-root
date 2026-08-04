@@ -174,6 +174,60 @@ describe("autoclose as a synthesized reaction", () => {
     expect(closed[0].truncated.has("t4")).toBe(true);
   });
 
+  // #1356: a `__snapshot__` commits at a higher id right after the domain
+  // event that tripped the snap predicate. The terminate-only path must key
+  // on the domain head/count, not the trailing snapshot — otherwise `is`
+  // never matches and `reaches` counts snapshot events toward the threshold.
+  it("closes on the terminal event even when a snapshot trails it (`is`, #1356)", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        base()
+          .snap((s) => s.patches >= 2)
+          .autocloses({ is: "Resolved" })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    // Opened (patches=1), Resolved (patches=2 → a __snapshot__ trails Resolved).
+    await app.do("open", { stream: "ts1", actor }, {});
+    await app.do("resolve", { stream: "ts1", actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    expect(closed).toHaveLength(1);
+    expect(closed[0].truncated.has("ts1")).toBe(true);
+  });
+
+  it("counts only domain events toward `reaches` when snapshots trail (#1356)", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        base()
+          .snap((s) => s.patches >= 2)
+          .autocloses({ reaches: 3 })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    // Two domain events (a __snapshot__ trails the 2nd) — the domain count is
+    // 2, below the threshold of 3, so the snapshot must NOT inflate it.
+    await app.do("open", { stream: "ts2", actor }, {});
+    await app.do("resolve", { stream: "ts2", actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(closed).toHaveLength(0);
+
+    // Third domain event reaches the threshold of 3 real events.
+    await app.do("open", { stream: "ts2", actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(closed).toHaveLength(1);
+    expect(closed[0].truncated.has("ts2")).toBe(true);
+  });
+
   it("defensively skips closing when the live head has vanished mid-cycle", async () => {
     // Fault injection: simulate a competing worker truncating the stream
     // between the drain's fetch and the handler's query_stats — the handler

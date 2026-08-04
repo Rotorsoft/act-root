@@ -5161,18 +5161,22 @@ export function synthesize_autoclose_reactions<
           throw new DeferSignal({
             at: next_window_open(config.autocloseWindow!, new Date()),
           });
-        // Rolling-window policies also exclude snapshots and fetch the
-        // tail: the prune decision keys on the oldest *domain* event —
-        // after a prune the oldest surviving event is the boundary
-        // snapshot, whose age says nothing about whether another prune
-        // would be productive.
+        // Every policy keys on the *domain* head/count, so snapshots are
+        // excluded unconditionally (#1356) — matching \`scan_stream_heads\` in
+        // close-cycle.ts. \`snap()\` commits a \`__snapshot__\` at a higher id
+        // right after the triggering domain event, so a terminal commit that
+        // crosses a \`.snap()\` boundary would otherwise make the snapshot the
+        // head: \`is\` never matches (\`head.name === "__snapshot__"\`) and never
+        // recovers, \`after\` measures the cooldown from the snapshot's
+        // timestamp, and \`reaches:N\` counts snapshot events toward N. Only
+        // rolling-window (\`keep\`) policies additionally fetch the tail: the
+        // prune decision keys on the oldest *domain* event — after a prune the
+        // oldest surviving event is the boundary snapshot, whose age says
+        // nothing about whether another prune would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
           tail: keep_days !== undefined ? true : undefined,
-          exclude:
-            keep_days !== undefined
-              ? [TOMBSTONE_EVENT, SNAP_EVENT]
-              : [TOMBSTONE_EVENT],
+          exclude: [TOMBSTONE_EVENT, SNAP_EVENT],
         });
         const entry = stats.get(aggregate);
         // No live (non-tombstone) head → already closed, nothing to do.
@@ -6315,21 +6319,30 @@ async function probe_min_watermarks(
 async function scan_stream_heads(
   streams: string[]
 ): Promise<Map<string, StreamHead>> {
-  // One round trip: query_stats returns the latest non-snap event per
-  // stream (heads-only cheap path, indexed). Streams whose latest non-snap
-  // event is a tombstone are filtered out in the loop — we don't want to
-  // re-tombstone an already-closed stream. Streams with no events (or
-  // only snap/tombstone events filtered out) are absent from the result
-  // map entirely.
+  // query_stats returns the latest non-snap event per stream (heads-only
+  // cheap path, indexed). Streams whose latest non-snap event is a tombstone
+  // are filtered out in the loop — we don't want to re-tombstone an
+  // already-closed stream. Streams with no events (or only snap/tombstone
+  // events filtered out) are absent from the result map entirely.
   const stats = await store().query_stats(streams, {
     exclude: [SNAP_EVENT],
   });
+  // The tombstone's optimistic lock must expect the stream's ACTUAL current
+  // version, which is one higher when a \`__snapshot__\` trails the domain head
+  // — \`snap()\` commits it into the next version slot (event-sourcing.ts). The
+  // domain head above still drives \`max_id\` (the safety probe: a subscription
+  // advances its watermark on domain events, never snapshots) and
+  // \`last_event_name\` (the restart-seed owner lookup). Only the guard version
+  // needs the true head, so a second heads-only pass reads it with snapshots
+  // included. Without this, a terminal commit that crossed a \`.snap()\`
+  // boundary makes the guard expect a stale version and skip the close (#1356).
+  const true_heads = await store().query_stats(streams, {});
   const out = new Map<string, StreamHead>();
   for (const [stream, { head }] of stats) {
     if (head.name === TOMBSTONE_EVENT) continue;
     out.set(stream, {
       max_id: head.id,
-      version: head.version,
+      version: true_heads.get(stream)!.head.version,
       last_event_name: head.name as string,
     });
   }
@@ -22280,18 +22293,22 @@ export function synthesize_autoclose_reactions<
           throw new DeferSignal({
             at: next_window_open(config.autocloseWindow!, new Date()),
           });
-        // Rolling-window policies also exclude snapshots and fetch the
-        // tail: the prune decision keys on the oldest *domain* event —
-        // after a prune the oldest surviving event is the boundary
-        // snapshot, whose age says nothing about whether another prune
-        // would be productive.
+        // Every policy keys on the *domain* head/count, so snapshots are
+        // excluded unconditionally (#1356) — matching \`scan_stream_heads\` in
+        // close-cycle.ts. \`snap()\` commits a \`__snapshot__\` at a higher id
+        // right after the triggering domain event, so a terminal commit that
+        // crosses a \`.snap()\` boundary would otherwise make the snapshot the
+        // head: \`is\` never matches (\`head.name === "__snapshot__"\`) and never
+        // recovers, \`after\` measures the cooldown from the snapshot's
+        // timestamp, and \`reaches:N\` counts snapshot events toward N. Only
+        // rolling-window (\`keep\`) policies additionally fetch the tail: the
+        // prune decision keys on the oldest *domain* event — after a prune the
+        // oldest surviving event is the boundary snapshot, whose age says
+        // nothing about whether another prune would be productive.
         const stats = await store().query_stats([aggregate], {
           count: true,
           tail: keep_days !== undefined ? true : undefined,
-          exclude:
-            keep_days !== undefined
-              ? [TOMBSTONE_EVENT, SNAP_EVENT]
-              : [TOMBSTONE_EVENT],
+          exclude: [TOMBSTONE_EVENT, SNAP_EVENT],
         });
         const entry = stats.get(aggregate);
         // No live (non-tombstone) head → already closed, nothing to do.
@@ -23314,21 +23331,30 @@ async function probe_min_watermarks(
 async function scan_stream_heads(
   streams: string[]
 ): Promise<Map<string, StreamHead>> {
-  // One round trip: query_stats returns the latest non-snap event per
-  // stream (heads-only cheap path, indexed). Streams whose latest non-snap
-  // event is a tombstone are filtered out in the loop — we don't want to
-  // re-tombstone an already-closed stream. Streams with no events (or
-  // only snap/tombstone events filtered out) are absent from the result
-  // map entirely.
+  // query_stats returns the latest non-snap event per stream (heads-only
+  // cheap path, indexed). Streams whose latest non-snap event is a tombstone
+  // are filtered out in the loop — we don't want to re-tombstone an
+  // already-closed stream. Streams with no events (or only snap/tombstone
+  // events filtered out) are absent from the result map entirely.
   const stats = await store().query_stats(streams, {
     exclude: [SNAP_EVENT],
   });
+  // The tombstone's optimistic lock must expect the stream's ACTUAL current
+  // version, which is one higher when a \`__snapshot__\` trails the domain head
+  // — \`snap()\` commits it into the next version slot (event-sourcing.ts). The
+  // domain head above still drives \`max_id\` (the safety probe: a subscription
+  // advances its watermark on domain events, never snapshots) and
+  // \`last_event_name\` (the restart-seed owner lookup). Only the guard version
+  // needs the true head, so a second heads-only pass reads it with snapshots
+  // included. Without this, a terminal commit that crossed a \`.snap()\`
+  // boundary makes the guard expect a stale version and skip the close (#1356).
+  const true_heads = await store().query_stats(streams, {});
   const out = new Map<string, StreamHead>();
   for (const [stream, { head }] of stats) {
     if (head.name === TOMBSTONE_EVENT) continue;
     out.set(stream, {
       max_id: head.id,
-      version: head.version,
+      version: true_heads.get(stream)!.head.version,
       last_event_name: head.name as string,
     });
   }
