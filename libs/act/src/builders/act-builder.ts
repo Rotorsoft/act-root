@@ -342,12 +342,76 @@ export function act<
   const pending_projections: Projection<any>[] = [];
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
+  // Validated fold-projection ingredients, resolved once on the first
+  // build. The HANDLERS themselves are built per `.build()` — see
+  // `make_act_handlers` — because a fold handler owns a mutable
+  // per-stream cache that must never be shared across Acts.
+  const fold_specs: {
+    target: string;
+    merged: any;
+    flush: any;
+    config: any;
+  }[] = [];
   const lanes: LaneConfig[] = [];
 
   // Set on the first `.build()` call. Lets the same builder produce
   // many Acts (multi-tenant / A-B testing patterns) without re-merging
   // projections or re-logging the deprecation advisory.
   let _built = false;
+
+  /**
+   * Wraps a batch handler so the batch dispatcher stays PII-unaware —
+   * sensitive keys are stripped from every event before the handler
+   * sees it. `_sf` is read lazily at dispatch time, by when the
+   * events pass has populated it.
+   */
+  const pii_wrap =
+    (original: BatchHandler<any>) => async (events: any[], stream: string) => {
+      const stripped = events.map((e) => {
+        const f = _sf.get(e.name as string);
+        return f ? pii_strip(e, f) : e;
+      });
+      return original(stripped as never, stream);
+    };
+
+  /**
+   * Per-Act batch-handler map. Stateless projection handlers are shared
+   * with the builder (they carry no state, and `register_batch_handler`
+   * already rejects duplicate targets); state-projection FOLD handlers
+   * are constructed fresh for every `.build()`.
+   *
+   * A fold handler owns a mutable per-stream cache of folded state
+   * (`projection-fold.ts`), keyed on stream name alone. Sharing one
+   * instance across Acts built from the same builder — the documented
+   * multi-tenant pattern, and every `fixture(builder)` test — let one
+   * Act's folded rows surface in another Act's sink, and made the
+   * frontier guard compare event ids originating in different stores.
+   * The cache still spans drain cycles within one Act, so the warm-fold
+   * performance property is unchanged.
+   *
+   * Building here also means each Act's fold handlers observe that
+   * build's own `patch_fn` (`validateFoldedState` is a per-build
+   * option), instead of freezing the first build's choice.
+   */
+  const make_act_handlers = (patch_fn: PatchFn) => {
+    const handlers = new Map(batch_handlers);
+    for (const spec of fold_specs) {
+      handlers.set(
+        spec.target,
+        pii_wrap(
+          make_fold_handler(
+            spec.merged,
+            spec.flush,
+            spec.config,
+            patch_fn,
+            // Head loads strip sensitive keys like the warm path (#1320).
+            (event_name) => _sf.get(event_name) ?? []
+          )
+        ) as never
+      );
+    }
+    return handlers;
+  };
 
   // ACT-403: auto-deprecation enforcement. Groups each state's events
   // by base name + `_v<digits>`; the highest version is current, all
@@ -515,19 +579,16 @@ export function act<
               throw new Error(
                 `State projection "${proj.target}" of "${fold.name}" is missing events ${missing.join(", ")} — pass every partial of the state to .of()`
               );
-            batch_handlers.set(
-              proj.target!,
-              make_fold_handler(
-                merged,
-                fold.flush,
-                fold.config,
-                patch_fn,
-                // Head loads strip sensitive keys like the warm path (#1320).
-                // `_sf` is populated in the events pass below; read lazily at
-                // fold time, by when the map is complete.
-                (event_name) => _sf.get(event_name) ?? []
-              )
-            );
+            // Record the validated ingredients only. The handler is
+            // constructed per `.build()` (see `make_act_handlers`) — it
+            // owns a mutable per-stream fold cache, so one shared instance
+            // would leak folded rows between Acts built from this builder.
+            fold_specs.push({
+              target: proj.target!,
+              merged,
+              flush: fold.flush,
+              config: fold.config,
+            });
           }
           finalize_deprecations();
           validate_lane_references(registry, lanes);
@@ -634,14 +695,7 @@ export function act<
             };
           }
           for (const [target, original] of batch_handlers) {
-            const wrapped = async (events: any[], stream: string) => {
-              const stripped = events.map((e) => {
-                const f = _sf.get(e.name as string);
-                return f ? pii_strip(e, f) : e;
-              });
-              return original(stripped as never, stream);
-            };
-            batch_handlers.set(target, wrapped as never);
+            batch_handlers.set(target, pii_wrap(original) as never);
           }
           // Synthesize the autoclose reactions last, once the registry is
           // fully merged — their dynamic resolvers must be present before
@@ -668,7 +722,7 @@ export function act<
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
           states,
-          batch_handlers,
+          make_act_handlers(patch_fn),
           options,
           lanes,
           patch_fn

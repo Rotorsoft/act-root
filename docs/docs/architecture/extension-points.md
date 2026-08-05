@@ -342,7 +342,7 @@ function onTenantSignup(tenant: string) {
 }
 ```
 
-The per-Act mutable state (drain controller, correlate cycle, settle loop, notify subscription, lifecycle emitter) is constructed fresh on every `.build()`. The shared blueprint (registry, states map, batch handlers, deprecation set) is read-only post-build and is passed by reference to each Act — multi-tenant memory cost is dominated by the per-Act mutable state, not by N copies of the registry.
+The per-Act mutable state (drain controller, correlate cycle, settle loop, notify subscription, lifecycle emitter) is constructed fresh on every `.build()`. So are **state-projection fold handlers** (`projection(...).of(State)`) — each one owns a per-stream cache of folded state, so every Act gets its own; they also pick up that build's own `validateFoldedState` setting. The shared blueprint (registry, states map, stateless projection batch handlers, deprecation set) is read-only post-build and is passed by reference to each Act — multi-tenant memory cost is dominated by the per-Act mutable state, not by N copies of the registry.
 
 A/B store experiments are the same pattern with `tenants` replaced by the experiment arms — `apps.set("control", build({scoped: oldStore + oldCache}))` and `apps.set("candidate", build({scoped: newStore + newCache}))`.
 

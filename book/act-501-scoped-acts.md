@@ -30,7 +30,7 @@ for (const tenant of tenants) {
 // New tenants can be added later by calling .build() again.
 ```
 
-Worth calling out in the chapter: the per-Act mutable state (drain controller, correlate cycle, settle loop, notify subscription, lifecycle emitter) is *intentionally* per-Act — collapsing those into one shared instance would mean one drain throttle for all tenants, which is rarely what operators want. What's actually shared by reference across all N Acts is the read-only blueprint (registry, states map, batch handlers, deprecation set).
+Worth calling out in the chapter: the per-Act mutable state (drain controller, correlate cycle, settle loop, notify subscription, lifecycle emitter) is *intentionally* per-Act — collapsing those into one shared instance would mean one drain throttle for all tenants, which is rarely what operators want. What's actually shared by reference across all N Acts is the read-only blueprint (registry, states map, stateless batch handlers, deprecation set). The qualifier on that last point was learned the hard way — see [act-1369-fold-cache-per-act.md](act-1369-fold-cache-per-act.md).
 
 **Use cases to feature in the chapter:**
 
