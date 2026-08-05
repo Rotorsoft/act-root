@@ -1,3 +1,12 @@
+# [@rotorsoft/act-tck-v1.27.29](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.28...@rotorsoft/act-tck-v1.27.29) (2026-08-05)
+
+
+### Bug Fixes
+
+* **act-http:** receiver auto-finalize releases on 4xx, not just 5xx ([52c6ee5](https://github.com/rotorsoft/act-root/commit/52c6ee54079997bbd703efa6acc6b049de3e87f8)), closes [#1364](https://github.com/rotorsoft/act-root/issues/1364)
+* **act-sqlite:** revive a Date in a pii field on read, matching data/meta ([fca5ed8](https://github.com/rotorsoft/act-root/commit/fca5ed86268a4dd0015549f9f9abf1b42026726e)), closes [#1198](https://github.com/rotorsoft/act-root/issues/1198) [#1198](https://github.com/rotorsoft/act-root/issues/1198) [#1365](https://github.com/rotorsoft/act-root/issues/1365)
+* **act:** dynamic-resolver target priority upgrades across correlate scans ([695ce15](https://github.com/rotorsoft/act-root/commit/695ce159a72e8f6e0fcad814827d10757ab0cfa8)), closes [should-be-hi#priority](https://github.com/should-be-hi/issues/priority) [#1363](https://github.com/rotorsoft/act-root/issues/1363)
+
 # [@rotorsoft/act-tck-v1.27.28](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.27...@rotorsoft/act-tck-v1.27.28) (2026-08-04)
 
 
