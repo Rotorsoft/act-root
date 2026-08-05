@@ -282,7 +282,12 @@ export class SqliteStore implements Store {
     raw: unknown
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
-    const parsed = JSON.parse(raw as string);
+    // Revive ISO-date strings to `Date` on the pii read path too (#1365),
+    // matching `data`/`meta` (via `parse_json`) and PG/InMemory — otherwise a
+    // `Date` in a sensitive field reads back as a string on SQLite only. A
+    // base64 ciphertext string never matches `ISO_8601`, so the encrypted
+    // branch below is unaffected.
+    const parsed = JSON.parse(raw as string, date_reviver);
     if (this._resolve_pii_key && typeof parsed === "string") {
       return (await decrypt(parsed, this._resolve_pii_key)) as Record<
         string,
