@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.24](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.23...@rotorsoft/act-v1.23.24) (2026-08-05)
+
+
+### Bug Fixes
+
+* **act:** dynamic-resolver target priority upgrades across correlate scans ([695ce15](https://github.com/rotorsoft/act-root/commit/695ce159a72e8f6e0fcad814827d10757ab0cfa8)), closes [should-be-hi#priority](https://github.com/should-be-hi/issues/priority) [#1363](https://github.com/rotorsoft/act-root/issues/1363)
+
 # [@rotorsoft/act-v1.23.23](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.22...@rotorsoft/act-v1.23.23) (2026-08-04)
 
 
