@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.12](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.11...@rotorsoft/act-sqlite-v1.12.12) (2026-08-05)
+
+
+### Bug Fixes
+
+* **act-sqlite:** revive a Date in a pii field on read, matching data/meta ([fca5ed8](https://github.com/rotorsoft/act-root/commit/fca5ed86268a4dd0015549f9f9abf1b42026726e)), closes [#1198](https://github.com/rotorsoft/act-root/issues/1198) [#1198](https://github.com/rotorsoft/act-root/issues/1198) [#1365](https://github.com/rotorsoft/act-root/issues/1365)
+
 # [@rotorsoft/act-sqlite-v1.12.11](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.10...@rotorsoft/act-sqlite-v1.12.11) (2026-08-04)
 
 
