@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.20](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.19...@rotorsoft/act-http-v1.8.20) (2026-08-05)
+
+
+### Bug Fixes
+
+* **act-http:** receiver auto-finalize releases on 4xx, not just 5xx ([52c6ee5](https://github.com/rotorsoft/act-root/commit/52c6ee54079997bbd703efa6acc6b049de3e87f8)), closes [#1364](https://github.com/rotorsoft/act-root/issues/1364)
+
 # [@rotorsoft/act-http-v1.8.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.18...@rotorsoft/act-http-v1.8.19) (2026-08-03)
 
 
