@@ -352,3 +352,82 @@ describe("NonRetryableError (drain integration)", () => {
     ]);
   });
 });
+
+describe("lifecycle listener containment (drain finalize)", () => {
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  // The durable work is committed before the lifecycle sinks run, so a
+  // throwing listener must not unwind into the store-error catch. It used
+  // to: the `blocked` event was lost permanently (block() never re-runs —
+  // the stream is already blocked and excluded from claim), drain()
+  // returned an empty result, and the circuit breaker saw a store failure
+  // that never happened.
+  it("keeps emitting blocked when an acked listener throws", async () => {
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function react(event) {
+        if (event.stream.startsWith("poison"))
+          throw new NonRetryableError("nope");
+      })
+      .build();
+
+    const blocked: unknown[] = [];
+    const errors: unknown[] = [];
+    app.on("blocked", (b) => blocked.push(b));
+    app.on("error", (e) => errors.push(e));
+    app.on("acked", () => {
+      throw new Error("listener bug");
+    });
+
+    await app.do("tick", { stream: "ok-1", actor }, {});
+    await app.do("tick", { stream: "poison-1", actor }, {});
+    await app.correlate();
+    const drain = await app.drain();
+
+    // The poisoned stream is durably blocked...
+    expect((await app.blocked_streams()).map((p) => p.stream)).toEqual([
+      "poison-1",
+    ]);
+    // ...and the observer channel saw it exactly once.
+    expect(blocked.length).toBe(1);
+    // No fictitious store failure, and the caller still gets its result.
+    expect(errors.length).toBe(0);
+    expect(drain.acked.length).toBe(1);
+    expect(drain.blocked.length).toBe(1);
+
+    await app.shutdown();
+  });
+
+  it("contains a throwing blocked listener without losing the ack", async () => {
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function react(event) {
+        if (event.stream.startsWith("poison"))
+          throw new NonRetryableError("nope");
+      })
+      .build();
+
+    const acked: unknown[] = [];
+    const errors: unknown[] = [];
+    app.on("acked", (a) => acked.push(a));
+    app.on("error", (e) => errors.push(e));
+    app.on("blocked", () => {
+      throw new Error("listener bug");
+    });
+
+    await app.do("tick", { stream: "ok-2", actor }, {});
+    await app.do("tick", { stream: "poison-2", actor }, {});
+    await app.correlate();
+    const drain = await app.drain();
+
+    expect(acked.length).toBe(1);
+    expect(errors.length).toBe(0);
+    expect(drain.blocked.length).toBe(1);
+
+    await app.shutdown();
+  });
+});

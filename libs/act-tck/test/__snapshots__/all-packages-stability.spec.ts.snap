@@ -8627,6 +8627,37 @@ const EMPTY_DRAIN: Drain<Schemas> = {
 };
 
 /**
+ * Runs a lifecycle sink, logging and swallowing anything it throws.
+ * Observer failures are never the cycle's failure — see the call site.
+ *
+ * @internal
+ */
+const contain = (logger: Logger, sink: string, fn: () => void): void => {
+  try {
+    fn();
+  } catch (error) {
+    logger.error(error, \`\${sink} listener threw\`);
+  }
+};
+
+/**
+ * Awaited variant of {@link contain} for sinks that return a promise.
+ *
+ * @internal
+ */
+const contain_async = async (
+  logger: Logger,
+  sink: string,
+  fn: () => Promise<unknown>
+): Promise<void> => {
+  try {
+    await fn();
+  } catch (error) {
+    logger.error(error, \`\${sink} listener threw\`);
+  }
+};
+
+/**
  * Dependencies the {@link DrainController} needs from the orchestrator.
  * The lifecycle event sinks (\`on_acked\` / \`on_blocked\`) are callbacks so
  * this module doesn't reach back into Act's emitter.
@@ -8875,13 +8906,29 @@ export class DrainController<
       }
       if (this._defer.size > 0) this._defer.schedule();
 
-      if (acked.length) this._deps.on_acked(acked);
-      if (blocked.length) this._deps.on_blocked(blocked);
+      // Lifecycle sinks are contained individually, mirroring the
+      // \`notified\` handler in \`act.ts\`. The durable work is already
+      // committed by this point, so a throwing listener must not unwind
+      // into the store-error \`catch\` below: that would report a store
+      // failure that never happened, return an empty Drain, and — because
+      // \`block\` is guarded on \`blocked = false\` and a blocked stream is
+      // excluded from \`claim\` — permanently lose the \`blocked\` event and
+      // any reaction-requested close. Containing each sink separately
+      // keeps one bad listener from suppressing the others.
+      if (acked.length)
+        contain(this._deps.logger, "acked", () => this._deps.on_acked(acked));
+      if (blocked.length)
+        contain(this._deps.logger, "blocked", () =>
+          this._deps.on_blocked(blocked)
+        );
       // Run reaction-requested closes after acks land (#1090) — the close
       // targets were acked above, so the close-cycle guard sees the requesting
       // reaction as caught up. Awaited so a slow close doesn't overlap the
       // next claim.
-      if (closeable.length) await this._deps.on_close(closeable);
+      if (closeable.length)
+        await contain_async(this._deps.logger, "close", () =>
+          this._deps.on_close(closeable)
+        );
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.
@@ -25426,6 +25473,37 @@ const EMPTY_DRAIN: Drain<Schemas> = {
 };
 
 /**
+ * Runs a lifecycle sink, logging and swallowing anything it throws.
+ * Observer failures are never the cycle's failure — see the call site.
+ *
+ * @internal
+ */
+const contain = (logger: Logger, sink: string, fn: () => void): void => {
+  try {
+    fn();
+  } catch (error) {
+    logger.error(error, \`\${sink} listener threw\`);
+  }
+};
+
+/**
+ * Awaited variant of {@link contain} for sinks that return a promise.
+ *
+ * @internal
+ */
+const contain_async = async (
+  logger: Logger,
+  sink: string,
+  fn: () => Promise<unknown>
+): Promise<void> => {
+  try {
+    await fn();
+  } catch (error) {
+    logger.error(error, \`\${sink} listener threw\`);
+  }
+};
+
+/**
  * Dependencies the {@link DrainController} needs from the orchestrator.
  * The lifecycle event sinks (\`on_acked\` / \`on_blocked\`) are callbacks so
  * this module doesn't reach back into Act's emitter.
@@ -25674,13 +25752,29 @@ export class DrainController<
       }
       if (this._defer.size > 0) this._defer.schedule();
 
-      if (acked.length) this._deps.on_acked(acked);
-      if (blocked.length) this._deps.on_blocked(blocked);
+      // Lifecycle sinks are contained individually, mirroring the
+      // \`notified\` handler in \`act.ts\`. The durable work is already
+      // committed by this point, so a throwing listener must not unwind
+      // into the store-error \`catch\` below: that would report a store
+      // failure that never happened, return an empty Drain, and — because
+      // \`block\` is guarded on \`blocked = false\` and a blocked stream is
+      // excluded from \`claim\` — permanently lose the \`blocked\` event and
+      // any reaction-requested close. Containing each sink separately
+      // keeps one bad listener from suppressing the others.
+      if (acked.length)
+        contain(this._deps.logger, "acked", () => this._deps.on_acked(acked));
+      if (blocked.length)
+        contain(this._deps.logger, "blocked", () =>
+          this._deps.on_blocked(blocked)
+        );
       // Run reaction-requested closes after acks land (#1090) — the close
       // targets were acked above, so the close-cycle guard sees the requesting
       // reaction as caught up. Awaited so a slow close doesn't overlap the
       // next claim.
-      if (closeable.length) await this._deps.on_close(closeable);
+      if (closeable.length)
+        await contain_async(this._deps.logger, "close", () =>
+          this._deps.on_close(closeable)
+        );
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.

@@ -57,6 +57,31 @@ describe("autoclose as a synthesized reaction", () => {
     expect(closed[0].truncated.has("t1")).toBe(true);
   });
 
+  // The close sink runs after the acks are durable, so a throwing
+  // `closed` listener must not unwind into the drain's store-error catch —
+  // the close-requesting event is already acked and the reaction never
+  // re-fires, so the close would be lost permanently.
+  it("contains a throwing closed listener without failing the cycle", async () => {
+    const errors: unknown[] = [];
+    const app = act()
+      .withState(ticket({ is: "Resolved" }))
+      .build();
+    app.on("error", (e) => errors.push(e));
+    app.on("closed", () => {
+      throw new Error("listener bug");
+    });
+
+    await app.do("open", { stream: "t-throw", actor }, {});
+    await app.do("resolve", { stream: "t-throw", actor }, {});
+    await app.correlate();
+    const drain = await app.drain();
+
+    // The cycle completed normally: no fictitious store failure, and the
+    // caller still gets its acks.
+    expect(errors).toHaveLength(0);
+    expect(drain.acked.length).toBeGreaterThan(0);
+  });
+
   it("runs the .archives archiver while guarded, before truncating", async () => {
     const archived: string[] = [];
     const app = act()
