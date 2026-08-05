@@ -62,7 +62,7 @@ When multiple reactions target the same stream with different priorities — e.g
 .on("Inc").do(r2).to({ target: "shared", priority: 7 })  // sets the lane
 ```
 
-The same `max()` invariant holds at runtime: `subscribe()` upserts priority via `GREATEST(stored, new)`, so the highest-priority registered reaction sets the scheduling lane.
+The same `max()` invariant holds at runtime: `subscribe()` upserts priority via `GREATEST(stored, new)`, so the highest-priority registered reaction sets the scheduling lane. This holds for **dynamic resolvers across correlate scans** too — if a target is first discovered at a low priority and a later event resolves a higher one for the same target, the correlate cycle re-subscribes it so the store's `GREATEST` raises it (a lower-or-equal later resolution is a no-op). The orchestrator tracks the last-subscribed priority per dynamic target rather than mere presence, so the upgrade isn't frozen at first discovery ([#1363](https://github.com/Rotorsoft/act-root/issues/1363)).
 
 ## Runtime operator override — `app.prioritize`
 
