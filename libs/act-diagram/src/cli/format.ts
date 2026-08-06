@@ -242,23 +242,48 @@ export function format_action(idx: ContractIndex, entry: IndexEntry): string {
 }
 
 export function format_state(idx: ContractIndex, entry: IndexEntry): string {
-  const st = idx.model.states.find((s) => s.name === entry.name);
+  // A state is commonly declared across several partials, which the
+  // registry merges into one. Fold every matching node here rather than
+  // picking one with `.find` — the index collapses partials to the LAST
+  // one while this used to resolve the FIRST, so the header named a file
+  // that contained none of the listed members and the other partials'
+  // actions and events were missing entirely (#1392).
+  const partials = idx.model.states.filter((s) => s.name === entry.name);
   const lines: string[] = [];
   lines.push(bold(amber(entry.name)));
-  if (entry.file) lines.push(`  in:      ${dim(loc(entry.file, entry.line))}`);
-  if (!st) return lines.join("\n");
-  if (st.actions.length > 0) {
+  const files = [...new Set(partials.map((s) => s.file).filter(Boolean))];
+  if (files.length > 1) {
+    lines.push("  in:");
+    for (const f of files) lines.push(`    - ${dim(loc(f as string))}`);
+  } else {
+    const file = files[0] ?? entry.file;
+    if (file) lines.push(`  in:      ${dim(loc(file, entry.line))}`);
+  }
+  if (!partials.length) return lines.join("\n");
+
+  // Attribute each member to the partial that declares it — with several
+  // files in play, an unqualified list sends `$EDITOR` to the wrong one.
+  const show_file = files.length > 1;
+  const actions = partials.flatMap((s) =>
+    s.actions.map((a) => ({ node: a, file: s.file }))
+  );
+  if (actions.length > 0) {
     lines.push("  actions:");
-    for (const a of st.actions) {
-      const emits = a.emits.length > 0 ? ` → ${a.emits.join(", ")}` : "";
-      lines.push(`    - ${pink(a.name)}${emits}`);
+    for (const { node, file } of actions) {
+      const emits = node.emits.length > 0 ? ` → ${node.emits.join(", ")}` : "";
+      const where = show_file && file ? `  ${dim(loc(file, node.line))}` : "";
+      lines.push(`    - ${pink(node.name)}${emits}${where}`);
     }
   }
-  if (st.events.length > 0) {
+  const events = partials.flatMap((s) =>
+    s.events.map((e) => ({ node: e, file: s.file }))
+  );
+  if (events.length > 0) {
     lines.push("  events:");
-    for (const e of st.events) {
-      const schema = e.schema ? `  ${dim(e.schema)}` : "";
-      lines.push(`    - ${orange(e.name)}${schema}`);
+    for (const { node, file } of events) {
+      const schema = node.schema ? `  ${dim(node.schema)}` : "";
+      const where = show_file && file ? `  ${dim(loc(file, node.line))}` : "";
+      lines.push(`    - ${orange(node.name)}${schema}${where}`);
     }
   }
   return lines.join("\n");

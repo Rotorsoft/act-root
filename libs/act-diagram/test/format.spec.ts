@@ -396,6 +396,56 @@ describe("format_state", () => {
     expect(out).toContain("z.object({ id: z.string(), total: z.number() })");
   });
 
+  // #1392 — a state declared across several partials is merged by the
+  // registry into one. The CLI index collapses the entries to the LAST
+  // partial while format_state resolved the FIRST, so the header named a
+  // file containing none of the listed members and every other partial's
+  // actions and events were missing, with no truncation marker.
+  it("folds every partial of a multi-partial state", () => {
+    const m: DomainModel = {
+      entries: [],
+      states: [
+        {
+          name: "Ticket",
+          varName: "Ticket:0",
+          file: "src/ops.ts",
+          events: [{ name: "Assigned", hasCustomPatch: false }],
+          actions: [
+            { name: "AssignTicket", emits: ["Assigned"], invariants: [] },
+          ],
+        },
+        {
+          name: "Ticket",
+          varName: "Ticket:1",
+          file: "src/creation.ts",
+          events: [{ name: "Opened", hasCustomPatch: false }],
+          actions: [{ name: "OpenTicket", emits: ["Opened"], invariants: [] }],
+        },
+      ],
+      slices: [],
+      projections: [],
+      reactions: [],
+    };
+    const i = build_contract_index(m);
+    const entry = i.entries.find((e) => e.kind === "state")!;
+    const out = format_state(i, entry);
+
+    // Every member from every partial, none dropped.
+    expect(out).toContain("AssignTicket");
+    expect(out).toContain("OpenTicket");
+    expect(out).toContain("Assigned");
+    expect(out).toContain("Opened");
+    // Both files listed, and each member attributed to its own.
+    expect(out).toContain("src/ops.ts");
+    expect(out).toContain("src/creation.ts");
+    expect(out).toMatch(/OpenTicket.*src\/creation\.ts/);
+  });
+
+  it("keeps the single-file header shape for a one-partial state", () => {
+    const out = format_state(idx, findEntry("state", "Order"));
+    expect(out).toContain("in:      ");
+  });
+
   it("handles a state with no actions or events", () => {
     const out = format_state(idx, findEntry("state", "Empty"));
     expect(out).toContain("Empty");
