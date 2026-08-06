@@ -115,3 +115,46 @@ const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
 export function is_literal_source(source: string): boolean {
   return !SOURCE_METACHARACTERS.test(source);
 }
+
+/**
+ * Matches an ISO-8601 timestamp, the shape `JSON.stringify` produces for a
+ * `Date`.
+ *
+ * @internal
+ */
+const ISO_8601 =
+  /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\.\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
+
+/**
+ * `JSON.parse` reviver that turns ISO-8601 strings back into `Date`s.
+ *
+ * JSON has no date type, so a `Date` committed into an event's `data`,
+ * `meta`, or `pii` serializes to a string. Reading it back as a string
+ * would silently break reducers that call `.getTime()` — and would do so
+ * on some adapters and not others. Every adapter therefore revives dates
+ * on read, and this is the single definition they share, so the behavior
+ * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ *
+ * Adapters must apply it to **every** JSON column they read, including
+ * decrypted `pii` payloads — a value's runtime type must not depend on
+ * which column it sits in or whether encryption is enabled
+ * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
+ * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
+ * adapters need it to pass the store TCK's Date round-trip cases.
+ *
+ * The trade-off is deliberate: a string that happens to look like a
+ * timestamp is revived into a `Date`. That is the price of dates surviving
+ * a JSON round trip at all, and it is applied uniformly.
+ *
+ * @param _key - Unused; present to satisfy the `JSON.parse` reviver shape.
+ * @param value - The parsed value.
+ * @returns A `Date` when `value` is an ISO-8601 string, otherwise `value`.
+ *
+ * @example
+ * ```typescript
+ * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
+ * // → { at: Date }
+ * ```
+ */
+export const dateReviver = (_key: string, value: unknown): unknown =>
+  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;

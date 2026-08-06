@@ -17996,6 +17996,49 @@ export function is_literal_source(source: string): boolean {
   return !SOURCE_METACHARACTERS.test(source);
 }
 
+/**
+ * Matches an ISO-8601 timestamp, the shape \`JSON.stringify\` produces for a
+ * \`Date\`.
+ *
+ * @internal
+ */
+const ISO_8601 =
+  /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
+
+/**
+ * \`JSON.parse\` reviver that turns ISO-8601 strings back into \`Date\`s.
+ *
+ * JSON has no date type, so a \`Date\` committed into an event's \`data\`,
+ * \`meta\`, or \`pii\` serializes to a string. Reading it back as a string
+ * would silently break reducers that call \`.getTime()\` — and would do so
+ * on some adapters and not others. Every adapter therefore revives dates
+ * on read, and this is the single definition they share, so the behavior
+ * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ *
+ * Adapters must apply it to **every** JSON column they read, including
+ * decrypted \`pii\` payloads — a value's runtime type must not depend on
+ * which column it sits in or whether encryption is enabled
+ * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
+ * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
+ * adapters need it to pass the store TCK's Date round-trip cases.
+ *
+ * The trade-off is deliberate: a string that happens to look like a
+ * timestamp is revived into a \`Date\`. That is the price of dates surviving
+ * a JSON round trip at all, and it is applied uniformly.
+ *
+ * @param _key - Unused; present to satisfy the \`JSON.parse\` reviver shape.
+ * @param value - The parsed value.
+ * @returns A \`Date\` when \`value\` is an ISO-8601 string, otherwise \`value\`.
+ *
+ * @example
+ * \`\`\`typescript
+ * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
+ * // → { at: Date }
+ * \`\`\`
+ */
+export const dateReviver = (_key: string, value: unknown): unknown =>
+  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
 // === walk-streams.ts ===
 import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
 
@@ -33955,6 +33998,49 @@ export function is_literal_source(source: string): boolean {
   return !SOURCE_METACHARACTERS.test(source);
 }
 
+/**
+ * Matches an ISO-8601 timestamp, the shape \`JSON.stringify\` produces for a
+ * \`Date\`.
+ *
+ * @internal
+ */
+const ISO_8601 =
+  /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
+
+/**
+ * \`JSON.parse\` reviver that turns ISO-8601 strings back into \`Date\`s.
+ *
+ * JSON has no date type, so a \`Date\` committed into an event's \`data\`,
+ * \`meta\`, or \`pii\` serializes to a string. Reading it back as a string
+ * would silently break reducers that call \`.getTime()\` — and would do so
+ * on some adapters and not others. Every adapter therefore revives dates
+ * on read, and this is the single definition they share, so the behavior
+ * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ *
+ * Adapters must apply it to **every** JSON column they read, including
+ * decrypted \`pii\` payloads — a value's runtime type must not depend on
+ * which column it sits in or whether encryption is enabled
+ * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
+ * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
+ * adapters need it to pass the store TCK's Date round-trip cases.
+ *
+ * The trade-off is deliberate: a string that happens to look like a
+ * timestamp is revived into a \`Date\`. That is the price of dates surviving
+ * a JSON round trip at all, and it is applied uniformly.
+ *
+ * @param _key - Unused; present to satisfy the \`JSON.parse\` reviver shape.
+ * @param value - The parsed value.
+ * @returns A \`Date\` when \`value\` is an ISO-8601 string, otherwise \`value\`.
+ *
+ * @example
+ * \`\`\`typescript
+ * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
+ * // → { at: Date }
+ * \`\`\`
+ */
+export const dateReviver = (_key: string, value: unknown): unknown =>
+  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
+
 // === walk-streams.ts ===
 import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
 
@@ -38316,6 +38402,12 @@ export async function encrypt(
  *
  * @param encoded Output of a prior {@link encrypt} call.
  * @param resolve_key Key resolver from {@link makeKeyResolver}.
+ * @param reviver Optional \`JSON.parse\` reviver. Encryption is meant to be
+ *   transparent, but \`encrypt\` serializes through \`JSON.stringify\` — so a
+ *   \`Date\` arrives back as an ISO string unless the caller revives it.
+ *   Adapters pass the same reviver they use for their plaintext columns,
+ *   which is what keeps an encrypted value the same runtime type as an
+ *   unencrypted one.
  * @returns The original payload after \`JSON.parse\`.
  * @throws DecryptionError on:
  *   - input too short to hold the header
@@ -38325,7 +38417,8 @@ export async function encrypt(
  */
 export async function decrypt(
   encoded: string,
-  resolve_key: () => Promise<Buffer>
+  resolve_key: () => Promise<Buffer>,
+  reviver?: (key: string, value: unknown) => unknown
 ): Promise<unknown> {
   const key = await resolve_key();
   const bytes = Buffer.from(encoded, "base64");
@@ -38343,7 +38436,7 @@ export async function decrypt(
   decipher.setAuthTag(tag);
   try {
     const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
-    return JSON.parse(pt.toString("utf8"));
+    return JSON.parse(pt.toString("utf8"), reviver);
   } catch {
     throw new DecryptionError(
       "ciphertext failed to decrypt — wrong key, tampered payload, or corrupt framing"
@@ -47166,6 +47259,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  dateReviver,
   log,
   SNAP_EVENT,
   StoreError,
@@ -47178,7 +47272,6 @@ import {
   makeKeyResolver,
 } from "@rotorsoft/act-crypto";
 import pg from "pg";
-import { dateReviver } from "./utils.js";
 
 const logger: Logger = log();
 
@@ -47933,7 +48026,11 @@ export class PostgresStore implements Store {
       // the driver are mutable in-flight before they cross back to
       // the framework.
       if (this._resolve_pii_key && typeof row.pii === "string") {
-        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+        const decrypted = await decrypt(
+          row.pii,
+          this._resolve_pii_key,
+          dateReviver
+        );
         (row as { pii: unknown }).pii = decrypted;
       }
       await Promise.resolve(callback(row));
@@ -48085,7 +48182,11 @@ export class PostgresStore implements Store {
         if (this._resolve_pii_key) {
           for (const row of rows) {
             if (typeof row.pii === "string") {
-              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+              const decrypted = await decrypt(
+                row.pii,
+                this._resolve_pii_key,
+                dateReviver
+              );
               (row as { pii: unknown }).pii = decrypted;
             }
           }
@@ -49418,32 +49519,6 @@ export class PostgresStore implements Store {
     return r.rowCount ?? 0;
   }
 }
-
-// === utils.ts ===
-/**
- * @module act-pg
- * Date reviver for JSON.parse to automatically convert ISO 8601 date strings to Date objects.
- *
- * Recognizes the following formats:
- * - YYYY-MM-DDTHH:MM:SS.sssZ
- * - YYYY-MM-DDTHH:MM:SS.sss+HH:MM
- * - YYYY-MM-DDTHH:MM:SS.sss-HH:MM
- *
- * @param key The key being parsed
- * @param value The value being parsed
- * @returns A Date object if the value matches ISO 8601, otherwise the original value
- *
- * @example
- * const obj = JSON.parse(jsonString, dateReviver);
- */
-const ISO_8601 =
-  /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
-export const dateReviver = (_key: string, value: string): string | Date => {
-  if (typeof value === "string" && ISO_8601.test(value)) {
-    return new Date(value);
-  }
-  return value;
-};
 "
 `;
 
@@ -49620,6 +49695,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  dateReviver,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -49673,30 +49749,11 @@ const DEFAULT_CONFIG: SqliteConfig = {
 };
 
 /**
- * ISO-8601 shape (optional fractional seconds, optional timezone). Kept
- * in sync with the PostgresStore reviver so payload dates round-trip
- * identically across adapters (#1198).
- * @internal
- */
-const ISO_8601 =
-  /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
-
-/**
- * \`JSON.parse\` reviver that revives ISO-date strings to \`Date\`. Parity
- * with PG's JSONB reviver (#1198): a \`Date\` committed into event \`data\`
- * reads back as a \`Date\`, not an ISO string — so an InMemory/PG → SQLite
- * migration doesn't silently break reducers calling \`.getTime()\`.
- * @internal
- */
-const date_reviver = (_key: string, value: unknown): unknown =>
-  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
-
-/**
  * Parse a JSON-encoded TEXT column, reviving ISO-date strings to \`Date\`
  * for cross-adapter payload parity (#1198).
  * @internal
  */
-const parse_json = (raw: string): unknown => JSON.parse(raw, date_reviver);
+const parse_json = (raw: string): unknown => JSON.parse(raw, dateReviver);
 
 /**
  * SQLite extended result code for a UNIQUE constraint violation
@@ -49885,19 +49942,18 @@ export class SqliteStore implements Store {
     raw: unknown
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
-    // Revive ISO-date strings to \`Date\` on the pii read path too (#1365),
-    // matching \`data\`/\`meta\` (via \`parse_json\`) and PG/InMemory — otherwise a
-    // \`Date\` in a sensitive field reads back as a string on SQLite only. A
-    // base64 ciphertext string never matches \`ISO_8601\`, so the encrypted
-    // branch below is unaffected.
-    const parsed = JSON.parse(raw as string, date_reviver);
+    // Revive dates like \`data\`/\`meta\` do (#1198/#1365). Base64 ciphertext
+    // never matches the ISO-8601 pattern, so the encrypted branch below is
+    // unaffected by the reviver here — it gets its own on the plaintext.
+    const parsed = parse_json(raw as string);
     if (this._resolve_pii_key && typeof parsed === "string") {
-      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
-        string,
-        unknown
-      >;
+      return (await decrypt(
+        parsed,
+        this._resolve_pii_key,
+        dateReviver
+      )) as Record<string, unknown>;
     }
-    return parsed;
+    return parsed as Record<string, unknown>;
   }
 
   async seed() {
@@ -57473,27 +57529,38 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
-      it("revives a Date in a pii field to a Date, like data (#1365)", async () => {
+      it("revives a Date in pii like data/meta (#1365/#1370)", async () => {
+        // A Date must come back a Date wherever it sits, and whether or
+        // not the adapter encrypts the pii column — encryption is an
+        // at-rest concern, not a payload-type change. The same Date in
+        // \`data\` is the in-row control.
         const s = \`pii-date-\${uid()}\`;
-        const dob = new Date("2000-03-04T05:06:07.000Z");
+        const when = new Date("2024-03-01T10:20:30.000Z");
         await store.commit<CounterEvents>(
           s,
-          [{ name: "Incremented", data: { amount: 1 }, pii: { dob } }],
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1, at: when } as never,
+              pii: { born: when },
+            },
+          ],
           make_meta({ stream: s })
         );
 
         const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
-        await store.query<CounterEvents>((e) => seen.push(e), {
-          stream: s,
-          stream_exact: true,
-        });
-        expect(seen).toHaveLength(1);
-        // A Date in pii round-trips as a Date, matching the \`data\`/\`meta\`
-        // reviver — not an ISO string on JSON-storage adapters.
-        expect((seen[0].pii as { dob: unknown }).dob).toBeInstanceOf(Date);
-        expect((seen[0].pii as { dob: Date }).dob.getTime()).toBe(
-          dob.getTime()
+        await store.query<CounterEvents>(
+          (e) => {
+            seen.push(e);
+          },
+          { stream: s, stream_exact: true }
         );
+        expect(seen).toHaveLength(1);
+        const at = (seen[0].data as unknown as { at: unknown }).at;
+        const born = (seen[0].pii as { born: unknown }).born;
+        expect(at).toBeInstanceOf(Date);
+        expect(born).toBeInstanceOf(Date);
+        expect((born as Date).toISOString()).toBe(when.toISOString());
       });
 
       it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {
