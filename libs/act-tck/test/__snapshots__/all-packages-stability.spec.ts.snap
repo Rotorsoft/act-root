@@ -348,7 +348,7 @@ export function act<
   const batch_handlers = new Map<string, BatchHandler<any>>();
   // Validated fold-projection ingredients, resolved once on the first
   // build. The HANDLERS themselves are built per \`.build()\` — see
-  // \`make_act_handlers\` — because a fold handler owns a mutable
+  // \`make_batch_handlers\` — because a fold handler owns a mutable
   // per-stream cache that must never be shared across Acts.
   const fold_specs: {
     target: string;
@@ -397,7 +397,7 @@ export function act<
    * build's own \`patch_fn\` (\`validateFoldedState\` is a per-build
    * option), instead of freezing the first build's choice.
    */
-  const make_act_handlers = (patch_fn: PatchFn) => {
+  const make_batch_handlers = (patch_fn: PatchFn) => {
     const handlers = new Map(batch_handlers);
     for (const spec of fold_specs) {
       handlers.set(
@@ -584,7 +584,7 @@ export function act<
                 \`State projection "\${proj.target}" of "\${fold.name}" is missing events \${missing.join(", ")} — pass every partial of the state to .of()\`
               );
             // Record the validated ingredients only. The handler is
-            // constructed per \`.build()\` (see \`make_act_handlers\`) — it
+            // constructed per \`.build()\` (see \`make_batch_handlers\`) — it
             // owns a mutable per-stream fold cache, so one shared instance
             // would leak folded rows between Acts built from this builder.
             fold_specs.push({
@@ -726,7 +726,7 @@ export function act<
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
           states,
-          make_act_handlers(patch_fn),
+          make_batch_handlers(patch_fn),
           options,
           lanes,
           patch_fn
