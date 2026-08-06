@@ -709,7 +709,15 @@ export class Act<
             with_stream_lock: (stream, work) =>
               this._with_close_lock(stream, work),
           });
-          this.emit("closed", result);
+          // Contain only the EMIT — a listener throw must not look like a
+          // store failure. The close machinery above is deliberately
+          // outside this guard so a real StoreError reaches the breaker
+          // (#1388).
+          try {
+            this.emit("closed", result);
+          } catch (err) {
+            this._logger.error(err, "closed listener threw");
+          }
         },
         breaker: this._breaker,
         // Re-scope the per-lane worker's auto-start ticks so their drain
