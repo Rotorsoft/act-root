@@ -41,6 +41,8 @@ Returns an `AsyncIterable` so callers can `break` early. Each finding lands as s
 
 Every requested category contributes a *pass* with optional per-row callbacks. The dispatcher determines the union of needed data sources (events / streams / stats), runs each **once**, and broadcasts each row to all interested passes. Worst case: three scans total no matter how many categories you ask for.
 
+The stream scan pages through the whole table with the keyset cursor, so stream-derived findings cover every subscription regardless of how many there are — one subscription per aggregate is normal with dynamic reaction targets. The event scan is the one you bound, via `AuditOptions.query`.
+
 Most categories share data — close-candidate, restart-candidate, snapshot-drift, deprecated-load, and routing-health all consume the same `query_stats` pass; schema, correlation-gaps, and clock-anomalies all hang off the same events walk. Categories that need follow-up work (snapshot-drift fetching the last `__snapshot__` per drifted stream, for example) do that in a `finalize` hook with targeted store calls.
 
 ## Categories

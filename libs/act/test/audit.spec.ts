@@ -1264,4 +1264,30 @@ describe("audit", () => {
       expect(findings).toEqual([]);
     });
   });
+
+  // `query_streams` defaults to `limit: 100`, so an unpaged walk reported
+  // a false all-clear for every stream sorting past the first page — on
+  // the surface whose job is to find blocked and misrouted streams.
+  describe("walks every stream, not just the first page", () => {
+    it("reports unknown-lane findings past the default page size", async () => {
+      const app = act().withState(widget).build();
+      const names = Array.from(
+        { length: 150 },
+        (_, i) => `paged-${String(i).padStart(3, "0")}`
+      );
+      await store().subscribe(
+        names.map((stream) => ({ stream, lane: "ghost" }))
+      );
+
+      const found: string[] = [];
+      for await (const f of app.audit(["routing-health"])) {
+        const stream = (f as { stream?: string }).stream;
+        if (stream?.startsWith("paged-")) found.push(stream);
+      }
+
+      expect(found).toHaveLength(150);
+      expect(found).toContain(names[149]);
+      await app.shutdown();
+    });
+  });
 });

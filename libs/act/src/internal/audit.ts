@@ -66,6 +66,7 @@ import {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
+import { walk_streams } from "./walk-streams.js";
 
 /**
  * Snapshot of orchestrator state the audit reads. Built once at
@@ -186,7 +187,10 @@ export async function* audit(
   }
 
   if (need_streams) {
-    await deps.store().query_streams((pos) => {
+    // Paged — `query_streams` defaults to 100, and an audit that inspects
+    // only the first page reports a false all-clear for every stream that
+    // sorts past it.
+    await walk_streams(deps.store(), (pos) => {
       for (const p of passes) p.on_stream?.(pos);
     });
   }

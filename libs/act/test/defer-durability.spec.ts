@@ -146,6 +146,40 @@ describe("defer durability", () => {
     expect(defer_timer.is_deferred("idle-agg")).toBe(true);
   });
 
+  it("re-seeds a deferred stream sorting past the first stream page (#1371)", async () => {
+    // The cold-start walk used `query_streams` with no query, which
+    // defaults to `limit: 100`. A deferred stream sorting past that page
+    // never got its timer re-armed — and the failing case is exactly the
+    // idle aggregate this re-seed exists for, since no commit ever
+    // re-arms it.
+    const due = Date.now() + 60_000;
+    const filler = Array.from(
+      { length: 150 },
+      (_, i) => `filler-${String(i).padStart(3, "0")}`
+    );
+    await store().subscribe(
+      filler.map((stream) => ({ stream, source: stream }))
+    );
+    // Sorts after every filler stream.
+    await store().subscribe([{ stream: "zzz-idle", source: "zzz-idle" }]);
+    await store().defer(["zzz-idle"], due);
+
+    const noop = async () => {};
+    const app = act().withState(counter).on("ticked").do(noop).build();
+    await app.correlate();
+
+    const controller = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { _defer: { size: number; is_deferred: (s: string) => boolean } }
+        >;
+      }
+    )._drain_controllers.get("default")!;
+    expect(controller._defer.is_deferred("zzz-idle")).toBe(true);
+    await app.shutdown();
+  });
+
   it("re-arms the drain at the persisted due-time with no intervening commit (#1221)", async () => {
     // A near-future due-time so a real-time wait is short. The store's own
     // async ops use real setTimeout, so fake timers can't drive the wake

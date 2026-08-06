@@ -1,0 +1,19 @@
+# A hundred is a number someone chose
+
+`Store.query_streams` takes an optional query, and when you don't pass one it returns a hundred streams. That default is defensible. It is a callback-per-row API over a table that can grow to one row per aggregate, and handing an unsuspecting caller the entire table is a worse failure than handing them a page. Postgres, SQLite, and the in-memory adapter all implement it identically, and the contract documents it.
+
+Two callers inside the framework passed no query and meant *all of them*.
+
+The first is the audit. `app.audit(["reaction-health"])` is the thing an operator runs to ask which streams are stuck, and it walked exactly a hundred streams sorted by name. With a hundred and fifty subscriptions and a blocked stream named `zzz-poison`, the audit returns clean. Not "clean, first page" — clean. There is no truncation flag in the result, no cursor in `AuditOptions` to widen the scan, nothing in the output distinguishing a healthy store from a store whose problems sort late alphabetically. The surface whose entire purpose is finding problems had a silent floor under its own vision.
+
+What makes it sharper is that the same `audit()` call has *two* scans, and only one was capped. `query_stats` defaults to unbounded, deliberately and documentedly, precisely because the two defaults differ. So within a single audit run, the stats-driven categories saw every stream and the stream-driven categories saw a hundred, and nothing about the code made that visible at the call site.
+
+The second caller is quieter and costs more than a report. At cold start, Act reads persisted `deferred_at` values out of the store and re-arms the process-local timers that fire them, because the timers are worker memory and a restart empties them. That walk was capped the same way. A stream sorting past the first page came back from a restart with a durable due-time in the store and nothing in memory to fire it.
+
+The method's own doc-comment describes exactly the case that then breaks. It is written to explain why the re-seed exists at all: an idle aggregate that deferred its terminal close is durable in the store but has nothing in memory to re-arm the drain, and since the aggregate is idle, no commit ever re-arms it. That sentence is the failure mode. The re-seed was built to close a hole and, past the first page, left it exactly where it was.
+
+The framework already knew how to do this correctly, which is the part worth keeping. The close cycle walks `query_streams` with an explicit `after`/`limit` loop, and its comment says why: a lagging reaction marks its close target pending regardless of how far its subscription sorts past the first page. Somebody hit this, understood it, wrote the loop, and wrote down the reason. The knowledge existed in one file and did not travel.
+
+So the fix is not clever. It is the close cycle's loop, extracted, with both callers moved onto it. The extraction is the actual point: three hand-rolled pagination loops would be three chances to get the cursor wrong, and getting a cursor wrong is its own bug family — the in-memory adapter had one where the sort comparator and the cursor comparator disagreed, silently dropping mixed-case names from a walk that looked complete.
+
+The lesson generalizes past this API. A default that is right for external callers is not automatically right for internal ones, and the two are easy to conflate because they call the same function. An external caller passing no query is saying "give me something reasonable." An internal caller passing no query is usually saying "give me everything," and gets something reasonable instead. The signature cannot tell them apart, so the caller has to, and the only way to catch the ones that don't is to look for the omission rather than wait for a symptom. There was no symptom here. There was an audit that said everything was fine.
