@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.33](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.32...@rotorsoft/act-tck-v1.27.33) (2026-08-06)
+
+
+### Bug Fixes
+
+* **act-crypto:** revive dates when decrypting pii payloads ([1a79178](https://github.com/rotorsoft/act-root/commit/1a7917883db522b5fba9935ceef99f15fe8de6ec)), closes [#1365](https://github.com/rotorsoft/act-root/issues/1365) [#1370](https://github.com/rotorsoft/act-root/issues/1370) [#1365](https://github.com/rotorsoft/act-root/issues/1365)
+
 # [@rotorsoft/act-tck-v1.27.32](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.31...@rotorsoft/act-tck-v1.27.32) (2026-08-06)
 
 
