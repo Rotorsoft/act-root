@@ -50,6 +50,7 @@
  * @internal
  */
 
+import { SNAP_EVENT } from "../ports.js";
 import type {
   AuditCategory,
   AuditFinding,
@@ -178,9 +179,21 @@ export async function* audit(
   const need_events = passes.some((p) => p.on_event !== undefined);
 
   if (need_stats) {
+    // Exclude `__snapshot__` so `head` and `count` are DOMAIN figures.
+    // A snapshot is committed right after the domain event that triggered
+    // it, so without this the head of any snapshotting stream is
+    // `__snapshot__` — and every pass that gates on the head name
+    // (`startsWith("__")` → "already closed") silently skips the stream.
+    // Same reasoning as `scan_stream_heads` in the close cycle.
+    //
+    // `__tombstone__` is deliberately NOT excluded: a tombstoned stream
+    // really is closed, and the head-name gates are what recognize it.
     const stats = await deps
       .store()
-      .query_stats<Schemas>({}, { count: true, names: true });
+      .query_stats<Schemas>(
+        {},
+        { count: true, names: true, exclude: [SNAP_EVENT] }
+      );
     for (const [stream, s] of stats) {
       for (const p of passes) p.on_stat?.(stream, s);
     }
@@ -404,25 +417,43 @@ const make_close_candidate_pass: PassFactory = (deps, options) => {
  */
 const make_restart_candidate_pass: PassFactory = (deps, options) => {
   const threshold = options.thresholds?.restart_min ?? DEFAULTS.restart_min;
+  // Resolved in finalize — the shared stat scan excludes `__snapshot__`
+  // (so heads and counts are domain figures), which means the snapshot
+  // tally isn't in `names`. Candidates are streams above `restart_min`,
+  // so this is a handful of targeted counts, not a second table walk.
+  const candidates: Array<{ stream: string; count: number }> = [];
   const findings: AuditFinding[] = [];
   return {
     category: "restart-candidate",
-    on_stat(stream, { head, count, names }) {
-      // `count` / `names` always populated — query_stats is called
-      // with both flags set; adapters keep them present together.
+    on_stat(stream, { head, count }) {
+      // `count` always populated — query_stats is called with the flag set.
       if (count! < threshold) return;
       const head_name = String(head.name);
       if (head_name.startsWith("__")) return;
       if (!restart_is_supported(deps, head_name)) return;
-      findings.push({
-        category: "restart-candidate",
-        stream,
-        count: count!,
-        // names map is sparse — `__snapshot__` key absent when the
-        // stream has never been snapshotted (a common case for the
-        // restart-candidate signal).
-        snaps: names!.__snapshot__ ?? 0,
-      });
+      candidates.push({ stream, count: count! });
+    },
+    async finalize(deps) {
+      for (const { stream, count } of candidates) {
+        let snaps = 0;
+        await deps.store().query(
+          () => {
+            snaps++;
+          },
+          {
+            stream,
+            stream_exact: true,
+            names: [SNAP_EVENT],
+            with_snaps: true,
+          }
+        );
+        findings.push({
+          category: "restart-candidate",
+          stream,
+          count,
+          snaps,
+        });
+      }
     },
     drain: () => findings,
   };
@@ -496,12 +527,11 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
   const candidates: Array<{
     stream: string;
     total: number;
-    snaps: number;
   }> = [];
   const findings: AuditFinding[] = [];
   return {
     category: "snapshot-drift",
-    on_stat(stream, { head, count, names }) {
+    on_stat(stream, { head, count }) {
       // restart_is_supported() already filters out framework markers
       // (__snapshot__, __tombstone__) — neither name appears in any
       // user state's events map, so the snap check rejects them.
@@ -510,30 +540,32 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
       candidates.push({
         stream,
         total: count!,
-        snaps: names!.__snapshot__ ?? 0,
       });
     },
     async finalize(deps) {
-      for (const { stream, total, snaps } of candidates) {
+      for (const { stream, total } of candidates) {
         let events_since_snap = total;
         let snap_at: number | undefined;
-        if (snaps > 0) {
-          const collected: Array<{ id: number }> = [];
-          await deps.store().query(
-            (e) => {
-              collected.push({ id: e.id });
-            },
-            {
-              stream,
-              stream_exact: true,
-              names: ["__snapshot__"],
-              backward: true,
-              limit: 1,
-              with_snaps: true,
-            }
-          );
-          // snaps > 0 means at least one `__snapshot__` event sits on
-          // this stream — the backward-walk above must surface it.
+        // The shared stat scan excludes `__snapshot__` so every other
+        // pass sees domain heads, which means the snapshot count isn't
+        // in `names` — resolve it from this targeted lookup instead. A
+        // stream with no snapshot yields nothing here and keeps
+        // `events_since_snap = total`, the same answer as before.
+        const collected: Array<{ id: number }> = [];
+        await deps.store().query(
+          (e) => {
+            collected.push({ id: e.id });
+          },
+          {
+            stream,
+            stream_exact: true,
+            names: ["__snapshot__"],
+            backward: true,
+            limit: 1,
+            with_snaps: true,
+          }
+        );
+        if (collected.length > 0) {
           snap_at = collected[0]!.id;
           let after = 0;
           await deps.store().query(

@@ -45,6 +45,8 @@ The stream scan pages through the whole table with the keyset cursor, so stream-
 
 Most categories share data — close-candidate, restart-candidate, snapshot-drift, deprecated-load, and routing-health all consume the same `query_stats` pass; schema, correlation-gaps, and clock-anomalies all hang off the same events walk. Categories that need follow-up work (snapshot-drift fetching the last `__snapshot__` per drifted stream, for example) do that in a `finalize` hook with targeted store calls.
 
+The shared stats pass excludes `__snapshot__`, so every head and count a category sees is a **domain** figure. This matters because a snapshot is committed immediately after the domain event that triggered it, which would otherwise make `__snapshot__` the head of every snapshotting stream — and the head-name check that recognizes an already-closed stream would then skip it. `__tombstone__` is deliberately *not* excluded: a tombstoned stream really is closed, and that check is what recognizes it. Snapshot tallies (`snaps`) come from per-candidate lookups in `finalize` rather than the shared histogram.
+
 ## Categories
 
 Each category answers a different operational question and pairs with a remediation.
@@ -77,7 +79,7 @@ Each finding carries `restart_supported`, derived from whether the stream's owni
 
 ### `restart-candidate` → `app.close([{stream, restart: true}])`
 
-Streams above `restart_min` (default 10,000) whose owning state has a `.snap()` reducer. Restart shrinks the working set without losing state. Streams whose state doesn't support snapshots are silently skipped (restart wouldn't work) — they belong in the close-candidate buckets instead.
+Streams above `restart_min` (default 10,000) **domain** events whose owning state has a `.snap()` reducer — snapshots don't pad the count. Restart shrinks the working set without losing state. Streams whose state doesn't support snapshots are silently skipped (restart wouldn't work) — they belong in the close-candidate buckets instead.
 
 ### `reaction-health` → `app.unblock(...)` / `app.reset(...)`
 
