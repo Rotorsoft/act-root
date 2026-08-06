@@ -1611,6 +1611,42 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(again.find((l) => l.stream === s)).toBeUndefined();
       });
 
+      it("returns the post-block row, not the caller's lease (#1382)", async () => {
+        // `run_drain_cycle` hands `block()` a lease whose `at` has been
+        // fast-forwarded to the fetch ceiling, but a block deliberately
+        // leaves the watermark alone — the failing event must be retried,
+        // not skipped. So the returned lease must carry the DURABLE `at`.
+        // Re-reading via query_streams isn't enough: it reflects the
+        // correct durable value either way, which is how #1347 and #1382
+        // both slipped past this suite.
+        const s = `block-returns-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        await store.ack(leased.filter((l) => l.stream !== s));
+
+        // Block with an `at` the row does NOT hold.
+        const blocked = await store.block([
+          { ...(mine as Lease), at: 999_999, error: "boom" },
+        ]);
+        expect(blocked).toHaveLength(1);
+
+        let durable_at: number | undefined;
+        await store.query_streams(
+          (p) => {
+            durable_at = p.at;
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(blocked[0].at).toBe(durable_at);
+      });
+
       it("rejects block calls from a different holder", async () => {
         const s = `block-wrong-${uid()}`;
         await store.subscribe([{ stream: s }]);

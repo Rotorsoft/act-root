@@ -805,11 +805,32 @@ export class SqliteStore implements Store {
       const result: BlockedLease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
+          // RETURNING the post-block row so the returned lease reflects the
+          // authoritative state, not the caller's echo (#1382, the `block`
+          // twin of #1347). A block leaves the watermark alone — the failing
+          // event must be retried, not skipped — but `run_drain_cycle` hands
+          // us a lease whose `at` was fast-forwarded to the fetch ceiling, so
+          // pushing the input verbatim reported a position the row never
+          // held. `by`/`error`/`lagging` still come from the input lease,
+          // matching PG (`RETURNING s.stream, s.source, s.at, i.by, ...`).
           sql: `UPDATE streams SET blocked = 1, error = ?, deferred_at = NULL
-                WHERE stream = ? AND leased_by = ? AND blocked = 0`,
+                WHERE stream = ? AND leased_by = ? AND blocked = 0
+                RETURNING source, at, retry, lane`,
           args: [l.error, l.stream, l.by],
         });
-        if (r.rowsAffected > 0) result.push(l);
+        if (r.rows.length > 0) {
+          const row = r.rows[0];
+          result.push({
+            stream: l.stream,
+            source: (row.source as string | null) ?? undefined,
+            at: Number(row.at),
+            by: l.by,
+            retry: Number(row.retry),
+            error: l.error,
+            lagging: l.lagging,
+            lane: row.lane as string,
+          });
+        }
       }
       await tx.commit();
       return result;
