@@ -389,4 +389,37 @@ describe("SqliteStore pii_encryption", () => {
     });
     expect(typeof raw_rows.rows[0]!.pii).toBe("string");
   });
+
+  it("revives a Date in pii under encryption (#1370)", async () => {
+    // Encryption is an at-rest concern: a Date must survive it as a Date,
+    // exactly as it does on the plaintext path. `data.at` is the in-row
+    // control — it never travels through the envelope.
+    const key = randomBytes(32);
+    const { store, raw, path } = await freshStore(key);
+    track(store, raw, path);
+    const stream = `date-enc-${chance.guid()}`;
+    const when = new Date("2024-03-01T10:20:30.000Z");
+
+    await store.commit(
+      stream,
+      [
+        {
+          name: "UserRegistered",
+          data: { at: when },
+          pii: { born: when },
+        },
+      ] as never,
+      { correlation: chance.guid(), causation: {} }
+    );
+
+    const rows: Array<{ data: unknown; pii: unknown }> = [];
+    await store.query((e) => rows.push(e as never), { stream });
+
+    expect(rows).toHaveLength(1);
+    expect((rows[0].data as { at: unknown }).at).toBeInstanceOf(Date);
+    expect((rows[0].pii as { born: unknown }).born).toBeInstanceOf(Date);
+    expect((rows[0].pii as { born: Date }).born.toISOString()).toBe(
+      when.toISOString()
+    );
+  });
 });

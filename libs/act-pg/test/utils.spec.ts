@@ -19,7 +19,6 @@ describe("act-pg utils", () => {
 
   it("should return original value for non-string values", () => {
     const notAString = 12345;
-    // @ts-expect-error - testing with non-string value
     const result = dateReviver("key", notAString);
     expect(result).toBe(notAString);
   });

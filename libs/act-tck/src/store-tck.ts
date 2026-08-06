@@ -4092,27 +4092,38 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
-      it("revives a Date in a pii field to a Date, like data (#1365)", async () => {
+      it("revives a Date in pii like data/meta (#1365/#1370)", async () => {
+        // A Date must come back a Date wherever it sits, and whether or
+        // not the adapter encrypts the pii column — encryption is an
+        // at-rest concern, not a payload-type change. The same Date in
+        // `data` is the in-row control.
         const s = `pii-date-${uid()}`;
-        const dob = new Date("2000-03-04T05:06:07.000Z");
+        const when = new Date("2024-03-01T10:20:30.000Z");
         await store.commit<CounterEvents>(
           s,
-          [{ name: "Incremented", data: { amount: 1 }, pii: { dob } }],
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1, at: when } as never,
+              pii: { born: when },
+            },
+          ],
           make_meta({ stream: s })
         );
 
         const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
-        await store.query<CounterEvents>((e) => seen.push(e), {
-          stream: s,
-          stream_exact: true,
-        });
-        expect(seen).toHaveLength(1);
-        // A Date in pii round-trips as a Date, matching the `data`/`meta`
-        // reviver — not an ISO string on JSON-storage adapters.
-        expect((seen[0].pii as { dob: unknown }).dob).toBeInstanceOf(Date);
-        expect((seen[0].pii as { dob: Date }).dob.getTime()).toBe(
-          dob.getTime()
+        await store.query<CounterEvents>(
+          (e) => {
+            seen.push(e);
+          },
+          { stream: s, stream_exact: true }
         );
+        expect(seen).toHaveLength(1);
+        const at = (seen[0].data as unknown as { at: unknown }).at;
+        const born = (seen[0].pii as { born: unknown }).born;
+        expect(at).toBeInstanceOf(Date);
+        expect(born).toBeInstanceOf(Date);
+        expect((born as Date).toISOString()).toBe(when.toISOString());
       });
 
       it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {

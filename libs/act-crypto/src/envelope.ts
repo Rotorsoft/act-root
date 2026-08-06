@@ -145,6 +145,12 @@ export async function encrypt(
  *
  * @param encoded Output of a prior {@link encrypt} call.
  * @param resolve_key Key resolver from {@link makeKeyResolver}.
+ * @param reviver Optional `JSON.parse` reviver. Encryption is meant to be
+ *   transparent, but `encrypt` serializes through `JSON.stringify` — so a
+ *   `Date` arrives back as an ISO string unless the caller revives it.
+ *   Adapters pass the same reviver they use for their plaintext columns,
+ *   which is what keeps an encrypted value the same runtime type as an
+ *   unencrypted one.
  * @returns The original payload after `JSON.parse`.
  * @throws DecryptionError on:
  *   - input too short to hold the header
@@ -154,7 +160,8 @@ export async function encrypt(
  */
 export async function decrypt(
   encoded: string,
-  resolve_key: () => Promise<Buffer>
+  resolve_key: () => Promise<Buffer>,
+  reviver?: (key: string, value: unknown) => unknown
 ): Promise<unknown> {
   const key = await resolve_key();
   const bytes = Buffer.from(encoded, "base64");
@@ -172,7 +179,7 @@ export async function decrypt(
   decipher.setAuthTag(tag);
   try {
     const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
-    return JSON.parse(pt.toString("utf8"));
+    return JSON.parse(pt.toString("utf8"), reviver);
   } catch {
     throw new DecryptionError(
       "ciphertext failed to decrypt — wrong key, tampered payload, or corrupt framing"
