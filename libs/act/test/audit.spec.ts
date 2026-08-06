@@ -1177,11 +1177,14 @@ describe("audit", () => {
     });
 
     it("routing-health ignores framework-marker event names in the unrouted scan", async () => {
-      // __snapshot__ shows up in the workspace names map but must not
-      // be flagged as unrouted — it's a framework concern.
+      // Framework markers must never be flagged as unrouted. __snapshot__
+      // is excluded from the shared stat scan outright (#1374, so heads
+      // stay domain-level); __tombstone__ still reaches the names map and
+      // is filtered by the marker guard.
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
       await store().commit("w1", [{ name: "__snapshot__", data: {} }], meta);
+      await store().commit("w2", [{ name: "__tombstone__", data: {} }], meta);
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["routing-health"])) findings.push(f);
@@ -1287,6 +1290,84 @@ describe("audit", () => {
 
       expect(found).toHaveLength(150);
       expect(found).toContain(names[149]);
+      await app.shutdown();
+    });
+  });
+
+  // Every existing close/restart test commits through the raw store, which
+  // never produces a `__snapshot__`. Going through `app.do` does — and the
+  // snapshot lands at a higher id than the domain event that triggered it,
+  // so it becomes the stream head. The shared stat scan has to exclude it
+  // or every head-gated pass skips the stream (#1374).
+  describe("domain head resolution with snapshots present", () => {
+    const snapped = state({ Snapped: z.object({ steps: z.number() }) })
+      .init(() => ({ steps: 0 }))
+      .emits({
+        Started: z.object({}),
+        Finished: z.object({}),
+      })
+      .patch({
+        Started: (_e, st) => ({ steps: st.steps + 1 }),
+        Finished: (_e, st) => ({ steps: st.steps + 1 }),
+      })
+      .on({ start: z.object({}) })
+      .emit(() => ["Started", {}])
+      .on({ finish: z.object({}) })
+      .emit(() => ["Finished", {}])
+      .snap((st) => st.patches >= 2)
+      .build();
+
+    const snap_actor = { id: "a", name: "a" };
+
+    it("flags a terminated stream whose head is a __snapshot__", async () => {
+      const app = act().withState(snapped).build();
+      await app.do("start", { stream: "sn1", actor: snap_actor }, {});
+      await app.do("finish", { stream: "sn1", actor: snap_actor }, {});
+
+      // Precondition: the raw head really is the snapshot.
+      const raw = await store().query_stats({ stream: "sn1" }, { count: true });
+      expect(String(raw.get("sn1")?.head.name)).toBe("__snapshot__");
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["close-candidate"], {
+        thresholds: { terminal_events: ["Finished"], idle_days: 10_000 },
+      })) {
+        findings.push(f);
+      }
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        category: "close-candidate",
+        stream: "sn1",
+        reason: "terminal",
+        restart_supported: true,
+      });
+      await app.shutdown();
+    });
+
+    it("counts snapshotting streams as restart candidates on domain events", async () => {
+      const app = act().withState(snapped).build();
+      await app.do("start", { stream: "sn2", actor: snap_actor }, {});
+      await app.do("finish", { stream: "sn2", actor: snap_actor }, {});
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["restart-candidate"], {
+        thresholds: { restart_min: 2 },
+      })) {
+        findings.push(f);
+      }
+
+      // Two domain events — the snapshot must not pad the count, and the
+      // stream must not be skipped for having a marker head.
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        category: "restart-candidate",
+        stream: "sn2",
+        // Two domain events; the snapshot is counted separately, not
+        // folded into the domain total.
+        count: 2,
+        snaps: 1,
+      });
       await app.shutdown();
     });
   });
