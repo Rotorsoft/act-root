@@ -2752,6 +2752,36 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("query_streams", () => {
+      it("keyset pagination visits every stream regardless of name case (#1375)", async () => {
+        // The `query_streams` twin of #1357. Mixed-case suffixes so the
+        // sort comparator and the `after` cursor must agree: code-unit
+        // order is B,C,a,d; a locale sort (a,B,C,d) paired with a
+        // code-unit `<=` cursor silently skips Bravo/Charlie.
+        const tag = uid();
+        const names = [
+          `${tag}-Bravo`,
+          `${tag}-alpha`,
+          `${tag}-Charlie`,
+          `${tag}-delta`,
+        ];
+        await store.subscribe(names.map((stream) => ({ stream })));
+
+        const visited: string[] = [];
+        let after: string | undefined;
+        for (;;) {
+          const page: string[] = [];
+          await store.query_streams((p) => page.push(p.stream), {
+            stream: `${tag}-.*`,
+            after,
+            limit: 1,
+          });
+          if (page.length === 0) break;
+          visited.push(...page);
+          after = page.at(-1);
+        }
+        expect([...visited].sort()).toEqual([...names].sort());
+      });
+
       it("returns positions filtered by stream regex, exact, source, and source_exact", async () => {
         const tag = uid();
         const proj1 = `qs-${tag}-projection-tickets`;
