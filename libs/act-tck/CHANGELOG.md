@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.35](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.34...@rotorsoft/act-tck-v1.27.35) (2026-08-06)
+
+
+### Bug Fixes
+
+* **act-sqlite:** return the post-block row from block(), not the caller's lease ([0555d07](https://github.com/rotorsoft/act-root/commit/0555d07329e4f192161bf4bd36d379e2d6607716)), closes [#1347](https://github.com/rotorsoft/act-root/issues/1347) [#1382](https://github.com/rotorsoft/act-root/issues/1382)
+
 # [@rotorsoft/act-tck-v1.27.34](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.33...@rotorsoft/act-tck-v1.27.34) (2026-08-06)
 
 
