@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.32](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.31...@rotorsoft/act-tck-v1.27.32) (2026-08-06)
+
+
+### Bug Fixes
+
+* **act:** resolve domain stream heads in audit by excluding __snapshot__ ([f2f096b](https://github.com/rotorsoft/act-root/commit/f2f096ba5c0b1f5032a4893fdb148c15afc340ab)), closes [#1374](https://github.com/rotorsoft/act-root/issues/1374)
+
 # [@rotorsoft/act-tck-v1.27.31](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.30...@rotorsoft/act-tck-v1.27.31) (2026-08-06)
 
 
