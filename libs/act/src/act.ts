@@ -34,7 +34,15 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  type Scoped,
+  scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -709,6 +717,7 @@ export class Act<
             with_stream_lock: (stream, work) =>
               this._with_close_lock(stream, work),
           });
+          this._forget_closed_subscriptions(result);
           // Contain only the EMIT — a listener throw must not look like a
           // store failure. The close machinery above is deliberately
           // outside this guard so a real StoreError reaches the breaker
@@ -1939,6 +1948,18 @@ export class Act<
    * ]);
    * ```
    */
+  /**
+   * After a close, forget any target whose subscription row the truncate
+   * removed, so a later correlate can re-subscribe it (#1398). Restart
+   * targets keep their row, so only fully-retired streams are forgotten.
+   */
+  private _forget_closed_subscriptions(result: CloseResult): void {
+    const retired = [...result.truncated.entries()]
+      .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
+      .map(([stream]) => stream);
+    if (retired.length) this._correlate.forget_subscribed(retired);
+  }
+
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
@@ -1960,6 +1981,7 @@ export class Act<
         with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
+      this._forget_closed_subscriptions(result);
       this.emit("closed", result);
       return result;
     });

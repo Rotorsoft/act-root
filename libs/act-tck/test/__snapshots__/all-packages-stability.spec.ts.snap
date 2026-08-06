@@ -774,7 +774,15 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  type Scoped,
+  scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -1449,6 +1457,7 @@ export class Act<
             with_stream_lock: (stream, work) =>
               this._with_close_lock(stream, work),
           });
+          this._forget_closed_subscriptions(result);
           // Contain only the EMIT — a listener throw must not look like a
           // store failure. The close machinery above is deliberately
           // outside this guard so a real StoreError reaches the breaker
@@ -2679,6 +2688,18 @@ export class Act<
    * ]);
    * \`\`\`
    */
+  /**
+   * After a close, forget any target whose subscription row the truncate
+   * removed, so a later correlate can re-subscribe it (#1398). Restart
+   * targets keep their row, so only fully-retired streams are forgotten.
+   */
+  private _forget_closed_subscriptions(result: CloseResult): void {
+    const retired = [...result.truncated.entries()]
+      .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
+      .map(([stream]) => stream);
+    if (retired.length) this._correlate.forget_subscribed(retired);
+  }
+
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
@@ -2700,6 +2721,7 @@ export class Act<
         with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
+      this._forget_closed_subscriptions(result);
       this.emit("closed", result);
       return result;
     });
@@ -7746,6 +7768,27 @@ export class CorrelateCycle<
   }
 
   /**
+   * Forget targets whose subscription rows no longer exist, so a later
+   * scan can re-subscribe them.
+   *
+   * A full close deletes the closed stream's subscription row. The
+   * in-process dedup would otherwise still believe the target is
+   * subscribed and never re-issue \`subscribe()\`, silently stopping
+   * delivery for any reaction whose target is named after the stream —
+   * the documented per-aggregate shape \`.to(e => ({target: e.stream}))\`
+   * makes those two namespaces collide by construction (#1398).
+   *
+   * Static targets are left alone: they are subscribed once at init and
+   * recorded at +Infinity so the dynamic path never re-opens them.
+   */
+  forget_subscribed(streams: Iterable<string>): void {
+    const statics = new Set(this._static_targets.map((t) => t.stream));
+    for (const stream of streams) {
+      if (!statics.has(stream)) this._subscribed.delete(stream);
+    }
+  }
+
+  /**
    * Discover dynamic-resolver targets in the events past the checkpoint
    * and register any new streams via \`cd.subscribe\`. Static targets are
    * subscribed at init time, so this only walks dynamic resolvers.
@@ -11944,8 +11987,15 @@ export class InMemoryStore implements Store {
       }
     }
     this._events = this._events.filter((e) => !stream_set.has(e.stream));
+    // A restart target carries a seed snapshot: the stream lives on, so its
+    // subscription row must survive. Deleting it silently stops reactions
+    // whose target is named after the stream — the documented per-aggregate
+    // shape \`.to(e => ({target: e.stream}))\` (#1398).
+    const restarted = new Set(
+      full.filter((t) => t.snapshot !== undefined).map((t) => t.stream)
+    );
     for (const stream of stream_set) {
-      this._streams.delete(stream);
+      if (!restarted.has(stream)) this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
@@ -18224,7 +18274,15 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  type Scoped,
+  scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -18899,6 +18957,7 @@ export class Act<
             with_stream_lock: (stream, work) =>
               this._with_close_lock(stream, work),
           });
+          this._forget_closed_subscriptions(result);
           // Contain only the EMIT — a listener throw must not look like a
           // store failure. The close machinery above is deliberately
           // outside this guard so a real StoreError reaches the breaker
@@ -20129,6 +20188,18 @@ export class Act<
    * ]);
    * \`\`\`
    */
+  /**
+   * After a close, forget any target whose subscription row the truncate
+   * removed, so a later correlate can re-subscribe it (#1398). Restart
+   * targets keep their row, so only fully-retired streams are forgotten.
+   */
+  private _forget_closed_subscriptions(result: CloseResult): void {
+    const retired = [...result.truncated.entries()]
+      .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
+      .map(([stream]) => stream);
+    if (retired.length) this._correlate.forget_subscribed(retired);
+  }
+
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
@@ -20150,6 +20221,7 @@ export class Act<
         with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
+      this._forget_closed_subscriptions(result);
       this.emit("closed", result);
       return result;
     });
@@ -25076,6 +25148,27 @@ export class CorrelateCycle<
   }
 
   /**
+   * Forget targets whose subscription rows no longer exist, so a later
+   * scan can re-subscribe them.
+   *
+   * A full close deletes the closed stream's subscription row. The
+   * in-process dedup would otherwise still believe the target is
+   * subscribed and never re-issue \`subscribe()\`, silently stopping
+   * delivery for any reaction whose target is named after the stream —
+   * the documented per-aggregate shape \`.to(e => ({target: e.stream}))\`
+   * makes those two namespaces collide by construction (#1398).
+   *
+   * Static targets are left alone: they are subscribed once at init and
+   * recorded at +Infinity so the dynamic path never re-opens them.
+   */
+  forget_subscribed(streams: Iterable<string>): void {
+    const statics = new Set(this._static_targets.map((t) => t.stream));
+    for (const stream of streams) {
+      if (!statics.has(stream)) this._subscribed.delete(stream);
+    }
+  }
+
+  /**
    * Discover dynamic-resolver targets in the events past the checkpoint
    * and register any new streams via \`cd.subscribe\`. Static targets are
    * subscribed at init time, so this only walks dynamic resolvers.
@@ -29046,8 +29139,15 @@ export class InMemoryStore implements Store {
       }
     }
     this._events = this._events.filter((e) => !stream_set.has(e.stream));
+    // A restart target carries a seed snapshot: the stream lives on, so its
+    // subscription row must survive. Deleting it silently stops reactions
+    // whose target is named after the stream — the documented per-aggregate
+    // shape \`.to(e => ({target: e.stream}))\` (#1398).
+    const restarted = new Set(
+      full.filter((t) => t.snapshot !== undefined).map((t) => t.stream)
+    );
     for (const stream of stream_set) {
-      this._streams.delete(stream);
+      if (!restarted.has(stream)) this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
@@ -49556,9 +49656,16 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
-      if (full.length) {
+      // A restart target carries a seed snapshot: the stream lives on, so
+      // its subscription row must survive. Deleting it silently stops
+      // reactions whose target is named after the stream — the documented
+      // per-aggregate shape \`.to(e => ({target: e.stream}))\` (#1398).
+      const retired = full
+        .filter((t) => t.snapshot === undefined)
+        .map((t) => t.stream);
+      if (retired.length) {
         await client.query(\`DELETE FROM \${this._fqs} WHERE stream = ANY($1)\`, [
-          full.map((t) => t.stream),
+          retired,
         ]);
       }
       for (const { stream, snapshot, meta } of full) {
@@ -51332,10 +51439,15 @@ export class SqliteStore implements Store {
           sql: "DELETE FROM events WHERE stream = ?",
           args: [stream],
         });
-        await tx.execute({
-          sql: "DELETE FROM streams WHERE stream = ?",
-          args: [stream],
-        });
+        // A restart target carries a seed snapshot: the stream lives on, so
+        // its subscription row must survive. Deleting it silently stops
+        // reactions whose target is named after the stream — the documented
+        // per-aggregate shape \`.to(e => ({target: e.stream}))\` (#1398).
+        if (snapshot === undefined)
+          await tx.execute({
+            sql: "DELETE FROM streams WHERE stream = ?",
+            args: [stream],
+          });
 
         const event_name =
           snapshot !== undefined ? "__snapshot__" : "__tombstone__";
@@ -56188,6 +56300,42 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("truncate", () => {
+      it("keeps the subscription row for a restart target, drops it for a retire (#1398)", async () => {
+        // The subscriptions table is keyed by TARGET name, and the
+        // documented per-aggregate reaction shape \`.to(e => ({target:
+        // e.stream}))\` makes that collide with the event stream name. A
+        // restart keeps the stream alive, so its subscription must survive;
+        // a retire correctly drops it.
+        const tag = uid();
+        const restarted = \`trunc-restart-\${tag}\`;
+        const retired = \`trunc-retire-\${tag}\`;
+        for (const s of [restarted, retired]) {
+          await store.subscribe([{ stream: s }]);
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        }
+
+        await store.truncate([
+          {
+            stream: restarted,
+            snapshot: { count: 1 },
+            meta: make_meta({ stream: restarted }),
+          },
+          { stream: retired, meta: make_meta({ stream: retired }) },
+        ]);
+
+        const rows: string[] = [];
+        await store.query_streams((p) => rows.push(p.stream), {
+          stream: \`trunc-.*-\${tag}\`,
+          limit: 100,
+        });
+        expect(rows).toContain(restarted);
+        expect(rows).not.toContain(retired);
+      });
+
       it("seeds a tombstone when no snapshot is provided", async () => {
         const s = \`trunc-tomb-\${uid()}\`;
         await store.commit<CounterEvents>(

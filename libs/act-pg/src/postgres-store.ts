@@ -2135,9 +2135,16 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
-      if (full.length) {
+      // A restart target carries a seed snapshot: the stream lives on, so
+      // its subscription row must survive. Deleting it silently stops
+      // reactions whose target is named after the stream — the documented
+      // per-aggregate shape `.to(e => ({target: e.stream}))` (#1398).
+      const retired = full
+        .filter((t) => t.snapshot === undefined)
+        .map((t) => t.stream);
+      if (retired.length) {
         await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
-          full.map((t) => t.stream),
+          retired,
         ]);
       }
       for (const { stream, snapshot, meta } of full) {
