@@ -85,6 +85,15 @@ describe("decompose_event_name", () => {
   it("decomposes _v<digits> suffix", () => {
     expect(decompose_event_name("Foo_v3")).toEqual({ base: "Foo", version: 3 });
   });
+  // #1395 — the framework requires v >= 2 (`event-versions.ts`): the base
+  // `Foo` is implicitly v1, so `Foo_v1` is a literal event name. Stripping
+  // it made the CLI call a current, emittable event deprecated.
+  it("treats _v1 as a literal name, not a version", () => {
+    expect(decompose_event_name("Foo_v1")).toEqual({
+      base: "Foo_v1",
+      version: 1,
+    });
+  });
   it("ignores _v without digits", () => {
     expect(decompose_event_name("Foo_vNext")).toEqual({
       base: "Foo_vNext",
@@ -110,6 +119,13 @@ describe("event_status", () => {
   });
   it("marks an isolated bare name active", () => {
     expect(event_status("Bar", all)).toEqual({ status: "active" });
+  });
+  it("does not deprecate _v1 in favour of _v2 (#1395)", () => {
+    // To the framework these are two unrelated base names, both current;
+    // a static .emit("Shipped_v1") is legal and the app builds.
+    const names = new Set(["Shipped_v1", "Shipped_v2"]);
+    expect(event_status("Shipped_v1", names)).toEqual({ status: "active" });
+    expect(event_status("Shipped_v2", names)).toEqual({ status: "active" });
   });
 });
 
