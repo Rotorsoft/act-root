@@ -509,6 +509,19 @@ async function load_restart_seeds(
           );
           return;
         }
+        if (owner_state.pii_aware) {
+          // The seed load below is actorless, so every `sensitive()` field
+          // folds to the redaction sentinel — and the truncate then deletes
+          // the real events and their pii sidecars, making the loss
+          // irreversible. Loading privileged instead is NOT the answer: that
+          // writes plaintext into `__snapshot__.data`, which `forget_pii`
+          // cannot reach — exactly what the build-time guard on `.snap()`
+          // exists to prevent. A pii-aware state simply cannot be restarted.
+          logger.error(
+            `Cannot seed restart for "${stream}": state "${owner_state.name}" carries sensitive fields, and a restart seed would persist redacted values while deleting the originals. Stream will be tombstoned instead.`
+          );
+          return;
+        }
         const snap = await load(owner_state, { stream });
         seed_states.set(stream, snap.state as Schema);
       })

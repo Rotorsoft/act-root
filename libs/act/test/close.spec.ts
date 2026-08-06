@@ -7,6 +7,7 @@ import {
   log,
   SNAP_EVENT,
   StreamClosedError,
+  sensitive,
   state,
   store,
   TOMBSTONE_EVENT,
@@ -536,5 +537,59 @@ describe("close", () => {
 
     const { truncated } = await app.close([{ stream: "tdata" }]);
     expect(truncated.get("tdata")!.committed.data).toEqual({});
+  });
+});
+
+describe("close restart on a sensitive-bearing state", () => {
+  const actor = { id: "a", name: "a" };
+
+  const Person = state({
+    Person: z.object({ email: z.string(), n: z.number() }),
+  })
+    .init(() => ({ email: "", n: 0 }))
+    .emits({
+      registered: z.object({ email: sensitive(z.string()), n: z.number() }),
+    })
+    .patch({ registered: ({ data }) => ({ email: data.email, n: data.n }) })
+    .on({ register: z.object({ email: sensitive(z.string()), n: z.number() }) })
+    .emit((p) => ["registered", p])
+    .discloses(() => true)
+    .build();
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  // The seed load is actorless, so every sensitive field folds to the
+  // redaction sentinel — and the truncate then deletes the real events and
+  // their pii sidecars, so the originals are unrecoverable. Loading the seed
+  // privileged instead would write plaintext into __snapshot__.data, which
+  // forget_pii cannot reach — the very thing the build guard on .snap()
+  // prevents. A pii-aware state cannot be restarted at all.
+  it("tombstones instead of seeding a redacted snapshot", async () => {
+    const pii_app = act().withState(Person).build();
+    await pii_app.do(
+      "register",
+      { stream: "p1", actor },
+      { email: "a@b.com", n: 1 }
+    );
+
+    const before = await pii_app.load(Person, { stream: "p1", actor });
+    expect(before.state.email).toBe("a@b.com");
+
+    const result = await pii_app.close([{ stream: "p1", restart: true }]);
+    expect([...result.truncated.keys()]).toEqual(["p1"]);
+
+    // No seed snapshot was written for the pii-aware state...
+    const names: string[] = [];
+    await store().query((e) => names.push(String(e.name)), {
+      stream: "p1",
+      with_snaps: true,
+    });
+    expect(names).not.toContain(SNAP_EVENT);
+    expect(names).toContain(TOMBSTONE_EVENT);
+
+    // ...so no redacted value was persisted in place of the plaintext.
+    await pii_app.shutdown();
   });
 });
