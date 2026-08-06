@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { act, InMemoryCache, InMemoryStore, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
+import type { Store } from "../src/types/index.js";
 
 /**
  * ACT-1207 — correlate cold-start checkpoint must not overshoot an
@@ -109,5 +110,126 @@ describe("correlate cold-start checkpoint overshoot (ACT-1207)", () => {
     } finally {
       await ctx2.dispose();
     }
+  });
+});
+
+/**
+ * #1387 — `init()` latched "already initialized" BEFORE the awaited
+ * `subscribe`, so one transient store failure at cold start left every
+ * static target unsubscribed for the process lifetime. Nothing reset the
+ * flag, and the failure was invisible afterwards: no subscription row
+ * means `claim` can never return the stream, `blocked_streams()` is
+ * empty, and the audit has no row to report.
+ */
+describe("init retries after a transient store failure (#1387)", () => {
+  const actor = { id: "a", name: "a" };
+
+  const Src = state({ Src: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Fired: z.object({}) })
+    .patch({ Fired: (_e, s) => ({ n: s.n + 1 }) })
+    .on({ fire: z.object({}) })
+    .emit(() => ["Fired", {}])
+    .build();
+
+  /** Fails the first `fail_times` subscribe calls, then delegates. */
+  const flaky_subscribe = (inner: Store, fail_times: number): Store => {
+    let calls = 0;
+    return new Proxy(inner, {
+      get(target, prop, receiver) {
+        if (prop === "subscribe")
+          return async (...args: unknown[]) => {
+            if (calls++ < fail_times) throw new Error("connection reset");
+            return (target.subscribe as never as (...a: unknown[]) => unknown)(
+              ...args
+            );
+          };
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+  };
+
+  const run = async (fail_times: number) => {
+    let handled = 0;
+    const store = flaky_subscribe(new InMemoryStore(), fail_times);
+    await store.seed();
+    const cache = new InMemoryCache();
+    const app = act()
+      .withState(Src)
+      .on("Fired")
+      .do(async function react() {
+        handled++;
+      })
+      .to("out")
+      .build({ scoped: { store, cache } });
+
+    await app.do("fire", { stream: "s1", actor }, {});
+    let threw = false;
+    try {
+      await app.correlate();
+    } catch {
+      threw = true;
+    }
+    // Store is healthy now — the retry must repair init.
+    await app.correlate();
+    await app.drain();
+
+    const subs: string[] = [];
+    await store.query_streams((p) => subs.push(p.stream), { limit: 50 });
+
+    await app.shutdown();
+    await store.dispose();
+    await cache.dispose();
+    return { handled, threw, subs };
+  };
+
+  it("subscribes static targets on a retry after subscribe throws", async () => {
+    const r = await run(1);
+    expect(r.threw).toBe(true);
+    expect(r.subs).toContain("out");
+    expect(r.handled).toBe(1);
+  });
+
+  it("control — a healthy store subscribes on the first call", async () => {
+    const r = await run(0);
+    expect(r.threw).toBe(false);
+    expect(r.subs).toContain("out");
+    expect(r.handled).toBe(1);
+  });
+
+  it("shares one init across concurrent callers (single-flight)", async () => {
+    let calls = 0;
+    const inner = new InMemoryStore();
+    await inner.seed();
+    const store = new Proxy(inner, {
+      get(target, prop, receiver) {
+        if (prop === "subscribe")
+          return async (...args: unknown[]) => {
+            calls++;
+            // Hold the first call open so the second caller arrives while
+            // init is still in flight.
+            await new Promise((r) => setTimeout(r, 10));
+            return (target.subscribe as never as (...a: unknown[]) => unknown)(
+              ...args
+            );
+          };
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as Store;
+
+    const cache = new InMemoryCache();
+    const app = act()
+      .withState(Src)
+      .on("Fired")
+      .do(async function react() {})
+      .to("out")
+      .build({ scoped: { store, cache } });
+
+    await Promise.all([app.correlate(), app.correlate(), app.correlate()]);
+    expect(calls).toBe(1);
+
+    await app.shutdown();
+    await store.dispose();
+    await cache.dispose();
   });
 });

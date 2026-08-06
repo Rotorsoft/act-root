@@ -7566,6 +7566,8 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /** In-flight init, memoized for single-flight and cleared on failure. */
+  private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
   // target → the priority it was last subscribed at. A dynamic target is
   // re-subscribed (so the store's \`GREATEST\` upsert runs) only when a later
@@ -7652,8 +7654,24 @@ export class CorrelateCycle<
    */
   async init(): Promise<void> {
     if (this._initialized) return;
+    // Single-flight, but retryable: the promise is memoized so concurrent
+    // callers (correlate, the settle loop, every lane worker) share one
+    // run, and cleared on rejection so a transient store failure doesn't
+    // latch. Setting a boolean before the await instead left every static
+    // target unsubscribed for the process lifetime after one blip — the
+    // reaction pipeline silently dead, with nothing in blocked_streams or
+    // the audit to reveal it, because the subscription row never existed.
+    if (!this._init_promise) {
+      this._init_promise = this._run_init().catch((error) => {
+        this._init_promise = undefined;
+        throw error;
+      });
+    }
+    await this._init_promise;
     this._initialized = true;
+  }
 
+  private async _run_init(): Promise<void> {
     const { watermark } = await store().subscribe([...this._static_targets]);
     // Without dynamic resolvers correlate never scans, so the checkpoint
     // is inert — keep the plain \`max(at)\` cold start. With dynamic
@@ -24825,6 +24843,8 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /** In-flight init, memoized for single-flight and cleared on failure. */
+  private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
   // target → the priority it was last subscribed at. A dynamic target is
   // re-subscribed (so the store's \`GREATEST\` upsert runs) only when a later
@@ -24911,8 +24931,24 @@ export class CorrelateCycle<
    */
   async init(): Promise<void> {
     if (this._initialized) return;
+    // Single-flight, but retryable: the promise is memoized so concurrent
+    // callers (correlate, the settle loop, every lane worker) share one
+    // run, and cleared on rejection so a transient store failure doesn't
+    // latch. Setting a boolean before the await instead left every static
+    // target unsubscribed for the process lifetime after one blip — the
+    // reaction pipeline silently dead, with nothing in blocked_streams or
+    // the audit to reveal it, because the subscription row never existed.
+    if (!this._init_promise) {
+      this._init_promise = this._run_init().catch((error) => {
+        this._init_promise = undefined;
+        throw error;
+      });
+    }
+    await this._init_promise;
     this._initialized = true;
+  }
 
+  private async _run_init(): Promise<void> {
     const { watermark } = await store().subscribe([...this._static_targets]);
     // Without dynamic resolvers correlate never scans, so the checkpoint
     // is inert — keep the plain \`max(at)\` cold start. With dynamic
