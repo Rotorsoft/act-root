@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.30](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.29...@rotorsoft/act-tck-v1.27.30) (2026-08-06)
+
+
+### Bug Fixes
+
+* **act:** contain throwing lifecycle listeners in the drain finalize path ([c39d2e8](https://github.com/rotorsoft/act-root/commit/c39d2e8ed8f01ab5ec46b4e4427fffc7e640b492)), closes [#1373](https://github.com/rotorsoft/act-root/issues/1373)
+* **act:** page the audit and defer-reseed stream walks ([7393a24](https://github.com/rotorsoft/act-root/commit/7393a24552e64e58f718111b294c778df9768a7b)), closes [#1371](https://github.com/rotorsoft/act-root/issues/1371)
+
 # [@rotorsoft/act-tck-v1.27.29](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.28...@rotorsoft/act-tck-v1.27.29) (2026-08-05)
 
 
