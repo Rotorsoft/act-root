@@ -12,6 +12,7 @@
  */
 import { resolve } from "node:path";
 import { extract_model } from "../client/lib/evaluate.js";
+import type { FileTab } from "../client/types/index.js";
 import { build_contract_index, search } from "./contract-index.js";
 import { format_detail, format_matches } from "./format.js";
 import { format_json_schema } from "./json-schema.js";
@@ -91,7 +92,8 @@ export type RunDeps = {
    */
   run_interactive?: (
     idx: ReturnType<typeof build_contract_index>,
-    root_dir: string
+    root_dir: string,
+    files: FileTab[]
   ) => Promise<void>;
 };
 
@@ -183,7 +185,10 @@ export async function main(deps: RunDeps): Promise<number> {
 
   // Default interactive flow ships in `repl.ts`; tests inject a stub
   // so the non-`-q` branch is exercised without the clack prompts.
-  await (deps.run_interactive ?? run_interactive)(idx, root_dir);
+  // Files are threaded through so jump-to-source can resolve a real
+  // line: the model never populates EventNode.line / ActionNode.line, so
+  // the editor always opened at line 1 (#1396).
+  await (deps.run_interactive ?? run_interactive)(idx, root_dir, files);
   return 0;
 }
 

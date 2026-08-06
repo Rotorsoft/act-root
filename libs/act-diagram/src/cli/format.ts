@@ -272,8 +272,14 @@ export function format_slice(idx: ContractIndex, entry: IndexEntry): string {
   if (!sl) return lines.join("\n");
   if (sl.error) lines.push(`  ${red("error: " + sl.error)}`);
   if (sl.states.length > 0) {
+    // `SliceNode.states` holds internal `${name}:${idx}` disambiguator keys
+    // (build-model.ts). The diagram resolves them through its varName map;
+    // printing them raw named entities that don't exist — `Ticket:1` is not
+    // a state, and `act -q Ticket:1` finds nothing (#1396).
+    const by_var = new Map(idx.model.states.map((st) => [st.varName, st.name]));
+    const names = [...new Set(sl.states.map((s) => by_var.get(s) ?? s))];
     lines.push("  states:");
-    for (const s of sl.states) lines.push(`    - ${amber(s)}`);
+    for (const s of names) lines.push(`    - ${amber(s)}`);
   }
   if (sl.projections.length > 0) {
     lines.push("  projections:");
