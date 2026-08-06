@@ -28,6 +28,7 @@ import {
   run_close_cycle,
   SettleLoop,
   scan,
+  walk_streams,
 } from "./internal/index.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
@@ -844,7 +845,11 @@ export class Act<
    */
   private async _seed_persisted_defers(): Promise<void> {
     const now = Date.now();
-    await store().query_streams((pos) => {
+    // Paged — `query_streams` defaults to 100, and a stream sorting past
+    // the first page would never get its timer re-armed. The failing case
+    // is exactly the one described above: an idle aggregate no commit
+    // ever re-arms.
+    await walk_streams(store(), (pos) => {
       // Only future defers matter — a past-due schedule is claimable
       // already, so the ordinary armed drain picks it up.
       if (pos.deferred_at === undefined || pos.deferred_at <= now) return;

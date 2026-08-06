@@ -103,3 +103,4 @@ export {
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { walk_streams } from "./walk-streams.js";

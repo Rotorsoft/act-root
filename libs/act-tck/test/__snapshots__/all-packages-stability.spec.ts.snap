@@ -714,6 +714,7 @@ import {
   run_close_cycle,
   SettleLoop,
   scan,
+  walk_streams,
 } from "./internal/index.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
@@ -1530,7 +1531,11 @@ export class Act<
    */
   private async _seed_persisted_defers(): Promise<void> {
     const now = Date.now();
-    await store().query_streams((pos) => {
+    // Paged — \`query_streams\` defaults to 100, and a stream sorting past
+    // the first page would never get its timer re-armed. The failing case
+    // is exactly the one described above: an idle aggregate no commit
+    // ever re-arms.
+    await walk_streams(store(), (pos) => {
       // Only future defers matter — a past-due schedule is claimable
       // already, so the ordinary armed drain picks it up.
       if (pos.deferred_at === undefined || pos.deferred_at <= now) return;
@@ -3966,6 +3971,7 @@ import {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
+import { walk_streams } from "./walk-streams.js";
 
 /**
  * Snapshot of orchestrator state the audit reads. Built once at
@@ -4086,7 +4092,10 @@ export async function* audit(
   }
 
   if (need_streams) {
-    await deps.store().query_streams((pos) => {
+    // Paged — \`query_streams\` defaults to 100, and an audit that inspects
+    // only the first page reports a false all-clear for every stream that
+    // sorts past it.
+    await walk_streams(deps.store(), (pos) => {
       for (const p of passes) p.on_stream?.(pos);
     });
   }
@@ -12001,6 +12010,7 @@ export {
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { walk_streams } from "./walk-streams.js";
 
 // === index.ts ===
 /**
@@ -17889,6 +17899,57 @@ const SOURCE_METACHARACTERS = /[\\^$.*+?()[\\]{}|\\\\]/;
 export function is_literal_source(source: string): boolean {
   return !SOURCE_METACHARACTERS.test(source);
 }
+
+// === walk-streams.ts ===
+import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
+
+/** Streams read per page when walking the whole table. */
+export const DEFAULT_STREAM_PAGE = 500;
+
+/**
+ * Walks EVERY stream matching \`query\`, paging with the keyset cursor.
+ *
+ * \`Store.query_streams\` defaults to \`limit: 100\`, so a caller that wants
+ * the whole table must page — passing no query silently truncates at the
+ * first page, which is a false all-clear for anything that reports on
+ * what it found.
+ *
+ * The cursor is the last stream name the callback saw; results are
+ * ordered by stream name, so a short page means the walk is done.
+ *
+ * @param store - Store to walk.
+ * @param callback - Invoked once per matching position, in name order.
+ * @param query - Optional filter. A caller-supplied \`limit\` sets the page
+ *   size (the walk still visits every match); \`after\` seeds the cursor.
+ * @returns The total number of positions emitted.
+ *
+ * @internal
+ */
+export async function walk_streams(
+  store: Store,
+  callback: (position: StreamPosition) => void,
+  query?: Omit<QueryStreams, "after" | "limit"> & {
+    after?: string;
+    limit?: number;
+  }
+): Promise<number> {
+  const page_size = query?.limit ?? DEFAULT_STREAM_PAGE;
+  let after = query?.after;
+  let total = 0;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store.query_streams(
+      (position) => {
+        last = position.stream;
+        callback(position);
+      },
+      { ...query, after, limit: page_size }
+    );
+    total += count;
+    if (count < page_size) return total;
+    after = last;
+  }
+}
 "
 `;
 
@@ -17924,6 +17985,7 @@ import {
   run_close_cycle,
   SettleLoop,
   scan,
+  walk_streams,
 } from "./internal/index.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
@@ -18740,7 +18802,11 @@ export class Act<
    */
   private async _seed_persisted_defers(): Promise<void> {
     const now = Date.now();
-    await store().query_streams((pos) => {
+    // Paged — \`query_streams\` defaults to 100, and a stream sorting past
+    // the first page would never get its timer re-armed. The failing case
+    // is exactly the one described above: an idle aggregate no commit
+    // ever re-arms.
+    await walk_streams(store(), (pos) => {
       // Only future defers matter — a past-due schedule is claimable
       // already, so the ordinary armed drain picks it up.
       if (pos.deferred_at === undefined || pos.deferred_at <= now) return;
@@ -21176,6 +21242,7 @@ import {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
+import { walk_streams } from "./walk-streams.js";
 
 /**
  * Snapshot of orchestrator state the audit reads. Built once at
@@ -21296,7 +21363,10 @@ export async function* audit(
   }
 
   if (need_streams) {
-    await deps.store().query_streams((pos) => {
+    // Paged — \`query_streams\` defaults to 100, and an audit that inspects
+    // only the first page reports a false all-clear for every stream that
+    // sorts past it.
+    await walk_streams(deps.store(), (pos) => {
       for (const p of passes) p.on_stream?.(pos);
     });
   }
@@ -28850,6 +28920,7 @@ export {
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
 export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { walk_streams } from "./walk-streams.js";
 
 // === index.ts ===
 /**
@@ -33744,6 +33815,57 @@ const SOURCE_METACHARACTERS = /[\\^$.*+?()[\\]{}|\\\\]/;
  */
 export function is_literal_source(source: string): boolean {
   return !SOURCE_METACHARACTERS.test(source);
+}
+
+// === walk-streams.ts ===
+import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
+
+/** Streams read per page when walking the whole table. */
+export const DEFAULT_STREAM_PAGE = 500;
+
+/**
+ * Walks EVERY stream matching \`query\`, paging with the keyset cursor.
+ *
+ * \`Store.query_streams\` defaults to \`limit: 100\`, so a caller that wants
+ * the whole table must page — passing no query silently truncates at the
+ * first page, which is a false all-clear for anything that reports on
+ * what it found.
+ *
+ * The cursor is the last stream name the callback saw; results are
+ * ordered by stream name, so a short page means the walk is done.
+ *
+ * @param store - Store to walk.
+ * @param callback - Invoked once per matching position, in name order.
+ * @param query - Optional filter. A caller-supplied \`limit\` sets the page
+ *   size (the walk still visits every match); \`after\` seeds the cursor.
+ * @returns The total number of positions emitted.
+ *
+ * @internal
+ */
+export async function walk_streams(
+  store: Store,
+  callback: (position: StreamPosition) => void,
+  query?: Omit<QueryStreams, "after" | "limit"> & {
+    after?: string;
+    limit?: number;
+  }
+): Promise<number> {
+  const page_size = query?.limit ?? DEFAULT_STREAM_PAGE;
+  let after = query?.after;
+  let total = 0;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store.query_streams(
+      (position) => {
+        last = position.stream;
+        callback(position);
+      },
+      { ...query, after, limit: page_size }
+    );
+    total += count;
+    if (count < page_size) return total;
+    after = last;
+  }
 }
 "
 `;
