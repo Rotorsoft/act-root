@@ -21,6 +21,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  dateReviver,
   log,
   SNAP_EVENT,
   StoreError,
@@ -33,7 +34,6 @@ import {
   makeKeyResolver,
 } from "@rotorsoft/act-crypto";
 import pg from "pg";
-import { dateReviver } from "./utils.js";
 
 const logger: Logger = log();
 

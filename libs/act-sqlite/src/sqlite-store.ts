@@ -17,6 +17,7 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  dateReviver,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -70,30 +71,11 @@ const DEFAULT_CONFIG: SqliteConfig = {
 };
 
 /**
- * ISO-8601 shape (optional fractional seconds, optional timezone). Kept
- * in sync with the PostgresStore reviver so payload dates round-trip
- * identically across adapters (#1198).
- * @internal
- */
-const ISO_8601 =
-  /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\.\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
-
-/**
- * `JSON.parse` reviver that revives ISO-date strings to `Date`. Parity
- * with PG's JSONB reviver (#1198): a `Date` committed into event `data`
- * reads back as a `Date`, not an ISO string — so an InMemory/PG → SQLite
- * migration doesn't silently break reducers calling `.getTime()`.
- * @internal
- */
-const date_reviver = (_key: string, value: unknown): unknown =>
-  typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
-
-/**
  * Parse a JSON-encoded TEXT column, reviving ISO-date strings to `Date`
  * for cross-adapter payload parity (#1198).
  * @internal
  */
-const parse_json = (raw: string): unknown => JSON.parse(raw, date_reviver);
+const parse_json = (raw: string): unknown => JSON.parse(raw, dateReviver);
 
 /**
  * SQLite extended result code for a UNIQUE constraint violation
@@ -290,7 +272,7 @@ export class SqliteStore implements Store {
       return (await decrypt(
         parsed,
         this._resolve_pii_key,
-        date_reviver
+        dateReviver
       )) as Record<string, unknown>;
     }
     return parsed as Record<string, unknown>;
