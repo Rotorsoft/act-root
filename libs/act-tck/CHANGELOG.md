@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.31](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.30...@rotorsoft/act-tck-v1.27.31) (2026-08-06)
+
+
+### Bug Fixes
+
+* **act:** build state-projection fold handlers per Act, not per builder ([fb27b00](https://github.com/rotorsoft/act-root/commit/fb27b004d61a167ca8937c8be2ea0b4c2cc2b226)), closes [#1369](https://github.com/rotorsoft/act-root/issues/1369)
+* **act:** match InMemory query_streams sort comparator to its cursor ([c3cb14d](https://github.com/rotorsoft/act-root/commit/c3cb14dd0f6d53f01df2966467ff8425a9a91524)), closes [#1357](https://github.com/rotorsoft/act-root/issues/1357) [#1375](https://github.com/rotorsoft/act-root/issues/1375)
+
 # [@rotorsoft/act-tck-v1.27.30](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.29...@rotorsoft/act-tck-v1.27.30) (2026-08-06)
 
 
