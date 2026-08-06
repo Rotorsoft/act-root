@@ -610,4 +610,49 @@ describe("state projection (.of)", () => {
       ZodError
     );
   });
+
+  // The fold cache is per-stream mutable state. It used to live on a
+  // handler built once and shared by every Act the builder produced, so
+  // a second Act saw the first Act's folded rows — on the documented
+  // multi-tenant pattern and on every `fixture(builder)` test file.
+  it("gives each Act built from one builder its own fold cache", async () => {
+    const rows = new Map<string, Row[]>();
+    let tenant = "unset";
+    const counters = projection("counters")
+      .of(Counter)
+      .flush(async (batch) => {
+        const bucket = rows.get(tenant) ?? [];
+        bucket.push(...batch.map((r) => ({ ...r })));
+        rows.set(tenant, bucket);
+      })
+      .build();
+    const builder = act().withState(Counter).withProjection(counters);
+
+    const a = await sandbox(builder);
+    const b = await sandbox(builder);
+
+    tenant = "a";
+    await a.app.do("increment", { stream: "c-1", actor }, { by: 10 });
+    await a.app.correlate();
+    await a.app.drain();
+
+    tenant = "b";
+    await b.app.do("increment", { stream: "c-1", actor }, { by: 3 });
+    await b.app.correlate();
+    await b.app.drain();
+
+    // Each sink row must match its OWN Act's state, not the other's.
+    expect((await a.app.load("Counter", "c-1")).state).toEqual({ count: 10 });
+    expect((await b.app.load("Counter", "c-1")).state).toEqual({ count: 3 });
+    expect(rows.get("a")?.at(-1)?.state).toEqual({ count: 10 });
+    expect(rows.get("b")?.at(-1)?.state).toEqual({ count: 3 });
+    // The second Act's own event must actually be folded — a shared
+    // cache made the `event.id > fold.event_id` frontier guard compare
+    // ids from two different stores, dropping the event entirely.
+    expect(rows.get("b")?.at(-1)?.event_id).toBe(0);
+    expect(rows.get("b")?.at(-1)?.patches).toBe(1);
+
+    await a.dispose();
+    await b.dispose();
+  });
 });
