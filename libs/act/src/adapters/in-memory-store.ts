@@ -960,9 +960,19 @@ export class InMemoryStore implements Store {
       return source_matches!.some((name) => re!.test(name));
     };
 
-    const sorted = [...this._streams.values()].sort((a, b) =>
-      a.stream.localeCompare(b.stream)
-    );
+    // Order by stream name so `after`/`limit` keyset-paginate
+    // deterministically. The sort MUST agree with the `after` cursor below
+    // (JS `<=`, i.e. UTF-16 code-unit order) — `localeCompare` disagrees
+    // with `<=` on mixed-case/accented names (`B`=66 < `a`=97 by code unit,
+    // but `a` < `B` by locale), which let the cursor skip streams the sort
+    // placed after it (#1375, the `query_streams` twin of #1357).
+    // The default `Array.sort()` comparator IS code-unit order, so it
+    // matches `<=` exactly — and PG/SQLite, which paginate under their
+    // binary collation. Sorting the keys (rather than comparing values)
+    // keeps that default in play.
+    const sorted = [...this._streams.keys()]
+      .sort()
+      .map((stream) => this._streams.get(stream) as InMemoryStream);
 
     let count = 0;
     for (const s of sorted) {
