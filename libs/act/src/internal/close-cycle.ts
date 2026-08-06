@@ -89,6 +89,15 @@ type StreamHead = {
   readonly max_id: number;
   readonly version: number;
   readonly last_event_name: string;
+  /**
+   * Set when the stream already carries a tombstone but still holds domain
+   * events — a close that wrote its guard and was then interrupted before
+   * truncating (a throwing archive callback, or a `truncate` that failed).
+   * Carries the existing guard's event id so the retry resumes at Phase 4
+   * instead of re-tombstoning (which would fail the version guard) or being
+   * dropped from the scan entirely (#1389).
+   */
+  readonly resumed_guard?: { readonly id: number };
 };
 
 /**
@@ -349,6 +358,15 @@ async function scan_stream_heads(
   const stats = await store().query_stats(streams, {
     exclude: [SNAP_EVENT],
   });
+  // Domain head, markers excluded. A stream absent here has no domain
+  // events left, so a previous close ran to completion and there is
+  // nothing to do. A stream present here whose `stats` head is a tombstone
+  // was guarded and then interrupted — it must be resumed, not skipped
+  // (#1389). `last_event_name` also has to come from this pass: the
+  // restart-seed owner lookup needs the domain event, not the marker.
+  const domain_heads = await store().query_stats(streams, {
+    exclude: [SNAP_EVENT, TOMBSTONE_EVENT],
+  });
   // The tombstone's optimistic lock must expect the stream's ACTUAL current
   // version, which is one higher when a `__snapshot__` trails the domain head
   // — `snap()` commits it into the next version slot (event-sourcing.ts). The
@@ -360,12 +378,14 @@ async function scan_stream_heads(
   // boundary makes the guard expect a stale version and skip the close (#1356).
   const true_heads = await store().query_stats(streams, {});
   const out = new Map<string, StreamHead>();
-  for (const [stream, { head }] of stats) {
-    if (head.name === TOMBSTONE_EVENT) continue;
+  for (const [stream, { head }] of domain_heads) {
+    const marker_head = stats.get(stream)?.head;
+    const interrupted = marker_head?.name === TOMBSTONE_EVENT;
     out.set(stream, {
       max_id: head.id,
       version: true_heads.get(stream)!.head.version,
       last_event_name: head.name as string,
+      ...(interrupted ? { resumed_guard: { id: marker_head.id } } : {}),
     });
   }
   return out;
@@ -467,6 +487,13 @@ async function guard_with_tombstones(
   await Promise.all(
     safe.map(async (stream) => {
       const info = stream_info.get(stream)!;
+      if (info.resumed_guard) {
+        // Guard already written by the interrupted run — reuse it rather
+        // than re-tombstoning (the version guard would reject it anyway).
+        guarded.push(stream);
+        guard_events.set(stream, { id: info.resumed_guard.id, stream });
+        return;
+      }
       const committed = await tombstone(stream, info.version, correlation);
       if (committed) {
         guarded.push(stream);
