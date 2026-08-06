@@ -31,6 +31,7 @@ Register listeners with `app.on(name, listener)`. The payloads below are the act
 Two things to know before wiring:
 
 - **Listeners run synchronously on the emitter.** Keep them cheap — increment a counter, observe a histogram, return. Anything slow belongs in a reaction, not a lifecycle listener.
+- **A throwing listener is contained, not fatal.** If your listener throws, the framework logs it and carries on: the cycle still finalizes, the remaining sinks still fire, and `drain()` still returns its result. Your metric is wrong for that event and nothing else is. Don't rely on this to paper over a broken bridge — check your logs for `listener threw`.
 - **Label cardinality is your problem, not the framework's.** `Lease.stream` can be one stream per aggregate when you use dynamic reaction targets. Feeding raw stream names into a Prometheus label will blow up your time-series count. Label by `lane`, by a derived family (`stream.split("-")[0]`), or not at all.
 
 ## Or: install the bridge
