@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.29](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.28...@rotorsoft/act-v1.23.29) (2026-08-06)
+
+
+### Bug Fixes
+
+* **act:** accumulate the settle's passes into the settled payload ([fc67a85](https://github.com/rotorsoft/act-root/commit/fc67a85324b513ac21515927e40c124478334c84)), closes [#1383](https://github.com/rotorsoft/act-root/issues/1383)
+
 # [@rotorsoft/act-v1.23.28](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.27...@rotorsoft/act-v1.23.28) (2026-08-06)
 
 # [@rotorsoft/act-v1.23.27](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.26...@rotorsoft/act-v1.23.27) (2026-08-06)
