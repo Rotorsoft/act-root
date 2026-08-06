@@ -22,7 +22,7 @@ Register listeners with `app.on(name, listener)`. The payloads below are the act
 | `committed` | `Snapshot[]` — each with `state`, `event`, `version`, `patches`, `snaps` | A local `app.do()` commits events |
 | `acked` | `Lease[]` — `{ stream, source?, at, by, retry, lagging, lane? }` | A drain cycle acknowledges processed streams |
 | `blocked` | `BlockedLease[]` — a `Lease` plus `error: string` | A stream exhausts its retry budget (or a handler throws `NonRetryableError`) |
-| `settled` | `Drain` — `{ fetched, leased, acked, blocked }` | A settle pass completes |
+| `settled` | `Drain` — `{ fetched, leased, acked, blocked }`, accumulated across every pass of the settle | A settle completes (reaches quiescence) |
 | `closed` | `CloseResult` — `{ truncated, skipped }` | A close-the-books run finishes |
 | `notified` | `StoreNotification` — `{ stream, events: [{ id, name }] }` | A **different process** commits to the same store |
 | `forgotten` | `{ stream, at: Date, eventCount }` | `app.forget(stream)` wipes a stream's sensitive payloads |
@@ -139,6 +139,8 @@ app.on("settled", (drain) => {
     settleDuration.observe(performance.now() - commit_t0);
     commit_t0 = undefined;
   }
+  // The payload accumulates every pass of the settle, so it reports what
+  // the whole settle did — not just its final (quiescent) pass.
   // drain.fetched is per-stream: sum event counts if you want throughput.
   // drain.acked / drain.blocked are the same leases the dedicated
   // listeners above already saw — don't double-count them here.
