@@ -114,7 +114,12 @@ export class SettleLoop<TEvents extends Schemas> {
 
       (async () => {
         await this._deps.init();
-        let last_drain: Drain<TEvents> | undefined;
+        // Accumulated across every pass, so `settled` reports what the
+        // SETTLE did rather than what its last pass did. The loop only
+        // exits on a pass that made no progress, so emitting that pass
+        // alone meant the payload was always empty — while the guide tells
+        // operators to sum `drain.fetched` for throughput (#1383).
+        let settled_drain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
         // projection) without forcing callers to roll their own loop.
@@ -133,7 +138,15 @@ export class SettleLoop<TEvents extends Schemas> {
           // hammer the down store (#1329). drain's own passed()/failed() on
           // its real claim keeps the breaker accurate for those apps.
           if (this._deps.correlate_probes_store) this._deps.breaker.passed();
-          last_drain = await this._deps.drain(drain_options);
+          const drain = await this._deps.drain(drain_options);
+          settled_drain = settled_drain
+            ? {
+                fetched: [...settled_drain.fetched, ...drain.fetched],
+                leased: [...settled_drain.leased, ...drain.leased],
+                acked: [...settled_drain.acked, ...drain.acked],
+                blocked: [...settled_drain.blocked, ...drain.blocked],
+              }
+            : drain;
           // `last_id > after_before` counts correlate consuming events as
           // progress even when nothing subscribed or drained this pass — a
           // bounded correlate window (`limit`) full of inert events would
@@ -142,12 +155,12 @@ export class SettleLoop<TEvents extends Schemas> {
           // finite, so once no events remain `last_id === after_before`.
           const made_progress =
             subscribed > 0 ||
-            last_drain.acked.length > 0 ||
-            last_drain.blocked.length > 0 ||
+            drain.acked.length > 0 ||
+            drain.blocked.length > 0 ||
             last_id > after_before;
           if (!made_progress) break;
         }
-        if (last_drain) this._deps.on_settled(last_drain);
+        if (settled_drain) this._deps.on_settled(settled_drain);
       })()
         .catch((err) => {
           // correlate / init failed (a store op). Record on the shared
