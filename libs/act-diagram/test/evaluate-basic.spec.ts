@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extract_model } from "../src/client/lib/evaluate.js";
+import { extract_model, strip_non_code } from "../src/client/lib/evaluate.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
 describe("extract_model", () => {
@@ -736,6 +736,84 @@ export const S = state({ S: z.object({}) })
     ];
     const { model } = extract_model(files);
     expect(model).toBeDefined();
+  });
+
+  // #1391 — the comment pass used to run before the string passes, so a
+  // `//` inside a URL truncated the literal; the dangling quote then
+  // paired with the next quote in the file and blanked every line
+  // between. On wolfdesk that erased a whole slice declaration, and
+  // `act -q TicketEscalated` reported `consumers: (none)` for an event
+  // with four real consumers.
+  it("keeps declarations that follow a URL in a string literal", () => {
+    const src = [
+      'const HOOK = "https://example.com/hook";',
+      // A quote on the following line is what the dangling quote pairs
+      // with — that pairing is what erased the declaration.
+      'export const NotifySlice = slice("notify").build();',
+    ].join("\n");
+    const stripped = strip_non_code(src);
+    expect(stripped).toContain("NotifySlice");
+    expect(stripped).toContain("slice(");
+    // The URL itself is still blanked, and offsets are preserved.
+    expect(stripped).not.toContain("example.com");
+    expect(stripped.length).toBe(src.length);
+  });
+
+  it("keeps declarations that follow a quote inside a line comment", () => {
+    const src = [
+      "// don't blank the rest of the file",
+      'export const OtherSlice = slice("other").build();',
+    ].join("\n");
+    const stripped = strip_non_code(src);
+    expect(stripped).toContain("OtherSlice");
+    expect(stripped.length).toBe(src.length);
+  });
+
+  it("preserves strings at nav level while still blanking comments", () => {
+    const src = 'const u = "https://x.dev"; // trailing\nconst k = 1;';
+    const stripped = strip_non_code(src, "nav");
+    // nav keeps strings (navigation needs them) ...
+    expect(stripped).toContain("https://x.dev");
+    // ... but still removes comments, and the following line survives.
+    expect(stripped).not.toContain("trailing");
+    expect(stripped).toContain("const k = 1;");
+    expect(stripped.length).toBe(src.length);
+  });
+
+  it("does not let an unterminated quote swallow the rest of the file", () => {
+    const src = [
+      'const bad = "oops;',
+      "export const Kept = slice().build();",
+    ].join("\n");
+    const stripped = strip_non_code(src);
+    expect(stripped).toContain("Kept");
+    expect(stripped.length).toBe(src.length);
+  });
+
+  it("handles escapes inside string and template literals", () => {
+    // A backslash-escaped quote must not end the literal early, or the
+    // rest of the line would be re-scanned as code.
+    const src = [
+      'const q = "a \\" b // not a comment";',
+      "const t = `x \\` y`;",
+      'export const Esc = slice("esc").build();',
+    ].join("\n");
+    const stripped = strip_non_code(src);
+    expect(stripped).toContain("Esc");
+    expect(stripped).toContain("slice(");
+    expect(stripped).not.toContain("not a comment");
+    expect(stripped.length).toBe(src.length);
+  });
+
+  it("blanks an unterminated block comment to end of file", () => {
+    const src = [
+      'export const Before = slice("b").build();',
+      "/* never closed",
+    ].join("\n");
+    const stripped = strip_non_code(src);
+    expect(stripped).toContain("Before");
+    expect(stripped).not.toContain("never closed");
+    expect(stripped.length).toBe(src.length);
   });
 
   it("strip_non_code filters slice declarations inside template literals", () => {
