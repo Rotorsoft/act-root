@@ -108,6 +108,10 @@ export function mock_state(
     // state from the parsed model.
     autocloses: () => action_builder(_currentAction),
     archives: () => action_builder(_currentAction),
+    // Disclosure predicate for `sensitive()` fields. Same reasoning as
+    // the close-policy methods above: the diagram doesn't render it, but
+    // the chain must survive or the whole state is dropped (#1394).
+    discloses: () => action_builder(_currentAction),
     build: () => {
       on_build?.(info);
       return info;
@@ -207,25 +211,36 @@ export function mock_slice(on_build?: (info: any) => void) {
       if (p) info.projections.push(p);
       return builder;
     },
+    // Lane declaration — the diagram doesn't render lanes, but the chain
+    // must survive or the slice is dropped (#1394).
+    withLane() {
+      return builder;
+    },
     on(event_name: string) {
+      const reaction_chain = (handler: any) => {
+        const dispatches = capture_dispatches(handler);
+        const reaction: ReactionNode = {
+          event: event_name,
+          handlerName:
+            (typeof handler?.name === "string" && handler.name) ||
+            `on ${event_name}`,
+          dispatches,
+        };
+        info.reactions.push(reaction);
+        return {
+          ...builder,
+          to() {
+            return builder;
+          },
+        };
+      };
       return {
-        do(handler: any) {
-          const dispatches = capture_dispatches(handler);
-          const reaction: ReactionNode = {
-            event: event_name,
-            handlerName:
-              (typeof handler?.name === "string" && handler.name) ||
-              `on ${event_name}`,
-            dispatches,
-          };
-          info.reactions.push(reaction);
-          return {
-            ...builder,
-            to() {
-              return builder;
-            },
-          };
+        // `.defer(...)` sits between `.on(...)` and `.do(...)`; it only
+        // schedules, so the reaction is still recorded by `.do`.
+        defer() {
+          return { do: reaction_chain };
         },
+        do: reaction_chain,
       };
     },
     build: () => {
@@ -247,6 +262,26 @@ export function mock_projection(
   };
 
   const builder: any = {
+    // State-projection (fold) form: `projection(n).of(State, ...).flush(fn)`.
+    // The folded state's own events are what the projection handles, so
+    // record them from each passed state — that is what makes the
+    // projection show up as a consumer of those events (#1394).
+    of(...states: any[]) {
+      for (const st of states) {
+        const events = st?.events;
+        if (events)
+          for (const name of Object.keys(events)) {
+            if (!info.handles.includes(name)) info.handles.push(name);
+          }
+      }
+      return builder;
+    },
+    flush() {
+      return builder;
+    },
+    batch() {
+      return builder;
+    },
     on(event_entry: Record<string, any>) {
       const event_name = Object.keys(event_entry)[0];
       info.handles.push(event_name);
@@ -295,6 +330,9 @@ export function mock_act(on_build?: (info: any) => void) {
       return builder;
     },
     withActor: () => builder,
+    // Lane declaration — not rendered, but the chain must survive or the
+    // whole orchestrator is dropped from the model (#1394).
+    withLane: () => builder,
     on(event_name: string) {
       return {
         do(handler: any) {
