@@ -157,6 +157,14 @@ export async function run_drain_cycle<
   leading: number,
   eventLimit: number,
   leaseMillis: number,
+  /**
+   * Emitted as soon as `block` confirms, BEFORE the `ack` that follows.
+   * A block is terminal: every adapter gates `block` on `blocked = false`
+   * and excludes a blocked stream from `claim`, so it never runs again for
+   * that stream. If the emit waited until the end of the cycle, an `ack`
+   * failure in between would lose the `blocked` event permanently (#1390).
+   */
+  on_blocked: (blocked: BlockedLease[]) => void,
   lane?: string
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
@@ -259,6 +267,8 @@ export async function run_drain_cycle<
       .filter(({ block }) => block)
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
+
+  if (blocked.length) on_blocked(blocked);
 
   const acked = await ops.ack(
     handled.flatMap((h, i) => {
@@ -536,6 +546,8 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
+        (b) =>
+          contain(this._deps.logger, "blocked", () => this._deps.on_blocked(b)),
         this._deps.lane
       );
 
@@ -590,10 +602,6 @@ export class DrainController<
       // keeps one bad listener from suppressing the others.
       if (acked.length)
         contain(this._deps.logger, "acked", () => this._deps.on_acked(acked));
-      if (blocked.length)
-        contain(this._deps.logger, "blocked", () =>
-          this._deps.on_blocked(blocked)
-        );
       // Run reaction-requested closes after acks land (#1090) — the close
       // targets were acked above, so the close-cycle guard sees the requesting
       // reaction as caught up. Awaited so a slow close doesn't overlap the
