@@ -566,7 +566,7 @@ describe("close restart on a sensitive-bearing state", () => {
   // privileged instead would write plaintext into __snapshot__.data, which
   // forget_pii cannot reach — the very thing the build guard on .snap()
   // prevents. A pii-aware state cannot be restarted at all.
-  it("tombstones instead of seeding a redacted snapshot", async () => {
+  it("refuses the close entirely rather than tombstoning", async () => {
     const pii_app = act().withState(Person).build();
     await pii_app.do(
       "register",
@@ -578,18 +578,57 @@ describe("close restart on a sensitive-bearing state", () => {
     expect(before.state.email).toBe("a@b.com");
 
     const result = await pii_app.close([{ stream: "p1", restart: true }]);
-    expect([...result.truncated.keys()]).toEqual(["p1"]);
 
-    // No seed snapshot was written for the pii-aware state...
+    // Nothing was closed, nothing was written: the caller asked to keep
+    // the aggregate alive, and tombstoning it instead would be strictly
+    // more destructive than what was requested.
+    expect([...result.truncated.keys()]).toEqual([]);
+    expect(result.skipped).toContain("p1");
+
     const names: string[] = [];
     await store().query((e) => names.push(String(e.name)), {
       stream: "p1",
       with_snaps: true,
     });
     expect(names).not.toContain(SNAP_EVENT);
-    expect(names).toContain(TOMBSTONE_EVENT);
+    expect(names).not.toContain(TOMBSTONE_EVENT);
 
-    // ...so no redacted value was persisted in place of the plaintext.
+    // The stream is untouched — plaintext intact and still writable.
+    const after = await pii_app.load(Person, { stream: "p1", actor });
+    expect(after.state.email).toBe("a@b.com");
+    await pii_app.do(
+      "register",
+      { stream: "p1", actor },
+      { email: "c@d.com", n: 2 }
+    );
+
+    await pii_app.shutdown();
+  });
+
+  it("closes without restart normally", async () => {
+    const pii_app = act().withState(Person).build();
+    await pii_app.do(
+      "register",
+      { stream: "p2", actor },
+      { email: "a@b.com", n: 1 }
+    );
+
+    const result = await pii_app.close([{ stream: "p2" }]);
+    expect([...result.truncated.keys()]).toEqual(["p2"]);
+
+    const names: string[] = [];
+    await store().query((e) => names.push(String(e.name)), { stream: "p2" });
+    expect(names).toEqual([TOMBSTONE_EVENT]);
+
+    await pii_app.shutdown();
+  });
+
+  it("ignores a restart target for a stream with no events", async () => {
+    const pii_app = act().withState(Person).build();
+    // No stream_info entry exists for an empty stream, so the pii check
+    // has nothing to inspect — it must not throw.
+    const result = await pii_app.close([{ stream: "ghost", restart: true }]);
+    expect([...result.truncated.keys()]).toEqual([]);
     await pii_app.shutdown();
   });
 });
