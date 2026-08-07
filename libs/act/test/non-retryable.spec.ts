@@ -3,8 +3,10 @@ import {
   act,
   dispose,
   NonRetryableError,
+  StoreError,
   sleep,
   state,
+  store,
   ZodEmpty,
 } from "../src/index.js";
 
@@ -428,6 +430,46 @@ describe("lifecycle listener containment (drain finalize)", () => {
     expect(errors.length).toBe(0);
     expect(drain.blocked.length).toBe(1);
 
+    await app.shutdown();
+  });
+
+  // #1390 — a block is terminal: every adapter gates `block` on
+  // `blocked = false` and excludes a blocked stream from `claim`, so it
+  // never runs again for that stream. Emitting at the end of the cycle
+  // meant an `ack` failure in between lost the `blocked` event forever —
+  // the same permanence #1373 was filed for, reached through a store
+  // fault instead of a listener throw.
+  it("emits blocked even when the following ack fails", async () => {
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function react() {
+        throw new NonRetryableError("poison");
+      })
+      .build();
+
+    const blocked: unknown[] = [];
+    app.on("blocked", (b) => blocked.push(b));
+
+    let acks = 0;
+    const real_ack = store().ack.bind(store());
+    const spy = vi.spyOn(store(), "ack").mockImplementation(async (leases) => {
+      if (acks++ === 0) throw new StoreError("ack");
+      return real_ack(leases);
+    });
+
+    await app.do("tick", { stream: "ack-fail", actor }, {});
+    await app.correlate();
+    for (let i = 0; i < 3; i++) await app.drain();
+
+    // Durably blocked ...
+    expect((await app.blocked_streams()).map((p) => p.stream)).toEqual([
+      "ack-fail",
+    ]);
+    // ... and the observer saw it exactly once.
+    expect(blocked.length).toBe(1);
+
+    spy.mockRestore();
     await app.shutdown();
   });
 });
