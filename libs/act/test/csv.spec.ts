@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Committed, EventSource, Query, Schemas } from "@rotorsoft/act";
-import { CsvFile } from "@rotorsoft/act";
+import { CsvFile, InMemoryStore } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 type E = Committed<Schemas, string>;
@@ -21,7 +21,9 @@ const makeEvent = (overrides: Partial<E> = {}): E =>
   ({
     id: 1,
     name: "Tick",
-    data: { tick: 1 },
+    // A Date inside `data` — the fixture could not previously produce
+    // the condition, so the missing reviver was invisible (#1399).
+    data: { tick: 1, at: new Date("2024-03-04T05:06:07.000Z") },
     stream: "s1",
     version: 0,
     created: new Date("2024-01-01T00:00:00.000Z"),
@@ -141,6 +143,42 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  // #1399 — the round-trip above verifies CsvFile against itself, which is
+  // green whether or not the reviver runs. The contract is that a payload
+  // survives the trip through a CSV unchanged, so one end must be a store.
+  it("round-trips a Date in data through a store, not just CsvFile", async () => {
+    const when = new Date("2024-03-04T05:06:07.000Z");
+    const store = new InMemoryStore();
+    await store.seed();
+    await store.commit(
+      "s1",
+      [{ name: "Tick", data: { at: when } }] as never,
+      { correlation: "c", causation: {}, stream: "s1" } as never
+    );
+
+    const path = join(dir, "store-round-trip.csv");
+    const sink = new CsvFile({ path });
+    await sink.restore(async (commit) => {
+      await store.query(async (e) => {
+        await commit(e as Committed<Schemas, keyof Schemas>);
+      });
+    });
+    await sink.dispose();
+
+    const source = new CsvFile({ path });
+    const back: E[] = [];
+    await source.query<Schemas>((e) => back.push(e as E));
+    await source.dispose();
+
+    const at = (back[0].data as { at: unknown }).at;
+    expect(at).toBeInstanceOf(Date);
+    expect((at as Date).toISOString()).toBe(when.toISOString());
+    // `created` has always been parsed explicitly — asserting it alone
+    // was the wrong half, and is why this went unnoticed.
+    expect(back[0].created).toBeInstanceOf(Date);
+    await store.dispose();
+  });
+
   it("writes events through restore and reads them back via query", async () => {
     const path = join(dir, "round-trip.csv");
     const sink = new CsvFile({ path });
@@ -166,6 +204,10 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     await source.dispose();
     expect(n).toBe(3);
     expect(back.map((e) => e.id)).toEqual([1, 2, 3]);
+    // A Date in `data` must survive as a Date. This round-trip writes and
+    // reads through CsvFile on both ends, so serializer and parser share
+    // any defect — the store differential below is the real guard (#1399).
+    expect((back[0].data as { at: unknown }).at).toBeInstanceOf(Date);
     expect(back.map((e) => e.stream)).toEqual(["a", "a", "b"]);
     expect(back.map((e) => e.version)).toEqual([0, 1, 0]);
   });
