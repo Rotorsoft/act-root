@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.32](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.31...@rotorsoft/act-v1.23.32) (2026-08-07)
+
+
+### Bug Fixes
+
+* **act:** refuse a restart close on a sensitive-bearing state before any write ([e436005](https://github.com/rotorsoft/act-root/commit/e436005cdf9bd86585e9e52f0d429a2b3fef72d8)), closes [#1397](https://github.com/rotorsoft/act-root/issues/1397)
+* **act:** refuse restart seeding for a sensitive-bearing state ([881b3f8](https://github.com/rotorsoft/act-root/commit/881b3f8a646912c633c7a0cd174789da7c7f8b34)), closes [#1397](https://github.com/rotorsoft/act-root/issues/1397)
+
 # [@rotorsoft/act-v1.23.31](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.30...@rotorsoft/act-v1.23.31) (2026-08-07)
 
 
