@@ -10,19 +10,63 @@ import { topo_sort } from "./sort.js";
 
 /** Replace non-executable content with same-length whitespace (preserving offsets).
  *  `level: "full"` strips comments + strings + template literals (for scanning).
- *  `level: "nav"` strips comments + template literals only (for navigation). */
+ *  `level: "nav"` strips comments + template literals only (for navigation).
+ *
+ *  Single left-to-right pass rather than sequential regex replaces. The
+ *  passes used to run comments-first, so a `//` inside a string literal
+ *  ("https://host/path") was treated as a comment start: blanking to
+ *  end-of-line truncated the literal, and the dangling quote then paired
+ *  with the next quote in the file, blanking every line between. One URL
+ *  could erase a whole slice declaration (#1391). Scanning once with the
+ *  cursor's context tracked makes that structurally impossible, and it
+ *  handles the mirror case (a quote inside a comment) for free. */
 export const strip_non_code = (src: string, level: "full" | "nav" = "full") => {
-  const blank = (m: string) => m.replace(/[^\n]/g, " ");
-  let result = src
-    .replace(/\/\/[^\n]*/g, blank) // line comments
-    .replace(/\/\*[\s\S]*?\*\//g, blank) // block comments
-    .replace(/`(?:\\[\s\S]|[^`\\])*`/g, blank); // template literals
-  if (level === "full") {
-    result = result
-      .replace(/"(?:\\[\s\S]|[^"\\])*"/g, blank) // double-quoted strings
-      .replace(/'(?:\\[\s\S]|[^'\\])*'/g, blank); // single-quoted strings
+  const strip_strings = level === "full";
+  let out = "";
+  let i = 0;
+  // Blank a run, preserving newlines so offsets and line numbers survive.
+  const blank = (from: number, to: number) => {
+    out += src.slice(from, to).replace(/[^\n]/g, " ");
+  };
+  while (i < src.length) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (c === "/" && next === "/") {
+      const end = src.indexOf("\n", i);
+      const stop = end === -1 ? src.length : end;
+      blank(i, stop);
+      i = stop;
+    } else if (c === "/" && next === "*") {
+      const end = src.indexOf("*/", i + 2);
+      const stop = end === -1 ? src.length : end + 2;
+      blank(i, stop);
+      i = stop;
+    } else if (c === "`" || c === '"' || c === "'") {
+      // Consume the whole literal so its contents can never be
+      // re-interpreted as a comment or a second literal.
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (src[j] === c) break;
+        // A non-template literal ends at a newline if unterminated; stop
+        // there so one bad quote can't swallow the rest of the file.
+        if (c !== "`" && src[j] === "\n") break;
+        j++;
+      }
+      const stop = Math.min(j + 1, src.length);
+      // Template literals are always blanked; quotes only at "full".
+      if (c === "`" || strip_strings) blank(i, stop);
+      else out += src.slice(i, stop);
+      i = stop;
+    } else {
+      out += c;
+      i++;
+    }
   }
-  return result;
+  return out;
 };
 
 /** Source file filter — excludes tests, declarations, and non-TS files */
