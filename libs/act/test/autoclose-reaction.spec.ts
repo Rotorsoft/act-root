@@ -131,6 +131,66 @@ describe("autoclose as a synthesized reaction", () => {
     void real;
   });
 
+  // #1389 — a close writes its tombstone guard first and truncates last.
+  // An archive callback that throws leaves the stream guarded-but-intact,
+  // which close-cycle.md documents as a safe state the caller can simply
+  // retry. Phase 1 used to drop every tombstone-headed stream, so the
+  // retry found nothing: an empty, error-free CloseResult, and a stream
+  // that was write-dead, unarchived and untruncated forever.
+  it("resumes a close whose archive callback threw", async () => {
+    const archived: string[] = [];
+    let failed = false;
+    const app = act()
+      .withState(
+        base()
+          .autocloses({ is: "Resolved" })
+          .archives(async (stream) => {
+            if (!failed) {
+              failed = true;
+              throw new Error("s3 down");
+            }
+            archived.push(stream);
+          })
+          .build()
+      )
+      .build();
+
+    await app.do("open", { stream: "t-resume", actor }, {});
+    await app.do("resolve", { stream: "t-resume", actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    // Interrupted: guarded but not truncated.
+    const mid: string[] = [];
+    await store().query((e) => mid.push(String(e.name)), {
+      stream: "t-resume",
+    });
+    expect(mid).toContain("__tombstone__");
+    expect(mid).toContain("Resolved");
+    expect(archived).toEqual([]);
+
+    // The documented recovery: retry the close. close-cycle.md promises
+    // Phase 5 runs archive again, so the retry carries its own archiver
+    // (`.archives` is autoclose-scoped; an explicit close supplies one via
+    // CloseTarget.archive).
+    const retry = await app.close([
+      {
+        stream: "t-resume",
+        archive: async () => {
+          archived.push("t-resume");
+        },
+      },
+    ]);
+    expect([...retry.truncated.keys()]).toContain("t-resume");
+    expect(archived).toEqual(["t-resume"]);
+
+    const after: string[] = [];
+    await store().query((e) => after.push(String(e.name)), {
+      stream: "t-resume",
+    });
+    expect(after).toEqual(["__tombstone__"]);
+  });
+
   it("evaluates the live head — a reopened stream is not closed", async () => {
     const closed: CloseResult[] = [];
     const app = act()
