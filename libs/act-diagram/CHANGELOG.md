@@ -1,3 +1,14 @@
+# [@rotorsoft/act-diagram-v1.0.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.13...@rotorsoft/act-diagram-v1.0.14) (2026-08-07)
+
+
+### Bug Fixes
+
+* **act-diagram:** classify event deprecation per state, not globally ([bc10303](https://github.com/rotorsoft/act-root/commit/bc10303043d301d5004ae4c927ac7a153e878b62)), closes [#1310](https://github.com/rotorsoft/act-root/issues/1310) [#1393](https://github.com/rotorsoft/act-root/issues/1393)
+* **act-diagram:** fold every partial when formatting a merged state ([85d0de2](https://github.com/rotorsoft/act-root/commit/85d0de2f174f77db20b37d5e7543ada6faf1d4bc)), closes [#1392](https://github.com/rotorsoft/act-root/issues/1392)
+* **act-diagram:** scan comments and strings in one pass, not sequential regexes ([1e948ff](https://github.com/rotorsoft/act-root/commit/1e948ffb49a9b719ac74311cb51d61c5896bc90c)), closes [#1391](https://github.com/rotorsoft/act-root/issues/1391)
+* **act-diagram:** show real state names and jump to a real source line ([ecb4711](https://github.com/rotorsoft/act-root/commit/ecb4711659d6c2c863f9d91c4d8a30a5ff019fb6)), closes [#1396](https://github.com/rotorsoft/act-root/issues/1396)
+* **act-diagram:** teach the mock builders discloses/of/flush/batch/defer/withLane ([38412b2](https://github.com/rotorsoft/act-root/commit/38412b23025310ffcd92119b3482534cedd25e2b)), closes [#1394](https://github.com/rotorsoft/act-root/issues/1394)
+
 # [@rotorsoft/act-diagram-v1.0.13](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.12...@rotorsoft/act-diagram-v1.0.13) (2026-08-03)
 
 
