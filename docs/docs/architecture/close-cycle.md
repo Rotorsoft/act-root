@@ -128,6 +128,7 @@ After the guard, no concurrent writer can interfere. The load reflects the exact
 The "owning state" for each stream is found via `eventToState.get(lastEventName)`. The build-classify pass at Act construction builds this map: event-name → state-definition that emits it. The duplicate-event guard in `merge.ts` ensures one event maps to at most one state.
 
 - **No state owns the last event** (deleted state, schema versioning gone wrong): we can't seed. The stream still gets tombstoned (no `restart: true` semantics), but a warning is logged. This is a degraded state — cold path.
+- **The owning state carries `sensitive()` fields**: `restart: true` is refused for that stream *before* Phase 3, so nothing is written. The seed load is actorless, so every sensitive field would fold to the redaction sentinel and the truncate would then delete the real events and their `pii` sidecars — irreversible. Loading the seed *privileged* is not an alternative: that persists plaintext into `__snapshot__.data`, which `forget_pii` cannot reach (the reason `.snap()` is rejected at build time on such a state). Since the stream cannot be restarted, it is not closed either — the caller asked to keep the aggregate alive, and tombstoning it instead would be strictly more destructive than what was requested. The stream lands in `skipped` and an error is logged. Closing the same stream **without** `restart` works normally.
 - **Load fails**: propagates to caller. Streams remain guarded but not truncated. Retryable.
 
 ### Phase 5 — Run archive callbacks

@@ -6210,6 +6210,32 @@ export async function run_close_cycle(
   // 1. Scan: find the latest non-tombstone event per stream
   const stream_info = await scan_stream_heads(streams);
 
+  // 1b. Reject restart targets whose owning state carries sensitive
+  // fields, BEFORE anything is written. The seed load in phase 4 is
+  // actorless, so every \`sensitive()\` field would fold to the redaction
+  // sentinel and the truncate would then delete the originals — and
+  // loading privileged instead would persist plaintext into
+  // \`__snapshot__.data\`, which \`forget_pii\` cannot reach (the reason
+  // \`.snap()\` is rejected at build time for these states). Such a stream
+  // cannot be restarted at all, so it must not be closed either: the
+  // caller asked to keep the aggregate alive, and tombstoning it instead
+  // would be a strictly more destructive outcome than the one requested.
+  // It lands in \`skipped\`, the established channel for "couldn't do this
+  // one", with nothing mutated.
+  for (const target of full) {
+    if (!target.restart) continue;
+    const info = stream_info.get(target.stream);
+    if (!info) continue;
+    const owner = deps.event_to_state.get(info.last_event_name);
+    if (owner?.pii_aware) {
+      deps.logger.error(
+        \`Refusing to close "\${target.stream}" with restart: state "\${owner.name}" carries sensitive fields, so a restart seed would persist redacted values while deleting the originals. Close it without restart to retire the stream, or leave it open.\`
+      );
+      skipped.push(target.stream);
+      stream_info.delete(target.stream);
+    }
+  }
+
   // 2. Partition: skip streams with pending reactions in flight
   const safe = await partition_by_safety(
     stream_info,
@@ -23468,6 +23494,32 @@ export async function run_close_cycle(
 
   // 1. Scan: find the latest non-tombstone event per stream
   const stream_info = await scan_stream_heads(streams);
+
+  // 1b. Reject restart targets whose owning state carries sensitive
+  // fields, BEFORE anything is written. The seed load in phase 4 is
+  // actorless, so every \`sensitive()\` field would fold to the redaction
+  // sentinel and the truncate would then delete the originals — and
+  // loading privileged instead would persist plaintext into
+  // \`__snapshot__.data\`, which \`forget_pii\` cannot reach (the reason
+  // \`.snap()\` is rejected at build time for these states). Such a stream
+  // cannot be restarted at all, so it must not be closed either: the
+  // caller asked to keep the aggregate alive, and tombstoning it instead
+  // would be a strictly more destructive outcome than the one requested.
+  // It lands in \`skipped\`, the established channel for "couldn't do this
+  // one", with nothing mutated.
+  for (const target of full) {
+    if (!target.restart) continue;
+    const info = stream_info.get(target.stream);
+    if (!info) continue;
+    const owner = deps.event_to_state.get(info.last_event_name);
+    if (owner?.pii_aware) {
+      deps.logger.error(
+        \`Refusing to close "\${target.stream}" with restart: state "\${owner.name}" carries sensitive fields, so a restart seed would persist redacted values while deleting the originals. Close it without restart to retire the stream, or leave it open.\`
+      );
+      skipped.push(target.stream);
+      stream_info.delete(target.stream);
+    }
+  }
 
   // 2. Partition: skip streams with pending reactions in flight
   const safe = await partition_by_safety(
