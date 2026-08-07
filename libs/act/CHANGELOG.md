@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.30](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.29...@rotorsoft/act-v1.23.30) (2026-08-07)
+
+
+### Bug Fixes
+
+* **act:** revive dates when reading data and meta from a CSV ([b2a8122](https://github.com/rotorsoft/act-root/commit/b2a81220e50210b5b91ca5f7c39bc64fcf73c101)), closes [#1380](https://github.com/rotorsoft/act-root/issues/1380) [#1399](https://github.com/rotorsoft/act-root/issues/1399)
+
 # [@rotorsoft/act-v1.23.29](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.28...@rotorsoft/act-v1.23.29) (2026-08-06)
 
 
