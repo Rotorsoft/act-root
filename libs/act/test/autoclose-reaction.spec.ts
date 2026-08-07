@@ -4,6 +4,7 @@ import {
   act,
   type CloseResult,
   dispose,
+  StoreError,
   state,
   store,
   ZodEmpty,
@@ -101,6 +102,33 @@ describe("autoclose as a synthesized reaction", () => {
     await app.drain();
 
     expect(archived).toEqual(["ta"]);
+  });
+
+  // #1388 — `on_close` runs the close machinery, not an emit. A StoreError
+  // from inside it must reach the breaker; wrapping the whole call in the
+  // listener-containment helper meant a real outage produced no `error`
+  // event, no cooldown, and a breaker that recorded a SUCCESS for the
+  // failing cycle. Only the `closed` emit is contained (tested above).
+  it("surfaces a store failure inside the close as an error event", async () => {
+    const errors: unknown[] = [];
+    const app = act()
+      .withState(ticket({ is: "Resolved" }))
+      .build();
+    app.on("error", (e) => errors.push(e));
+
+    const real = store().truncate.bind(store());
+    const spy = vi
+      .spyOn(store(), "truncate")
+      .mockRejectedValue(new StoreError("truncate"));
+
+    await app.do("open", { stream: "t-fail", actor }, {});
+    await app.do("resolve", { stream: "t-fail", actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    expect(errors.length).toBeGreaterThan(0);
+    spy.mockRestore();
+    void real;
   });
 
   it("evaluates the live head — a reopened stream is not closed", async () => {

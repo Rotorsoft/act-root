@@ -324,23 +324,6 @@ const contain = (logger: Logger, sink: string, fn: () => void): void => {
 };
 
 /**
- * Awaited variant of {@link contain} for sinks that return a promise.
- *
- * @internal
- */
-const contain_async = async (
-  logger: Logger,
-  sink: string,
-  fn: () => Promise<unknown>
-): Promise<void> => {
-  try {
-    await fn();
-  } catch (error) {
-    logger.error(error, `${sink} listener threw`);
-  }
-};
-
-/**
  * Dependencies the {@link DrainController} needs from the orchestrator.
  * The lifecycle event sinks (`on_acked` / `on_blocked`) are callbacks so
  * this module doesn't reach back into Act's emitter.
@@ -556,10 +539,9 @@ export class DrainController<
       // finalize never reaches here: `Store.ack` applies watermarks and
       // defer schedules atomically, so it either all landed or the
       // whole cycle threw into the catch below and nothing did.
-      this._deps.breaker.passed();
-
       if (!cycle) {
         // claim() returned no leases — fully caught up
+        this._deps.breaker.passed();
         this._armed = false;
         return EMPTY_DRAIN as Drain<TEvents>;
       }
@@ -606,10 +588,17 @@ export class DrainController<
       // targets were acked above, so the close-cycle guard sees the requesting
       // reaction as caught up. Awaited so a slow close doesn't overlap the
       // next claim.
-      if (closeable.length)
-        await contain_async(this._deps.logger, "close", () =>
-          this._deps.on_close(closeable)
-        );
+      // NOT contained: `on_close` runs the close machinery (load,
+      // tombstone, archive, truncate), not an emit. A StoreError raised in
+      // there is a real store failure and must reach the breaker via the
+      // catch below, or an outage silently bricks streams while the
+      // breaker records a success (#1388). The `closed` EMIT is contained
+      // on the Act side, which is the only listener risk on this path.
+      if (closeable.length) await this._deps.on_close(closeable);
+
+      // Recorded after `on_close` so a cycle whose close failed is never
+      // counted as a store success (#1388).
+      this._deps.breaker.passed();
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.
