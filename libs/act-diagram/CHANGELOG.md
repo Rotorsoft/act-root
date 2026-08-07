@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.0.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.14...@rotorsoft/act-diagram-v1.0.15) (2026-08-07)
+
+
+### Bug Fixes
+
+* **act-diagram:** treat _v1 as a literal event name, not a version suffix ([b7a5463](https://github.com/rotorsoft/act-root/commit/b7a5463ca58e7778a925b8c2043c6296c239c3f0)), closes [#1395](https://github.com/rotorsoft/act-root/issues/1395)
+
 # [@rotorsoft/act-diagram-v1.0.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.13...@rotorsoft/act-diagram-v1.0.14) (2026-08-07)
 
 
