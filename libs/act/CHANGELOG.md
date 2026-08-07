@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.33](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.32...@rotorsoft/act-v1.23.33) (2026-08-07)
+
+
+### Bug Fixes
+
+* **act:** make correlate init retryable after a transient store failure ([9d53ee6](https://github.com/rotorsoft/act-root/commit/9d53ee64cd5eefebee08dae059c0253050c981d8)), closes [#1387](https://github.com/rotorsoft/act-root/issues/1387)
+* **act:** resume an interrupted close instead of dropping it from the scan ([fca684c](https://github.com/rotorsoft/act-root/commit/fca684cac08de3def90a1bbaab3ebafbdd41722e)), closes [#1389](https://github.com/rotorsoft/act-root/issues/1389)
+
 # [@rotorsoft/act-v1.23.32](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.31...@rotorsoft/act-v1.23.32) (2026-08-07)
 
 
