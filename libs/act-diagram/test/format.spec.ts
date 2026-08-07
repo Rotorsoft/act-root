@@ -437,9 +437,56 @@ describe("format_slice", () => {
   it("shows states, projections, and reactions", () => {
     const out = format_slice(idx, findEntry("slice", "Fulfillment"));
     expect(out).toContain("Fulfillment");
-    expect(out).toContain("- Order:0");
+    // #1396 — `SliceNode.states` holds internal `${name}:${idx}`
+    // disambiguator keys. This assertion used to expect the raw key, so it
+    // pinned the defect: `Order:0` is not a state, and `act -q Order:0`
+    // finds nothing.
+    expect(out).toContain("- Order");
+    expect(out).not.toContain("Order:0");
     expect(out).toContain("- OrdersByCustomer");
     expect(out).toContain("- OrderPlaced_v2 → reserveStock → reserve");
+  });
+
+  it("collapses repeated partials of one state to a single name", () => {
+    const m: DomainModel = {
+      entries: [],
+      states: [
+        {
+          name: "Ticket",
+          varName: "Ticket:0",
+          file: "src/a.ts",
+          events: [],
+          actions: [],
+        },
+        {
+          name: "Ticket",
+          varName: "Ticket:1",
+          file: "src/b.ts",
+          events: [],
+          actions: [],
+        },
+      ],
+      slices: [
+        {
+          name: "S",
+          file: "src/s.ts",
+          // "Loose" has no matching state node — an unresolvable key falls
+          // back to printing itself rather than vanishing.
+          states: ["Ticket:1", "Ticket:0", "Loose"],
+          stateVars: ["Ticket:1", "Ticket:0", "Loose"],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      reactions: [],
+    };
+    const i = build_contract_index(m);
+    const out = format_slice(i, i.entries.find((e) => e.kind === "slice")!);
+    // One line, the real state name — not two synthetic keys.
+    expect(out.match(/- Ticket/g)).toHaveLength(1);
+    expect(out).not.toContain(":0");
+    expect(out).toContain("- Loose");
   });
 
   it("surfaces slice errors", () => {

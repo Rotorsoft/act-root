@@ -7,6 +7,8 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { intro, isCancel, log, outro, select, text } from "@clack/prompts";
+import { navigate_to_code } from "../client/lib/navigate.js";
+import type { FileTab } from "../client/types/index.js";
 import { dim, kind_color } from "./colors.js";
 import {
   CATEGORY_KEYWORDS,
@@ -68,6 +70,7 @@ const label_entry = (e: IndexEntry): string => {
 async function pick_from_list(
   idx: ContractIndex,
   root_dir: string,
+  files: FileTab[],
   message: string,
   entries: IndexEntry[]
 ): Promise<void> {
@@ -85,12 +88,13 @@ async function pick_from_list(
     maxItems: 12,
   });
   if (isCancel(pick)) return;
-  await show_detail(idx, root_dir, pick);
+  await show_detail(idx, root_dir, files, pick);
 }
 
 async function show_detail(
   idx: ContractIndex,
   root_dir: string,
+  files: FileTab[],
   entry: IndexEntry
 ): Promise<void> {
   // log.message keeps our ANSI colors intact; `note()` would wrap each
@@ -111,7 +115,14 @@ async function show_detail(
     ],
   });
   if (isCancel(action)) return;
-  const result = await open_in_editor(entry.file, entry.line, { root_dir });
+  // `EventNode.line` / `ActionNode.line` are never populated by the model,
+  // so `entry.line` is usually undefined and the editor opened at line 1.
+  // `navigate_to_code` computes a real position from the source (#1396).
+  const nav = navigate_to_code(files, entry.name, entry.kind, entry.file);
+  const line = entry.line ?? nav?.line;
+  const result = await open_in_editor(nav?.file ?? entry.file, line, {
+    root_dir,
+  });
   if (!result.ok) log.warn(`editor exited: ${result.reason ?? "unknown"}`);
 }
 
@@ -169,7 +180,8 @@ async function export_registry(
 
 async function search_by_name(
   idx: ContractIndex,
-  root_dir: string
+  root_dir: string,
+  files: FileTab[]
 ): Promise<void> {
   // Pause the vim-keys patch so j/k are typed as letters in the input
   // box. esc/q still cancel via clack's built-in handling (esc) or as
@@ -187,6 +199,7 @@ async function search_by_name(
     await pick_from_list(
       idx,
       root_dir,
+      files,
       `${KIND_LABELS[kind]}`,
       list_by_kind(idx, kind)
     );
@@ -197,12 +210,13 @@ async function search_by_name(
     log.warn(`no matches for "${q}"`);
     return;
   }
-  await pick_from_list(idx, root_dir, `matches for "${q}"`, matches);
+  await pick_from_list(idx, root_dir, files, `matches for "${q}"`, matches);
 }
 
 export async function run_interactive(
   idx: ContractIndex,
-  root_dir: string
+  root_dir: string,
+  files: FileTab[] = []
 ): Promise<void> {
   // j/k → arrows, q → esc, / → request-search. Loops below catch the
   // search_requested flag when clack cancels and jump to search.
@@ -211,7 +225,7 @@ export async function run_interactive(
     search_requested = true;
   });
   try {
-    await drive_interactive(idx, root_dir);
+    await drive_interactive(idx, root_dir, files);
   } finally {
     unsub();
     vim_keys.restore();
@@ -222,7 +236,8 @@ export async function run_interactive(
 
 async function drive_interactive(
   idx: ContractIndex,
-  root_dir: string
+  root_dir: string,
+  files: FileTab[]
 ): Promise<void> {
   intro("act — contracts explorer");
   log.message(format_summary(idx));
@@ -233,7 +248,7 @@ async function drive_interactive(
     // because each sub-flow returns control here.
     if (search_requested) {
       search_requested = false;
-      await search_by_name(idx, root_dir);
+      await search_by_name(idx, root_dir, files);
       continue;
     }
     const choice = await select<CategoryChoice>({
@@ -264,6 +279,7 @@ async function drive_interactive(
     await pick_from_list(
       idx,
       root_dir,
+      files,
       `${KIND_LABELS[choice]}`,
       list_by_kind(idx, choice)
     );
