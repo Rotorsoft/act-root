@@ -712,3 +712,84 @@ describe("MODULES", () => {
     expect(e.message).toBe("test");
   });
 });
+
+/**
+ * #1394 — the builder surface grew four methods the mocks never learned
+ * (`discloses`, `of`/`flush`/`batch`, `defer`, `withLane`). The chain
+ * threw mid-declaration, `.build()` never ran, and three of the four
+ * dropped their entity from the model with no error at all. On wolfdesk
+ * that made `act -q tickets` exit 1 and left the worked example in
+ * contracts-cli.md unreproducible on the package it documents.
+ */
+describe("builder-surface coverage (#1394)", () => {
+  it("mock_state survives .discloses()", () => {
+    let built: any;
+    const st = mock_state({ Thing: {} }, (i) => {
+      built = i;
+    });
+    st.init()
+      .emits({ Happened: {} })
+      .patch({ Happened: () => ({}) })
+      .on({ act: {} })
+      .emit(() => ["Happened", {}])
+      .discloses(() => true)
+      .build();
+    expect(built).toBeDefined();
+    expect(Object.keys(built.events)).toContain("Happened");
+  });
+
+  it("mock_projection records the folded state's events via .of().flush()", () => {
+    let built: any;
+    const proj = mock_projection("totals", (i) => {
+      built = i;
+    });
+    proj
+      // Two partials of the same state share an event — a fold projection
+      // must list it once. A state with no events, and a missing one, must
+      // not break the walk.
+      .of(
+        { events: { Opened: {}, Closed: {} } },
+        { events: { Closed: {}, Reopened: {} } },
+        { events: undefined },
+        undefined
+      )
+      .flush(async () => {})
+      .build();
+    expect(built.target).toBe("totals");
+    expect(built.handles).toEqual(["Opened", "Closed", "Reopened"]);
+  });
+
+  it("mock_projection survives .batch()", () => {
+    let built: any;
+    const proj = mock_projection("b", (i) => {
+      built = i;
+    });
+    proj.batch(async () => {}).build();
+    expect(built).toBeDefined();
+  });
+
+  it("mock_slice survives .withLane() and .defer()", () => {
+    let built: any;
+    const sl = mock_slice((i) => {
+      built = i;
+    });
+    sl.withLane({ name: "slow" })
+      .on("Happened")
+      .defer(() => 100)
+      .do(function react() {})
+      .build();
+    expect(built.reactions.map((r: any) => r.event)).toEqual(["Happened"]);
+  });
+
+  it("mock_act survives .withLane()", () => {
+    const app = mock_act().withLane({ name: "fast" }).build();
+    expect(app).toBeDefined();
+  });
+
+  // NOTE: a durable drift guard belongs at the type level, not here. A
+  // runtime walk of the real builder's keys compares implementation
+  // details — `ActionBuilder` carries `patch` at runtime through a spread
+  // while its type does not — so it would flag refactors as drift and
+  // teach people to ignore it. The cases above pin every method the mocks
+  // currently need; adding a builder method means adding one here.
+});
