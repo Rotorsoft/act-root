@@ -57,13 +57,24 @@ export function event_names_for(
   );
 }
 
-/** Strip `_v<digits>` suffix and return logical (base, version). */
+/**
+ * Strip `_v<digits>` suffix and return logical (base, version).
+ *
+ * Only `v >= 2` counts as a version, mirroring the framework
+ * (`event-versions.ts`): `Foo_v1` is a literal event name, since the base
+ * `Foo` is implicitly v1. Treating it as a version made the CLI report a
+ * current, emittable event as deprecated and tell operators to migrate
+ * off it (#1395).
+ */
 export function decompose_event_name(name: string): {
   base: string;
   version: number;
 } {
   const m = name.match(/^(.+)_v(\d+)$/);
-  if (m) return { base: m[1], version: Number.parseInt(m[2], 10) };
+  if (m) {
+    const version = Number.parseInt(m[2], 10);
+    if (version >= 2) return { base: m[1], version };
+  }
   return { base: name, version: 1 };
 }
 
