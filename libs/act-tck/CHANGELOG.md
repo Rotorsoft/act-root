@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.37](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.36...@rotorsoft/act-tck-v1.27.37) (2026-08-07)
+
+
+### Bug Fixes
+
+* **act:** emit blocked when block confirms, not at the end of the cycle ([0cbc80d](https://github.com/rotorsoft/act-root/commit/0cbc80d31152eb6a6671c230f0751f82a0665369)), closes [#1373](https://github.com/rotorsoft/act-root/issues/1373) [#1296](https://github.com/rotorsoft/act-root/issues/1296) [#1373](https://github.com/rotorsoft/act-root/issues/1373) [#1390](https://github.com/rotorsoft/act-root/issues/1390)
+* **act:** let store failures inside on_close reach the circuit breaker ([46a912f](https://github.com/rotorsoft/act-root/commit/46a912f51ec48c9278cd3c3db51a7bc5631b6fdd)), closes [#1376](https://github.com/rotorsoft/act-root/issues/1376) [pre-#1376](https://github.com/pre-/issues/1376) [#1376](https://github.com/rotorsoft/act-root/issues/1376) [#1388](https://github.com/rotorsoft/act-root/issues/1388)
+
 # [@rotorsoft/act-tck-v1.27.36](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.35...@rotorsoft/act-tck-v1.27.36) (2026-08-07)
 
 
