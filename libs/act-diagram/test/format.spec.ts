@@ -176,6 +176,68 @@ describe("format_event", () => {
     expect(out).not.toContain("on state: Same");
   });
 
+  // #1393 — event names are per-state-namespaced, so `AStar.Approved` and
+  // an unrelated `BStar.Approved_v2` are both current. Classifying over a
+  // global set told operators to migrate off a current, emittable event,
+  // and shipped that status downstream through -m and -j.
+  it("does not deprecate an event via an unrelated state's version", () => {
+    const m: DomainModel = {
+      entries: [],
+      states: [
+        {
+          name: "AStar",
+          varName: "AStar:0",
+          file: "src/a.ts",
+          events: [{ name: "Approved", hasCustomPatch: false }],
+          actions: [],
+        },
+        {
+          name: "BStar",
+          varName: "BStar:0",
+          file: "src/b.ts",
+          events: [{ name: "Approved_v2", hasCustomPatch: false }],
+          actions: [],
+        },
+      ],
+      slices: [],
+      projections: [],
+      reactions: [],
+    };
+    const i = build_contract_index(m);
+    const entry = i.entries.find(
+      (e) => e.kind === "event" && e.name === "Approved"
+    )!;
+    const out = format_event(i, entry);
+    expect(out).toContain("active");
+    expect(out).not.toContain("deprecated");
+  });
+
+  it("still deprecates within one state's own events", () => {
+    const m: DomainModel = {
+      entries: [],
+      states: [
+        {
+          name: "Same",
+          varName: "Same:0",
+          file: "src/s.ts",
+          events: [
+            { name: "Renamed", hasCustomPatch: false },
+            { name: "Renamed_v2", hasCustomPatch: false },
+          ],
+          actions: [],
+        },
+      ],
+      slices: [],
+      projections: [],
+      reactions: [],
+    };
+    const i = build_contract_index(m);
+    const entry = i.entries.find(
+      (e) => e.kind === "event" && e.name === "Renamed"
+    )!;
+    expect(format_event(i, entry)).toContain("deprecated");
+  });
+
   it("renders producer file location when state file is present", () => {
     const m: DomainModel = {
       entries: [],

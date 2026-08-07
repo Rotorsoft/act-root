@@ -10,6 +10,7 @@
 import type { DomainModel } from "../client/types/index.js";
 import {
   type ContractIndex,
+  event_names_for,
   event_status,
   list_by_kind,
 } from "./contract-index.js";
@@ -139,7 +140,7 @@ export function format_markdown(idx: ContractIndex): string {
         break;
       }
     }
-    const status = event_status(e.name, idx.all_event_names);
+    const status = event_status(e.name, event_names_for(idx, owning_state));
     const status_label =
       status.status === "active"
         ? "active"

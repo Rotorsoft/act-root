@@ -15,7 +15,11 @@
  */
 import { z } from "zod";
 import type { DomainModel } from "../client/types/index.js";
-import { type ContractIndex, event_status } from "./contract-index.js";
+import {
+  type ContractIndex,
+  event_names_for,
+  event_status,
+} from "./contract-index.js";
 
 type EventReport = {
   name: string;
@@ -141,7 +145,7 @@ export function format_json_schema(idx: ContractIndex): string {
 
   for (const st of m.states) {
     for (const ev of st.events) {
-      const status = event_status(ev.name, idx.all_event_names);
+      const status = event_status(ev.name, event_names_for(idx, st.name));
       const conv = toJsonSchemaSafe(ev.zod);
       const report: EventReport = {
         name: ev.name,

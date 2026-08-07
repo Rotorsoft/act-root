@@ -22,6 +22,7 @@ import {
 } from "./colors.js";
 import {
   type ContractIndex,
+  event_names_for,
   event_status,
   type IndexEntry,
 } from "./contract-index.js";
@@ -152,7 +153,12 @@ export function format_event(idx: ContractIndex, entry: IndexEntry): string {
   }
   const file = entry.file ?? owning_state?.file;
 
-  const status = event_status(entry.name, idx.all_event_names);
+  // Scope to the owning state: event names are per-state-namespaced,
+  // so a global set reports one state's event as superseded by another's.
+  const status = event_status(
+    entry.name,
+    event_names_for(idx, entry.qualifier)
+  );
   const status_line =
     status.status === "active"
       ? green("active")

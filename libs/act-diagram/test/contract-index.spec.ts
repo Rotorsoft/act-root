@@ -3,6 +3,7 @@ import {
   build_contract_index,
   CATEGORY_KEYWORDS,
   decompose_event_name,
+  event_names_for,
   event_status,
   list_by_kind,
   search,
@@ -213,5 +214,74 @@ describe("CATEGORY_KEYWORDS", () => {
     expect(CATEGORY_KEYWORDS.events).toBe("event");
     expect(CATEGORY_KEYWORDS.slice).toBe("slice");
     expect(CATEGORY_KEYWORDS.slices).toBe("slice");
+  });
+});
+
+// #1393 — the CLI twin of #1310. Event names are per-state-namespaced, so
+// two unrelated states may legally share a base name (`register_new_state`
+// only rejects identical names across differently-named states). Pooling
+// them into one global set reported one state's current event as
+// superseded by an unrelated state's.
+describe("per-state deprecation scoping (#1393)", () => {
+  const model: DomainModel = {
+    entries: [],
+    states: [
+      {
+        name: "AStar",
+        varName: "AStar:0",
+        file: "src/a.ts",
+        events: [{ name: "Approved", hasCustomPatch: false }],
+        actions: [],
+      },
+      {
+        name: "BStar",
+        varName: "BStar:0",
+        file: "src/b.ts",
+        events: [{ name: "Approved_v2", hasCustomPatch: false }],
+        actions: [],
+      },
+    ],
+    slices: [],
+    projections: [],
+    reactions: [],
+  };
+
+  it("keeps each state's events in their own namespace", () => {
+    const idx = build_contract_index(model);
+    expect([...event_names_for(idx, "AStar")]).toEqual(["Approved"]);
+    expect([...event_names_for(idx, "BStar")]).toEqual(["Approved_v2"]);
+    // Both remain active — neither supersedes the other.
+    expect(event_status("Approved", event_names_for(idx, "AStar"))).toEqual({
+      status: "active",
+    });
+  });
+
+  it("falls back to the global set for an event with no owning state", () => {
+    const idx = build_contract_index(model);
+    expect(event_names_for(idx, undefined)).toBe(idx.all_event_names);
+    expect(event_names_for(idx, "Unknown")).toBe(idx.all_event_names);
+  });
+
+  it("unions same-name partials into one state's event set", () => {
+    const idx = build_contract_index({
+      ...model,
+      states: [
+        {
+          name: "Split",
+          varName: "Split:0",
+          file: "src/x.ts",
+          events: [{ name: "One", hasCustomPatch: false }],
+          actions: [],
+        },
+        {
+          name: "Split",
+          varName: "Split:1",
+          file: "src/y.ts",
+          events: [{ name: "Two", hasCustomPatch: false }],
+          actions: [],
+        },
+      ],
+    });
+    expect([...event_names_for(idx, "Split")].sort()).toEqual(["One", "Two"]);
   });
 });

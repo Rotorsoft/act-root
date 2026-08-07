@@ -33,7 +33,29 @@ export type ContractIndex = {
   model: DomainModel;
   /** All event names that appear anywhere in the model. */
   all_event_names: Set<string>;
+  /**
+   * Event names declared by each state, keyed by state name. Deprecation
+   * is a per-state property — event names are per-state-namespaced, so two
+   * unrelated states may legally share a base name — and classifying over
+   * the global set reported one state's event as superseded by another's
+   * (#1393, the CLI twin of #1310).
+   */
+  events_by_state: Map<string, Set<string>>;
 };
+
+/**
+ * The event-name set deprecation should be classified within: the owning
+ * state's own events when known, the global set otherwise (an event
+ * reached only through a reaction or projection has no owning state here).
+ */
+export function event_names_for(
+  idx: ContractIndex,
+  state?: string
+): Set<string> {
+  return (
+    (state ? idx.events_by_state.get(state) : undefined) ?? idx.all_event_names
+  );
+}
 
 /** Strip `_v<digits>` suffix and return logical (base, version). */
 export function decompose_event_name(name: string): {
@@ -78,6 +100,7 @@ export function event_status(
 export function build_contract_index(model: DomainModel): ContractIndex {
   const entries: IndexEntry[] = [];
   const all_event_names = new Set<string>();
+  const events_by_state = new Map<string, Set<string>>();
 
   for (const st of model.states) {
     entries.push({
@@ -86,8 +109,15 @@ export function build_contract_index(model: DomainModel): ContractIndex {
       file: st.file,
       line: st.line,
     });
+    // Same-name partials contribute to one logical state's event set.
+    let own = events_by_state.get(st.name);
+    if (!own) {
+      own = new Set<string>();
+      events_by_state.set(st.name, own);
+    }
     for (const ev of st.events) {
       all_event_names.add(ev.name);
+      own.add(ev.name);
       entries.push({
         kind: "event",
         name: ev.name,
@@ -144,7 +174,7 @@ export function build_contract_index(model: DomainModel): ContractIndex {
     });
   }
 
-  return { entries, model, all_event_names };
+  return { entries, model, all_event_names, events_by_state };
 }
 
 /**
