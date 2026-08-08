@@ -60,15 +60,24 @@ export function applyPatchMessage<S extends BroadcastState>(
   const maxV = versions[versions.length - 1];
 
   // Overlay frame: a version-neutral update (presence, computed field) at the
-  // current version. A caught-up client (maxV === cachedV) merges it on top
-  // of its state, keeping _v. Older (maxV < cachedV) is genuinely stale; a
-  // gap ahead (maxV > cachedV) means the client is behind — both fall through
-  // to the normal logic below.
-  if (msg._overlay && cached && maxV === cachedV) {
-    return {
-      ok: true,
-      state: { ...deep_merge(cached, msg[maxV]), _v: cachedV },
-    };
+  // current version. Handled EXHAUSTIVELY here — an overlay must never reach
+  // the contiguous fold below, which would apply its payload as if it were
+  // that version's domain patch. At exactly `cachedV + 1` that fold made the
+  // client adopt presence data as version N, stamp itself caught up, and
+  // never refetch — the real update for N lost permanently (#1419).
+  if (msg._overlay) {
+    // No baseline to merge onto: the client must fetch one.
+    if (!cached) return { ok: false, reason: "behind" };
+    // Caught up: merge on top, keeping _v (an overlay changes no version).
+    if (maxV === cachedV)
+      return {
+        ok: true,
+        state: { ...deep_merge(cached, msg[maxV]), _v: cachedV },
+      };
+    // Ahead by any amount: the client missed at least one domain patch.
+    if (maxV > cachedV) return { ok: false, reason: "behind" };
+    // Older than the baseline: genuinely stale.
+    return { ok: false, reason: "stale" };
   }
 
   // A present baseline that already covers these versions is stale. A fresh

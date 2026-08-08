@@ -281,4 +281,90 @@ describe("applyPatchMessage", () => {
       }
     });
   });
+
+  // Three bugs have come out of the `_overlay` marker interacting with the
+  // version gate: #1312 (same-version overlay dropped for caught-up
+  // clients), #1346 (genesis version-0 treated as stale), #1419 (overlay at
+  // cachedV + 1 folded as that version's domain patch). They are corners of
+  // one state space, so pin the whole matrix rather than a case per bug.
+  describe("frame kind × version position (#1312/#1346/#1419)", () => {
+    const cached = { _v: 4, name: "n", count: 1 } as TestState;
+
+    const overlay = (v: number): PatchMessage<TestState> =>
+      ({ [v]: { name: "alice" }, _overlay: true }) as never;
+    const ordinary = (v: number): PatchMessage<TestState> =>
+      ({ [v]: { count: 2 } }) as never;
+
+    it("overlay, stale (below the baseline) → stale", () => {
+      expect(applyPatchMessage(overlay(3), cached)).toMatchObject({
+        ok: false,
+        reason: "stale",
+      });
+    });
+
+    it("overlay, caught up → merges and keeps _v", () => {
+      const r = applyPatchMessage(overlay(4), cached);
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.state._v).toBe(4);
+      expect(r.ok && (r.state as TestState).name).toBe("alice");
+    });
+
+    it("overlay, exactly one ahead → behind (never folded as the patch)", () => {
+      // The client missed v5's DOMAIN patch. Adopting the overlay's payload
+      // as v5 would mark it caught up while `count` stayed stale, and it
+      // would never refetch.
+      expect(applyPatchMessage(overlay(5), cached)).toMatchObject({
+        ok: false,
+        reason: "behind",
+      });
+    });
+
+    it("overlay, several ahead → behind", () => {
+      expect(applyPatchMessage(overlay(9), cached)).toMatchObject({
+        ok: false,
+        reason: "behind",
+      });
+    });
+
+    it("overlay with no baseline → behind", () => {
+      expect(applyPatchMessage(overlay(0), undefined)).toMatchObject({
+        ok: false,
+        reason: "behind",
+      });
+    });
+
+    it("ordinary, stale → stale", () => {
+      expect(applyPatchMessage(ordinary(3), cached)).toMatchObject({
+        ok: false,
+        reason: "stale",
+      });
+    });
+
+    it("ordinary, at the baseline → stale", () => {
+      expect(applyPatchMessage(ordinary(4), cached)).toMatchObject({
+        ok: false,
+        reason: "stale",
+      });
+    });
+
+    it("ordinary, exactly one ahead → applies and advances _v", () => {
+      const r = applyPatchMessage(ordinary(5), cached);
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.state._v).toBe(5);
+      expect(r.ok && (r.state as TestState).count).toBe(2);
+    });
+
+    it("ordinary, several ahead → behind", () => {
+      expect(applyPatchMessage(ordinary(9), cached)).toMatchObject({
+        ok: false,
+        reason: "behind",
+      });
+    });
+
+    it("ordinary genesis with no baseline → applies", () => {
+      const r = applyPatchMessage(ordinary(0), undefined);
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.state._v).toBe(0);
+    });
+  });
 });
