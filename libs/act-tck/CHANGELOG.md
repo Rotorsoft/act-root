@@ -1,3 +1,12 @@
+# [@rotorsoft/act-tck-v1.27.41](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.40...@rotorsoft/act-tck-v1.27.41) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-http:** classify overlay frames exhaustively before the fold ([409c86e](https://github.com/rotorsoft/act-root/commit/409c86e687fce7629832f70a16ac5bfa08c5a988)), closes [#1312](https://github.com/rotorsoft/act-root/issues/1312) [#1346](https://github.com/rotorsoft/act-root/issues/1346) [#1419](https://github.com/rotorsoft/act-root/issues/1419)
+* **act-pg:** widen stream/source/name to text so derived identifiers fit ([ef4bd11](https://github.com/rotorsoft/act-root/commit/ef4bd1153a2845eeb9a5158a3a431c526a9e8c9e)), closes [#1190](https://github.com/rotorsoft/act-root/issues/1190) [#1420](https://github.com/rotorsoft/act-root/issues/1420)
+* **act:** keep the sensitive() marker through refinements and unions ([4d3696d](https://github.com/rotorsoft/act-root/commit/4d3696d21ef2007cb734209a75e0c224a57b97bf)), closes [#1277](https://github.com/rotorsoft/act-root/issues/1277) [1397/#1405](https://github.com/rotorsoft/act-root/issues/1405) [#1417](https://github.com/rotorsoft/act-root/issues/1417)
+
 # [@rotorsoft/act-tck-v1.27.40](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.39...@rotorsoft/act-tck-v1.27.40) (2026-08-08)
 
 
