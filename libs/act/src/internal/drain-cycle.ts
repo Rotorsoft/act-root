@@ -132,6 +132,43 @@ export type DrainCycle<TEvents extends Schemas> = {
 };
 
 /**
+ * Terminal result for a stream whose retry budget was spent without a single
+ * attempt ever reaching the block decision — or `undefined` when the stream
+ * still has budget.
+ *
+ * The budget is consulted on the *error* path (`finalize` returns early when
+ * a handler didn't throw), so it only terminates handlers that fail loudly. A
+ * handler that fails by overrunning its lease never throws: it completes,
+ * submits an ack the store drops (`WHERE leased_by = by`), and the next claim
+ * bumps `retry` again. `retry` climbs without bound, the watermark never
+ * advances, and the side effect re-runs forever — the one outcome
+ * `blockOnError` exists to prevent (#1418).
+ *
+ * The threshold is strictly greater than `maxRetries`, not `>=`, and that is
+ * load-bearing. A stream legitimately reaches `retry === maxRetries` on its
+ * final attempt, which `finalize` is entitled to run and block only if it
+ * fails again. Blocking here at `>=` would take that attempt away and change
+ * every error-driven path. At `>` the only way to arrive is with the budget
+ * already spent and no attempt having produced an error — a lease lost every
+ * single round, which is the stuck stream and nothing else.
+ *
+ * Gated on `blockOnError` for the same reason `finalize` is: an operator who
+ * opted out of blocking chose "retry forever," and that choice holds here too.
+ *
+ * @internal
+ */
+function budget_exhausted<TEvents extends Schemas>(
+  lease: Lease,
+  options: ReactionPayload<TEvents>["options"] | undefined
+): HandleResult | undefined {
+  if (!options?.blockOnError || lease.retry <= options.maxRetries)
+    return undefined;
+  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the lease was lost on every attempt, so the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. Raise leaseMillis for this handler, then unblock the stream.`;
+  log().error(error);
+  return { lease, handled: 0, acked_at: lease.at, error, block: true };
+}
+
+/**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
  *
@@ -224,6 +261,8 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
+      const exhausted = budget_exhausted(lease, payloads[0]?.options);
+      if (exhausted) return Promise.resolve(exhausted);
       const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
         return handle_batch({ ...lease, at }, payloads, batchHandler);

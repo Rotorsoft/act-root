@@ -157,6 +157,16 @@ Both primitives surface in the trace breadcrumb stream:
 
 For a stuck stream, query `store.query_streams` directly — it returns the per-stream `at`, `retry`, `blocked`, and `leased_by/leased_until` without taking a lease. The act-inspector tool is built on this primitive.
 
+### When every attempt loses its lease
+
+The retry budget is an *error* budget: `blockOnError` is consulted on the failure path, so a handler that never throws never spends it. A handler that fails only by overrunning its lease does exactly that — it completes, submits an ack the store drops, and the next claim bumps `retry` again. Left alone, `retry` climbs without bound, the watermark never advances, and the side effect re-runs on every round, which is the one outcome `blockOnError` exists to prevent.
+
+The drain therefore checks the budget once more where it can still act on it: at claim time, holding the lease, before dispatching. A stream that arrives with `retry` **strictly greater** than `maxRetries` is blocked without running the handler.
+
+Strictly greater, not `>=`, and the difference matters. A stream legitimately reaches `retry === maxRetries` on its final attempt, and that attempt is entitled to run — it blocks only if it fails again. Arriving *past* the budget is only possible when no attempt ever produced an error, which means the lease was lost every single round. That is the stuck stream and nothing else. Recovery is the ordinary one: raise `leaseMillis` for that handler, then `app.unblock`.
+
+Operators who set `blockOnError: false` chose "retry forever" and keep it here too.
+
 ## Why no framework-level request deduplication
 
 Optimistic concurrency catches *stream-version* conflicts. It does **not** catch the case where a client retries a network-failed `POST` and the same intent commits twice. That's request-level idempotency, and the framework deliberately leaves it to the API edge (see [Idempotency at the API edge](../guides/production-checklist#5-idempotency-at-the-api-edge)).

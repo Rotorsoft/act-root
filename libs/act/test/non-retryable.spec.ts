@@ -532,3 +532,109 @@ describe("dropped acks are reported (#1418)", () => {
     await app.shutdown();
   });
 });
+
+// #1418 (second half) — the retry budget is consulted on the error path only,
+// so a handler that fails by overrunning its lease never spends it: `retry`
+// climbs on every claim, the watermark never advances, and the side effect
+// re-runs forever. Reproduced at store level against Postgres: five rounds of
+// claim-steal-late-ack left `retry` at 9, `at` at -1, `blocked` false.
+describe("retry budget spent without a single error (#1418)", () => {
+  const stuck_actor = { id: "a", name: "a" };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  /** Inflate `retry` on every lease, as repeated lease theft would. */
+  const with_retry = (retry: number) => {
+    const real = store().claim.bind(store());
+    return vi
+      .spyOn(store(), "claim")
+      .mockImplementation(async (...args: Parameters<typeof real>) =>
+        (await real(...args)).map((lease) => ({ ...lease, retry }))
+      );
+  };
+
+  it("blocks a stream that lost its lease every round", async () => {
+    let attempts = 0;
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function neverAcks() {
+          attempts++;
+        },
+        { maxRetries: 3 }
+      )
+      .build();
+
+    const claimed = with_retry(4); // one past the budget
+    const logged = vi.spyOn(log(), "error").mockImplementation(() => {});
+
+    await app.do("tick", { stream: "stuck", actor: stuck_actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+
+    // Terminal before dispatch: re-running a handler whose every attempt has
+    // been discarded is exactly the unbounded side effect being stopped.
+    expect(attempts).toBe(0);
+    expect(drained.blocked.length).toBe(1);
+    expect(drained.blocked[0].error).toContain("no acknowledged progress");
+    expect(drained.acked.length).toBe(0);
+
+    claimed.mockRestore();
+    logged.mockRestore();
+    await app.shutdown();
+  });
+
+  it("control — the final attempt at exactly maxRetries still runs", async () => {
+    let attempts = 0;
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function stillRuns() {
+          attempts++;
+        },
+        { maxRetries: 3 }
+      )
+      .build();
+
+    const claimed = with_retry(3); // at the budget, not past it
+    await app.do("tick", { stream: "final", actor: stuck_actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+
+    expect(attempts).toBe(1);
+    expect(drained.blocked.length).toBe(0);
+    expect(drained.acked.length).toBe(1);
+
+    claimed.mockRestore();
+    await app.shutdown();
+  });
+
+  it("control — blockOnError:false keeps retrying forever", async () => {
+    let attempts = 0;
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function retriesForever() {
+          attempts++;
+        },
+        { maxRetries: 3, blockOnError: false }
+      )
+      .build();
+
+    const claimed = with_retry(99);
+    await app.do("tick", { stream: "forever", actor: stuck_actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+
+    expect(attempts).toBe(1);
+    expect(drained.blocked.length).toBe(0);
+
+    claimed.mockRestore();
+    await app.shutdown();
+  });
+});
