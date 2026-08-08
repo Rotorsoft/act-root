@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.14...@rotorsoft/act-sqlite-v1.12.15) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** keep a restarted stream's subscription and forget a retired one ([5b57672](https://github.com/rotorsoft/act-root/commit/5b57672dbe44d78e3deac16be8fcc9fb90118b19)), closes [#1363](https://github.com/rotorsoft/act-root/issues/1363) [#1398](https://github.com/rotorsoft/act-root/issues/1398)
+
 # [@rotorsoft/act-sqlite-v1.12.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.13...@rotorsoft/act-sqlite-v1.12.14) (2026-08-06)
 
 
