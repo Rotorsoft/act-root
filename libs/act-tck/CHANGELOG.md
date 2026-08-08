@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.27.43](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.42...@rotorsoft/act-tck-v1.27.43) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-http:** contain throwing SSE subscribers and surface overlay cache misses ([8a0f27e](https://github.com/rotorsoft/act-root/commit/8a0f27e5dafd8355bd5c337cd92b7e32d1b237dc)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+* **act:** mask sensitive keys before the audit schema parse ([b2c5b76](https://github.com/rotorsoft/act-root/commit/b2c5b76558d988b67404a983a68b7061c12d9ffd)), closes [#1417](https://github.com/rotorsoft/act-root/issues/1417) [#1310](https://github.com/rotorsoft/act-root/issues/1310) [#1424](https://github.com/rotorsoft/act-root/issues/1424)
+
 # [@rotorsoft/act-tck-v1.27.42](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.41...@rotorsoft/act-tck-v1.27.42) (2026-08-08)
 
 
