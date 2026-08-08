@@ -18140,13 +18140,52 @@ export const validate = <S>(
   schema?: ZodType<S>
 ): Readonly<S> => {
   try {
-    return schema ? schema.parse(payload) : payload;
+    const validated = schema ? schema.parse(payload) : payload;
+    const nul = find_nul(validated);
+    if (nul !== undefined)
+      throw new ValidationError(
+        target,
+        payload,
+        \`NUL byte (\\\\u0000) in "\${nul}" — Postgres jsonb cannot store it, so this would commit on InMemory and SQLite and fail only in production. Strip it at the edge.\`
+      );
+    return validated;
   } catch (error) {
+    if (error instanceof ValidationError) throw error;
     if (error instanceof ZodError) {
       throw new ValidationError(target, payload, prettifyError(error));
     }
     throw new ValidationError(target, payload, error);
   }
+};
+
+/**
+ * First path holding a string with a NUL byte, or \`undefined\`.
+ *
+ * A NUL is valid JSON and valid in a JS string, so it passes Zod and reaches
+ * the store — where Postgres \`jsonb\` rejects it while InMemory and SQLite
+ * (TEXT) round-trip it. Rejecting here keeps the three adapters in agreement
+ * and turns a driver-level "unsupported Unicode escape sequence", which names
+ * neither field nor stream, into an actionable \`ValidationError\` (#1422).
+ *
+ * @internal
+ */
+const find_nul = (value: unknown, path = ""): string | undefined => {
+  if (typeof value === "string")
+    return value.includes("\\u0000") ? path || "(root)" : undefined;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = find_nul(value[i], \`\${path}[\${i}]\`);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    for (const [k, v] of Object.entries(value)) {
+      const hit = find_nul(v, path ? \`\${path}.\${k}\` : k);
+      if (hit !== undefined) return hit;
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -34364,13 +34403,52 @@ export const validate = <S>(
   schema?: ZodType<S>
 ): Readonly<S> => {
   try {
-    return schema ? schema.parse(payload) : payload;
+    const validated = schema ? schema.parse(payload) : payload;
+    const nul = find_nul(validated);
+    if (nul !== undefined)
+      throw new ValidationError(
+        target,
+        payload,
+        \`NUL byte (\\\\u0000) in "\${nul}" — Postgres jsonb cannot store it, so this would commit on InMemory and SQLite and fail only in production. Strip it at the edge.\`
+      );
+    return validated;
   } catch (error) {
+    if (error instanceof ValidationError) throw error;
     if (error instanceof ZodError) {
       throw new ValidationError(target, payload, prettifyError(error));
     }
     throw new ValidationError(target, payload, error);
   }
+};
+
+/**
+ * First path holding a string with a NUL byte, or \`undefined\`.
+ *
+ * A NUL is valid JSON and valid in a JS string, so it passes Zod and reaches
+ * the store — where Postgres \`jsonb\` rejects it while InMemory and SQLite
+ * (TEXT) round-trip it. Rejecting here keeps the three adapters in agreement
+ * and turns a driver-level "unsupported Unicode escape sequence", which names
+ * neither field nor stream, into an actionable \`ValidationError\` (#1422).
+ *
+ * @internal
+ */
+const find_nul = (value: unknown, path = ""): string | undefined => {
+  if (typeof value === "string")
+    return value.includes("\\u0000") ? path || "(root)" : undefined;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = find_nul(value[i], \`\${path}[\${i}]\`);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    for (const [k, v] of Object.entries(value)) {
+      const hit = find_nul(v, path ? \`\${path}.\${k}\` : k);
+      if (hit !== undefined) return hit;
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -47813,14 +47891,22 @@ const { Pool, types } = pg;
  * parser. This is the shape pg threads down to each pooled client.
  */
 const JSONB_OID = types.builtins.JSONB;
+// node-pg returns int8 as a STRING by default, to avoid silently losing
+// precision past 2^53. \`events.id\` is \`bigserial\` since #1422, and
+// \`Committed.id\` is a JS \`number\` — so without this parser every id would
+// arrive as a string and every id comparison in the orchestrator would fail.
+// Numbers are exact to 2^53, which is four orders of magnitude past the
+// int4 ceiling the widening was for, so the coercion is safe in practice.
+const INT8_OID = types.builtins.INT8;
 const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
-  getTypeParser: ((oid: number, format?: unknown) =>
-    oid === JSONB_OID
-      ? (val: string) => JSON.parse(val, dateReviver)
-      : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
-          oid,
-          format
-        )) as typeof types.getTypeParser,
+  getTypeParser: ((oid: number, format?: unknown) => {
+    if (oid === JSONB_OID) return (val: string) => JSON.parse(val, dateReviver);
+    if (oid === INT8_OID) return (val: string) => Number(val);
+    return (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
+      oid,
+      format
+    );
+  }) as typeof types.getTypeParser,
 };
 
 type Config = Readonly<{
@@ -48285,7 +48371,7 @@ export class PostgresStore implements Store {
       // Events table
       await client.query(
         \`CREATE TABLE IF NOT EXISTS \${this._fqt} (
-          id serial PRIMARY KEY,
+          id bigserial PRIMARY KEY,
           name text COLLATE pg_catalog."default" NOT NULL,
           data jsonb,
           stream text COLLATE pg_catalog."default" NOT NULL,
@@ -48383,6 +48469,31 @@ export class PostgresStore implements Store {
                AND data_type = 'smallint'
            ) THEN
              EXECUTE 'ALTER TABLE \${this._fqs} ALTER COLUMN retry TYPE integer';
+           END IF;
+         END
+         $$;\`
+      );
+
+      // Migration for tables created before the id widening (#1422). \`serial\`
+      // is int4, capping an append-only store at ~2.1e9 events — SQLite uses
+      // a 64-bit INTEGER and InMemory a JS number. At the ceiling every
+      // commit fails permanently and there is no in-place recovery, since
+      // ALTER on a 2.1-billion-row table is a full rewrite. \`Committed.id\` is
+      // a JS number (safe to 2^53), so the wider column strains nothing.
+      // Guarded on the current type: the rewrite happens once, and is far
+      // cheaper at 10M rows than at the cliff.
+      await client.query(
+        \`DO $$
+         BEGIN
+           IF EXISTS (
+             SELECT 1 FROM information_schema.columns
+             WHERE table_schema = '\${this.config.schema}'
+               AND table_name = '\${this.config.table}'
+               AND column_name = 'id'
+               AND data_type = 'integer'
+           ) THEN
+             EXECUTE 'ALTER TABLE \${this._fqt} ALTER COLUMN id TYPE bigint';
+             EXECUTE 'ALTER SEQUENCE "\${this.config.schema}"."\${this.config.table}_id_seq" AS bigint';
            END IF;
          END
          $$;\`
