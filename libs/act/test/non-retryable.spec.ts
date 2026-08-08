@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   act,
   dispose,
+  log,
   NonRetryableError,
   StoreError,
   sleep,
@@ -471,5 +472,164 @@ describe("lifecycle listener containment (drain finalize)", () => {
 
     spy.mockRestore();
     await app.shutdown();
+  });
+});
+
+// #1418 — two failure modes of the same root cause, both driven through
+// real lease theft: two `Act` instances over the shared store compete for
+// one stream, the first parks inside its handler until the test releases
+// it, and the lease lapses in between. Nothing about the store is mocked;
+// the claims, the rejected ack and the block are all the adapter's own.
+// The same sequence runs against a real Postgres store in
+// `libs/act-pg/test/lease-loss.spec.ts`.
+describe("a handler that only ever loses its lease (#1418)", () => {
+  const lease_actor = { id: "a", name: "a" };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  /** A promise the test resolves by hand — the handler's parking brake. */
+  const latch = () => {
+    let open!: () => void;
+    const held = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { held, open };
+  };
+
+  /** Two competing workers on one target: `slow` parks, `fast` returns. */
+  const workers = (target: string, maxRetries: number, blockOnError = true) => {
+    const entered = latch();
+    const release = latch();
+    let fast_attempts = 0;
+
+    const slow = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function slowWorker() {
+          entered.open();
+          await release.held;
+        },
+        { maxRetries, blockOnError }
+      )
+      .to(target)
+      .build();
+
+    const fast = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function fastWorker() {
+          fast_attempts++;
+        },
+        { maxRetries, blockOnError }
+      )
+      .to(target)
+      .build();
+
+    return { slow, fast, entered, release, fast_attempts: () => fast_attempts };
+  };
+
+  const row = async (stream: string) => {
+    const rows: Array<{ at: number; retry: number; blocked: boolean }> = [];
+    await store().query_streams((r) => rows.push(r), { stream });
+    return rows[0]!;
+  };
+
+  /** Run the steal: slow claims and parks, lease lapses, fast takes over. */
+  const steal = async (w: ReturnType<typeof workers>) => {
+    await w.slow.do("tick", { stream: "s1", actor: lease_actor }, {});
+    await w.slow.correlate();
+    const inflight = w.slow.drain({ leaseMillis: 1 });
+    await w.entered.held;
+    await sleep(50);
+    await w.fast.correlate();
+    const stolen = await w.fast.drain({ leaseMillis: 60_000 });
+    return { inflight, stolen };
+  };
+
+  it("reports the round of work the stolen lease discarded", async () => {
+    // Budget wide open, so the claim-time guard stays out of the way and
+    // the competitor actually runs and acks.
+    const w = workers("dropped", 5);
+    const logged = vi.spyOn(log(), "error");
+    const { inflight, stolen } = await steal(w);
+
+    expect(w.fast_attempts()).toBe(1);
+    expect(stolen.acked.length).toBe(1);
+
+    // The original holder finishes with no error, submits its ack, and the
+    // ownership guard rejects it. That short return used to go unnoticed.
+    w.release.open();
+    const late = await inflight;
+    expect(late.acked.length).toBe(0);
+    expect(
+      logged.mock.calls.filter((c) =>
+        String(c[0]).includes("acks were dropped")
+      ).length
+    ).toBe(1);
+
+    logged.mockRestore();
+    await w.slow.shutdown();
+    await w.fast.shutdown();
+  });
+
+  it("blocks the stream once the budget is spent with no error raised", async () => {
+    // maxRetries 0: the first claim (retry 0) is the one attempt allowed,
+    // the stolen claim (retry 1) is past the budget.
+    const w = workers("stuck", 0);
+    const logged = vi.spyOn(log(), "error").mockImplementation(() => {});
+    const { inflight, stolen } = await steal(w);
+
+    // Terminal before dispatch — re-running a handler whose every attempt
+    // has been discarded is the unbounded side effect being stopped.
+    expect(w.fast_attempts()).toBe(0);
+    expect(stolen.blocked.length).toBe(1);
+    expect(stolen.blocked[0].stream).toBe("stuck");
+    expect(stolen.blocked[0].error).toContain("no acknowledged progress");
+    expect(stolen.acked.length).toBe(0);
+
+    const blocked = await row("stuck");
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.at).toBe(-1); // nothing was ever acknowledged
+
+    w.release.open();
+    await inflight;
+    logged.mockRestore();
+    await w.slow.shutdown();
+    await w.fast.shutdown();
+  });
+
+  it("control — a claim at exactly maxRetries still gets its attempt", async () => {
+    // The stolen claim arrives at retry 1, which is the budget, not past
+    // it. Blocking here at `>=` instead of `>` would break this.
+    const w = workers("final", 1);
+    const { inflight, stolen } = await steal(w);
+
+    expect(w.fast_attempts()).toBe(1);
+    expect(stolen.blocked.length).toBe(0);
+    expect(stolen.acked.length).toBe(1);
+    expect((await row("final")).blocked).toBe(false);
+
+    w.release.open();
+    await inflight;
+    await w.slow.shutdown();
+    await w.fast.shutdown();
+  });
+
+  it("control — blockOnError:false still means retry forever", async () => {
+    const w = workers("forever", 0, false);
+    const { inflight, stolen } = await steal(w);
+
+    expect(w.fast_attempts()).toBe(1);
+    expect(stolen.blocked.length).toBe(0);
+    expect((await row("forever")).blocked).toBe(false);
+
+    w.release.open();
+    await inflight;
+    await w.slow.shutdown();
+    await w.fast.shutdown();
   });
 });

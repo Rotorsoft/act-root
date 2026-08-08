@@ -1,3 +1,17 @@
+# [@rotorsoft/act-http-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.22...@rotorsoft/act-http-v1.9.0) (2026-08-08)
+
+
+### Features
+
+* **act-http:** emit a resync frame when overlay loses its baseline ([b03d7e7](https://github.com/rotorsoft/act-root/commit/b03d7e70736a0fbd009022f99e6fb14f7b4c9d30)), closes [#1419](https://github.com/rotorsoft/act-root/issues/1419) [1346/#1419](https://github.com/rotorsoft/act-root/issues/1419) [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
+# [@rotorsoft/act-http-v1.8.22](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.21...@rotorsoft/act-http-v1.8.22) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-http:** contain throwing SSE subscribers and surface overlay cache misses ([8a0f27e](https://github.com/rotorsoft/act-root/commit/8a0f27e5dafd8355bd5c337cd92b7e32d1b237dc)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
 # [@rotorsoft/act-http-v1.8.21](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.20...@rotorsoft/act-http-v1.8.21) (2026-08-08)
 
 

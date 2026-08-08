@@ -1,3 +1,4 @@
+import { log } from "@rotorsoft/act";
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -36,6 +37,34 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * store's monotonic stream version) BEFORE calling `publish()`. This is the
  * single source of truth for ordering — no separate version counters.
  */
+/**
+ * Deliver a frame to every subscriber, containing each one individually.
+ *
+ * SSE subscribers are the least-trusted callbacks in the system — one per
+ * connection, driven by network state. The unguarded loop this replaces let
+ * the first thrower abort iteration, so every later subscriber lost the
+ * frame and the exception escaped into the host's commit path (#1423). Same
+ * containment principle the orchestrator applies to lifecycle listeners.
+ * Guarding each callback rather than the loop is the point: one guard around
+ * the whole loop would still let the first throw suppress the rest.
+ *
+ * @internal
+ */
+function fan_out<S extends BroadcastState>(
+  subs: Set<Subscriber<S>> | undefined,
+  msg: PatchMessage<S>,
+  on_error: (error: unknown) => void
+): void {
+  if (!subs?.size) return;
+  for (const cb of subs) {
+    try {
+      cb(msg);
+    } catch (error) {
+      on_error(error);
+    }
+  }
+}
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -44,8 +73,27 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * @param options.cacheSize - Max number of stream states kept in the LRU
    * cache (default 50).
    */
+  private on_subscriber_error: (error: unknown, streamId: string) => void;
+  private on_overlay_miss: (streamId: string) => void;
+
   constructor(options?: {
     cacheSize?: number;
+    /**
+     * Called when `overlay()` finds no cached baseline for the stream, so
+     * the update cannot be broadcast. Live subscribers receive nothing and
+     * have no way to notice — a host that cares should raise `cacheSize`,
+     * re-`publish` the stream, or push the viewers to refetch. Defaults to a
+     * no-op so existing behavior is unchanged apart from being observable.
+     */
+    onOverlayMiss?: (streamId: string) => void;
+    /**
+     * Called when a subscriber callback throws. The frame is still delivered
+     * to every other subscriber and the publish still returns normally — a
+     * bad consumer must not break the publisher (#1423). Defaults to the
+     * framework's `log()` port, so it lands wherever the host already
+     * routes framework logs.
+     */
+    onSubscriberError?: (error: unknown, streamId: string) => void;
     /**
      * Deprecated alias of `cacheSize` — removal in the next major. When
      * both are given, `cacheSize` wins.
@@ -56,6 +104,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     this.state_cache = new StateCache<S>(
       options?.cacheSize ?? options?.cache_size ?? 50
     );
+    this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
+    this.on_subscriber_error =
+      options?.onSubscriberError ??
+      ((error, streamId) =>
+        log().error(error, `sse subscriber threw for "${streamId}"`));
   }
 
   /**
@@ -79,10 +132,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       msg[baseV + i + 1] = p;
     });
 
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -96,7 +148,29 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
     const prev = this.state_cache.get(streamId);
-    if (!prev) return undefined;
+    if (!prev) {
+      // No baseline to read-modify-write, so nothing is broadcast — and
+      // because no frame is emitted there is nothing for a live client to
+      // classify as `behind`, so it never refetches either. Unlike a domain
+      // commit (which repopulates the cache via `publish`), an overlay-only
+      // stream never recovers. The defaults make this reachable rather than
+      // exotic: `cacheSize` is 50 while a host may hold far more live
+      // subscriptions, and cache promotion happens at connect time, so a
+      // busy-but-not-committing stream ages out while fully subscribed.
+      //
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). `on_overlay_miss` still fires so
+      // a host can count these — a steady stream of them means `cacheSize`
+      // is too small for the working set.
+      this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still `undefined`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
+      return undefined;
+    }
 
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
@@ -105,10 +179,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 

@@ -1,3 +1,26 @@
+# [@rotorsoft/act-tck-v1.28.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.0...@rotorsoft/act-tck-v1.28.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** block a stream whose lease is lost every round ([340e24f](https://github.com/rotorsoft/act-root/commit/340e24f698b09b015a9ca48e7c09e80d249d7692)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418)
+* **act:** report acks dropped by a stolen lease ([b648b23](https://github.com/rotorsoft/act-root/commit/b648b23c06d10ff546e97e6aa5104b469cb37569)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418)
+
+# [@rotorsoft/act-tck-v1.28.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.43...@rotorsoft/act-tck-v1.28.0) (2026-08-08)
+
+
+### Features
+
+* **act-http:** emit a resync frame when overlay loses its baseline ([b03d7e7](https://github.com/rotorsoft/act-root/commit/b03d7e70736a0fbd009022f99e6fb14f7b4c9d30)), closes [#1419](https://github.com/rotorsoft/act-root/issues/1419) [1346/#1419](https://github.com/rotorsoft/act-root/issues/1419) [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
+# [@rotorsoft/act-tck-v1.27.43](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.42...@rotorsoft/act-tck-v1.27.43) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-http:** contain throwing SSE subscribers and surface overlay cache misses ([8a0f27e](https://github.com/rotorsoft/act-root/commit/8a0f27e5dafd8355bd5c337cd92b7e32d1b237dc)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+* **act:** mask sensitive keys before the audit schema parse ([b2c5b76](https://github.com/rotorsoft/act-root/commit/b2c5b76558d988b67404a983a68b7061c12d9ffd)), closes [#1417](https://github.com/rotorsoft/act-root/issues/1417) [#1310](https://github.com/rotorsoft/act-root/issues/1310) [#1424](https://github.com/rotorsoft/act-root/issues/1424)
+
 # [@rotorsoft/act-tck-v1.27.42](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.41...@rotorsoft/act-tck-v1.27.42) (2026-08-08)
 
 

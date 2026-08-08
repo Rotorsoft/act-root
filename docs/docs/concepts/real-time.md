@@ -70,6 +70,14 @@ type AppState = BroadcastState & {
 
 const broadcast = new BroadcastChannel<AppState>({
   cacheSize: 50, // LRU entries; default 50
+  // Called when a subscriber callback throws. The frame still reaches every
+  // other subscriber and the publish still returns — a bad consumer must not
+  // break the publisher. Defaults to the framework's log() port.
+  onSubscriberError: (error, streamId) => metrics.sseSubscriberError.inc(),
+  // Called when overlay() finds no cached baseline. Live subscribers get a
+  // `_resync` frame so they refetch, but a steady stream of these means
+  // cacheSize is too small for the working set. Defaults to a no-op.
+  onOverlayMiss: (streamId) => metrics.sseOverlayMiss.inc(),
 });
 ```
 

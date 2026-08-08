@@ -8612,6 +8612,7 @@ export class DeferTimer {
  */
 
 import { randomUUID } from "node:crypto";
+import { log } from "../ports.js";
 import type {
   BatchHandler,
   BlockedLease,
@@ -8727,6 +8728,43 @@ export type DrainCycle<TEvents extends Schemas> = {
 };
 
 /**
+ * Terminal result for a stream whose retry budget was spent without a single
+ * attempt ever reaching the block decision — or \`undefined\` when the stream
+ * still has budget.
+ *
+ * The budget is consulted on the *error* path (\`finalize\` returns early when
+ * a handler didn't throw), so it only terminates handlers that fail loudly. A
+ * handler that fails by overrunning its lease never throws: it completes,
+ * submits an ack the store drops (\`WHERE leased_by = by\`), and the next claim
+ * bumps \`retry\` again. \`retry\` climbs without bound, the watermark never
+ * advances, and the side effect re-runs forever — the one outcome
+ * \`blockOnError\` exists to prevent (#1418).
+ *
+ * The threshold is strictly greater than \`maxRetries\`, not \`>=\`, and that is
+ * load-bearing. A stream legitimately reaches \`retry === maxRetries\` on its
+ * final attempt, which \`finalize\` is entitled to run and block only if it
+ * fails again. Blocking here at \`>=\` would take that attempt away and change
+ * every error-driven path. At \`>\` the only way to arrive is with the budget
+ * already spent and no attempt having produced an error — a lease lost every
+ * single round, which is the stuck stream and nothing else.
+ *
+ * Gated on \`blockOnError\` for the same reason \`finalize\` is: an operator who
+ * opted out of blocking chose "retry forever," and that choice holds here too.
+ *
+ * @internal
+ */
+function budget_exhausted<TEvents extends Schemas>(
+  lease: Lease,
+  options: ReactionPayload<TEvents>["options"] | undefined
+): HandleResult | undefined {
+  if (!options?.blockOnError || lease.retry <= options.maxRetries)
+    return undefined;
+  const error = \`Blocking \${lease.stream} after \${lease.retry} claims with no acknowledged progress — the lease was lost on every attempt, so the retry budget (\${options.maxRetries}) was spent without the handler ever reporting an error. Raise leaseMillis for this handler, then unblock the stream.\`;
+  log().error(error);
+  return { lease, handled: 0, acked_at: lease.at, error, block: true };
+}
+
+/**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
  *
@@ -8819,6 +8857,8 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
+      const exhausted = budget_exhausted(lease, payloads[0]?.options);
+      if (exhausted) return Promise.resolve(exhausted);
       const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
         return handle_batch({ ...lease, at }, payloads, batchHandler);
@@ -8866,18 +8906,34 @@ export async function run_drain_cycle<
 
   if (blocked.length) on_blocked(blocked);
 
-  const acked = await ops.ack(
-    handled.flatMap((h, i) => {
-      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
-      return h.defer !== undefined
-        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
-        : h.next_attempt_at !== undefined
-          ? { ...h.lease, at: advance, due: h.next_attempt_at }
-          : h.handled > 0 || !h.error
-            ? { ...h.lease, at: h.acked_at }
-            : [];
-    })
-  );
+  const submitted = handled.flatMap((h, i) => {
+    const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+    return h.defer !== undefined
+      ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+      : h.next_attempt_at !== undefined
+        ? { ...h.lease, at: advance, due: h.next_attempt_at }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : [];
+  });
+  const acked = await ops.ack(submitted);
+
+  // Every adapter gates \`ack\` on the lease still being held
+  // (\`WHERE leased_by = by\`) — correctly, since that is what stops an
+  // evicted holder from regressing a watermark a competitor advanced. But
+  // the loss came back as a SHORT RETURN with no error, and nothing compared
+  // the two, so a worker whose lease was stolen mid-handler discarded a full
+  // round of work with no signal anywhere (#1418).
+  //
+  // Deferred entries are excluded from ack's return by contract, so they are
+  // not "missing" — only non-due submissions are counted here.
+  const expected = submitted.filter((l) => l.due === undefined).length;
+  if (acked.length < expected)
+    log().error(
+      new Error(
+        \`drain: \${expected - acked.length} of \${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.\`
+      )
+    );
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, \`defer === undefined\`), which advances the
@@ -25886,6 +25942,7 @@ export class DeferTimer {
  */
 
 import { randomUUID } from "node:crypto";
+import { log } from "../ports.js";
 import type {
   BatchHandler,
   BlockedLease,
@@ -26001,6 +26058,43 @@ export type DrainCycle<TEvents extends Schemas> = {
 };
 
 /**
+ * Terminal result for a stream whose retry budget was spent without a single
+ * attempt ever reaching the block decision — or \`undefined\` when the stream
+ * still has budget.
+ *
+ * The budget is consulted on the *error* path (\`finalize\` returns early when
+ * a handler didn't throw), so it only terminates handlers that fail loudly. A
+ * handler that fails by overrunning its lease never throws: it completes,
+ * submits an ack the store drops (\`WHERE leased_by = by\`), and the next claim
+ * bumps \`retry\` again. \`retry\` climbs without bound, the watermark never
+ * advances, and the side effect re-runs forever — the one outcome
+ * \`blockOnError\` exists to prevent (#1418).
+ *
+ * The threshold is strictly greater than \`maxRetries\`, not \`>=\`, and that is
+ * load-bearing. A stream legitimately reaches \`retry === maxRetries\` on its
+ * final attempt, which \`finalize\` is entitled to run and block only if it
+ * fails again. Blocking here at \`>=\` would take that attempt away and change
+ * every error-driven path. At \`>\` the only way to arrive is with the budget
+ * already spent and no attempt having produced an error — a lease lost every
+ * single round, which is the stuck stream and nothing else.
+ *
+ * Gated on \`blockOnError\` for the same reason \`finalize\` is: an operator who
+ * opted out of blocking chose "retry forever," and that choice holds here too.
+ *
+ * @internal
+ */
+function budget_exhausted<TEvents extends Schemas>(
+  lease: Lease,
+  options: ReactionPayload<TEvents>["options"] | undefined
+): HandleResult | undefined {
+  if (!options?.blockOnError || lease.retry <= options.maxRetries)
+    return undefined;
+  const error = \`Blocking \${lease.stream} after \${lease.retry} claims with no acknowledged progress — the lease was lost on every attempt, so the retry budget (\${options.maxRetries}) was spent without the handler ever reporting an error. Raise leaseMillis for this handler, then unblock the stream.\`;
+  log().error(error);
+  return { lease, handled: 0, acked_at: lease.at, error, block: true };
+}
+
+/**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
  *
@@ -26093,6 +26187,8 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
+      const exhausted = budget_exhausted(lease, payloads[0]?.options);
+      if (exhausted) return Promise.resolve(exhausted);
       const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
         return handle_batch({ ...lease, at }, payloads, batchHandler);
@@ -26140,18 +26236,34 @@ export async function run_drain_cycle<
 
   if (blocked.length) on_blocked(blocked);
 
-  const acked = await ops.ack(
-    handled.flatMap((h, i) => {
-      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
-      return h.defer !== undefined
-        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
-        : h.next_attempt_at !== undefined
-          ? { ...h.lease, at: advance, due: h.next_attempt_at }
-          : h.handled > 0 || !h.error
-            ? { ...h.lease, at: h.acked_at }
-            : [];
-    })
-  );
+  const submitted = handled.flatMap((h, i) => {
+    const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+    return h.defer !== undefined
+      ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+      : h.next_attempt_at !== undefined
+        ? { ...h.lease, at: advance, due: h.next_attempt_at }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : [];
+  });
+  const acked = await ops.ack(submitted);
+
+  // Every adapter gates \`ack\` on the lease still being held
+  // (\`WHERE leased_by = by\`) — correctly, since that is what stops an
+  // evicted holder from regressing a watermark a competitor advanced. But
+  // the loss came back as a SHORT RETURN with no error, and nothing compared
+  // the two, so a worker whose lease was stolen mid-handler discarded a full
+  // round of work with no signal anywhere (#1418).
+  //
+  // Deferred entries are excluded from ack's return by contract, so they are
+  // not "missing" — only non-due submissions are counted here.
+  const expected = submitted.filter((l) => l.due === undefined).length;
+  if (acked.length < expected)
+    log().error(
+      new Error(
+        \`drain: \${expected - acked.length} of \${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.\`
+      )
+    );
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, \`defer === undefined\`), which advances the
@@ -39063,6 +39175,7 @@ import type { Actor } from "@rotorsoft/act";
 export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
 
 // === broadcast.ts ===
+import { log } from "@rotorsoft/act";
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -39101,6 +39214,34 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
  * single source of truth for ordering — no separate version counters.
  */
+/**
+ * Deliver a frame to every subscriber, containing each one individually.
+ *
+ * SSE subscribers are the least-trusted callbacks in the system — one per
+ * connection, driven by network state. The unguarded loop this replaces let
+ * the first thrower abort iteration, so every later subscriber lost the
+ * frame and the exception escaped into the host's commit path (#1423). Same
+ * containment principle the orchestrator applies to lifecycle listeners.
+ * Guarding each callback rather than the loop is the point: one guard around
+ * the whole loop would still let the first throw suppress the rest.
+ *
+ * @internal
+ */
+function fan_out<S extends BroadcastState>(
+  subs: Set<Subscriber<S>> | undefined,
+  msg: PatchMessage<S>,
+  on_error: (error: unknown) => void
+): void {
+  if (!subs?.size) return;
+  for (const cb of subs) {
+    try {
+      cb(msg);
+    } catch (error) {
+      on_error(error);
+    }
+  }
+}
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -39109,8 +39250,27 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * @param options.cacheSize - Max number of stream states kept in the LRU
    * cache (default 50).
    */
+  private on_subscriber_error: (error: unknown, streamId: string) => void;
+  private on_overlay_miss: (streamId: string) => void;
+
   constructor(options?: {
     cacheSize?: number;
+    /**
+     * Called when \`overlay()\` finds no cached baseline for the stream, so
+     * the update cannot be broadcast. Live subscribers receive nothing and
+     * have no way to notice — a host that cares should raise \`cacheSize\`,
+     * re-\`publish\` the stream, or push the viewers to refetch. Defaults to a
+     * no-op so existing behavior is unchanged apart from being observable.
+     */
+    onOverlayMiss?: (streamId: string) => void;
+    /**
+     * Called when a subscriber callback throws. The frame is still delivered
+     * to every other subscriber and the publish still returns normally — a
+     * bad consumer must not break the publisher (#1423). Defaults to the
+     * framework's \`log()\` port, so it lands wherever the host already
+     * routes framework logs.
+     */
+    onSubscriberError?: (error: unknown, streamId: string) => void;
     /**
      * Deprecated alias of \`cacheSize\` — removal in the next major. When
      * both are given, \`cacheSize\` wins.
@@ -39121,6 +39281,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     this.state_cache = new StateCache<S>(
       options?.cacheSize ?? options?.cache_size ?? 50
     );
+    this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
+    this.on_subscriber_error =
+      options?.onSubscriberError ??
+      ((error, streamId) =>
+        log().error(error, \`sse subscriber threw for "\${streamId}"\`));
   }
 
   /**
@@ -39144,10 +39309,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       msg[baseV + i + 1] = p;
     });
 
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -39161,7 +39325,29 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
     const prev = this.state_cache.get(streamId);
-    if (!prev) return undefined;
+    if (!prev) {
+      // No baseline to read-modify-write, so nothing is broadcast — and
+      // because no frame is emitted there is nothing for a live client to
+      // classify as \`behind\`, so it never refetches either. Unlike a domain
+      // commit (which repopulates the cache via \`publish\`), an overlay-only
+      // stream never recovers. The defaults make this reachable rather than
+      // exotic: \`cacheSize\` is 50 while a host may hold far more live
+      // subscriptions, and cache promotion happens at connect time, so a
+      // busy-but-not-committing stream ages out while fully subscribed.
+      //
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
+      this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
+      return undefined;
+    }
 
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
@@ -39170,10 +39356,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -39863,11 +40048,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -39902,6 +40094,7 @@ import type { Actor } from "@rotorsoft/act";
 export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
 
 // === broadcast.ts ===
+import { log } from "@rotorsoft/act";
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -39940,6 +40133,34 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
  * single source of truth for ordering — no separate version counters.
  */
+/**
+ * Deliver a frame to every subscriber, containing each one individually.
+ *
+ * SSE subscribers are the least-trusted callbacks in the system — one per
+ * connection, driven by network state. The unguarded loop this replaces let
+ * the first thrower abort iteration, so every later subscriber lost the
+ * frame and the exception escaped into the host's commit path (#1423). Same
+ * containment principle the orchestrator applies to lifecycle listeners.
+ * Guarding each callback rather than the loop is the point: one guard around
+ * the whole loop would still let the first throw suppress the rest.
+ *
+ * @internal
+ */
+function fan_out<S extends BroadcastState>(
+  subs: Set<Subscriber<S>> | undefined,
+  msg: PatchMessage<S>,
+  on_error: (error: unknown) => void
+): void {
+  if (!subs?.size) return;
+  for (const cb of subs) {
+    try {
+      cb(msg);
+    } catch (error) {
+      on_error(error);
+    }
+  }
+}
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -39948,8 +40169,27 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * @param options.cacheSize - Max number of stream states kept in the LRU
    * cache (default 50).
    */
+  private on_subscriber_error: (error: unknown, streamId: string) => void;
+  private on_overlay_miss: (streamId: string) => void;
+
   constructor(options?: {
     cacheSize?: number;
+    /**
+     * Called when \`overlay()\` finds no cached baseline for the stream, so
+     * the update cannot be broadcast. Live subscribers receive nothing and
+     * have no way to notice — a host that cares should raise \`cacheSize\`,
+     * re-\`publish\` the stream, or push the viewers to refetch. Defaults to a
+     * no-op so existing behavior is unchanged apart from being observable.
+     */
+    onOverlayMiss?: (streamId: string) => void;
+    /**
+     * Called when a subscriber callback throws. The frame is still delivered
+     * to every other subscriber and the publish still returns normally — a
+     * bad consumer must not break the publisher (#1423). Defaults to the
+     * framework's \`log()\` port, so it lands wherever the host already
+     * routes framework logs.
+     */
+    onSubscriberError?: (error: unknown, streamId: string) => void;
     /**
      * Deprecated alias of \`cacheSize\` — removal in the next major. When
      * both are given, \`cacheSize\` wins.
@@ -39960,6 +40200,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     this.state_cache = new StateCache<S>(
       options?.cacheSize ?? options?.cache_size ?? 50
     );
+    this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
+    this.on_subscriber_error =
+      options?.onSubscriberError ??
+      ((error, streamId) =>
+        log().error(error, \`sse subscriber threw for "\${streamId}"\`));
   }
 
   /**
@@ -39983,10 +40228,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       msg[baseV + i + 1] = p;
     });
 
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -40000,7 +40244,29 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
     const prev = this.state_cache.get(streamId);
-    if (!prev) return undefined;
+    if (!prev) {
+      // No baseline to read-modify-write, so nothing is broadcast — and
+      // because no frame is emitted there is nothing for a live client to
+      // classify as \`behind\`, so it never refetches either. Unlike a domain
+      // commit (which repopulates the cache via \`publish\`), an overlay-only
+      // stream never recovers. The defaults make this reachable rather than
+      // exotic: \`cacheSize\` is 50 while a host may hold far more live
+      // subscriptions, and cache promotion happens at connect time, so a
+      // busy-but-not-committing stream ages out while fully subscribed.
+      //
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
+      this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
+      return undefined;
+    }
 
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
@@ -40009,10 +40275,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -41098,11 +41363,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -44097,6 +44369,13 @@ export function applyPatchMessage<S extends BroadcastState>(
     .filter((v) => Number.isInteger(v))
     .sort((a, b) => a - b);
 
+  // Server-forced resync: it could not construct a patch (e.g. \`overlay()\`
+  // found the baseline evicted), so the client must refetch. Checked before
+  // anything else — a resync frame carries no versions, and the empty-frame
+  // branch below would otherwise report it as \`stale\`, which is the one
+  // answer that does NOT refetch (#1423).
+  if (msg._resync) return { ok: false, reason: "behind" };
+
   if (!versions.length) return { ok: false, reason: "stale" };
 
   const minV = versions[0];
@@ -44143,6 +44422,7 @@ export function applyPatchMessage<S extends BroadcastState>(
 }
 
 // === broadcast.ts ===
+import { log } from "@rotorsoft/act";
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -44181,6 +44461,34 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
  * single source of truth for ordering — no separate version counters.
  */
+/**
+ * Deliver a frame to every subscriber, containing each one individually.
+ *
+ * SSE subscribers are the least-trusted callbacks in the system — one per
+ * connection, driven by network state. The unguarded loop this replaces let
+ * the first thrower abort iteration, so every later subscriber lost the
+ * frame and the exception escaped into the host's commit path (#1423). Same
+ * containment principle the orchestrator applies to lifecycle listeners.
+ * Guarding each callback rather than the loop is the point: one guard around
+ * the whole loop would still let the first throw suppress the rest.
+ *
+ * @internal
+ */
+function fan_out<S extends BroadcastState>(
+  subs: Set<Subscriber<S>> | undefined,
+  msg: PatchMessage<S>,
+  on_error: (error: unknown) => void
+): void {
+  if (!subs?.size) return;
+  for (const cb of subs) {
+    try {
+      cb(msg);
+    } catch (error) {
+      on_error(error);
+    }
+  }
+}
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -44189,8 +44497,27 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * @param options.cacheSize - Max number of stream states kept in the LRU
    * cache (default 50).
    */
+  private on_subscriber_error: (error: unknown, streamId: string) => void;
+  private on_overlay_miss: (streamId: string) => void;
+
   constructor(options?: {
     cacheSize?: number;
+    /**
+     * Called when \`overlay()\` finds no cached baseline for the stream, so
+     * the update cannot be broadcast. Live subscribers receive nothing and
+     * have no way to notice — a host that cares should raise \`cacheSize\`,
+     * re-\`publish\` the stream, or push the viewers to refetch. Defaults to a
+     * no-op so existing behavior is unchanged apart from being observable.
+     */
+    onOverlayMiss?: (streamId: string) => void;
+    /**
+     * Called when a subscriber callback throws. The frame is still delivered
+     * to every other subscriber and the publish still returns normally — a
+     * bad consumer must not break the publisher (#1423). Defaults to the
+     * framework's \`log()\` port, so it lands wherever the host already
+     * routes framework logs.
+     */
+    onSubscriberError?: (error: unknown, streamId: string) => void;
     /**
      * Deprecated alias of \`cacheSize\` — removal in the next major. When
      * both are given, \`cacheSize\` wins.
@@ -44201,6 +44528,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     this.state_cache = new StateCache<S>(
       options?.cacheSize ?? options?.cache_size ?? 50
     );
+    this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
+    this.on_subscriber_error =
+      options?.onSubscriberError ??
+      ((error, streamId) =>
+        log().error(error, \`sse subscriber threw for "\${streamId}"\`));
   }
 
   /**
@@ -44224,10 +44556,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       msg[baseV + i + 1] = p;
     });
 
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -44241,7 +44572,29 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
     const prev = this.state_cache.get(streamId);
-    if (!prev) return undefined;
+    if (!prev) {
+      // No baseline to read-modify-write, so nothing is broadcast — and
+      // because no frame is emitted there is nothing for a live client to
+      // classify as \`behind\`, so it never refetches either. Unlike a domain
+      // commit (which repopulates the cache via \`publish\`), an overlay-only
+      // stream never recovers. The defaults make this reachable rather than
+      // exotic: \`cacheSize\` is 50 while a host may hold far more live
+      // subscriptions, and cache promotion happens at connect time, so a
+      // busy-but-not-committing stream ages out while fully subscribed.
+      //
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
+      this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
+      return undefined;
+    }
 
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
@@ -44250,10 +44603,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -44503,11 +44855,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -44542,6 +44901,7 @@ import type { Actor } from "@rotorsoft/act";
 export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
 
 // === broadcast.ts ===
+import { log } from "@rotorsoft/act";
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -44580,6 +44940,34 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
  * single source of truth for ordering — no separate version counters.
  */
+/**
+ * Deliver a frame to every subscriber, containing each one individually.
+ *
+ * SSE subscribers are the least-trusted callbacks in the system — one per
+ * connection, driven by network state. The unguarded loop this replaces let
+ * the first thrower abort iteration, so every later subscriber lost the
+ * frame and the exception escaped into the host's commit path (#1423). Same
+ * containment principle the orchestrator applies to lifecycle listeners.
+ * Guarding each callback rather than the loop is the point: one guard around
+ * the whole loop would still let the first throw suppress the rest.
+ *
+ * @internal
+ */
+function fan_out<S extends BroadcastState>(
+  subs: Set<Subscriber<S>> | undefined,
+  msg: PatchMessage<S>,
+  on_error: (error: unknown) => void
+): void {
+  if (!subs?.size) return;
+  for (const cb of subs) {
+    try {
+      cb(msg);
+    } catch (error) {
+      on_error(error);
+    }
+  }
+}
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -44588,8 +44976,27 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * @param options.cacheSize - Max number of stream states kept in the LRU
    * cache (default 50).
    */
+  private on_subscriber_error: (error: unknown, streamId: string) => void;
+  private on_overlay_miss: (streamId: string) => void;
+
   constructor(options?: {
     cacheSize?: number;
+    /**
+     * Called when \`overlay()\` finds no cached baseline for the stream, so
+     * the update cannot be broadcast. Live subscribers receive nothing and
+     * have no way to notice — a host that cares should raise \`cacheSize\`,
+     * re-\`publish\` the stream, or push the viewers to refetch. Defaults to a
+     * no-op so existing behavior is unchanged apart from being observable.
+     */
+    onOverlayMiss?: (streamId: string) => void;
+    /**
+     * Called when a subscriber callback throws. The frame is still delivered
+     * to every other subscriber and the publish still returns normally — a
+     * bad consumer must not break the publisher (#1423). Defaults to the
+     * framework's \`log()\` port, so it lands wherever the host already
+     * routes framework logs.
+     */
+    onSubscriberError?: (error: unknown, streamId: string) => void;
     /**
      * Deprecated alias of \`cacheSize\` — removal in the next major. When
      * both are given, \`cacheSize\` wins.
@@ -44600,6 +45007,11 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     this.state_cache = new StateCache<S>(
       options?.cacheSize ?? options?.cache_size ?? 50
     );
+    this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
+    this.on_subscriber_error =
+      options?.onSubscriberError ??
+      ((error, streamId) =>
+        log().error(error, \`sse subscriber threw for "\${streamId}"\`));
   }
 
   /**
@@ -44623,10 +45035,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       msg[baseV + i + 1] = p;
     });
 
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -44640,7 +45051,29 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
     const prev = this.state_cache.get(streamId);
-    if (!prev) return undefined;
+    if (!prev) {
+      // No baseline to read-modify-write, so nothing is broadcast — and
+      // because no frame is emitted there is nothing for a live client to
+      // classify as \`behind\`, so it never refetches either. Unlike a domain
+      // commit (which repopulates the cache via \`publish\`), an overlay-only
+      // stream never recovers. The defaults make this reachable rather than
+      // exotic: \`cacheSize\` is 50 while a host may hold far more live
+      // subscriptions, and cache promotion happens at connect time, so a
+      // busy-but-not-committing stream ages out while fully subscribed.
+      //
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
+      this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
+      return undefined;
+    }
 
     const state = apply_patch(prev, overlay_patch) as S;
     this.state_cache.set(streamId, state);
@@ -44649,10 +45082,9 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
-    const subs = this.channels.get(streamId);
-    if (subs?.size) {
-      for (const cb of subs) cb(msg);
-    }
+    fan_out(this.channels.get(streamId), msg, (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
     return msg;
   }
 
@@ -45812,11 +46244,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -54157,6 +54596,7 @@ import type {
   Schemas,
   Store,
   StoreNotification,
+  StreamPosition,
 } from "@rotorsoft/act/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
@@ -55122,6 +55562,49 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(leasedB.length).toBeGreaterThan(0);
         expect(leasedB.find((l) => l.stream === s)).toBeUndefined();
         expect(leasedB.find((l) => l.stream === other)).toBeDefined();
+      });
+
+      // The two halves of what happens when a holder overruns its lease
+      // (#1418). Both are load-bearing for the drain: the first is why a
+      // slow worker's round of work is discarded, the second is why the
+      // budget still accrues so a later holder can act on it.
+      it("drops the ack of a holder whose lease was taken, and accrues retry per claim", async () => {
+        const s = \`claim-stolen-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2)],
+          make_meta({ stream: s })
+        );
+
+        // A takes a lease it will overrun.
+        const leasedA = await store.claim(100, 0, \`wA-\${uid()}\`, 1);
+        const a = leasedA.find((l) => l.stream === s) as Lease;
+        expect(a).toBeDefined();
+        expect(a.retry).toBe(0);
+
+        // The lease lapses while A is still "working".
+        await new Promise((r) => setTimeout(r, 50));
+
+        // B steals it, and the claim advances the budget again.
+        const leasedB = await store.claim(100, 0, \`wB-\${uid()}\`, 100_000);
+        const b = leasedB.find((l) => l.stream === s) as Lease;
+        expect(b).toBeDefined();
+        expect(b.retry).toBe(1);
+
+        // A finishes and acks — too late. A short return, not an error:
+        // the ownership guard is what stops A regressing a watermark B is
+        // about to advance.
+        const late = await store.ack([{ ...a, at: a.at + 1 }]);
+        expect(late).toEqual([]);
+
+        // A's watermark never landed, and the budget B will see keeps the
+        // count of claims that produced no acknowledged progress.
+        const rows: StreamPosition[] = [];
+        await store.query_streams((r) => rows.push(r), { stream: s });
+        expect(rows[0]?.at).toBe(a.at);
+        expect(rows[0]?.retry).toBe(1);
+        expect(rows[0]?.blocked).toBe(false);
       });
 
       it("supports dual frontiers (lagging + leading)", async () => {
