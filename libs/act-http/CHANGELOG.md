@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.8.21](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.20...@rotorsoft/act-http-v1.8.21) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-http:** classify overlay frames exhaustively before the fold ([409c86e](https://github.com/rotorsoft/act-root/commit/409c86e687fce7629832f70a16ac5bfa08c5a988)), closes [#1312](https://github.com/rotorsoft/act-root/issues/1312) [#1346](https://github.com/rotorsoft/act-root/issues/1346) [#1419](https://github.com/rotorsoft/act-root/issues/1419)
+
 # [@rotorsoft/act-http-v1.8.20](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.19...@rotorsoft/act-http-v1.8.20) (2026-08-05)
 
 
