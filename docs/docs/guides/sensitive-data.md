@@ -72,6 +72,14 @@ Schema-evolution rules still apply. The reducer for `UserRegistered` continues t
 
 One build-time constraint to know: a state whose events declare any `sensitive(...)` field cannot also declare `.snap()`. Snapshots write derived state into `__snapshot__.data`, which `forget_pii` can't reach. Building an Act with that combination throws with a clear message — the misconfiguration is surfaced in dev, not silently months later. PII-aware states also bypass the snapshot cache by design; see [Cache contract on PII-aware states](#cache-contract-on-pii-aware-states) below.
 
+### Where `sensitive(...)` can sit
+
+`sensitive(...)` marks a schema wherever it appears in an event's top-level shape, including behind `.optional()`, `.nullable()`, `.default()`, `.readonly()`, and `.catch()`, and including inside a `z.union` / `z.discriminatedUnion` variant (a key sensitive in *any* variant is split, since the stored payload could be that variant).
+
+Refinements chained **after** the call are fine too — `sensitive(z.string()).min(1)` and `sensitive(z.string().min(1))` behave identically. They did not before [#1417](https://github.com/Rotorsoft/act-root/issues/1417): the marker was tracked per schema *instance*, and Zod creates a new instance for every refinement, so the first form silently lost its marker and wrote plaintext into `events.data`.
+
+The one place the marker is **not** followed is a field nested inside a `z.object` declared within the payload — only the event's own top-level keys are split. If you need PII in a nested object, lift it to a top-level key.
+
 ## Reading sensitive events — the auth-aware load
 
 `IAct.load` has two shapes that differ only in how they answer the question "is this caller allowed to see the plaintext?"

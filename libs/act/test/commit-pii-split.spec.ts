@@ -131,3 +131,88 @@ describe("commit-path PII split (#855 slice 3)", () => {
     expect(events[0].pii).toEqual({ email: "x@y.com" });
   });
 });
+
+// #1417 — `sensitive()` registered the schema INSTANCE in a WeakMap, and Zod
+// clones on every refinement, so `sensitive(z.string()).min(1)` silently lost
+// its marker: plaintext into events.data, plaintext out of the default-deny
+// read surface, and forget() reporting eventCount 0 while wiping nothing.
+// One paren from the documented form, with no signal anywhere.
+describe("sensitive() marker survival (#1417)", () => {
+  const marker_actor = { id: "a", name: "a" };
+
+  const build = (email: z.ZodType<string>) => {
+    const registered = z.object({ email, plan: z.string() });
+    return state({ M: z.object({ email: z.string(), plan: z.string() }) })
+      .init(() => ({ email: "", plan: "" }))
+      .emits({ MRegistered: registered })
+      .patch({
+        MRegistered: ({ data }) => ({ email: data.email, plan: data.plan }),
+      })
+      .on({ register: registered })
+      .emit((p) => ["MRegistered", p])
+      .build();
+  };
+
+  const split_for = async (email: z.ZodType<string>) => {
+    const app = act().withState(build(email)).build();
+    await app.do(
+      "register",
+      { stream: `m-${Math.random()}`, actor: marker_actor },
+      { email: "alice@example.com", plan: "pro" }
+    );
+    const rows: { data: unknown; pii?: unknown }[] = [];
+    await store().query((e) => rows.push(e as never));
+    await app.shutdown();
+    return rows[rows.length - 1];
+  };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("survives a refinement chained after sensitive()", async () => {
+    const row = await split_for(sensitive(z.string()).min(1));
+    expect(row?.pii).toEqual({ email: "alice@example.com" });
+    expect(row?.data).toEqual({ plan: "pro" });
+  });
+
+  it("survives .email(), .describe() and .refine() chains", async () => {
+    for (const email of [
+      sensitive(z.string()).email(),
+      sensitive(z.string()).describe("the email"),
+      sensitive(z.string()).refine((v) => v.length > 0),
+    ]) {
+      const row = await split_for(email as z.ZodType<string>);
+      expect(row?.pii).toEqual({ email: "alice@example.com" });
+    }
+  });
+
+  it("still works in the documented order", async () => {
+    const row = await split_for(sensitive(z.string().min(1)));
+    expect(row?.pii).toEqual({ email: "alice@example.com" });
+  });
+
+  it("splits pii declared inside a discriminated-union variant", async () => {
+    const contacted = z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("email"), email: sensitive(z.string()) }),
+      z.object({ kind: z.literal("phone"), phone: z.string() }),
+    ]);
+    const U = state({ U: z.object({ seen: z.boolean() }) })
+      .init(() => ({ seen: false }))
+      .emits({ Contacted: contacted })
+      .patch({ Contacted: () => ({ seen: true }) })
+      .on({ contact: contacted })
+      .emit((p) => ["Contacted", p])
+      .build();
+    const app = act().withState(U).build();
+    await app.do("contact", { stream: "u-union", actor: marker_actor }, {
+      kind: "email",
+      email: "alice@example.com",
+    } as never);
+    const rows: { data: unknown; pii?: unknown }[] = [];
+    await store().query((e) => rows.push(e as never), { stream: "u-union" });
+    expect(rows[0]?.pii).toEqual({ email: "alice@example.com" });
+    expect(rows[0]?.data).toEqual({ kind: "email" });
+    await app.shutdown();
+  });
+});
