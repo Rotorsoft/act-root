@@ -65,6 +65,33 @@ and import via `scan`/`restore` (see § Implementing `Store.restore` below
 and the inspector's transfer pipeline) — never point Act at a foreign table
 and try to reshape it in place.
 
+## What the framework does not validate for you
+
+The framework validates payloads against their Zod schemas and nothing else.
+It does **not** screen them for values your backing store happens to reject —
+that would mean walking every payload on the framework's hottest path to
+enforce one adapter's storage limits on all of them, and the walk costs
+multiples of the Zod parse it would ride along with.
+
+The known case is a **NUL byte** (`\u0000`). It is legal JSON and a legal JS
+string, so it passes Zod; InMemory and SQLite (TEXT) round-trip it; Postgres
+refuses it, from the jsonb parser for `data`/`meta`/`pii` (SQLSTATE `22P05`)
+and from the UTF-8 decoder for the text columns (`22021`). An app that works
+against SQLite in development can fail against Postgres in production on the
+same input.
+
+What an adapter owes its users here is a legible refusal, not silent
+sanitizing. `PostgresStore` catches both SQLSTATEs in `commit` and rethrows a
+`ValidationError` naming the stream and the events involved, keeping the
+driver's own wording so the SQLSTATE stays searchable
+([#1422](https://github.com/Rotorsoft/act-root/issues/1422)). Never strip or
+substitute the offending bytes — an event store that quietly rewrites what it
+was handed is worse than one that refuses it.
+
+If your backing store has its own such limit (identifier length caps, encoding
+restrictions, value-size ceilings), translate it the same way: catch at the
+boundary, name the stream, keep the driver's message.
+
 ## The TCK is the spec
 
 `@rotorsoft/act-tck` exports `runStoreTck`, a function you drop into your adapter's vitest suite:
