@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.14...@rotorsoft/act-pg-v1.13.15) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** keep a restarted stream's subscription and forget a retired one ([5b57672](https://github.com/rotorsoft/act-root/commit/5b57672dbe44d78e3deac16be8fcc9fb90118b19)), closes [#1363](https://github.com/rotorsoft/act-root/issues/1363) [#1398](https://github.com/rotorsoft/act-root/issues/1398)
+
 # [@rotorsoft/act-pg-v1.13.14](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.13...@rotorsoft/act-pg-v1.13.14) (2026-08-06)
 
 
