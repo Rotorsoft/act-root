@@ -115,6 +115,15 @@ describe("PostgresStore seed-sync contract", () => {
     // poison stream's ever-climbing retry counter never overflows.
     expect(await column_type(`${TABLE}_streams`, "retry")).toBe("integer");
 
+    // #1420: the legacy `varchar(100)` identifier columns are widened to
+    // `text`. The framework DERIVES identifiers from stream names — an
+    // `.autocloses` target is `"__autoclose__:" + stream` — so the cap broke
+    // framework-generated names, not just user input.
+    expect(await column_type(TABLE, "stream")).toBe("text");
+    expect(await column_type(TABLE, "name")).toBe("text");
+    expect(await column_type(`${TABLE}_streams`, "stream")).toBe("text");
+    expect(await column_type(`${TABLE}_streams`, "source")).toBe("text");
+
     // The superseded fetch index is gone; its replacement is present.
     const ix = await indexes(`${TABLE}_streams`);
     expect(ix).not.toContain(`${TABLE}_streams_fetch_ix`);
@@ -143,6 +152,18 @@ describe("PostgresStore seed-sync contract", () => {
       `SELECT count(*)::int AS n FROM "${SCHEMA}"."${TABLE}"`
     );
     expect(again[0].n).toBe(2);
+
+    // …and the widened columns actually accept an identifier past the old
+    // varchar(100) cap, including a derived `.autocloses` target.
+    const long_stream = `legacy-${"x".repeat(140)}`;
+    await store().commit(long_stream, [{ name: "opened", data: { n: 9 } }], {
+      correlation: "c",
+      causation: {},
+      stream: long_stream,
+    } as never);
+    await store().subscribe([
+      { stream: `__autoclose__:${long_stream}`, source: long_stream },
+    ]);
   });
 
   it("serializes concurrent cold boots on an empty schema", async () => {

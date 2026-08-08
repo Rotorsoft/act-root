@@ -522,9 +522,9 @@ export class PostgresStore implements Store {
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this._fqt} (
           id serial PRIMARY KEY,
-          name varchar(100) COLLATE pg_catalog."default" NOT NULL,
+          name text COLLATE pg_catalog."default" NOT NULL,
           data jsonb,
-          stream varchar(100) COLLATE pg_catalog."default" NOT NULL,
+          stream text COLLATE pg_catalog."default" NOT NULL,
           version int NOT NULL,
           created timestamptz NOT NULL DEFAULT now(),
           meta jsonb,
@@ -568,8 +568,8 @@ export class PostgresStore implements Store {
       // Streams table
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this._fqs} (
-          stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
-          source varchar(100) COLLATE pg_catalog."default",
+          stream text COLLATE pg_catalog."default" PRIMARY KEY,
+          source text COLLATE pg_catalog."default",
           at int NOT NULL DEFAULT -1,
           retry int NOT NULL DEFAULT -1,
           blocked boolean NOT NULL DEFAULT false,
@@ -623,6 +623,40 @@ export class PostgresStore implements Store {
          END
          $$;`
       );
+
+      // Migration for tables created before the identifier widening (#1420).
+      // `stream` / `source` / `name` were `varchar(100)`, while InMemory is
+      // unbounded and SQLite uses TEXT. The framework DERIVES identifiers that
+      // can exceed the cap — `.autocloses` synthesizes a target of
+      // `"__autoclose__:" + stream` (14 chars), so an 87-char stream commits
+      // fine and then its subscribe fails. `correlate-cycle` only advances its
+      // checkpoint after subscribe succeeds, so that throw pins the checkpoint
+      // and stalls EVERY dynamic-resolver reaction app-wide, restart included.
+      // `text` and `varchar` are byte-identical in PG storage and indexing, so
+      // this costs nothing. Guarded on the current type so steady-state
+      // re-seeds skip the DDL and its brief ACCESS EXCLUSIVE lock.
+      for (const [table, columns] of [
+        [this.config.table, ["stream", "name"]],
+        [`${this.config.table}_streams`, ["stream", "source"]],
+      ] as const) {
+        for (const column of columns) {
+          await client.query(
+            `DO $$
+             BEGIN
+               IF EXISTS (
+                 SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = '${this.config.schema}'
+                   AND table_name = '${table}'
+                   AND column_name = '${column}'
+                   AND data_type = 'character varying'
+               ) THEN
+                 EXECUTE 'ALTER TABLE "${this.config.schema}"."${table}" ALTER COLUMN ${column} TYPE text';
+               END IF;
+             END
+             $$;`
+          );
+        }
+      }
 
       // Composite index for `claim()` — `(blocked, priority DESC, at)`
       // matches the lagging-frontier ORDER BY exactly so the planner

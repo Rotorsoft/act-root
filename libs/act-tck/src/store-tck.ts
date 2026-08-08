@@ -2546,6 +2546,35 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
+    describe("long identifiers", () => {
+      it("accepts a stream name well past 100 characters (#1420)", async () => {
+        // The framework DERIVES identifiers from stream names — `.autocloses`
+        // synthesizes `"__autoclose__:" + stream` — so a cap here is not a
+        // user-input limit, it silently breaks framework-generated targets.
+        const tag = uid();
+        const long = `${tag}-${"x".repeat(140)}`;
+        await store.commit<CounterEvents>(
+          long,
+          [inc(1)],
+          make_meta({ stream: long })
+        );
+        await store.subscribe([
+          { stream: `__autoclose__:${long}`, source: long },
+        ]);
+
+        const seen: string[] = [];
+        await store.query<CounterEvents>((e) => seen.push(e.stream), {
+          stream: long,
+          stream_exact: true,
+        });
+        expect(seen).toEqual([long]);
+
+        const subs: string[] = [];
+        await store.query_streams((p) => subs.push(p.stream), { limit: 500 });
+        expect(subs).toContain(`__autoclose__:${long}`);
+      });
+    });
+
     describe("truncate", () => {
       it("keeps the subscription row for a restart target, drops it for a retire (#1398)", async () => {
         // The subscriptions table is keyed by TARGET name, and the
