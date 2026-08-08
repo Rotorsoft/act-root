@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.37](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.36...@rotorsoft/act-v1.23.37) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** block a stream whose lease is lost every round ([340e24f](https://github.com/rotorsoft/act-root/commit/340e24f698b09b015a9ca48e7c09e80d249d7692)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418)
+* **act:** report acks dropped by a stolen lease ([b648b23](https://github.com/rotorsoft/act-root/commit/b648b23c06d10ff546e97e6aa5104b469cb37569)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418)
+
 # [@rotorsoft/act-v1.23.36](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.35...@rotorsoft/act-v1.23.36) (2026-08-08)
 
 
