@@ -59,6 +59,36 @@ export const SHREDDED = "[SHREDDED]" as const;
 export const _registry = z.registry<{ sensitive: true }>();
 
 /**
+ * Marker key stamped onto a schema's own `def`. Zod clones a schema on every
+ * refinement (`.min()`, `.email()`, `.trim()`, `.describe()`, `.refine()`,
+ * `.transform()`, …) via `{...def}`, which copies own symbol keys — so a
+ * marker on the def survives the whole chain, while the `_registry` WeakMap
+ * (keyed on the *instance*) does not (#1417).
+ *
+ * The registry is still populated and still consulted: it covers schemas
+ * marked before this key existed, and it is the mechanism the public
+ * `sensitive()` doc-comment describes.
+ *
+ * @internal
+ */
+export const _SENSITIVE = Symbol.for("act.sensitive");
+
+/**
+ * Stamp the def-level marker. Called by the public `sensitive()` alongside
+ * `_registry.add`.
+ *
+ * @internal
+ */
+export function _mark_sensitive(schema: z.ZodType): void {
+  const def = (
+    schema as unknown as {
+      _zod?: { def?: Record<PropertyKey, unknown> };
+    }
+  )._zod?.def;
+  if (def) def[_SENSITIVE] = true;
+}
+
+/**
  * True when the given schema was marked via `sensitive(...)`.
  *
  * Walks through Zod wrapper layers (`.optional()`, `.nullable()`,
@@ -73,6 +103,14 @@ function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
+    // Def-level marker: survives the clone a refinement produces, which the
+    // instance-keyed registry above cannot (#1417).
+    const def = (
+      cur as unknown as {
+        _zod?: { def?: Record<PropertyKey, unknown> };
+      }
+    )._zod?.def;
+    if (def?.[_SENSITIVE] === true) return true;
     const inner = (cur as { _def?: { innerType?: z.ZodType } })._def?.innerType;
     if (!inner || inner === cur) return false;
     cur = inner;
@@ -95,12 +133,27 @@ function is_pii(schema: z.ZodType): boolean {
  */
 export function pii_fields(schema: z.ZodType): readonly string[] {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
-  if (!shape || typeof shape !== "object") return [];
-  const fields: string[] = [];
-  for (const key of Object.keys(shape)) {
-    if (is_pii(shape[key])) fields.push(key);
+  if (shape && typeof shape === "object") {
+    const fields: string[] = [];
+    for (const key of Object.keys(shape)) {
+      if (is_pii(shape[key])) fields.push(key);
+    }
+    return fields;
   }
-  return fields;
+  // A union event has no top-level shape, so reading `.shape` alone returned
+  // [] and dropped EVERY marker in every variant (#1417). Take the union of
+  // the options' field sets: a key that is sensitive in any variant must be
+  // split, because the stored payload could be that variant. This is not the
+  // documented nested-object carve-out below — here the union IS the top
+  // level.
+  const options = (schema as { options?: unknown }).options;
+  if (Array.isArray(options)) {
+    const fields = new Set<string>();
+    for (const option of options)
+      for (const key of pii_fields(option as z.ZodType)) fields.add(key);
+    return [...fields];
+  }
+  return [];
 }
 
 /**

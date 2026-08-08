@@ -3,7 +3,7 @@ import { type ZodObject, type ZodRawShape, z } from "zod";
 // a side-effect-free leaf, and going through the internal barrel would pull
 // tracing.ts → config.ts in at type-schema load time and crash on TDZ when a
 // test imports a public schema before config is initialized.
-import { _registry } from "../internal/sensitive.js";
+import { _mark_sensitive, _registry } from "../internal/sensitive.js";
 
 /**
  * @packageDocumentation
@@ -66,6 +66,10 @@ export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
  */
 export function sensitive<T extends z.ZodType>(schema: T): T {
   _registry.add(schema, { sensitive: true });
+  // Also stamp the def, so the marker survives the clone Zod produces for
+  // any refinement chained AFTER this call — `sensitive(z.string()).min(1)`
+  // used to lose it silently and write plaintext into `events.data` (#1417).
+  _mark_sensitive(schema);
   return schema;
 }
 

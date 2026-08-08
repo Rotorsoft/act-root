@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { pii_fields } from "../src/internal/sensitive.js";
+import { _mark_sensitive, pii_fields } from "../src/internal/sensitive.js";
 import { sensitive } from "../src/types/schemas.js";
 
 describe("sensitive()", () => {
@@ -93,5 +93,13 @@ describe("pii_fields()", () => {
       }),
     });
     expect(pii_fields(schema)).toEqual([]);
+  });
+
+  // The def-level marker (#1417) is what survives Zod's clone-on-refinement.
+  // If Zod ever moves `_zod.def`, marking degrades gracefully rather than
+  // throwing — the instance registry still covers the unchained case.
+  it("degrades gracefully when a schema exposes no _zod.def", () => {
+    expect(() => _mark_sensitive({} as never)).not.toThrow();
+    expect(() => _mark_sensitive({ _zod: {} } as never)).not.toThrow();
   });
 });
