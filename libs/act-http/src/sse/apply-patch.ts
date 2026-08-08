@@ -54,6 +54,13 @@ export function applyPatchMessage<S extends BroadcastState>(
     .filter((v) => Number.isInteger(v))
     .sort((a, b) => a - b);
 
+  // Server-forced resync: it could not construct a patch (e.g. `overlay()`
+  // found the baseline evicted), so the client must refetch. Checked before
+  // anything else — a resync frame carries no versions, and the empty-frame
+  // branch below would otherwise report it as `stale`, which is the one
+  // answer that does NOT refetch (#1423).
+  if (msg._resync) return { ok: false, reason: "behind" };
+
   if (!versions.length) return { ok: false, reason: "stale" };
 
   const minV = versions[0];
