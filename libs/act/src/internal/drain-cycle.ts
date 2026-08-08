@@ -16,6 +16,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { log } from "../ports.js";
 import type {
   BatchHandler,
   BlockedLease,
@@ -131,6 +132,43 @@ export type DrainCycle<TEvents extends Schemas> = {
 };
 
 /**
+ * Terminal result for a stream whose retry budget was spent without a single
+ * attempt ever reaching the block decision — or `undefined` when the stream
+ * still has budget.
+ *
+ * The budget is consulted on the *error* path (`finalize` returns early when
+ * a handler didn't throw), so it only terminates handlers that fail loudly. A
+ * handler that fails by overrunning its lease never throws: it completes,
+ * submits an ack the store drops (`WHERE leased_by = by`), and the next claim
+ * bumps `retry` again. `retry` climbs without bound, the watermark never
+ * advances, and the side effect re-runs forever — the one outcome
+ * `blockOnError` exists to prevent (#1418).
+ *
+ * The threshold is strictly greater than `maxRetries`, not `>=`, and that is
+ * load-bearing. A stream legitimately reaches `retry === maxRetries` on its
+ * final attempt, which `finalize` is entitled to run and block only if it
+ * fails again. Blocking here at `>=` would take that attempt away and change
+ * every error-driven path. At `>` the only way to arrive is with the budget
+ * already spent and no attempt having produced an error — a lease lost every
+ * single round, which is the stuck stream and nothing else.
+ *
+ * Gated on `blockOnError` for the same reason `finalize` is: an operator who
+ * opted out of blocking chose "retry forever," and that choice holds here too.
+ *
+ * @internal
+ */
+function budget_exhausted<TEvents extends Schemas>(
+  lease: Lease,
+  options: ReactionPayload<TEvents>["options"] | undefined
+): HandleResult | undefined {
+  if (!options?.blockOnError || lease.retry <= options.maxRetries)
+    return undefined;
+  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the lease was lost on every attempt, so the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. Raise leaseMillis for this handler, then unblock the stream.`;
+  log().error(error);
+  return { lease, handled: 0, acked_at: lease.at, error, block: true };
+}
+
+/**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
  *
@@ -223,6 +261,8 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
+      const exhausted = budget_exhausted(lease, payloads[0]?.options);
+      if (exhausted) return Promise.resolve(exhausted);
       const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
         return handle_batch({ ...lease, at }, payloads, batchHandler);
@@ -270,18 +310,34 @@ export async function run_drain_cycle<
 
   if (blocked.length) on_blocked(blocked);
 
-  const acked = await ops.ack(
-    handled.flatMap((h, i) => {
-      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
-      return h.defer !== undefined
-        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
-        : h.next_attempt_at !== undefined
-          ? { ...h.lease, at: advance, due: h.next_attempt_at }
-          : h.handled > 0 || !h.error
-            ? { ...h.lease, at: h.acked_at }
-            : [];
-    })
-  );
+  const submitted = handled.flatMap((h, i) => {
+    const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+    return h.defer !== undefined
+      ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+      : h.next_attempt_at !== undefined
+        ? { ...h.lease, at: advance, due: h.next_attempt_at }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : [];
+  });
+  const acked = await ops.ack(submitted);
+
+  // Every adapter gates `ack` on the lease still being held
+  // (`WHERE leased_by = by`) — correctly, since that is what stops an
+  // evicted holder from regressing a watermark a competitor advanced. But
+  // the loss came back as a SHORT RETURN with no error, and nothing compared
+  // the two, so a worker whose lease was stolen mid-handler discarded a full
+  // round of work with no signal anywhere (#1418).
+  //
+  // Deferred entries are excluded from ack's return by contract, so they are
+  // not "missing" — only non-due submissions are counted here.
+  const expected = submitted.filter((l) => l.due === undefined).length;
+  if (acked.length < expected)
+    log().error(
+      new Error(
+        `drain: ${expected - acked.length} of ${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.`
+      )
+    );
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, `defer === undefined`), which advances the

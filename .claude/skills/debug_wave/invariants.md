@@ -212,3 +212,40 @@ Eight bugs filed, every one reproduced red-first in the main loop with a control
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.
 - Vitest ignores specs outside the project root — a probe in `/tmp` or the scratchpad reports `No test files found`. Write probes into the package's `test/` dir, run, delete.
 - Any *real* fix that changes source text of a public export (adapters, `runStoreTck`) shifts the stability snapshots. Regenerate them **after** biome formats the source (`npx biome check --write` then `vitest -u` on the stability spec), and expect the rfc-gate to want an `rfc-gate: exempt — ...` line when the snapshot grows only from embedded test/comment text.
+
+### The retry budget is spent on the error path only (#1418)
+
+`finalize` returns early when a handler didn't throw, so `blockOnError` only
+ever terminates handlers that fail *loudly*. A handler that fails by
+overrunning its lease never throws: it completes, submits an ack the store
+drops (`WHERE leased_by = by`), and the next claim bumps `retry` again.
+Reproduced at store level against Postgres — five rounds of
+claim/steal/late-ack left `retry` at 9, `at` at -1, `blocked` false, forever.
+
+Two things follow for future waves:
+
+- **`retry` climbing without the watermark moving is not a store bug.** Every
+  adapter bumps `retry` in `claim` and resets it in a successful `ack`; the
+  climb is the budget accruing correctly. The gap was in who consults it.
+- **The consultation now also happens at claim time**, gated on
+  `blockOnError` and on `retry` **strictly greater** than `maxRetries`. Do not
+  "fix" that to `>=`: a stream legitimately reaches `retry === maxRetries` on
+  its final attempt and is entitled to run it. Only `>` is unreachable
+  without lease loss.
+
+Also settled: the losing worker can never repair this itself. Both `ack` and
+`block` are gated on `leased_by = by`, so an evicted holder's writes are
+no-ops by construction. Any fix has to run on the *next* holder, which is why
+it lives at claim and not at ack.
+
+**And a lesson about proving it.** The first version of this fix shipped with
+tests that mocked `store.ack` to return `[]` and rewrote `retry` on the way
+out of `claim` — they proved the guard fires when hand-fed the state, not that
+the state ever occurs. The real reproduction lived in a throwaway probe that
+got deleted. Lease theft is directly reproducible in a committed test: two
+`Act` instances over one store, a handler parked on a promise the test
+resolves, and a 1ms lease left to lapse. Deterministic (the park removes the
+race; only expiry touches the clock) and it runs on InMemory and Postgres
+alike. When a finding is about concurrency, the test has to contain the
+concurrency — a mock of the losing side's return value is a restatement of
+the hypothesis, not evidence for it.

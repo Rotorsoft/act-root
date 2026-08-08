@@ -153,7 +153,19 @@ Both primitives surface in the trace breadcrumb stream:
 - Optimistic concurrency: `ConcurrencyError` thrown to caller; the framework logs nothing extra (caller decides what to log)
 - Lease lifecycle: `>> claimed`, `>> acked`, `>> blocked` traces from `internal/drain-cycle.ts` decorators
 
+- Dropped acks: when a worker's lease is taken mid-handler, `Store.ack` confirms fewer entries than were submitted — the guard is `WHERE leased_by = by`, which is what stops an evicted holder from regressing a watermark a competitor advanced. The drain logs the difference ([#1418](https://github.com/Rotorsoft/act-root/issues/1418)). The work itself is redelivered under the at-least-once contract, so an occasional line is benign; a persistent stream of them means `leaseMillis` is sized below the handler's real duration.
+
 For a stuck stream, query `store.query_streams` directly — it returns the per-stream `at`, `retry`, `blocked`, and `leased_by/leased_until` without taking a lease. The act-inspector tool is built on this primitive.
+
+### When every attempt loses its lease
+
+The retry budget is an *error* budget: `blockOnError` is consulted on the failure path, so a handler that never throws never spends it. A handler that fails only by overrunning its lease does exactly that — it completes, submits an ack the store drops, and the next claim bumps `retry` again. Left alone, `retry` climbs without bound, the watermark never advances, and the side effect re-runs on every round, which is the one outcome `blockOnError` exists to prevent.
+
+The drain therefore checks the budget once more where it can still act on it: at claim time, holding the lease, before dispatching. A stream that arrives with `retry` **strictly greater** than `maxRetries` is blocked without running the handler.
+
+Strictly greater, not `>=`, and the difference matters. A stream legitimately reaches `retry === maxRetries` on its final attempt, and that attempt is entitled to run — it blocks only if it fails again. Arriving *past* the budget is only possible when no attempt ever produced an error, which means the lease was lost every single round. That is the stuck stream and nothing else. Recovery is the ordinary one: raise `leaseMillis` for that handler, then `app.unblock`.
+
+Operators who set `blockOnError: false` chose "retry forever" and keep it here too.
 
 ## Why no framework-level request deduplication
 
