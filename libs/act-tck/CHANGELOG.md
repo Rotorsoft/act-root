@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.40](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.39...@rotorsoft/act-tck-v1.27.40) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** keep a restarted stream's subscription and forget a retired one ([5b57672](https://github.com/rotorsoft/act-root/commit/5b57672dbe44d78e3deac16be8fcc9fb90118b19)), closes [#1363](https://github.com/rotorsoft/act-root/issues/1363) [#1398](https://github.com/rotorsoft/act-root/issues/1398)
+
 # [@rotorsoft/act-tck-v1.27.39](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.38...@rotorsoft/act-tck-v1.27.39) (2026-08-07)
 
 
