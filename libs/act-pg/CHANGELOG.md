@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.15...@rotorsoft/act-pg-v1.13.16) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-pg:** widen stream/source/name to text so derived identifiers fit ([ef4bd11](https://github.com/rotorsoft/act-root/commit/ef4bd1153a2845eeb9a5158a3a431c526a9e8c9e)), closes [#1190](https://github.com/rotorsoft/act-root/issues/1190) [#1420](https://github.com/rotorsoft/act-root/issues/1420)
+
 # [@rotorsoft/act-pg-v1.13.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.14...@rotorsoft/act-pg-v1.13.15) (2026-08-08)
 
 
