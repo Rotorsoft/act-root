@@ -67,6 +67,7 @@ import {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
+import { pii_fields } from "./sensitive.js";
 import { walk_streams } from "./walk-streams.js";
 
 /**
@@ -263,7 +264,32 @@ const make_schema_pass: PassFactory = (deps) => {
         return;
       }
       const schema = state.events[name];
-      const parsed = schema.safeParse(event.data);
+      // `sensitive()` keys are split out of `data` into the pii sidecar at
+      // commit — their absence from `data` is correct, not corruption. The
+      // pass reads raw stored rows, so parsing against the full schema
+      // reported every healthy sensitive event as invalid, one finding per
+      // event, burying the real ones (#1424). Omit those keys instead; the
+      // rest of the payload is still validated.
+      const sensitive = pii_fields(schema);
+      let parse_schema = schema;
+      if (sensitive.length > 0) {
+        const omitter = (
+          schema as unknown as {
+            omit?: (mask: Record<string, true>) => typeof schema;
+          }
+        ).omit;
+        if (typeof omitter !== "function") {
+          // A non-object schema (e.g. a union) whose variants carry pii —
+          // the split keys can't be masked off, so any parse here is a
+          // guaranteed false positive. Skip rather than cry wolf.
+          return;
+        }
+        parse_schema = omitter.call(
+          schema,
+          Object.fromEntries(sensitive.map((f) => [f, true as const]))
+        );
+      }
+      const parsed = parse_schema.safeParse(event.data);
       if (!parsed.success) {
         findings.push({
           category: "schema",

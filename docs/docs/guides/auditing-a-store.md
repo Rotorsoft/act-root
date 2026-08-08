@@ -60,6 +60,8 @@ Walks every event in the audit window, parses against the Zod schema the registr
 
 Findings carry the event id + stream so you can drill straight to the offending row. Zod's `error` object is forwarded for callers that want per-issue detail.
 
+`sensitive(...)` fields are masked off before the parse. Those keys live in the `pii` sidecar by design, so their absence from `data` is correct, not corruption — validating against the full schema reported every healthy sensitive event as invalid ([#1424](https://github.com/Rotorsoft/act-root/issues/1424)). The rest of the payload is still validated, so a genuinely malformed non-sensitive field is still caught. One case is skipped outright: an event whose schema is a `z.union` with sensitive fields in its variants, since the split keys can't be masked off a union — the pass reports nothing rather than a guaranteed false positive.
+
 **Remediation:** rewrite the affected reducers, version the event (`Foo` → `Foo_v2`), or `app.close()` the poisoned streams.
 
 ### `deprecated-load` → "close the heaviest legacy carriers"

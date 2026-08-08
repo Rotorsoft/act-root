@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { act, dispose, projection, sleep, state, store } from "../src/index.js";
+import {
+  act,
+  dispose,
+  projection,
+  sensitive,
+  sleep,
+  state,
+  store,
+} from "../src/index.js";
 import type { AuditFinding } from "../src/types/index.js";
 
 /**
@@ -1368,6 +1376,94 @@ describe("audit", () => {
         count: 2,
         snaps: 1,
       });
+      await app.shutdown();
+    });
+  });
+
+  // #1424 — `sensitive()` keys are split out of `data` into the pii sidecar
+  // at commit. The schema pass reads raw stored rows, so parsing against the
+  // full declared schema reported EVERY healthy sensitive event as
+  // `schema_validation_failed` — one false positive per event, which buries
+  // the real ones the category exists to surface.
+  describe("schema pass vs sensitive events (#1424)", () => {
+    const sens_actor = { id: "a", name: "a" };
+
+    const build = (mark: boolean) => {
+      const email = mark ? sensitive(z.string()) : z.string();
+      const registered = z.object({ email, plan: z.string() });
+      return state({ S: z.object({ email: z.string(), plan: z.string() }) })
+        .init(() => ({ email: "", plan: "" }))
+        .emits({ SRegistered: registered })
+        .patch({
+          SRegistered: ({ data }) => ({ email: data.email, plan: data.plan }),
+        })
+        .on({ register: registered })
+        .emit((p) => ["SRegistered", p])
+        .build();
+    };
+
+    const audit_reasons = async (mark: boolean) => {
+      const app = act().withState(build(mark)).build();
+      await app.do(
+        "register",
+        { stream: `s-${mark}`, actor: sens_actor },
+        { email: "alice@example.com", plan: "pro" }
+      );
+      const out: string[] = [];
+      for await (const f of app.audit(["schema"]))
+        out.push((f as { reason?: string }).reason ?? "?");
+      await app.shutdown();
+      return out;
+    };
+
+    it("does not flag a healthy sensitive event", async () => {
+      expect(await audit_reasons(true)).toEqual([]);
+    });
+
+    it("control — the same event without sensitive()", async () => {
+      expect(await audit_reasons(false)).toEqual([]);
+    });
+
+    it("skips a union event whose variants carry pii rather than false-flagging", async () => {
+      // Since #1417 a union's variants can declare sensitive fields, but a
+      // union has no `.omit()` — the split keys can't be masked off, so any
+      // parse here would be a guaranteed false positive.
+      const contacted = z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("email"), email: sensitive(z.string()) }),
+        z.object({ kind: z.literal("phone"), phone: z.string() }),
+      ]);
+      const U = state({ U: z.object({ seen: z.boolean() }) })
+        .init(() => ({ seen: false }))
+        .emits({ UContacted: contacted })
+        .patch({ UContacted: () => ({ seen: true }) })
+        .on({ contact: contacted })
+        .emit((p) => ["UContacted", p])
+        .build();
+      const app = act().withState(U).build();
+      await app.do("contact", { stream: "u-aud", actor: sens_actor }, {
+        kind: "email",
+        email: "alice@example.com",
+      } as never);
+      const out: string[] = [];
+      for await (const f of app.audit(["schema"]))
+        out.push((f as { reason?: string }).reason ?? "?");
+      expect(out).toEqual([]);
+      await app.shutdown();
+    });
+
+    it("still flags a genuinely malformed payload on a sensitive event", async () => {
+      const app = act().withState(build(true)).build();
+      // Commit past the builder so `plan` is the wrong type on disk — the
+      // non-sensitive half of the payload must still be validated.
+      await store().commit(
+        "s-bad",
+        [{ name: "SRegistered", data: { plan: 42 } }] as never,
+        { correlation: "c", causation: {}, stream: "s-bad" } as never
+      );
+      const out: string[] = [];
+      for await (const f of app.audit(["schema"]))
+        out.push((f as { reason?: string }).reason ?? "?");
+      expect(out).toContain("schema_validation_failed");
       await app.shutdown();
     });
   });
