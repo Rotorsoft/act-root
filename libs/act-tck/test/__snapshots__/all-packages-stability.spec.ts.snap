@@ -8612,6 +8612,7 @@ export class DeferTimer {
  */
 
 import { randomUUID } from "node:crypto";
+import { log } from "../ports.js";
 import type {
   BatchHandler,
   BlockedLease,
@@ -8866,18 +8867,34 @@ export async function run_drain_cycle<
 
   if (blocked.length) on_blocked(blocked);
 
-  const acked = await ops.ack(
-    handled.flatMap((h, i) => {
-      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
-      return h.defer !== undefined
-        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
-        : h.next_attempt_at !== undefined
-          ? { ...h.lease, at: advance, due: h.next_attempt_at }
-          : h.handled > 0 || !h.error
-            ? { ...h.lease, at: h.acked_at }
-            : [];
-    })
-  );
+  const submitted = handled.flatMap((h, i) => {
+    const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+    return h.defer !== undefined
+      ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+      : h.next_attempt_at !== undefined
+        ? { ...h.lease, at: advance, due: h.next_attempt_at }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : [];
+  });
+  const acked = await ops.ack(submitted);
+
+  // Every adapter gates \`ack\` on the lease still being held
+  // (\`WHERE leased_by = by\`) — correctly, since that is what stops an
+  // evicted holder from regressing a watermark a competitor advanced. But
+  // the loss came back as a SHORT RETURN with no error, and nothing compared
+  // the two, so a worker whose lease was stolen mid-handler discarded a full
+  // round of work with no signal anywhere (#1418).
+  //
+  // Deferred entries are excluded from ack's return by contract, so they are
+  // not "missing" — only non-due submissions are counted here.
+  const expected = submitted.filter((l) => l.due === undefined).length;
+  if (acked.length < expected)
+    log().error(
+      new Error(
+        \`drain: \${expected - acked.length} of \${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.\`
+      )
+    );
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, \`defer === undefined\`), which advances the
@@ -25847,6 +25864,7 @@ export class DeferTimer {
  */
 
 import { randomUUID } from "node:crypto";
+import { log } from "../ports.js";
 import type {
   BatchHandler,
   BlockedLease,
@@ -26101,18 +26119,34 @@ export async function run_drain_cycle<
 
   if (blocked.length) on_blocked(blocked);
 
-  const acked = await ops.ack(
-    handled.flatMap((h, i) => {
-      const advance = h.handled > 0 ? h.acked_at : leased[i].at;
-      return h.defer !== undefined
-        ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
-        : h.next_attempt_at !== undefined
-          ? { ...h.lease, at: advance, due: h.next_attempt_at }
-          : h.handled > 0 || !h.error
-            ? { ...h.lease, at: h.acked_at }
-            : [];
-    })
-  );
+  const submitted = handled.flatMap((h, i) => {
+    const advance = h.handled > 0 ? h.acked_at : leased[i].at;
+    return h.defer !== undefined
+      ? { ...h.lease, at: advance, due: h.defer, retry: -1 }
+      : h.next_attempt_at !== undefined
+        ? { ...h.lease, at: advance, due: h.next_attempt_at }
+        : h.handled > 0 || !h.error
+          ? { ...h.lease, at: h.acked_at }
+          : [];
+  });
+  const acked = await ops.ack(submitted);
+
+  // Every adapter gates \`ack\` on the lease still being held
+  // (\`WHERE leased_by = by\`) — correctly, since that is what stops an
+  // evicted holder from regressing a watermark a competitor advanced. But
+  // the loss came back as a SHORT RETURN with no error, and nothing compared
+  // the two, so a worker whose lease was stolen mid-handler discarded a full
+  // round of work with no signal anywhere (#1418).
+  //
+  // Deferred entries are excluded from ack's return by contract, so they are
+  // not "missing" — only non-due submissions are counted here.
+  const expected = submitted.filter((l) => l.due === undefined).length;
+  if (acked.length < expected)
+    log().error(
+      new Error(
+        \`drain: \${expected - acked.length} of \${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.\`
+      )
+    );
 
   // Collect close requests (#1090). A close result was already acked above
   // (its event made progress, \`defer === undefined\`), which advances the

@@ -153,6 +153,8 @@ Both primitives surface in the trace breadcrumb stream:
 - Optimistic concurrency: `ConcurrencyError` thrown to caller; the framework logs nothing extra (caller decides what to log)
 - Lease lifecycle: `>> claimed`, `>> acked`, `>> blocked` traces from `internal/drain-cycle.ts` decorators
 
+- Dropped acks: when a worker's lease is taken mid-handler, `Store.ack` confirms fewer entries than were submitted — the guard is `WHERE leased_by = by`, which is what stops an evicted holder from regressing a watermark a competitor advanced. The drain logs the difference ([#1418](https://github.com/Rotorsoft/act-root/issues/1418)). The work itself is redelivered under the at-least-once contract, so an occasional line is benign; a persistent stream of them means `leaseMillis` is sized below the handler's real duration.
+
 For a stuck stream, query `store.query_streams` directly — it returns the per-stream `at`, `retry`, `blocked`, and `leased_by/leased_until` without taking a lease. The act-inspector tool is built on this primitive.
 
 ## Why no framework-level request deduplication

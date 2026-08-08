@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   act,
   dispose,
+  log,
   NonRetryableError,
   StoreError,
   sleep,
@@ -470,6 +471,64 @@ describe("lifecycle listener containment (drain finalize)", () => {
     expect(blocked.length).toBe(1);
 
     spy.mockRestore();
+    await app.shutdown();
+  });
+});
+
+// #1418 — every adapter gates `ack` on the lease still being held, which is
+// correct: it stops an evicted holder regressing a watermark a competitor
+// advanced. But the loss came back as a SHORT RETURN with no error, and
+// nothing compared submitted against confirmed — so a worker whose lease was
+// stolen mid-handler discarded a full round of work with no signal anywhere.
+describe("dropped acks are reported (#1418)", () => {
+  const drop_actor = { id: "a", name: "a" };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("logs when the store confirms fewer acks than were submitted", async () => {
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function react() {})
+      .build();
+
+    // Simulate the lease being stolen mid-handler: the store accepts the
+    // call but confirms nothing, exactly as `WHERE leased_by = by` does for
+    // an evicted holder.
+    const spy = vi.spyOn(store(), "ack").mockResolvedValue([]);
+    const logged = vi.spyOn(log(), "error").mockImplementation(() => {});
+
+    await app.do("tick", { stream: "dropped", actor: drop_actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    expect(logged).toHaveBeenCalled();
+    expect(String(logged.mock.calls[0]?.[0])).toMatch(/acks were dropped/);
+
+    spy.mockRestore();
+    logged.mockRestore();
+    await app.shutdown();
+  });
+
+  it("control — a healthy ack logs nothing", async () => {
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function react() {})
+      .build();
+
+    const logged = vi.spyOn(log(), "error").mockImplementation(() => {});
+    await app.do("tick", { stream: "kept", actor: drop_actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    const drops = logged.mock.calls.filter((c) =>
+      String(c[0]).includes("acks were dropped")
+    );
+    expect(drops).toEqual([]);
+    logged.mockRestore();
     await app.shutdown();
   });
 });
