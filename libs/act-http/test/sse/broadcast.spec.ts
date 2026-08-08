@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { log } from "@rotorsoft/act";
+import { describe, expect, it, vi } from "vitest";
 import { BroadcastChannel } from "../../src/sse/broadcast.js";
 import type { BroadcastState, PatchMessage } from "../../src/sse/types.js";
 
@@ -196,5 +197,105 @@ describe("BroadcastChannel", () => {
     bc.publish("s1", makeState(1));
     expect(msgs1).toHaveLength(1);
     expect(msgs2).toHaveLength(0);
+  });
+});
+
+// #1423 — two delivery defects on the same fan-out path.
+describe("subscriber containment and overlay cache misses (#1423)", () => {
+  const st = (v: number, name = "n"): TestState =>
+    ({ _v: v, name, count: 1 }) as TestState;
+
+  it("one throwing subscriber does not suppress the others", () => {
+    const errors: string[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      onSubscriberError: (e) => errors.push((e as Error).message),
+    });
+    const delivered: string[] = [];
+    bc.subscribe("a", () => {
+      throw new Error("bad consumer");
+    });
+    bc.subscribe("a", () => delivered.push("second"));
+    bc.subscribe("a", () => delivered.push("third"));
+
+    // The publisher must not see someone else's consumer error.
+    expect(() => bc.publish("a", st(0), [{ count: 1 }])).not.toThrow();
+    expect(delivered).toEqual(["second", "third"]);
+    expect(errors).toEqual(["bad consumer"]);
+  });
+
+  it("contains a throwing subscriber on the overlay path too", () => {
+    const errors: unknown[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      onSubscriberError: (e) => errors.push(e),
+    });
+    const delivered: string[] = [];
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.subscribe("a", () => {
+      throw new Error("bad consumer");
+    });
+    bc.subscribe("a", () => delivered.push("second"));
+
+    expect(() => bc.overlay("a", { name: "alice" })).not.toThrow();
+    expect(delivered).toEqual(["second"]);
+    expect(errors).toHaveLength(1);
+  });
+
+  it("reports an overlay whose baseline was evicted", () => {
+    const missed: string[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 2,
+      onOverlayMiss: (id) => missed.push(id),
+    });
+    const frames: PatchMessage<TestState>[] = [];
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.subscribe("a", (m) => frames.push(m));
+    // Traffic on other streams evicts `a` from the size-2 cache.
+    bc.publish("b", st(0), [{ count: 1 }]);
+    bc.publish("c", st(0), [{ count: 1 }]);
+
+    expect(bc.overlay("a", { name: "alice" })).toBeUndefined();
+    // Still no frame — forcing a resync needs a new frame kind (RFC). What
+    // changes here is that the host can SEE the miss instead of it being
+    // silent.
+    expect(frames).toHaveLength(0);
+    expect(missed).toEqual(["a"]);
+  });
+
+  it("control — an overlay with its baseline cached delivers and reports no miss", () => {
+    const missed: string[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 50,
+      onOverlayMiss: (id) => missed.push(id),
+    });
+    const frames: PatchMessage<TestState>[] = [];
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.subscribe("a", (m) => frames.push(m));
+    bc.publish("b", st(0), [{ count: 1 }]);
+
+    expect(bc.overlay("a", { name: "alice" })).toBeDefined();
+    expect(frames).toHaveLength(1);
+    expect(missed).toEqual([]);
+  });
+
+  it("uses safe defaults when no hooks are supplied", () => {
+    const bc = new BroadcastChannel<TestState>({ cacheSize: 1 });
+    const delivered: string[] = [];
+    bc.subscribe("a", () => {
+      throw new Error("bad consumer");
+    });
+    bc.subscribe("a", () => delivered.push("second"));
+
+    const spy = vi.spyOn(log(), "error").mockImplementation(() => {});
+    // Default onSubscriberError routes through the framework logger; the
+    // frame still reaches the other subscribers.
+    expect(() => bc.publish("a", st(0), [{ count: 1 }])).not.toThrow();
+    expect(delivered).toEqual(["second"]);
+    expect(spy).toHaveBeenCalledOnce();
+    spy.mockRestore();
+
+    // Default onOverlayMiss is a silent no-op — behavior unchanged.
+    bc.publish("b", st(0), [{ count: 1 }]); // evicts "a" (cacheSize 1)
+    expect(() => bc.overlay("a", { name: "alice" })).not.toThrow();
+    expect(bc.overlay("a", { name: "alice" })).toBeUndefined();
   });
 });
