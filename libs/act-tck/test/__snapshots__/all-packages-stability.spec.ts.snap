@@ -48210,6 +48210,17 @@ export class PostgresStore implements Store {
       // schema at once serialize here instead. Transaction-scoped:
       // the lock releases at COMMIT/ROLLBACK, and steady-state
       // re-seeds pass through in microseconds.
+      // Two locks, because two different scopes are being guarded. The
+      // schema-scoped one covers \`CREATE SCHEMA\` below: keying only on
+      // \`schema.table\` let stores sharing a schema but using different table
+      // names hash to different keys, so their CREATE SCHEMA calls raced the
+      // catalog and all but one failed with a duplicate-key error on
+      // pg_namespace — \`IF NOT EXISTS\` is not atomic against a concurrent
+      // creator (#1421). The table-scoped one keeps the per-table DDL below
+      // concurrent across tables in the same schema.
+      await client.query(\`SELECT pg_advisory_xact_lock(hashtext($1))\`, [
+        this.config.schema,
+      ]);
       await client.query(\`SELECT pg_advisory_xact_lock(hashtext($1))\`, [
         \`\${this.config.schema}.\${this.config.table}\`,
       ]);

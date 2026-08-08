@@ -166,6 +166,30 @@ describe("PostgresStore seed-sync contract", () => {
     ]);
   });
 
+  // #1421 — the advisory lock was keyed `schema.table`, but the statement it
+  // guards is schema-wide. Stores sharing a schema with DIFFERENT table names
+  // hashed to different keys, so their CREATE SCHEMA calls raced the catalog
+  // and all but one failed. The existing case below shares a table, which is
+  // exactly the configuration that already worked.
+  it("serializes concurrent cold boots across different tables in one schema", async () => {
+    await pool().query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
+    const stores = ["t_a", "t_b", "t_c", "t_d", "t_e", "t_f"].map(
+      (table) => new PostgresStore({ port: PORT, schema: SCHEMA, table })
+    );
+    const results = await Promise.allSettled(stores.map((s) => s.seed()));
+    const failures = results.filter((r) => r.status === "rejected");
+    await Promise.all(stores.map((s) => s.dispose()));
+    expect(failures).toEqual([]);
+
+    // Every table landed in the one schema.
+    const { rows } = await pool().query(
+      `SELECT count(*)::int AS n FROM information_schema.tables
+       WHERE table_schema = $1 AND table_name = ANY($2)`,
+      [SCHEMA, ["t_a", "t_b", "t_c", "t_d", "t_e", "t_f"]]
+    );
+    expect(rows[0].n).toBe(6);
+  });
+
   it("serializes concurrent cold boots on an empty schema", async () => {
     await pool().query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
     // N workers booting at once: the transaction-scoped advisory lock
