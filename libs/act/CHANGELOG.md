@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.36](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.35...@rotorsoft/act-v1.23.36) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** mask sensitive keys before the audit schema parse ([b2c5b76](https://github.com/rotorsoft/act-root/commit/b2c5b76558d988b67404a983a68b7061c12d9ffd)), closes [#1417](https://github.com/rotorsoft/act-root/issues/1417) [#1310](https://github.com/rotorsoft/act-root/issues/1310) [#1424](https://github.com/rotorsoft/act-root/issues/1424)
+
 # [@rotorsoft/act-v1.23.35](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.34...@rotorsoft/act-v1.23.35) (2026-08-08)
 
 
