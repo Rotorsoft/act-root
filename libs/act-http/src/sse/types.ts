@@ -20,11 +20,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from `publish()` omit it.
+ *
+ * `_resync` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when `overlay()` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports `behind`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.

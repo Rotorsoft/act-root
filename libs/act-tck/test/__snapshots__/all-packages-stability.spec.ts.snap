@@ -39145,10 +39145,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // subscriptions, and cache promotion happens at connect time, so a
       // busy-but-not-committing stream ages out while fully subscribed.
       //
-      // Surfacing the miss is the fix in scope here (#1423). Actually
-      // forcing a resync needs a new frame kind on the wire — public surface,
-      // so an RFC — and is deliberately left out of a bug fix.
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
       this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
       return undefined;
     }
 
@@ -39851,11 +39858,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -40050,10 +40064,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // subscriptions, and cache promotion happens at connect time, so a
       // busy-but-not-committing stream ages out while fully subscribed.
       //
-      // Surfacing the miss is the fix in scope here (#1423). Actually
-      // forcing a resync needs a new frame kind on the wire — public surface,
-      // so an RFC — and is deliberately left out of a bug fix.
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
       this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
       return undefined;
     }
 
@@ -41152,11 +41173,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -44151,6 +44179,13 @@ export function applyPatchMessage<S extends BroadcastState>(
     .filter((v) => Number.isInteger(v))
     .sort((a, b) => a - b);
 
+  // Server-forced resync: it could not construct a patch (e.g. \`overlay()\`
+  // found the baseline evicted), so the client must refetch. Checked before
+  // anything else — a resync frame carries no versions, and the empty-frame
+  // branch below would otherwise report it as \`stale\`, which is the one
+  // answer that does NOT refetch (#1423).
+  if (msg._resync) return { ok: false, reason: "behind" };
+
   if (!versions.length) return { ok: false, reason: "stale" };
 
   const minV = versions[0];
@@ -44357,10 +44392,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // subscriptions, and cache promotion happens at connect time, so a
       // busy-but-not-committing stream ages out while fully subscribed.
       //
-      // Surfacing the miss is the fix in scope here (#1423). Actually
-      // forcing a resync needs a new frame kind on the wire — public surface,
-      // so an RFC — and is deliberately left out of a bug fix.
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
       this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
       return undefined;
     }
 
@@ -44623,11 +44665,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.
@@ -44822,10 +44871,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // subscriptions, and cache promotion happens at connect time, so a
       // busy-but-not-committing stream ages out while fully subscribed.
       //
-      // Surfacing the miss is the fix in scope here (#1423). Actually
-      // forcing a resync needs a new frame kind on the wire — public surface,
-      // so an RFC — and is deliberately left out of a bug fix.
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). \`on_overlay_miss\` still fires so
+      // a host can count these — a steady stream of them means \`cacheSize\`
+      // is too small for the working set.
       this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still \`undefined\`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
       return undefined;
     }
 
@@ -45998,11 +46054,18 @@ export type BroadcastState = Record<string, unknown> & {
  * to merge the entry on top of the client's caught-up state instead of
  * rejecting it as stale (a same-version patch WITHOUT the marker stays
  * stale). Ordinary version-bumping patches from \`publish()\` omit it.
+ *
+ * \`_resync\` carries no versions at all. The server emits it when it cannot
+ * construct a patch — today, when \`overlay()\` finds the stream's baseline
+ * evicted from the LRU. A client that receives one always reports \`behind\`
+ * and refetches. Without it the server had nothing to say in that case, so
+ * live subscribers silently stopped receiving presence updates and had no
+ * way to notice (#1423).
  */
 export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
   number,
   DeepPartial<S>
-> & { readonly _overlay?: true };
+> & { readonly _overlay?: true; readonly _resync?: true };
 
 /**
  * Subscriber callback — receives version-keyed patch messages.

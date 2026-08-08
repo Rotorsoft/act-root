@@ -1,5 +1,6 @@
 import { log } from "@rotorsoft/act";
 import { describe, expect, it, vi } from "vitest";
+import { applyPatchMessage } from "../../src/sse/apply-patch.js";
 import { BroadcastChannel } from "../../src/sse/broadcast.js";
 import type { BroadcastState, PatchMessage } from "../../src/sse/types.js";
 
@@ -253,11 +254,12 @@ describe("subscriber containment and overlay cache misses (#1423)", () => {
     bc.publish("b", st(0), [{ count: 1 }]);
     bc.publish("c", st(0), [{ count: 1 }]);
 
+    // No overlay state was produced, so the return stays undefined …
     expect(bc.overlay("a", { name: "alice" })).toBeUndefined();
-    // Still no frame — forcing a resync needs a new frame kind (RFC). What
-    // changes here is that the host can SEE the miss instead of it being
-    // silent.
-    expect(frames).toHaveLength(0);
+    // … but live subscribers get a resync frame so they refetch instead of
+    // silently missing the update forever.
+    expect(frames).toHaveLength(1);
+    expect(frames[0]._resync).toBe(true);
     expect(missed).toEqual(["a"]);
   });
 
@@ -297,5 +299,24 @@ describe("subscriber containment and overlay cache misses (#1423)", () => {
     bc.publish("b", st(0), [{ count: 1 }]); // evicts "a" (cacheSize 1)
     expect(() => bc.overlay("a", { name: "alice" })).not.toThrow();
     expect(bc.overlay("a", { name: "alice" })).toBeUndefined();
+  });
+
+  it("a resync frame makes the client refetch rather than go stale", () => {
+    // The frame carries no versions. Without the explicit branch the
+    // empty-frame path would report `stale`, which is the one answer that
+    // does NOT trigger a refetch.
+    const r = applyPatchMessage(
+      { _resync: true } as PatchMessage<TestState>,
+      { _v: 7, name: "n", count: 1 } as TestState
+    );
+    expect(r).toMatchObject({ ok: false, reason: "behind" });
+  });
+
+  it("a resync frame with no client baseline also reports behind", () => {
+    const r = applyPatchMessage(
+      { _resync: true } as PatchMessage<TestState>,
+      undefined
+    );
+    expect(r).toMatchObject({ ok: false, reason: "behind" });
   });
 });

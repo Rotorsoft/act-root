@@ -158,10 +158,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // subscriptions, and cache promotion happens at connect time, so a
       // busy-but-not-committing stream ages out while fully subscribed.
       //
-      // Surfacing the miss is the fix in scope here (#1423). Actually
-      // forcing a resync needs a new frame kind on the wire — public surface,
-      // so an RFC — and is deliberately left out of a bug fix.
+      // Emit a resync frame so live subscribers refetch instead of silently
+      // missing the update forever (#1423). `on_overlay_miss` still fires so
+      // a host can count these — a steady stream of them means `cacheSize`
+      // is too small for the working set.
       this.on_overlay_miss(streamId);
+      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
+      fan_out(this.channels.get(streamId), resync, (error) =>
+        this.on_subscriber_error(error, streamId)
+      );
+      // Still `undefined`: no overlay state was produced, and callers use the
+      // return value as "the patch I broadcast", which a resync is not.
       return undefined;
     }
 
