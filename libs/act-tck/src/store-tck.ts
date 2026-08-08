@@ -2547,6 +2547,42 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("truncate", () => {
+      it("keeps the subscription row for a restart target, drops it for a retire (#1398)", async () => {
+        // The subscriptions table is keyed by TARGET name, and the
+        // documented per-aggregate reaction shape `.to(e => ({target:
+        // e.stream}))` makes that collide with the event stream name. A
+        // restart keeps the stream alive, so its subscription must survive;
+        // a retire correctly drops it.
+        const tag = uid();
+        const restarted = `trunc-restart-${tag}`;
+        const retired = `trunc-retire-${tag}`;
+        for (const s of [restarted, retired]) {
+          await store.subscribe([{ stream: s }]);
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        }
+
+        await store.truncate([
+          {
+            stream: restarted,
+            snapshot: { count: 1 },
+            meta: make_meta({ stream: restarted }),
+          },
+          { stream: retired, meta: make_meta({ stream: retired }) },
+        ]);
+
+        const rows: string[] = [];
+        await store.query_streams((p) => rows.push(p.stream), {
+          stream: `trunc-.*-${tag}`,
+          limit: 100,
+        });
+        expect(rows).toContain(restarted);
+        expect(rows).not.toContain(retired);
+      });
+
       it("seeds a tombstone when no snapshot is provided", async () => {
         const s = `trunc-tomb-${uid()}`;
         await store.commit<CounterEvents>(

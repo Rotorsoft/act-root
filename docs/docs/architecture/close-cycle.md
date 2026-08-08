@@ -156,10 +156,14 @@ Atomic per-stream transaction. For each guarded stream:
 ```sql
 BEGIN
   DELETE FROM events WHERE stream = ?
-  DELETE FROM streams WHERE stream = ?
+  DELETE FROM streams WHERE stream = ?   -- retire only; a restart keeps its row
   INSERT INTO events (...)  -- the seed: __snapshot__ if restart, __tombstone__ otherwise
 COMMIT
 ```
+
+The subscription delete applies to a **retire** only. The subscriptions table is keyed by reaction *target*, and the documented per-aggregate shape `.to(event => ({ target: event.stream }))` makes target names and stream names collide by construction — so dropping the row for a `restart: true` close silently stopped that aggregate's reactions on a stream the restart exists to keep alive ([#1398](https://github.com/Rotorsoft/act-root/issues/1398)). Adapters distinguish the two by the presence of the seed `snapshot` on the truncate target.
+
+For a retire the delete is correct, and the orchestrator additionally forgets the target in its in-process dedup so a later re-opened stream of the same name is re-subscribed. Static targets are exempt: they are subscribed once at init and never re-opened through the dynamic path, so a full close retires them until the next process start.
 
 The seed is not optional. After truncate, the events table for this stream has exactly one row — either a snapshot (allowing future actions to start fresh from it) or a tombstone (closing the stream permanently).
 

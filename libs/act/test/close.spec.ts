@@ -632,3 +632,111 @@ describe("close restart on a sensitive-bearing state", () => {
     await pii_app.shutdown();
   });
 });
+
+describe("close and reaction subscriptions (#1398)", () => {
+  const sub_actor = { id: "a", name: "a" };
+  let seen: string[] = [];
+
+  const Thing = state({ Thing: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Bumped: z.object({}) })
+    .patch({ Bumped: (_e, s) => ({ n: s.n + 1 }) })
+    .on({ bump: z.object({}) })
+    .emit(() => ["Bumped", {}])
+    .build();
+
+  // The subscriptions table is keyed by TARGET; truncate deleted by event
+  // STREAM name. The documented per-aggregate shape makes those namespaces
+  // collide, so closing a stream silently killed its own reaction — no
+  // block, no error, nothing in blocked_streams.
+  const build_app = () =>
+    act()
+      .withState(Thing)
+      .on("Bumped")
+      .do(async function react(event) {
+        seen.push(`${event.stream}#${event.id}`);
+      })
+      .to((event) => ({ target: event.stream }))
+      .build();
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("keeps delivering to a restarted stream's per-aggregate reaction", async () => {
+    seen = [];
+    const app = build_app();
+
+    await app.do("bump", { stream: "R", actor: sub_actor }, {});
+    await app.do("bump", { stream: "C", actor: sub_actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    await app.close([{ stream: "R", restart: true }]);
+
+    await app.do("bump", { stream: "R", actor: sub_actor }, {});
+    await app.do("bump", { stream: "C", actor: sub_actor }, {});
+    await app.correlate();
+    await app.drain();
+    await app.correlate();
+    await app.drain();
+
+    const onR = seen.filter((s) => s.startsWith("R#")).length;
+    const onC = seen.filter((s) => s.startsWith("C#")).length;
+    expect(onC).toBe(2); // control
+    expect(onR).toBe(2); // restarted stream keeps working
+    await app.shutdown();
+  });
+
+  it("re-subscribes a fully-closed stream when it sees new activity", async () => {
+    seen = [];
+    const app = build_app();
+
+    await app.do("bump", { stream: "F", actor: sub_actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(seen.filter((s) => s.startsWith("F#")).length).toBe(1);
+
+    // A full close retires the stream and drops its subscription row —
+    // correct. The in-process dedup must forget it too, or a later
+    // re-opened stream of the same name never gets a subscription.
+    await app.close([{ stream: "F" }]);
+
+    await app.do("bump", { stream: "F2", actor: sub_actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(seen.filter((s) => s.startsWith("F2#")).length).toBe(1);
+    await app.shutdown();
+  });
+
+  // Static targets are subscribed once by init() and recorded at +Infinity
+  // so the dynamic path never re-opens them. Evicting one from the dedup
+  // would achieve nothing — correlate only re-subscribes dynamic
+  // resolutions — so `forget_subscribed` deliberately skips them, and a
+  // full close retires the target as asked.
+  it("retires a static reaction target on a full close", async () => {
+    const hits: string[] = [];
+    const app = act()
+      .withState(Thing)
+      .on("Bumped")
+      .do(async function react(event) {
+        hits.push(`${event.stream}#${event.id}`);
+      })
+      // Target IS the source stream, so it carries events and is closable.
+      .to("SS")
+      .build();
+
+    await app.do("bump", { stream: "SS", actor: sub_actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(hits.length).toBe(1);
+
+    const result = await app.close([{ stream: "SS" }]);
+    expect([...result.truncated.keys()]).toContain("SS");
+
+    const rows: string[] = [];
+    await store().query_streams((p) => rows.push(p.stream), { limit: 100 });
+    expect(rows).not.toContain("SS");
+    await app.shutdown();
+  });
+});

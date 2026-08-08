@@ -1471,10 +1471,15 @@ export class SqliteStore implements Store {
           sql: "DELETE FROM events WHERE stream = ?",
           args: [stream],
         });
-        await tx.execute({
-          sql: "DELETE FROM streams WHERE stream = ?",
-          args: [stream],
-        });
+        // A restart target carries a seed snapshot: the stream lives on, so
+        // its subscription row must survive. Deleting it silently stops
+        // reactions whose target is named after the stream — the documented
+        // per-aggregate shape `.to(e => ({target: e.stream}))` (#1398).
+        if (snapshot === undefined)
+          await tx.execute({
+            sql: "DELETE FROM streams WHERE stream = ?",
+            args: [stream],
+          });
 
         const event_name =
           snapshot !== undefined ? "__snapshot__" : "__tombstone__";

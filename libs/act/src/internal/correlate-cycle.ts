@@ -223,6 +223,27 @@ export class CorrelateCycle<
   }
 
   /**
+   * Forget targets whose subscription rows no longer exist, so a later
+   * scan can re-subscribe them.
+   *
+   * A full close deletes the closed stream's subscription row. The
+   * in-process dedup would otherwise still believe the target is
+   * subscribed and never re-issue `subscribe()`, silently stopping
+   * delivery for any reaction whose target is named after the stream —
+   * the documented per-aggregate shape `.to(e => ({target: e.stream}))`
+   * makes those two namespaces collide by construction (#1398).
+   *
+   * Static targets are left alone: they are subscribed once at init and
+   * recorded at +Infinity so the dynamic path never re-opens them.
+   */
+  forget_subscribed(streams: Iterable<string>): void {
+    const statics = new Set(this._static_targets.map((t) => t.stream));
+    for (const stream of streams) {
+      if (!statics.has(stream)) this._subscribed.delete(stream);
+    }
+  }
+
+  /**
    * Discover dynamic-resolver targets in the events past the checkpoint
    * and register any new streams via `cd.subscribe`. Static targets are
    * subscribed at init time, so this only walks dynamic resolvers.
