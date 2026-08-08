@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.35](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.34...@rotorsoft/act-v1.23.35) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** keep the sensitive() marker through refinements and unions ([4d3696d](https://github.com/rotorsoft/act-root/commit/4d3696d21ef2007cb734209a75e0c224a57b97bf)), closes [#1277](https://github.com/rotorsoft/act-root/issues/1277) [1397/#1405](https://github.com/rotorsoft/act-root/issues/1405) [#1417](https://github.com/rotorsoft/act-root/issues/1417)
+
 # [@rotorsoft/act-v1.23.34](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.33...@rotorsoft/act-v1.23.34) (2026-08-08)
 
 
