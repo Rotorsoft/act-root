@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.27.42](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.41...@rotorsoft/act-tck-v1.27.42) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act-pg:** take a schema-scoped advisory lock around CREATE SCHEMA ([79d585d](https://github.com/rotorsoft/act-root/commit/79d585d807ddda13d437036dee214d43dd58af8e)), closes [#1421](https://github.com/rotorsoft/act-root/issues/1421)
+
 # [@rotorsoft/act-tck-v1.27.41](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.27.40...@rotorsoft/act-tck-v1.27.41) (2026-08-08)
 
 
