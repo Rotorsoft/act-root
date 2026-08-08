@@ -54422,6 +54422,7 @@ import type {
   Schemas,
   Store,
   StoreNotification,
+  StreamPosition,
 } from "@rotorsoft/act/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
@@ -55387,6 +55388,49 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(leasedB.length).toBeGreaterThan(0);
         expect(leasedB.find((l) => l.stream === s)).toBeUndefined();
         expect(leasedB.find((l) => l.stream === other)).toBeDefined();
+      });
+
+      // The two halves of what happens when a holder overruns its lease
+      // (#1418). Both are load-bearing for the drain: the first is why a
+      // slow worker's round of work is discarded, the second is why the
+      // budget still accrues so a later holder can act on it.
+      it("drops the ack of a holder whose lease was taken, and accrues retry per claim", async () => {
+        const s = \`claim-stolen-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2)],
+          make_meta({ stream: s })
+        );
+
+        // A takes a lease it will overrun.
+        const leasedA = await store.claim(100, 0, \`wA-\${uid()}\`, 1);
+        const a = leasedA.find((l) => l.stream === s) as Lease;
+        expect(a).toBeDefined();
+        expect(a.retry).toBe(0);
+
+        // The lease lapses while A is still "working".
+        await new Promise((r) => setTimeout(r, 50));
+
+        // B steals it, and the claim advances the budget again.
+        const leasedB = await store.claim(100, 0, \`wB-\${uid()}\`, 100_000);
+        const b = leasedB.find((l) => l.stream === s) as Lease;
+        expect(b).toBeDefined();
+        expect(b.retry).toBe(1);
+
+        // A finishes and acks — too late. A short return, not an error:
+        // the ownership guard is what stops A regressing a watermark B is
+        // about to advance.
+        const late = await store.ack([{ ...a, at: a.at + 1 }]);
+        expect(late).toEqual([]);
+
+        // A's watermark never landed, and the budget B will see keeps the
+        // count of claims that produced no acknowledged progress.
+        const rows: StreamPosition[] = [];
+        await store.query_streams((r) => rows.push(r), { stream: s });
+        expect(rows[0]?.at).toBe(a.at);
+        expect(rows[0]?.retry).toBe(1);
+        expect(rows[0]?.blocked).toBe(false);
       });
 
       it("supports dual frontiers (lagging + leading)", async () => {

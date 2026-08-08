@@ -237,3 +237,15 @@ Also settled: the losing worker can never repair this itself. Both `ack` and
 `block` are gated on `leased_by = by`, so an evicted holder's writes are
 no-ops by construction. Any fix has to run on the *next* holder, which is why
 it lives at claim and not at ack.
+
+**And a lesson about proving it.** The first version of this fix shipped with
+tests that mocked `store.ack` to return `[]` and rewrote `retry` on the way
+out of `claim` — they proved the guard fires when hand-fed the state, not that
+the state ever occurs. The real reproduction lived in a throwaway probe that
+got deleted. Lease theft is directly reproducible in a committed test: two
+`Act` instances over one store, a handler parked on a promise the test
+resolves, and a 1ms lease left to lapse. Deterministic (the park removes the
+race; only expiry touches the clock) and it runs on InMemory and Postgres
+alike. When a finding is about concurrency, the test has to contain the
+concurrency — a mock of the losing side's return value is a restatement of
+the hypothesis, not evidence for it.
