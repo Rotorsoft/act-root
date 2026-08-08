@@ -119,10 +119,6 @@ describe("PostgresStore seed-sync contract", () => {
     // `text`. The framework DERIVES identifiers from stream names — an
     // `.autocloses` target is `"__autoclose__:" + stream` — so the cap broke
     // framework-generated names, not just user input.
-    // #1422: `id serial` (int4) capped an append-only store at ~2.1e9 events
-    // with no in-place recovery once reached. Widened to bigint.
-    expect(await column_type(TABLE, "id")).toBe("bigint");
-
     expect(await column_type(TABLE, "stream")).toBe("text");
     expect(await column_type(TABLE, "name")).toBe("text");
     expect(await column_type(`${TABLE}_streams`, "stream")).toBe("text");

@@ -6,7 +6,6 @@ import {
   sleep,
   state,
   store,
-  ValidationError,
   ZodEmpty,
 } from "../src/index.js";
 
@@ -766,84 +765,5 @@ describe("act", () => {
     mockClaim.mockRestore();
     mockQueryArray.mockRestore();
     mockAck.mockRestore();
-  });
-});
-
-// #1422 — a NUL byte is valid JSON and a valid JS string, so it passes Zod
-// and reaches the store, where Postgres `jsonb` rejects it while InMemory and
-// SQLite (TEXT) round-trip it. An app that works in tests fails only in
-// production, with a driver message naming neither field nor stream. Core
-// rejects it up front so the three adapters agree.
-describe("NUL bytes in event payloads (#1422)", () => {
-  const nul_actor = { id: "a", name: "a" };
-
-  const Noted = state({ Noted: z.object({ note: z.string() }) })
-    .init(() => ({ note: "" }))
-    .emits({ NoteAdded: z.object({ note: z.string() }) })
-    .patch({ NoteAdded: ({ data }) => ({ note: data.note }) })
-    .on({ addNote: z.object({ note: z.string() }) })
-    .emit((p) => ["NoteAdded", p])
-    .build();
-
-  afterEach(async () => {
-    await dispose()();
-  });
-
-  it("rejects a NUL byte with a ValidationError naming the field", async () => {
-    const app = act().withState(Noted).build();
-    const err = await app
-      .do("addNote", { stream: "n1", actor: nul_actor }, { note: "a\u0000b" })
-      .catch((e) => e as ValidationError);
-    expect(err).toBeInstanceOf(ValidationError);
-    const details = (err as ValidationError).details;
-    // The detail names the offending field — the whole point, versus the
-    // driver's "unsupported Unicode escape sequence".
-    expect(String(details)).toMatch(/note/);
-  });
-
-  it("control — the same payload without a NUL commits", async () => {
-    const app = act().withState(Noted).build();
-    await app.do("addNote", { stream: "n2", actor: nul_actor }, { note: "ab" });
-    const snap = await app.load(Noted, { stream: "n2" });
-    expect(snap.state.note).toBe("ab");
-    await app.shutdown();
-  });
-
-  it("finds a NUL nested in an object or array", async () => {
-    const Nested = state({ Nested: z.object({ ok: z.boolean() }) })
-      .init(() => ({ ok: false }))
-      .emits({
-        Deep: z.object({
-          tags: z.array(z.string()),
-          meta: z.object({ x: z.string() }),
-        }),
-      })
-      .patch({ Deep: () => ({ ok: true }) })
-      .on({
-        deep: z.object({
-          tags: z.array(z.string()),
-          meta: z.object({ x: z.string() }),
-        }),
-      })
-      .emit((p) => ["Deep", p])
-      .build();
-    const app = act().withState(Nested).build();
-    const in_array = await app
-      .do(
-        "deep",
-        { stream: "n3", actor: nul_actor },
-        { tags: ["fine", "b\u0000d"], meta: { x: "ok" } }
-      )
-      .catch((e) => e as ValidationError);
-    expect(String((in_array as ValidationError).details)).toMatch(/tags\[1\]/);
-
-    const in_object = await app
-      .do(
-        "deep",
-        { stream: "n4", actor: nul_actor },
-        { tags: [], meta: { x: "b\u0000d" } }
-      )
-      .catch((e) => e as ValidationError);
-    expect(String((in_object as ValidationError).details)).toMatch(/meta\.x/);
   });
 });

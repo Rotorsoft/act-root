@@ -235,18 +235,6 @@ describe("utils", () => {
       // details should preserve the impostor; it must not be prettified as zod
       expect(caught?.details).toBeInstanceOf(ImpostorError);
     });
-
-    it("names the root when the payload itself is a NUL-bearing string (#1422)", () => {
-      // Not every payload is an object — a bare string schema has no field
-      // name to report, so the path degrades to "(root)".
-      let details: unknown;
-      try {
-        validate("thing", "a\u0000b" as never, z.string() as never);
-      } catch (e) {
-        details = (e as { details?: unknown }).details;
-      }
-      expect(String(details)).toMatch(/\(root\)/);
-    });
   });
 
   describe("extend", () => {

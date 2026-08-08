@@ -33,52 +33,13 @@ export const validate = <S>(
   schema?: ZodType<S>
 ): Readonly<S> => {
   try {
-    const validated = schema ? schema.parse(payload) : payload;
-    const nul = find_nul(validated);
-    if (nul !== undefined)
-      throw new ValidationError(
-        target,
-        payload,
-        `NUL byte (\\u0000) in "${nul}" — Postgres jsonb cannot store it, so this would commit on InMemory and SQLite and fail only in production. Strip it at the edge.`
-      );
-    return validated;
+    return schema ? schema.parse(payload) : payload;
   } catch (error) {
-    if (error instanceof ValidationError) throw error;
     if (error instanceof ZodError) {
       throw new ValidationError(target, payload, prettifyError(error));
     }
     throw new ValidationError(target, payload, error);
   }
-};
-
-/**
- * First path holding a string with a NUL byte, or `undefined`.
- *
- * A NUL is valid JSON and valid in a JS string, so it passes Zod and reaches
- * the store — where Postgres `jsonb` rejects it while InMemory and SQLite
- * (TEXT) round-trip it. Rejecting here keeps the three adapters in agreement
- * and turns a driver-level "unsupported Unicode escape sequence", which names
- * neither field nor stream, into an actionable `ValidationError` (#1422).
- *
- * @internal
- */
-const find_nul = (value: unknown, path = ""): string | undefined => {
-  if (typeof value === "string")
-    return value.includes("\u0000") ? path || "(root)" : undefined;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      const hit = find_nul(value[i], `${path}[${i}]`);
-      if (hit !== undefined) return hit;
-    }
-    return undefined;
-  }
-  if (value && typeof value === "object" && !(value instanceof Date)) {
-    for (const [k, v] of Object.entries(value)) {
-      const hit = find_nul(v, path ? `${path}.${k}` : k);
-      if (hit !== undefined) return hit;
-    }
-  }
-  return undefined;
 };
 
 /**

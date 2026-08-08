@@ -157,10 +157,8 @@ Idempotent. Creates the events table, the streams (subscription) table, and the 
 
 Created by `seed()`:
 
-- **Events** (`{schema}.{table}`): `id` (bigserial PK), `name` (text), `data` (jsonb), `stream` (text), `version`, `created` (timestamptz), `meta` (jsonb). Unique index on `(stream, version)`.
+- **Events** (`{schema}.{table}`): `id` (serial PK), `name` (text), `data` (jsonb), `stream` (text), `version`, `created` (timestamptz), `meta` (jsonb). Unique index on `(stream, version)`.
 - **Streams** (`{schema}.{table}_streams`): `stream` (text, PK), `source` (text), `at`, `retry`, `blocked`, `error`, `leased_by`, `leased_until`, `priority`. Composite index on `(blocked, priority DESC, at)` for the saturated-claim ordering.
-
-`id` is `bigserial`, not `serial`. It was `serial` (int4) before [#1422](https://github.com/Rotorsoft/act-root/issues/1422), capping an append-only store at ~2.1e9 events with no in-place recovery — `ALTER` on a table that size is a full rewrite, and the framework has no migration story by design. The seed ladder widens existing tables (do it early: the rewrite is cheap at 10M rows, not at the cliff). The pool registers an `int8` parser so ids arrive as JS numbers, exact to 2^53.
 
 Identifier columns are `text`, not a bounded `varchar`. They were `varchar(100)` before [#1420](https://github.com/Rotorsoft/act-root/issues/1420); the seed ladder widens existing tables in place. The cap mattered because the framework *derives* identifiers from stream names — an `.autocloses` target is `"__autoclose__:" + stream` — so an 87-character stream committed fine and then failed to subscribe, which pinned the correlate checkpoint and stalled every dynamic reaction in the app. `text` and `varchar` are byte-identical in PG storage and indexing, so there is no cost to the wider type.
 
