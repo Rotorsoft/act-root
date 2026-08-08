@@ -12,8 +12,6 @@
  *   `sensitive()` adds to it; the helpers in this module read it.
  * - `pii_fields(schema)` — walk a Zod schema's top-level shape, return the
  *   keys marked via `sensitive(...)`.
- * - `pii_merge(event, fields)` — produce the reducer view (pii merged
- *   into data; `[SHREDDED]` if pii column is null).
  * - `pii_gate(event, fields, predicate, actor)` — produce the external
  *   view: plaintext when authorized, `[REDACTED]` when not, `[SHREDDED]`
  *   when the underlying pii column is null.

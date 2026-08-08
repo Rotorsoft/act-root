@@ -224,7 +224,7 @@ The host is responsible for:
 
 ## What this primitive is NOT for
 
-- **Restart** (rotating a stream while keeping the entity alive). The terminate fields always tombstone. Rotation stays on the explicit `app.close({ stream, restart: true })` path. (`keep` is the different case: it prunes a live stream's history but is neither a rotation nor a restart — no seed is ever written.)
+- **Restart** (rotating a stream while keeping the entity alive). The terminate fields always tombstone. Rotation stays on the explicit `app.close({ stream, restart: true })` path — which itself does not apply to streams owned by a state carrying `sensitive(...)` fields (see [sensitive data](./sensitive-data.md); those streams land in `skipped`). (`keep` is the different case: it prunes a live stream's history but is neither a rotation nor a restart — no seed is ever written.)
 - **Cross-state coordination** ("close stream A only if B is closed"). Each state's policy sees only its own aggregate's head. Compose in the host's scheduler if you need it.
 - **Arbitrary conditions.** The declarative policy derives a due-time and a terminal set; conditions it can't express belong in your own logic calling `app.close`.
 - **Load latency.** Pruning with `keep` never speeds up `app.load` — replay is snapshot-anchored, so pre-snapshot events already contribute nothing to any load result. If loads feel slow, tune `.snap` cadence instead.

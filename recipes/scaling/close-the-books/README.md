@@ -155,7 +155,10 @@ aggregate's own commits and parks only while the window is shut.
 terminate always tombstones. For a long-running business entity
 that needs its history rotated but stays live, two tools exist:
 `app.close({ stream, restart: true })` collapses everything to a
-fresh snapshot in one shot, and `.autocloses({ keep: { days: N } })`
+fresh snapshot in one shot (not available for streams owned by a
+state carrying `sensitive(...)` fields — a restart seed is a
+snapshot, and those states cannot be snapshotted; such streams land
+in `skipped`), and `.autocloses({ keep: { days: N } })`
 maintains a rolling window of real events continuously (a
 multi-year customer relationship where the last year of activity
 is hot and older history is reference-only maps to
