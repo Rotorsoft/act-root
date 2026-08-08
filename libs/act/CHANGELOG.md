@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.34](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.33...@rotorsoft/act-v1.23.34) (2026-08-08)
+
+
+### Bug Fixes
+
+* **act:** keep a restarted stream's subscription and forget a retired one ([5b57672](https://github.com/rotorsoft/act-root/commit/5b57672dbe44d78e3deac16be8fcc9fb90118b19)), closes [#1363](https://github.com/rotorsoft/act-root/issues/1363) [#1398](https://github.com/rotorsoft/act-root/issues/1398)
+
 # [@rotorsoft/act-v1.23.33](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.32...@rotorsoft/act-v1.23.33) (2026-08-07)
 
 
