@@ -1,6 +1,6 @@
 # RFC 1449: splitting the `Store` port into event store + subscription store
 
-- **Status:** draft — recommendation is **do not split**; the motivating win is available without it
+- **Status:** draft — **superseded in part.** The original recommendation (do not split) still holds *as posed*, but the question was reframed: see § Reframing. The interesting primitive is a subscription-side work set, which makes the split possible and is worth doing on its own merits.
 - **Issue:** #1449 (benchmarks filed separately as #1448)
 - **Author:** Rotorsoft
 - **Created:** 2026-08-09
@@ -102,7 +102,7 @@ And the split's cost *grows as the system gets healthier*: the fewer streams wit
 - **The [split-stores recipe](../recipes/scaling/split-stores/README.md)** — split by bounded context or tenant when the shared total order is the thing you're paying for. Same vertical shape.
 - **`act-notify`** — already lifts the LISTEN/NOTIFY fanout ceiling by riding an external broker for cross-process wakeups *without* touching durability. Precedent for the pattern that actually works here: decorate the one store, don't bisect the port.
 
-## Recommendation
+## Recommendation (original, as posed)
 
 **Do not split.** Land #1448 instead.
 
@@ -110,6 +110,103 @@ The split's motivating benefit — a faster, cheaper subscription tier — is al
 
 Revisit only with a workload where the *events* half is the constraint in a way the subscription half is not — for example an append-only archival store on object storage with leases in Postgres. That is a genuinely different shape from "make claim faster", and it would want its own numbers.
 
+## Reframing: what if `claim` never asked the event log?
+
+The analysis above takes the pull model as given: the subscription side *asks*
+the event log "who has work?", which needs the join, which is what the split
+cannot do. That framing was too narrow.
+
+If the subscription side is **told** instead of asking — a durable work set it
+owns — then `claim` reads only its own store, the join disappears, and the
+hard blocker with it.
+
+### #1448 landed, and left the interesting half standing
+
+The claim fix (#1448, merged as a sargable source-class split plus a partial
+`(stream, id)` index) took 10k-stream claims from **22,345 ms to 12.65 ms**.
+That fixed the *per-probe* cost. It did not fix the *probe count*: `available`
+is still materialized with no `LIMIT`, so the work is still O(subscribed
+streams), which is the residual slope from 12.65 ms at 10k to 26.41 ms at 20k.
+
+A work set removes that term outright — `claim` becomes O(lease budget),
+independent of how many streams are subscribed. **That is a single-store win.
+It does not require, or presuppose, a split.**
+
+### Who produces the set
+
+Not `commit`. Enqueueing transactionally with every commit is a distributed
+transaction on the hottest path in the system — far worse than the `truncate`
+one, which is at least low-cadence. Enqueueing non-transactionally loses
+signals, and a lost signal stalls a stream forever unless a pull remains as
+backstop — which puts the join right back.
+
+**`correlate` is already the producer.** It owns a durable checkpoint, scans
+events forward from it, and calls `subscribe` — an idempotent UPSERT — for the
+targets it discovers. Recording "target T has work up to id N" is the same
+shape on the same data it is already reading.
+
+That makes the two-store interaction a **pipeline, not a transaction**: read
+from the event store at a checkpoint, write to the subscription store
+idempotently. The classic at-least-once shape, no distributed commit, and
+self-healing by construction — a lost or corrupt work set is rebuilt by
+rewinding the checkpoint, which `correlate` already does on cold start via its
+`BACK_SCAN` floor.
+
+### What it would cost
+
+- **New durable structure and the port methods to maintain it** — public
+  surface, so its own RFC and TCK cases.
+- **`correlate` must always run.** Today it early-returns for apps whose
+  reactions are all static (`correlate_probes_store === false`). It would
+  become the universal producer. Probably net-positive — it replaces the
+  per-claim probe with one forward scan — but it is a real behavior change and
+  needs its own numbers.
+- **Stale entries are tolerable but not free.** An entry whose work was
+  already consumed costs a wasted lease, an empty fetch and an ack.
+  Self-correcting, and cheap relative to what it replaces.
+- **Ordering is unaffected.** Priority, the fairness reserve, and `at`-order
+  are all subscription-side already; they would order the work set instead of
+  the joined result.
+
+### What it does to the split
+
+Every blocker in this RFC changes category:
+
+| Blocker | Under the work set |
+|---|---|
+| `claim` is a join | Gone — claim reads the subscription store only |
+| `streams.at` is the other store's id | Still true, but only `correlate` interprets ids; the subscription store treats them as opaque |
+| `truncate` spans both | Unchanged — still needs a resumable two-phase protocol, still tractable |
+
+So the split stops being blocked by the thing that made it a bad idea. It does
+not thereby become a good one: it still buys a deployment option, and it still
+costs a second port, a second TCK, and an untested adapter × adapter matrix.
+
+## Recommendation (revised)
+
+1. **Prototype the subscription-side work set for the single store, and
+   measure it.** The bar is the #1448 numbers: does `claim` go flat with
+   subscribed-stream count, and what does the always-on `correlate` cost an
+   app with only static reactions? This is worth doing whether or not anyone
+   ever splits the port.
+2. **Revisit the split afterwards**, on its own merits, with the join no
+   longer part of the argument. It should be judged then as "is a second port
+   worth the deployment flexibility", which is a much smaller question than
+   the one this RFC opened with.
+3. **Do not split now.** Nothing in the measurements supports paying the N+1
+   cost against today's claim path.
+
+The original recommendation — land #1448, keep one port — was right for the
+question as posed. The question was the wrong one: the pull model was the
+constraint, not the port boundary.
+
 ## Public surface
 
-None proposed. Recorded here so the question does not get re-litigated from first principles; if it is reopened, start from the table above rather than from the intuition that a join is obviously cheaper than N+1 — for six months it was not.
+None proposed by this RFC. The work set in § Reframing *would* add public
+surface (a durable structure plus the port methods that maintain it) and needs
+its own RFC before any code.
+
+Recorded here so the question is not re-litigated from first principles. If it
+is reopened, start from the measurements rather than from the intuition that a
+join is obviously cheaper than N+1 — before #1448 it was not, by three orders
+of magnitude.
