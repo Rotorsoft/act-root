@@ -48212,6 +48212,7 @@ import {
   SNAP_EVENT,
   StoreError,
   TOMBSTONE_EVENT,
+  ValidationError,
 } from "@rotorsoft/act";
 import {
   decrypt,
@@ -48317,6 +48318,19 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // unique index on (stream, version). Stable across PG versions per the
 // SQL standard. See: https://www.postgresql.org/docs/current/errcodes-appendix.html
 const PG_UNIQUE_VIOLATION = "23505";
+
+// The two SQLSTATEs Postgres raises for a NUL byte (\` \`) in a committed
+// payload: \`22P05\` from the jsonb parser (\`data\` / \`meta\` / \`pii\`) and
+// \`22021\` from the UTF-8 decoder (\`stream\` / \`name\`, which are text).
+//
+// A NUL is legal JSON and a legal JS string, so it passes Zod and reaches the
+// store, where InMemory and SQLite (TEXT) round-trip it happily and only
+// Postgres refuses. The framework does not reject it up front — that would
+// mean walking every payload on the framework's hottest path to enforce one
+// adapter's storage limit on all three. What is worth doing is not letting
+// the driver's message ("unsupported Unicode escape sequence") be the whole
+// story, since it names neither the stream nor the event.
+const PG_NUL_BYTE = new Set(["22P05", "22021"]);
 
 // Channel-name prefix for cross-process commit notifications. The
 // effective channel is namespaced per \`(schema, table)\` so two
@@ -49197,6 +49211,13 @@ export class PostgresStore implements Store {
             base_version,
             msgs as unknown as Message<Schemas, string>[],
             expectedVersion ?? -1
+          );
+        }
+        if (PG_NUL_BYTE.has((error as { code?: string })?.code ?? "")) {
+          throw new ValidationError(
+            stream,
+            msgs as unknown as Readonly<unknown>,
+            \`Postgres cannot store a NUL byte (\\\\u0000). One of the \${msgs.length} event(s) committed to "\${stream}" (\${msgs.map((m) => String(m.name)).join(", ")}) carries one in its name, data, meta or pii. InMemory and SQLite accept it, so this commit would have succeeded there — strip NUL bytes at the edge where the data enters. Driver: \${(error as Error).message}\`
           );
         }
         throw error;
