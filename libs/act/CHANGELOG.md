@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.39](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.38...@rotorsoft/act-v1.23.39) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act:** contain lifecycle listeners in Act.emit, per listener ([8ab9bed](https://github.com/rotorsoft/act-root/commit/8ab9bedca3181a4c7300f476aa57540624aae043)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
 # [@rotorsoft/act-v1.23.38](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.37...@rotorsoft/act-v1.23.38) (2026-08-09)
 
 
