@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v1.23.38](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.37...@rotorsoft/act-v1.23.38) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act-pg:** translate Postgres NUL-byte refusals into a ValidationError ([188d71b](https://github.com/rotorsoft/act-root/commit/188d71b14153d69021a97de4cad47df40de1156a)), closes [#1422](https://github.com/rotorsoft/act-root/issues/1422) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+* **act-pg:** widen id to bigserial, and reject NUL bytes in core ([3ec323b](https://github.com/rotorsoft/act-root/commit/3ec323bc581526eb0815a3c9c4b2c614f61c7876)), closes [#1140](https://github.com/rotorsoft/act-root/issues/1140) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+* **act:** contain a throwing settled listener so it cannot open the breaker ([496c9ad](https://github.com/rotorsoft/act-root/commit/496c9adc6bc9c3f0d340dcd52256883cc3702f6a))
+
 # [@rotorsoft/act-v1.23.37](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.36...@rotorsoft/act-v1.23.37) (2026-08-08)
 
 
