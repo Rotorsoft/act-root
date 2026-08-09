@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, dispose, state, ZodEmpty } from "../src/index.js";
+import { act, dispose, state, store, ZodEmpty } from "../src/index.js";
 import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 import { SettleLoop } from "../src/internal/settle.js";
 import type { Drain, Schemas } from "../src/types/index.js";
@@ -257,6 +257,133 @@ describe("settled payload (#1383)", () => {
       acked_events.map((l) => l.stream).sort()
     );
 
+    await app.shutdown();
+  });
+});
+
+// #1436 — `on_settled` sat inside the IIFE whose `.catch` records
+// `breaker.failed()`, and every other statement in that block IS a store op
+// (`init`, `correlate`, `drain` — and `drain` never throws, it catches
+// internally). So a throwing observability listener was indistinguishable
+// from the store going away: a spurious `error` event on every settle, and
+// at `failureThreshold: 1` an OPEN breaker that returned EMPTY_DRAIN for the
+// whole cooldown, re-tripping on each half-open recovery. A broken metrics
+// bridge stalled the reaction pipeline indefinitely.
+describe("a throwing settled listener is contained (#1436)", () => {
+  const Counter = state({ Counter: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Ticked: ZodEmpty })
+    .patch({ Ticked: (_e, s) => ({ n: s.n + 1 }) })
+    .on({ tick: ZodEmpty })
+    .emit(() => ["Ticked", {}])
+    .build();
+
+  const actor = { id: "a", name: "a" };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  const build = (opts?: object) =>
+    act()
+      .withState(Counter)
+      .on("Ticked")
+      .do(async function react() {})
+      .to((e) => ({ target: `t-${e.stream}` }))
+      .build(opts as never);
+
+  /**
+   * Settle, waiting on a resolver registered BEFORE the throwing listener so
+   * the throw cannot suppress it (an EventEmitter aborts the remaining
+   * listeners for that event).
+   */
+  const settle_once = async (
+    app: ReturnType<typeof build>,
+    thrower?: () => void
+  ) => {
+    const done = new Promise<void>((resolve) => {
+      app.on("settled", () => resolve());
+    });
+    if (thrower) app.on("settled", thrower);
+    app.settle({ debounceMs: 0 });
+    await done;
+    // let the IIFE's .catch run before asserting on what it recorded
+    await new Promise((r) => setTimeout(r, 20));
+  };
+
+  it("does not record the listener's throw as a store failure", async () => {
+    const app = build();
+    const errors: unknown[] = [];
+    app.on("error", (e) => errors.push(e));
+
+    await app.do("tick", { stream: "c1", actor }, {});
+    await settle_once(app, () => {
+      throw new Error("metrics bridge exploded");
+    });
+
+    expect(errors).toEqual([]);
+    await app.shutdown();
+  });
+
+  it("does not open the breaker, so the pipeline keeps draining", async () => {
+    // failureThreshold 1 is legal and schema-validated, so one spurious
+    // failure was enough to stall everything for a full cooldown.
+    const app = build({
+      circuitBreaker: { failureThreshold: 1, cooldownMs: 30_000 },
+    });
+    const errors: unknown[] = [];
+    app.on("error", (e) => errors.push(e));
+
+    await app.do("tick", { stream: "c2", actor }, {});
+    await settle_once(app, () => {
+      throw new Error("metrics bridge exploded");
+    });
+
+    // A follow-up unit of work must still drain.
+    await app.do("tick", { stream: "c2", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+
+    expect({ errors, acked: drained.acked.length }).toEqual({
+      errors: [],
+      acked: 1,
+    });
+    await app.shutdown();
+  });
+
+  it("control — a non-throwing settled listener still fires and stays clean", async () => {
+    const app = build();
+    const errors: unknown[] = [];
+    let settled = 0;
+    app.on("error", (e) => errors.push(e));
+
+    await app.do("tick", { stream: "c3", actor }, {});
+    await settle_once(app, () => {
+      settled++;
+    });
+
+    expect(errors).toEqual([]);
+    expect(settled).toBeGreaterThan(0);
+    await app.shutdown();
+  });
+
+  it("control — a real store failure still reaches the breaker", async () => {
+    // The containment must not swallow the thing the catch exists for.
+    const app = build();
+    const errors: unknown[] = [];
+    app.on("error", (e) => errors.push(e));
+    const boom = vi
+      .spyOn(store(), "subscribe")
+      .mockRejectedValue(new Error("store is down"));
+
+    await app.do("tick", { stream: "c4", actor }, {}).catch(() => {});
+    app.settle({ debounceMs: 0 });
+    await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0));
+
+    expect(String((errors[0] as { error?: Error })?.error)).toContain(
+      "store is down"
+    );
+    boom.mockRestore();
     await app.shutdown();
   });
 });

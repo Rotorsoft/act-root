@@ -13,6 +13,7 @@
  * @internal
  */
 
+import { log } from "../ports.js";
 import type {
   Drain,
   DrainOptions,
@@ -21,6 +22,7 @@ import type {
   SettleOptions,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import { contain } from "./drain-cycle.js";
 
 /**
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
@@ -160,7 +162,17 @@ export class SettleLoop<TEvents extends Schemas> {
             last_id > after_before;
           if (!made_progress) break;
         }
-        if (settled_drain) this._deps.on_settled(settled_drain);
+        // Contained, because everything else in this block is a store op and
+        // the `.catch` below treats what it sees as one. An uncontained
+        // listener throw was therefore recorded via `breaker.failed()` —
+        // surfacing a spurious `error` event on every settle, and, at
+        // `failureThreshold: 1`, opening the breaker so `drain` returned
+        // EMPTY_DRAIN for the whole cooldown. Each half-open recovery
+        // re-tripped it, so a broken metrics bridge stalled the reaction
+        // pipeline indefinitely (#1436). Same containment `drain-cycle`
+        // already applies to `acked` / `blocked`.
+        if (settled_drain)
+          contain(log(), "settled", () => this._deps.on_settled(settled_drain));
       })()
         .catch((err) => {
           // correlate / init failed (a store op). Record on the shared

@@ -369,9 +369,13 @@ const EMPTY_DRAIN: Drain<Schemas> = {
  * Runs a lifecycle sink, logging and swallowing anything it throws.
  * Observer failures are never the cycle's failure — see the call site.
  *
+ * Exported so the settle loop shares this exact idiom rather than growing a
+ * second one: its `settled` emit sits inside the breaker-guarded IIFE, where
+ * an uncontained listener throw was recorded as a store failure (#1436).
+ *
  * @internal
  */
-const contain = (logger: Logger, sink: string, fn: () => void): void => {
+export const contain = (logger: Logger, sink: string, fn: () => void): void => {
   try {
     fn();
   } catch (error) {
