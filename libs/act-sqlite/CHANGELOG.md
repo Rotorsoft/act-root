@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.12.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.15...@rotorsoft/act-sqlite-v1.12.16) (2026-08-09)
+
+
+### Performance Improvements
+
+* **act-pg:** make claim's has-work probe sargable and index it ([2276fc1](https://github.com/rotorsoft/act-root/commit/2276fc109246bd51deb56d5825a332ee697b24df))
+
 # [@rotorsoft/act-sqlite-v1.12.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.12.14...@rotorsoft/act-sqlite-v1.12.15) (2026-08-08)
 
 
