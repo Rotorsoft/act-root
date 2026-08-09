@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.28.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.1...@rotorsoft/act-tck-v1.28.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act-pg:** translate Postgres NUL-byte refusals into a ValidationError ([188d71b](https://github.com/rotorsoft/act-root/commit/188d71b14153d69021a97de4cad47df40de1156a)), closes [#1422](https://github.com/rotorsoft/act-root/issues/1422) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+* **act-pg:** widen id to bigserial, and reject NUL bytes in core ([3ec323b](https://github.com/rotorsoft/act-root/commit/3ec323bc581526eb0815a3c9c4b2c614f61c7876)), closes [#1140](https://github.com/rotorsoft/act-root/issues/1140) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+
 # [@rotorsoft/act-tck-v1.28.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.0...@rotorsoft/act-tck-v1.28.1) (2026-08-08)
 
 
