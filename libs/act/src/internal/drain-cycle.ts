@@ -366,24 +366,6 @@ const EMPTY_DRAIN: Drain<Schemas> = {
 };
 
 /**
- * Runs a lifecycle sink, logging and swallowing anything it throws.
- * Observer failures are never the cycle's failure — see the call site.
- *
- * Exported so the settle loop shares this exact idiom rather than growing a
- * second one: its `settled` emit sits inside the breaker-guarded IIFE, where
- * an uncontained listener throw was recorded as a store failure (#1436).
- *
- * @internal
- */
-export const contain = (logger: Logger, sink: string, fn: () => void): void => {
-  try {
-    fn();
-  } catch (error) {
-    logger.error(error, `${sink} listener threw`);
-  }
-};
-
-/**
  * Dependencies the {@link DrainController} needs from the orchestrator.
  * The lifecycle event sinks (`on_acked` / `on_blocked`) are callbacks so
  * this module doesn't reach back into Act's emitter.
@@ -589,8 +571,7 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        (b) =>
-          contain(this._deps.logger, "blocked", () => this._deps.on_blocked(b)),
+        (b) => this._deps.on_blocked(b),
         this._deps.lane
       );
 
@@ -640,10 +621,10 @@ export class DrainController<
       // failure that never happened, return an empty Drain, and — because
       // `block` is guarded on `blocked = false` and a blocked stream is
       // excluded from `claim` — permanently lose the `blocked` event and
-      // any reaction-requested close. Containing each sink separately
-      // keeps one bad listener from suppressing the others.
-      if (acked.length)
-        contain(this._deps.logger, "acked", () => this._deps.on_acked(acked));
+      // any reaction-requested close. Listener containment itself lives in
+      // `Act.emit`, which guards each listener individually (#1437) — the
+      // sinks here are plain calls.
+      if (acked.length) this._deps.on_acked(acked);
       // Run reaction-requested closes after acks land (#1090) — the close
       // targets were acked above, so the close-cycle guard sees the requesting
       // reaction as caught up. Awaited so a slow close doesn't overlap the

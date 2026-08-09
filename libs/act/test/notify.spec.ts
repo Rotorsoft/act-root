@@ -191,3 +191,27 @@ describe("Act ↔ Store.notify auto-wiring", () => {
     expect(result.capturedHandler()).toBeUndefined();
   });
 });
+
+// #1437 — listener containment moved into `Act.emit`, so the try/catch
+// around the notify handler no longer guards the `notified` emit. It still
+// guards the BOOKKEEPING that follows it (`_arm_for_event_names`,
+// `_settle.schedule`), and that is the part worth pinning: a malformed
+// notification from a third-party adapter must not kill the store's
+// listener, which would silently end cross-process wake-ups for the process.
+describe("notify handler contains its own bookkeeping (#1437)", () => {
+  it("survives a malformed notification without killing the subscription", async () => {
+    const { app, capturedHandler } = await buildAppWithNotifyStore();
+    const seen: unknown[] = [];
+    app.on("notified", (n) => seen.push(n));
+    const handler = capturedHandler()!;
+
+    // `events` is not an array — `.map()` inside the bookkeeping throws.
+    expect(() =>
+      handler({ stream: "remote", events: undefined as never })
+    ).not.toThrow();
+
+    // The listener is still live: a well-formed notification still works.
+    handler({ stream: "remote", events: [{ id: 1, name: "Pressed" }] });
+    expect(seen).toHaveLength(2);
+  });
+});
