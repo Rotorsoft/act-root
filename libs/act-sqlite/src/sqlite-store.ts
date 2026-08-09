@@ -316,6 +316,16 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
     );
+    // Complement of the snapshot index, and the one claim's has-work probe
+    // seeks on: "does this source stream have a non-snapshot event past the
+    // watermark?" (#1448). SQLite already probes per candidate with a
+    // sargable `stream = ? AND id > ?`, so it only lacked the index — the
+    // existing idx_events_stream is stream-only and still has to walk every
+    // event of that stream. Partial over non-snapshot rows so the two
+    // indexes partition the table rather than overlapping.
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_events_stream_id ON events(stream, id) WHERE name <> '__snapshot__'"
+    );
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS streams (
         stream TEXT PRIMARY KEY,

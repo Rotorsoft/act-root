@@ -5,6 +5,80 @@ adapter. The core framework's `PERFORMANCE.md` (in
 [`libs/act/PERFORMANCE.md`](../act/PERFORMANCE.md)) covers
 adapter-independent optimizations; entries here are PG-specific.
 
+## #1448 — `claim()` was O(subscribed streams × events after watermark)
+
+`claim()` answers "which subscribed streams have unconsumed work?" with an
+`EXISTS` probe against the event log. Two properties of the SQL combined
+badly:
+
+1. The `available` CTE has no `LIMIT` and is referenced three times (twice in
+   `lag`, once in `lead`), so Postgres **materializes** it — the probe ran for
+   every eligible stream, not just the handful needed to fill the lease
+   budget.
+2. The source predicate was one disjunction:
+   ```sql
+   AND ( s.source IS NULL
+      OR (s.source !~ '<meta>' AND e.stream = s.source)
+      OR (s.source ~  '<meta>' AND e.stream ~ s.source) )
+   ```
+   The equality is buried inside an `OR`, so it is **not sargable**. No
+   `(stream, id)` index could serve it; each probe fell back to the primary
+   key and scanned forward from the stream's watermark.
+
+The second is what made it expensive. A *dormant* aggregate — caught up, but
+whose last event is old — has the longest `id > at` tail, and that tail grows
+with the events table. Measured at 10k streams: `loops=10000`, ~7,523 index
+rows removed per probe, 939,790 shared buffer hits to return 10 rows.
+
+### The change
+
+- `claim` splits `available` into four arms by **source class** (never
+  processed / source-less / literal / pattern), each with a single
+  planner-legible predicate. The literal arm — every per-aggregate
+  `.to(e => ({target: e.stream}))` reaction, i.e. the overwhelming majority —
+  becomes an index seek.
+- `seed()` adds a partial index `(stream, id) WHERE name <> '__snapshot__'`,
+  the complement of the existing snapshot index, so the two partition the
+  table rather than overlap.
+
+Behavior is unchanged: the four arms are mutually exclusive and return
+exactly what the OR-chain did. The store TCK (147 cases, including the
+pattern-source claim suite) passes untouched.
+
+### Results
+
+Real `PostgresStore.claim()`, 10 of N streams pending, Postgres on :5431.
+Script: [`scripts/claim-scale.bench.mjs`](scripts/claim-scale.bench.mjs).
+
+| subscribed streams | before | after | speedup |
+|---|---|---|---|
+| 100 | 4.39 ms | 1.96 ms | 2.2x |
+| 1,000 | 213.28 ms | 3.06 ms | 70x |
+| 5,000 | 5,355.01 ms | 7.56 ms | 708x |
+| 10,000 | 22,345.62 ms | 12.65 ms | **1,766x** |
+| 20,000 | (did not complete) | 26.41 ms | — |
+
+### What remains linear
+
+The per-probe cost is now flat, but the probe *count* is not: `available` is
+still materialized, so the number of probes is still O(subscribed streams).
+That is the residual slope above (12.65 ms → 26.41 ms from 10k to 20k) and it
+is why this entry does not claim the problem is closed.
+
+Removing it means claim no longer asking the event log at all — the drain
+would read a durable "these streams have work" set maintained on the
+subscription side, which correlate is already positioned to produce since it
+scans events forward against a checkpoint. That is a design change, not an
+index, and it is explored in [RFC 1449](../../rfcs/1449-split-store-port.md).
+
+### Reproducing
+
+The benchmark's data model is load-bearing. Ids are assigned in randomized
+order so a stream's watermark lands at a random point in the global sequence.
+Seeding events version-by-version, or modelling has-work as `at = -1`, both
+sort every pending stream to the front of `ORDER BY at ASC` and understate
+the cost by orders of magnitude.
+
 ## ACT-101 — cross-process commit→reaction latency (LISTEN/NOTIFY wakeup)
 
 Reaction latency on poll-driven deployments is bounded below by the
