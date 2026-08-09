@@ -401,12 +401,44 @@ export class Act<
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
    * via {@link ActLifecycleEvents}.
+   *
+   * **Every listener is contained individually.** Lifecycle listeners are
+   * observers — `observability.md` promises that a throwing one is "contained,
+   * not fatal" — and containment belongs here rather than at each call site,
+   * for two reasons the previous arrangement got wrong (#1437):
+   *
+   * - Wrapping the *emit* rather than each *listener* still let the first
+   *   thrower abort the rest: `EventEmitter.emit` stops dispatching on the
+   *   first exception, so a second `app.on("acked", …)` never ran. The
+   *   documented "the remaining sinks still fire" was false whenever an event
+   *   had more than one listener. Same lesson as #1423, where guarding the
+   *   loop instead of each callback left every later SSE subscriber unserved.
+   * - Only *some* call sites wrapped at all. The drain contained `acked` and
+   *   `blocked`; `committed`, `forgotten` and `close()`'s `closed` did not, so
+   *   a throwing listener rejected `do()`, `forget()` and `close()` **after**
+   *   their durable work had already landed. A caller retrying a "failed"
+   *   `do()` writes the event twice, since the framework has no dedup by
+   *   design.
+   *
+   * Containing here makes it a property of emitting, so a new lifecycle event
+   * cannot reintroduce the gap by omission.
+   *
+   * Uses `rawListeners` so `once` wrappers still de-register themselves, and
+   * returns "had listeners" to preserve the `EventEmitter.emit` contract.
    */
   emit<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
     event: E,
     args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
   ): boolean {
-    return this._emitter.emit(event, args);
+    const listeners = this._emitter.rawListeners(event as string);
+    for (const listener of listeners) {
+      try {
+        listener(args);
+      } catch (error) {
+        this._logger.error(error, `${String(event)} listener threw`);
+      }
+    }
+    return listeners.length > 0;
   }
 
   /**
@@ -718,15 +750,10 @@ export class Act<
               this._with_close_lock(stream, work),
           });
           this._forget_closed_subscriptions(result);
-          // Contain only the EMIT — a listener throw must not look like a
-          // store failure. The close machinery above is deliberately
-          // outside this guard so a real StoreError reaches the breaker
-          // (#1388).
-          try {
-            this.emit("closed", result);
-          } catch (err) {
-            this._logger.error(err, "closed listener threw");
-          }
+          // The close machinery above is deliberately NOT wrapped, so a
+          // real StoreError reaches the breaker (#1388). The emit needs no
+          // guard here: `Act.emit` contains each listener (#1437).
+          this.emit("closed", result);
         },
         breaker: this._breaker,
         // Re-scope the per-lane worker's auto-start ticks so their drain
