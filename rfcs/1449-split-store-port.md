@@ -104,6 +104,9 @@ And the split's cost *grows as the system gets healthier*: the fewer streams wit
 
 ## Recommendation (original, as posed)
 
+*Superseded by § Recommendation (revised) below — kept because the reasoning
+still holds for the question as it was asked.*
+
 **Do not split.** Land #1448 instead.
 
 The split's motivating benefit — a faster, cheaper subscription tier — is almost entirely recovered by fixing the join, and the fixed join is 36x faster than the best realistic split on the case that matters. The costs are permanent and land on the hottest path in the framework, while the benefits are available today from `scoped`, the split-stores recipe, and `act-notify`.
@@ -120,11 +123,11 @@ If the subscription side is **told** instead of asking — a durable work set it
 owns — then `claim` reads only its own store, the join disappears, and the
 hard blocker with it.
 
-### #1448 landed, and left the interesting half standing
+### #1448 fixes the constant factor, and leaves the interesting half standing
 
-The claim fix (#1448, merged as a sargable source-class split plus a partial
-`(stream, id)` index) took 10k-stream claims from **22,345 ms to 12.65 ms**.
-That fixed the *per-probe* cost. It did not fix the *probe count*: `available`
+The claim fix (#1448 — a sargable source-class split plus a partial
+`(stream, id)` index, open as PR #1451) takes 10k-stream claims from
+**22,345 ms to 12.65 ms**. That fixes the *per-probe* cost. It did not fix the *probe count*: `available`
 is still materialized with no `LIMIT`, so the work is still O(subscribed
 streams), which is the residual slope from 12.65 ms at 10k to 26.41 ms at 20k.
 
