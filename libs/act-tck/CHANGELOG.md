@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.28.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.3...@rotorsoft/act-tck-v1.28.4) (2026-08-09)
+
+
+### Performance Improvements
+
+* **act-pg:** make claim's has-work probe sargable and index it ([2276fc1](https://github.com/rotorsoft/act-root/commit/2276fc109246bd51deb56d5825a332ee697b24df))
+
 # [@rotorsoft/act-tck-v1.28.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.2...@rotorsoft/act-tck-v1.28.3) (2026-08-09)
 
 
