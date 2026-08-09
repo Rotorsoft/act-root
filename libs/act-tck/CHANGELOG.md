@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.28.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.4...@rotorsoft/act-tck-v1.28.5) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act:** contain lifecycle listeners in Act.emit, per listener ([8ab9bed](https://github.com/rotorsoft/act-root/commit/8ab9bedca3181a4c7300f476aa57540624aae043)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
 # [@rotorsoft/act-tck-v1.28.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.3...@rotorsoft/act-tck-v1.28.4) (2026-08-09)
 
 
