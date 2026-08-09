@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.28.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.2...@rotorsoft/act-tck-v1.28.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act:** contain a throwing settled listener so it cannot open the breaker ([496c9ad](https://github.com/rotorsoft/act-root/commit/496c9adc6bc9c3f0d340dcd52256883cc3702f6a))
+
 # [@rotorsoft/act-tck-v1.28.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.1...@rotorsoft/act-tck-v1.28.2) (2026-08-09)
 
 
