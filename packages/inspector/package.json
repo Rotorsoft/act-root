@@ -40,7 +40,7 @@
     "@types/cors": "^2.8.19",
     "@types/d3-scale": "^4.0.9",
     "@types/d3-time": "^3.0.4",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "^8.20.4",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
