@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.0.16](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.15...@rotorsoft/act-diagram-v1.0.16) (2026-08-10)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([b71629a](https://github.com/rotorsoft/act-root/commit/b71629ae678dd9883721a8b7795db853a8a16633))
+
 # [@rotorsoft/act-diagram-v1.0.15](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.14...@rotorsoft/act-diagram-v1.0.15) (2026-08-07)
 
 
