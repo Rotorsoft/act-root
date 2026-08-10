@@ -101,8 +101,8 @@
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.18.0",
     "express": "^5.2.1",
-    "fastify": "^5.11.0",
-    "hono": "^4.12.32"
+    "fastify": "^5.11.2",
+    "hono": "^4.12.34"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {

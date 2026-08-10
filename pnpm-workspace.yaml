@@ -21,12 +21,12 @@ onlyBuiltDependencies:
 # Moved from `package.json` `pnpm.overrides` (pnpm settings migration —
 # https://pnpm.io/settings). Pins for known-CVE downstream packages.
 overrides:
-  "js-yaml@<3.15.0": "3.15.0"
+  "js-yaml@<3.15.0": "3.15.1"
   flatted: ">=3.4.4"
   picomatch: ">=4.0.5"
   yaml: ">=2.9.0"
   undici: ">=8.9.0"
-  rollup: ">=4.62.3"
+  rollup: ">=4.62.4"
   "minimatch@<3.1.4": ">=10.2.6"
   serialize-javascript: ">=7.0.7"
   svgo: ">=4.0.2"
@@ -45,7 +45,7 @@ overrides:
   "follow-redirects@<=1.15.11": ">=1.16.0"
   "fast-uri@<4.1.1": ">=4.1.2"
   "@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3": ">=8.0.1"
-  "ws@>=8.0.0 <8.20.1": ">=8.21.1"
+  "ws@>=8.0.0 <8.20.1": ">=8.21.2"
   "webpack-dev-server@<=5.2.3": ">=5.2.6"
   "uuid@<11.1.1": ">=14.0.1"
   "ws@>=7.0.0 <7.5.11": ">=7.5.13"
@@ -56,5 +56,5 @@ overrides:
   "@babel/core@>=7.0.0 <=7.29.0": "7.29.7"
   "esbuild@>=0.27.3 <0.28.1": "0.28.1"
   "joi@>=17.0.0 <17.13.4": "17.13.4"
-  "postcss@<=8.5.17": ">=8.5.25"
+  "postcss@<=8.5.17": ">=8.5.26"
   "find-my-way@<=9.6.0": ">=9.7.0"
