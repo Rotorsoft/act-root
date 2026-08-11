@@ -756,9 +756,25 @@ export async function action<
           reactingTo ? undefined : expected
         );
       } catch (error) {
-        // Invalidate cache on concurrency errors — cached state is stale
+        // Invalidate cache on concurrency errors — cached state is stale.
+        //
+        // Contained and NOT awaited, matching every other cache write on this
+        // path (the load checkpoint, the action checkpoint, the gapped-commit
+        // invalidate): a transient failure in a remote-backed Cache must not
+        // fail the operation. Awaiting it unguarded here did two kinds of
+        // damage (#1438). The caller got the cache's error instead of the
+        // `ConcurrencyError`, so transports mapped a Redis blip to 500 rather
+        // than 412. Worse, the substituted error failed the
+        // `instanceof ConcurrencyError` test in the retry loop below, so a
+        // conflict that would have resolved on reload+retry became a
+        // permanent failure with the work lost.
+        //
+        // The invalidate is defensive anyway: the cache is self-correcting,
+        // since a stale checkpoint is re-folded from `after: event_id`.
         if (error instanceof ConcurrencyError) {
-          await cache().invalidate(stream);
+          cache()
+            .invalidate(stream)
+            .catch((err) => log().error(err));
         }
         throw error;
       }
