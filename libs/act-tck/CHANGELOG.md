@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.28.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.5...@rotorsoft/act-tck-v1.28.6) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act:** contain the cache invalidate on the ConcurrencyError path ([fe9b529](https://github.com/rotorsoft/act-root/commit/fe9b5299b5d6996043e7c014755e5d34be0961cc))
+* **act:** reject a projection target claimed twice, in all four pairings ([e632ab7](https://github.com/rotorsoft/act-root/commit/e632ab70baf7f92273674adf5c2e67077ed477ae))
+
 # [@rotorsoft/act-tck-v1.28.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.4...@rotorsoft/act-tck-v1.28.5) (2026-08-09)
 
 
