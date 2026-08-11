@@ -11,6 +11,10 @@ const DB_PATH = join(import.meta.dirname, "tck-store.db");
 runStoreTck({
   name: "SqliteStore",
   factory: () => new SqliteStore({ url: `file:${DB_PATH}` }),
+  // There is no zero-config SqliteStore: a store has to be told where to
+  // write, and every in-memory default libSQL can serve is either broken
+  // or process-global (#1443). The TCK asserts the refusal is loud.
+  default_factory: () => new SqliteStore(undefined as never),
   capabilities: {
     restore: true,
     pii_isolation: true,
