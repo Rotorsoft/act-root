@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.24.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.41...@rotorsoft/act-v1.24.0) (2026-08-11)
+
+
+### Features
+
+* **act-tck:** cover an adapter's own default config ([b622a96](https://github.com/rotorsoft/act-root/commit/b622a960a354b7b4618452b828cbb12a67f8a8a9)), closes [#1443](https://github.com/rotorsoft/act-root/issues/1443)
+
 # [@rotorsoft/act-v1.23.41](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.40...@rotorsoft/act-v1.23.41) (2026-08-11)
 
 
