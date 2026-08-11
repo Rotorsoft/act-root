@@ -1,3 +1,15 @@
+# [@rotorsoft/act-tck-v1.29.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.6...@rotorsoft/act-tck-v1.29.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act-sqlite:** require an explicit url and repair in-memory ([5d1383b](https://github.com/rotorsoft/act-root/commit/5d1383b6c5235581be07891b6637016fe8ecce7d)), closes [#1443](https://github.com/rotorsoft/act-root/issues/1443)
+
+
+### Features
+
+* **act-tck:** cover an adapter's own default config ([b622a96](https://github.com/rotorsoft/act-root/commit/b622a960a354b7b4618452b828cbb12a67f8a8a9)), closes [#1443](https://github.com/rotorsoft/act-root/issues/1443)
+
 # [@rotorsoft/act-tck-v1.28.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.5...@rotorsoft/act-tck-v1.28.6) (2026-08-11)
 
 
