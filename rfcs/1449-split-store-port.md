@@ -126,14 +126,39 @@ hard blocker with it.
 ### #1448 fixes the constant factor, and leaves the interesting half standing
 
 The claim fix (#1448 — a sargable source-class split plus a partial
-`(stream, id)` index, open as PR #1451) takes 10k-stream claims from
+`(stream, id)` index, merged as PR #1451) takes 10k-stream claims from
 **22,345 ms to 12.65 ms**. That fixes the *per-probe* cost. It did not fix the *probe count*: `available`
-is still materialized with no `LIMIT`, so the work is still O(subscribed
-streams), which is the residual slope from 12.65 ms at 10k to 26.41 ms at 20k.
+is still materialized with no `LIMIT` and referenced four times, so the
+`EXISTS` probe runs for every eligible row before `lag`/`lead` apply their
+limits. The work is still O(subscribed streams), which is the residual slope
+from 12.65 ms at 10k to 26.41 ms at 20k — about **1.4 µs per subscribed
+stream, per claim, per worker**. Extrapolated, that is ~130 ms per claim at
+100k streams and ~1.3 s at 1M. For the per-aggregate reaction shape
+(`.to(e => ({ target: e.stream }))`), subscribed streams *equals* aggregate
+count, so this is a scaling wall on the framework's most common topology.
 
 A work set removes that term outright — `claim` becomes O(lease budget),
 independent of how many streams are subscribed. **That is a single-store win.
 It does not require, or presuppose, a split.**
+
+### SQLite is the decisive case, and #1448's fix cannot reach it
+
+`sqlite-store.ts` `claim` opens `transaction("write")`, selects **every**
+eligible stream with no limit, then runs one `SELECT 1 FROM events … LIMIT 1`
+**per candidate in a JavaScript loop**, with no early exit once
+`lagging + leading` candidates are found.
+
+Three problems compound. It is a literal N+1 — the exact cost model this RFC
+measured and rejected for the split, already shipping in an in-tree adapter.
+The loop runs inside the single writer lock, so at 10k streams a claim
+serializes ~10k round-trips against every concurrent `commit`. And #1448's fix
+does not port: the probe is in JS, not SQL, so there is no planner to make
+sargable. **Under the pull model SQLite has no path to a fix at all**, which
+is the strongest argument in this document for changing the model rather than
+optimizing it further.
+
+There is no `claim-scale` benchmark for act-sqlite today. There should be, and
+it is likely to be the headline number of the whole effort.
 
 ### Who produces the set
 
@@ -143,10 +168,34 @@ one, which is at least low-cadence. Enqueueing non-transactionally loses
 signals, and a lost signal stalls a stream forever unless a pull remains as
 backstop — which puts the join right back.
 
-**`correlate` is already the producer.** It owns a durable checkpoint, scans
-events forward from it, and calls `subscribe` — an idempotent UPSERT — for the
-targets it discovers. Recording "target T has work up to id N" is the same
-shape on the same data it is already reading.
+**`correlate` is already the producer.** It scans events forward from a
+checkpoint and calls `subscribe` — an idempotent UPSERT — for the targets it
+discovers. Recording "target T has work up to id N" is the same shape on the
+same data it is already reading.
+
+The decisive reason is stronger than transaction cost, and worth stating
+plainly because it rules out the outbox pattern permanently: **the store
+cannot compute the target.** `reaction.resolver(event)` is arbitrary user code
+in the registry, so only the orchestrator can resolve an event to its targets.
+And orchestrator-side resolution *at commit time* still misses every event
+that does not flow through this process's `app.do` — a remote writer, a direct
+`store().commit`, a `restore`, a replay. `correlate` is the only component
+that sees every event regardless of who wrote it.
+
+**Correction to an earlier draft of this section:** it claimed correlate
+"owns a durable checkpoint". It does not. `correlate-cycle.ts` holds
+`private _checkpoint = -1` in memory, recovered on cold start from
+`subscribe()`'s returned watermark minus `DEFAULT_COLD_START_BACK_SCAN`
+(10,000). Three consequences follow, and they change the plan rather than the
+conclusion. Under N workers there are N independent correlators, each scanning
+the same event range and issuing the same UPSERTs, so correlation work is
+duplicated N-fold today, uncoordinated and unmeasured. The resume point is
+*derived from the subscription watermark*, which is precisely the coupling a
+split is meant to break. And the 10k back-scan is a heuristic: a target more
+than 10k events behind the global max is not re-derived on restart. Making the
+checkpoint durable and single-writer-leased is therefore a **prerequisite
+slice**, not an implementation detail — and it is worth shipping on its own
+merits before any of this.
 
 That makes the two-store interaction a **pipeline, not a transaction**: read
 from the event store at a checkpoint, write to the subscription store
@@ -155,21 +204,113 @@ self-healing by construction — a lost or corrupt work set is rebuilt by
 rewinding the checkpoint, which `correlate` already does on cold start via its
 `BACK_SCAN` floor.
 
+### What everyone else does
+
+| System | How it answers "who has work?" | What it pays |
+|---|---|---|
+| **EventStoreDB** persistent subscriptions | Doesn't ask. A server-side process reads forward and *pushes* into a per-group buffer; consumers ack by event number. | The subscription is a process, not a query. Checkpoint per group. |
+| **Marten** async daemon | A high-water-mark detector finds the max contiguous sequence; each shard reads its own range forward from one progression row. One forward scan drives every projection. | A dedicated daemon; the detector must handle sequence gaps from in-flight transactions. |
+| **Kafka** consumer groups | `log_end_offset > committed_offset`, O(1) per partition. | The key space collapses to a fixed partition count. You can never ask this per key. Rebalancing is a distributed protocol. |
+| **Postgres logical replication** | One WAL sender walks forward once and routes; the slot holds one LSN. | Single reader; slot retention pins WAL. |
+| **Debezium outbox** | The *writer* materializes the dirty set in the same transaction. | Write amplification on the hot path, and the producer must know the routing. |
+| **Axon** tracking tokens | One token per *processor*, not per aggregate. | No per-aggregate isolation — a poison aggregate stalls the processor. |
+| **NATS JetStream** | Per-consumer ack floor vs stream last-sequence, plus an in-memory pending map. | Pending state is memory-resident, rebuilt on restart. |
+
+Every one of these either walks the log once with a single cursor and fans
+out, or has the writer materialize the dirty set, or shrinks the key space to
+a handful of partitions. **Nobody asks "which of my N keys have work?" per
+key.** Act is the outlier.
+
+What Act does that none of them do, and should keep, is maintain per-target
+state: lease, retry budget, blocking, priority, lane, ordering. That is more
+expressive than a Kafka partition or an Axon token, and it is why a poison
+aggregate blocks one stream here instead of an entire processor. The mistake
+is not the per-stream watermark. **The mistake is using the per-stream
+watermark as the *discovery* mechanism.**
+
+### The shape: a `pending` mark on the subscription row
+
+One nullable `bigint` column, `streams.pending`, meaning *correlate has
+observed an event at id N that resolves to this target*. Correlate records it
+through the `subscribe` UPSERT it already issues, as
+`pending = GREATEST(pending, N)`. Eligibility becomes a pure
+subscription-table predicate:
+
+```sql
+WHERE blocked = false
+  AND (leased_by IS NULL OR leased_until <= NOW())
+  AND (deferred_at IS NULL OR deferred_at <= NOW())
+  AND at < pending
+```
+
+`at < pending` is a valid partial-index predicate — immutable, single-row, no
+cross-row reference — so the pending set *is* an index:
+
+```sql
+CREATE INDEX act_streams_pending_ix
+  ON <schema>.<table>_streams (lane, priority DESC, at)
+  WHERE blocked = false AND at < pending;
+```
+
+It contains only streams with work. `LIMIT` pushes straight into it. A stream
+leaves when `ack` advances `at` to `pending` and re-enters when correlate
+raises `pending`. `claim` becomes an index scan of at most
+`lagging + leading` rows: **O(budget), independent of subscribed-stream
+count.** SQLite gets the identical fix, and its N+1 loop and writer-lock
+occupancy are deleted outright.
+
+**The public surface is one optional field.** `Store.subscribe` already takes
+`{stream, source?, priority?, lane?}` and is already the idempotent UPSERT
+called from the right place; it gains `pending?: number`. No new port, no new
+method, no new table. That is the smallest surface that expresses the change,
+and it keeps "record the target" and "record its frontier" in one statement.
+
+**Migration.** The column lands via the established
+`ADD COLUMN IF NOT EXISTS` pattern used for `priority`, `lane`, and
+`deferred_at`, consistent with seed-sync being the schema story. Bootstrapping
+existing rows is the real sub-decision. Backfilling `pending = MAX(id)` makes
+every stream look pending at once and drains the whole table through empty
+fetches. A full correlate replay from `-1` is correct but unbounded at
+startup. The workable answer is that **`pending IS NULL` means "unknown — use
+the legacy probe"**: today's `EXISTS` arms stay as a gated branch, old rows
+behave exactly as they do now, and every row correlate touches migrates to the
+fast arm permanently. The legacy arm is deleted in a later slice, once an
+opt-in reconciliation sweep has covered the tail.
+
 ### What it would cost
 
-- **New durable structure and the port methods to maintain it** — public
-  surface, so its own RFC and TCK cases.
-- **`correlate` must always run.** Today it early-returns for apps whose
-  reactions are all static (`correlate_probes_store === false`). It would
-  become the universal producer. Probably net-positive — it replaces the
-  per-claim probe with one forward scan — but it is a real behavior change and
-  needs its own numbers.
-- **Stale entries are tolerable but not free.** An entry whose work was
-  already consumed costs a wasted lease, an empty fetch and an ack.
-  Self-correcting, and cheap relative to what it replaces.
+- **`correlate` must always run.** Today it early-returns when no reaction has
+  a dynamic resolver (`correlate-cycle.ts`: `if (!this._has_dynamic_resolvers)
+  return …`). It would become the universal producer, resolving static targets
+  too. Probably net-positive — one forward scan replaces the per-claim probe —
+  but it is a real behavior change for static-only apps and needs its own
+  numbers. This is the one place the design can *regress* someone.
+- **A stale mark is not self-correcting, and this must be fixed first.** An
+  earlier draft called stale entries self-correcting. In the current code they
+  are not. `drain-cycle.ts` computes
+  `const at = entry.fetch.events.at(-1)?.id || fetch_window_at`, where
+  `fetch_window_at` is the max over the cycle's fetched entries. When *some*
+  stream in the cycle fetched work, an empty-fetch stream fast-forwards to the
+  window max and is fine. When the whole cycle comes back empty — exactly the
+  all-stale-marks case — `fetch_window_at` collapses to the max of the leases'
+  own `at`, so the stream does not advance, is re-claimed next cycle, and
+  `claim` bumps `retry` on every acquisition until `budget_exhausted` blocks
+  it. Narrower than "any empty fetch", and still a stall-then-block. It is a
+  latent bug worth fixing on its own merits, and a hard prerequisite here.
+- **N-way write contention on the mark.** N uncoordinated correlators write
+  the same `pending` values. This is a today-problem the design makes visible
+  rather than one it creates; the answer is the durable leased checkpoint,
+  which is why that slice comes first.
+- **Btree churn on the pending index** as streams enter and leave under
+  sustained commit load. Unknown, and measurable.
 - **Ordering is unaffected.** Priority, the fairness reserve, and `at`-order
-  are all subscription-side already; they would order the work set instead of
-  the joined result.
+  are all subscription-side already; they would order the pending set instead
+  of the joined result.
+
+It also settles **#1446** — adapters disagree on whether a fresh `at = -1`
+subscription with no events is claimable — by making the rule definitional:
+claimable iff the subscription store holds a mark saying so. That ambiguity
+exists today precisely because "has work" is inferred rather than stated.
 
 ### What it does to the split
 
@@ -187,27 +328,82 @@ costs a second port, a second TCK, and an untested adapter × adapter matrix.
 
 ## Recommendation (revised)
 
-1. **Prototype the subscription-side work set for the single store, and
-   measure it.** The bar is the #1448 numbers: does `claim` go flat with
-   subscribed-stream count, and what does the always-on `correlate` cost an
-   app with only static reactions? This is worth doing whether or not anyone
-   ever splits the port.
-2. **Revisit the split afterwards**, on its own merits, with the join no
-   longer part of the argument. It should be judged then as "is a second port
-   worth the deployment flexibility", which is a much smaller question than
-   the one this RFC opened with.
-3. **Do not split now.** Nothing in the measurements supports paying the N+1
-   cost against today's claim path.
+**Ship the pending mark. Treat the split as a later, demand-gated
+repackaging of it. Do not split now.**
+
+The mark is the only candidate that fixes SQLite, whose claim is an N+1 inside
+the writer lock with no path to an index-based fix. It removes the
+O(subscribed streams) term outright rather than shaving its constant. It costs
+one optional field on an existing port method, and no orchestration changes at
+all — the `notify` → `settle` → `correlate` → `drain` chain already routes
+correctly, because `notify` is already the trigger and correlate already the
+scanner. And it makes the split *possible* without doing the split, which is
+the honest resolution of this RFC: **the port boundary was never the
+constraint; the pull model was.**
+
+Rejected along the way, one line each. *Commit-side dirty set* — the store
+cannot resolve user-code targets, and commit-time resolution misses every
+non-local writer. *Notify-carried routing* — a documented best-effort channel
+cannot be the sole producer without a pull backstop, which reinstates the
+join. *In-memory hot set fed by notify* — per-process, lost on restart, keeps
+the O(N) fallback; a mitigation, not a fix. *Bucketing the streams table
+Kafka-style* — a constant-factor win that requires static worker-to-bucket
+assignment, surrendering the assignment-free elasticity `SKIP LOCKED` gives
+Act today. *Splitting the port now* — pays a second port, a second TCK, and an
+adapter × adapter matrix for a deployment option, buying no performance the
+mark does not already deliver.
+
+### Slice plan
+
+Each slice ships on its own.
+
+| # | Slice | Notes |
+|---|---|---|
+| 0 | **Benchmarks first.** Extend `claim-scale.bench.mjs` to 50k/100k; **write the missing act-sqlite claim-scale bench**. Record both in the respective `PERFORMANCE.md`. | Establishes the bar; likely the headline number. |
+| 1 | **Fix the empty-fetch no-advance hazard** + TCK case + behavior-contract row. | Latent bug today. Hard prerequisite. |
+| 2 | **Durable, single-writer-leased correlate checkpoint.** Prefer a zero-surface home over a new column or table. | Deletes N-fold duplicate correlate scans. Measurable alone. |
+| 3 | **RFC for the subscription work set.** | Gates the public surface; lands before any of slice 4. |
+| 4 | **`pending` column + partial index + `subscribe({pending})`** across PG, SQLite, InMemory, with the `pending IS NULL` legacy arm and TCK cases. | Ships dark — no behavior change yet. |
+| 5 | **Correlate becomes the universal producer** — resolves static resolvers, no longer early-returns, records `pending`. | The behavior change. Needs the static-app numbers. |
+| 6 | **Delete the legacy probe arm** + opt-in reconciliation sweep. | The payoff: `claim` stops touching the event log. |
+| 7 | *(demand-gated)* **Split the port.** | Judged then as "is a second port worth the deployment flexibility" — a much smaller question than this RFC opened with. |
+
+### Benchmarks that decide it
+
+On real adapters only (act-pg on docker :5431, act-sqlite); InMemory may
+appear as a reference row, never as the primary number. PG claim-scale to
+100k to pin the slope. SQLite claim-scale from 100 to 10k, which does not
+exist today. The prototype across 1k/10k/100k streams × 1%/10%/100% hit rate,
+with **claim time flat in stream count** as the success criterion. Always-on
+correlate cost for a static-only app, the one place this can regress someone.
+N-worker contention at 2/4/8 workers, covering aggregate claim throughput,
+pending-index churn, and correlate write contention with and without the
+leased checkpoint — the principal unknown. A commit-path regression check,
+since the design does not touch `commit` and that should be visible in
+numbers. And a re-run of `store-split-claim.bench.mjs` against the mark rather
+than the joined baseline, so slice 7 is re-decided on new numbers.
+
+**Modelling trap, restated because it was hit twice while producing the
+numbers above:** assign event ids in randomized order so a stream's watermark
+lands at a random point in the global sequence. Seeding version-by-version, or
+modelling has-work as `at = -1`, sorts every pending stream to the front of
+`ORDER BY at ASC` and understates the cost by orders of magnitude.
 
 The original recommendation — land #1448, keep one port — was right for the
-question as posed. The question was the wrong one: the pull model was the
-constraint, not the port boundary.
+question as posed. The question was the wrong one.
 
 ## Public surface
 
-None proposed by this RFC. The work set in § Reframing *would* add public
-surface (a durable structure plus the port methods that maintain it) and needs
-its own RFC before any code.
+None proposed by this RFC. The pending mark adds one optional field to
+`Store.subscribe`, which is **additive** on a charter-covered surface and gets
+its own RFC (`rfcs/NNNN-subscription-work-set.md`) before any code, per slice
+3.
+
+One charter consequence deserves calling out because a type diff will not
+surface it: `claim`'s *semantics* change from "claimable iff the log holds an
+event past the watermark" to "claimable iff the subscription store holds a
+mark". That is a **semantic change on a charter-covered surface with no type
+change**, exactly the category the charter exists to catch.
 
 Recorded here so the question is not re-litigated from first principles. If it
 is reopened, start from the measurements rather than from the intuition that a
