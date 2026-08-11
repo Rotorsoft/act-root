@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.23.40](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.39...@rotorsoft/act-v1.23.40) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act:** contain the cache invalidate on the ConcurrencyError path ([fe9b529](https://github.com/rotorsoft/act-root/commit/fe9b5299b5d6996043e7c014755e5d34be0961cc))
+
 # [@rotorsoft/act-v1.23.39](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.38...@rotorsoft/act-v1.23.39) (2026-08-09)
 
 
