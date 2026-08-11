@@ -16,11 +16,14 @@
  * reshaped so the partial predicate no longer matches) flips the plan to
  * a scan and fails here.
  *
- * In-memory SQLite — no file, no shared state, fast.
+ * Runs against a throwaway file database: libSQL's in-memory database is
+ * process-wide shared cache (#1443), and this suite bulk-loads 5000 noise
+ * rows that no other spec should have to see.
  */
 import { SNAP_EVENT } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 const SNAPSHOT_IX = "idx_events_snapshot";
 const TARGET = "stream-with-snaps";
@@ -36,7 +39,7 @@ describe("SqliteStore #1024 partial snapshot index (EXPLAIN QUERY PLAN)", () => 
   let client: Client;
 
   beforeAll(async () => {
-    store = new SqliteStore({ url: ":memory:" });
+    store = new SqliteStore({ url: tmp_db_url() });
     client = (store as unknown as { client: Client }).client;
     await store.seed();
 
@@ -76,6 +79,7 @@ describe("SqliteStore #1024 partial snapshot index (EXPLAIN QUERY PLAN)", () => 
 
   afterAll(async () => {
     await store.dispose();
+    rm_tmp_dbs();
   });
 
   it("the partial snapshot index exists with the snapshot-name predicate", async () => {

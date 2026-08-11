@@ -134,6 +134,28 @@ export type StoreTckOptions = {
    */
   readonly factory: () => Store | Promise<Store>;
   /**
+   * Constructs the adapter the way a first-time user does: with its own
+   * documented defaults and nothing else — `() => new MyStore()`.
+   *
+   * Supplying it opts into the default-configuration suite, which
+   * allows exactly two outcomes and outlaws the third:
+   *
+   * 1. **Construction throws.** The adapter has no safe default and
+   *    says so — an operator sees the error immediately.
+   * 2. **Construction succeeds and the store round-trips**, including a
+   *    second commit that advances the version.
+   * 3. ~~Construction succeeds, `commit` reports success, and the data
+   *    is not there.~~ This is the shape the suite exists to catch
+   *    (#1443: a zero-config SQLite store defaulted to a per-connection
+   *    private in-memory database, so `seed`'s DDL landed where later
+   *    statements could not see it — every write was accepted and lost).
+   *
+   * The suite never calls `drop()`, so it is safe to point at a default
+   * that resolves to a real shared database; it namespaces its stream
+   * with {@link uid} like every other case.
+   */
+  readonly default_factory?: () => Store | Promise<Store>;
+  /**
    * Optional capabilities flags — see {@link StoreCapabilities}.
    */
   readonly capabilities?: StoreCapabilities;
@@ -202,6 +224,54 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     afterAll(async () => {
       await store.dispose();
     });
+
+    // The one suite that does not use the shared `store`: it exercises
+    // whatever the adapter's own defaults produce (#1443).
+    const default_factory = options.default_factory;
+    if (default_factory) {
+      describe("default configuration", () => {
+        it("either refuses to construct or round-trips a commit", async () => {
+          let zero_config: Store;
+          try {
+            zero_config = await default_factory();
+          } catch (error) {
+            // Refusing is a valid answer — an adapter with no safe
+            // default must say so out loud, at construction, before any
+            // caller can hand it data to lose.
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).not.toBe("");
+            return;
+          }
+          try {
+            await zero_config.seed();
+            const s = `default-config-${uid()}`;
+            const first = await zero_config.commit<CounterEvents>(
+              s,
+              [inc(1)],
+              make_meta({ stream: s })
+            );
+            expect(first[0].version).toBe(0);
+            // A second commit catches the subtler half of the failure:
+            // a store that loses the first write restarts versioning
+            // here instead of advancing.
+            const second = await zero_config.commit<CounterEvents>(
+              s,
+              [inc(2)],
+              make_meta({ stream: s })
+            );
+            expect(second[0].version).toBe(1);
+            const read: Committed<CounterEvents, keyof CounterEvents>[] = [];
+            await zero_config.query<CounterEvents>((e) => read.push(e), {
+              stream: s,
+            });
+            expect(read).toHaveLength(2);
+            expect(read.map((e) => e.data.amount)).toEqual([1, 2]);
+          } finally {
+            await zero_config.dispose();
+          }
+        });
+      });
+    }
 
     describe("commit", () => {
       it("returns committed events with sequenced ids and versions", async () => {

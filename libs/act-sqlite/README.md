@@ -54,7 +54,7 @@ Full type reference: [typedoc](https://github.com/Rotorsoft/act-root/blob/master
 
 | Option | Default | Description |
 |---|---|---|
-| `url` | `file::memory:` | libSQL connection URL. Use `file:path.db` for persistent file, `libsql://…` for Turso. |
+| `url` | **required** | libSQL connection URL. Use `file:path.db` for a persistent file, `libsql://…` for Turso, `:memory:` for the shared in-memory database. |
 | `authToken` | — | Auth token for libSQL server connections (Turso). |
 
 ### File-based persistence
@@ -66,8 +66,21 @@ store(new SqliteStore({ url: "file:data/events.db" }));
 ### In-memory (tests / quick experiments)
 
 ```ts
-store(new SqliteStore()); // defaults to file::memory:
+store(new SqliteStore({ url: ":memory:" }));
 ```
+
+There is no default `url` — a store has to be told where to write, and
+constructing one without a URL throws. libSQL gives every *connection* its
+own private in-memory database and does not pin statements to a single
+connection, so a zero-config store used to accept writes into a database
+the next statement could not see. `:memory:` is therefore normalized to
+libSQL's shared-cache form, the only one that round-trips.
+
+That comes with a caveat: the shared-cache database is **one per process**,
+visible to every store pointed at it, and it outlives `dispose()`. For
+isolated throwaway state — parallel tests, two independent stores in one
+process — use `InMemoryStore` from `@rotorsoft/act`, or give each store its
+own `file:` path.
 
 ### Turso (edge)
 

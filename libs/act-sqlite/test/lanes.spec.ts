@@ -11,10 +11,11 @@
 
 import { dispose, store } from "@rotorsoft/act";
 import { SqliteStore } from "../src/sqlite-store.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 describe("SqliteStore lane migration", () => {
   beforeEach(async () => {
-    store(new SqliteStore({ url: ":memory:" }));
+    store(new SqliteStore({ url: tmp_db_url() }));
     await store().drop();
     await store().seed();
   });
@@ -22,6 +23,8 @@ describe("SqliteStore lane migration", () => {
   afterEach(async () => {
     await dispose()("EXIT").catch(() => {});
   });
+
+  afterAll(rm_tmp_dbs);
 
   it("seed adds the lane column to a pre-1103 streams table", async () => {
     // Hand-build the pre-1103 schema (no lane column), then call seed()
