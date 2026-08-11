@@ -1,6 +1,6 @@
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ConcurrencyError, StoreError } from "@rotorsoft/act";
+import { ConcurrencyError, StoreError, ValidationError } from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
 
 type Stmt = string | { sql: string; args?: unknown[] };
@@ -95,22 +95,63 @@ describe("SqliteStore error paths", () => {
   let db: SqliteStore;
 
   beforeEach(() => {
-    db = new SqliteStore();
+    // Every case below swaps in a mock client, so the URL only has to
+    // construct — it is never connected to.
+    db = new SqliteStore({ url: ":memory:" });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("constructs with default config (in-memory)", () => {
-    const s = new SqliteStore();
-    expect(s).toBeInstanceOf(SqliteStore);
-  });
-
   it("accepts a custom url and authToken", () => {
     const s = new SqliteStore({ url: "file::memory:", authToken: "tok" });
     expect(s).toBeInstanceOf(SqliteStore);
   });
+
+  // #1443: the zero-config store used to construct happily against a
+  // per-connection private in-memory database, accept a commit, and lose
+  // it. There is no safe default, so construction refuses instead.
+  it("rejects a missing url", () => {
+    expect(() => new SqliteStore(undefined as never)).toThrow(ValidationError);
+    expect(() => new SqliteStore(undefined as never)).toThrow(
+      /"url" is required and has no default/
+    );
+  });
+
+  it.each([{ url: "" }, { url: "   " }, { url: 42 as unknown as string }])(
+    "rejects a blank or non-string url: %o",
+    (config) => {
+      expect(() => new SqliteStore(config)).toThrow(ValidationError);
+    }
+  );
+
+  it("rejects an explicitly private in-memory url", () => {
+    const private_url = { url: "file::memory:?cache=private" };
+    expect(() => new SqliteStore(private_url)).toThrow(ValidationError);
+    expect(() => new SqliteStore(private_url)).toThrow(
+      /private in-memory database/
+    );
+  });
+
+  // Normalization is what makes an explicit `:memory:` usable at all —
+  // the round-trip proof lives in the TCK's default-configuration suite.
+  it.each([":memory:", "file::memory:", "file::memory:?cache=shared"])(
+    "normalizes the in-memory url %s to shared cache",
+    async (url) => {
+      const s = new SqliteStore({ url });
+      await s.seed();
+      await s.commit("mem", [{ name: "E", data: { n: 1 } }], {
+        correlation: "",
+        causation: {},
+      });
+      const read: unknown[] = [];
+      await s.query((e) => read.push(e), { stream: "mem" });
+      expect(read).toHaveLength(1);
+      await s.drop();
+      await s.dispose();
+    }
+  );
 
   it("commit: rolls back and wraps INSERT failure in StoreError (#1202)", async () => {
     const client = mockClientFailOn("INSERT INTO events");

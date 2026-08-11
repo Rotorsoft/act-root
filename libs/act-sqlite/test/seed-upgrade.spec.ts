@@ -9,6 +9,7 @@
 
 import { dispose, store } from "@rotorsoft/act";
 import { SqliteStore } from "../src/sqlite-store.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 const client = () => (store() as unknown as { client: any }).client;
 
@@ -54,12 +55,16 @@ const columns = async (table: string): Promise<string[]> => {
 
 describe("SqliteStore seed-sync contract", () => {
   beforeEach(() => {
-    store(new SqliteStore({ url: ":memory:" }));
+    // A private database per test: the fixture below hand-builds the
+    // legacy schema with bare CREATE TABLE, which needs an empty file.
+    store(new SqliteStore({ url: tmp_db_url() }));
   });
 
   afterEach(async () => {
     await dispose()("EXIT").catch(() => {});
   });
+
+  afterAll(rm_tmp_dbs);
 
   it("upgrades the oldest supported shape losslessly and idempotently", async () => {
     await build_oldest_shape();
