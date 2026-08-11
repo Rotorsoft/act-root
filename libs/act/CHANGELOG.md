@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.23.41](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.40...@rotorsoft/act-v1.23.41) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act:** reject a projection target claimed twice, in all four pairings ([e632ab7](https://github.com/rotorsoft/act-root/commit/e632ab70baf7f92273674adf5c2e67077ed477ae))
+* **act:** skip a repeat registration of the same projection reaction ([f78a3e2](https://github.com/rotorsoft/act-root/commit/f78a3e2f858ed9d4e738ee7098955090d72291e4))
+
 # [@rotorsoft/act-v1.23.40](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.39...@rotorsoft/act-v1.23.40) (2026-08-11)
 
 
