@@ -49,6 +49,11 @@ import type { Slice } from "./slice-builder.js";
  * if a different handler is already registered for the same target. Two
  * projections silently overwriting each other's batch handlers used to be a
  * latent footgun.
+ *
+ * This half covers batch x batch only. A fold projection (`.of(...)`) has a
+ * target but no batch handler, so it early-returns here — the fold side of
+ * the guard lives at the `fold_specs.push` site in `build()`, which sees a
+ * fully-populated `batch_handlers` and so catches both orders (#1440).
  */
 function register_batch_handler(
   proj: Projection<any>,
@@ -57,7 +62,9 @@ function register_batch_handler(
   if (!proj.batchHandler || !proj.target) return;
   const existing = batch_handlers.get(proj.target);
   if (existing && existing !== proj.batchHandler) {
-    throw new Error(`Duplicate batch handler for target "${proj.target}"`);
+    throw new Error(
+      `Duplicate projection target "${proj.target}" — a target is served by one batch handler or one state projection, never both`
+    );
   }
   batch_handlers.set(proj.target, proj.batchHandler);
 }
@@ -578,6 +585,28 @@ export function act<
             if (missing.length > 0)
               throw new Error(
                 `State projection "${proj.target}" of "${fold.name}" is missing events ${missing.join(", ")} — pass every partial of the state to .of()`
+              );
+            // A target may be claimed exactly once, by a batch handler OR by
+            // a fold — `make_batch_handlers` does an unconditional
+            // `handlers.set(spec.target, …)`, so without this the last
+            // registration silently won (#1440).
+            //
+            // `register_batch_handler` cannot catch these: it early-returns
+            // on `!proj.batchHandler`, and a fold projection has a target but
+            // no batch handler, so the fold path bypassed the guard in both
+            // directions. The damage was worse than a dead projection — the
+            // fold cold-loads the losing target's streams through the
+            // stream-keyed cache, so it received the OTHER projection's
+            // aggregates and wrote them into its own read table.
+            //
+            // With this check all four {batch, fold}² pairings throw;
+            // previously only batch × batch did.
+            if (
+              batch_handlers.has(proj.target!) ||
+              fold_specs.some((s) => s.target === proj.target)
+            )
+              throw new Error(
+                `Duplicate projection target "${proj.target}" — a target is served by one batch handler or one state projection, never both`
               );
             // Record the validated ingredients only. The handler is
             // constructed per `.build()` (see `make_batch_handlers`) — it
