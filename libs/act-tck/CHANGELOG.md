@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.29.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.29.0...@rotorsoft/act-tck-v1.29.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **act:** stop pinning every Act in the dispose registry ([955ed6b](https://github.com/rotorsoft/act-root/commit/955ed6bb9f66eeb506cd8acf6d490f80596ca0fa)), closes [#1441](https://github.com/rotorsoft/act-root/issues/1441)
+
 # [@rotorsoft/act-tck-v1.29.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.6...@rotorsoft/act-tck-v1.29.0) (2026-08-11)
 
 
