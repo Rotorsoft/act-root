@@ -24,6 +24,7 @@ import {
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -39,7 +40,6 @@ export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import {
   cache,
-  dispose,
   log,
   type Scoped,
   scoped,
@@ -669,7 +669,15 @@ export class Act<
     // take effect. Scoped Acts bind against their own store.
     this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
 
-    dispose(() => this.shutdown());
+    // Registered weakly (#1441). A plain `dispose(() => this.shutdown())`
+    // closure captures `this` in a module-level array that is never emptied,
+    // so every Act ever built — with its registry, drain controllers, and for
+    // a scoped Act its own store and cache, connection pools included —
+    // survives for the process lifetime. Apps that mint short-lived Acts (one
+    // per tenant, per request, per test) leak one apiece. Holding the
+    // reference weakly keeps process-wide `dispose()()` working for a live
+    // Act while letting an unreachable one be collected, shut down or not.
+    register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
   /**

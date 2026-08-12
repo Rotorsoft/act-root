@@ -3,6 +3,7 @@ import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./internal/disposers.js";
 import type {
   Cache,
   Disposable,
@@ -215,8 +216,11 @@ export const cache = ((adapter?: Cache): Cache => {
 // Disposal
 // ---------------------------------------------------------------------------
 
-/** Registered cleanup functions, executed in reverse order during shutdown. */
-const disposers: Disposer[] = [];
+/**
+ * Registered cleanup functions live in `internal/disposers.ts`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
 
 /**
  * Disposes all registered adapters and disposers, then exits the process.
@@ -247,9 +251,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   // Run sequentially in reverse registration order so a disposer can rely on
   // later-registered disposers (and adapters on later-registered adapters)
   // having already finished — Promise.all would race them.
-  for (const disposer of [...disposers].reverse()) {
-    await disposer();
-  }
+  await run_disposers();
   for (const adapter of [...adapters.values()].reverse()) {
     await adapter.dispose();
     log().info(`[act] - ${adapter.constructor.name}`);
@@ -285,7 +287,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
 export function dispose(
   disposer?: Disposer
 ): (code?: ExitCode) => Promise<void> {
-  disposer && disposers.push(disposer);
+  disposer && register_disposer(disposer);
   return disposeAndExit;
 }
 
