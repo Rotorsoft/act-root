@@ -126,12 +126,14 @@
                       "**/internal/*",
                       "!**/internal/index",
                       "!**/internal/index.js",
+                      "!**/internal/disposers",
+                      "!**/internal/disposers.js",
                       "!**/internal/lru-map",
                       "!**/internal/lru-map.js",
                       "!**/internal/sensitive",
                       "!**/internal/sensitive.js"
                     ],
-                    "message": "Import via the internal barrel ('./internal/index.js'), not a deep path. Exception: `internal/lru-map.js` and `internal/sensitive.js` are side-effect-free leaf utilities and can be imported directly. (`sensitive.js` deep-import is load-bearing for `types/schemas.ts` — going through the barrel pulls tracing.ts → config.ts in at type-schema load time and crashes on TDZ.)"
+                    "message": "Import via the internal barrel ('./internal/index.js'), not a deep path. Exception: `internal/disposers.js`, `internal/lru-map.js` and `internal/sensitive.js` are side-effect-free leaf utilities and can be imported directly. (`disposers.js` deep-import is load-bearing for `ports.ts` — the barrel pulls the whole internal graph, much of which imports `ports.js` back, and the cycle breaks 12 specs.) (`sensitive.js` deep-import is load-bearing for `types/schemas.ts` — going through the barrel pulls tracing.ts → config.ts in at type-schema load time and crashes on TDZ.)"
                   }
                 ]
               }
