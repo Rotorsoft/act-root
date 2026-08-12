@@ -50,6 +50,7 @@ import type {
   LaneConfig,
   ReactionOptions,
   SettleOptions,
+  ShutdownOptions,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -177,6 +178,46 @@ export function resolveSettleConfig(
 ): SettleOptions | undefined {
   if (options === undefined) return undefined;
   SettleOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown — the grace budget `shutdown(...)` gives in-flight drain cycles
+// (#1442).
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on the derived shutdown grace budget. Without a cap, a lane
+ * configured with a long lease (minutes, for a genuinely slow integration)
+ * would let one parked handler hold a rolling deploy open for that whole
+ * lease. 30s is the longest `leaseMillis` the production checklist
+ * recommends, so it is the point past which "graceful" stops being the
+ * operator's intent.
+ */
+export const MAX_SHUTDOWN_GRACE_MS = 30_000;
+
+/**
+ * Grace budget used when no lane pinned a `leaseMillis` — matches `drain()`'s
+ * own `leaseMillis` fallback, so the default deployment gets a budget
+ * consistent with how long its handlers were already allowed to hold a
+ * stream.
+ */
+export const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
+
+const ShutdownOptionsSchema = z
+  .object({
+    // `0` is legal and is exactly today's behavior: stop scheduling and
+    // return without waiting.
+    graceMs: z.number().min(0).optional(),
+  })
+  .loose();
+
+/** Validate shutdown options, or pass `undefined` through. Throws `ZodError`. */
+export function resolveShutdownConfig(
+  options: ShutdownOptions | undefined
+): ShutdownOptions | undefined {
+  if (options === undefined) return undefined;
+  ShutdownOptionsSchema.parse(options);
   return options;
 }
 
