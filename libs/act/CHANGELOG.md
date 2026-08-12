@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.24.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.24.0...@rotorsoft/act-v1.24.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **act:** stop pinning every Act in the dispose registry ([955ed6b](https://github.com/rotorsoft/act-root/commit/955ed6bb9f66eeb506cd8acf6d490f80596ca0fa)), closes [#1441](https://github.com/rotorsoft/act-root/issues/1441)
+
 # [@rotorsoft/act-v1.24.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.41...@rotorsoft/act-v1.24.0) (2026-08-11)
 
 
