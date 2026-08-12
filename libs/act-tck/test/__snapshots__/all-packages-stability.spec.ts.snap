@@ -791,6 +791,7 @@ import {
   type Handle,
   type HandleBatch,
   type PatchFn,
+  register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -805,7 +806,6 @@ export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import {
   cache,
-  dispose,
   log,
   type Scoped,
   scoped,
@@ -1434,7 +1434,15 @@ export class Act<
     // take effect. Scoped Acts bind against their own store.
     this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
 
-    dispose(() => this.shutdown());
+    // Registered weakly (#1441). A plain \`dispose(() => this.shutdown())\`
+    // closure captures \`this\` in a module-level array that is never emptied,
+    // so every Act ever built — with its registry, drain controllers, and for
+    // a scoped Act its own store and cache, connection pools included —
+    // survives for the process lifetime. Apps that mint short-lived Acts (one
+    // per tenant, per request, per test) leak one apiece. Holding the
+    // reference weakly keeps process-wide \`dispose()()\` working for a live
+    // Act while letting an unreachable one be collected, shut down or not.
+    register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
   /**
@@ -8649,6 +8657,90 @@ export class DeferTimer {
   }
 }
 
+// === disposers.ts ===
+import type { Disposer } from "../types/index.js";
+
+/**
+ * The shape {@link register_weak_disposer} needs from a \`WeakRef\`. Declared
+ * structurally so tests can hand in a stub that reports its target as
+ * collected — real garbage collection is not schedulable, and a guarantee
+ * about releasing memory deserves a deterministic test.
+ */
+export type RefLike<T extends object> = { deref: () => T | undefined };
+
+/**
+ * A registered cleanup function, optionally tied to the lifetime of the
+ * object it cleans up. \`ref\` present means "run this only while its target
+ * is still reachable" — the entry holds no strong reference to that target,
+ * so registering never keeps it alive. The target is handed back to \`run\`,
+ * so a weak disposer never has to re-check what the registry just proved.
+ */
+type Entry = {
+  readonly run: (target: never) => Promise<void>;
+  readonly ref?: RefLike<object>;
+};
+
+/** Registered cleanup functions, executed in reverse order during shutdown. */
+const entries: Entry[] = [];
+
+/**
+ * Drop entries whose target has been collected.
+ *
+ * Called on every registration so the registry stays proportional to the
+ * live objects rather than to every object ever built. That matters for apps
+ * that mint short-lived Acts — one per tenant, per request, per test — where
+ * the registry would otherwise grow without bound for the process lifetime
+ * (#1441).
+ */
+const prune = (): void => {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const { ref } = entries[i];
+    if (ref && !ref.deref()) entries.splice(i, 1);
+  }
+};
+
+/** Register a cleanup function that runs unconditionally at teardown. */
+export const register_disposer = (run: Disposer): void => {
+  prune();
+  entries.push({ run });
+};
+
+/**
+ * Register a cleanup function bound to \`ref\`'s target, held weakly.
+ *
+ * The registry never retains the target, so an object that becomes
+ * unreachable is collectable whether or not it was cleaned up first, and its
+ * entry is skipped at teardown — there is nothing left to clean up.
+ */
+export const register_weak_disposer = <T extends object>(
+  ref: RefLike<T>,
+  run: (target: T) => Promise<void>
+): void => {
+  prune();
+  entries.push({
+    run: run as (target: never) => Promise<void>,
+    ref: ref as RefLike<object>,
+  });
+};
+
+/**
+ * Run every live disposer in reverse registration order, sequentially, so a
+ * disposer can rely on later-registered ones having already finished.
+ *
+ * Registrations are left in place, so a second teardown call re-runs them,
+ * exactly as before this registry learned about weak entries.
+ */
+export const run_disposers = async (): Promise<void> => {
+  for (const { run, ref } of [...entries].reverse()) {
+    if (!ref) {
+      await (run as Disposer)();
+      continue;
+    }
+    const target = ref.deref();
+    if (target) await (run as (t: object) => Promise<void>)(target);
+  }
+};
+
 // === drain-cycle.ts ===
 /**
  * @module drain-cycle
@@ -12342,6 +12434,12 @@ export {
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
+export {
+  type RefLike,
+  register_disposer,
+  register_weak_disposer,
+  run_disposers,
+} from "./disposers.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -12858,6 +12956,7 @@ import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./internal/disposers.js";
 import type {
   Cache,
   Disposable,
@@ -13070,8 +13169,11 @@ export const cache = ((adapter?: Cache): Cache => {
 // Disposal
 // ---------------------------------------------------------------------------
 
-/** Registered cleanup functions, executed in reverse order during shutdown. */
-const disposers: Disposer[] = [];
+/**
+ * Registered cleanup functions live in \`internal/disposers.ts\`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
 
 /**
  * Disposes all registered adapters and disposers, then exits the process.
@@ -13102,9 +13204,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   // Run sequentially in reverse registration order so a disposer can rely on
   // later-registered disposers (and adapters on later-registered adapters)
   // having already finished — Promise.all would race them.
-  for (const disposer of [...disposers].reverse()) {
-    await disposer();
-  }
+  await run_disposers();
   for (const adapter of [...adapters.values()].reverse()) {
     await adapter.dispose();
     log().info(\`[act] - \${adapter.constructor.name}\`);
@@ -13140,7 +13240,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
 export function dispose(
   disposer?: Disposer
 ): (code?: ExitCode) => Promise<void> {
-  disposer && disposers.push(disposer);
+  disposer && register_disposer(disposer);
   return disposeAndExit;
 }
 
@@ -18480,6 +18580,7 @@ import {
   type Handle,
   type HandleBatch,
   type PatchFn,
+  register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -18494,7 +18595,6 @@ export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import {
   cache,
-  dispose,
   log,
   type Scoped,
   scoped,
@@ -19123,7 +19223,15 @@ export class Act<
     // take effect. Scoped Acts bind against their own store.
     this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
 
-    dispose(() => this.shutdown());
+    // Registered weakly (#1441). A plain \`dispose(() => this.shutdown())\`
+    // closure captures \`this\` in a module-level array that is never emptied,
+    // so every Act ever built — with its registry, drain controllers, and for
+    // a scoped Act its own store and cache, connection pools included —
+    // survives for the process lifetime. Apps that mint short-lived Acts (one
+    // per tenant, per request, per test) leak one apiece. Holding the
+    // reference weakly keeps process-wide \`dispose()()\` working for a live
+    // Act while letting an unreachable one be collected, shut down or not.
+    register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
   /**
@@ -25990,6 +26098,90 @@ export class DeferTimer {
   }
 }
 
+// === disposers.ts ===
+import type { Disposer } from "../types/index.js";
+
+/**
+ * The shape {@link register_weak_disposer} needs from a \`WeakRef\`. Declared
+ * structurally so tests can hand in a stub that reports its target as
+ * collected — real garbage collection is not schedulable, and a guarantee
+ * about releasing memory deserves a deterministic test.
+ */
+export type RefLike<T extends object> = { deref: () => T | undefined };
+
+/**
+ * A registered cleanup function, optionally tied to the lifetime of the
+ * object it cleans up. \`ref\` present means "run this only while its target
+ * is still reachable" — the entry holds no strong reference to that target,
+ * so registering never keeps it alive. The target is handed back to \`run\`,
+ * so a weak disposer never has to re-check what the registry just proved.
+ */
+type Entry = {
+  readonly run: (target: never) => Promise<void>;
+  readonly ref?: RefLike<object>;
+};
+
+/** Registered cleanup functions, executed in reverse order during shutdown. */
+const entries: Entry[] = [];
+
+/**
+ * Drop entries whose target has been collected.
+ *
+ * Called on every registration so the registry stays proportional to the
+ * live objects rather than to every object ever built. That matters for apps
+ * that mint short-lived Acts — one per tenant, per request, per test — where
+ * the registry would otherwise grow without bound for the process lifetime
+ * (#1441).
+ */
+const prune = (): void => {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const { ref } = entries[i];
+    if (ref && !ref.deref()) entries.splice(i, 1);
+  }
+};
+
+/** Register a cleanup function that runs unconditionally at teardown. */
+export const register_disposer = (run: Disposer): void => {
+  prune();
+  entries.push({ run });
+};
+
+/**
+ * Register a cleanup function bound to \`ref\`'s target, held weakly.
+ *
+ * The registry never retains the target, so an object that becomes
+ * unreachable is collectable whether or not it was cleaned up first, and its
+ * entry is skipped at teardown — there is nothing left to clean up.
+ */
+export const register_weak_disposer = <T extends object>(
+  ref: RefLike<T>,
+  run: (target: T) => Promise<void>
+): void => {
+  prune();
+  entries.push({
+    run: run as (target: never) => Promise<void>,
+    ref: ref as RefLike<object>,
+  });
+};
+
+/**
+ * Run every live disposer in reverse registration order, sequentially, so a
+ * disposer can rely on later-registered ones having already finished.
+ *
+ * Registrations are left in place, so a second teardown call re-runs them,
+ * exactly as before this registry learned about weak entries.
+ */
+export const run_disposers = async (): Promise<void> => {
+  for (const { run, ref } of [...entries].reverse()) {
+    if (!ref) {
+      await (run as Disposer)();
+      continue;
+    }
+    const target = ref.deref();
+    if (target) await (run as (t: object) => Promise<void>)(target);
+  }
+};
+
 // === drain-cycle.ts ===
 /**
  * @module drain-cycle
@@ -29665,6 +29857,12 @@ export {
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
+export {
+  type RefLike,
+  register_disposer,
+  register_weak_disposer,
+  run_disposers,
+} from "./disposers.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -30162,6 +30360,7 @@ import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./internal/disposers.js";
 import type {
   Cache,
   Disposable,
@@ -30374,8 +30573,11 @@ export const cache = ((adapter?: Cache): Cache => {
 // Disposal
 // ---------------------------------------------------------------------------
 
-/** Registered cleanup functions, executed in reverse order during shutdown. */
-const disposers: Disposer[] = [];
+/**
+ * Registered cleanup functions live in \`internal/disposers.ts\`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
 
 /**
  * Disposes all registered adapters and disposers, then exits the process.
@@ -30406,9 +30608,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   // Run sequentially in reverse registration order so a disposer can rely on
   // later-registered disposers (and adapters on later-registered adapters)
   // having already finished — Promise.all would race them.
-  for (const disposer of [...disposers].reverse()) {
-    await disposer();
-  }
+  await run_disposers();
   for (const adapter of [...adapters.values()].reverse()) {
     await adapter.dispose();
     log().info(\`[act] - \${adapter.constructor.name}\`);
@@ -30444,7 +30644,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
 export function dispose(
   disposer?: Disposer
 ): (code?: ExitCode) => Promise<void> {
-  disposer && disposers.push(disposer);
+  disposer && register_disposer(disposer);
   return disposeAndExit;
 }
 

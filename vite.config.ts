@@ -74,6 +74,11 @@ export default defineConfig({
       NO_COLOR: "1",
       FORCE_COLOR: "0",
     },
+    // Expose `globalThis.gc` to workers so the retention guarantee in
+    // `disposers.spec.ts` is enforced rather than skipped (#1441). A claim
+    // about releasing memory can only be checked by actually collecting;
+    // without this flag the case silently opts out on every run.
+    execArgv: ["--expose-gc"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html", "json-summary"],
