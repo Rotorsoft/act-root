@@ -1040,6 +1040,69 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(in_window).toHaveLength(1);
       });
 
+      // The max rule holds across the whole number line, not just above
+      // zero (#1445). Every case above uses positive priorities, which is
+      // precisely why SQLite's `priority > 0` gate around its merge went
+      // unnoticed: with positive values the gate is a no-op.
+      it("keeps the maximum for negative and zero priorities too", async () => {
+        const s = `sub-pri-neg-${uid()}`;
+        const read = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.priority;
+        };
+
+        await store.subscribe([{ stream: s, priority: -5 }]);
+        expect(await read()).toBe(-5);
+
+        // A less-negative priority is still higher — it must win.
+        await store.subscribe([{ stream: s, priority: -1 }]);
+        expect(await read()).toBe(-1);
+
+        // More negative must not lower it.
+        await store.subscribe([{ stream: s, priority: -9 }]);
+        expect(await read()).toBe(-1);
+
+        // Zero outranks every negative, including via the omitted default.
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(0);
+      });
+
+      // `prioritize` is the documented operator override and the one call
+      // that may *lower* priority. Because `subscribe` is restart-driven and
+      // re-runs for every reaction target on every boot, the declared
+      // priority must come back — otherwise an operator's temporary
+      // de-prioritization is sticky forever (#1445).
+      it("restores the declared priority on the next subscribe after a prioritize() downgrade", async () => {
+        const s = `sub-pri-restore-${uid()}`;
+        const read = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.priority;
+        };
+
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(0);
+
+        // Operator drops it below the declared default.
+        await store.prioritize({ stream: s, stream_exact: true }, -5);
+        expect(await read()).toBe(-5);
+
+        // The next boot re-subscribes at the declared priority and restores it.
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(0);
+      });
+
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = `claim-${uid()}`;
         await store.subscribe([{ stream: s }]);
