@@ -10,6 +10,7 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
+  FOLD_RESET,
   IDENTITY_GATE,
   make_fold_handler,
   make_gate,
@@ -19,6 +20,7 @@ import {
   pii_fields,
   pii_split,
   pii_strip,
+  type ResettableBatchHandler,
   reaction_on,
   register_lane,
   register_state,
@@ -372,14 +374,21 @@ export function act<
    * sees it. `_sf` is read lazily at dispatch time, by when the
    * events pass has populated it.
    */
-  const pii_wrap =
-    (original: BatchHandler<any>) => async (events: any[], stream: string) => {
+  const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
+    const wrapped = async (events: readonly any[], stream: string) => {
       const stripped = events.map((e) => {
         const f = _sf.get(e.name as string);
         return f ? pii_strip(e, f) : e;
       });
       return original(stripped as never, stream);
     };
+    // Carry the fold's cache-reset handle through the wrapper (#1466). The
+    // orchestrator only ever sees what this map holds, so a handle left on
+    // the inner handler is a handle nobody can reach.
+    const reset = (original as ResettableBatchHandler<any>)[FOLD_RESET];
+    if (reset) Object.defineProperty(wrapped, FOLD_RESET, { value: reset });
+    return wrapped;
+  };
 
   /**
    * Per-Act batch-handler map. Stateless projection handlers are shared

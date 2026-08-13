@@ -96,7 +96,11 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export { make_fold_handler } from "./projection-fold.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,

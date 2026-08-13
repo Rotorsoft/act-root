@@ -14,6 +14,7 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
+  FOLD_RESET,
   IDENTITY_GATE,
   make_fold_handler,
   make_gate,
@@ -23,6 +24,7 @@ import {
   pii_fields,
   pii_split,
   pii_strip,
+  type ResettableBatchHandler,
   reaction_on,
   register_lane,
   register_state,
@@ -376,14 +378,21 @@ export function act<
    * sees it. \`_sf\` is read lazily at dispatch time, by when the
    * events pass has populated it.
    */
-  const pii_wrap =
-    (original: BatchHandler<any>) => async (events: any[], stream: string) => {
+  const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
+    const wrapped = async (events: readonly any[], stream: string) => {
       const stripped = events.map((e) => {
         const f = _sf.get(e.name as string);
         return f ? pii_strip(e, f) : e;
       });
       return original(stripped as never, stream);
     };
+    // Carry the fold's cache-reset handle through the wrapper (#1466). The
+    // orchestrator only ever sees what this map holds, so a handle left on
+    // the inner handler is a handle nobody can reach.
+    const reset = (original as ResettableBatchHandler<any>)[FOLD_RESET];
+    if (reset) Object.defineProperty(wrapped, FOLD_RESET, { value: reset });
+    return wrapped;
+  };
 
   /**
    * Per-Act batch-handler map. Stateless projection handlers are shared
@@ -789,10 +798,12 @@ import {
   default_correlator,
   type EsOps,
   type EventLaneSet,
+  FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  type ResettableBatchHandler,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
@@ -2503,6 +2514,16 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
+      // Drop every fold cache before the replay reaches a handler (#1466).
+      // A rebuild replays from the beginning, so every event lands at or
+      // below a warm fold's head and takes its already-folded branch, which
+      // re-flushes whatever that cache holds — writing a stale row straight
+      // back out. Cleared unconditionally rather than per target: \`input\`
+      // may be a filter, resolving it costs a query, and the only cost of
+      // clearing a cache that did not need it is one head load per stream
+      // on the next batch.
+      for (const handler of this._batch_handlers.values())
+        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
@@ -12617,7 +12638,11 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export { make_fold_handler } from "./projection-fold.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -15236,9 +15261,33 @@ type Fold<TState extends Schema> = {
 } & { dirty: boolean };
 
 /**
+ * Internal handle a fold handler exposes so the orchestrator can drop its
+ * process-local state (#1466).
+ *
+ * A rebuild must not trust a per-Act cache: \`reset\` rewinds the watermark and
+ * replays from the beginning, and every replayed event is at or below the
+ * cached head, so the fold takes its already-folded branch and re-flushes
+ * whatever it happens to hold. If that cache is stale, the rebuild writes the
+ * staleness back out — the one outcome a rebuild exists to prevent. Dropping
+ * the cache makes the next batch re-load head state from the store, which is
+ * authoritative by definition.
+ *
+ * A symbol on the function keeps \`BatchHandler\` a plain function type; nothing
+ * here is re-exported from \`src/index.ts\`.
+ */
+export const FOLD_RESET = Symbol("act.fold.reset");
+
+/** A batch handler that owns a fold cache it can be told to drop. */
+export type ResettableBatchHandler<TEvents extends Schemas> =
+  BatchHandler<TEvents> & {
+    readonly [FOLD_RESET]?: () => void;
+  };
+
+/**
  * Build the batch handler that folds a state's events into per-stream rows.
  * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
+ * survives across drain cycles, so warm streams fold without I/O. It carries
+ * a {@link FOLD_RESET} handle so a rebuild can drop that cache.
  */
 export function make_fold_handler<
   TState extends Schema,
@@ -15289,7 +15338,42 @@ export function make_fold_handler<
     for (const f of flushed) f.dirty = false;
   };
 
-  return async (events) => {
+  /**
+   * Load a stream's head state and seat it in the cache.
+   *
+   * The loaded state and its head position (\`version\`, global \`id\`,
+   * \`patches\`, \`snaps\`) are captured atomically inside \`load()\` — even on a
+   * warm cache hit where \`snapshot.event\` is undefined. Reading the head id
+   * back from the cache separately (ACT-1204) opened a TOCTOU window: a
+   * concurrent \`action()\` committing between the two awaits pairs this
+   * OLDER state with a NEWER event_id, and the frontier guard below then
+   * permanently skips the intervening events. Dirty from the start: the row
+   * must be written at least once.
+   */
+  const first_sight = async (stream: string): Promise<Fold<TState>> => {
+    if (cache.size >= config.maxCachedStates) {
+      // flush-before-evict: the oldest entry leaves only after its folded
+      // work is durable.
+      const oldest = cache.keys().next().value as string;
+      const evictee = cache.get(oldest) as Fold<TState>;
+      if (evictee.dirty) await flush([row(evictee)]);
+      cache.delete(oldest);
+    }
+    const snapshot = await load(load_me, { stream }, undefined, patch_fn);
+    const seated: Fold<TState> = {
+      stream,
+      state: snapshot.state,
+      version: snapshot.version,
+      event_id: snapshot.id,
+      patches: snapshot.patches,
+      snaps: snapshot.snaps,
+      dirty: true,
+    };
+    cache.set(stream, seated);
+    return seated;
+  };
+
+  const handler: ResettableBatchHandler<TEvents> = async (events) => {
     let folded_since_flush = 0;
     for (const event of events) {
       const stream = event.stream;
@@ -15299,36 +15383,25 @@ export function make_fold_handler<
         cache.delete(stream);
         cache.set(stream, fold);
       } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). The loaded state and its
-        // head position (\`version\`, global \`id\`, \`patches\`, \`snaps\`) are
-        // captured atomically inside \`load()\` — even on a warm cache hit
-        // where \`snapshot.event\` is undefined. Reading the head id back
-        // from the cache separately (ACT-1204) opened a TOCTOU window: a
-        // concurrent \`action()\` committing between the two awaits pairs
-        // this OLDER state with a NEWER event_id, and the
-        // \`event.id > fold.event_id\` guard below then permanently skips
-        // the intervening events. Dirty from the start: the row must be
-        // written at least once.
-        const snapshot = await load(load_me, { stream }, undefined, patch_fn);
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: snapshot.version,
-          event_id: snapshot.id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
+        fold = await first_sight(stream);
+      }
+      // Fold forward only across a CONTIGUOUS version step (#1465). The
+      // cache is per-Act but the subscription watermark is shared, so a
+      // worker can be handed an event whose predecessors were drained by a
+      // sibling worker — its cached state is then stale, and folding onto
+      // it silently corrupts the row for good (the flushed row carries the
+      // newest event_id, so the monotonic-upsert guard overwrites the
+      // correct row with the wrong one). "Newer than what I hold" is not
+      // the same question as "next after what I hold".
+      //
+      // A gap re-takes the first-sight path: drop the entry and load head
+      // state, which is authoritative and absorbs both the missed window
+      // and the version slot a \`__snapshot__\` consumes. The reloaded entry
+      // sits at head, so this event then takes the already-folded branch.
+      const contiguous = event.version === fold.version + 1;
+      if (event.id > fold.event_id && !contiguous) {
+        cache.delete(stream);
+        fold = await first_sight(stream);
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
@@ -15357,6 +15430,12 @@ export function make_fold_handler<
     // after the handler resolves, so rows are durable before the ack.
     await flush_dirty();
   };
+
+  // Dirty entries are dropped rather than flushed: a rebuild is about to
+  // re-derive every row from the store, so a pending write of process-local
+  // state has nothing to contribute and everything to get wrong.
+  Object.defineProperty(handler, FOLD_RESET, { value: () => cache.clear() });
+  return handler;
 }
 
 // === reaction.ts ===
@@ -18761,10 +18840,12 @@ import {
   default_correlator,
   type EsOps,
   type EventLaneSet,
+  FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  type ResettableBatchHandler,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
@@ -20475,6 +20556,16 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
+      // Drop every fold cache before the replay reaches a handler (#1466).
+      // A rebuild replays from the beginning, so every event lands at or
+      // below a warm fold's head and takes its already-folded branch, which
+      // re-flushes whatever that cache holds — writing a stale row straight
+      // back out. Cleared unconditionally rather than per target: \`input\`
+      // may be a filter, resolving it costs a query, and the only cost of
+      // clearing a cache that did not need it is one head load per stream
+      // on the next batch.
+      for (const handler of this._batch_handlers.values())
+        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
@@ -30223,7 +30314,11 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export { make_fold_handler } from "./projection-fold.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -32823,9 +32918,33 @@ type Fold<TState extends Schema> = {
 } & { dirty: boolean };
 
 /**
+ * Internal handle a fold handler exposes so the orchestrator can drop its
+ * process-local state (#1466).
+ *
+ * A rebuild must not trust a per-Act cache: \`reset\` rewinds the watermark and
+ * replays from the beginning, and every replayed event is at or below the
+ * cached head, so the fold takes its already-folded branch and re-flushes
+ * whatever it happens to hold. If that cache is stale, the rebuild writes the
+ * staleness back out — the one outcome a rebuild exists to prevent. Dropping
+ * the cache makes the next batch re-load head state from the store, which is
+ * authoritative by definition.
+ *
+ * A symbol on the function keeps \`BatchHandler\` a plain function type; nothing
+ * here is re-exported from \`src/index.ts\`.
+ */
+export const FOLD_RESET = Symbol("act.fold.reset");
+
+/** A batch handler that owns a fold cache it can be told to drop. */
+export type ResettableBatchHandler<TEvents extends Schemas> =
+  BatchHandler<TEvents> & {
+    readonly [FOLD_RESET]?: () => void;
+  };
+
+/**
  * Build the batch handler that folds a state's events into per-stream rows.
  * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
+ * survives across drain cycles, so warm streams fold without I/O. It carries
+ * a {@link FOLD_RESET} handle so a rebuild can drop that cache.
  */
 export function make_fold_handler<
   TState extends Schema,
@@ -32876,7 +32995,42 @@ export function make_fold_handler<
     for (const f of flushed) f.dirty = false;
   };
 
-  return async (events) => {
+  /**
+   * Load a stream's head state and seat it in the cache.
+   *
+   * The loaded state and its head position (\`version\`, global \`id\`,
+   * \`patches\`, \`snaps\`) are captured atomically inside \`load()\` — even on a
+   * warm cache hit where \`snapshot.event\` is undefined. Reading the head id
+   * back from the cache separately (ACT-1204) opened a TOCTOU window: a
+   * concurrent \`action()\` committing between the two awaits pairs this
+   * OLDER state with a NEWER event_id, and the frontier guard below then
+   * permanently skips the intervening events. Dirty from the start: the row
+   * must be written at least once.
+   */
+  const first_sight = async (stream: string): Promise<Fold<TState>> => {
+    if (cache.size >= config.maxCachedStates) {
+      // flush-before-evict: the oldest entry leaves only after its folded
+      // work is durable.
+      const oldest = cache.keys().next().value as string;
+      const evictee = cache.get(oldest) as Fold<TState>;
+      if (evictee.dirty) await flush([row(evictee)]);
+      cache.delete(oldest);
+    }
+    const snapshot = await load(load_me, { stream }, undefined, patch_fn);
+    const seated: Fold<TState> = {
+      stream,
+      state: snapshot.state,
+      version: snapshot.version,
+      event_id: snapshot.id,
+      patches: snapshot.patches,
+      snaps: snapshot.snaps,
+      dirty: true,
+    };
+    cache.set(stream, seated);
+    return seated;
+  };
+
+  const handler: ResettableBatchHandler<TEvents> = async (events) => {
     let folded_since_flush = 0;
     for (const event of events) {
       const stream = event.stream;
@@ -32886,36 +33040,25 @@ export function make_fold_handler<
         cache.delete(stream);
         cache.set(stream, fold);
       } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). The loaded state and its
-        // head position (\`version\`, global \`id\`, \`patches\`, \`snaps\`) are
-        // captured atomically inside \`load()\` — even on a warm cache hit
-        // where \`snapshot.event\` is undefined. Reading the head id back
-        // from the cache separately (ACT-1204) opened a TOCTOU window: a
-        // concurrent \`action()\` committing between the two awaits pairs
-        // this OLDER state with a NEWER event_id, and the
-        // \`event.id > fold.event_id\` guard below then permanently skips
-        // the intervening events. Dirty from the start: the row must be
-        // written at least once.
-        const snapshot = await load(load_me, { stream }, undefined, patch_fn);
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: snapshot.version,
-          event_id: snapshot.id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
+        fold = await first_sight(stream);
+      }
+      // Fold forward only across a CONTIGUOUS version step (#1465). The
+      // cache is per-Act but the subscription watermark is shared, so a
+      // worker can be handed an event whose predecessors were drained by a
+      // sibling worker — its cached state is then stale, and folding onto
+      // it silently corrupts the row for good (the flushed row carries the
+      // newest event_id, so the monotonic-upsert guard overwrites the
+      // correct row with the wrong one). "Newer than what I hold" is not
+      // the same question as "next after what I hold".
+      //
+      // A gap re-takes the first-sight path: drop the entry and load head
+      // state, which is authoritative and absorbs both the missed window
+      // and the version slot a \`__snapshot__\` consumes. The reloaded entry
+      // sits at head, so this event then takes the already-folded branch.
+      const contiguous = event.version === fold.version + 1;
+      if (event.id > fold.event_id && !contiguous) {
+        cache.delete(stream);
+        fold = await first_sight(stream);
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
@@ -32944,6 +33087,12 @@ export function make_fold_handler<
     // after the handler resolves, so rows are durable before the ack.
     await flush_dirty();
   };
+
+  // Dirty entries are dropped rather than flushed: a rebuild is about to
+  // re-derive every row from the store, so a pending write of process-local
+  // state has nothing to contribute and everything to get wrong.
+  Object.defineProperty(handler, FOLD_RESET, { value: () => cache.clear() });
+  return handler;
 }
 
 // === reaction.ts ===
