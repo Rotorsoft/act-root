@@ -133,6 +133,34 @@ dispose(async () => {
 
 When a signal fires, the shutdown sequence runs in this order: custom disposers in reverse registration order, then port adapters (logger, store, cache) in reverse registration order, then `process.exit`. Reverse order matters — the HTTP server stops accepting connections before the store closes, so an in-flight request can still finish its commit.
 
+### In-flight reactions and the grace budget
+
+An in-flight *reaction* is a different case from an in-flight request, and it is the one that costs you on a rolling deploy. A handler parked on an `await` — an HTTP call to a payment provider, a write to a reporting database — holds its stream's lease until it acks. `Act.shutdown()` stops scheduling new cycles, then waits for the cycles already running, so that handler reaches its ack and releases the lease:
+
+```typescript no-check
+// Wait up to the derived budget (the default).
+await app.shutdown();
+
+// Or set it explicitly.
+await app.shutdown({ graceMs: 15_000 });
+```
+
+The default budget is derived from the lanes that actually have a cycle in flight: each contributes its configured `leaseMillis` (or the 10s `drain()` fallback if it pinned none), the largest wins, and the result is capped at 30 seconds. The reasoning is that `leaseMillis` is already your statement of how long one of that lane's handlers may legitimately hold a stream, so it is the right ceiling for how long teardown should wait for one.
+
+The budget is a ceiling, not a delay — teardown continues the moment the last cycle finishes. When it is exhausted, teardown proceeds anyway: a single stuck handler must never hang a deploy.
+
+What you give up by shortening it, and what you pay for by lengthening it:
+
+| `graceMs` | Rolling-deploy behavior |
+|---|---|
+| `0` | Teardown returns immediately. Every in-flight stream stays leased until `leaseMillis` expires, so the replacement worker cannot claim it for up to that long, and each abandoned handler's round of work is discarded and redelivered. |
+| derived (default) | In-flight handlers finish and release their leases; the replacement worker picks the streams up immediately. Teardown takes as long as the slowest in-flight handler, bounded. |
+| long, explicit | Same, with more patience for genuinely slow integrations. Your orchestrator's own termination grace period (`terminationGracePeriodSeconds` on Kubernetes) should exceed it, or the process is killed mid-wait and you are back to the `0` row. |
+
+Set `graceMs: 0` only if you have decided that redelivery is cheaper than waiting — which it can be for idempotent handlers with a short `leaseMillis`.
+
+Lifecycle listeners are removed *after* the wait, so an `acked` or `blocked` subscriber still observes work that completes during the window. Anything still running when the budget expires is abandoned exactly as before: its ack lands after teardown and is dropped, and the work is redelivered on the next claim.
+
 `dispose()` called with no argument returns the trigger function, useful for manual shutdown or tests:
 
 ```typescript no-check
