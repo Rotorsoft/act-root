@@ -422,3 +422,27 @@ export type SettleOptions = DrainOptions & {
   readonly correlate?: Query;
   readonly maxPasses?: number;
 };
+
+/**
+ * Options for {@link IAct.shutdown}.
+ *
+ * @property graceMs - How long teardown waits for drain cycles already in
+ *   flight, in milliseconds. A reaction handler parked on an `await` (an
+ *   HTTP call, a database write) holds its stream's lease until it acks, so
+ *   abandoning it means the replacement worker cannot claim that stream
+ *   until the lease expires — up to `leaseMillis` of dead time per in-flight
+ *   stream on every rolling deploy, with the completing handler's round of
+ *   work discarded and redelivered (#1442).
+ *
+ *   Defaults to the largest `leaseMillis` configured across the Act's lanes
+ *   (capped at 30s), because a lane's lease is already the operator's
+ *   statement of how long a handler may legitimately hold a stream. Lanes
+ *   that pinned no lease contribute the same 10s default `drain()` uses.
+ *
+ *   `0` restores the pre-#1442 behavior: stop scheduling and return without
+ *   waiting. Whatever the budget, it is a ceiling and not a delay — teardown
+ *   proceeds the moment the last in-flight cycle finishes.
+ */
+export type ShutdownOptions = {
+  readonly graceMs?: number;
+};

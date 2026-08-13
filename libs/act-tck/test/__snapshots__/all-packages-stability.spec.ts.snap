@@ -783,6 +783,7 @@ import {
   CorrelateCycle,
   classify_registry,
   close_correlation,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -790,11 +791,13 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
+  resolveShutdownConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -842,6 +845,7 @@ import type {
   SchemaRegister,
   Schemas,
   SettleOptions,
+  ShutdownOptions,
   Snapshot,
   State,
   Store,
@@ -1710,23 +1714,43 @@ export class Act<
   private _shutdown_promise: Promise<void> | undefined;
 
   /**
-   * Per-instance teardown: remove lifecycle listeners, stop the
-   * correlation worker, cancel any pending settle cycle, and tear
-   * down the cross-process notify subscription.
+   * Per-instance teardown: stop scheduling new work, give drain cycles
+   * already in flight a bounded chance to finish, then remove lifecycle
+   * listeners and tear down the cross-process notify subscription.
    *
-   * Idempotent — repeated calls return the same promise. Registered
-   * automatically with the global \`dispose()\` registry at construction,
-   * so process-wide \`dispose()()\` covers it; test helpers (or operators
-   * that mint short-lived Acts) call it explicitly for prompt cleanup.
+   * The order is deliberate (#1442). Scheduling stops first, so nothing new
+   * is claimed while teardown runs. Then in-flight cycles are awaited up to
+   * \`graceMs\`: a reaction handler parked on an \`await\` holds its stream's
+   * lease until it acks, so abandoning it costs the replacement worker up to
+   * \`leaseMillis\` of dead time on that stream and discards the round of work
+   * (which #1418 then redelivers). Listeners come off *after* that wait, not
+   * before, so an \`acked\` / \`blocked\` subscriber still observes the work
+   * that completed during the grace window.
+   *
+   * The budget is a ceiling, not a delay — teardown continues the moment the
+   * last in-flight cycle finishes. When it is exhausted, teardown proceeds
+   * anyway: one stuck handler must not hang a deploy, which is the failure
+   * mode an unbounded wait would trade for.
+   *
+   * Idempotent — repeated calls return the same promise, and the first
+   * call's \`graceMs\` is the one that applies. Registered automatically with
+   * the global \`dispose()\` registry at construction, so process-wide
+   * \`dispose()()\` covers it; test helpers (or operators that mint
+   * short-lived Acts) call it explicitly for prompt cleanup.
+   *
+   * @param options - See {@link ShutdownOptions}. Defaults the grace budget
+   *   to the largest lane \`leaseMillis\` (capped at 30s).
    */
-  shutdown(): Promise<void> {
+  shutdown(options?: ShutdownOptions): Promise<void> {
     if (!this._shutdown_promise) {
+      resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
-        this._emitter.removeAllListeners();
         this.stop_correlations();
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
+        await this._await_inflight(options?.graceMs);
+        this._emitter.removeAllListeners();
         // \`_wire_notify\` swallows subscription errors and resolves to
         // \`undefined\`, so this promise never rejects.
         const disposer = await this._notify_disposer;
@@ -1734,6 +1758,51 @@ export class Act<
       })();
     }
     return this._shutdown_promise;
+  }
+
+  /**
+   * Wait for every in-flight drain cycle, or for the grace budget to elapse,
+   * whichever comes first. Cycle promises never reject (\`drain()\` contains
+   * its own errors), so this never throws.
+   *
+   * An omitted budget is derived from the lanes that actually have a cycle
+   * in flight: their \`leaseMillis\` is the operator's own statement of how
+   * long one of their handlers may hold a stream, which makes it the honest
+   * ceiling for how long teardown should wait for that handler. A parked
+   * lane that pinned no lease contributes \`drain()\`'s own fallback, and the
+   * whole thing is capped so a long-leased lane cannot hold a deploy open.
+   * Idle lanes do not count — nothing is running on them to wait for.
+   */
+  private _derive_grace_ms(
+    running: { readonly lease_millis: number | undefined }[]
+  ): number {
+    let max = 0;
+    for (const c of running)
+      max = Math.max(max, c.lease_millis ?? DEFAULT_SHUTDOWN_GRACE_MS);
+    return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
+  }
+
+  private async _await_inflight(grace_ms?: number): Promise<void> {
+    const running = [...this._drain_controllers.values()].filter(
+      (c) => c.inflight !== undefined
+    );
+    if (running.length === 0) return;
+    const grace = grace_ms ?? this._derive_grace_ms(running);
+    if (grace <= 0) return;
+    const inflight = running.map((c) => c.inflight);
+    // Assigned synchronously by the executor below, before the race is
+    // awaited — so the \`finally\` never has to test for it.
+    let timer!: ReturnType<typeof setTimeout>;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, grace);
+      timer.unref();
+    });
+    try {
+      await Promise.race([Promise.all(inflight), budget]);
+    } finally {
+      // Don't leave the budget timer pending when the cycles won the race.
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -7153,6 +7222,7 @@ import type {
   LaneConfig,
   ReactionOptions,
   SettleOptions,
+  ShutdownOptions,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -7280,6 +7350,46 @@ export function resolveSettleConfig(
 ): SettleOptions | undefined {
   if (options === undefined) return undefined;
   SettleOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown — the grace budget \`shutdown(...)\` gives in-flight drain cycles
+// (#1442).
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on the derived shutdown grace budget. Without a cap, a lane
+ * configured with a long lease (minutes, for a genuinely slow integration)
+ * would let one parked handler hold a rolling deploy open for that whole
+ * lease. 30s is the longest \`leaseMillis\` the production checklist
+ * recommends, so it is the point past which "graceful" stops being the
+ * operator's intent.
+ */
+export const MAX_SHUTDOWN_GRACE_MS = 30_000;
+
+/**
+ * Grace budget used when no lane pinned a \`leaseMillis\` — matches \`drain()\`'s
+ * own \`leaseMillis\` fallback, so the default deployment gets a budget
+ * consistent with how long its handlers were already allowed to hold a
+ * stream.
+ */
+export const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
+
+const ShutdownOptionsSchema = z
+  .object({
+    // \`0\` is legal and is exactly today's behavior: stop scheduling and
+    // return without waiting.
+    graceMs: z.number().min(0).optional(),
+  })
+  .loose();
+
+/** Validate shutdown options, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveShutdownConfig(
+  options: ShutdownOptions | undefined
+): ShutdownOptions | undefined {
+  if (options === undefined) return undefined;
+  ShutdownOptionsSchema.parse(options);
   return options;
 }
 
@@ -9197,6 +9307,16 @@ export class DrainController<
   /** Worker timer (ACT-1103). Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
+  /**
+   * Resolves when the cycle currently in flight finishes; \`undefined\` when
+   * no cycle is running (#1442). \`_locked\` answers "is a cycle running?" for
+   * the overlap guard; this answers "tell me when it is done" for a graceful
+   * shutdown, which needs to await the handler rather than abandon it
+   * mid-\`await\` with the stream still leased. Never rejects — \`drain()\`
+   * contains its own errors — so awaiting it is always safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  private _inflight_done: (() => void) | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
 
@@ -9233,6 +9353,26 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
+  }
+
+  /**
+   * The cycle currently in flight, or \`undefined\` when idle (#1442). A
+   * graceful shutdown awaits this so an in-flight handler reaches its \`ack\`
+   * — which releases the stream's lease — instead of being abandoned with
+   * the lease held until it expires.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
+  }
+
+  /**
+   * This lane's configured lease budget, or \`undefined\` when the lane didn't
+   * pin one. It is the operator's own statement of how long a handler may
+   * legitimately hold a stream, which makes it the right basis for a
+   * shutdown grace budget (#1442).
+   */
+  get lease_millis(): number | undefined {
+    return this._deps.defaults?.leaseMillis;
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -9302,6 +9442,9 @@ export class DrainController<
 
     try {
       this._locked = true;
+      this._inflight = new Promise<void>((done) => {
+        this._inflight_done = done;
+      });
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
@@ -9400,6 +9543,11 @@ export class DrainController<
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;
+      // Release anyone awaiting this cycle (a graceful shutdown) before the
+      // next one can start.
+      this._inflight = undefined;
+      this._inflight_done?.();
+      this._inflight_done = undefined;
     }
   }
 }
@@ -12418,7 +12566,9 @@ export {
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_FOLD_FLUSH_EVERY,
   DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   type FoldConfig,
+  MAX_SHUTDOWN_GRACE_MS,
   type ReactionConfig,
   resolveActConfig,
   resolveActionConfig,
@@ -12430,6 +12580,7 @@ export {
   resolveLaneConfig,
   resolveReactionConfig,
   resolveSettleConfig,
+  resolveShutdownConfig,
 } from "./config.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
@@ -15626,6 +15777,30 @@ export type SettleOptions = DrainOptions & {
   readonly maxPasses?: number;
 };
 
+/**
+ * Options for {@link IAct.shutdown}.
+ *
+ * @property graceMs - How long teardown waits for drain cycles already in
+ *   flight, in milliseconds. A reaction handler parked on an \`await\` (an
+ *   HTTP call, a database write) holds its stream's lease until it acks, so
+ *   abandoning it means the replacement worker cannot claim that stream
+ *   until the lease expires — up to \`leaseMillis\` of dead time per in-flight
+ *   stream on every rolling deploy, with the completing handler's round of
+ *   work discarded and redelivered (#1442).
+ *
+ *   Defaults to the largest \`leaseMillis\` configured across the Act's lanes
+ *   (capped at 30s), because a lane's lease is already the operator's
+ *   statement of how long a handler may legitimately hold a stream. Lanes
+ *   that pinned no lease contribute the same 10s default \`drain()\` uses.
+ *
+ *   \`0\` restores the pre-#1442 behavior: stop scheduling and return without
+ *   waiting. Whatever the budget, it is a ceiling and not a delay — teardown
+ *   proceeds the moment the last in-flight cycle finishes.
+ */
+export type ShutdownOptions = {
+  readonly graceMs?: number;
+};
+
 // === reactions.ts ===
 /**
  * @module reactions
@@ -18572,6 +18747,7 @@ import {
   CorrelateCycle,
   classify_registry,
   close_correlation,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -18579,11 +18755,13 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
+  resolveShutdownConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -18631,6 +18809,7 @@ import type {
   SchemaRegister,
   Schemas,
   SettleOptions,
+  ShutdownOptions,
   Snapshot,
   State,
   Store,
@@ -19499,23 +19678,43 @@ export class Act<
   private _shutdown_promise: Promise<void> | undefined;
 
   /**
-   * Per-instance teardown: remove lifecycle listeners, stop the
-   * correlation worker, cancel any pending settle cycle, and tear
-   * down the cross-process notify subscription.
+   * Per-instance teardown: stop scheduling new work, give drain cycles
+   * already in flight a bounded chance to finish, then remove lifecycle
+   * listeners and tear down the cross-process notify subscription.
    *
-   * Idempotent — repeated calls return the same promise. Registered
-   * automatically with the global \`dispose()\` registry at construction,
-   * so process-wide \`dispose()()\` covers it; test helpers (or operators
-   * that mint short-lived Acts) call it explicitly for prompt cleanup.
+   * The order is deliberate (#1442). Scheduling stops first, so nothing new
+   * is claimed while teardown runs. Then in-flight cycles are awaited up to
+   * \`graceMs\`: a reaction handler parked on an \`await\` holds its stream's
+   * lease until it acks, so abandoning it costs the replacement worker up to
+   * \`leaseMillis\` of dead time on that stream and discards the round of work
+   * (which #1418 then redelivers). Listeners come off *after* that wait, not
+   * before, so an \`acked\` / \`blocked\` subscriber still observes the work
+   * that completed during the grace window.
+   *
+   * The budget is a ceiling, not a delay — teardown continues the moment the
+   * last in-flight cycle finishes. When it is exhausted, teardown proceeds
+   * anyway: one stuck handler must not hang a deploy, which is the failure
+   * mode an unbounded wait would trade for.
+   *
+   * Idempotent — repeated calls return the same promise, and the first
+   * call's \`graceMs\` is the one that applies. Registered automatically with
+   * the global \`dispose()\` registry at construction, so process-wide
+   * \`dispose()()\` covers it; test helpers (or operators that mint
+   * short-lived Acts) call it explicitly for prompt cleanup.
+   *
+   * @param options - See {@link ShutdownOptions}. Defaults the grace budget
+   *   to the largest lane \`leaseMillis\` (capped at 30s).
    */
-  shutdown(): Promise<void> {
+  shutdown(options?: ShutdownOptions): Promise<void> {
     if (!this._shutdown_promise) {
+      resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
-        this._emitter.removeAllListeners();
         this.stop_correlations();
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
+        await this._await_inflight(options?.graceMs);
+        this._emitter.removeAllListeners();
         // \`_wire_notify\` swallows subscription errors and resolves to
         // \`undefined\`, so this promise never rejects.
         const disposer = await this._notify_disposer;
@@ -19523,6 +19722,51 @@ export class Act<
       })();
     }
     return this._shutdown_promise;
+  }
+
+  /**
+   * Wait for every in-flight drain cycle, or for the grace budget to elapse,
+   * whichever comes first. Cycle promises never reject (\`drain()\` contains
+   * its own errors), so this never throws.
+   *
+   * An omitted budget is derived from the lanes that actually have a cycle
+   * in flight: their \`leaseMillis\` is the operator's own statement of how
+   * long one of their handlers may hold a stream, which makes it the honest
+   * ceiling for how long teardown should wait for that handler. A parked
+   * lane that pinned no lease contributes \`drain()\`'s own fallback, and the
+   * whole thing is capped so a long-leased lane cannot hold a deploy open.
+   * Idle lanes do not count — nothing is running on them to wait for.
+   */
+  private _derive_grace_ms(
+    running: { readonly lease_millis: number | undefined }[]
+  ): number {
+    let max = 0;
+    for (const c of running)
+      max = Math.max(max, c.lease_millis ?? DEFAULT_SHUTDOWN_GRACE_MS);
+    return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
+  }
+
+  private async _await_inflight(grace_ms?: number): Promise<void> {
+    const running = [...this._drain_controllers.values()].filter(
+      (c) => c.inflight !== undefined
+    );
+    if (running.length === 0) return;
+    const grace = grace_ms ?? this._derive_grace_ms(running);
+    if (grace <= 0) return;
+    const inflight = running.map((c) => c.inflight);
+    // Assigned synchronously by the executor below, before the race is
+    // awaited — so the \`finally\` never has to test for it.
+    let timer!: ReturnType<typeof setTimeout>;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, grace);
+      timer.unref();
+    });
+    try {
+      await Promise.race([Promise.all(inflight), budget]);
+    } finally {
+      // Don't leave the budget timer pending when the cycles won the race.
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -24822,6 +25066,7 @@ import type {
   LaneConfig,
   ReactionOptions,
   SettleOptions,
+  ShutdownOptions,
 } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -24949,6 +25194,46 @@ export function resolveSettleConfig(
 ): SettleOptions | undefined {
   if (options === undefined) return undefined;
   SettleOptionsSchema.parse(options);
+  return options;
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown — the grace budget \`shutdown(...)\` gives in-flight drain cycles
+// (#1442).
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on the derived shutdown grace budget. Without a cap, a lane
+ * configured with a long lease (minutes, for a genuinely slow integration)
+ * would let one parked handler hold a rolling deploy open for that whole
+ * lease. 30s is the longest \`leaseMillis\` the production checklist
+ * recommends, so it is the point past which "graceful" stops being the
+ * operator's intent.
+ */
+export const MAX_SHUTDOWN_GRACE_MS = 30_000;
+
+/**
+ * Grace budget used when no lane pinned a \`leaseMillis\` — matches \`drain()\`'s
+ * own \`leaseMillis\` fallback, so the default deployment gets a budget
+ * consistent with how long its handlers were already allowed to hold a
+ * stream.
+ */
+export const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
+
+const ShutdownOptionsSchema = z
+  .object({
+    // \`0\` is legal and is exactly today's behavior: stop scheduling and
+    // return without waiting.
+    graceMs: z.number().min(0).optional(),
+  })
+  .loose();
+
+/** Validate shutdown options, or pass \`undefined\` through. Throws \`ZodError\`. */
+export function resolveShutdownConfig(
+  options: ShutdownOptions | undefined
+): ShutdownOptions | undefined {
+  if (options === undefined) return undefined;
+  ShutdownOptionsSchema.parse(options);
   return options;
 }
 
@@ -26638,6 +26923,16 @@ export class DrainController<
   /** Worker timer (ACT-1103). Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
+  /**
+   * Resolves when the cycle currently in flight finishes; \`undefined\` when
+   * no cycle is running (#1442). \`_locked\` answers "is a cycle running?" for
+   * the overlap guard; this answers "tell me when it is done" for a graceful
+   * shutdown, which needs to await the handler rather than abandon it
+   * mid-\`await\` with the stream still leased. Never rejects — \`drain()\`
+   * contains its own errors — so awaiting it is always safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  private _inflight_done: (() => void) | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
 
@@ -26674,6 +26969,26 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
+  }
+
+  /**
+   * The cycle currently in flight, or \`undefined\` when idle (#1442). A
+   * graceful shutdown awaits this so an in-flight handler reaches its \`ack\`
+   * — which releases the stream's lease — instead of being abandoned with
+   * the lease held until it expires.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
+  }
+
+  /**
+   * This lane's configured lease budget, or \`undefined\` when the lane didn't
+   * pin one. It is the operator's own statement of how long a handler may
+   * legitimately hold a stream, which makes it the right basis for a
+   * shutdown grace budget (#1442).
+   */
+  get lease_millis(): number | undefined {
+    return this._deps.defaults?.leaseMillis;
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -26743,6 +27058,9 @@ export class DrainController<
 
     try {
       this._locked = true;
+      this._inflight = new Promise<void>((done) => {
+        this._inflight_done = done;
+      });
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
@@ -26841,6 +27159,11 @@ export class DrainController<
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;
+      // Release anyone awaiting this cycle (a graceful shutdown) before the
+      // next one can start.
+      this._inflight = undefined;
+      this._inflight_done?.();
+      this._inflight_done = undefined;
     }
   }
 }
@@ -29841,7 +30164,9 @@ export {
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_FOLD_FLUSH_EVERY,
   DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   type FoldConfig,
+  MAX_SHUTDOWN_GRACE_MS,
   type ReactionConfig,
   resolveActConfig,
   resolveActionConfig,
@@ -29853,6 +30178,7 @@ export {
   resolveLaneConfig,
   resolveReactionConfig,
   resolveSettleConfig,
+  resolveShutdownConfig,
 } from "./config.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
@@ -33028,6 +33354,30 @@ export type SettleOptions = DrainOptions & {
   readonly debounceMs?: number;
   readonly correlate?: Query;
   readonly maxPasses?: number;
+};
+
+/**
+ * Options for {@link IAct.shutdown}.
+ *
+ * @property graceMs - How long teardown waits for drain cycles already in
+ *   flight, in milliseconds. A reaction handler parked on an \`await\` (an
+ *   HTTP call, a database write) holds its stream's lease until it acks, so
+ *   abandoning it means the replacement worker cannot claim that stream
+ *   until the lease expires — up to \`leaseMillis\` of dead time per in-flight
+ *   stream on every rolling deploy, with the completing handler's round of
+ *   work discarded and redelivered (#1442).
+ *
+ *   Defaults to the largest \`leaseMillis\` configured across the Act's lanes
+ *   (capped at 30s), because a lane's lease is already the operator's
+ *   statement of how long a handler may legitimately hold a stream. Lanes
+ *   that pinned no lease contribute the same 10s default \`drain()\` uses.
+ *
+ *   \`0\` restores the pre-#1442 behavior: stop scheduling and return without
+ *   waiting. Whatever the budget, it is a ceiling and not a delay — teardown
+ *   proceeds the moment the last in-flight cycle finishes.
+ */
+export type ShutdownOptions = {
+  readonly graceMs?: number;
 };
 
 // === reactions.ts ===
@@ -38522,6 +38872,30 @@ export type SettleOptions = DrainOptions & {
   readonly debounceMs?: number;
   readonly correlate?: Query;
   readonly maxPasses?: number;
+};
+
+/**
+ * Options for {@link IAct.shutdown}.
+ *
+ * @property graceMs - How long teardown waits for drain cycles already in
+ *   flight, in milliseconds. A reaction handler parked on an \`await\` (an
+ *   HTTP call, a database write) holds its stream's lease until it acks, so
+ *   abandoning it means the replacement worker cannot claim that stream
+ *   until the lease expires — up to \`leaseMillis\` of dead time per in-flight
+ *   stream on every rolling deploy, with the completing handler's round of
+ *   work discarded and redelivered (#1442).
+ *
+ *   Defaults to the largest \`leaseMillis\` configured across the Act's lanes
+ *   (capped at 30s), because a lane's lease is already the operator's
+ *   statement of how long a handler may legitimately hold a stream. Lanes
+ *   that pinned no lease contribute the same 10s default \`drain()\` uses.
+ *
+ *   \`0\` restores the pre-#1442 behavior: stop scheduling and return without
+ *   waiting. Whatever the budget, it is a ceiling and not a delay — teardown
+ *   proceeds the moment the last in-flight cycle finishes.
+ */
+export type ShutdownOptions = {
+  readonly graceMs?: number;
 };
 
 // === registry.ts ===
