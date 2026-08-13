@@ -11776,8 +11776,16 @@ export class InMemoryStore implements Store {
     // (e.g. the calculator's \`^(A|B)$\`) is compiled to a RegExp once per
     // candidate subscription and tested against every stream whose max
     // event id has advanced past the watermark.
+    // A fresh subscription (\`at = -1\`) is not special-cased into being
+    // claimable (#1446): "no matching events" means "no work" whatever the
+    // watermark says, and every comparison below already answers correctly
+    // at \`-1\` — the first event on a fresh stream has an id greater than
+    // it. The short-circuit that used to live here cost an empty lease and
+    // a no-op ack per subscription, and that ack was not harmless: an
+    // event committed between the cycle's fetch and its ack was acked past
+    // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
+    // first event this store ever issues — was silently skipped.
     const has_work = (s: InMemoryStream): boolean => {
-      if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
         const max_id = this._max_event_id_by_stream.get(s.source);
@@ -29392,8 +29400,16 @@ export class InMemoryStore implements Store {
     // (e.g. the calculator's \`^(A|B)$\`) is compiled to a RegExp once per
     // candidate subscription and tested against every stream whose max
     // event id has advanced past the watermark.
+    // A fresh subscription (\`at = -1\`) is not special-cased into being
+    // claimable (#1446): "no matching events" means "no work" whatever the
+    // watermark says, and every comparison below already answers correctly
+    // at \`-1\` — the first event on a fresh stream has an id greater than
+    // it. The short-circuit that used to live here cost an empty lease and
+    // a no-op ack per subscription, and that ack was not harmless: an
+    // event committed between the cycle's fetch and its ack was acked past
+    // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
+    // first event this store ever issues — was silently skipped.
     const has_work = (s: InMemoryStream): boolean => {
-      if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
         const max_id = this._max_event_id_by_stream.get(s.source);
@@ -50023,13 +50039,16 @@ export class PostgresStore implements Store {
             AND (deferred_at IS NULL OR deferred_at <= NOW())
         ),
         available AS (
-          -- Never processed: claimable without probing the log at all.
-          SELECT stream, source, at, priority, lane FROM eligible WHERE at < 0
-          UNION ALL
+          -- Every arm below is watermark-agnostic (#1446): a fresh
+          -- subscription sits at -1, and e.id > s.at already answers
+          -- correctly there, since the first event has a greater id.
+          -- There used to be a fourth arm claiming at < 0 unconditionally,
+          -- which handed out an empty lease and a no-op ack for every
+          -- subscription with no matching events yet.
           -- Source-less subscription: any non-snapshot event past the
           -- watermark counts, so the id index alone answers it.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.at >= 0 AND s.source IS NULL
+          WHERE s.source IS NULL
             AND EXISTS (
               SELECT 1 FROM \${this._fqt} e
               WHERE e.id > s.at AND e.name <> '\${SNAP_EVENT}' LIMIT 1
@@ -50038,7 +50057,7 @@ export class PostgresStore implements Store {
           -- Literal source (no regex metacharacter): exact equality, so
           -- "s1" never claims "s12", and (stream, id) is usable.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.at >= 0 AND s.source IS NOT NULL
+          WHERE s.source IS NOT NULL
             AND s.source !~ '\${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM \${this._fqt} e
@@ -50051,7 +50070,7 @@ export class PostgresStore implements Store {
           -- it anchors. Unavoidably a scan — but only for the subscriptions
           -- that actually declare a pattern.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.at >= 0 AND s.source IS NOT NULL
+          WHERE s.source IS NOT NULL
             AND s.source ~ '\${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM \${this._fqt} e
@@ -56323,6 +56342,47 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(10);
       });
 
+      // Claim eligibility for a fresh subscription (#1446). The adapters
+      // disagreed here — two short-circuited \`at < 0\` into "claimable",
+      // SQLite did not — and the TCK pinned nothing, so a third-party
+      // adapter was free to pick either. The contract is that a claim
+      // follows work, not registration: an empty lease costs a cycle, and
+      // its no-op ack can advance the watermark past an event committed
+      // mid-cycle.
+      it("does not claim a fresh subscription with no matching events", async () => {
+        const s = \`fresh-empty-\${uid()}\`;
+        const src = \`fresh-src-\${uid()}\`;
+        await store.subscribe([{ stream: s, source: src }]);
+        const leases = await store.claim(5, 5, \`w-\${uid()}\`, 5_000);
+        expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
+      });
+
+      it("claims a fresh subscription as soon as its first event lands", async () => {
+        const s = \`fresh-first-\${uid()}\`;
+        const src = \`fresh-first-src-\${uid()}\`;
+        await store.subscribe([{ stream: s, source: src }]);
+        await store.commit<CounterEvents>(
+          src,
+          [inc(1)],
+          make_meta({ stream: src })
+        );
+        const leases = await store.claim(5, 5, \`w-\${uid()}\`, 5_000);
+        const mine = leases.filter((l) => l.stream === s);
+        expect(mine).toHaveLength(1);
+        // The watermark is still the fresh \`-1\`, so the first event is
+        // inside the fetch window rather than behind it. This is what makes
+        // a zero-based event id survivable — a store whose first id is 0
+        // loses that event if anything acked a fresh stream to 0 first.
+        expect(mine[0].at).toBe(-1);
+        const in_window: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>((e) => in_window.push(e), {
+          stream: src,
+          stream_exact: true,
+          after: mine[0].at,
+        });
+        expect(in_window).toHaveLength(1);
+      });
+
       // The max rule holds across the whole number line, not just above
       // zero (#1445). Every case above uses positive priorities, which is
       // precisely why SQLite's \`priority > 0\` gate around its merge went
@@ -56905,23 +56965,21 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               { stream: target, source: pattern },
               { stream: control, source: other },
             ]);
-            // Advance the target's watermark past -1 first: a fresh
-            // subscription is claimable unconditionally on some adapters,
-            // so the negative assertion must run against a settled stream.
+            // Advance the target's watermark past -1 first, so the
+            // negative assertion below runs against a settled stream
+            // rather than a fresh one.
             const [ea] = await seed_stream(fresh, a, 1);
             const first = await fresh.claim(100, 0, \`w-\${uid()}\`, 30_000);
             const l1 = first.find((s) => s.stream === target);
             expect(l1).toBeDefined();
-            // Ack both the pattern target and the fresh control lease so
-            // neither is held into the second claim; the control becomes
-            // claimable again only when \`other\` gets a commit below. Both
-            // are fresh subscriptions, so both are in the first claim.
-            const c1 = first.find((s) => s.stream === control);
-            expect(c1).toBeDefined();
-            await fresh.ack([
-              { ...(l1 as Lease), at: ea.id },
-              { ...(c1 as Lease), at: -1 },
-            ]);
+            // The control is not in this claim: its source has no events
+            // yet, and a subscription with no matching work is not claimed
+            // (#1446). It becomes claimable only on the commit below,
+            // which is what makes the second claim non-empty.
+            expect(first.map((s) => s.stream)).not.toContain(control);
+            // Ack the pattern target so its lease isn't held into the
+            // second claim.
+            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
             // Now activity on a stream the pattern does NOT match must not
             // make the target claimable again — but the control sourced
             // from that stream must.
