@@ -665,12 +665,16 @@ export class SqliteStore implements Store {
         if (inserted.rowsAffected > 0) {
           subscribed++;
         } else {
-          if (priority > 0) {
-            await tx.execute({
-              sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
-              args: [priority, stream, priority],
-            });
-          }
+          // `WHERE priority < ?` is the whole max rule, for every value on
+          // the number line. An extra `priority > 0` gate around this used to
+          // skip the merge for non-positive priorities, which made a stored
+          // negative priority unraisable: an operator's `prioritize(-5)`
+          // survived every subsequent boot instead of being restored to the
+          // declared priority by the restart-driven re-subscribe (#1445).
+          await tx.execute({
+            sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
+            args: [priority, stream, priority],
+          });
           // ACT-1103: current subscribe wins on lane.
           await tx.execute({
             sql: "UPDATE streams SET lane = ? WHERE stream = ? AND lane <> ?",
