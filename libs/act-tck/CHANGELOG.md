@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.30.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.0...@rotorsoft/act-tck-v1.30.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **act-sqlite:** apply the priority max-merge to non-positive values ([a272abb](https://github.com/rotorsoft/act-root/commit/a272abbfd3838184d1ece44a201f509ca81b4c2e)), closes [#1445](https://github.com/rotorsoft/act-root/issues/1445)
+
 # [@rotorsoft/act-tck-v1.30.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.29.1...@rotorsoft/act-tck-v1.30.0) (2026-08-13)
 
 
