@@ -1,3 +1,62 @@
+# [@rotorsoft/act-v1.25.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.0...@rotorsoft/act-v1.25.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **act:** claim follows work, not registration, on every adapter ([151646b](https://github.com/rotorsoft/act-root/commit/151646b80fb5029b8e63beb34c6efe24aaee8326)), closes [#1446](https://github.com/rotorsoft/act-root/issues/1446)
+
+# [@rotorsoft/act-v1.25.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.24.1...@rotorsoft/act-v1.25.0) (2026-08-13)
+
+
+### Features
+
+* **act:** give shutdown a bounded wait for in-flight drain cycles ([c806471](https://github.com/rotorsoft/act-root/commit/c8064712c7fae5b3493fae284116cc4b0bd609ba)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418) [#1442](https://github.com/rotorsoft/act-root/issues/1442)
+
+# [@rotorsoft/act-v1.24.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.24.0...@rotorsoft/act-v1.24.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **act:** stop pinning every Act in the dispose registry ([955ed6b](https://github.com/rotorsoft/act-root/commit/955ed6bb9f66eeb506cd8acf6d490f80596ca0fa)), closes [#1441](https://github.com/rotorsoft/act-root/issues/1441)
+
+# [@rotorsoft/act-v1.24.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.41...@rotorsoft/act-v1.24.0) (2026-08-11)
+
+
+### Features
+
+* **act-tck:** cover an adapter's own default config ([b622a96](https://github.com/rotorsoft/act-root/commit/b622a960a354b7b4618452b828cbb12a67f8a8a9)), closes [#1443](https://github.com/rotorsoft/act-root/issues/1443)
+
+# [@rotorsoft/act-v1.23.41](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.40...@rotorsoft/act-v1.23.41) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act:** reject a projection target claimed twice, in all four pairings ([e632ab7](https://github.com/rotorsoft/act-root/commit/e632ab70baf7f92273674adf5c2e67077ed477ae))
+* **act:** skip a repeat registration of the same projection reaction ([f78a3e2](https://github.com/rotorsoft/act-root/commit/f78a3e2f858ed9d4e738ee7098955090d72291e4))
+
+# [@rotorsoft/act-v1.23.40](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.39...@rotorsoft/act-v1.23.40) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act:** contain the cache invalidate on the ConcurrencyError path ([fe9b529](https://github.com/rotorsoft/act-root/commit/fe9b5299b5d6996043e7c014755e5d34be0961cc))
+
+# [@rotorsoft/act-v1.23.39](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.38...@rotorsoft/act-v1.23.39) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act:** contain lifecycle listeners in Act.emit, per listener ([8ab9bed](https://github.com/rotorsoft/act-root/commit/8ab9bedca3181a4c7300f476aa57540624aae043)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
+# [@rotorsoft/act-v1.23.38](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.37...@rotorsoft/act-v1.23.38) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act-pg:** translate Postgres NUL-byte refusals into a ValidationError ([188d71b](https://github.com/rotorsoft/act-root/commit/188d71b14153d69021a97de4cad47df40de1156a)), closes [#1422](https://github.com/rotorsoft/act-root/issues/1422) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+* **act-pg:** widen id to bigserial, and reject NUL bytes in core ([3ec323b](https://github.com/rotorsoft/act-root/commit/3ec323bc581526eb0815a3c9c4b2c614f61c7876)), closes [#1140](https://github.com/rotorsoft/act-root/issues/1140) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+* **act:** contain a throwing settled listener so it cannot open the breaker ([496c9ad](https://github.com/rotorsoft/act-root/commit/496c9adc6bc9c3f0d340dcd52256883cc3702f6a))
+
 # [@rotorsoft/act-v1.23.37](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.23.36...@rotorsoft/act-v1.23.37) (2026-08-08)
 
 

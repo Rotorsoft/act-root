@@ -263,6 +263,20 @@ export function merge_projection(
       };
     } else {
       for (const [name, reaction] of proj_register.reactions) {
+        // The `_p` rename resolves a NAME collision between two genuinely
+        // different handlers. Registering the SAME reaction object again is
+        // not a collision — it is the same projection reached along two
+        // paths (exported from a module and embedded by two slices, or a
+        // `.withProjection(p)` written twice) — and renaming it registered a
+        // second copy under `name_p`, so the handler ran twice per event,
+        // forever, frozen into the registry at build (#1439).
+        //
+        // Not the at-least-once redelivery contract: a structural duplicate,
+        // deterministic on every event, with no signal anywhere. Both
+        // siblings already guard on identity — `merge_event_register` throws
+        // on a different handler under the same name, `register_batch_handler`
+        // likewise — this one only lacked the check.
+        if ([...existing.reactions.values()].includes(reaction)) continue;
         let key = name;
         while (existing.reactions.has(key)) key = `${key}_p`;
         existing.reactions.set(key, reaction);

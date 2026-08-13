@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-http",
   "type": "module",
-  "version": "1.9.0",
+  "version": "1.9.2",
   "description": "HTTP integrations for act apps — webhooks and SSE",
   "keywords": [
     "typescript",
@@ -96,13 +96,13 @@
     "mutation": "stryker run"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.0.12",
+    "@hono/node-server": "^2.1.0",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.18.0",
     "express": "^5.2.1",
-    "fastify": "^5.11.0",
-    "hono": "^4.12.32"
+    "fastify": "^5.11.2",
+    "hono": "^4.13.1"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
@@ -128,7 +128,7 @@
     "@rotorsoft/act-patch": "workspace:^"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.0.12",
+    "@hono/node-server": "^2.1.0",
     "@hono/zod-validator": "^0.9.0",
     "@rotorsoft/act-ops": "workspace:^",
     "@stryker-mutator/core": "^9.6.1",
@@ -136,8 +136,8 @@
     "@trpc/server": "^11.18.0",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
-    "fastify": "^5.11.0",
-    "hono": "^4.12.32",
+    "fastify": "^5.11.2",
+    "hono": "^4.13.1",
     "zod": "^4.4.3"
   }
 }

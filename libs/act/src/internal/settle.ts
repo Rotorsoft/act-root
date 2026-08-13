@@ -160,6 +160,16 @@ export class SettleLoop<TEvents extends Schemas> {
             last_id > after_before;
           if (!made_progress) break;
         }
+        // The `.catch` below treats anything it sees as a store failure,
+        // because everything else in this block is one. An uncontained
+        // listener throw was therefore recorded via `breaker.failed()` —
+        // surfacing a spurious `error` event on every settle, and, at
+        // `failureThreshold: 1`, opening the breaker so `drain` returned
+        // EMPTY_DRAIN for the whole cooldown. Each half-open recovery
+        // re-tripped it, so a broken metrics bridge stalled the reaction
+        // pipeline indefinitely (#1436). Containment now lives in
+        // `Act.emit`, which guards each listener individually (#1437), so
+        // no throw escapes `on_settled` to reach that catch.
         if (settled_drain) this._deps.on_settled(settled_drain);
       })()
         .catch((err) => {

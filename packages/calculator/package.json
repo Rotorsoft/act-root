@@ -19,12 +19,12 @@
     "startCommand": "LOG_LEVEL=trace tsx watch src/main.ts"
   },
   "dependencies": {
-    "@rotorsoft/act": ">=1.23.19",
+    "@rotorsoft/act": ">=1.23.29",
     "@trpc/server": "11.18.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.5",
-    "tsx": "^4.23.1"
+    "tsx": "^4.23.10"
   }
 }

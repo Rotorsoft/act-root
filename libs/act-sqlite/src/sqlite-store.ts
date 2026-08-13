@@ -33,7 +33,30 @@ import {
  * SQLite store configuration
  */
 export interface SqliteConfig {
-  /** Path to the SQLite database file (default: ":memory:") */
+  /**
+   * libSQL connection URL. **Required — there is no default.**
+   *
+   * Accepted forms:
+   *
+   * - `file:myapp.db` — a local database file, relative or absolute.
+   *   This is the shape an embedded deployment wants.
+   * - `libsql://…` / `https://…` — a remote libSQL server, paired with
+   *   {@link SqliteConfig.authToken}.
+   * - `:memory:` / `file::memory:` — an in-memory database. Normalized
+   *   to `file::memory:?cache=shared`, because libSQL hands every
+   *   *connection* its own private database otherwise and the client
+   *   does not pin statements to one connection — DDL would land in a
+   *   database later statements cannot see, so writes would be accepted
+   *   and then silently lost. Shared cache is the only in-memory mode
+   *   that round-trips, and it comes with a caveat worth knowing: it is
+   *   **one database per process**, shared by every store pointed at
+   *   it, and it outlives {@link SqliteStore.dispose}. For isolated
+   *   throwaway state prefer `InMemoryStore` from `@rotorsoft/act`, or
+   *   give each store its own `file:` path.
+   *
+   * `file::memory:?cache=private` is rejected at construction — it is
+   * the failure mode above, spelled out explicitly.
+   */
   url: string;
   /** Auth token for libSQL server connections (optional) */
   authToken?: string;
@@ -66,8 +89,53 @@ export interface SqliteConfig {
   pii_encryption?: Encryption;
 }
 
-const DEFAULT_CONFIG: SqliteConfig = {
-  url: "file::memory:",
+/**
+ * The only in-memory URL libSQL serves from a single database. A bare
+ * `:memory:` / `file::memory:` gives every connection a *private*
+ * database, and the client is free to run consecutive statements on
+ * different connections — `seed()`'s DDL then lands somewhere the next
+ * `commit` cannot see, which surfaces as a successful commit followed
+ * by "no such table: events" on readback.
+ * @internal
+ */
+const SHARED_MEMORY_URL = "file::memory:?cache=shared";
+
+/**
+ * Recognize libSQL's in-memory URL forms: the bare `:memory:` alias and
+ * the `file::memory:` URI it expands to, with or without a query string.
+ * Mirrors `isInMemoryConfig` in `@libsql/core`.
+ * @internal
+ */
+const is_in_memory_url = (url: string): boolean =>
+  url === ":memory:" ||
+  url === "file::memory:" ||
+  url.startsWith("file::memory:?");
+
+/**
+ * Validate and normalize the configured URL.
+ *
+ * Two failures are turned into loud construction-time errors rather
+ * than silent data loss: a missing URL (there is no safe default — a
+ * store has to be told where to write) and an explicitly private
+ * in-memory database (unusable, for the reason on
+ * {@link SHARED_MEMORY_URL}). Every other in-memory spelling is
+ * normalized to the shared-cache form so it actually round-trips.
+ * @internal
+ */
+const resolve_url = (url: unknown): string => {
+  if (typeof url !== "string" || url.trim().length === 0)
+    throw new ValidationError(
+      'SqliteStore config — "url" is required and has no default. Use a file database ("file:myapp.db"), a remote libSQL server ("libsql://…" plus authToken), or ":memory:" for a process-wide shared in-memory database. For isolated throwaway state, prefer InMemoryStore from @rotorsoft/act',
+      { url },
+      "missing url"
+    );
+  if (url.startsWith("file::memory:?") && url.includes("cache=private"))
+    throw new ValidationError(
+      'SqliteStore config — a private in-memory database ("cache=private") cannot back a store: libSQL gives each connection its own database, so writes are accepted and then lost on the next statement. Use ":memory:" for the shared-cache database, a "file:" path, or InMemoryStore from @rotorsoft/act',
+      { url },
+      "private in-memory url"
+    );
+  return is_in_memory_url(url) ? SHARED_MEMORY_URL : url;
 };
 
 /**
@@ -222,14 +290,13 @@ export class SqliteStore implements Store {
    */
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
-  constructor(config: Partial<SqliteConfig> = {}) {
-    const cfg = { ...DEFAULT_CONFIG, ...config };
+  constructor(config: SqliteConfig) {
     this.client = createClient({
-      url: cfg.url,
-      authToken: cfg.authToken,
+      url: resolve_url(config?.url),
+      authToken: config.authToken,
     });
-    this._resolve_pii_key = cfg.pii_encryption
-      ? makeKeyResolver(cfg.pii_encryption)
+    this._resolve_pii_key = config.pii_encryption
+      ? makeKeyResolver(config.pii_encryption)
       : undefined;
   }
 
@@ -315,6 +382,16 @@ export class SqliteStore implements Store {
     // streams with no snapshot (the index has no rows for them).
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
+    );
+    // Complement of the snapshot index, and the one claim's has-work probe
+    // seeks on: "does this source stream have a non-snapshot event past the
+    // watermark?" (#1448). SQLite already probes per candidate with a
+    // sargable `stream = ? AND id > ?`, so it only lacked the index — the
+    // existing idx_events_stream is stream-only and still has to walk every
+    // event of that stream. Partial over non-snapshot rows so the two
+    // indexes partition the table rather than overlapping.
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_events_stream_id ON events(stream, id) WHERE name <> '__snapshot__'"
     );
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS streams (
@@ -588,12 +665,16 @@ export class SqliteStore implements Store {
         if (inserted.rowsAffected > 0) {
           subscribed++;
         } else {
-          if (priority > 0) {
-            await tx.execute({
-              sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
-              args: [priority, stream, priority],
-            });
-          }
+          // `WHERE priority < ?` is the whole max rule, for every value on
+          // the number line. An extra `priority > 0` gate around this used to
+          // skip the merge for non-positive priorities, which made a stored
+          // negative priority unraisable: an operator's `prioritize(-5)`
+          // survived every subsequent boot instead of being restored to the
+          // declared priority by the restart-driven re-subscribe (#1445).
+          await tx.execute({
+            sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
+            args: [priority, stream, priority],
+          });
           // ACT-1103: current subscribe wins on lane.
           await tx.execute({
             sql: "UPDATE streams SET lane = ? WHERE stream = ? AND lane <> ?",

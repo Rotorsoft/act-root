@@ -1,3 +1,17 @@
+# [@rotorsoft/act-http-v1.9.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.1...@rotorsoft/act-http-v1.9.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([b71629a](https://github.com/rotorsoft/act-root/commit/b71629ae678dd9883721a8b7795db853a8a16633))
+
+# [@rotorsoft/act-http-v1.9.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.0...@rotorsoft/act-http-v1.9.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#1455](https://github.com/rotorsoft/act-root/issues/1455)) ([4fcd284](https://github.com/rotorsoft/act-root/commit/4fcd2843e40a074e1e2a803ac76a025d55408599))
+
 # [@rotorsoft/act-http-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.8.22...@rotorsoft/act-http-v1.9.0) (2026-08-08)
 
 

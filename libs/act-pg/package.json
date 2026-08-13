@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-pg",
   "type": "module",
-  "version": "1.13.17",
+  "version": "1.13.19",
   "description": "act pg adapters",
   "keywords": [
     "typescript",
@@ -63,6 +63,6 @@
     "@rotorsoft/act-tck": "workspace:^",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
-    "@types/pg": "^8.20.0"
+    "@types/pg": "^8.20.4"
   }
 }

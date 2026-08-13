@@ -53,7 +53,9 @@ export {
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_FOLD_FLUSH_EVERY,
   DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   type FoldConfig,
+  MAX_SHUTDOWN_GRACE_MS,
   type ReactionConfig,
   resolveActConfig,
   resolveActionConfig,
@@ -65,10 +67,17 @@ export {
   resolveLaneConfig,
   resolveReactionConfig,
   resolveSettleConfig,
+  resolveShutdownConfig,
 } from "./config.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
+export {
+  type RefLike,
+  register_disposer,
+  register_weak_disposer,
+  run_disposers,
+} from "./disposers.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,

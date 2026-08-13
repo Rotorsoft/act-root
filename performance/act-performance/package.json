@@ -13,8 +13,8 @@
     "evidence:10m": "TIER=10M bash evidence/run.sh"
   },
   "dependencies": {
-    "@rotorsoft/act": "^1.23.19",
-    "@rotorsoft/act-pg": "^1.13.12",
+    "@rotorsoft/act": "^1.23.29",
+    "@rotorsoft/act-pg": "^1.13.14",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
     "pg": "^8.22.0",
@@ -22,8 +22,8 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/pg": "^8.20.0",
-    "tsx": "^4.23.1",
+    "@types/pg": "^8.20.4",
+    "tsx": "^4.23.10",
     "typescript": "^7.0.2"
   },
   "stackblitz": {

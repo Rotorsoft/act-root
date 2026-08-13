@@ -609,8 +609,16 @@ export class InMemoryStore implements Store {
     // (e.g. the calculator's `^(A|B)$`) is compiled to a RegExp once per
     // candidate subscription and tested against every stream whose max
     // event id has advanced past the watermark.
+    // A fresh subscription (`at = -1`) is not special-cased into being
+    // claimable (#1446): "no matching events" means "no work" whatever the
+    // watermark says, and every comparison below already answers correctly
+    // at `-1` — the first event on a fresh stream has an id greater than
+    // it. The short-circuit that used to live here cost an empty lease and
+    // a no-op ack per subscription, and that ack was not harmless: an
+    // event committed between the cycle's fetch and its ack was acked past
+    // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
+    // first event this store ever issues — was silently skipped.
     const has_work = (s: InMemoryStream): boolean => {
-      if (s.at < 0) return true;
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
         const max_id = this._max_event_id_by_stream.get(s.source);

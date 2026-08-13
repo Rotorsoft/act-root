@@ -366,20 +366,6 @@ const EMPTY_DRAIN: Drain<Schemas> = {
 };
 
 /**
- * Runs a lifecycle sink, logging and swallowing anything it throws.
- * Observer failures are never the cycle's failure — see the call site.
- *
- * @internal
- */
-const contain = (logger: Logger, sink: string, fn: () => void): void => {
-  try {
-    fn();
-  } catch (error) {
-    logger.error(error, `${sink} listener threw`);
-  }
-};
-
-/**
  * Dependencies the {@link DrainController} needs from the orchestrator.
  * The lifecycle event sinks (`on_acked` / `on_blocked`) are callbacks so
  * this module doesn't reach back into Act's emitter.
@@ -467,6 +453,16 @@ export class DrainController<
   /** Worker timer (ACT-1103). Set when `start()` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
+  /**
+   * Resolves when the cycle currently in flight finishes; `undefined` when
+   * no cycle is running (#1442). `_locked` answers "is a cycle running?" for
+   * the overlap guard; this answers "tell me when it is done" for a graceful
+   * shutdown, which needs to await the handler rather than abandon it
+   * mid-`await` with the stream still leased. Never rejects — `drain()`
+   * contains its own errors — so awaiting it is always safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  private _inflight_done: (() => void) | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
 
@@ -503,6 +499,26 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
+  }
+
+  /**
+   * The cycle currently in flight, or `undefined` when idle (#1442). A
+   * graceful shutdown awaits this so an in-flight handler reaches its `ack`
+   * — which releases the stream's lease — instead of being abandoned with
+   * the lease held until it expires.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
+  }
+
+  /**
+   * This lane's configured lease budget, or `undefined` when the lane didn't
+   * pin one. It is the operator's own statement of how long a handler may
+   * legitimately hold a stream, which makes it the right basis for a
+   * shutdown grace budget (#1442).
+   */
+  get lease_millis(): number | undefined {
+    return this._deps.defaults?.leaseMillis;
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -572,6 +588,9 @@ export class DrainController<
 
     try {
       this._locked = true;
+      this._inflight = new Promise<void>((done) => {
+        this._inflight_done = done;
+      });
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
@@ -585,8 +604,7 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        (b) =>
-          contain(this._deps.logger, "blocked", () => this._deps.on_blocked(b)),
+        (b) => this._deps.on_blocked(b),
         this._deps.lane
       );
 
@@ -636,10 +654,10 @@ export class DrainController<
       // failure that never happened, return an empty Drain, and — because
       // `block` is guarded on `blocked = false` and a blocked stream is
       // excluded from `claim` — permanently lose the `blocked` event and
-      // any reaction-requested close. Containing each sink separately
-      // keeps one bad listener from suppressing the others.
-      if (acked.length)
-        contain(this._deps.logger, "acked", () => this._deps.on_acked(acked));
+      // any reaction-requested close. Listener containment itself lives in
+      // `Act.emit`, which guards each listener individually (#1437) — the
+      // sinks here are plain calls.
+      if (acked.length) this._deps.on_acked(acked);
       // Run reaction-requested closes after acks land (#1090) — the close
       // targets were acked above, so the close-cycle guard sees the requesting
       // reaction as caught up. Awaited so a slow close doesn't overlap the
@@ -671,6 +689,11 @@ export class DrainController<
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;
+      // Release anyone awaiting this cycle (a graceful shutdown) before the
+      // next one can start.
+      this._inflight = undefined;
+      this._inflight_done?.();
+      this._inflight_done = undefined;
     }
   }
 }

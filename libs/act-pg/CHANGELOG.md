@@ -1,3 +1,24 @@
+# [@rotorsoft/act-pg-v1.13.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.18...@rotorsoft/act-pg-v1.13.19) (2026-08-13)
+
+
+### Bug Fixes
+
+* **act:** claim follows work, not registration, on every adapter ([151646b](https://github.com/rotorsoft/act-root/commit/151646b80fb5029b8e63beb34c6efe24aaee8326)), closes [#1446](https://github.com/rotorsoft/act-root/issues/1446)
+
+# [@rotorsoft/act-pg-v1.13.18](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.17...@rotorsoft/act-pg-v1.13.18) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act-pg:** escape the NUL byte in the NUL-byte comment ([4c593d8](https://github.com/rotorsoft/act-root/commit/4c593d89094bc87b0432c641eebc285cb53041b2))
+* **act-pg:** translate Postgres NUL-byte refusals into a ValidationError ([188d71b](https://github.com/rotorsoft/act-root/commit/188d71b14153d69021a97de4cad47df40de1156a)), closes [#1422](https://github.com/rotorsoft/act-root/issues/1422) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+* **act-pg:** widen id to bigserial, and reject NUL bytes in core ([3ec323b](https://github.com/rotorsoft/act-root/commit/3ec323bc581526eb0815a3c9c4b2c614f61c7876)), closes [#1140](https://github.com/rotorsoft/act-root/issues/1140) [#1422](https://github.com/rotorsoft/act-root/issues/1422)
+
+
+### Performance Improvements
+
+* **act-pg:** make claim's has-work probe sargable and index it ([2276fc1](https://github.com/rotorsoft/act-root/commit/2276fc109246bd51deb56d5825a332ee697b24df))
+
 # [@rotorsoft/act-pg-v1.13.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.16...@rotorsoft/act-pg-v1.13.17) (2026-08-08)
 
 

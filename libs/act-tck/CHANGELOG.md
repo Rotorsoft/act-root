@@ -1,3 +1,72 @@
+# [@rotorsoft/act-tck-v1.30.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.1...@rotorsoft/act-tck-v1.30.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **act:** claim follows work, not registration, on every adapter ([151646b](https://github.com/rotorsoft/act-root/commit/151646b80fb5029b8e63beb34c6efe24aaee8326)), closes [#1446](https://github.com/rotorsoft/act-root/issues/1446)
+
+# [@rotorsoft/act-tck-v1.30.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.0...@rotorsoft/act-tck-v1.30.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **act-sqlite:** apply the priority max-merge to non-positive values ([a272abb](https://github.com/rotorsoft/act-root/commit/a272abbfd3838184d1ece44a201f509ca81b4c2e)), closes [#1445](https://github.com/rotorsoft/act-root/issues/1445)
+
+# [@rotorsoft/act-tck-v1.30.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.29.1...@rotorsoft/act-tck-v1.30.0) (2026-08-13)
+
+
+### Features
+
+* **act:** give shutdown a bounded wait for in-flight drain cycles ([c806471](https://github.com/rotorsoft/act-root/commit/c8064712c7fae5b3493fae284116cc4b0bd609ba)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418) [#1442](https://github.com/rotorsoft/act-root/issues/1442)
+
+# [@rotorsoft/act-tck-v1.29.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.29.0...@rotorsoft/act-tck-v1.29.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **act:** stop pinning every Act in the dispose registry ([955ed6b](https://github.com/rotorsoft/act-root/commit/955ed6bb9f66eeb506cd8acf6d490f80596ca0fa)), closes [#1441](https://github.com/rotorsoft/act-root/issues/1441)
+
+# [@rotorsoft/act-tck-v1.29.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.6...@rotorsoft/act-tck-v1.29.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act-sqlite:** require an explicit url and repair in-memory ([5d1383b](https://github.com/rotorsoft/act-root/commit/5d1383b6c5235581be07891b6637016fe8ecce7d)), closes [#1443](https://github.com/rotorsoft/act-root/issues/1443)
+
+
+### Features
+
+* **act-tck:** cover an adapter's own default config ([b622a96](https://github.com/rotorsoft/act-root/commit/b622a960a354b7b4618452b828cbb12a67f8a8a9)), closes [#1443](https://github.com/rotorsoft/act-root/issues/1443)
+
+# [@rotorsoft/act-tck-v1.28.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.5...@rotorsoft/act-tck-v1.28.6) (2026-08-11)
+
+
+### Bug Fixes
+
+* **act:** contain the cache invalidate on the ConcurrencyError path ([fe9b529](https://github.com/rotorsoft/act-root/commit/fe9b5299b5d6996043e7c014755e5d34be0961cc))
+* **act:** reject a projection target claimed twice, in all four pairings ([e632ab7](https://github.com/rotorsoft/act-root/commit/e632ab70baf7f92273674adf5c2e67077ed477ae))
+
+# [@rotorsoft/act-tck-v1.28.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.4...@rotorsoft/act-tck-v1.28.5) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act:** contain lifecycle listeners in Act.emit, per listener ([8ab9bed](https://github.com/rotorsoft/act-root/commit/8ab9bedca3181a4c7300f476aa57540624aae043)), closes [#1423](https://github.com/rotorsoft/act-root/issues/1423)
+
+# [@rotorsoft/act-tck-v1.28.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.3...@rotorsoft/act-tck-v1.28.4) (2026-08-09)
+
+
+### Performance Improvements
+
+* **act-pg:** make claim's has-work probe sargable and index it ([2276fc1](https://github.com/rotorsoft/act-root/commit/2276fc109246bd51deb56d5825a332ee697b24df))
+
+# [@rotorsoft/act-tck-v1.28.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.2...@rotorsoft/act-tck-v1.28.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **act:** contain a throwing settled listener so it cannot open the breaker ([496c9ad](https://github.com/rotorsoft/act-root/commit/496c9adc6bc9c3f0d340dcd52256883cc3702f6a))
+
 # [@rotorsoft/act-tck-v1.28.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.28.1...@rotorsoft/act-tck-v1.28.2) (2026-08-09)
 
 

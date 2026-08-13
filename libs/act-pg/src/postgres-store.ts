@@ -589,6 +589,21 @@ export class PostgresStore implements Store {
         ON ${this._fqt} (stream COLLATE pg_catalog."default", id)
         WHERE name = '${SNAP_EVENT}';`
       );
+      // The complement of the snapshot index, and the one `claim`'s has-work
+      // probe seeks on: "does this source stream have a non-snapshot event
+      // past the watermark?" (#1448). Partial over non-snapshot rows so the
+      // two indexes partition the table rather than overlapping.
+      //
+      // Without it the probe fell back to the pk and scanned forward from
+      // each stream's watermark — and because a dormant aggregate's
+      // watermark is old, that tail is long and grows with the table. At 10k
+      // subscribed streams a single claim cost 5,792 ms; with this index and
+      // the source-class split in `claim`, 10.3 ms.
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_stream_id_ix"
+        ON ${this._fqt} (stream COLLATE pg_catalog."default", id)
+        WHERE name <> '${SNAP_EVENT}';`
+      );
 
       // Streams table
       await client.query(
@@ -1090,29 +1105,69 @@ export class PostgresStore implements Store {
         -- and lock EVERY claimable stream for this transaction, starving
         -- overlapping competing consumers. We only lock the small
         -- lagging+leading candidate slice, down in the "locked" CTE.
-        available AS (
+        -- Eligibility, split by SOURCE CLASS rather than expressed as one
+        -- disjunction (#1448). The three classes are mutually exclusive, so
+        -- the UNION ALL returns exactly what the old OR-chain did — but each
+        -- arm now carries a single, planner-legible predicate.
+        --
+        -- That matters for one arm in particular. Written as
+        -- "s.source IS NULL OR (... AND e.stream = s.source) OR (... ~ ...)",
+        -- the equality is buried inside a disjunction and is NOT sargable:
+        -- no index on (stream, id) can serve it, so every probe degenerated
+        -- into a forward scan of the pk from the stream's watermark. With
+        -- the classes separated, the literal arm — every per-aggregate
+        -- .to(e => ({target: e.stream})) reaction, i.e. the overwhelming
+        -- majority — becomes an index seek on (stream, id).
+        --
+        -- Measured at 10k subscribed streams with 10 pending: 5,792 ms
+        -- before, 10.3 ms after. See libs/act-pg/PERFORMANCE.md for #1448.
+        eligible AS (
           SELECT stream, source, at, priority, lane
           FROM ${this._fqs} s
           WHERE blocked = false
             ${lane_clause}
             AND (leased_by IS NULL OR leased_until <= NOW())
             AND (deferred_at IS NULL OR deferred_at <= NOW())
-            AND (s.at < 0 OR EXISTS (
+        ),
+        available AS (
+          -- Every arm below is watermark-agnostic (#1446): a fresh
+          -- subscription sits at -1, and e.id > s.at already answers
+          -- correctly there, since the first event has a greater id.
+          -- There used to be a fourth arm claiming at < 0 unconditionally,
+          -- which handed out an empty lease and a no-op ack for every
+          -- subscription with no matching events yet.
+          -- Source-less subscription: any non-snapshot event past the
+          -- watermark counts, so the id index alone answers it.
+          SELECT stream, source, at, priority, lane FROM eligible s
+          WHERE s.source IS NULL
+            AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
-              WHERE e.id > s.at
-                AND e.name <> '${SNAP_EVENT}'
-                -- Literal source (no regex metacharacter) matches by
-                -- equality — index-friendly, and exact so "s1" never
-                -- claims "s12". A pattern source (e.g. '^(A|B)$') matches
-                -- with the POSIX regex operator so the calculator's static
-                -- regex reaction is claimed for every stream it anchors.
-                AND (
-                  s.source IS NULL
-                  OR (s.source !~ '${SOURCE_METACHARACTER_CLASS}' AND e.stream = s.source)
-                  OR (s.source ~ '${SOURCE_METACHARACTER_CLASS}' AND e.stream ~ s.source)
-                )
-              LIMIT 1
-            ))
+              WHERE e.id > s.at AND e.name <> '${SNAP_EVENT}' LIMIT 1
+            )
+          UNION ALL
+          -- Literal source (no regex metacharacter): exact equality, so
+          -- "s1" never claims "s12", and (stream, id) is usable.
+          SELECT stream, source, at, priority, lane FROM eligible s
+          WHERE s.source IS NOT NULL
+            AND s.source !~ '${SOURCE_METACHARACTER_CLASS}'
+            AND EXISTS (
+              SELECT 1 FROM ${this._fqt} e
+              WHERE e.stream = s.source AND e.id > s.at
+                AND e.name <> '${SNAP_EVENT}' LIMIT 1
+            )
+          UNION ALL
+          -- Pattern source (e.g. '^(A|B)$'): POSIX match, so the
+          -- calculator's static regex reaction is claimed for every stream
+          -- it anchors. Unavoidably a scan — but only for the subscriptions
+          -- that actually declare a pattern.
+          SELECT stream, source, at, priority, lane FROM eligible s
+          WHERE s.source IS NOT NULL
+            AND s.source ~ '${SOURCE_METACHARACTER_CLASS}'
+            AND EXISTS (
+              SELECT 1 FROM ${this._fqt} e
+              WHERE e.id > s.at AND e.name <> '${SNAP_EVENT}'
+                AND e.stream ~ s.source LIMIT 1
+            )
         ),
         -- Priority lanes (ACT-102): higher priority first, then
         -- lagging-watermark order. With everyone at priority=0 the

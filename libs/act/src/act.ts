@@ -14,6 +14,7 @@ import {
   CorrelateCycle,
   classify_registry,
   close_correlation,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -21,10 +22,13 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
+  resolveShutdownConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -36,7 +40,6 @@ export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import {
   cache,
-  dispose,
   log,
   type Scoped,
   scoped,
@@ -73,6 +76,7 @@ import type {
   SchemaRegister,
   Schemas,
   SettleOptions,
+  ShutdownOptions,
   Snapshot,
   State,
   Store,
@@ -401,12 +405,44 @@ export class Act<
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
    * via {@link ActLifecycleEvents}.
+   *
+   * **Every listener is contained individually.** Lifecycle listeners are
+   * observers — `observability.md` promises that a throwing one is "contained,
+   * not fatal" — and containment belongs here rather than at each call site,
+   * for two reasons the previous arrangement got wrong (#1437):
+   *
+   * - Wrapping the *emit* rather than each *listener* still let the first
+   *   thrower abort the rest: `EventEmitter.emit` stops dispatching on the
+   *   first exception, so a second `app.on("acked", …)` never ran. The
+   *   documented "the remaining sinks still fire" was false whenever an event
+   *   had more than one listener. Same lesson as #1423, where guarding the
+   *   loop instead of each callback left every later SSE subscriber unserved.
+   * - Only *some* call sites wrapped at all. The drain contained `acked` and
+   *   `blocked`; `committed`, `forgotten` and `close()`'s `closed` did not, so
+   *   a throwing listener rejected `do()`, `forget()` and `close()` **after**
+   *   their durable work had already landed. A caller retrying a "failed"
+   *   `do()` writes the event twice, since the framework has no dedup by
+   *   design.
+   *
+   * Containing here makes it a property of emitting, so a new lifecycle event
+   * cannot reintroduce the gap by omission.
+   *
+   * Uses `rawListeners` so `once` wrappers still de-register themselves, and
+   * returns "had listeners" to preserve the `EventEmitter.emit` contract.
    */
   emit<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
     event: E,
     args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
   ): boolean {
-    return this._emitter.emit(event, args);
+    const listeners = this._emitter.rawListeners(event as string);
+    for (const listener of listeners) {
+      try {
+        listener(args);
+      } catch (error) {
+        this._logger.error(error, `${String(event)} listener threw`);
+      }
+    }
+    return listeners.length > 0;
   }
 
   /**
@@ -633,7 +669,15 @@ export class Act<
     // take effect. Scoped Acts bind against their own store.
     this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
 
-    dispose(() => this.shutdown());
+    // Registered weakly (#1441). A plain `dispose(() => this.shutdown())`
+    // closure captures `this` in a module-level array that is never emptied,
+    // so every Act ever built — with its registry, drain controllers, and for
+    // a scoped Act its own store and cache, connection pools included —
+    // survives for the process lifetime. Apps that mint short-lived Acts (one
+    // per tenant, per request, per test) leak one apiece. Holding the
+    // reference weakly keeps process-wide `dispose()()` working for a live
+    // Act while letting an unreachable one be collected, shut down or not.
+    register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
   /**
@@ -718,15 +762,10 @@ export class Act<
               this._with_close_lock(stream, work),
           });
           this._forget_closed_subscriptions(result);
-          // Contain only the EMIT — a listener throw must not look like a
-          // store failure. The close machinery above is deliberately
-          // outside this guard so a real StoreError reaches the breaker
-          // (#1388).
-          try {
-            this.emit("closed", result);
-          } catch (err) {
-            this._logger.error(err, "closed listener threw");
-          }
+          // The close machinery above is deliberately NOT wrapped, so a
+          // real StoreError reaches the breaker (#1388). The emit needs no
+          // guard here: `Act.emit` contains each listener (#1437).
+          this.emit("closed", result);
         },
         breaker: this._breaker,
         // Re-scope the per-lane worker's auto-start ticks so their drain
@@ -906,23 +945,43 @@ export class Act<
   private _shutdown_promise: Promise<void> | undefined;
 
   /**
-   * Per-instance teardown: remove lifecycle listeners, stop the
-   * correlation worker, cancel any pending settle cycle, and tear
-   * down the cross-process notify subscription.
+   * Per-instance teardown: stop scheduling new work, give drain cycles
+   * already in flight a bounded chance to finish, then remove lifecycle
+   * listeners and tear down the cross-process notify subscription.
    *
-   * Idempotent — repeated calls return the same promise. Registered
-   * automatically with the global `dispose()` registry at construction,
-   * so process-wide `dispose()()` covers it; test helpers (or operators
-   * that mint short-lived Acts) call it explicitly for prompt cleanup.
+   * The order is deliberate (#1442). Scheduling stops first, so nothing new
+   * is claimed while teardown runs. Then in-flight cycles are awaited up to
+   * `graceMs`: a reaction handler parked on an `await` holds its stream's
+   * lease until it acks, so abandoning it costs the replacement worker up to
+   * `leaseMillis` of dead time on that stream and discards the round of work
+   * (which #1418 then redelivers). Listeners come off *after* that wait, not
+   * before, so an `acked` / `blocked` subscriber still observes the work
+   * that completed during the grace window.
+   *
+   * The budget is a ceiling, not a delay — teardown continues the moment the
+   * last in-flight cycle finishes. When it is exhausted, teardown proceeds
+   * anyway: one stuck handler must not hang a deploy, which is the failure
+   * mode an unbounded wait would trade for.
+   *
+   * Idempotent — repeated calls return the same promise, and the first
+   * call's `graceMs` is the one that applies. Registered automatically with
+   * the global `dispose()` registry at construction, so process-wide
+   * `dispose()()` covers it; test helpers (or operators that mint
+   * short-lived Acts) call it explicitly for prompt cleanup.
+   *
+   * @param options - See {@link ShutdownOptions}. Defaults the grace budget
+   *   to the largest lane `leaseMillis` (capped at 30s).
    */
-  shutdown(): Promise<void> {
+  shutdown(options?: ShutdownOptions): Promise<void> {
     if (!this._shutdown_promise) {
+      resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
-        this._emitter.removeAllListeners();
         this.stop_correlations();
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
+        await this._await_inflight(options?.graceMs);
+        this._emitter.removeAllListeners();
         // `_wire_notify` swallows subscription errors and resolves to
         // `undefined`, so this promise never rejects.
         const disposer = await this._notify_disposer;
@@ -930,6 +989,51 @@ export class Act<
       })();
     }
     return this._shutdown_promise;
+  }
+
+  /**
+   * Wait for every in-flight drain cycle, or for the grace budget to elapse,
+   * whichever comes first. Cycle promises never reject (`drain()` contains
+   * its own errors), so this never throws.
+   *
+   * An omitted budget is derived from the lanes that actually have a cycle
+   * in flight: their `leaseMillis` is the operator's own statement of how
+   * long one of their handlers may hold a stream, which makes it the honest
+   * ceiling for how long teardown should wait for that handler. A parked
+   * lane that pinned no lease contributes `drain()`'s own fallback, and the
+   * whole thing is capped so a long-leased lane cannot hold a deploy open.
+   * Idle lanes do not count — nothing is running on them to wait for.
+   */
+  private _derive_grace_ms(
+    running: { readonly lease_millis: number | undefined }[]
+  ): number {
+    let max = 0;
+    for (const c of running)
+      max = Math.max(max, c.lease_millis ?? DEFAULT_SHUTDOWN_GRACE_MS);
+    return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
+  }
+
+  private async _await_inflight(grace_ms?: number): Promise<void> {
+    const running = [...this._drain_controllers.values()].filter(
+      (c) => c.inflight !== undefined
+    );
+    if (running.length === 0) return;
+    const grace = grace_ms ?? this._derive_grace_ms(running);
+    if (grace <= 0) return;
+    const inflight = running.map((c) => c.inflight);
+    // Assigned synchronously by the executor below, before the race is
+    // awaited — so the `finally` never has to test for it.
+    let timer!: ReturnType<typeof setTimeout>;
+    const budget = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, grace);
+      timer.unref();
+    });
+    try {
+      await Promise.race([Promise.all(inflight), budget]);
+    } finally {
+      // Don't leave the budget timer pending when the cycles won the race.
+      clearTimeout(timer);
+    }
   }
 
   /**

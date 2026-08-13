@@ -134,6 +134,28 @@ export type StoreTckOptions = {
    */
   readonly factory: () => Store | Promise<Store>;
   /**
+   * Constructs the adapter the way a first-time user does: with its own
+   * documented defaults and nothing else — `() => new MyStore()`.
+   *
+   * Supplying it opts into the default-configuration suite, which
+   * allows exactly two outcomes and outlaws the third:
+   *
+   * 1. **Construction throws.** The adapter has no safe default and
+   *    says so — an operator sees the error immediately.
+   * 2. **Construction succeeds and the store round-trips**, including a
+   *    second commit that advances the version.
+   * 3. ~~Construction succeeds, `commit` reports success, and the data
+   *    is not there.~~ This is the shape the suite exists to catch
+   *    (#1443: a zero-config SQLite store defaulted to a per-connection
+   *    private in-memory database, so `seed`'s DDL landed where later
+   *    statements could not see it — every write was accepted and lost).
+   *
+   * The suite never calls `drop()`, so it is safe to point at a default
+   * that resolves to a real shared database; it namespaces its stream
+   * with {@link uid} like every other case.
+   */
+  readonly default_factory?: () => Store | Promise<Store>;
+  /**
    * Optional capabilities flags — see {@link StoreCapabilities}.
    */
   readonly capabilities?: StoreCapabilities;
@@ -202,6 +224,54 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     afterAll(async () => {
       await store.dispose();
     });
+
+    // The one suite that does not use the shared `store`: it exercises
+    // whatever the adapter's own defaults produce (#1443).
+    const default_factory = options.default_factory;
+    if (default_factory) {
+      describe("default configuration", () => {
+        it("either refuses to construct or round-trips a commit", async () => {
+          let zero_config: Store;
+          try {
+            zero_config = await default_factory();
+          } catch (error) {
+            // Refusing is a valid answer — an adapter with no safe
+            // default must say so out loud, at construction, before any
+            // caller can hand it data to lose.
+            expect(error).toBeInstanceOf(Error);
+            expect((error as Error).message).not.toBe("");
+            return;
+          }
+          try {
+            await zero_config.seed();
+            const s = `default-config-${uid()}`;
+            const first = await zero_config.commit<CounterEvents>(
+              s,
+              [inc(1)],
+              make_meta({ stream: s })
+            );
+            expect(first[0].version).toBe(0);
+            // A second commit catches the subtler half of the failure:
+            // a store that loses the first write restarts versioning
+            // here instead of advancing.
+            const second = await zero_config.commit<CounterEvents>(
+              s,
+              [inc(2)],
+              make_meta({ stream: s })
+            );
+            expect(second[0].version).toBe(1);
+            const read: Committed<CounterEvents, keyof CounterEvents>[] = [];
+            await zero_config.query<CounterEvents>((e) => read.push(e), {
+              stream: s,
+            });
+            expect(read).toHaveLength(2);
+            expect(read.map((e) => e.data.amount)).toEqual([1, 2]);
+          } finally {
+            await zero_config.dispose();
+          }
+        });
+      });
+    }
 
     describe("commit", () => {
       it("returns committed events with sequenced ids and versions", async () => {
@@ -929,6 +999,110 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(10);
       });
 
+      // Claim eligibility for a fresh subscription (#1446). The adapters
+      // disagreed here — two short-circuited `at < 0` into "claimable",
+      // SQLite did not — and the TCK pinned nothing, so a third-party
+      // adapter was free to pick either. The contract is that a claim
+      // follows work, not registration: an empty lease costs a cycle, and
+      // its no-op ack can advance the watermark past an event committed
+      // mid-cycle.
+      it("does not claim a fresh subscription with no matching events", async () => {
+        const s = `fresh-empty-${uid()}`;
+        const src = `fresh-src-${uid()}`;
+        await store.subscribe([{ stream: s, source: src }]);
+        const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
+        expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
+      });
+
+      it("claims a fresh subscription as soon as its first event lands", async () => {
+        const s = `fresh-first-${uid()}`;
+        const src = `fresh-first-src-${uid()}`;
+        await store.subscribe([{ stream: s, source: src }]);
+        await store.commit<CounterEvents>(
+          src,
+          [inc(1)],
+          make_meta({ stream: src })
+        );
+        const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
+        const mine = leases.filter((l) => l.stream === s);
+        expect(mine).toHaveLength(1);
+        // The watermark is still the fresh `-1`, so the first event is
+        // inside the fetch window rather than behind it. This is what makes
+        // a zero-based event id survivable — a store whose first id is 0
+        // loses that event if anything acked a fresh stream to 0 first.
+        expect(mine[0].at).toBe(-1);
+        const in_window: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>((e) => in_window.push(e), {
+          stream: src,
+          stream_exact: true,
+          after: mine[0].at,
+        });
+        expect(in_window).toHaveLength(1);
+      });
+
+      // The max rule holds across the whole number line, not just above
+      // zero (#1445). Every case above uses positive priorities, which is
+      // precisely why SQLite's `priority > 0` gate around its merge went
+      // unnoticed: with positive values the gate is a no-op.
+      it("keeps the maximum for negative and zero priorities too", async () => {
+        const s = `sub-pri-neg-${uid()}`;
+        const read = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.priority;
+        };
+
+        await store.subscribe([{ stream: s, priority: -5 }]);
+        expect(await read()).toBe(-5);
+
+        // A less-negative priority is still higher — it must win.
+        await store.subscribe([{ stream: s, priority: -1 }]);
+        expect(await read()).toBe(-1);
+
+        // More negative must not lower it.
+        await store.subscribe([{ stream: s, priority: -9 }]);
+        expect(await read()).toBe(-1);
+
+        // Zero outranks every negative, including via the omitted default.
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(0);
+      });
+
+      // `prioritize` is the documented operator override and the one call
+      // that may *lower* priority. Because `subscribe` is restart-driven and
+      // re-runs for every reaction target on every boot, the declared
+      // priority must come back — otherwise an operator's temporary
+      // de-prioritization is sticky forever (#1445).
+      it("restores the declared priority on the next subscribe after a prioritize() downgrade", async () => {
+        const s = `sub-pri-restore-${uid()}`;
+        const read = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.priority;
+        };
+
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(0);
+
+        // Operator drops it below the declared default.
+        await store.prioritize({ stream: s, stream_exact: true }, -5);
+        expect(await read()).toBe(-5);
+
+        // The next boot re-subscribes at the declared priority and restores it.
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(0);
+      });
+
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = `claim-${uid()}`;
         await store.subscribe([{ stream: s }]);
@@ -1448,23 +1622,21 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               { stream: target, source: pattern },
               { stream: control, source: other },
             ]);
-            // Advance the target's watermark past -1 first: a fresh
-            // subscription is claimable unconditionally on some adapters,
-            // so the negative assertion must run against a settled stream.
+            // Advance the target's watermark past -1 first, so the
+            // negative assertion below runs against a settled stream
+            // rather than a fresh one.
             const [ea] = await seed_stream(fresh, a, 1);
             const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
             const l1 = first.find((s) => s.stream === target);
             expect(l1).toBeDefined();
-            // Ack both the pattern target and the fresh control lease so
-            // neither is held into the second claim; the control becomes
-            // claimable again only when `other` gets a commit below. Both
-            // are fresh subscriptions, so both are in the first claim.
-            const c1 = first.find((s) => s.stream === control);
-            expect(c1).toBeDefined();
-            await fresh.ack([
-              { ...(l1 as Lease), at: ea.id },
-              { ...(c1 as Lease), at: -1 },
-            ]);
+            // The control is not in this claim: its source has no events
+            // yet, and a subscription with no matching work is not claimed
+            // (#1446). It becomes claimable only on the commit below,
+            // which is what makes the second claim non-empty.
+            expect(first.map((s) => s.stream)).not.toContain(control);
+            // Ack the pattern target so its lease isn't held into the
+            // second claim.
+            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
             // Now activity on a stream the pattern does NOT match must not
             // make the target claimable again — but the control sourced
             // from that stream must.

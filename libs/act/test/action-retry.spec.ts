@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   act,
   ConcurrencyError,
+  cache,
   dispose,
+  InMemoryCache,
   InMemoryStore,
   state,
   store,
@@ -268,5 +270,91 @@ describe("per-action retry policy", () => {
       expect(flaky.attempts).toBe(2);
       expect(elapsed).toBeLessThan(50);
     });
+  });
+});
+
+// #1438 — the ConcurrencyError path awaited `cache().invalidate` UNGUARDED,
+// while every other cache write on this path is contained with an explicit
+// "a Redis blip must not fail the operation" justification. A rejecting
+// invalidate therefore replaced the ConcurrencyError with the cache's error,
+// which (a) crossed the API boundary as a 500 instead of a 412 and (b) failed
+// the `instanceof ConcurrencyError` gate in the retry loop — so a conflict
+// that would have resolved on reload+retry became permanent, with the work
+// lost. The invalidate is defensive anyway: a stale checkpoint is re-folded
+// from `after: event_id`.
+describe("a failing cache never changes the caller's error (#1438)", () => {
+  /** A Cache whose invalidate always rejects — the documented Redis blip. */
+  class BlipCache extends InMemoryCache {
+    override async invalidate(_stream: string): Promise<void> {
+      throw new Error("redis blip");
+    }
+  }
+
+  const blip_actor = { id: "a", name: "a" };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("surfaces ConcurrencyError, not the cache error", async () => {
+    // The port singleton memoizes on first call, so the cache must be
+    // injected BEFORE the app is built — injecting it late passes vacuously.
+    store(new InMemoryStore());
+    cache(new BlipCache());
+    const app = act().withState(RetryCounter).build();
+
+    await app.do("increment", { stream: "b1", actor: blip_actor }, { by: 1 });
+
+    let thrown: unknown;
+    await app
+      .do(
+        "increment",
+        { stream: "b1", actor: blip_actor, expectedVersion: 5 },
+        { by: 1 }
+      )
+      .catch((e) => {
+        thrown = e;
+      });
+
+    expect(thrown).toBeInstanceOf(ConcurrencyError);
+    await app.shutdown();
+  });
+
+  it("still retries a resolvable conflict through the action budget", async () => {
+    const flaky = new FlakyStore(1);
+    store(flaky);
+    cache(new BlipCache());
+    const app = act().withState(RetryCounter).build();
+
+    const snaps = await app.do(
+      "increment",
+      { stream: "b2", actor: blip_actor },
+      { by: 1 }
+    );
+
+    expect({
+      attempts: flaky.attempts,
+      name: snaps.at(-1)?.event?.name,
+    }).toEqual({ attempts: 2, name: "Incremented" });
+    await app.shutdown();
+  });
+
+  it("control — a healthy cache behaves identically", async () => {
+    const flaky = new FlakyStore(1);
+    store(flaky);
+    cache(new InMemoryCache());
+    const app = act().withState(RetryCounter).build();
+
+    const snaps = await app.do(
+      "increment",
+      { stream: "b3", actor: blip_actor },
+      { by: 1 }
+    );
+
+    expect({
+      attempts: flaky.attempts,
+      name: snaps.at(-1)?.event?.name,
+    }).toEqual({ attempts: 2, name: "Incremented" });
+    await app.shutdown();
   });
 });
