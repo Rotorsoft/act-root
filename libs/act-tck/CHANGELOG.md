@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.30.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.29.1...@rotorsoft/act-tck-v1.30.0) (2026-08-13)
+
+
+### Features
+
+* **act:** give shutdown a bounded wait for in-flight drain cycles ([c806471](https://github.com/rotorsoft/act-root/commit/c8064712c7fae5b3493fae284116cc4b0bd609ba)), closes [#1418](https://github.com/rotorsoft/act-root/issues/1418) [#1442](https://github.com/rotorsoft/act-root/issues/1442)
+
 # [@rotorsoft/act-tck-v1.29.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.29.0...@rotorsoft/act-tck-v1.29.1) (2026-08-12)
 
 
