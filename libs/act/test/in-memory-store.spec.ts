@@ -64,4 +64,32 @@ describe("InMemoryStore (adapter-specific)", () => {
   // ACT-1103 lane contract: every adapter is exercised by `runStoreTck`
   // (see `test/store-tck.spec.ts`). InMemoryStore has no adapter-only
   // lane concern — there's no schema migration to validate.
+
+  // #1446, adapter-specific because this store is the only one whose ids
+  // start at 0 — Postgres and SQLite both start at 1, which masked the
+  // same window. While `claim` short-circuited a fresh `at = -1`
+  // subscription into "claimable", an event committed between a cycle's
+  // fetch and its ack was acked past: drain's empty-fetch watermark seeds
+  // at 0, so acking a fresh stream to 0 stepped over event id 0 and the
+  // very first event this store ever issued was never delivered.
+  it("does not lose event id 0 when a commit lands during a fresh stream's cycle", async () => {
+    const s = store();
+    await s.subscribe([{ stream: "sub", source: "src" }]);
+
+    // Nothing committed yet, so there is nothing to claim.
+    expect(await s.claim(5, 5, "w", 5_000)).toHaveLength(0);
+
+    // The first event this store ever issues carries id 0.
+    const [first] = await s.commit("src", [{ name: "E", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    expect(first.id).toBe(0);
+
+    // It must be claimable, and the lease must open at -1 so the event
+    // sits inside the fetch window rather than behind it.
+    const leases = await s.claim(5, 5, "w", 5_000);
+    expect(leases).toHaveLength(1);
+    expect(leases[0].at).toBe(-1);
+  });
 });

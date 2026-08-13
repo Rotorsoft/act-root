@@ -999,6 +999,47 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(10);
       });
 
+      // Claim eligibility for a fresh subscription (#1446). The adapters
+      // disagreed here — two short-circuited `at < 0` into "claimable",
+      // SQLite did not — and the TCK pinned nothing, so a third-party
+      // adapter was free to pick either. The contract is that a claim
+      // follows work, not registration: an empty lease costs a cycle, and
+      // its no-op ack can advance the watermark past an event committed
+      // mid-cycle.
+      it("does not claim a fresh subscription with no matching events", async () => {
+        const s = `fresh-empty-${uid()}`;
+        const src = `fresh-src-${uid()}`;
+        await store.subscribe([{ stream: s, source: src }]);
+        const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
+        expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
+      });
+
+      it("claims a fresh subscription as soon as its first event lands", async () => {
+        const s = `fresh-first-${uid()}`;
+        const src = `fresh-first-src-${uid()}`;
+        await store.subscribe([{ stream: s, source: src }]);
+        await store.commit<CounterEvents>(
+          src,
+          [inc(1)],
+          make_meta({ stream: src })
+        );
+        const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
+        const mine = leases.filter((l) => l.stream === s);
+        expect(mine).toHaveLength(1);
+        // The watermark is still the fresh `-1`, so the first event is
+        // inside the fetch window rather than behind it. This is what makes
+        // a zero-based event id survivable — a store whose first id is 0
+        // loses that event if anything acked a fresh stream to 0 first.
+        expect(mine[0].at).toBe(-1);
+        const in_window: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>((e) => in_window.push(e), {
+          stream: src,
+          stream_exact: true,
+          after: mine[0].at,
+        });
+        expect(in_window).toHaveLength(1);
+      });
+
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = `claim-${uid()}`;
         await store.subscribe([{ stream: s }]);
@@ -1518,23 +1559,21 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               { stream: target, source: pattern },
               { stream: control, source: other },
             ]);
-            // Advance the target's watermark past -1 first: a fresh
-            // subscription is claimable unconditionally on some adapters,
-            // so the negative assertion must run against a settled stream.
+            // Advance the target's watermark past -1 first, so the
+            // negative assertion below runs against a settled stream
+            // rather than a fresh one.
             const [ea] = await seed_stream(fresh, a, 1);
             const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
             const l1 = first.find((s) => s.stream === target);
             expect(l1).toBeDefined();
-            // Ack both the pattern target and the fresh control lease so
-            // neither is held into the second claim; the control becomes
-            // claimable again only when `other` gets a commit below. Both
-            // are fresh subscriptions, so both are in the first claim.
-            const c1 = first.find((s) => s.stream === control);
-            expect(c1).toBeDefined();
-            await fresh.ack([
-              { ...(l1 as Lease), at: ea.id },
-              { ...(c1 as Lease), at: -1 },
-            ]);
+            // The control is not in this claim: its source has no events
+            // yet, and a subscription with no matching work is not claimed
+            // (#1446). It becomes claimable only on the commit below,
+            // which is what makes the second claim non-empty.
+            expect(first.map((s) => s.stream)).not.toContain(control);
+            // Ack the pattern target so its lease isn't held into the
+            // second claim.
+            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
             // Now activity on a stream the pattern does NOT match must not
             // make the target claimable again — but the control sourced
             // from that stream must.

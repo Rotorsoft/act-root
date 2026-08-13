@@ -1130,13 +1130,16 @@ export class PostgresStore implements Store {
             AND (deferred_at IS NULL OR deferred_at <= NOW())
         ),
         available AS (
-          -- Never processed: claimable without probing the log at all.
-          SELECT stream, source, at, priority, lane FROM eligible WHERE at < 0
-          UNION ALL
+          -- Every arm below is watermark-agnostic (#1446): a fresh
+          -- subscription sits at -1, and e.id > s.at already answers
+          -- correctly there, since the first event has a greater id.
+          -- There used to be a fourth arm claiming at < 0 unconditionally,
+          -- which handed out an empty lease and a no-op ack for every
+          -- subscription with no matching events yet.
           -- Source-less subscription: any non-snapshot event past the
           -- watermark counts, so the id index alone answers it.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.at >= 0 AND s.source IS NULL
+          WHERE s.source IS NULL
             AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
               WHERE e.id > s.at AND e.name <> '${SNAP_EVENT}' LIMIT 1
@@ -1145,7 +1148,7 @@ export class PostgresStore implements Store {
           -- Literal source (no regex metacharacter): exact equality, so
           -- "s1" never claims "s12", and (stream, id) is usable.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.at >= 0 AND s.source IS NOT NULL
+          WHERE s.source IS NOT NULL
             AND s.source !~ '${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
@@ -1158,7 +1161,7 @@ export class PostgresStore implements Store {
           -- it anchors. Unavoidably a scan — but only for the subscriptions
           -- that actually declare a pattern.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.at >= 0 AND s.source IS NOT NULL
+          WHERE s.source IS NOT NULL
             AND s.source ~ '${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
