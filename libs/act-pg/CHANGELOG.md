@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.13.19](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.18...@rotorsoft/act-pg-v1.13.19) (2026-08-13)
+
+
+### Bug Fixes
+
+* **act:** claim follows work, not registration, on every adapter ([151646b](https://github.com/rotorsoft/act-root/commit/151646b80fb5029b8e63beb34c6efe24aaee8326)), closes [#1446](https://github.com/rotorsoft/act-root/issues/1446)
+
 # [@rotorsoft/act-pg-v1.13.18](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.17...@rotorsoft/act-pg-v1.13.18) (2026-08-09)
 
 
