@@ -40051,9 +40051,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -40169,14 +40177,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -41005,9 +41019,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -41123,14 +41145,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -45368,9 +45396,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -45486,14 +45522,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -45882,9 +45924,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -46000,14 +46050,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
