@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.9.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.2...@rotorsoft/act-http-v1.9.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **act-http:** normalize undefined deletes to null in SSE frames ([048a1f0](https://github.com/rotorsoft/act-root/commit/048a1f01c23cce1538d0c02ba7d6a7d7cf2b4e4f)), closes [#1471](https://github.com/rotorsoft/act-root/issues/1471)
+
 # [@rotorsoft/act-http-v1.9.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.1...@rotorsoft/act-http-v1.9.2) (2026-08-10)
 
 
