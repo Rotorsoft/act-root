@@ -162,6 +162,12 @@ re-processes instead of being deduped into a silent success ([#1193](https://git
 | The wrapping adapters (Hono, tRPC) auto-finalize off the downstream outcome — commit on a 2xx / resolved result, release on a 5xx / thrown / `{ ok: false }` result; Express and Fastify expose `commit`/`release` on the request context for the handler to call | `external-integration.md` § Composing into an existing app | act-http `receiver/{hono,trpc,express,fastify}/index.spec.ts` (auto-commit/release + commit/release finalize cases); `receiver/finalize.spec.ts` → make_finalizers finalize-once + deduped-inert **(#1193)** |
 | `withIdempotency` (generated API) commits after the handler resolves and releases + re-throws when it rejects | `api/idempotency.ts` `withIdempotency` doc-comment | act-http `api/idempotency.spec.ts` → "commits the key after the handler succeeds", "releases the key and propagates handler rejections after a fresh claim" **(#1193)** |
 
+## SSE frame fidelity (act-http)
+
+| Claim | Source | Backing test |
+|---|---|---|
+| **A delete survives the wire.** `@rotorsoft/act-patch` treats `undefined` and `null` as the same delete signal, and every SSE transport serializes frames as JSON — which drops `undefined`-valued keys. `publish()` / `overlay()` normalize `undefined` to `null` (recursively, plain objects only) when building the frame, so a reducer that clears a field the idiomatic way reaches a live client. Server-side cached state is untouched: a reconnect reseed has the key absent, not null | `real-time.md` § Clearing a field; `BroadcastChannel.publish` doc | `sse/wire-safe.spec.ts` → "delivers an undefined-valued delete to a live client", "treats a null-valued delete identically", "clears a nested field without disturbing its siblings", "delivers an undefined-valued delete through overlay() too", "does not rewrite the internals of a non-plain object", "keeps the server-side cached state untouched by normalization" **(#1471)** |
+
 ## SSE subscription wiring (act-http — bounded backlog, slot accounting)
 
 The shared `runSseSubscription` loop bounds each connection's undelivered-frame
