@@ -17,8 +17,9 @@ import type { BroadcastState } from "../sse/types.js";
  * Defaults are sized for typical business-app dashboards (dozens to
  * hundreds of human viewers per process). Both numeric knobs are
  * validated at transport-function construction; out-of-range values
- * throw `RangeError` immediately so misconfiguration surfaces at
- * startup instead of at first connection.
+ * throw `ZodError` immediately so misconfiguration surfaces at startup
+ * instead of at first connection (the framework-wide convention for
+ * config bags — see CLAUDE.md § Config-validation schemas).
  */
 export type SseOptions = {
   /**

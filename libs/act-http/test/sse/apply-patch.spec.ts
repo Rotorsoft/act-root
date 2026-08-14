@@ -368,3 +368,26 @@ describe("applyPatchMessage", () => {
     });
   });
 });
+
+describe("a fresh client is never stale (#1474)", () => {
+  it("reports behind, not stale, for an empty frame with no baseline", () => {
+    // `stale` is the one answer that does NOT refetch, so returning it to a
+    // client with no baseline strands it. Both this module's doc-comment and
+    // real-time.md already claimed a fresh client can never be stale.
+    expect(applyPatchMessage({}, undefined)).toEqual({
+      ok: false,
+      reason: "behind",
+    });
+    expect(applyPatchMessage({}, null)).toEqual({
+      ok: false,
+      reason: "behind",
+    });
+  });
+
+  it("still reports stale for an empty frame when a baseline exists", () => {
+    expect(applyPatchMessage({}, { _v: 3 })).toEqual({
+      ok: false,
+      reason: "stale",
+    });
+  });
+});

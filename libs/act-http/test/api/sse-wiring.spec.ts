@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
+  DEFAULT_SSE_MAX_PENDING_PER_CONNECTION,
   fireAndForget,
   resolveSseConfig,
   runSseSubscription,
@@ -28,6 +30,56 @@ describe("resolveSseConfig", () => {
     });
     expect(cfg.maxConnections).toBe(100);
     expect(cfg.heartbeatMs).toBe(60_000);
+  });
+
+  // #1474 — `maxPendingPerConnection` had no test at all, while its two
+  // siblings had nine between them. Neutering the whole Zod field left the
+  // suite green, and a `NaN` there makes `pending.length >= NaN` always
+  // false: the backlog silently becomes unbounded again, which is the OOM
+  // the knob exists to prevent.
+  it("applies the maxPendingPerConnection default", () => {
+    expect(resolveSseConfig({ channel }).maxPendingPerConnection).toBe(
+      DEFAULT_SSE_MAX_PENDING_PER_CONNECTION
+    );
+  });
+
+  it("preserves a caller-supplied maxPendingPerConnection", () => {
+    expect(
+      resolveSseConfig({ channel, maxPendingPerConnection: 32 })
+        .maxPendingPerConnection
+    ).toBe(32);
+  });
+
+  it("rejects maxPendingPerConnection below the floor", () => {
+    expect(() =>
+      resolveSseConfig({ channel, maxPendingPerConnection: 0 })
+    ).toThrow(ZodError);
+  });
+
+  it("rejects maxPendingPerConnection above the ceiling", () => {
+    expect(() =>
+      resolveSseConfig({ channel, maxPendingPerConnection: 100_001 })
+    ).toThrow(ZodError);
+  });
+
+  it("rejects a non-finite or fractional maxPendingPerConnection", () => {
+    expect(() =>
+      resolveSseConfig({ channel, maxPendingPerConnection: Number.NaN })
+    ).toThrow(ZodError);
+    expect(() =>
+      resolveSseConfig({ channel, maxPendingPerConnection: 1.5 })
+    ).toThrow(ZodError);
+  });
+
+  // The docs promised `RangeError`; the code throws `ZodError`, which is the
+  // framework-wide convention. Pinned so the two cannot drift again (#1474).
+  it("throws ZodError, the documented type, for every out-of-range knob", () => {
+    expect(() => resolveSseConfig({ channel, maxConnections: 0 })).toThrow(
+      ZodError
+    );
+    expect(() => resolveSseConfig({ channel, heartbeatMs: 1 })).toThrow(
+      ZodError
+    );
   });
 
   it("rejects maxConnections below the floor", () => {
