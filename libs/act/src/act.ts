@@ -1017,10 +1017,17 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    if (running.length === 0) return;
+    // The settle loop drives the drain, so it has to be waited on too
+    // (#1468). `SettleLoop.stop()` cancels scheduling only: a cycle already
+    // inside its correlate → drain loop keeps running, and would otherwise
+    // claim a stream after teardown returned — and, under `disposeAndExit`,
+    // after the store adapter was disposed.
+    const settling = this._settle.inflight;
+    if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     // Assigned synchronously by the executor below, before the race is
     // awaited — so the `finally` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
