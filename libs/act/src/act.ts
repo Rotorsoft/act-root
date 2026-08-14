@@ -20,10 +20,12 @@ import {
   default_correlator,
   type EsOps,
   type EventLaneSet,
+  FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  type ResettableBatchHandler,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
@@ -1734,6 +1736,16 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
+      // Drop every fold cache before the replay reaches a handler (#1466).
+      // A rebuild replays from the beginning, so every event lands at or
+      // below a warm fold's head and takes its already-folded branch, which
+      // re-flushes whatever that cache holds — writing a stale row straight
+      // back out. Cleared unconditionally rather than per target: `input`
+      // may be a filter, resolving it costs a query, and the only cost of
+      // clearing a cache that did not need it is one head load per stream
+      // on the next batch.
+      for (const handler of this._batch_handlers.values())
+        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
