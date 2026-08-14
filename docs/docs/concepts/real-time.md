@@ -15,6 +15,21 @@ npm install @rotorsoft/act-http
 
 > **Migrating from `@rotorsoft/act-sse`?** The standalone package is deprecated — it's now a thin re-export shim over `@rotorsoft/act-http/sse` (the canonical home) and is scheduled for removal. The surface is identical; swap the import specifier and you're done. See the [1.x migration guide](../guides/migrating-to-1.x).
 
+
+### Clearing a field
+
+A reducer clears a field by patching it away, and `@rotorsoft/act-patch` accepts either spelling:
+
+```ts no-check
+.patch({ Cleared: () => ({ result: 0, left: undefined, operator: undefined }) })
+```
+
+Both `undefined` and `null` mean *delete this key*. On the wire only `null` survives — `JSON.stringify` drops `undefined`-valued keys, and every SSE transport serializes frames as JSON. The broadcast layer normalizes `undefined` to `null` when it builds a frame ([#1471](https://github.com/Rotorsoft/act-root/issues/1471)), so both spellings behave identically for live subscribers and you can keep writing whichever reads better.
+
+The normalization applies to the frame only. Server-side cached state is produced by `apply_patch`, which handles `undefined` natively, so a reconnecting client's reseed has the key absent rather than set to `null`.
+
+If you build a transport of your own over these patches, do the same normalization — a patch that crosses a JSON boundary must encode deletes as `null`.
+
 ## See it running
 
 The multi-transport calculator demo wires SSE end-to-end next to tRPC, Hono REST, and OpenAPI:

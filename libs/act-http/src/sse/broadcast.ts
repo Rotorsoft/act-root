@@ -65,6 +65,38 @@ function fan_out<S extends BroadcastState>(
   }
 }
 
+/**
+ * Rewrite `undefined`-valued keys to `null`, recursively.
+ *
+ * `@rotorsoft/act-patch` treats `undefined` and `null` as the same delete
+ * signal, but `JSON.stringify` drops `undefined`-valued keys entirely — and
+ * every SSE transport serializes frames as JSON. A reducer that clears a
+ * field the idiomatic way (`{ left: undefined }`) therefore produced a frame
+ * with no mention of `left` at all, so a live client kept the stale value
+ * while stamping the new version — believing itself caught up, and never
+ * refetching (#1471).
+ *
+ * `null` reaches the same `delete` branch in the patch applicator and
+ * survives JSON, so normalizing here makes the two spellings equivalent on
+ * the wire as they already are in memory.
+ *
+ * Only the broadcast frame is normalized. Server-side state is applied
+ * through `apply_patch`, which handles `undefined` natively.
+ */
+const wire_safe = <T>(patch: T): T => {
+  if (patch === null || typeof patch !== "object") return patch;
+  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+  // Non-plain objects (Date, Map, class instances) are left to whatever the
+  // host's serializer already does with them; rewriting their internals
+  // would change more than the delete signal.
+  const proto = Object.getPrototypeOf(patch);
+  if (proto !== Object.prototype && proto !== null) return patch;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
+    out[k] = v === undefined ? null : wire_safe(v);
+  return out as T;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -129,7 +161,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = p;
+      msg[baseV + i + 1] = wire_safe(p);
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -178,7 +210,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // `_overlay: true` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
+    const msg: PatchMessage<S> = {
+      [state._v]: wire_safe(overlay_patch),
+      _overlay: true,
+    };
     fan_out(this.channels.get(streamId), msg, (error) =>
       this.on_subscriber_error(error, streamId)
     );
