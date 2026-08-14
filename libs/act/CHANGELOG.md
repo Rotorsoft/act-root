@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.25.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.1...@rotorsoft/act-v1.25.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **act:** fold forward only across a contiguous version step ([0dfc0e1](https://github.com/rotorsoft/act-root/commit/0dfc0e1a8d2e2ef2890b055e4f22817ce71a5f32)), closes [#1372](https://github.com/rotorsoft/act-root/issues/1372) [#1465](https://github.com/rotorsoft/act-root/issues/1465) [#1466](https://github.com/rotorsoft/act-root/issues/1466)
+
 # [@rotorsoft/act-v1.25.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.0...@rotorsoft/act-v1.25.1) (2026-08-13)
 
 
