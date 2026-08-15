@@ -353,6 +353,22 @@ export function act<
     autoclose_archiver: (state_name) => _aa.get(state_name) ?? null,
   };
   const pending_projections: Projection<any>[] = [];
+  /**
+   * Reaction objects contributed BY projections. A projection's own
+   * reactions legitimately target it; anything else pointed at a target a
+   * projection serves is the #1467 collision. Recorded at registration
+   * because projections arrive through two doors (\`withProjection\` merges
+   * immediately, \`withSlice\` defers to build) and neither retains them.
+   * Identity is the same test \`merge_projection\` uses.
+   */
+  const projection_reactions = new Set<unknown>();
+  const record_projection_reactions = (proj: Projection<any>) => {
+    for (const register of Object.values(
+      proj.events as Record<string, { reactions: Map<string, unknown> }>
+    ))
+      for (const reaction of register.reactions.values())
+        projection_reactions.add(reaction);
+  };
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
   // Validated fold-projection ingredients, resolved once on the first
@@ -361,6 +377,9 @@ export function act<
   // per-stream cache that must never be shared across Acts.
   const fold_specs: {
     target: string;
+    /** Identity of the registering projection, so a repeat registration of
+     *  the same object is recognized as one claim rather than two (#1469). */
+    projection: Projection<any>;
     merged: any;
     flush: any;
     config: any;
@@ -529,6 +548,7 @@ export function act<
         return builder as never;
       },
       withProjection: (proj) => {
+        record_projection_reactions(proj as Projection<any>);
         merge_projection(proj as Projection<any>, registry.events);
         register_batch_handler(proj as Projection<any>, batch_handlers);
         if ((proj as Projection<any>).fold)
@@ -575,6 +595,7 @@ export function act<
         // every tenant.
         if (!_built) {
           for (const proj of pending_projections) {
+            record_projection_reactions(proj);
             merge_projection(proj, registry.events as Record<string, any>);
             register_batch_handler(proj, batch_handlers);
             if (proj.fold) fold_projections.push(proj);
@@ -614,10 +635,16 @@ export function act<
             //
             // With this check all four {batch, fold}² pairings throw;
             // previously only batch × batch did.
-            if (
-              batch_handlers.has(proj.target!) ||
-              fold_specs.some((s) => s.target === proj.target)
-            )
+            // Re-registering the SAME projection object is a no-op, not a
+            // duplicate (#1469) — a projection exported from a module and
+            // embedded by two slices, or a \`.withProjection(p)\` written
+            // twice, is a legitimate pattern that both sibling paths
+            // (\`merge_projection\`, \`register_batch_handler\`) already treat
+            // as idempotent. Only two DIFFERENT claimants on one target are
+            // an error.
+            const claimed = fold_specs.find((s) => s.target === proj.target);
+            if (claimed?.projection === proj) continue;
+            if (batch_handlers.has(proj.target!) || claimed)
               throw new Error(
                 \`Duplicate projection target "\${proj.target}" — a target is served by one batch handler or one state projection, never both\`
               );
@@ -627,10 +654,39 @@ export function act<
             // would leak folded rows between Acts built from this builder.
             fold_specs.push({
               target: proj.target!,
+              projection: proj,
               merged,
               flush: fold.flush,
               config: fold.config,
             });
+          }
+          // A target is served by ONE thing (#1467). The guard above covers
+          // projection-vs-projection; this covers the third claimant a
+          // projection has no way to see: an ordinary reaction pointed at a
+          // target a batch handler or fold already owns.
+          //
+          // The drain dispatches a stream with a batch handler through that
+          // handler and nothing else (\`drain-cycle.ts\`), so the foreign
+          // reaction never runs — silently, with no error, retry or block —
+          // and the fold cold-loads the foreign event's stream as ITS state,
+          // writing another aggregate's row into its read table. Exactly the
+          // #1440 damage through the seam that fix did not reach.
+          //
+          // A projection's OWN reactions legitimately target it, so they are
+          // excluded by object identity — the same test \`merge_projection\`
+          // uses to tell a re-registration from a collision.
+          for (const register of Object.values(registry.events)) {
+            for (const reaction of register.reactions.values()) {
+              if (typeof reaction.resolver === "function") continue;
+              const target = reaction.resolver.target;
+              const claimed =
+                batch_handlers.has(target) ||
+                fold_specs.some((f) => f.target === target);
+              if (claimed && !projection_reactions.has(reaction))
+                throw new Error(
+                  \`Reaction on target "\${target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run\`
+                );
+            }
           }
           finalize_deprecations();
           validate_lane_references(registry, lanes);
