@@ -368,7 +368,7 @@ The shared loop is exported as `runSseSubscription` from `@rotorsoft/act-http/ap
 | `heartbeatMs` | `30_000` | `[15_000, 300_000]` | Sub-15s wastes bandwidth on business workloads; above 5 min risks proxy idle drops. |
 | `maxPendingPerConnection` | `256` | `[1, 100_000]` | Bounds the per-connection undelivered-frame backlog. A stalled consumer on a busy stream can't drain as fast as it publishes; at the bound the oldest frame is dropped (drop-oldest) so one wedged client can't pin unbounded memory. |
 
-Out-of-range knobs throw `RangeError` at transport construction — misconfiguration surfaces at startup, not at first connection.
+Out-of-range knobs throw `ZodError` at transport construction — misconfiguration surfaces at startup, not at first connection. (Every config bag in the framework validates with Zod and throws `ZodError` at its entry point.)
 
 ### Why SSE, not WebSocket
 

@@ -61,7 +61,14 @@ export function applyPatchMessage<S extends BroadcastState>(
   // answer that does NOT refetch (#1423).
   if (msg._resync) return { ok: false, reason: "behind" };
 
-  if (!versions.length) return { ok: false, reason: "stale" };
+  // An empty frame carries nothing to apply. For a client that already has a
+  // baseline that is genuinely `stale` — a no-op, don't refetch. For one with
+  // NO baseline there is nothing to be stale relative to, and `stale` is the
+  // one answer that does not refetch, so it would strand the client (#1474).
+  // Both the doc-comment below and `real-time.md` already say a fresh client
+  // is never stale; this is the branch that made that false.
+  if (!versions.length)
+    return { ok: false, reason: hasBaseline ? "stale" : "behind" };
 
   const minV = versions[0];
   const maxV = versions[versions.length - 1];
