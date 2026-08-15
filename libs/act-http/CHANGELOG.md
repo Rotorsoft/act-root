@@ -1,3 +1,11 @@
+# [@rotorsoft/act-http-v1.9.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.4...@rotorsoft/act-http-v1.9.5) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** overlay state survives a commit ([7f89bb7](https://github.com/rotorsoft/act-root/commit/7f89bb7aba968bdd7f86f3b77a3bf2c84c02bf68)), closes [#1479](https://github.com/rotorsoft/act-root/issues/1479) [#1473](https://github.com/rotorsoft/act-root/issues/1473)
+* **act-http:** pin three documented SSE guarantees that nothing enforced ([47a2d0a](https://github.com/rotorsoft/act-root/commit/47a2d0af5f5ca4cfda78a0643c52a20b4b04c990)), closes [#1474](https://github.com/rotorsoft/act-root/issues/1474)
+
 # [@rotorsoft/act-http-v1.9.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.3...@rotorsoft/act-http-v1.9.4) (2026-08-15)
 
 
