@@ -71,6 +71,41 @@ subscription side, which correlate is already positioned to produce since it
 scans events forward against a checkpoint. That is a design change, not an
 index, and it is explored in [RFC 1449](../../rfcs/1449-split-store-port.md).
 
+### Extended to 100k (#1482, RFC 1449 baseline)
+
+Step 0 of [RFC 1449](../../rfcs/1449-split-store-port.md) re-ran this to the
+sizes the residual slope was only extrapolated to. Two changes make these
+numbers comparable across adapters and slightly *higher* than the table
+above: claims now lease for **0 ms**, so every iteration sees the full
+eligible set, and the bench reports the pending count so a shrinking
+candidate set cannot hide.
+
+| subscribed streams | claim latency | µs per subscribed stream |
+|---|---|---|
+| 100 | 2.56 ms | 25.6 |
+| 1,000 | 3.62 ms | 3.6 |
+| 10,000 | 12.08 ms | 1.2 |
+| 20,000 | 23.80 ms | 1.2 |
+| 50,000 | 76.15 ms | 1.5 |
+| 100,000 | 180.31 ms | 1.8 |
+
+The slope from 10k to 100k is **~1.87 µs per subscribed stream**, so the
+earlier ~1.4 µs estimate was optimistic and the extrapolated "~130 ms at
+100k" is really **180 ms**. The shape is confirmed: cost is linear in
+subscribed streams and independent of pending work (10 pending throughout).
+
+Why the 1-ms lease mattered: whenever a claim finished inside its own lease
+window, the previous iteration's leases were still live, so the next claim
+walked a smaller eligible set. The tell in the act-sqlite run was `leased 0`
+at small sizes flipping to `leased 10` only once each claim outlasted the
+lease (#1482).
+
+For the cross-adapter comparison this baseline exists to establish:
+`act-sqlite` measures **~11.6 µs per subscribed stream** — roughly 6× worse
+per stream, and inside `transaction("write")` — with no path to an index fix,
+because its probe is an N+1 in JavaScript rather than SQL. See
+[`libs/act-sqlite/PERFORMANCE.md`](../act-sqlite/PERFORMANCE.md).
+
 ### Reproducing
 
 The benchmark's data model is load-bearing. Ids are assigned in randomized

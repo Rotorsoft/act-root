@@ -56,7 +56,11 @@ async function seed(streams) {
   );
   await pool.query(`ANALYZE ${SCHEMA}.events`);
   await pool.query(`ANALYZE ${SCHEMA}.events_streams`);
-  return store;
+  const { rows } = await pool.query(
+    `SELECT count(*)::int AS n FROM ${SCHEMA}.events_streams s
+     WHERE EXISTS (SELECT 1 FROM ${SCHEMA}.events e WHERE e.stream = s.source AND e.id > s.at)`
+  );
+  return { store, pending: rows[0].n };
 }
 
 const main = async () => {
@@ -66,19 +70,23 @@ const main = async () => {
   console.log("-----------|---------------|-------");
   const sizes = process.env.SIZES
     ? process.env.SIZES.split(',').map(Number)
-    : [100, 1000, 5000, 10000, 20000];
+    : [100, 1000, 5000, 10000, 20000, 50000, 100000];
   for (const streams of sizes) {
-    const store = await seed(streams);
+    const { store, pending } = await seed(streams);
     const iters = streams >= 10000 ? 5 : 15;
-    for (let i = 0; i < 3; i++) await store.claim(8, 2, `warm-${i}`, 1);
+    // Lease for 0ms so every iteration sees the FULL eligible set. At 1ms
+    // the previous iteration's leases are still live whenever a claim is
+    // fast, so the probe walks a smaller candidate set and the measurement
+    // flatters itself (#1482). Matches the act-sqlite bench.
+    for (let i = 0; i < 3; i++) await store.claim(8, 2, `warm-${i}`, 0);
     const t = process.hrtime.bigint();
     let leased = 0;
     for (let i = 0; i < iters; i++) {
-      leased = (await store.claim(8, 2, `w-${i}-${Math.random()}`, 1)).length;
+      leased = (await store.claim(8, 2, `w-${i}-${Math.random()}`, 0)).length;
     }
     const ms = Number(process.hrtime.bigint() - t) / 1e6 / iters;
     console.log(
-      `${String(streams).padStart(10)} | ${ms.toFixed(2).padStart(10)} ms | ${String(leased).padStart(6)}`
+      `${String(streams).padStart(10)} | ${ms.toFixed(2).padStart(10)} ms | ${String(leased).padStart(6)} (pending ${pending})`
     );
     await store.dispose();
   }
