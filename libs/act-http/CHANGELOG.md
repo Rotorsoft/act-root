@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.9.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.3...@rotorsoft/act-http-v1.9.4) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** broadcast a Set as an array on both wire paths ([b82cf1f](https://github.com/rotorsoft/act-root/commit/b82cf1faabfe72ee451f777ec4772f26fd7a7b17)), closes [#1472](https://github.com/rotorsoft/act-root/issues/1472)
+
 # [@rotorsoft/act-http-v1.9.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.2...@rotorsoft/act-http-v1.9.3) (2026-08-14)
 
 
