@@ -103,12 +103,9 @@ describe("defer durability", () => {
     // One atomic call: the deferred lease rides the finalize batch marked
     // with `due`; the standalone defer() op is not part of drain
     // finalization anymore.
-    // The second argument is the correlate checkpoint the drain persists in
-    // the same call (#1484) — no extra round trip for it.
-    expect(ack_spy).toHaveBeenCalledWith(
-      [expect.objectContaining({ stream: "h1", due: due.getTime() })],
-      expect.any(Number)
-    );
+    expect(ack_spy).toHaveBeenCalledWith([
+      expect.objectContaining({ stream: "h1", due: due.getTime() }),
+    ]);
     expect(defer_spy).not.toHaveBeenCalled();
   });
 

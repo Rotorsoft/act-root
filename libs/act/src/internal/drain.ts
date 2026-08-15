@@ -73,8 +73,7 @@ export async function fetch<TEvents extends Schemas>(
 // Finalize: acks and defers in one atomic store call. Leases
 // carrying `due` are deferred, the rest acked — a failed finalize lands
 // nothing, and redelivery covers every outcome uniformly.
-export const ack = (leases: Lease[], correlated?: number): Promise<Lease[]> =>
-  store().ack(leases, correlated);
+export const ack = (leases: Lease[]): Promise<Lease[]> => store().ack(leases);
 
 export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
@@ -85,6 +84,7 @@ export const subscribe = (
     source?: string;
     priority?: number;
     lane?: string;
-  }>
-): Promise<{ subscribed: number; watermark: number }> =>
-  store().subscribe(streams);
+  }>,
+  correlated_through?: number
+): Promise<{ subscribed: number; watermark: number; correlated: number }> =>
+  store().subscribe(streams, correlated_through);

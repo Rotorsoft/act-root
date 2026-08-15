@@ -1104,57 +1104,55 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
 
       // The correlate checkpoint (#1484): how far the log has been READ, as
-      // opposed to how far a target has been processed (`at`). It costs no
-      // round trip of its own — `subscribe` returns it (correlate already
-      // calls subscribe) and `ack` advances it (the drain already acks).
+      // opposed to how far a target has been processed (`at`). Read AND
+      // written by `subscribe`, which correlate already calls with the
+      // targets each scan discovers — so it costs no round trip of its own,
+      // and its only writer is the component that knows the value.
       //
       // A singleton cannot be namespaced with `uid()` like every other case
       // here, so these read the current value and assert RELATIVE to it.
       describe("correlate checkpoint", () => {
         const peek = async () => (await store.subscribe([])).correlated;
 
-        it("starts at -1 and round-trips an advance through ack", async () => {
+        it("round-trips an advance through subscribe", async () => {
           const base = await peek();
-          await store.ack([], base + 10);
+          expect((await store.subscribe([], base + 10)).correlated).toBe(
+            base + 10
+          );
           expect(await peek()).toBe(base + 10);
         });
 
         it("persists only when greater than the stored value", async () => {
           const base = await peek();
-          // Lower — ignored, not written. A worker whose in-memory cursor
-          // lags must not be able to rewind the checkpoint.
-          await store.ack([], base - 5);
+          // Lower — ignored, not written. A worker whose cursor lags must
+          // not be able to rewind the checkpoint.
+          await store.subscribe([], base - 5);
           expect(await peek()).toBe(base);
           // Equal — a no-op, so re-sending the same value is safe.
-          await store.ack([], base);
+          await store.subscribe([], base);
           expect(await peek()).toBe(base);
           // Greater — advances.
-          await store.ack([], base + 3);
+          await store.subscribe([], base + 3);
           expect(await peek()).toBe(base + 3);
         });
 
-        it("is left untouched when ack omits it", async () => {
+        it("is left untouched when subscribe omits it", async () => {
           const base = await peek();
-          await store.ack([]);
+          await store.subscribe([]);
           expect(await peek()).toBe(base);
         });
 
-        it("advances in the same call that finalizes leases", async () => {
+        it("advances in the same call that registers discovered targets", async () => {
+          // The shape correlate actually issues: here are the targets I
+          // found, and here is how far I read to find them.
           const base = await peek();
-          const s = `cp-ack-${uid()}`;
-          await store.subscribe([{ stream: s }]);
-          await store.commit<CounterEvents>(
-            s,
-            [inc(1)],
-            make_meta({ stream: s })
+          const s = `cp-sub-${uid()}`;
+          const { subscribed, correlated } = await store.subscribe(
+            [{ stream: s }],
+            base + 7
           );
-          const [lease] = await store.claim(5, 5, `w-${uid()}`, 5_000);
-          const acked = await store.ack(
-            [{ ...lease, at: lease.at + 1 }],
-            base + 1
-          );
-          expect(acked.map((l) => l.stream)).toContain(lease.stream);
-          expect(await peek()).toBe(base + 1);
+          expect(subscribed).toBe(1);
+          expect(correlated).toBe(base + 7);
         });
 
         it("is invisible to every stream-scoped surface", async () => {

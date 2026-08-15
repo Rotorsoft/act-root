@@ -72,29 +72,27 @@ describe("the checkpoint survives a restart", () => {
   });
 });
 
-describe("the checkpoint is persisted by the drain's ack", () => {
-  it("advances after a correlate + drain cycle", async () => {
+describe("the checkpoint is persisted by correlate's own subscribe", () => {
+  it("advances as soon as a scan registers what it found", async () => {
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
     const w1 = worker();
     await w1.do("tick", { stream: "src", actor }, {});
 
-    // Correlate advances its cursor in memory...
+    // No drain needed: correlate persists its cursor in the same subscribe
+    // that registers the targets it discovered.
     const scan = await w1.correlate();
     expect(scan.subscribed).toBe(1);
-    // ...and the drain's ack is what makes it durable, with no round trip
-    // of its own.
-    await w1.drain();
     expect(await peek(raw)).toBe(scan.last_id);
   });
 
-  it("never regresses on a later, lower ack", async () => {
+  it("never regresses on a later, lower value", async () => {
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
-    await raw.ack([], 50);
-    await raw.ack([], 10);
+    await raw.subscribe([], 50);
+    await raw.subscribe([], 10);
     expect(await peek(raw)).toBe(50);
   });
 });

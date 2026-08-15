@@ -39,9 +39,9 @@ describe("two stores in one schema", () => {
 
     // Advance each to a different position.
     expect(await peek(alpha)).toBe(-1);
-    await alpha.ack([], 100);
+    await alpha.subscribe([], 100);
     expect(await peek(beta)).toBe(-1);
-    await beta.ack([], 7);
+    await beta.subscribe([], 7);
 
     // Neither sees the other's value.
     expect(await peek(alpha)).toBe(100);
@@ -60,7 +60,7 @@ describe("two stores in one schema", () => {
   it("advancing one scope's checkpoint leaves the other alone", async () => {
     await alpha.seed();
     await beta.seed();
-    await alpha.ack([], 5_000);
+    await alpha.subscribe([], 5_000);
     expect(await peek(alpha)).toBe(5_000);
     expect(await peek(beta)).toBeLessThan(5_000);
   });

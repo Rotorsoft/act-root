@@ -1292,7 +1292,8 @@ export class PostgresStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
+    }>,
+    correlated_through?: number
   ): Promise<{ subscribed: number; watermark: number; correlated: number }> {
     const client = await this._client("subscribe");
     try {
@@ -1342,8 +1343,14 @@ export class PostgresStore implements Store {
           [JSON.stringify(streams)]
         );
       }
-      // Watermark and correlate checkpoint in one round trip — correlate
-      // needs both, and it already calls subscribe (#1484).
+      // The correlate checkpoint is written by its own producer, in the call
+      // correlate already makes (#1484). GREATEST keeps it monotonic.
+      if (correlated_through !== undefined)
+        await client.query(
+          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
+          [correlated_through]
+        );
+      // Watermark and checkpoint in one round trip — correlate needs both.
       const { rows } = await client.query<{
         max: number | null;
         correlated: string | null;
@@ -1371,7 +1378,7 @@ export class PostgresStore implements Store {
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    * @returns Acked leases.
    */
-  async ack(leases: Lease[], correlated_through?: number): Promise<Lease[]> {
+  async ack(leases: Lease[]): Promise<Lease[]> {
     const client = await this._client("ack");
     try {
       await client.query("BEGIN");
@@ -1414,13 +1421,6 @@ export class PostgresStore implements Store {
       `,
         [JSON.stringify(leases)]
       );
-      // The correlate checkpoint rides this ack (#1484) — same transaction,
-      // no round trip of its own. `GREATEST` keeps it monotonic.
-      if (correlated_through !== undefined)
-        await client.query(
-          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
-          [correlated_through]
-        );
       await client.query("COMMIT");
 
       return rows

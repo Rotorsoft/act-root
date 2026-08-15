@@ -652,7 +652,8 @@ export class SqliteStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
+    }>,
+    correlated_through?: number
   ) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
@@ -701,8 +702,14 @@ export class SqliteStore implements Store {
       const wm = await tx.execute(
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
       );
-      // Watermark and correlate checkpoint together — correlate needs both
-      // and already calls subscribe (#1484).
+      // The correlate checkpoint is written by its own producer, in the call
+      // correlate already makes (#1484). MAX keeps it monotonic.
+      if (correlated_through !== undefined)
+        await tx.execute({
+          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
+          args: [correlated_through],
+        });
+      // Watermark and checkpoint together — correlate needs both.
       const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");
       await tx.commit();
       return {
@@ -849,7 +856,7 @@ export class SqliteStore implements Store {
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
-  async ack(leases: Lease[], correlated_through?: number) {
+  async ack(leases: Lease[]) {
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
@@ -896,13 +903,6 @@ export class SqliteStore implements Store {
           });
         }
       }
-      // The correlate checkpoint rides this ack (#1484) — same transaction,
-      // no round trip of its own. MAX keeps it monotonic.
-      if (correlated_through !== undefined)
-        await tx.execute({
-          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
-          args: [correlated_through],
-        });
       await tx.commit();
       return result;
     } catch (e) {

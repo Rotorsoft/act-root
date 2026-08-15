@@ -343,7 +343,10 @@ export class CorrelateCycle<
           lane,
         })
       );
-      const { subscribed } = await this._cd.subscribe(streams);
+      // Persist the read cursor with the targets this scan discovered
+      // (#1484). Correlate is the only component that knows how far it has
+      // read, and it is already making this call.
+      const { subscribed } = await this._cd.subscribe(streams, last_id);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {
