@@ -141,6 +141,8 @@ This applies the overlay to the cached state, leaves `_v` unchanged, and emits a
 
 ### Presence
 
+Overlay data survives the next commit: `publish()` carries overlay-contributed keys onto the new cached state unless the domain state speaks to them ([#1473](https://github.com/Rotorsoft/act-root/issues/1473)), so a reconnecting client reseeds with the same presence a live client is holding. A domain state that sets or drops one of those keys still wins — the store is authoritative for its own fields.
+
 `online()` returns a `Set`, which `JSON.stringify` encodes as `{}` — so the broadcast layer converts a `Set` to an array before it reaches the cache or the wire ([#1472](https://github.com/Rotorsoft/act-root/issues/1472)). Clients receive `["alice", "bob"]`, and a reconnecting client's reseed matches what a live one holds. A `Map` is left alone: unlike a `Set` it has no unambiguous JSON encoding, so pass one already shaped the way you want it sent.
 
 `PresenceTracker` is a ref-counted online-status tracker designed for multi-tab clients (each tab opens its own SSE; `add` / `remove` maintain a per-identity counter):

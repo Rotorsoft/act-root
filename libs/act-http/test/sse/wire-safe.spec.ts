@@ -206,3 +206,80 @@ describe("presence sets survive the wire (#1472)", () => {
     expect(sent["1"]).toEqual({ meta: {} });
   });
 });
+
+describe("overlay state survives a commit (#1473)", () => {
+  it("gives a reconnecting client what a live one holds after a publish", () => {
+    const ch = new BroadcastChannel<Calc>();
+    const frames: unknown[] = [];
+    ch.publish("g1", { _v: 5, result: 1 } as Calc);
+    ch.subscribe("g1", (f) => frames.push(f));
+
+    let live: Partial<Calc> = { _v: 5, result: 1 };
+    ch.overlay("g1", { onlineUsers: ["alice"] } as Partial<Calc>);
+    live = client_after(over_the_wire(frames.at(-1)), live);
+
+    // A domain commit lands; the host derives state from the store, which
+    // knows nothing about presence.
+    ch.publish("g1", { _v: 6, result: 2 } as Calc, [
+      { result: 2 } as Partial<Calc>,
+    ]);
+    live = client_after(over_the_wire(frames.at(-1)), live);
+
+    const reseed = over_the_wire(ch.state("g1")) as Partial<Calc>;
+    expect(live).toMatchObject({ _v: 6, result: 2, onlineUsers: ["alice"] });
+    expect(reseed.onlineUsers).toEqual(live.onlineUsers);
+    expect(reseed.result).toBe(2);
+  });
+
+  it("lets a later domain state overwrite an overlay key", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 1 } as Calc);
+    ch.overlay("g1", { result: 99 } as Partial<Calc>);
+    ch.publish("g1", { _v: 2, result: 7 } as Calc, [
+      { result: 7 } as Partial<Calc>,
+    ]);
+    expect(ch.state("g1")?.result).toBe(7);
+  });
+
+  it("keeps overlay keys across several commits", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 1 } as Calc);
+    ch.overlay("g1", { onlineUsers: ["alice"] } as Partial<Calc>);
+    ch.publish("g1", { _v: 2, result: 1 } as Calc, [{ result: 1 } as never]);
+    ch.publish("g1", { _v: 3, result: 2 } as Calc, [{ result: 2 } as never]);
+    expect(ch.state("g1")).toMatchObject({
+      _v: 3,
+      result: 2,
+      onlineUsers: ["alice"],
+    });
+  });
+
+  it("does not resurrect an overlay key the overlay itself cleared", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 1 } as Calc);
+    ch.overlay("g1", { onlineUsers: ["alice"] } as Partial<Calc>);
+    ch.overlay("g1", { onlineUsers: undefined } as Partial<Calc>);
+    ch.publish("g1", { _v: 2, result: 1 } as Calc, [{ result: 1 } as never]);
+    expect(ch.state("g1")).not.toHaveProperty("onlineUsers");
+  });
+
+  it("carries nothing when no overlay ever ran", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 1, left: "7" } as Calc);
+    // A publisher dropping a domain key must still drop it.
+    ch.publish("g1", { _v: 2, result: 1 } as Calc, [{ result: 1 } as never]);
+    expect(ch.state("g1")).not.toHaveProperty("left");
+  });
+
+  it("keeps the marker off the wire", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 1 } as Calc);
+    ch.overlay("g1", { onlineUsers: ["alice"] } as Partial<Calc>);
+    const reseed = ch.state("g1") as object;
+    expect(Object.keys(reseed)).toEqual(["_v", "onlineUsers"]);
+    expect(JSON.parse(JSON.stringify(reseed))).toEqual({
+      _v: 1,
+      onlineUsers: ["alice"],
+    });
+  });
+});
