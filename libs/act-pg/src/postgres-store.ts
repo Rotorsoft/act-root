@@ -1371,7 +1371,7 @@ export class PostgresStore implements Store {
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    * @returns Acked leases.
    */
-  async ack(leases: Lease[], correlated?: number): Promise<Lease[]> {
+  async ack(leases: Lease[], correlated_through?: number): Promise<Lease[]> {
     const client = await this._client("ack");
     try {
       await client.query("BEGIN");
@@ -1416,10 +1416,10 @@ export class PostgresStore implements Store {
       );
       // The correlate checkpoint rides this ack (#1484) — same transaction,
       // no round trip of its own. `GREATEST` keeps it monotonic.
-      if (correlated !== undefined)
+      if (correlated_through !== undefined)
         await client.query(
           `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
-          [correlated]
+          [correlated_through]
         );
       await client.query("COMMIT");
 

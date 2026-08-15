@@ -686,15 +686,20 @@ export interface Store extends Disposable, EventSource {
    * ));
    * ```
    *
-   * `correlated` advances the correlate checkpoint in the same call — see
-   * {@link subscribe}'s return. Omitted leaves it untouched; a lower value
-   * never regresses it. Piggybacking here is what keeps the checkpoint free:
-   * the drain already acks every cycle.
+   * `correlated_through` advances the correlate checkpoint in the same call
+   * — "the log is correlated through event N" — see {@link subscribe}'s
+   * return for the read side. Piggybacking here is what keeps the checkpoint
+   * free: the drain already acks every cycle.
+   *
+   * **It persists only when greater than the stored value.** A lower or equal
+   * value is ignored rather than written, so an out-of-order or stale ack
+   * from a worker whose in-memory cursor lags cannot rewind the checkpoint,
+   * and re-sending the same value is a no-op. Omitted leaves it untouched.
    *
    * @see {@link claim} for acquiring leases
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
-  ack: (leases: Lease[], correlated?: number) => Promise<Lease[]>;
+  ack: (leases: Lease[], correlated_through?: number) => Promise<Lease[]>;
 
   /**
    * Blocks streams after persistent processing failures.

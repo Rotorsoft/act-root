@@ -734,11 +734,14 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  async ack(leases: Lease[], correlated?: number) {
+  async ack(leases: Lease[], correlated_through?: number) {
     // The correlate checkpoint rides the ack the drain already makes (#1484).
     // Monotonic: a lower value never regresses it.
-    if (correlated !== undefined && correlated > this._correlated)
-      this._correlated = correlated;
+    if (
+      correlated_through !== undefined &&
+      correlated_through > this._correlated
+    )
+      this._correlated = correlated_through;
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on

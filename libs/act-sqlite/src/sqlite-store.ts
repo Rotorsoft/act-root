@@ -849,7 +849,7 @@ export class SqliteStore implements Store {
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
-  async ack(leases: Lease[], correlated?: number) {
+  async ack(leases: Lease[], correlated_through?: number) {
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
@@ -898,10 +898,10 @@ export class SqliteStore implements Store {
       }
       // The correlate checkpoint rides this ack (#1484) — same transaction,
       // no round trip of its own. MAX keeps it monotonic.
-      if (correlated !== undefined)
+      if (correlated_through !== undefined)
         await tx.execute({
           sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
-          args: [correlated],
+          args: [correlated_through],
         });
       await tx.commit();
       return result;

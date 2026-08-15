@@ -1119,10 +1119,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(await peek()).toBe(base + 10);
         });
 
-        it("never regresses", async () => {
+        it("persists only when greater than the stored value", async () => {
           const base = await peek();
+          // Lower — ignored, not written. A worker whose in-memory cursor
+          // lags must not be able to rewind the checkpoint.
           await store.ack([], base - 5);
           expect(await peek()).toBe(base);
+          // Equal — a no-op, so re-sending the same value is safe.
+          await store.ack([], base);
+          expect(await peek()).toBe(base);
+          // Greater — advances.
+          await store.ack([], base + 3);
+          expect(await peek()).toBe(base + 3);
         });
 
         it("is left untouched when ack omits it", async () => {

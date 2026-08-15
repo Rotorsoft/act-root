@@ -12014,11 +12014,14 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  async ack(leases: Lease[], correlated?: number) {
+  async ack(leases: Lease[], correlated_through?: number) {
     // The correlate checkpoint rides the ack the drain already makes (#1484).
     // Monotonic: a lower value never regresses it.
-    if (correlated !== undefined && correlated > this._correlated)
-      this._correlated = correlated;
+    if (
+      correlated_through !== undefined &&
+      correlated_through > this._correlated
+    )
+      this._correlated = correlated_through;
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on
@@ -14247,15 +14250,20 @@ export interface Store extends Disposable, EventSource {
    * ));
    * \`\`\`
    *
-   * \`correlated\` advances the correlate checkpoint in the same call — see
-   * {@link subscribe}'s return. Omitted leaves it untouched; a lower value
-   * never regresses it. Piggybacking here is what keeps the checkpoint free:
-   * the drain already acks every cycle.
+   * \`correlated_through\` advances the correlate checkpoint in the same call
+   * — "the log is correlated through event N" — see {@link subscribe}'s
+   * return for the read side. Piggybacking here is what keeps the checkpoint
+   * free: the drain already acks every cycle.
+   *
+   * **It persists only when greater than the stored value.** A lower or equal
+   * value is ignored rather than written, so an out-of-order or stale ack
+   * from a worker whose in-memory cursor lags cannot rewind the checkpoint,
+   * and re-sending the same value is a no-op. Omitted leaves it untouched.
    *
    * @see {@link claim} for acquiring leases
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
-  ack: (leases: Lease[], correlated?: number) => Promise<Lease[]>;
+  ack: (leases: Lease[], correlated_through?: number) => Promise<Lease[]>;
 
   /**
    * Blocks streams after persistent processing failures.
@@ -29804,11 +29812,14 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  async ack(leases: Lease[], correlated?: number) {
+  async ack(leases: Lease[], correlated_through?: number) {
     // The correlate checkpoint rides the ack the drain already makes (#1484).
     // Monotonic: a lower value never regresses it.
-    if (correlated !== undefined && correlated > this._correlated)
-      this._correlated = correlated;
+    if (
+      correlated_through !== undefined &&
+      correlated_through > this._correlated
+    )
+      this._correlated = correlated_through;
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on
@@ -32000,15 +32011,20 @@ export interface Store extends Disposable, EventSource {
    * ));
    * \`\`\`
    *
-   * \`correlated\` advances the correlate checkpoint in the same call — see
-   * {@link subscribe}'s return. Omitted leaves it untouched; a lower value
-   * never regresses it. Piggybacking here is what keeps the checkpoint free:
-   * the drain already acks every cycle.
+   * \`correlated_through\` advances the correlate checkpoint in the same call
+   * — "the log is correlated through event N" — see {@link subscribe}'s
+   * return for the read side. Piggybacking here is what keeps the checkpoint
+   * free: the drain already acks every cycle.
+   *
+   * **It persists only when greater than the stored value.** A lower or equal
+   * value is ignored rather than written, so an out-of-order or stale ack
+   * from a worker whose in-memory cursor lags cannot rewind the checkpoint,
+   * and re-sending the same value is a no-op. Omitted leaves it untouched.
    *
    * @see {@link claim} for acquiring leases
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
-  ack: (leases: Lease[], correlated?: number) => Promise<Lease[]>;
+  ack: (leases: Lease[], correlated_through?: number) => Promise<Lease[]>;
 
   /**
    * Blocks streams after persistent processing failures.
@@ -38281,15 +38297,20 @@ export interface Store extends Disposable, EventSource {
    * ));
    * \`\`\`
    *
-   * \`correlated\` advances the correlate checkpoint in the same call — see
-   * {@link subscribe}'s return. Omitted leaves it untouched; a lower value
-   * never regresses it. Piggybacking here is what keeps the checkpoint free:
-   * the drain already acks every cycle.
+   * \`correlated_through\` advances the correlate checkpoint in the same call
+   * — "the log is correlated through event N" — see {@link subscribe}'s
+   * return for the read side. Piggybacking here is what keeps the checkpoint
+   * free: the drain already acks every cycle.
+   *
+   * **It persists only when greater than the stored value.** A lower or equal
+   * value is ignored rather than written, so an out-of-order or stale ack
+   * from a worker whose in-memory cursor lags cannot rewind the checkpoint,
+   * and re-sending the same value is a no-op. Omitted leaves it untouched.
    *
    * @see {@link claim} for acquiring leases
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
-  ack: (leases: Lease[], correlated?: number) => Promise<Lease[]>;
+  ack: (leases: Lease[], correlated_through?: number) => Promise<Lease[]>;
 
   /**
    * Blocks streams after persistent processing failures.
@@ -51135,7 +51156,7 @@ export class PostgresStore implements Store {
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    * @returns Acked leases.
    */
-  async ack(leases: Lease[], correlated?: number): Promise<Lease[]> {
+  async ack(leases: Lease[], correlated_through?: number): Promise<Lease[]> {
     const client = await this._client("ack");
     try {
       await client.query("BEGIN");
@@ -51180,10 +51201,10 @@ export class PostgresStore implements Store {
       );
       // The correlate checkpoint rides this ack (#1484) — same transaction,
       // no round trip of its own. \`GREATEST\` keeps it monotonic.
-      if (correlated !== undefined)
+      if (correlated_through !== undefined)
         await client.query(
           \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0\`,
-          [correlated]
+          [correlated_through]
         );
       await client.query("COMMIT");
 
@@ -53220,7 +53241,7 @@ export class SqliteStore implements Store {
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
-  async ack(leases: Lease[], correlated?: number) {
+  async ack(leases: Lease[], correlated_through?: number) {
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
@@ -53269,10 +53290,10 @@ export class SqliteStore implements Store {
       }
       // The correlate checkpoint rides this ack (#1484) — same transaction,
       // no round trip of its own. MAX keeps it monotonic.
-      if (correlated !== undefined)
+      if (correlated_through !== undefined)
         await tx.execute({
           sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
-          args: [correlated],
+          args: [correlated_through],
         });
       await tx.commit();
       return result;
@@ -57388,10 +57409,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(await peek()).toBe(base + 10);
         });
 
-        it("never regresses", async () => {
+        it("persists only when greater than the stored value", async () => {
           const base = await peek();
+          // Lower — ignored, not written. A worker whose in-memory cursor
+          // lags must not be able to rewind the checkpoint.
           await store.ack([], base - 5);
           expect(await peek()).toBe(base);
+          // Equal — a no-op, so re-sending the same value is safe.
+          await store.ack([], base);
+          expect(await peek()).toBe(base);
+          // Greater — advances.
+          await store.ack([], base + 3);
+          expect(await peek()).toBe(base + 3);
         });
 
         it("is left untouched when ack omits it", async () => {

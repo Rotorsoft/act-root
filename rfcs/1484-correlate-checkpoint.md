@@ -69,6 +69,20 @@ libs/act/test/priority.spec.ts
 
 16 failures across 7 files. These are documented counts operators act on, so the leak is not cosmetic. The alternative — teaching every one of those surfaces to skip `__`-prefixed rows across three adapters — makes the exclusion an obligation every future adapter inherits, and one missed spot is a silently wrong count.
 
+### Why not derive it from the acked leases
+
+`ack` already carries every lease's `at`, so `max(acked.at)` looks free. It is wrong, and in the one direction that loses data.
+
+Once a target is subscribed, the drain's `claim`/`fetch` reads the log **directly** — correlate is not involved. Correlate is only the discovery mechanism, and it scans in bounded pages (`limit` 10 direct, 100 from settle). So processing routinely runs *ahead* of the read cursor. Measured on a single stream with 26 events:
+
+```
+max_acked = 25    correlate_checkpoint = 0
+```
+
+Deriving the checkpoint from the acks would jump it to 25, skipping events 1–24 **for discovery**: any dynamic target those events should have created never exists, and its reactions never run.
+
+The asymmetry is the point. A checkpoint derived *behind* the true read position (the work-set option below) costs a re-scan. A checkpoint derived *ahead* of it silently drops work. Only correlate knows how far correlate has read, so only correlate can report it.
+
 ### Why not derive it from the work set
 
 Once RFC 1486 lands, `MAX(correlated)` is available and needs no storage at all. It does not work, and the reason is worth recording so it is not re-proposed:
@@ -101,6 +115,7 @@ TCK cases run against all three adapters: round-trip an advance, never regress, 
 | | Verdict |
 |---|---|
 | Reserved subscription row | Built and rejected — miscounts six operator surfaces (measured) |
+| Derive from `max(acked.at)` | Rejected — processing runs ahead of the read cursor (measured 25 vs 0), so it skips discovery |
 | Dedicated `lease_correlated` / `ack_correlated` port methods | Rejected — surface creep every third-party adapter inherits |
 | `claim`/`ack` on a reserved lane | Rejected — no new methods, but two extra round trips per scan, and checkpoint traffic became indistinguishable from drain traffic |
 | Filter `__`-prefixed rows from those surfaces | Zero schema, but the exclusion is an obligation every future adapter inherits |
