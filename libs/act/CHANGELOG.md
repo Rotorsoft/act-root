@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.25.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.2...@rotorsoft/act-v1.25.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act:** complete the target-ownership guard and make it identity-aware ([0b11c0f](https://github.com/rotorsoft/act-root/commit/0b11c0f3478bc7ea31e124564640139a99c78461)), closes [#1467](https://github.com/rotorsoft/act-root/issues/1467) [#1469](https://github.com/rotorsoft/act-root/issues/1469) [#1467](https://github.com/rotorsoft/act-root/issues/1467) [#1469](https://github.com/rotorsoft/act-root/issues/1469)
+* **act:** shutdown awaits the in-flight settle cycle ([53746a4](https://github.com/rotorsoft/act-root/commit/53746a4e98a915507a2bfaefa5c0958f397ffaeb)), closes [#1468](https://github.com/rotorsoft/act-root/issues/1468)
+
 # [@rotorsoft/act-v1.25.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.1...@rotorsoft/act-v1.25.2) (2026-08-14)
 
 
