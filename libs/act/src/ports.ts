@@ -296,6 +296,25 @@ export function dispose(
 // ---------------------------------------------------------------------------
 
 /**
+ * Reserved lane and stream carrying the correlate checkpoint (#1484).
+ *
+ * The checkpoint is how far `correlate` has READ the event log — a single
+ * global scalar, distinct from a subscription's `at` (how far a target has
+ * been processed). It rides the existing `claim`/`ack` pair rather than its
+ * own port methods: `claim(1, 0, by, millis, CORRELATE_LANE)` leases it and
+ * returns it as the lease's `at`, `ack` advances and releases it.
+ *
+ * Adapters keep the value in their own single-row relation, so it is never
+ * counted by `prioritize`, `reset`, `unblock`, `query_streams` or
+ * `blocked_streams`. No `DrainController` is constructed for this lane, so
+ * the drain pipeline never claims it.
+ */
+export const CORRELATE_LANE = "__correlate__";
+
+/** Stream name on the synthetic checkpoint lease. @see {@link CORRELATE_LANE} */
+export const CORRELATE_STREAM = "__correlate__";
+
+/**
  * Event name used internally for snapshot events in the event store.
  * Snapshot events store a full state checkpoint, enabling efficient cold-start
  * recovery without replaying the entire event stream.

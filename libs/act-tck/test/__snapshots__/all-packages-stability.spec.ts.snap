@@ -7844,7 +7844,7 @@ export class ConsoleLogger implements Logger {
  */
 
 import { randomUUID } from "node:crypto";
-import { log, store } from "../ports.js";
+import { CORRELATE_LANE, CORRELATE_STREAM, log, store } from "../ports.js";
 import type {
   Query,
   ReactionPayload,
@@ -8001,10 +8001,18 @@ export class CorrelateCycle<
    * Read the durable checkpoint without holding its lease, for cold start.
    */
   private async _read_checkpoint(): Promise<number> {
-    const at = await store().lease_correlated(this._by, this._lease_millis);
-    if (at === undefined) return -1;
-    await store().ack_correlated(this._by, at);
-    return at;
+    const [lease] = await store().claim(
+      1,
+      0,
+      this._by,
+      this._lease_millis,
+      CORRELATE_LANE
+    );
+    if (!lease) return -1;
+    // Contained like every other release: a store that cannot ack must not
+    // stop the Act from initializing — the lease simply expires.
+    await this._release(lease.at);
+    return lease.at;
   }
 
   /** Last correlated event id. */
@@ -8124,9 +8132,15 @@ export class CorrelateCycle<
     // another correlator is already scanning, so this worker skips instead of
     // repeating the same range and issuing the same subscribe UPSERTs — the
     // N-fold duplication this replaces.
-    const leased = await store().lease_correlated(this._by, this._lease_millis);
-    if (leased === undefined)
-      return { subscribed: 0, last_id: this._checkpoint };
+    const [lease] = await store().claim(
+      1,
+      0,
+      this._by,
+      this._lease_millis,
+      CORRELATE_LANE
+    );
+    if (!lease) return { subscribed: 0, last_id: this._checkpoint };
+    const leased = lease.at;
     // Trust the durable value over the in-memory one: another worker may have
     // advanced it since this instance last scanned.
     this._checkpoint = Math.max(this._checkpoint, leased);
@@ -8232,9 +8246,28 @@ export class CorrelateCycle<
     }
   }
 
-  /** Advance (or merely release) the checkpoint lease. */
+  /**
+   * Advance (or merely release) the checkpoint lease.
+   *
+   * Contained: a failing release must not mask the error that caused the
+   * scan to fail, and the only cost of not releasing is waiting out the
+   * lease — the next correlator takes over when it expires.
+   */
   private async _release(at: number): Promise<boolean> {
-    await store().ack_correlated(this._by, at);
+    try {
+      await store().ack([
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at,
+          retry: -1,
+          by: this._by,
+          lagging: true,
+        },
+      ]);
+    } catch (error) {
+      log().error(error, "correlate checkpoint release failed");
+    }
     return true;
   }
 
@@ -11322,7 +11355,13 @@ export class InMemoryCache implements Cache {
  * @category Adapters
  */
 
-import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
+import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
+  DEFAULT_LANE,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+} from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -11938,6 +11977,30 @@ export class InMemoryStore implements Store {
     // event committed between the cycle's fetch and its ack was acked past
     // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
     // first event this store ever issues — was silently skipped.
+    // Reserved lane (#1484): the correlate checkpoint, kept out of the
+    // subscriptions map so no stream-scoped surface counts it.
+    if (lane === CORRELATE_LANE) {
+      const now = Date.now();
+      if (
+        this._correlated_by !== undefined &&
+        this._correlated_by !== by &&
+        this._correlated_until > now
+      )
+        return [];
+      this._correlated_by = by;
+      this._correlated_until = now + millis;
+      return [
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at: this._correlated,
+          retry: -1,
+          by,
+          lagging: true,
+        },
+      ];
+    }
+
     const has_work = (s: InMemoryStream): boolean => {
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
@@ -12051,43 +12114,26 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  /**
-   * Take the checkpoint lease and read it (#1484). Single-threaded, so the
-   * check and the take cannot interleave.
-   */
-  async lease_correlated(by: string, millis: number) {
-    await sleep();
-    const now = Date.now();
-    if (
-      this._correlated_by !== undefined &&
-      this._correlated_by !== by &&
-      this._correlated_until > now
-    )
-      return undefined;
-    this._correlated_by = by;
-    this._correlated_until = now + millis;
-    return this._correlated;
-  }
-
-  /** Advance the checkpoint and release its lease, gated on the holder. */
-  async ack_correlated(by: string, at: number) {
-    await sleep();
-    if (this._correlated_by !== by) return false;
-    this._correlated_by = undefined;
-    this._correlated_until = 0;
-    if (at <= this._correlated) return false;
-    this._correlated = at;
-    return true;
-  }
-
   async ack(leases: Lease[]) {
+    // Reserved lane (#1484) — advance the checkpoint and release its lease.
+    let rest = leases;
+    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
+    if (correlate) {
+      rest = leases.filter((l) => l !== correlate);
+      if (this._correlated_by === correlate.by) {
+        this._correlated_by = undefined;
+        this._correlated_until = 0;
+        if (correlate.at > this._correlated) this._correlated = correlate.at;
+      }
+      if (rest.length === 0) return [correlate];
+    }
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on
     // {@link Store.ack}: no await between entries, so a caller
     // never observes a cycle's acks without its schedules. \`due\`-carrying
     // entries defer (and return undefined), the rest ack.
-    return leases
+    return rest
       .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);
   }
@@ -13594,6 +13640,25 @@ export function dispose(
 // ---------------------------------------------------------------------------
 
 /**
+ * Reserved lane and stream carrying the correlate checkpoint (#1484).
+ *
+ * The checkpoint is how far \`correlate\` has READ the event log — a single
+ * global scalar, distinct from a subscription's \`at\` (how far a target has
+ * been processed). It rides the existing \`claim\`/\`ack\` pair rather than its
+ * own port methods: \`claim(1, 0, by, millis, CORRELATE_LANE)\` leases it and
+ * returns it as the lease's \`at\`, \`ack\` advances and releases it.
+ *
+ * Adapters keep the value in their own single-row relation, so it is never
+ * counted by \`prioritize\`, \`reset\`, \`unblock\`, \`query_streams\` or
+ * \`blocked_streams\`. No \`DrainController\` is constructed for this lane, so
+ * the drain pipeline never claims it.
+ */
+export const CORRELATE_LANE = "__correlate__";
+
+/** Stream name on the synthetic checkpoint lease. @see {@link CORRELATE_LANE} */
+export const CORRELATE_STREAM = "__correlate__";
+
+/**
  * Event name used internally for snapshot events in the event store.
  * Snapshot events store a full state checkpoint, enabling efficient cold-start
  * recovery without replaying the entire event stream.
@@ -14201,6 +14266,20 @@ export interface Store extends Disposable, EventSource {
    * @see {@link ack} for acknowledging completion
    * @see {@link block} for blocking failed streams
    */
+  /**
+   * Reserved lane carrying the correlate checkpoint (#1484).
+   *
+   * \`claim(1, 0, by, millis, CORRELATE_LANE)\` leases the checkpoint — how far
+   * \`correlate\` has READ the event log — and returns it as the lease's \`at\`,
+   * or \`[]\` when another correlator holds it. \`ack\` on that lease advances and
+   * releases it. Adapters keep the value in their own single-row relation, not
+   * in the subscriptions table, so it is never counted by \`prioritize\`,
+   * \`reset\`, \`unblock\`, \`query_streams\` or \`blocked_streams\`.
+   *
+   * No \`DrainController\` is ever constructed for this lane — lanes come from
+   * \`.withLane(...)\` declarations plus the implicit \`"default"\` — so the drain
+   * pipeline never sees it.
+   */
   claim: (
     lagging: number,
     leading: number,
@@ -14294,47 +14373,6 @@ export interface Store extends Disposable, EventSource {
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
   ack: (leases: Lease[]) => Promise<Lease[]>;
-
-  /**
-   * Take the correlate checkpoint's lease and read it (#1484).
-   *
-   * The checkpoint is how far \`correlate\` has **read** the event log — a
-   * single global scalar, distinct from a subscription's \`at\` (how far a
-   * target has been *processed*) and from RFC 1486's per-target
-   * \`correlated\` mark (how far work was *found* for it). Only scan progress
-   * can carry it: a run of events that resolve to no target leaves no trace
-   * on any subscription, so a checkpoint derived from marks cannot advance
-   * past one.
-   *
-   * It lives in its own single-row relation rather than as a reserved
-   * subscription, because a subscription row is counted by every
-   * stream-scoped operator surface — \`prioritize\`, \`reset\`, \`unblock\`,
-   * \`query_streams\`, \`blocked_streams\` — and would silently inflate the
-   * counts they report.
-   *
-   * Returns \`undefined\` when another correlator holds an unexpired lease,
-   * which is the signal to skip this scan rather than repeat it. That is
-   * what collapses N workers' duplicated correlation into one.
-   *
-   * @param by - Lease holder id
-   * @param millis - Lease duration; bounds a crashed correlator's hold
-   * @returns The checkpoint (\`-1\` when never advanced), or \`undefined\` when
-   *          the lease is held elsewhere
-   */
-  lease_correlated: (by: string, millis: number) => Promise<number | undefined>;
-
-  /**
-   * Advance the correlate checkpoint and release its lease, atomically.
-   *
-   * Gated on the holder, exactly like {@link ack}: a correlator whose lease
-   * expired mid-scan cannot clobber a checkpoint its successor has already
-   * moved. Never regresses the stored value.
-   *
-   * @param by - Lease holder id, must match the current holder
-   * @param at - Event id the scan reached
-   * @returns \`true\` when the checkpoint was advanced by this call
-   */
-  ack_correlated: (by: string, at: number) => Promise<boolean>;
 
   /**
    * Blocks streams after persistent processing failures.
@@ -25941,7 +25979,7 @@ export class ConsoleLogger implements Logger {
  */
 
 import { randomUUID } from "node:crypto";
-import { log, store } from "../ports.js";
+import { CORRELATE_LANE, CORRELATE_STREAM, log, store } from "../ports.js";
 import type {
   Query,
   ReactionPayload,
@@ -26098,10 +26136,18 @@ export class CorrelateCycle<
    * Read the durable checkpoint without holding its lease, for cold start.
    */
   private async _read_checkpoint(): Promise<number> {
-    const at = await store().lease_correlated(this._by, this._lease_millis);
-    if (at === undefined) return -1;
-    await store().ack_correlated(this._by, at);
-    return at;
+    const [lease] = await store().claim(
+      1,
+      0,
+      this._by,
+      this._lease_millis,
+      CORRELATE_LANE
+    );
+    if (!lease) return -1;
+    // Contained like every other release: a store that cannot ack must not
+    // stop the Act from initializing — the lease simply expires.
+    await this._release(lease.at);
+    return lease.at;
   }
 
   /** Last correlated event id. */
@@ -26221,9 +26267,15 @@ export class CorrelateCycle<
     // another correlator is already scanning, so this worker skips instead of
     // repeating the same range and issuing the same subscribe UPSERTs — the
     // N-fold duplication this replaces.
-    const leased = await store().lease_correlated(this._by, this._lease_millis);
-    if (leased === undefined)
-      return { subscribed: 0, last_id: this._checkpoint };
+    const [lease] = await store().claim(
+      1,
+      0,
+      this._by,
+      this._lease_millis,
+      CORRELATE_LANE
+    );
+    if (!lease) return { subscribed: 0, last_id: this._checkpoint };
+    const leased = lease.at;
     // Trust the durable value over the in-memory one: another worker may have
     // advanced it since this instance last scanned.
     this._checkpoint = Math.max(this._checkpoint, leased);
@@ -26329,9 +26381,28 @@ export class CorrelateCycle<
     }
   }
 
-  /** Advance (or merely release) the checkpoint lease. */
+  /**
+   * Advance (or merely release) the checkpoint lease.
+   *
+   * Contained: a failing release must not mask the error that caused the
+   * scan to fail, and the only cost of not releasing is waiting out the
+   * lease — the next correlator takes over when it expires.
+   */
   private async _release(at: number): Promise<boolean> {
-    await store().ack_correlated(this._by, at);
+    try {
+      await store().ack([
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at,
+          retry: -1,
+          by: this._by,
+          lagging: true,
+        },
+      ]);
+    } catch (error) {
+      log().error(error, "correlate checkpoint release failed");
+    }
     return true;
   }
 
@@ -29191,7 +29262,13 @@ export class InMemoryCache implements Cache {
  * @category Adapters
  */
 
-import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
+import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
+  DEFAULT_LANE,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+} from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -29807,6 +29884,30 @@ export class InMemoryStore implements Store {
     // event committed between the cycle's fetch and its ack was acked past
     // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
     // first event this store ever issues — was silently skipped.
+    // Reserved lane (#1484): the correlate checkpoint, kept out of the
+    // subscriptions map so no stream-scoped surface counts it.
+    if (lane === CORRELATE_LANE) {
+      const now = Date.now();
+      if (
+        this._correlated_by !== undefined &&
+        this._correlated_by !== by &&
+        this._correlated_until > now
+      )
+        return [];
+      this._correlated_by = by;
+      this._correlated_until = now + millis;
+      return [
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at: this._correlated,
+          retry: -1,
+          by,
+          lagging: true,
+        },
+      ];
+    }
+
     const has_work = (s: InMemoryStream): boolean => {
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
@@ -29920,43 +30021,26 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  /**
-   * Take the checkpoint lease and read it (#1484). Single-threaded, so the
-   * check and the take cannot interleave.
-   */
-  async lease_correlated(by: string, millis: number) {
-    await sleep();
-    const now = Date.now();
-    if (
-      this._correlated_by !== undefined &&
-      this._correlated_by !== by &&
-      this._correlated_until > now
-    )
-      return undefined;
-    this._correlated_by = by;
-    this._correlated_until = now + millis;
-    return this._correlated;
-  }
-
-  /** Advance the checkpoint and release its lease, gated on the holder. */
-  async ack_correlated(by: string, at: number) {
-    await sleep();
-    if (this._correlated_by !== by) return false;
-    this._correlated_by = undefined;
-    this._correlated_until = 0;
-    if (at <= this._correlated) return false;
-    this._correlated = at;
-    return true;
-  }
-
   async ack(leases: Lease[]) {
+    // Reserved lane (#1484) — advance the checkpoint and release its lease.
+    let rest = leases;
+    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
+    if (correlate) {
+      rest = leases.filter((l) => l !== correlate);
+      if (this._correlated_by === correlate.by) {
+        this._correlated_by = undefined;
+        this._correlated_until = 0;
+        if (correlate.at > this._correlated) this._correlated = correlate.at;
+      }
+      if (rest.length === 0) return [correlate];
+    }
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on
     // {@link Store.ack}: no await between entries, so a caller
     // never observes a cycle's acks without its schedules. \`due\`-carrying
     // entries defer (and return undefined), the rest ack.
-    return leases
+    return rest
       .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);
   }
@@ -31426,6 +31510,25 @@ export function dispose(
 // ---------------------------------------------------------------------------
 
 /**
+ * Reserved lane and stream carrying the correlate checkpoint (#1484).
+ *
+ * The checkpoint is how far \`correlate\` has READ the event log — a single
+ * global scalar, distinct from a subscription's \`at\` (how far a target has
+ * been processed). It rides the existing \`claim\`/\`ack\` pair rather than its
+ * own port methods: \`claim(1, 0, by, millis, CORRELATE_LANE)\` leases it and
+ * returns it as the lease's \`at\`, \`ack\` advances and releases it.
+ *
+ * Adapters keep the value in their own single-row relation, so it is never
+ * counted by \`prioritize\`, \`reset\`, \`unblock\`, \`query_streams\` or
+ * \`blocked_streams\`. No \`DrainController\` is constructed for this lane, so
+ * the drain pipeline never claims it.
+ */
+export const CORRELATE_LANE = "__correlate__";
+
+/** Stream name on the synthetic checkpoint lease. @see {@link CORRELATE_LANE} */
+export const CORRELATE_STREAM = "__correlate__";
+
+/**
  * Event name used internally for snapshot events in the event store.
  * Snapshot events store a full state checkpoint, enabling efficient cold-start
  * recovery without replaying the entire event stream.
@@ -32033,6 +32136,20 @@ export interface Store extends Disposable, EventSource {
    * @see {@link ack} for acknowledging completion
    * @see {@link block} for blocking failed streams
    */
+  /**
+   * Reserved lane carrying the correlate checkpoint (#1484).
+   *
+   * \`claim(1, 0, by, millis, CORRELATE_LANE)\` leases the checkpoint — how far
+   * \`correlate\` has READ the event log — and returns it as the lease's \`at\`,
+   * or \`[]\` when another correlator holds it. \`ack\` on that lease advances and
+   * releases it. Adapters keep the value in their own single-row relation, not
+   * in the subscriptions table, so it is never counted by \`prioritize\`,
+   * \`reset\`, \`unblock\`, \`query_streams\` or \`blocked_streams\`.
+   *
+   * No \`DrainController\` is ever constructed for this lane — lanes come from
+   * \`.withLane(...)\` declarations plus the implicit \`"default"\` — so the drain
+   * pipeline never sees it.
+   */
   claim: (
     lagging: number,
     leading: number,
@@ -32126,47 +32243,6 @@ export interface Store extends Disposable, EventSource {
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
   ack: (leases: Lease[]) => Promise<Lease[]>;
-
-  /**
-   * Take the correlate checkpoint's lease and read it (#1484).
-   *
-   * The checkpoint is how far \`correlate\` has **read** the event log — a
-   * single global scalar, distinct from a subscription's \`at\` (how far a
-   * target has been *processed*) and from RFC 1486's per-target
-   * \`correlated\` mark (how far work was *found* for it). Only scan progress
-   * can carry it: a run of events that resolve to no target leaves no trace
-   * on any subscription, so a checkpoint derived from marks cannot advance
-   * past one.
-   *
-   * It lives in its own single-row relation rather than as a reserved
-   * subscription, because a subscription row is counted by every
-   * stream-scoped operator surface — \`prioritize\`, \`reset\`, \`unblock\`,
-   * \`query_streams\`, \`blocked_streams\` — and would silently inflate the
-   * counts they report.
-   *
-   * Returns \`undefined\` when another correlator holds an unexpired lease,
-   * which is the signal to skip this scan rather than repeat it. That is
-   * what collapses N workers' duplicated correlation into one.
-   *
-   * @param by - Lease holder id
-   * @param millis - Lease duration; bounds a crashed correlator's hold
-   * @returns The checkpoint (\`-1\` when never advanced), or \`undefined\` when
-   *          the lease is held elsewhere
-   */
-  lease_correlated: (by: string, millis: number) => Promise<number | undefined>;
-
-  /**
-   * Advance the correlate checkpoint and release its lease, atomically.
-   *
-   * Gated on the holder, exactly like {@link ack}: a correlator whose lease
-   * expired mid-scan cannot clobber a checkpoint its successor has already
-   * moved. Never regresses the stored value.
-   *
-   * @param by - Lease holder id, must match the current holder
-   * @param at - Event id the scan reached
-   * @returns \`true\` when the checkpoint was advanced by this call
-   */
-  ack_correlated: (by: string, at: number) => Promise<boolean>;
 
   /**
    * Blocks streams after persistent processing failures.
@@ -38331,6 +38407,20 @@ export interface Store extends Disposable, EventSource {
    * @see {@link ack} for acknowledging completion
    * @see {@link block} for blocking failed streams
    */
+  /**
+   * Reserved lane carrying the correlate checkpoint (#1484).
+   *
+   * \`claim(1, 0, by, millis, CORRELATE_LANE)\` leases the checkpoint — how far
+   * \`correlate\` has READ the event log — and returns it as the lease's \`at\`,
+   * or \`[]\` when another correlator holds it. \`ack\` on that lease advances and
+   * releases it. Adapters keep the value in their own single-row relation, not
+   * in the subscriptions table, so it is never counted by \`prioritize\`,
+   * \`reset\`, \`unblock\`, \`query_streams\` or \`blocked_streams\`.
+   *
+   * No \`DrainController\` is ever constructed for this lane — lanes come from
+   * \`.withLane(...)\` declarations plus the implicit \`"default"\` — so the drain
+   * pipeline never sees it.
+   */
   claim: (
     lagging: number,
     leading: number,
@@ -38424,47 +38514,6 @@ export interface Store extends Disposable, EventSource {
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
   ack: (leases: Lease[]) => Promise<Lease[]>;
-
-  /**
-   * Take the correlate checkpoint's lease and read it (#1484).
-   *
-   * The checkpoint is how far \`correlate\` has **read** the event log — a
-   * single global scalar, distinct from a subscription's \`at\` (how far a
-   * target has been *processed*) and from RFC 1486's per-target
-   * \`correlated\` mark (how far work was *found* for it). Only scan progress
-   * can carry it: a run of events that resolve to no target leaves no trace
-   * on any subscription, so a checkpoint derived from marks cannot advance
-   * past one.
-   *
-   * It lives in its own single-row relation rather than as a reserved
-   * subscription, because a subscription row is counted by every
-   * stream-scoped operator surface — \`prioritize\`, \`reset\`, \`unblock\`,
-   * \`query_streams\`, \`blocked_streams\` — and would silently inflate the
-   * counts they report.
-   *
-   * Returns \`undefined\` when another correlator holds an unexpired lease,
-   * which is the signal to skip this scan rather than repeat it. That is
-   * what collapses N workers' duplicated correlation into one.
-   *
-   * @param by - Lease holder id
-   * @param millis - Lease duration; bounds a crashed correlator's hold
-   * @returns The checkpoint (\`-1\` when never advanced), or \`undefined\` when
-   *          the lease is held elsewhere
-   */
-  lease_correlated: (by: string, millis: number) => Promise<number | undefined>;
-
-  /**
-   * Advance the correlate checkpoint and release its lease, atomically.
-   *
-   * Gated on the holder, exactly like {@link ack}: a correlator whose lease
-   * expired mid-scan cannot clobber a checkpoint its successor has already
-   * moved. Never regresses the stored value.
-   *
-   * @param by - Lease holder id, must match the current holder
-   * @param at - Event id the scan reached
-   * @returns \`true\` when the checkpoint was advanced by this call
-   */
-  ack_correlated: (by: string, at: number) => Promise<boolean>;
 
   /**
    * Blocks streams after persistent processing failures.
@@ -49959,6 +50008,8 @@ import type {
   StreamStats,
 } from "@rotorsoft/act";
 import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
   ConcurrencyError,
   dateReviver,
   log,
@@ -51038,6 +51089,41 @@ export class PostgresStore implements Store {
     millis: number,
     lane?: string
   ): Promise<Lease[]> {
+    // Reserved lane (#1484): the correlate checkpoint lives in its own
+    // single-row relation, so no stream-scoped surface counts it. One
+    // statement — the WHERE decides availability, the UPDATE takes it, and
+    // RETURNING reads the checkpoint in the same round trip.
+    if (lane === CORRELATE_LANE) {
+      const client = await this._client("claim");
+      try {
+        const { rows } = await client.query<{ at: string }>(
+          \`UPDATE \${this._fqc}
+              SET leased_by = $1,
+                  leased_until = NOW() + ($2::int * INTERVAL '1 millisecond')
+            WHERE id = 0
+              AND (leased_by IS NULL OR leased_by = $1 OR leased_until <= NOW())
+          RETURNING at\`,
+          [by, millis]
+        );
+        return rows.length
+          ? [
+              {
+                stream: CORRELATE_STREAM,
+                source: undefined,
+                at: Number(rows[0].at),
+                retry: -1,
+                by,
+                lagging: true,
+              },
+            ]
+          : [];
+      } catch (error) {
+        throw new StoreError("claim", { cause: error });
+      } finally {
+        client.release();
+      }
+    }
+
     const client = await this._client("claim");
     try {
       await client.query("BEGIN");
@@ -51300,60 +51386,28 @@ export class PostgresStore implements Store {
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    * @returns Acked leases.
    */
-  /** Take the checkpoint lease and read it (#1484). */
-  async lease_correlated(
-    by: string,
-    millis: number
-  ): Promise<number | undefined> {
-    const client = await this._client("lease_correlated");
-    try {
-      // One statement: the WHERE decides whether the lease is available and
-      // the UPDATE takes it, so two correlators cannot both win.
-      const { rows } = await client.query<{ at: string }>(
-        \`UPDATE \${this._fqc}
-            SET leased_by = $1,
-                leased_until = NOW() + ($2::int * INTERVAL '1 millisecond')
-          WHERE id = 0
-            AND (leased_by IS NULL OR leased_by = $1 OR leased_until <= NOW())
-        RETURNING at\`,
-        [by, millis]
-      );
-      return rows.length ? Number(rows[0].at) : undefined;
-    } catch (error) {
-      throw new StoreError("lease_correlated", { cause: error });
-    } finally {
-      client.release();
-    }
-  }
-
-  /** Advance the checkpoint and release its lease, gated on the holder. */
-  async ack_correlated(by: string, at: number): Promise<boolean> {
-    const client = await this._client("ack_correlated");
-    try {
-      const { rowCount } = await client.query(
-        \`UPDATE \${this._fqc}
-            SET at = GREATEST(at, $2::bigint), leased_by = NULL, leased_until = NULL
-          WHERE id = 0 AND leased_by = $1 AND at < $2::bigint\`,
-        [by, at]
-      );
-      if (rowCount) return true;
-      // Not advancing (stale holder, or \`at\` already ahead) still releases a
-      // lease this holder owns, so a no-progress scan does not park the row.
-      await client.query(
-        \`UPDATE \${this._fqc}
-            SET leased_by = NULL, leased_until = NULL
-          WHERE id = 0 AND leased_by = $1\`,
-        [by]
-      );
-      return false;
-    } catch (error) {
-      throw new StoreError("ack_correlated", { cause: error });
-    } finally {
-      client.release();
-    }
-  }
-
   async ack(leases: Lease[]): Promise<Lease[]> {
+    // Reserved lane (#1484) — advance the checkpoint and release its lease.
+    let rest = leases;
+    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
+    if (correlate) {
+      rest = leases.filter((l) => l !== correlate);
+      const client = await this._client("ack");
+      try {
+        await client.query(
+          \`UPDATE \${this._fqc}
+              SET at = GREATEST(at, $2::bigint),
+                  leased_by = NULL, leased_until = NULL
+            WHERE id = 0 AND leased_by = $1\`,
+          [correlate.by, correlate.at]
+        );
+      } catch (error) {
+        throw new StoreError("ack", { cause: error });
+      } finally {
+        client.release();
+      }
+      if (rest.length === 0) return [correlate];
+    }
     const client = await this._client("ack");
     try {
       await client.query("BEGIN");
@@ -51394,7 +51448,7 @@ export class PostgresStore implements Store {
       WHERE s.stream = i.stream AND s.leased_by = i.by
       RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane, i.due
       \`,
-        [JSON.stringify(leases)]
+        [JSON.stringify(rest)]
       );
       await client.query("COMMIT");
 
@@ -52598,6 +52652,8 @@ import type {
   StreamStats,
 } from "@rotorsoft/act";
 import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
   ConcurrencyError,
   dateReviver,
   is_literal_source,
@@ -53301,6 +53357,41 @@ export class SqliteStore implements Store {
     millis: number,
     lane?: string
   ) {
+    // Reserved lane (#1484): the correlate checkpoint, in its own single-row
+    // table so no stream-scoped surface counts it. One statement — atomic on
+    // its own here, and an explicit write transaction cost 1.7x on the
+    // correlate+drain benchmark.
+    if (lane === CORRELATE_LANE) {
+      try {
+        const taken = await this.client.execute({
+          sql: \`UPDATE correlated SET leased_by = ?, leased_until = ?
+                 WHERE id = 0
+                   AND (leased_by IS NULL OR leased_by = ? OR leased_until <= ?)
+             RETURNING at\`,
+          args: [
+            by,
+            new Date(Date.now() + millis).toISOString(),
+            by,
+            new Date().toISOString(),
+          ],
+        });
+        return taken.rows.length
+          ? [
+              {
+                stream: CORRELATE_STREAM,
+                source: undefined,
+                at: Number(taken.rows[0].at),
+                retry: -1,
+                by,
+                lagging: true,
+              },
+            ]
+          : [];
+      } catch (error) {
+        throw new StoreError("claim", { cause: error });
+      }
+    }
+
     const tx = await this.client.transaction("write");
     try {
       const now = new Date().toISOString();
@@ -53422,63 +53513,25 @@ export class SqliteStore implements Store {
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
-  /**
-   * Take the checkpoint lease and read it (#1484). One write transaction, so
-   * the availability check and the take cannot interleave.
-   */
-  async lease_correlated(
-    by: string,
-    millis: number
-  ): Promise<number | undefined> {
-    const now = new Date().toISOString();
-    const until = new Date(Date.now() + millis).toISOString();
-    const tx = await this.client.transaction("write");
-    try {
-      const taken = await tx.execute({
-        sql: \`UPDATE correlated SET leased_by = ?, leased_until = ?
-               WHERE id = 0
-                 AND (leased_by IS NULL OR leased_by = ? OR leased_until <= ?)\`,
-        args: [by, until, by, now],
-      });
-      if (taken.rowsAffected === 0) {
-        await tx.rollback();
-        return undefined;
-      }
-      const read = await tx.execute("SELECT at FROM correlated WHERE id = 0");
-      await tx.commit();
-      return Number(read.rows[0].at);
-    } catch (error) {
-      await tx.rollback();
-      throw new StoreError("lease_correlated", { cause: error });
-    }
-  }
-
-  /** Advance the checkpoint and release its lease, gated on the holder. */
-  async ack_correlated(by: string, at: number): Promise<boolean> {
-    const tx = await this.client.transaction("write");
-    try {
-      const advanced = await tx.execute({
-        sql: \`UPDATE correlated SET at = ?, leased_by = NULL, leased_until = NULL
-               WHERE id = 0 AND leased_by = ? AND at < ?\`,
-        args: [at, by, at],
-      });
-      if (advanced.rowsAffected === 0)
-        // Not advancing still releases a lease this holder owns, so a
-        // no-progress scan does not park the row.
-        await tx.execute({
-          sql: \`UPDATE correlated SET leased_by = NULL, leased_until = NULL
-                 WHERE id = 0 AND leased_by = ?\`,
-          args: [by],
-        });
-      await tx.commit();
-      return advanced.rowsAffected > 0;
-    } catch (error) {
-      await tx.rollback();
-      throw new StoreError("ack_correlated", { cause: error });
-    }
-  }
-
   async ack(leases: Lease[]) {
+    // Reserved lane (#1484) — advance the checkpoint and release its lease.
+    let rest = leases;
+    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
+    if (correlate) {
+      rest = leases.filter((l) => l !== correlate);
+      try {
+        await this.client.execute({
+          sql: \`UPDATE correlated
+                   SET at = MAX(at, ?), leased_by = NULL, leased_until = NULL
+                 WHERE id = 0 AND leased_by = ?\`,
+          args: [correlate.at, correlate.by],
+        });
+      } catch (error) {
+        throw new StoreError("ack", { cause: error });
+      }
+      if (rest.length === 0) return [correlate];
+    }
+
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
@@ -53493,7 +53546,7 @@ export class SqliteStore implements Store {
       // backoff retry passes the climbing counter so the budget keeps
       // accruing across windows (#1262). Only acked entries are returned.
       const result: Lease[] = [];
-      for (const l of leases) {
+      for (const l of rest) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
           // RETURNING the post-ack \`retry\`/\`source\`/\`lane\` from the row so the
@@ -56520,6 +56573,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
 // === store-tck.ts ===
 import {
   act,
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
   ConcurrencyError,
   InMemoryCache,
   SNAP_EVENT,
@@ -57624,35 +57679,48 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
 
       // The correlate checkpoint (#1484): how far the log has been READ, as
-      // opposed to how far a target has been processed (\`at\`). It lives in
-      // its own single-row relation precisely so it is invisible to every
-      // stream-scoped surface — the last case asserts that half.
+      // opposed to how far a target has been processed (\`at\`). It rides the
+      // existing claim/ack pair on a reserved lane rather than its own port
+      // methods, and adapters keep it OUT of the subscriptions table — the
+      // last case asserts that half.
       //
       // Unlike every other case here, a singleton cannot be namespaced with
       // \`uid()\`, so these read the current value and assert RELATIVE to it.
-      // Absolute expectations would couple the cases to their order.
       describe("correlate checkpoint", () => {
+        const lease = (by: string, millis = 5_000) =>
+          store.claim(1, 0, by, millis, CORRELATE_LANE);
+        const release = (by: string, at: number) =>
+          store.ack([
+            {
+              stream: CORRELATE_STREAM,
+              source: undefined,
+              at,
+              retry: -1,
+              by,
+              lagging: true,
+            },
+          ]);
         /** Read the checkpoint without leaving a lease behind. */
         const peek = async () => {
-          const by = \`peek-\${uid()}\`;
-          const at = (await store.lease_correlated(by, 5_000)) as number;
-          await store.ack_correlated(by, at);
-          return at;
+          const [l] = await lease(\`peek-\${uid()}\`);
+          await release(l.by, l.at);
+          return l.at;
         };
 
         it("round-trips an advance", async () => {
           const base = await peek();
           const by = \`c-\${uid()}\`;
-          expect(await store.lease_correlated(by, 5_000)).toBe(base);
-          expect(await store.ack_correlated(by, base + 10)).toBe(true);
+          const [l] = await lease(by);
+          expect(l.at).toBe(base);
+          await release(by, base + 10);
           expect(await peek()).toBe(base + 10);
         });
 
         it("never regresses", async () => {
           const base = await peek();
           const by = \`c-\${uid()}\`;
-          await store.lease_correlated(by, 5_000);
-          expect(await store.ack_correlated(by, base - 1)).toBe(false);
+          await lease(by);
+          await release(by, base - 1);
           expect(await peek()).toBe(base);
         });
 
@@ -57660,43 +57728,70 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           const base = await peek();
           const a = \`c-\${uid()}\`;
           const b = \`c-\${uid()}\`;
-          expect(await store.lease_correlated(a, 30_000)).toBe(base);
+          const [held] = await lease(a, 30_000);
+          expect(held.at).toBe(base);
           // The second correlator is told to skip rather than repeat the scan.
-          expect(await store.lease_correlated(b, 30_000)).toBeUndefined();
-          await store.ack_correlated(a, base + 1);
+          expect(await lease(b, 30_000)).toHaveLength(0);
+          await release(a, base + 1);
           // Released — the next correlator gets it, and sees the advance.
-          expect(await store.lease_correlated(b, 5_000)).toBe(base + 1);
-          await store.ack_correlated(b, base + 1);
+          const [next] = await lease(b);
+          expect(next.at).toBe(base + 1);
+          await release(b, base + 1);
         });
 
         it("releases the lease even when the scan made no progress", async () => {
           const base = await peek();
           const a = \`c-\${uid()}\`;
-          await store.lease_correlated(a, 30_000);
-          expect(await store.ack_correlated(a, base)).toBe(false);
+          await lease(a, 30_000);
+          await release(a, base);
           const b = \`c-\${uid()}\`;
-          expect(await store.lease_correlated(b, 5_000)).toBe(base);
-          await store.ack_correlated(b, base);
+          const [next] = await lease(b);
+          expect(next.at).toBe(base);
+          await release(b, base);
         });
 
         it("ignores an ack from a holder that lost the lease", async () => {
           const base = await peek();
           const a = \`c-\${uid()}\`;
-          await store.lease_correlated(a, 1);
+          await lease(a, 1);
           await new Promise((r) => setTimeout(r, 25));
           const b = \`c-\${uid()}\`;
-          expect(await store.lease_correlated(b, 30_000)).toBe(base);
+          const [taken] = await lease(b, 30_000);
+          expect(taken.at).toBe(base);
           // \`a\`'s lease lapsed; its late ack must not move the checkpoint.
-          expect(await store.ack_correlated(a, base + 5_000)).toBe(false);
-          await store.ack_correlated(b, base);
+          await release(a, base + 5_000);
+          await release(b, base);
           expect(await peek()).toBe(base);
         });
 
+        it("rides along with ordinary leases in one ack call", async () => {
+          // The drain never mixes them, but nothing stops a caller, and the
+          // adapter must route each half rather than assuming one kind.
+          const base = await peek();
+          const s = \`mixed-\${uid()}\`;
+          await store.subscribe([{ stream: s }]);
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          const by = \`c-\${uid()}\`;
+          const [ordinary] = await store.claim(5, 5, by, 5_000);
+          const [checkpoint] = await lease(by, 5_000);
+          const acked = await store.ack([
+            { ...ordinary, at: ordinary.at + 1 },
+            { ...checkpoint, at: base + 1 },
+          ]);
+          expect(acked.map((l) => l.stream)).toContain(ordinary.stream);
+          expect(await peek()).toBe(base + 1);
+        });
+
         it("is invisible to every stream-scoped surface", async () => {
+          const by = \`c-\${uid()}\`;
+          await release(by, (await peek()) as number);
           const seen: string[] = [];
           await store.query_streams((p) => seen.push(p.stream), {});
-          expect(seen).not.toContain("__correlate__");
-          expect(seen.some((n) => n.startsWith("correlated"))).toBe(false);
+          expect(seen).not.toContain(CORRELATE_STREAM);
         });
       });
 

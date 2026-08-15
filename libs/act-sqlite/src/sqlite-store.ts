@@ -16,6 +16,8 @@ import type {
   StreamStats,
 } from "@rotorsoft/act";
 import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
   ConcurrencyError,
   dateReviver,
   is_literal_source,
@@ -719,6 +721,41 @@ export class SqliteStore implements Store {
     millis: number,
     lane?: string
   ) {
+    // Reserved lane (#1484): the correlate checkpoint, in its own single-row
+    // table so no stream-scoped surface counts it. One statement — atomic on
+    // its own here, and an explicit write transaction cost 1.7x on the
+    // correlate+drain benchmark.
+    if (lane === CORRELATE_LANE) {
+      try {
+        const taken = await this.client.execute({
+          sql: `UPDATE correlated SET leased_by = ?, leased_until = ?
+                 WHERE id = 0
+                   AND (leased_by IS NULL OR leased_by = ? OR leased_until <= ?)
+             RETURNING at`,
+          args: [
+            by,
+            new Date(Date.now() + millis).toISOString(),
+            by,
+            new Date().toISOString(),
+          ],
+        });
+        return taken.rows.length
+          ? [
+              {
+                stream: CORRELATE_STREAM,
+                source: undefined,
+                at: Number(taken.rows[0].at),
+                retry: -1,
+                by,
+                lagging: true,
+              },
+            ]
+          : [];
+      } catch (error) {
+        throw new StoreError("claim", { cause: error });
+      }
+    }
+
     const tx = await this.client.transaction("write");
     try {
       const now = new Date().toISOString();
@@ -840,63 +877,25 @@ export class SqliteStore implements Store {
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
-  /**
-   * Take the checkpoint lease and read it (#1484). One write transaction, so
-   * the availability check and the take cannot interleave.
-   */
-  async lease_correlated(
-    by: string,
-    millis: number
-  ): Promise<number | undefined> {
-    const now = new Date().toISOString();
-    const until = new Date(Date.now() + millis).toISOString();
-    const tx = await this.client.transaction("write");
-    try {
-      const taken = await tx.execute({
-        sql: `UPDATE correlated SET leased_by = ?, leased_until = ?
-               WHERE id = 0
-                 AND (leased_by IS NULL OR leased_by = ? OR leased_until <= ?)`,
-        args: [by, until, by, now],
-      });
-      if (taken.rowsAffected === 0) {
-        await tx.rollback();
-        return undefined;
-      }
-      const read = await tx.execute("SELECT at FROM correlated WHERE id = 0");
-      await tx.commit();
-      return Number(read.rows[0].at);
-    } catch (error) {
-      await tx.rollback();
-      throw new StoreError("lease_correlated", { cause: error });
-    }
-  }
-
-  /** Advance the checkpoint and release its lease, gated on the holder. */
-  async ack_correlated(by: string, at: number): Promise<boolean> {
-    const tx = await this.client.transaction("write");
-    try {
-      const advanced = await tx.execute({
-        sql: `UPDATE correlated SET at = ?, leased_by = NULL, leased_until = NULL
-               WHERE id = 0 AND leased_by = ? AND at < ?`,
-        args: [at, by, at],
-      });
-      if (advanced.rowsAffected === 0)
-        // Not advancing still releases a lease this holder owns, so a
-        // no-progress scan does not park the row.
-        await tx.execute({
-          sql: `UPDATE correlated SET leased_by = NULL, leased_until = NULL
-                 WHERE id = 0 AND leased_by = ?`,
-          args: [by],
-        });
-      await tx.commit();
-      return advanced.rowsAffected > 0;
-    } catch (error) {
-      await tx.rollback();
-      throw new StoreError("ack_correlated", { cause: error });
-    }
-  }
-
   async ack(leases: Lease[]) {
+    // Reserved lane (#1484) — advance the checkpoint and release its lease.
+    let rest = leases;
+    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
+    if (correlate) {
+      rest = leases.filter((l) => l !== correlate);
+      try {
+        await this.client.execute({
+          sql: `UPDATE correlated
+                   SET at = MAX(at, ?), leased_by = NULL, leased_until = NULL
+                 WHERE id = 0 AND leased_by = ?`,
+          args: [correlate.at, correlate.by],
+        });
+      } catch (error) {
+        throw new StoreError("ack", { cause: error });
+      }
+      if (rest.length === 0) return [correlate];
+    }
+
     const tx = await this.client.transaction("write");
     try {
       // The whole batch finalizes in one transaction, so acks and defer
@@ -911,7 +910,7 @@ export class SqliteStore implements Store {
       // backoff retry passes the climbing counter so the budget keeps
       // accruing across windows (#1262). Only acked entries are returned.
       const result: Lease[] = [];
-      for (const l of leases) {
+      for (const l of rest) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
           // RETURNING the post-ack `retry`/`source`/`lane` from the row so the

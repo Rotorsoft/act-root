@@ -15,7 +15,7 @@ vi.mock("pg", () => {
   };
 });
 
-import { StoreError } from "@rotorsoft/act";
+import { CORRELATE_LANE, CORRELATE_STREAM, StoreError } from "@rotorsoft/act";
 import * as pg from "pg";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -423,32 +423,44 @@ describe("PostgresStore", () => {
   });
 });
 
-describe("PostgresStore correlate checkpoint error paths (#1484)", () => {
+describe("PostgresStore reserved-lane error paths (#1484)", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("lease_correlated: wraps a driver failure in StoreError and releases", async () => {
+  const failing = () => {
     const release = vi.fn();
     vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
       query: vi.fn().mockRejectedValue(new Error("boom")),
       release,
     } as never);
-    const store = new PostgresStore({ port: 5431 });
-    const err = await store.lease_correlated("w", 1000).catch((e) => e);
+    return { store: new PostgresStore({ port: 5431 }), release };
+  };
+
+  it("claim: wraps a checkpoint-lease failure and releases the client", async () => {
+    const { store, release } = failing();
+    const err = await store
+      .claim(1, 0, "w", 1000, CORRELATE_LANE)
+      .catch((e) => e);
     expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("lease_correlated");
+    expect(err.operation).toBe("claim");
     expect(release).toHaveBeenCalled();
   });
 
-  it("ack_correlated: wraps a driver failure in StoreError and releases", async () => {
-    const release = vi.fn();
-    vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
-      query: vi.fn().mockRejectedValue(new Error("boom")),
-      release,
-    } as never);
-    const store = new PostgresStore({ port: 5431 });
-    const err = await store.ack_correlated("w", 5).catch((e) => e);
+  it("ack: wraps a checkpoint-advance failure and releases the client", async () => {
+    const { store, release } = failing();
+    const err = await store
+      .ack([
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at: 5,
+          retry: -1,
+          by: "w",
+          lagging: true,
+        },
+      ])
+      .catch((e) => e);
     expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("ack_correlated");
+    expect(err.operation).toBe("ack");
     expect(release).toHaveBeenCalled();
   });
 });

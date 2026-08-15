@@ -1,6 +1,12 @@
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ConcurrencyError, StoreError, ValidationError } from "@rotorsoft/act";
+import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
+  ConcurrencyError,
+  StoreError,
+  ValidationError,
+} from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
 
 type Stmt = string | { sql: string; args?: unknown[] };
@@ -354,24 +360,42 @@ describe("SqliteStore error paths", () => {
   });
 });
 
-describe("SqliteStore correlate checkpoint error paths (#1484)", () => {
-  it("lease_correlated: rolls back and wraps failure in StoreError", async () => {
-    const db2 = new SqliteStore({ url: ":memory:" });
-    const client = mockClientFailOn("UPDATE correlated SET leased_by");
-    (db2 as unknown as { client: unknown }).client = client;
-    const err = await db2.lease_correlated("w", 1000).catch((e) => e);
+describe("SqliteStore reserved-lane error paths (#1484)", () => {
+  it("claim: wraps a checkpoint-lease failure in StoreError", async () => {
+    const s = new SqliteStore({ url: ":memory:" });
+    // The reserved-lane path uses a direct `execute`, not a transaction, so
+    // the shared `mockClientFailOn` (which fails inside `transaction()`)
+    // would not reach it.
+    (s as unknown as { client: unknown }).client = {
+      execute: vi.fn().mockRejectedValue(new Error("mocked correlated")),
+      transaction: vi.fn(),
+      close: vi.fn(),
+    };
+    const err = await s.claim(1, 0, "w", 1000, CORRELATE_LANE).catch((e) => e);
     expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("lease_correlated");
-    expect(client._tx.rollback).toHaveBeenCalled();
+    expect(err.operation).toBe("claim");
   });
 
-  it("ack_correlated: rolls back and wraps failure in StoreError", async () => {
-    const db2 = new SqliteStore({ url: ":memory:" });
-    const client = mockClientFailOn("UPDATE correlated SET at");
-    (db2 as unknown as { client: unknown }).client = client;
-    const err = await db2.ack_correlated("w", 5).catch((e) => e);
+  it("ack: wraps a checkpoint-advance failure in StoreError", async () => {
+    const s = new SqliteStore({ url: ":memory:" });
+    (s as unknown as { client: unknown }).client = {
+      execute: vi.fn().mockRejectedValue(new Error("mocked correlated")),
+      transaction: vi.fn(),
+      close: vi.fn(),
+    };
+    const err = await s
+      .ack([
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at: 5,
+          retry: -1,
+          by: "w",
+          lagging: true,
+        },
+      ])
+      .catch((e) => e);
     expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("ack_correlated");
-    expect(client._tx.rollback).toHaveBeenCalled();
+    expect(err.operation).toBe("ack");
   });
 });

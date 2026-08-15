@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { log, store } from "../ports.js";
+import { CORRELATE_LANE, CORRELATE_STREAM, log, store } from "../ports.js";
 import type {
   Query,
   ReactionPayload,
@@ -172,10 +172,18 @@ export class CorrelateCycle<
    * Read the durable checkpoint without holding its lease, for cold start.
    */
   private async _read_checkpoint(): Promise<number> {
-    const at = await store().lease_correlated(this._by, this._lease_millis);
-    if (at === undefined) return -1;
-    await store().ack_correlated(this._by, at);
-    return at;
+    const [lease] = await store().claim(
+      1,
+      0,
+      this._by,
+      this._lease_millis,
+      CORRELATE_LANE
+    );
+    if (!lease) return -1;
+    // Contained like every other release: a store that cannot ack must not
+    // stop the Act from initializing — the lease simply expires.
+    await this._release(lease.at);
+    return lease.at;
   }
 
   /** Last correlated event id. */
@@ -295,9 +303,15 @@ export class CorrelateCycle<
     // another correlator is already scanning, so this worker skips instead of
     // repeating the same range and issuing the same subscribe UPSERTs — the
     // N-fold duplication this replaces.
-    const leased = await store().lease_correlated(this._by, this._lease_millis);
-    if (leased === undefined)
-      return { subscribed: 0, last_id: this._checkpoint };
+    const [lease] = await store().claim(
+      1,
+      0,
+      this._by,
+      this._lease_millis,
+      CORRELATE_LANE
+    );
+    if (!lease) return { subscribed: 0, last_id: this._checkpoint };
+    const leased = lease.at;
     // Trust the durable value over the in-memory one: another worker may have
     // advanced it since this instance last scanned.
     this._checkpoint = Math.max(this._checkpoint, leased);
@@ -403,9 +417,28 @@ export class CorrelateCycle<
     }
   }
 
-  /** Advance (or merely release) the checkpoint lease. */
+  /**
+   * Advance (or merely release) the checkpoint lease.
+   *
+   * Contained: a failing release must not mask the error that caused the
+   * scan to fail, and the only cost of not releasing is waiting out the
+   * lease — the next correlator takes over when it expires.
+   */
   private async _release(at: number): Promise<boolean> {
-    await store().ack_correlated(this._by, at);
+    try {
+      await store().ack([
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at,
+          retry: -1,
+          by: this._by,
+          lagging: true,
+        },
+      ]);
+    } catch (error) {
+      log().error(error, "correlate checkpoint release failed");
+    }
     return true;
   }
 

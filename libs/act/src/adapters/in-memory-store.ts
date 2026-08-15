@@ -9,7 +9,13 @@
  * @category Adapters
  */
 
-import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
+import {
+  CORRELATE_LANE,
+  CORRELATE_STREAM,
+  DEFAULT_LANE,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+} from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -625,6 +631,30 @@ export class InMemoryStore implements Store {
     // event committed between the cycle's fetch and its ack was acked past
     // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
     // first event this store ever issues — was silently skipped.
+    // Reserved lane (#1484): the correlate checkpoint, kept out of the
+    // subscriptions map so no stream-scoped surface counts it.
+    if (lane === CORRELATE_LANE) {
+      const now = Date.now();
+      if (
+        this._correlated_by !== undefined &&
+        this._correlated_by !== by &&
+        this._correlated_until > now
+      )
+        return [];
+      this._correlated_by = by;
+      this._correlated_until = now + millis;
+      return [
+        {
+          stream: CORRELATE_STREAM,
+          source: undefined,
+          at: this._correlated,
+          retry: -1,
+          by,
+          lagging: true,
+        },
+      ];
+    }
+
     const has_work = (s: InMemoryStream): boolean => {
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
@@ -738,43 +768,26 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  /**
-   * Take the checkpoint lease and read it (#1484). Single-threaded, so the
-   * check and the take cannot interleave.
-   */
-  async lease_correlated(by: string, millis: number) {
-    await sleep();
-    const now = Date.now();
-    if (
-      this._correlated_by !== undefined &&
-      this._correlated_by !== by &&
-      this._correlated_until > now
-    )
-      return undefined;
-    this._correlated_by = by;
-    this._correlated_until = now + millis;
-    return this._correlated;
-  }
-
-  /** Advance the checkpoint and release its lease, gated on the holder. */
-  async ack_correlated(by: string, at: number) {
-    await sleep();
-    if (this._correlated_by !== by) return false;
-    this._correlated_by = undefined;
-    this._correlated_until = 0;
-    if (at <= this._correlated) return false;
-    this._correlated = at;
-    return true;
-  }
-
   async ack(leases: Lease[]) {
+    // Reserved lane (#1484) — advance the checkpoint and release its lease.
+    let rest = leases;
+    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
+    if (correlate) {
+      rest = leases.filter((l) => l !== correlate);
+      if (this._correlated_by === correlate.by) {
+        this._correlated_by = undefined;
+        this._correlated_until = 0;
+        if (correlate.at > this._correlated) this._correlated = correlate.at;
+      }
+      if (rest.length === 0) return [correlate];
+    }
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on
     // {@link Store.ack}: no await between entries, so a caller
     // never observes a cycle's acks without its schedules. `due`-carrying
     // entries defer (and return undefined), the rest ack.
-    return leases
+    return rest
       .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);
   }

@@ -16,17 +16,24 @@ Step 1 of [RFC 1449](./1449-split-store-port.md), and a prerequisite for the wor
 
 ## Public surface added
 
-Two methods on `Store`:
+**Two constants. No new port methods.**
 
 ```ts
-/** Take the checkpoint's lease and read it. `undefined` when held elsewhere. */
-lease_correlated: (by: string, millis: number) => Promise<number | undefined>;
-
-/** Advance the checkpoint and release its lease, gated on the holder. */
-ack_correlated: (by: string, at: number) => Promise<boolean>;
+export const CORRELATE_LANE = "__correlate__";
+export const CORRELATE_STREAM = "__correlate__";
 ```
 
-The pair mirrors `claim`/`ack`: take a lease, do work, release it while writing the result. `lease_correlated` returning `undefined` is the signal to **skip** the scan, which is what collapses N workers' duplicated correlation into one.
+The checkpoint *is* a lease plus a watermark, which is exactly what `claim`/`ack` already mean, so it rides that pair on a reserved lane:
+
+```ts
+const [lease] = await store().claim(1, 0, by, millis, CORRELATE_LANE);
+// lease.at is the checkpoint; [] means another correlator holds it
+await store().ack([{ ...lease, at: last_id }], []);
+```
+
+An empty claim is the signal to **skip** the scan, which is what collapses N workers' duplicated correlation into one. An earlier draft added `lease_correlated` / `ack_correlated` as dedicated methods; that is surface creep for an operation the existing pair already expresses, and every third-party adapter would have had to implement both.
+
+No `DrainController` is constructed for this lane — lanes come from `.withLane(...)` declarations plus the implicit `"default"` — so the drain pipeline never claims it.
 
 ## Storage: its own single-row relation
 
@@ -88,6 +95,7 @@ TCK cases run against all three adapters: round-trip an advance, never regress, 
 | | Verdict |
 |---|---|
 | Reserved subscription row | Built and rejected — miscounts six operator surfaces (measured) |
+| Dedicated `lease_correlated` / `ack_correlated` port methods | Rejected — surface creep; `claim`/`ack` already mean lease-plus-watermark |
 | Filter `__`-prefixed rows from those surfaces | Zero schema, but the exclusion is an obligation every future adapter inherits |
 | Derive from `MAX(correlated)` | Livelocks past a reaction-less run longer than the page limit (measured) |
 | Persist as an event in a reserved stream | Write amplification on the hot path, and moves the pollution to `query`/`scan` |

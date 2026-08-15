@@ -1,3 +1,4 @@
+import { CORRELATE_STREAM } from "@rotorsoft/act";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -11,6 +12,24 @@ import {
 } from "../src/index.js";
 import { CloseSignal } from "../src/internal/close-signal.js";
 import { DeferSignal } from "../src/internal/defer-signal.js";
+
+/**
+ * Fail the next DRAIN ack only. `correlate` acks the reserved checkpoint
+ * lease through the same port method (#1484), so a bare
+ * `mockRejectedValueOnce` would be consumed by whichever call came first.
+ */
+const fail_next_drain_ack = (message: string) => {
+  const real = store().ack.bind(store());
+  let armed = true;
+  return vi.spyOn(store(), "ack").mockImplementation(async (leases) => {
+    const is_checkpoint = leases.some((l) => l.stream === CORRELATE_STREAM);
+    if (armed && !is_checkpoint) {
+      armed = false;
+      throw new Error(message);
+    }
+    return real(leases);
+  });
+};
 
 /**
  * Durability of the defer outcome: defer schedules are persisted
@@ -57,8 +76,7 @@ describe("defer durability", () => {
     app.on("closed", (r) => closed.push(r));
     app.on("error", ({ error }) => errors.push(String(error)));
 
-    const ack_spy = vi.spyOn(store(), "ack");
-    ack_spy.mockRejectedValueOnce(new Error("disk full"));
+    fail_next_drain_ack("disk full");
 
     await app.do("tick", { stream: "d-defer", actor }, {});
     await app.do("tick", { stream: "d-close", actor }, {});

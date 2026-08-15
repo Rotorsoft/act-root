@@ -578,6 +578,20 @@ export interface Store extends Disposable, EventSource {
    * @see {@link ack} for acknowledging completion
    * @see {@link block} for blocking failed streams
    */
+  /**
+   * Reserved lane carrying the correlate checkpoint (#1484).
+   *
+   * `claim(1, 0, by, millis, CORRELATE_LANE)` leases the checkpoint — how far
+   * `correlate` has READ the event log — and returns it as the lease's `at`,
+   * or `[]` when another correlator holds it. `ack` on that lease advances and
+   * releases it. Adapters keep the value in their own single-row relation, not
+   * in the subscriptions table, so it is never counted by `prioritize`,
+   * `reset`, `unblock`, `query_streams` or `blocked_streams`.
+   *
+   * No `DrainController` is ever constructed for this lane — lanes come from
+   * `.withLane(...)` declarations plus the implicit `"default"` — so the drain
+   * pipeline never sees it.
+   */
   claim: (
     lagging: number,
     leading: number,
@@ -671,47 +685,6 @@ export interface Store extends Disposable, EventSource {
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
   ack: (leases: Lease[]) => Promise<Lease[]>;
-
-  /**
-   * Take the correlate checkpoint's lease and read it (#1484).
-   *
-   * The checkpoint is how far `correlate` has **read** the event log — a
-   * single global scalar, distinct from a subscription's `at` (how far a
-   * target has been *processed*) and from RFC 1486's per-target
-   * `correlated` mark (how far work was *found* for it). Only scan progress
-   * can carry it: a run of events that resolve to no target leaves no trace
-   * on any subscription, so a checkpoint derived from marks cannot advance
-   * past one.
-   *
-   * It lives in its own single-row relation rather than as a reserved
-   * subscription, because a subscription row is counted by every
-   * stream-scoped operator surface — `prioritize`, `reset`, `unblock`,
-   * `query_streams`, `blocked_streams` — and would silently inflate the
-   * counts they report.
-   *
-   * Returns `undefined` when another correlator holds an unexpired lease,
-   * which is the signal to skip this scan rather than repeat it. That is
-   * what collapses N workers' duplicated correlation into one.
-   *
-   * @param by - Lease holder id
-   * @param millis - Lease duration; bounds a crashed correlator's hold
-   * @returns The checkpoint (`-1` when never advanced), or `undefined` when
-   *          the lease is held elsewhere
-   */
-  lease_correlated: (by: string, millis: number) => Promise<number | undefined>;
-
-  /**
-   * Advance the correlate checkpoint and release its lease, atomically.
-   *
-   * Gated on the holder, exactly like {@link ack}: a correlator whose lease
-   * expired mid-scan cannot clobber a checkpoint its successor has already
-   * moved. Never regresses the stored value.
-   *
-   * @param by - Lease holder id, must match the current holder
-   * @param at - Event id the scan reached
-   * @returns `true` when the checkpoint was advanced by this call
-   */
-  ack_correlated: (by: string, at: number) => Promise<boolean>;
 
   /**
    * Blocks streams after persistent processing failures.
