@@ -5,6 +5,54 @@ adapter. The core framework's `PERFORMANCE.md` (in
 [`libs/act/PERFORMANCE.md`](../act/PERFORMANCE.md)) covers
 adapter-independent optimizations; entries here are SQLite-specific.
 
+## #1482 — `claim()` scales linearly with subscribed streams (RFC 1449 baseline)
+
+Baseline for [RFC 1449](https://github.com/Rotorsoft/act-root/pull/1449) step 0.
+Measured with `scripts/claim-scale.bench.mjs`, file-backed, 10 of N streams
+actually pending:
+
+| subscribed streams | claim latency | µs per subscribed stream |
+|---|---|---|
+| 100 | 1.66 ms | 16.6 |
+| 1,000 | 11.50 ms | 11.5 |
+| 5,000 | 54.86 ms | 11.0 |
+| 10,000 | 113.17 ms | 11.3 |
+| 20,000 | 232.52 ms | 11.6 |
+| 50,000 | 603.55 ms | 12.1 |
+
+**Flat cost per stream, so total cost is linear in subscribed streams —
+independent of how much work is pending.** Extrapolating the slope: ~1.2 s per
+claim at 100k streams, ~12 s at 1M. For the per-aggregate reaction shape
+(`.to(e => ({target: e.stream}))`), subscribed streams equals aggregate count.
+
+Two things make this worse than the raw number suggests. The probe is an N+1
+in JavaScript — `claim` selects every eligible stream with no limit, then runs
+one `SELECT 1 FROM events … LIMIT 1` per candidate with no early exit once
+`lagging + leading` are found. And the whole loop runs inside
+`transaction("write")`, so every concurrent commit serializes behind it.
+
+For comparison, `act-pg` after #1448 sits at ~1.4 µs per subscribed stream —
+roughly 8× cheaper per stream, and outside a write transaction. #1448's fix (a
+sargable source predicate plus a partial `(stream, id)` index) **cannot port
+here**: the probe is in JS, not SQL, so there is no planner to make sargable.
+That is the case RFC 1449 exists to remove — under the proposed work set,
+`claim` becomes an index scan of at most `lagging + leading` rows on both
+adapters.
+
+**Benchmark construction, two traps worth keeping:**
+
+- Event ids are assigned in randomized order (`ORDER BY random()` over the
+  stream × version cross product) so a stream's watermark lands at a random
+  point in the global sequence. Seeding version-by-version, or modelling
+  has-work as `at = -1`, sorts every pending stream to the front of
+  `ORDER BY at ASC` and understates the cost by orders of magnitude.
+- Claims lease for **0 ms**, so every iteration sees the full eligible set. At
+  1 ms, the previous iteration's leases are still live whenever a claim is
+  fast, the probe walks a smaller candidate set, and the measurement flatters
+  itself — visible as `leased 0` at small sizes and `leased 10` only once each
+  claim outlasts the lease. *(The act-pg bench still uses 1 ms and has the
+  same caveat; worth aligning when its 50k/100k extension lands.)*
+
 ## ACT-1031 — per-adapter perf regression gate
 
 The core framework gate (`libs/act/scripts/perf-bench.ts`) runs against

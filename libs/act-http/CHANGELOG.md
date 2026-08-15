@@ -1,3 +1,25 @@
+# [@rotorsoft/act-http-v1.9.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.4...@rotorsoft/act-http-v1.9.5) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** overlay state survives a commit ([7f89bb7](https://github.com/rotorsoft/act-root/commit/7f89bb7aba968bdd7f86f3b77a3bf2c84c02bf68)), closes [#1479](https://github.com/rotorsoft/act-root/issues/1479) [#1473](https://github.com/rotorsoft/act-root/issues/1473)
+* **act-http:** pin three documented SSE guarantees that nothing enforced ([47a2d0a](https://github.com/rotorsoft/act-root/commit/47a2d0af5f5ca4cfda78a0643c52a20b4b04c990)), closes [#1474](https://github.com/rotorsoft/act-root/issues/1474)
+
+# [@rotorsoft/act-http-v1.9.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.3...@rotorsoft/act-http-v1.9.4) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** broadcast a Set as an array on both wire paths ([b82cf1f](https://github.com/rotorsoft/act-root/commit/b82cf1faabfe72ee451f777ec4772f26fd7a7b17)), closes [#1472](https://github.com/rotorsoft/act-root/issues/1472)
+
+# [@rotorsoft/act-http-v1.9.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.2...@rotorsoft/act-http-v1.9.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **act-http:** normalize undefined deletes to null in SSE frames ([048a1f0](https://github.com/rotorsoft/act-root/commit/048a1f01c23cce1538d0c02ba7d6a7d7cf2b4e4f)), closes [#1471](https://github.com/rotorsoft/act-root/issues/1471)
+
 # [@rotorsoft/act-http-v1.9.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.1...@rotorsoft/act-http-v1.9.2) (2026-08-10)
 
 

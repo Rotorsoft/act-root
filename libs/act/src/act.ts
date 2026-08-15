@@ -20,10 +20,12 @@ import {
   default_correlator,
   type EsOps,
   type EventLaneSet,
+  FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  type ResettableBatchHandler,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
@@ -1017,10 +1019,17 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    if (running.length === 0) return;
+    // The settle loop drives the drain, so it has to be waited on too
+    // (#1468). `SettleLoop.stop()` cancels scheduling only: a cycle already
+    // inside its correlate → drain loop keeps running, and would otherwise
+    // claim a stream after teardown returned — and, under `disposeAndExit`,
+    // after the store adapter was disposed.
+    const settling = this._settle.inflight;
+    if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     // Assigned synchronously by the executor below, before the race is
     // awaited — so the `finally` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
@@ -1734,6 +1743,16 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
+      // Drop every fold cache before the replay reaches a handler (#1466).
+      // A rebuild replays from the beginning, so every event lands at or
+      // below a warm fold's head and takes its already-folded branch, which
+      // re-flushes whatever that cache holds — writing a stale row straight
+      // back out. Cleared unconditionally rather than per target: `input`
+      // may be a filter, resolving it costs a query, and the only cost of
+      // clearing a cache that did not need it is one head load per stream
+      // on the next batch.
+      for (const handler of this._batch_handlers.values())
+        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });

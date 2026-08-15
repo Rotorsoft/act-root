@@ -1,3 +1,28 @@
+# [@rotorsoft/act-tck-v1.30.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.4...@rotorsoft/act-tck-v1.30.5) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** overlay state survives a commit ([7f89bb7](https://github.com/rotorsoft/act-root/commit/7f89bb7aba968bdd7f86f3b77a3bf2c84c02bf68)), closes [#1479](https://github.com/rotorsoft/act-root/issues/1479) [#1473](https://github.com/rotorsoft/act-root/issues/1473)
+* **act-http:** pin three documented SSE guarantees that nothing enforced ([47a2d0a](https://github.com/rotorsoft/act-root/commit/47a2d0af5f5ca4cfda78a0643c52a20b4b04c990)), closes [#1474](https://github.com/rotorsoft/act-root/issues/1474)
+
+# [@rotorsoft/act-tck-v1.30.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.3...@rotorsoft/act-tck-v1.30.4) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** broadcast a Set as an array on both wire paths ([b82cf1f](https://github.com/rotorsoft/act-root/commit/b82cf1faabfe72ee451f777ec4772f26fd7a7b17)), closes [#1472](https://github.com/rotorsoft/act-root/issues/1472)
+* **act:** complete the target-ownership guard and make it identity-aware ([0b11c0f](https://github.com/rotorsoft/act-root/commit/0b11c0f3478bc7ea31e124564640139a99c78461)), closes [#1467](https://github.com/rotorsoft/act-root/issues/1467) [#1469](https://github.com/rotorsoft/act-root/issues/1469) [#1467](https://github.com/rotorsoft/act-root/issues/1467) [#1469](https://github.com/rotorsoft/act-root/issues/1469)
+* **act:** shutdown awaits the in-flight settle cycle ([53746a4](https://github.com/rotorsoft/act-root/commit/53746a4e98a915507a2bfaefa5c0958f397ffaeb)), closes [#1468](https://github.com/rotorsoft/act-root/issues/1468)
+
+# [@rotorsoft/act-tck-v1.30.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.2...@rotorsoft/act-tck-v1.30.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **act-http:** normalize undefined deletes to null in SSE frames ([048a1f0](https://github.com/rotorsoft/act-root/commit/048a1f01c23cce1538d0c02ba7d6a7d7cf2b4e4f)), closes [#1471](https://github.com/rotorsoft/act-root/issues/1471)
+* **act:** fold forward only across a contiguous version step ([0dfc0e1](https://github.com/rotorsoft/act-root/commit/0dfc0e1a8d2e2ef2890b055e4f22817ce71a5f32)), closes [#1372](https://github.com/rotorsoft/act-root/issues/1372) [#1465](https://github.com/rotorsoft/act-root/issues/1465) [#1466](https://github.com/rotorsoft/act-root/issues/1466)
+
 # [@rotorsoft/act-tck-v1.30.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.1...@rotorsoft/act-tck-v1.30.2) (2026-08-13)
 
 

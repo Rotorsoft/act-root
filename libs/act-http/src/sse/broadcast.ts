@@ -65,6 +65,79 @@ function fan_out<S extends BroadcastState>(
   }
 }
 
+/**
+ * Rewrite `undefined`-valued keys to `null`, recursively.
+ *
+ * `@rotorsoft/act-patch` treats `undefined` and `null` as the same delete
+ * signal, but `JSON.stringify` drops `undefined`-valued keys entirely — and
+ * every SSE transport serializes frames as JSON. A reducer that clears a
+ * field the idiomatic way (`{ left: undefined }`) therefore produced a frame
+ * with no mention of `left` at all, so a live client kept the stale value
+ * while stamping the new version — believing itself caught up, and never
+ * refetching (#1471).
+ *
+ * `null` reaches the same `delete` branch in the patch applicator and
+ * survives JSON, so normalizing here makes the two spellings equivalent on
+ * the wire as they already are in memory.
+ *
+ * Only the broadcast frame is normalized. Server-side state is applied
+ * through `apply_patch`, which handles `undefined` natively.
+ */
+const wire_safe = <T>(patch: T): T => {
+  if (patch === null || typeof patch !== "object") return patch;
+  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+  // A Set has exactly one sensible JSON encoding, and `JSON.stringify` gives
+  // it the wrong one: `{}`. The framework's own `PresenceTracker.online()`
+  // returns a Set and the presence recipe feeds it straight to `overlay()`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding `{}` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. `Date` has a
+  // defined encoding; `Map` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
+  const proto = Object.getPrototypeOf(patch);
+  if (proto !== Object.prototype && proto !== null) return patch;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
+    out[k] = v === undefined ? null : wire_safe(v);
+  return out as T;
+};
+
+/**
+ * Keys an `overlay()` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * `publish()` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * `_v` matches the server's, so nothing classifies as `behind` (#1473).
+ *
+ * A symbol keeps this out of `Object.keys`, `JSON.stringify` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -124,12 +197,33 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an `overlay()` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = p;
+      msg[baseV + i + 1] = wire_safe(p);
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -172,13 +266,25 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
-    this.state_cache.set(streamId, state);
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). `apply_patch` treats
+    // `null` and `undefined` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // `_overlay: true` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
+    const msg: PatchMessage<S> = {
+      [state._v]: safe_patch,
+      _overlay: true,
+    };
     fan_out(this.channels.get(streamId), msg, (error) =>
       this.on_subscriber_error(error, streamId)
     );

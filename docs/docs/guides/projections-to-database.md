@@ -160,6 +160,8 @@ const Orders = projection("orders")
 
 The `setWhere` guard is the documented flush contract: a **monotonic upsert** keyed on `stream`, ignoring writes older than what the table already holds (`event_id` is the max event id folded into the row). Plain converging upserts are already correct under the single-writer watermark; the guard additionally makes a rebuild racing a live worker order-safe.
 
+The guard bounds *ordering*, not *correctness of the folded value* — a row carrying a higher `event_id` always wins, so it cannot repair a row that was folded from stale state. That is the fold engine's job: it folds forward only across a contiguous version step, and re-loads head state from the store whenever it is handed an event whose predecessors it did not see ([#1465](https://github.com/Rotorsoft/act-root/issues/1465)). Rebuilds get the same treatment from the other side — `app.reset()` drops every fold cache, so a replay re-derives rows instead of re-flushing whatever the worker happened to hold ([#1466](https://github.com/Rotorsoft/act-root/issues/1466)).
+
 Semantics worth knowing:
 
 - **The state is the filter.** The projection consumes exactly the state's event register, so only that state's streams are folded — and every event of a folded stream reaches the reducer. There is deliberately no per-instance filter; a partial list is regular-projection territory.

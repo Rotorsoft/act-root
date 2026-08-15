@@ -15,6 +15,21 @@ npm install @rotorsoft/act-http
 
 > **Migrating from `@rotorsoft/act-sse`?** The standalone package is deprecated — it's now a thin re-export shim over `@rotorsoft/act-http/sse` (the canonical home) and is scheduled for removal. The surface is identical; swap the import specifier and you're done. See the [1.x migration guide](../guides/migrating-to-1.x).
 
+
+### Clearing a field
+
+A reducer clears a field by patching it away, and `@rotorsoft/act-patch` accepts either spelling:
+
+```ts no-check
+.patch({ Cleared: () => ({ result: 0, left: undefined, operator: undefined }) })
+```
+
+Both `undefined` and `null` mean *delete this key*. On the wire only `null` survives — `JSON.stringify` drops `undefined`-valued keys, and every SSE transport serializes frames as JSON. The broadcast layer normalizes `undefined` to `null` when it builds a frame ([#1471](https://github.com/Rotorsoft/act-root/issues/1471)), so both spellings behave identically for live subscribers and you can keep writing whichever reads better.
+
+The normalization applies to the frame only. Server-side cached state is produced by `apply_patch`, which handles `undefined` natively, so a reconnecting client's reseed has the key absent rather than set to `null`.
+
+If you build a transport of your own over these patches, do the same normalization — a patch that crosses a JSON boundary must encode deletes as `null`.
+
 ## See it running
 
 The multi-transport calculator demo wires SSE end-to-end next to tRPC, Hono REST, and OpenAPI:
@@ -125,6 +140,10 @@ broadcast.overlay(streamId, {
 This applies the overlay to the cached state, leaves `_v` unchanged, and emits a single-key patch message at the cached version, tagged with an `_overlay: true` marker. The marker is what lets a live, caught-up client apply it: without it, a same-version message is indistinguishable from a stale patch the client already has, so `applyPatchMessage` would drop it. With it, `applyPatchMessage` merges the overlay on top of the client's current state (keeping `_v`), so presence reaches already-connected viewers, not just reconnecting ones.
 
 ### Presence
+
+Overlay data survives the next commit: `publish()` carries overlay-contributed keys onto the new cached state unless the domain state speaks to them ([#1473](https://github.com/Rotorsoft/act-root/issues/1473)), so a reconnecting client reseeds with the same presence a live client is holding. A domain state that sets or drops one of those keys still wins — the store is authoritative for its own fields.
+
+`online()` returns a `Set`, which `JSON.stringify` encodes as `{}` — so the broadcast layer converts a `Set` to an array before it reaches the cache or the wire ([#1472](https://github.com/Rotorsoft/act-root/issues/1472)). Clients receive `["alice", "bob"]`, and a reconnecting client's reseed matches what a live one holds. A `Map` is left alone: unlike a `Set` it has no unambiguous JSON encoding, so pass one already shaped the way you want it sent.
 
 `PresenceTracker` is a ref-counted online-status tracker designed for multi-tab clients (each tab opens its own SSE; `add` / `remove` maintain a per-identity counter):
 

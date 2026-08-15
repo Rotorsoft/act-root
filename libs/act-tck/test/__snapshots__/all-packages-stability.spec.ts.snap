@@ -14,6 +14,7 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
+  FOLD_RESET,
   IDENTITY_GATE,
   make_fold_handler,
   make_gate,
@@ -23,6 +24,7 @@ import {
   pii_fields,
   pii_split,
   pii_strip,
+  type ResettableBatchHandler,
   reaction_on,
   register_lane,
   register_state,
@@ -351,6 +353,22 @@ export function act<
     autoclose_archiver: (state_name) => _aa.get(state_name) ?? null,
   };
   const pending_projections: Projection<any>[] = [];
+  /**
+   * Reaction objects contributed BY projections. A projection's own
+   * reactions legitimately target it; anything else pointed at a target a
+   * projection serves is the #1467 collision. Recorded at registration
+   * because projections arrive through two doors (\`withProjection\` merges
+   * immediately, \`withSlice\` defers to build) and neither retains them.
+   * Identity is the same test \`merge_projection\` uses.
+   */
+  const projection_reactions = new Set<unknown>();
+  const record_projection_reactions = (proj: Projection<any>) => {
+    for (const register of Object.values(
+      proj.events as Record<string, { reactions: Map<string, unknown> }>
+    ))
+      for (const reaction of register.reactions.values())
+        projection_reactions.add(reaction);
+  };
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
   // Validated fold-projection ingredients, resolved once on the first
@@ -359,6 +377,9 @@ export function act<
   // per-stream cache that must never be shared across Acts.
   const fold_specs: {
     target: string;
+    /** Identity of the registering projection, so a repeat registration of
+     *  the same object is recognized as one claim rather than two (#1469). */
+    projection: Projection<any>;
     merged: any;
     flush: any;
     config: any;
@@ -376,14 +397,21 @@ export function act<
    * sees it. \`_sf\` is read lazily at dispatch time, by when the
    * events pass has populated it.
    */
-  const pii_wrap =
-    (original: BatchHandler<any>) => async (events: any[], stream: string) => {
+  const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
+    const wrapped = async (events: readonly any[], stream: string) => {
       const stripped = events.map((e) => {
         const f = _sf.get(e.name as string);
         return f ? pii_strip(e, f) : e;
       });
       return original(stripped as never, stream);
     };
+    // Carry the fold's cache-reset handle through the wrapper (#1466). The
+    // orchestrator only ever sees what this map holds, so a handle left on
+    // the inner handler is a handle nobody can reach.
+    const reset = (original as ResettableBatchHandler<any>)[FOLD_RESET];
+    if (reset) Object.defineProperty(wrapped, FOLD_RESET, { value: reset });
+    return wrapped;
+  };
 
   /**
    * Per-Act batch-handler map. Stateless projection handlers are shared
@@ -520,6 +548,7 @@ export function act<
         return builder as never;
       },
       withProjection: (proj) => {
+        record_projection_reactions(proj as Projection<any>);
         merge_projection(proj as Projection<any>, registry.events);
         register_batch_handler(proj as Projection<any>, batch_handlers);
         if ((proj as Projection<any>).fold)
@@ -566,6 +595,7 @@ export function act<
         // every tenant.
         if (!_built) {
           for (const proj of pending_projections) {
+            record_projection_reactions(proj);
             merge_projection(proj, registry.events as Record<string, any>);
             register_batch_handler(proj, batch_handlers);
             if (proj.fold) fold_projections.push(proj);
@@ -605,10 +635,16 @@ export function act<
             //
             // With this check all four {batch, fold}² pairings throw;
             // previously only batch × batch did.
-            if (
-              batch_handlers.has(proj.target!) ||
-              fold_specs.some((s) => s.target === proj.target)
-            )
+            // Re-registering the SAME projection object is a no-op, not a
+            // duplicate (#1469) — a projection exported from a module and
+            // embedded by two slices, or a \`.withProjection(p)\` written
+            // twice, is a legitimate pattern that both sibling paths
+            // (\`merge_projection\`, \`register_batch_handler\`) already treat
+            // as idempotent. Only two DIFFERENT claimants on one target are
+            // an error.
+            const claimed = fold_specs.find((s) => s.target === proj.target);
+            if (claimed?.projection === proj) continue;
+            if (batch_handlers.has(proj.target!) || claimed)
               throw new Error(
                 \`Duplicate projection target "\${proj.target}" — a target is served by one batch handler or one state projection, never both\`
               );
@@ -618,10 +654,39 @@ export function act<
             // would leak folded rows between Acts built from this builder.
             fold_specs.push({
               target: proj.target!,
+              projection: proj,
               merged,
               flush: fold.flush,
               config: fold.config,
             });
+          }
+          // A target is served by ONE thing (#1467). The guard above covers
+          // projection-vs-projection; this covers the third claimant a
+          // projection has no way to see: an ordinary reaction pointed at a
+          // target a batch handler or fold already owns.
+          //
+          // The drain dispatches a stream with a batch handler through that
+          // handler and nothing else (\`drain-cycle.ts\`), so the foreign
+          // reaction never runs — silently, with no error, retry or block —
+          // and the fold cold-loads the foreign event's stream as ITS state,
+          // writing another aggregate's row into its read table. Exactly the
+          // #1440 damage through the seam that fix did not reach.
+          //
+          // A projection's OWN reactions legitimately target it, so they are
+          // excluded by object identity — the same test \`merge_projection\`
+          // uses to tell a re-registration from a collision.
+          for (const register of Object.values(registry.events)) {
+            for (const reaction of register.reactions.values()) {
+              if (typeof reaction.resolver === "function") continue;
+              const target = reaction.resolver.target;
+              const claimed =
+                batch_handlers.has(target) ||
+                fold_specs.some((f) => f.target === target);
+              if (claimed && !projection_reactions.has(reaction))
+                throw new Error(
+                  \`Reaction on target "\${target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run\`
+                );
+            }
           }
           finalize_deprecations();
           validate_lane_references(registry, lanes);
@@ -789,10 +854,12 @@ import {
   default_correlator,
   type EsOps,
   type EventLaneSet,
+  FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  type ResettableBatchHandler,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
@@ -1786,10 +1853,17 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    if (running.length === 0) return;
+    // The settle loop drives the drain, so it has to be waited on too
+    // (#1468). \`SettleLoop.stop()\` cancels scheduling only: a cycle already
+    // inside its correlate → drain loop keeps running, and would otherwise
+    // claim a stream after teardown returned — and, under \`disposeAndExit\`,
+    // after the store adapter was disposed.
+    const settling = this._settle.inflight;
+    if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     // Assigned synchronously by the executor below, before the race is
     // awaited — so the \`finally\` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
@@ -2503,6 +2577,16 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
+      // Drop every fold cache before the replay reaches a handler (#1466).
+      // A rebuild replays from the beginning, so every event lands at or
+      // below a warm fold's head and takes its already-folded branch, which
+      // re-flushes whatever that cache holds — writing a stale row straight
+      // back out. Cleared unconditionally rather than per target: \`input\`
+      // may be a filter, resolving it costs a query, and the only cost of
+      // clearing a cache that did not need it is one head load per stream
+      // on the next batch.
+      for (const handler of this._batch_handlers.values())
+        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
@@ -12617,7 +12701,11 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export { make_fold_handler } from "./projection-fold.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -15236,9 +15324,33 @@ type Fold<TState extends Schema> = {
 } & { dirty: boolean };
 
 /**
+ * Internal handle a fold handler exposes so the orchestrator can drop its
+ * process-local state (#1466).
+ *
+ * A rebuild must not trust a per-Act cache: \`reset\` rewinds the watermark and
+ * replays from the beginning, and every replayed event is at or below the
+ * cached head, so the fold takes its already-folded branch and re-flushes
+ * whatever it happens to hold. If that cache is stale, the rebuild writes the
+ * staleness back out — the one outcome a rebuild exists to prevent. Dropping
+ * the cache makes the next batch re-load head state from the store, which is
+ * authoritative by definition.
+ *
+ * A symbol on the function keeps \`BatchHandler\` a plain function type; nothing
+ * here is re-exported from \`src/index.ts\`.
+ */
+export const FOLD_RESET = Symbol("act.fold.reset");
+
+/** A batch handler that owns a fold cache it can be told to drop. */
+export type ResettableBatchHandler<TEvents extends Schemas> =
+  BatchHandler<TEvents> & {
+    readonly [FOLD_RESET]?: () => void;
+  };
+
+/**
  * Build the batch handler that folds a state's events into per-stream rows.
  * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
+ * survives across drain cycles, so warm streams fold without I/O. It carries
+ * a {@link FOLD_RESET} handle so a rebuild can drop that cache.
  */
 export function make_fold_handler<
   TState extends Schema,
@@ -15289,7 +15401,42 @@ export function make_fold_handler<
     for (const f of flushed) f.dirty = false;
   };
 
-  return async (events) => {
+  /**
+   * Load a stream's head state and seat it in the cache.
+   *
+   * The loaded state and its head position (\`version\`, global \`id\`,
+   * \`patches\`, \`snaps\`) are captured atomically inside \`load()\` — even on a
+   * warm cache hit where \`snapshot.event\` is undefined. Reading the head id
+   * back from the cache separately (ACT-1204) opened a TOCTOU window: a
+   * concurrent \`action()\` committing between the two awaits pairs this
+   * OLDER state with a NEWER event_id, and the frontier guard below then
+   * permanently skips the intervening events. Dirty from the start: the row
+   * must be written at least once.
+   */
+  const first_sight = async (stream: string): Promise<Fold<TState>> => {
+    if (cache.size >= config.maxCachedStates) {
+      // flush-before-evict: the oldest entry leaves only after its folded
+      // work is durable.
+      const oldest = cache.keys().next().value as string;
+      const evictee = cache.get(oldest) as Fold<TState>;
+      if (evictee.dirty) await flush([row(evictee)]);
+      cache.delete(oldest);
+    }
+    const snapshot = await load(load_me, { stream }, undefined, patch_fn);
+    const seated: Fold<TState> = {
+      stream,
+      state: snapshot.state,
+      version: snapshot.version,
+      event_id: snapshot.id,
+      patches: snapshot.patches,
+      snaps: snapshot.snaps,
+      dirty: true,
+    };
+    cache.set(stream, seated);
+    return seated;
+  };
+
+  const handler: ResettableBatchHandler<TEvents> = async (events) => {
     let folded_since_flush = 0;
     for (const event of events) {
       const stream = event.stream;
@@ -15299,36 +15446,25 @@ export function make_fold_handler<
         cache.delete(stream);
         cache.set(stream, fold);
       } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). The loaded state and its
-        // head position (\`version\`, global \`id\`, \`patches\`, \`snaps\`) are
-        // captured atomically inside \`load()\` — even on a warm cache hit
-        // where \`snapshot.event\` is undefined. Reading the head id back
-        // from the cache separately (ACT-1204) opened a TOCTOU window: a
-        // concurrent \`action()\` committing between the two awaits pairs
-        // this OLDER state with a NEWER event_id, and the
-        // \`event.id > fold.event_id\` guard below then permanently skips
-        // the intervening events. Dirty from the start: the row must be
-        // written at least once.
-        const snapshot = await load(load_me, { stream }, undefined, patch_fn);
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: snapshot.version,
-          event_id: snapshot.id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
+        fold = await first_sight(stream);
+      }
+      // Fold forward only across a CONTIGUOUS version step (#1465). The
+      // cache is per-Act but the subscription watermark is shared, so a
+      // worker can be handed an event whose predecessors were drained by a
+      // sibling worker — its cached state is then stale, and folding onto
+      // it silently corrupts the row for good (the flushed row carries the
+      // newest event_id, so the monotonic-upsert guard overwrites the
+      // correct row with the wrong one). "Newer than what I hold" is not
+      // the same question as "next after what I hold".
+      //
+      // A gap re-takes the first-sight path: drop the entry and load head
+      // state, which is authoritative and absorbs both the missed window
+      // and the version slot a \`__snapshot__\` consumes. The reloaded entry
+      // sits at head, so this event then takes the already-folded branch.
+      const contiguous = event.version === fold.version + 1;
+      if (event.id > fold.event_id && !contiguous) {
+        cache.delete(stream);
+        fold = await first_sight(stream);
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
@@ -15357,6 +15493,12 @@ export function make_fold_handler<
     // after the handler resolves, so rows are durable before the ack.
     await flush_dirty();
   };
+
+  // Dirty entries are dropped rather than flushed: a rebuild is about to
+  // re-derive every row from the store, so a pending write of process-local
+  // state has nothing to contribute and everything to get wrong.
+  Object.defineProperty(handler, FOLD_RESET, { value: () => cache.clear() });
+  return handler;
 }
 
 // === reaction.ts ===
@@ -16823,6 +16965,19 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
   /**
+   * Resolves when the cycle currently in flight finishes; \`undefined\` when
+   * idle (#1468). \`_running\` answers "is a cycle running?" for the
+   * re-arm bookkeeping; this answers "tell me when it is done" for a
+   * graceful shutdown.
+   *
+   * \`stop()\` only cancels *scheduling* — a cycle already inside its
+   * correlate → drain loop keeps going, and because \`DrainController.drain\`
+   * does not consult \`_stopped\`, it can claim a stream after teardown
+   * returned and after the store adapter was disposed. Never rejects: the
+   * cycle's own \`catch\` contains its errors, so awaiting this is safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  /**
    * Set when a \`schedule()\` timer fires while a cycle is still running
    * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
    * the wake-up isn't dropped — a commit landing during the final
@@ -16867,6 +17022,11 @@ export class SettleLoop<TEvents extends Schemas> {
         return;
       }
       this._running = true;
+
+      let settle_done!: () => void;
+      this._inflight = new Promise<void>((done) => {
+        settle_done = done;
+      });
 
       (async () => {
         await this._deps.init();
@@ -16936,6 +17096,8 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          this._inflight = undefined;
+          settle_done();
           // A wake-up arrived mid-cycle. Re-arm one more pass with its
           // options so the requested drain actually happens (ACT-1205).
           const pending = this._pending;
@@ -16945,6 +17107,15 @@ export class SettleLoop<TEvents extends Schemas> {
           }
         });
     }, debounceMs);
+  }
+
+  /**
+   * The cycle currently in flight, or \`undefined\` when idle (#1468). A
+   * graceful shutdown awaits this alongside the drain controllers so a
+   * settle parked in \`correlate\` does not resume after teardown.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
@@ -18761,10 +18932,12 @@ import {
   default_correlator,
   type EsOps,
   type EventLaneSet,
+  FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
+  type ResettableBatchHandler,
   register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
@@ -19758,10 +19931,17 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    if (running.length === 0) return;
+    // The settle loop drives the drain, so it has to be waited on too
+    // (#1468). \`SettleLoop.stop()\` cancels scheduling only: a cycle already
+    // inside its correlate → drain loop keeps running, and would otherwise
+    // claim a stream after teardown returned — and, under \`disposeAndExit\`,
+    // after the store adapter was disposed.
+    const settling = this._settle.inflight;
+    if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     // Assigned synchronously by the executor below, before the race is
     // awaited — so the \`finally\` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
@@ -20475,6 +20655,16 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
+      // Drop every fold cache before the replay reaches a handler (#1466).
+      // A rebuild replays from the beginning, so every event lands at or
+      // below a warm fold's head and takes its already-folded branch, which
+      // re-flushes whatever that cache holds — writing a stale row straight
+      // back out. Cleared unconditionally rather than per target: \`input\`
+      // may be a filter, resolving it costs a query, and the only cost of
+      // clearing a cache that did not need it is one head load per stream
+      // on the next batch.
+      for (const handler of this._batch_handlers.values())
+        (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
@@ -30223,7 +30413,11 @@ export {
   merge_projection,
   register_state,
 } from "./merge.js";
-export { make_fold_handler } from "./projection-fold.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
 export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
@@ -32823,9 +33017,33 @@ type Fold<TState extends Schema> = {
 } & { dirty: boolean };
 
 /**
+ * Internal handle a fold handler exposes so the orchestrator can drop its
+ * process-local state (#1466).
+ *
+ * A rebuild must not trust a per-Act cache: \`reset\` rewinds the watermark and
+ * replays from the beginning, and every replayed event is at or below the
+ * cached head, so the fold takes its already-folded branch and re-flushes
+ * whatever it happens to hold. If that cache is stale, the rebuild writes the
+ * staleness back out — the one outcome a rebuild exists to prevent. Dropping
+ * the cache makes the next batch re-load head state from the store, which is
+ * authoritative by definition.
+ *
+ * A symbol on the function keeps \`BatchHandler\` a plain function type; nothing
+ * here is re-exported from \`src/index.ts\`.
+ */
+export const FOLD_RESET = Symbol("act.fold.reset");
+
+/** A batch handler that owns a fold cache it can be told to drop. */
+export type ResettableBatchHandler<TEvents extends Schemas> =
+  BatchHandler<TEvents> & {
+    readonly [FOLD_RESET]?: () => void;
+  };
+
+/**
  * Build the batch handler that folds a state's events into per-stream rows.
  * The returned closure is long-lived (one per built projection): its cache
- * survives across drain cycles, so warm streams fold without I/O.
+ * survives across drain cycles, so warm streams fold without I/O. It carries
+ * a {@link FOLD_RESET} handle so a rebuild can drop that cache.
  */
 export function make_fold_handler<
   TState extends Schema,
@@ -32876,7 +33094,42 @@ export function make_fold_handler<
     for (const f of flushed) f.dirty = false;
   };
 
-  return async (events) => {
+  /**
+   * Load a stream's head state and seat it in the cache.
+   *
+   * The loaded state and its head position (\`version\`, global \`id\`,
+   * \`patches\`, \`snaps\`) are captured atomically inside \`load()\` — even on a
+   * warm cache hit where \`snapshot.event\` is undefined. Reading the head id
+   * back from the cache separately (ACT-1204) opened a TOCTOU window: a
+   * concurrent \`action()\` committing between the two awaits pairs this
+   * OLDER state with a NEWER event_id, and the frontier guard below then
+   * permanently skips the intervening events. Dirty from the start: the row
+   * must be written at least once.
+   */
+  const first_sight = async (stream: string): Promise<Fold<TState>> => {
+    if (cache.size >= config.maxCachedStates) {
+      // flush-before-evict: the oldest entry leaves only after its folded
+      // work is durable.
+      const oldest = cache.keys().next().value as string;
+      const evictee = cache.get(oldest) as Fold<TState>;
+      if (evictee.dirty) await flush([row(evictee)]);
+      cache.delete(oldest);
+    }
+    const snapshot = await load(load_me, { stream }, undefined, patch_fn);
+    const seated: Fold<TState> = {
+      stream,
+      state: snapshot.state,
+      version: snapshot.version,
+      event_id: snapshot.id,
+      patches: snapshot.patches,
+      snaps: snapshot.snaps,
+      dirty: true,
+    };
+    cache.set(stream, seated);
+    return seated;
+  };
+
+  const handler: ResettableBatchHandler<TEvents> = async (events) => {
     let folded_since_flush = 0;
     for (const event of events) {
       const stream = event.stream;
@@ -32886,36 +33139,25 @@ export function make_fold_handler<
         cache.delete(stream);
         cache.set(stream, fold);
       } else {
-        if (cache.size >= config.maxCachedStates) {
-          // flush-before-evict: the oldest entry leaves only after its
-          // folded work is durable.
-          const oldest = cache.keys().next().value as string;
-          const evictee = cache.get(oldest) as Fold<TState>;
-          if (evictee.dirty) await flush([row(evictee)]);
-          cache.delete(oldest);
-        }
-        // First sight of this stream: load its head state through the
-        // regular load path (cache, snapshots). The loaded state and its
-        // head position (\`version\`, global \`id\`, \`patches\`, \`snaps\`) are
-        // captured atomically inside \`load()\` — even on a warm cache hit
-        // where \`snapshot.event\` is undefined. Reading the head id back
-        // from the cache separately (ACT-1204) opened a TOCTOU window: a
-        // concurrent \`action()\` committing between the two awaits pairs
-        // this OLDER state with a NEWER event_id, and the
-        // \`event.id > fold.event_id\` guard below then permanently skips
-        // the intervening events. Dirty from the start: the row must be
-        // written at least once.
-        const snapshot = await load(load_me, { stream }, undefined, patch_fn);
-        fold = {
-          stream,
-          state: snapshot.state,
-          version: snapshot.version,
-          event_id: snapshot.id,
-          patches: snapshot.patches,
-          snaps: snapshot.snaps,
-          dirty: true,
-        };
-        cache.set(stream, fold);
+        fold = await first_sight(stream);
+      }
+      // Fold forward only across a CONTIGUOUS version step (#1465). The
+      // cache is per-Act but the subscription watermark is shared, so a
+      // worker can be handed an event whose predecessors were drained by a
+      // sibling worker — its cached state is then stale, and folding onto
+      // it silently corrupts the row for good (the flushed row carries the
+      // newest event_id, so the monotonic-upsert guard overwrites the
+      // correct row with the wrong one). "Newer than what I hold" is not
+      // the same question as "next after what I hold".
+      //
+      // A gap re-takes the first-sight path: drop the entry and load head
+      // state, which is authoritative and absorbs both the missed window
+      // and the version slot a \`__snapshot__\` consumes. The reloaded entry
+      // sits at head, so this event then takes the already-folded branch.
+      const contiguous = event.version === fold.version + 1;
+      if (event.id > fold.event_id && !contiguous) {
+        cache.delete(stream);
+        fold = await first_sight(stream);
       }
       if (event.id > fold.event_id) {
         const reducer = me.patch[event.name as keyof TEvents];
@@ -32944,6 +33186,12 @@ export function make_fold_handler<
     // after the handler resolves, so rows are durable before the ack.
     await flush_dirty();
   };
+
+  // Dirty entries are dropped rather than flushed: a rebuild is about to
+  // re-derive every row from the store, so a pending write of process-local
+  // state has nothing to contribute and everything to get wrong.
+  Object.defineProperty(handler, FOLD_RESET, { value: () => cache.clear() });
+  return handler;
 }
 
 // === reaction.ts ===
@@ -34579,6 +34827,19 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
   /**
+   * Resolves when the cycle currently in flight finishes; \`undefined\` when
+   * idle (#1468). \`_running\` answers "is a cycle running?" for the
+   * re-arm bookkeeping; this answers "tell me when it is done" for a
+   * graceful shutdown.
+   *
+   * \`stop()\` only cancels *scheduling* — a cycle already inside its
+   * correlate → drain loop keeps going, and because \`DrainController.drain\`
+   * does not consult \`_stopped\`, it can claim a stream after teardown
+   * returned and after the store adapter was disposed. Never rejects: the
+   * cycle's own \`catch\` contains its errors, so awaiting this is safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  /**
    * Set when a \`schedule()\` timer fires while a cycle is still running
    * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
    * the wake-up isn't dropped — a commit landing during the final
@@ -34623,6 +34884,11 @@ export class SettleLoop<TEvents extends Schemas> {
         return;
       }
       this._running = true;
+
+      let settle_done!: () => void;
+      this._inflight = new Promise<void>((done) => {
+        settle_done = done;
+      });
 
       (async () => {
         await this._deps.init();
@@ -34692,6 +34958,8 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          this._inflight = undefined;
+          settle_done();
           // A wake-up arrived mid-cycle. Re-arm one more pass with its
           // options so the requested drain actually happens (ACT-1205).
           const pending = this._pending;
@@ -34701,6 +34969,15 @@ export class SettleLoop<TEvents extends Schemas> {
           }
         });
     }, debounceMs);
+  }
+
+  /**
+   * The cycle currently in flight, or \`undefined\` when idle (#1468). A
+   * graceful shutdown awaits this alongside the drain controllers so a
+   * settle parked in \`correlate\` does not resume after teardown.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
@@ -39881,6 +40158,79 @@ function fan_out<S extends BroadcastState>(
   }
 }
 
+/**
+ * Rewrite \`undefined\`-valued keys to \`null\`, recursively.
+ *
+ * \`@rotorsoft/act-patch\` treats \`undefined\` and \`null\` as the same delete
+ * signal, but \`JSON.stringify\` drops \`undefined\`-valued keys entirely — and
+ * every SSE transport serializes frames as JSON. A reducer that clears a
+ * field the idiomatic way (\`{ left: undefined }\`) therefore produced a frame
+ * with no mention of \`left\` at all, so a live client kept the stale value
+ * while stamping the new version — believing itself caught up, and never
+ * refetching (#1471).
+ *
+ * \`null\` reaches the same \`delete\` branch in the patch applicator and
+ * survives JSON, so normalizing here makes the two spellings equivalent on
+ * the wire as they already are in memory.
+ *
+ * Only the broadcast frame is normalized. Server-side state is applied
+ * through \`apply_patch\`, which handles \`undefined\` natively.
+ */
+const wire_safe = <T>(patch: T): T => {
+  if (patch === null || typeof patch !== "object") return patch;
+  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
+  const proto = Object.getPrototypeOf(patch);
+  if (proto !== Object.prototype && proto !== null) return patch;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
+    out[k] = v === undefined ? null : wire_safe(v);
+  return out as T;
+};
+
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -39940,12 +40290,33 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = p;
+      msg[baseV + i + 1] = wire_safe(p);
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -39988,13 +40359,25 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
-    this.state_cache.set(streamId, state);
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
+    const msg: PatchMessage<S> = {
+      [state._v]: safe_patch,
+      _overlay: true,
+    };
     fan_out(this.channels.get(streamId), msg, (error) =>
       this.on_subscriber_error(error, streamId)
     );
@@ -40292,8 +40675,9 @@ import type { BroadcastState } from "../sse/types.js";
  * Defaults are sized for typical business-app dashboards (dozens to
  * hundreds of human viewers per process). Both numeric knobs are
  * validated at transport-function construction; out-of-range values
- * throw \`RangeError\` immediately so misconfiguration surfaces at
- * startup instead of at first connection.
+ * throw \`ZodError\` immediately so misconfiguration surfaces at startup
+ * instead of at first connection (the framework-wide convention for
+ * config bags — see CLAUDE.md § Config-validation schemas).
  */
 export type SseOptions = {
   /**
@@ -40800,6 +41184,79 @@ function fan_out<S extends BroadcastState>(
   }
 }
 
+/**
+ * Rewrite \`undefined\`-valued keys to \`null\`, recursively.
+ *
+ * \`@rotorsoft/act-patch\` treats \`undefined\` and \`null\` as the same delete
+ * signal, but \`JSON.stringify\` drops \`undefined\`-valued keys entirely — and
+ * every SSE transport serializes frames as JSON. A reducer that clears a
+ * field the idiomatic way (\`{ left: undefined }\`) therefore produced a frame
+ * with no mention of \`left\` at all, so a live client kept the stale value
+ * while stamping the new version — believing itself caught up, and never
+ * refetching (#1471).
+ *
+ * \`null\` reaches the same \`delete\` branch in the patch applicator and
+ * survives JSON, so normalizing here makes the two spellings equivalent on
+ * the wire as they already are in memory.
+ *
+ * Only the broadcast frame is normalized. Server-side state is applied
+ * through \`apply_patch\`, which handles \`undefined\` natively.
+ */
+const wire_safe = <T>(patch: T): T => {
+  if (patch === null || typeof patch !== "object") return patch;
+  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
+  const proto = Object.getPrototypeOf(patch);
+  if (proto !== Object.prototype && proto !== null) return patch;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
+    out[k] = v === undefined ? null : wire_safe(v);
+  return out as T;
+};
+
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -40859,12 +41316,33 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = p;
+      msg[baseV + i + 1] = wire_safe(p);
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -40907,13 +41385,25 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
-    this.state_cache.set(streamId, state);
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
+    const msg: PatchMessage<S> = {
+      [state._v]: safe_patch,
+      _overlay: true,
+    };
     fan_out(this.channels.get(streamId), msg, (error) =>
       this.on_subscriber_error(error, streamId)
     );
@@ -41607,8 +42097,9 @@ import type { BroadcastState } from "../sse/types.js";
  * Defaults are sized for typical business-app dashboards (dozens to
  * hundreds of human viewers per process). Both numeric knobs are
  * validated at transport-function construction; out-of-range values
- * throw \`RangeError\` immediately so misconfiguration surfaces at
- * startup instead of at first connection.
+ * throw \`ZodError\` immediately so misconfiguration surfaces at startup
+ * instead of at first connection (the framework-wide convention for
+ * config bags — see CLAUDE.md § Config-validation schemas).
  */
 export type SseOptions = {
   /**
@@ -45015,7 +45506,14 @@ export function applyPatchMessage<S extends BroadcastState>(
   // answer that does NOT refetch (#1423).
   if (msg._resync) return { ok: false, reason: "behind" };
 
-  if (!versions.length) return { ok: false, reason: "stale" };
+  // An empty frame carries nothing to apply. For a client that already has a
+  // baseline that is genuinely \`stale\` — a no-op, don't refetch. For one with
+  // NO baseline there is nothing to be stale relative to, and \`stale\` is the
+  // one answer that does not refetch, so it would strand the client (#1474).
+  // Both the doc-comment below and \`real-time.md\` already say a fresh client
+  // is never stale; this is the branch that made that false.
+  if (!versions.length)
+    return { ok: false, reason: hasBaseline ? "stale" : "behind" };
 
   const minV = versions[0];
   const maxV = versions[versions.length - 1];
@@ -45128,6 +45626,79 @@ function fan_out<S extends BroadcastState>(
   }
 }
 
+/**
+ * Rewrite \`undefined\`-valued keys to \`null\`, recursively.
+ *
+ * \`@rotorsoft/act-patch\` treats \`undefined\` and \`null\` as the same delete
+ * signal, but \`JSON.stringify\` drops \`undefined\`-valued keys entirely — and
+ * every SSE transport serializes frames as JSON. A reducer that clears a
+ * field the idiomatic way (\`{ left: undefined }\`) therefore produced a frame
+ * with no mention of \`left\` at all, so a live client kept the stale value
+ * while stamping the new version — believing itself caught up, and never
+ * refetching (#1471).
+ *
+ * \`null\` reaches the same \`delete\` branch in the patch applicator and
+ * survives JSON, so normalizing here makes the two spellings equivalent on
+ * the wire as they already are in memory.
+ *
+ * Only the broadcast frame is normalized. Server-side state is applied
+ * through \`apply_patch\`, which handles \`undefined\` natively.
+ */
+const wire_safe = <T>(patch: T): T => {
+  if (patch === null || typeof patch !== "object") return patch;
+  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
+  const proto = Object.getPrototypeOf(patch);
+  if (proto !== Object.prototype && proto !== null) return patch;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
+    out[k] = v === undefined ? null : wire_safe(v);
+  return out as T;
+};
+
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -45187,12 +45758,33 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = p;
+      msg[baseV + i + 1] = wire_safe(p);
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -45235,13 +45827,25 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
-    this.state_cache.set(streamId, state);
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
+    const msg: PatchMessage<S> = {
+      [state._v]: safe_patch,
+      _overlay: true,
+    };
     fan_out(this.channels.get(streamId), msg, (error) =>
       this.on_subscriber_error(error, streamId)
     );
@@ -45607,6 +46211,79 @@ function fan_out<S extends BroadcastState>(
   }
 }
 
+/**
+ * Rewrite \`undefined\`-valued keys to \`null\`, recursively.
+ *
+ * \`@rotorsoft/act-patch\` treats \`undefined\` and \`null\` as the same delete
+ * signal, but \`JSON.stringify\` drops \`undefined\`-valued keys entirely — and
+ * every SSE transport serializes frames as JSON. A reducer that clears a
+ * field the idiomatic way (\`{ left: undefined }\`) therefore produced a frame
+ * with no mention of \`left\` at all, so a live client kept the stale value
+ * while stamping the new version — believing itself caught up, and never
+ * refetching (#1471).
+ *
+ * \`null\` reaches the same \`delete\` branch in the patch applicator and
+ * survives JSON, so normalizing here makes the two spellings equivalent on
+ * the wire as they already are in memory.
+ *
+ * Only the broadcast frame is normalized. Server-side state is applied
+ * through \`apply_patch\`, which handles \`undefined\` natively.
+ */
+const wire_safe = <T>(patch: T): T => {
+  if (patch === null || typeof patch !== "object") return patch;
+  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
+  const proto = Object.getPrototypeOf(patch);
+  if (proto !== Object.prototype && proto !== null) return patch;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
+    out[k] = v === undefined ? null : wire_safe(v);
+  return out as T;
+};
+
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -45666,12 +46343,33 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
     patches.forEach((p, i) => {
-      msg[baseV + i + 1] = p;
+      msg[baseV + i + 1] = wire_safe(p);
     });
 
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -45714,13 +46412,25 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
-    this.state_cache.set(streamId, state);
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
-    const msg: PatchMessage<S> = { [state._v]: overlay_patch, _overlay: true };
+    const msg: PatchMessage<S> = {
+      [state._v]: safe_patch,
+      _overlay: true,
+    };
     fan_out(this.channels.get(streamId), msg, (error) =>
       this.on_subscriber_error(error, streamId)
     );
@@ -46488,8 +47198,9 @@ import type { BroadcastState } from "../sse/types.js";
  * Defaults are sized for typical business-app dashboards (dozens to
  * hundreds of human viewers per process). Both numeric knobs are
  * validated at transport-function construction; out-of-range values
- * throw \`RangeError\` immediately so misconfiguration surfaces at
- * startup instead of at first connection.
+ * throw \`ZodError\` immediately so misconfiguration surfaces at startup
+ * instead of at first connection (the framework-wide convention for
+ * config bags — see CLAUDE.md § Config-validation schemas).
  */
 export type SseOptions = {
   /**

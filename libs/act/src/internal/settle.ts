@@ -67,6 +67,19 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
   /**
+   * Resolves when the cycle currently in flight finishes; `undefined` when
+   * idle (#1468). `_running` answers "is a cycle running?" for the
+   * re-arm bookkeeping; this answers "tell me when it is done" for a
+   * graceful shutdown.
+   *
+   * `stop()` only cancels *scheduling* — a cycle already inside its
+   * correlate → drain loop keeps going, and because `DrainController.drain`
+   * does not consult `_stopped`, it can claim a stream after teardown
+   * returned and after the store adapter was disposed. Never rejects: the
+   * cycle's own `catch` contains its errors, so awaiting this is safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  /**
    * Set when a `schedule()` timer fires while a cycle is still running
    * (ACT-1205). The in-flight cycle's `finally` re-arms one more pass so
    * the wake-up isn't dropped — a commit landing during the final
@@ -111,6 +124,11 @@ export class SettleLoop<TEvents extends Schemas> {
         return;
       }
       this._running = true;
+
+      let settle_done!: () => void;
+      this._inflight = new Promise<void>((done) => {
+        settle_done = done;
+      });
 
       (async () => {
         await this._deps.init();
@@ -180,6 +198,8 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          this._inflight = undefined;
+          settle_done();
           // A wake-up arrived mid-cycle. Re-arm one more pass with its
           // options so the requested drain actually happens (ACT-1205).
           const pending = this._pending;
@@ -189,6 +209,15 @@ export class SettleLoop<TEvents extends Schemas> {
           }
         });
     }, debounceMs);
+  }
+
+  /**
+   * The cycle currently in flight, or `undefined` when idle (#1468). A
+   * graceful shutdown awaits this alongside the drain controllers so a
+   * settle parked in `correlate` does not resume after teardown.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
