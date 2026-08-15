@@ -1,3 +1,12 @@
+# [@rotorsoft/act-tck-v1.30.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.3...@rotorsoft/act-tck-v1.30.4) (2026-08-15)
+
+
+### Bug Fixes
+
+* **act-http:** broadcast a Set as an array on both wire paths ([b82cf1f](https://github.com/rotorsoft/act-root/commit/b82cf1faabfe72ee451f777ec4772f26fd7a7b17)), closes [#1472](https://github.com/rotorsoft/act-root/issues/1472)
+* **act:** complete the target-ownership guard and make it identity-aware ([0b11c0f](https://github.com/rotorsoft/act-root/commit/0b11c0f3478bc7ea31e124564640139a99c78461)), closes [#1467](https://github.com/rotorsoft/act-root/issues/1467) [#1469](https://github.com/rotorsoft/act-root/issues/1469) [#1467](https://github.com/rotorsoft/act-root/issues/1467) [#1469](https://github.com/rotorsoft/act-root/issues/1469)
+* **act:** shutdown awaits the in-flight settle cycle ([53746a4](https://github.com/rotorsoft/act-root/commit/53746a4e98a915507a2bfaefa5c0958f397ffaeb)), closes [#1468](https://github.com/rotorsoft/act-root/issues/1468)
+
 # [@rotorsoft/act-tck-v1.30.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.30.2...@rotorsoft/act-tck-v1.30.3) (2026-08-14)
 
 

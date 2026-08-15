@@ -17,8 +17,10 @@ type Calc = {
   result?: number;
   left?: string;
   operator?: string;
-  nested?: { keep?: string; drop?: string };
+  nested?: { keep?: string; drop?: string; tags?: string[] };
   tags?: string[];
+  onlineUsers?: string[];
+  meta?: Record<string, unknown>;
 };
 
 /** Exactly what a transport does to a frame. */
@@ -133,5 +135,74 @@ describe("broadcast frames are wire-safe", () => {
     // `apply_patch` handles `undefined` natively — the reseed a reconnecting
     // client gets must have the key gone, not set to null.
     expect(ch.state("s")).not.toHaveProperty("left");
+  });
+});
+
+describe("presence sets survive the wire (#1472)", () => {
+  it("delivers a Set-valued overlay as an array to a live client", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 5, result: 1 } as Calc);
+    const frames: unknown[] = [];
+    ch.subscribe("g1", (f) => frames.push(f));
+
+    // The shape `PresenceTracker.online()` returns, fed to overlay() the way
+    // the real-time guide's presence recipe does.
+    ch.overlay("g1", {
+      onlineUsers: new Set(["alice", "bob"]),
+    } as unknown as Partial<Calc>);
+
+    const live = client_after(over_the_wire(frames.at(-1)), {
+      _v: 5,
+      result: 1,
+    });
+    expect(live.onlineUsers).toEqual(["alice", "bob"]);
+  });
+
+  it("gives a reconnecting client the same value as a live one", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g1", { _v: 5, result: 1 } as Calc);
+    const frames: unknown[] = [];
+    ch.subscribe("g1", (f) => frames.push(f));
+    ch.overlay("g1", {
+      onlineUsers: new Set(["alice"]),
+    } as unknown as Partial<Calc>);
+
+    const live = client_after(over_the_wire(frames.at(-1)), {
+      _v: 5,
+      result: 1,
+    });
+    const reseed = over_the_wire(ch.state("g1")) as Partial<Calc>;
+    expect(reseed.onlineUsers).toEqual(["alice"]);
+    expect(reseed.onlineUsers).toEqual(live.onlineUsers);
+  });
+
+  it("normalizes a Set nested inside a patch", () => {
+    const ch = new BroadcastChannel<Calc>();
+    const frames: unknown[] = [];
+    ch.subscribe("s", (f) => frames.push(f));
+    ch.publish("s", { _v: 0 } as Calc);
+    ch.publish("s", { _v: 1 } as Calc, [
+      { nested: { tags: new Set(["x"]) } } as unknown as Partial<Calc>,
+    ]);
+    const sent = over_the_wire(frames.at(-1)) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(sent["1"]).toEqual({ nested: { tags: ["x"] } });
+  });
+
+  it("leaves a Map alone — its JSON encoding is ambiguous, not wrong", () => {
+    const ch = new BroadcastChannel<Calc>();
+    const frames: unknown[] = [];
+    ch.subscribe("s", (f) => frames.push(f));
+    ch.publish("s", { _v: 0 } as Calc);
+    ch.publish("s", { _v: 1 } as Calc, [
+      { meta: new Map([["k", "v"]]) } as unknown as Partial<Calc>,
+    ]);
+    const sent = over_the_wire(frames.at(-1)) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(sent["1"]).toEqual({ meta: {} });
   });
 });

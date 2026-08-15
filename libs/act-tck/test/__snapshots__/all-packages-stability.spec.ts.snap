@@ -353,6 +353,22 @@ export function act<
     autoclose_archiver: (state_name) => _aa.get(state_name) ?? null,
   };
   const pending_projections: Projection<any>[] = [];
+  /**
+   * Reaction objects contributed BY projections. A projection's own
+   * reactions legitimately target it; anything else pointed at a target a
+   * projection serves is the #1467 collision. Recorded at registration
+   * because projections arrive through two doors (\`withProjection\` merges
+   * immediately, \`withSlice\` defers to build) and neither retains them.
+   * Identity is the same test \`merge_projection\` uses.
+   */
+  const projection_reactions = new Set<unknown>();
+  const record_projection_reactions = (proj: Projection<any>) => {
+    for (const register of Object.values(
+      proj.events as Record<string, { reactions: Map<string, unknown> }>
+    ))
+      for (const reaction of register.reactions.values())
+        projection_reactions.add(reaction);
+  };
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
   // Validated fold-projection ingredients, resolved once on the first
@@ -361,6 +377,9 @@ export function act<
   // per-stream cache that must never be shared across Acts.
   const fold_specs: {
     target: string;
+    /** Identity of the registering projection, so a repeat registration of
+     *  the same object is recognized as one claim rather than two (#1469). */
+    projection: Projection<any>;
     merged: any;
     flush: any;
     config: any;
@@ -529,6 +548,7 @@ export function act<
         return builder as never;
       },
       withProjection: (proj) => {
+        record_projection_reactions(proj as Projection<any>);
         merge_projection(proj as Projection<any>, registry.events);
         register_batch_handler(proj as Projection<any>, batch_handlers);
         if ((proj as Projection<any>).fold)
@@ -575,6 +595,7 @@ export function act<
         // every tenant.
         if (!_built) {
           for (const proj of pending_projections) {
+            record_projection_reactions(proj);
             merge_projection(proj, registry.events as Record<string, any>);
             register_batch_handler(proj, batch_handlers);
             if (proj.fold) fold_projections.push(proj);
@@ -614,10 +635,16 @@ export function act<
             //
             // With this check all four {batch, fold}² pairings throw;
             // previously only batch × batch did.
-            if (
-              batch_handlers.has(proj.target!) ||
-              fold_specs.some((s) => s.target === proj.target)
-            )
+            // Re-registering the SAME projection object is a no-op, not a
+            // duplicate (#1469) — a projection exported from a module and
+            // embedded by two slices, or a \`.withProjection(p)\` written
+            // twice, is a legitimate pattern that both sibling paths
+            // (\`merge_projection\`, \`register_batch_handler\`) already treat
+            // as idempotent. Only two DIFFERENT claimants on one target are
+            // an error.
+            const claimed = fold_specs.find((s) => s.target === proj.target);
+            if (claimed?.projection === proj) continue;
+            if (batch_handlers.has(proj.target!) || claimed)
               throw new Error(
                 \`Duplicate projection target "\${proj.target}" — a target is served by one batch handler or one state projection, never both\`
               );
@@ -627,10 +654,39 @@ export function act<
             // would leak folded rows between Acts built from this builder.
             fold_specs.push({
               target: proj.target!,
+              projection: proj,
               merged,
               flush: fold.flush,
               config: fold.config,
             });
+          }
+          // A target is served by ONE thing (#1467). The guard above covers
+          // projection-vs-projection; this covers the third claimant a
+          // projection has no way to see: an ordinary reaction pointed at a
+          // target a batch handler or fold already owns.
+          //
+          // The drain dispatches a stream with a batch handler through that
+          // handler and nothing else (\`drain-cycle.ts\`), so the foreign
+          // reaction never runs — silently, with no error, retry or block —
+          // and the fold cold-loads the foreign event's stream as ITS state,
+          // writing another aggregate's row into its read table. Exactly the
+          // #1440 damage through the seam that fix did not reach.
+          //
+          // A projection's OWN reactions legitimately target it, so they are
+          // excluded by object identity — the same test \`merge_projection\`
+          // uses to tell a re-registration from a collision.
+          for (const register of Object.values(registry.events)) {
+            for (const reaction of register.reactions.values()) {
+              if (typeof reaction.resolver === "function") continue;
+              const target = reaction.resolver.target;
+              const claimed =
+                batch_handlers.has(target) ||
+                fold_specs.some((f) => f.target === target);
+              if (claimed && !projection_reactions.has(reaction))
+                throw new Error(
+                  \`Reaction on target "\${target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run\`
+                );
+            }
           }
           finalize_deprecations();
           validate_lane_references(registry, lanes);
@@ -1797,10 +1853,17 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    if (running.length === 0) return;
+    // The settle loop drives the drain, so it has to be waited on too
+    // (#1468). \`SettleLoop.stop()\` cancels scheduling only: a cycle already
+    // inside its correlate → drain loop keeps running, and would otherwise
+    // claim a stream after teardown returned — and, under \`disposeAndExit\`,
+    // after the store adapter was disposed.
+    const settling = this._settle.inflight;
+    if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     // Assigned synchronously by the executor below, before the race is
     // awaited — so the \`finally\` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
@@ -16902,6 +16965,19 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
   /**
+   * Resolves when the cycle currently in flight finishes; \`undefined\` when
+   * idle (#1468). \`_running\` answers "is a cycle running?" for the
+   * re-arm bookkeeping; this answers "tell me when it is done" for a
+   * graceful shutdown.
+   *
+   * \`stop()\` only cancels *scheduling* — a cycle already inside its
+   * correlate → drain loop keeps going, and because \`DrainController.drain\`
+   * does not consult \`_stopped\`, it can claim a stream after teardown
+   * returned and after the store adapter was disposed. Never rejects: the
+   * cycle's own \`catch\` contains its errors, so awaiting this is safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  /**
    * Set when a \`schedule()\` timer fires while a cycle is still running
    * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
    * the wake-up isn't dropped — a commit landing during the final
@@ -16946,6 +17022,11 @@ export class SettleLoop<TEvents extends Schemas> {
         return;
       }
       this._running = true;
+
+      let settle_done!: () => void;
+      this._inflight = new Promise<void>((done) => {
+        settle_done = done;
+      });
 
       (async () => {
         await this._deps.init();
@@ -17015,6 +17096,8 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          this._inflight = undefined;
+          settle_done();
           // A wake-up arrived mid-cycle. Re-arm one more pass with its
           // options so the requested drain actually happens (ACT-1205).
           const pending = this._pending;
@@ -17024,6 +17107,15 @@ export class SettleLoop<TEvents extends Schemas> {
           }
         });
     }, debounceMs);
+  }
+
+  /**
+   * The cycle currently in flight, or \`undefined\` when idle (#1468). A
+   * graceful shutdown awaits this alongside the drain controllers so a
+   * settle parked in \`correlate\` does not resume after teardown.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
@@ -19839,10 +19931,17 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    if (running.length === 0) return;
+    // The settle loop drives the drain, so it has to be waited on too
+    // (#1468). \`SettleLoop.stop()\` cancels scheduling only: a cycle already
+    // inside its correlate → drain loop keeps running, and would otherwise
+    // claim a stream after teardown returned — and, under \`disposeAndExit\`,
+    // after the store adapter was disposed.
+    const settling = this._settle.inflight;
+    if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     // Assigned synchronously by the executor below, before the race is
     // awaited — so the \`finally\` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
@@ -34728,6 +34827,19 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
   /**
+   * Resolves when the cycle currently in flight finishes; \`undefined\` when
+   * idle (#1468). \`_running\` answers "is a cycle running?" for the
+   * re-arm bookkeeping; this answers "tell me when it is done" for a
+   * graceful shutdown.
+   *
+   * \`stop()\` only cancels *scheduling* — a cycle already inside its
+   * correlate → drain loop keeps going, and because \`DrainController.drain\`
+   * does not consult \`_stopped\`, it can claim a stream after teardown
+   * returned and after the store adapter was disposed. Never rejects: the
+   * cycle's own \`catch\` contains its errors, so awaiting this is safe.
+   */
+  private _inflight: Promise<void> | undefined;
+  /**
    * Set when a \`schedule()\` timer fires while a cycle is still running
    * (ACT-1205). The in-flight cycle's \`finally\` re-arms one more pass so
    * the wake-up isn't dropped — a commit landing during the final
@@ -34772,6 +34884,11 @@ export class SettleLoop<TEvents extends Schemas> {
         return;
       }
       this._running = true;
+
+      let settle_done!: () => void;
+      this._inflight = new Promise<void>((done) => {
+        settle_done = done;
+      });
 
       (async () => {
         await this._deps.init();
@@ -34841,6 +34958,8 @@ export class SettleLoop<TEvents extends Schemas> {
         })
         .finally(() => {
           this._running = false;
+          this._inflight = undefined;
+          settle_done();
           // A wake-up arrived mid-cycle. Re-arm one more pass with its
           // options so the requested drain actually happens (ACT-1205).
           const pending = this._pending;
@@ -34850,6 +34969,15 @@ export class SettleLoop<TEvents extends Schemas> {
           }
         });
     }, debounceMs);
+  }
+
+  /**
+   * The cycle currently in flight, or \`undefined\` when idle (#1468). A
+   * graceful shutdown awaits this alongside the drain controllers so a
+   * settle parked in \`correlate\` does not resume after teardown.
+   */
+  get inflight(): Promise<void> | undefined {
+    return this._inflight;
   }
 
   /** Cancel any pending or active settle cycle. Idempotent. */
@@ -40051,9 +40179,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -40169,14 +40305,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -41006,9 +41148,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -41124,14 +41274,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -45377,9 +45533,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -45495,14 +45659,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
@@ -45891,9 +46061,17 @@ function fan_out<S extends BroadcastState>(
 const wire_safe = <T>(patch: T): T => {
   if (patch === null || typeof patch !== "object") return patch;
   if (Array.isArray(patch)) return patch.map(wire_safe) as T;
-  // Non-plain objects (Date, Map, class instances) are left to whatever the
-  // host's serializer already does with them; rewriting their internals
-  // would change more than the delete signal.
+  // A Set has exactly one sensible JSON encoding, and \`JSON.stringify\` gives
+  // it the wrong one: \`{}\`. The framework's own \`PresenceTracker.online()\`
+  // returns a Set and the presence recipe feeds it straight to \`overlay()\`,
+  // so the documented way to broadcast presence shipped an empty object to
+  // every client — and then froze, because a client holding \`{}\` treats
+  // every later empty patch as a no-op (#1472).
+  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  // Everything else non-plain (Date, Map, class instances) is left to
+  // whatever the host's serializer already does with it. \`Date\` has a
+  // defined encoding; \`Map\` does not have an unambiguous one (entries or
+  // object?), so guessing would trade a visible bug for a silent choice.
   const proto = Object.getPrototypeOf(patch);
   if (proto !== Object.prototype && proto !== null) return patch;
   const out: Record<string, unknown> = {};
@@ -46009,14 +46187,20 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       return undefined;
     }
 
-    const state = apply_patch(prev, overlay_patch) as S;
+    // Normalize BEFORE applying to the cache, so a reconnecting client's
+    // reseed and a live client's frame agree (#1472). \`apply_patch\` treats
+    // \`null\` and \`undefined\` as the same delete signal, so normalizing first
+    // does not change the delete semantics — it only fixes the encodings
+    // that would not survive JSON.
+    const safe_patch = wire_safe(overlay_patch);
+    const state = apply_patch(prev, safe_patch) as S;
     this.state_cache.set(streamId, state);
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
     // stale (the key equals the client's cachedV). Ordinary patches omit it.
     const msg: PatchMessage<S> = {
-      [state._v]: wire_safe(overlay_patch),
+      [state._v]: safe_patch,
       _overlay: true,
     };
     fan_out(this.channels.get(streamId), msg, (error) =>
