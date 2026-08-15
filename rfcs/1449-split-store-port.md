@@ -82,9 +82,13 @@ With `claim` reading only its own tables, `Store` divides cleanly:
 
 **Build this only on demand.** It buys a deployment option and no performance that step 1 has not already delivered, at the cost of a second port, a second TCK, and an untested adapter × adapter matrix.
 
-### Prerequisite
+### Prerequisite — shipped, with one half deferred
 
-**The correlate checkpoint must be durable and single-writer.** It is `private _checkpoint = -1` in process memory, recovered on cold start from the subscription watermark minus a 10k back-scan. Under N workers there are N uncoordinated correlators duplicating the same scans and UPSERTs, and the resume point is derived from precisely the coupling the split is meant to break.
+**The correlate checkpoint is now durable** ([#1493](https://github.com/Rotorsoft/act-root/pull/1493)). It was `private _checkpoint = -1` in process memory, recovered on cold start from the subscription watermark minus a 10k back-scan — a heuristic, and a resume point derived from precisely the coupling the split is meant to break. It now lives in its own single-row relation per scope, read from `subscribe`'s return and advanced by `ack`, so maintaining it costs no store round trip of its own.
+
+**Single-writer was deliberately not built.** Mutual exclusion needs a step where exactly one correlator wins, which is a store call of its own — the opposite of riding operations the pipeline already performs. So N workers still scan the same range. This is better than the status quo it replaced (each worker had its *own* in-memory floor, arbitrarily far behind, so they scanned *different and larger* ranges), and worth revisiting only if a measurement shows duplicate correlate scans cost something. RFC 1449's own numbers put the win in `claim`, not correlate.
+
+Two designs were built and rejected on evidence along the way — a reserved subscription row (it miscounts six operator surfaces; `prioritize` returned 2 where the answer was 1) and deriving the floor from `MAX(correlated)` (it livelocks past a reaction-less run longer than the scan's page limit). Both are recorded in [RFC 1484](./1484-correlate-checkpoint.md) so they are not re-proposed.
 
 **Ruled out as a prerequisite (verified, #1483):** an earlier draft claimed a stale mark could stall a stream into blocking, because an all-empty cycle cannot advance the watermark and `claim` bumps `retry` on every re-acquisition. It cannot: the cycle still *acks* an empty-payload result, and a successful ack resets `retry`. The related watermark jump — an empty-fetch stream fast-forwarding to the cycle's window max, past its own unhandled events — is reproducible only by fault injection, because in both the pull model and the mark model an empty fetch means there is genuinely no work to skip. The `fetch_window_at` fallback stays load-bearing for settle convergence.
 
@@ -105,8 +109,8 @@ Each step ships independently and is valuable on its own.
 | # | Step | Ships alone | Notes |
 |---|---|---|---|
 | 0 | **Benchmarks.** Extend `claim-scale.bench.mjs` to 50k/100k; write the missing act-sqlite equivalent. Record both in the respective `PERFORMANCE.md`. | scripts + docs | Establishes the bar; SQLite is expected to produce the headline number. |
-| 1 | **Durable, single-writer-leased correlate checkpoint.** Prefer a zero-surface home (a reserved subscription row) over a new column or table. | deletes N-fold duplicate scans | Measure the N-worker win on its own. |
-| 2 | **RFC for the work set** (`rfcs/NNNN-subscription-work-set.md`). | docs | Gates the public surface; lands before any of step 3. |
+| 1 | **Durable correlate checkpoint** — ✅ shipped in [#1493](https://github.com/Rotorsoft/act-root/pull/1493). Its own single-row relation per scope; read from `subscribe`'s return, advanced by `ack`, so it costs no round trip of its own. | restart resumes exactly | Single-writer was deliberately dropped — see below. |
+| 2 | **RFC for the work set** — ✅ [`rfcs/1486-subscription-work-set.md`](./1486-subscription-work-set.md). | docs | Gates the public surface; settles the three open questions below. |
 | 3 | **`correlated` column + partial index + `subscribe({correlated})`** on PG, SQLite, InMemory, with TCK cases and the `correlated IS NULL` legacy arm. | dark — no behavior change | The bulk of the work. |
 | 4 | **Correlate becomes the universal producer** — resolves static targets too, no longer early-returns for static-only apps, records `correlated`. | behavior change | Needs the static-only-app cost numbers from step 0. |
 | 5 | **Delete the legacy probe arm** + add an opt-in reconciliation sweep. | payoff | `claim` stops touching the event log on both adapters. |
@@ -135,7 +139,7 @@ Benchmark construction: assign event ids in randomized order so a stream's water
 One optional field on an existing port method:
 
 ```ts
-Store.subscribe(streams: { stream, source?, priority?, lane?, pending? }[])
+Store.subscribe(streams: { stream, source?, priority?, lane?, correlated? }[])
 ```
 
 No new port, no new method, no new table. `subscribe` is already the idempotent UPSERT called from the right place, which keeps "record the target" and "record its frontier" in one statement.
@@ -144,7 +148,7 @@ No new port, no new method, no new table. `subscribe` is already the idempotent 
 
 - **Additive, MINOR** — `Store.subscribe`'s input type gains an optional field. Existing adapters compile and pass unchanged.
 - **Semantic change with no type diff** — `claim`'s rule moves from "claimable iff the log holds an event past the watermark" to "claimable iff the subscription store holds a mark". Exactly the category the charter exists to catch and a type diff will not surface. It also settles #1446 by making the rule definitional.
-- **TCK, in the same PR as the port change** (per CLAUDE.md), against all three in-tree adapters: mark-then-claim; mark monotonicity (`GREATEST`, never regresses); a stream with no mark is not claimable; `ack` to `pending` removes the stream from the claimable set and a later higher mark re-adds it; stale-mark self-heal (depends on step 1); `reset` / `unblock` / `defer` / `prioritize` interaction with the mark; the legacy `correlated IS NULL` arm while it exists.
+- **TCK, in the same PR as the port change** (per CLAUDE.md), against all three in-tree adapters: mark-then-claim; mark monotonicity (`GREATEST`, never regresses); a stream with no mark is not claimable; `ack` to `correlated` removes the stream from the claimable set and a later higher mark re-adds it; stale-mark self-heal (depends on step 1); `reset` / `unblock` / `defer` / `prioritize` interaction with the mark; the legacy `correlated IS NULL` arm while it exists.
 - **Docs, same PR:** `concurrency-model.md`, `correlation-and-drain.md`, `extension-points.md` (method list *and* semantics), `priority-lanes.md` (ordering now applies over the correlated set), `guides/writing-a-store.md`, plus behavior-contract rows for every runtime claim added.
 - **RFC required for step 3** — the public surface addition gets its own RFC per step 3.
 
