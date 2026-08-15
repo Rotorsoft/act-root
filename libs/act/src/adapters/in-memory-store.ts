@@ -9,13 +9,7 @@
  * @category Adapters
  */
 
-import {
-  CORRELATE_LANE,
-  CORRELATE_STREAM,
-  DEFAULT_LANE,
-  SNAP_EVENT,
-  TOMBSTONE_EVENT,
-} from "../ports.js";
+import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -352,8 +346,6 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated = -1;
-  private _correlated_by: string | undefined;
-  private _correlated_until = 0;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -373,8 +365,6 @@ export class InMemoryStore implements Store {
     this._events.length = 0;
     this._next_id = 0;
     this._correlated = -1;
-    this._correlated_by = undefined;
-    this._correlated_until = 0;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -631,30 +621,6 @@ export class InMemoryStore implements Store {
     // event committed between the cycle's fetch and its ack was acked past
     // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
     // first event this store ever issues — was silently skipped.
-    // Reserved lane (#1484): the correlate checkpoint, kept out of the
-    // subscriptions map so no stream-scoped surface counts it.
-    if (lane === CORRELATE_LANE) {
-      const now = Date.now();
-      if (
-        this._correlated_by !== undefined &&
-        this._correlated_by !== by &&
-        this._correlated_until > now
-      )
-        return [];
-      this._correlated_by = by;
-      this._correlated_until = now + millis;
-      return [
-        {
-          stream: CORRELATE_STREAM,
-          source: undefined,
-          at: this._correlated,
-          retry: -1,
-          by,
-          lagging: true,
-        },
-      ];
-    }
-
     const has_work = (s: InMemoryStream): boolean => {
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
@@ -761,33 +727,25 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark };
+    return { subscribed, watermark, correlated: this._correlated };
   }
 
   /**
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
-  async ack(leases: Lease[]) {
-    // Reserved lane (#1484) — advance the checkpoint and release its lease.
-    let rest = leases;
-    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
-    if (correlate) {
-      rest = leases.filter((l) => l !== correlate);
-      if (this._correlated_by === correlate.by) {
-        this._correlated_by = undefined;
-        this._correlated_until = 0;
-        if (correlate.at > this._correlated) this._correlated = correlate.at;
-      }
-      if (rest.length === 0) return [correlate];
-    }
+  async ack(leases: Lease[], correlated?: number) {
+    // The correlate checkpoint rides the ack the drain already makes (#1484).
+    // Monotonic: a lower value never regresses it.
+    if (correlated !== undefined && correlated > this._correlated)
+      this._correlated = correlated;
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
     // in-memory equivalent of the single-transaction contract on
     // {@link Store.ack}: no await between entries, so a caller
     // never observes a cycle's acks without its schedules. `due`-carrying
     // entries defer (and return undefined), the rest ack.
-    return rest
+    return leases
       .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);
   }

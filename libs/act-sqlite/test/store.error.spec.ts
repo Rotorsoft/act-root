@@ -1,12 +1,6 @@
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import {
-  CORRELATE_LANE,
-  CORRELATE_STREAM,
-  ConcurrencyError,
-  StoreError,
-  ValidationError,
-} from "@rotorsoft/act";
+import { ConcurrencyError, StoreError, ValidationError } from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
 
 type Stmt = string | { sql: string; args?: unknown[] };
@@ -357,45 +351,5 @@ describe("SqliteStore error paths", () => {
     (db as unknown as { client: unknown }).client = client;
     const wiped = await db.forget_pii("never-existed");
     expect(wiped).toBe(0);
-  });
-});
-
-describe("SqliteStore reserved-lane error paths (#1484)", () => {
-  it("claim: wraps a checkpoint-lease failure in StoreError", async () => {
-    const s = new SqliteStore({ url: ":memory:" });
-    // The reserved-lane path uses a direct `execute`, not a transaction, so
-    // the shared `mockClientFailOn` (which fails inside `transaction()`)
-    // would not reach it.
-    (s as unknown as { client: unknown }).client = {
-      execute: vi.fn().mockRejectedValue(new Error("mocked correlated")),
-      transaction: vi.fn(),
-      close: vi.fn(),
-    };
-    const err = await s.claim(1, 0, "w", 1000, CORRELATE_LANE).catch((e) => e);
-    expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("claim");
-  });
-
-  it("ack: wraps a checkpoint-advance failure in StoreError", async () => {
-    const s = new SqliteStore({ url: ":memory:" });
-    (s as unknown as { client: unknown }).client = {
-      execute: vi.fn().mockRejectedValue(new Error("mocked correlated")),
-      transaction: vi.fn(),
-      close: vi.fn(),
-    };
-    const err = await s
-      .ack([
-        {
-          stream: CORRELATE_STREAM,
-          source: undefined,
-          at: 5,
-          retry: -1,
-          by: "w",
-          lagging: true,
-        },
-      ])
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("ack");
   });
 });

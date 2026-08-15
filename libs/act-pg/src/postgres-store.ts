@@ -20,8 +20,6 @@ import type {
   StreamStats,
 } from "@rotorsoft/act";
 import {
-  CORRELATE_LANE,
-  CORRELATE_STREAM,
   ConcurrencyError,
   dateReviver,
   log,
@@ -1101,41 +1099,6 @@ export class PostgresStore implements Store {
     millis: number,
     lane?: string
   ): Promise<Lease[]> {
-    // Reserved lane (#1484): the correlate checkpoint lives in its own
-    // single-row relation, so no stream-scoped surface counts it. One
-    // statement — the WHERE decides availability, the UPDATE takes it, and
-    // RETURNING reads the checkpoint in the same round trip.
-    if (lane === CORRELATE_LANE) {
-      const client = await this._client("claim");
-      try {
-        const { rows } = await client.query<{ at: string }>(
-          `UPDATE ${this._fqc}
-              SET leased_by = $1,
-                  leased_until = NOW() + ($2::int * INTERVAL '1 millisecond')
-            WHERE id = 0
-              AND (leased_by IS NULL OR leased_by = $1 OR leased_until <= NOW())
-          RETURNING at`,
-          [by, millis]
-        );
-        return rows.length
-          ? [
-              {
-                stream: CORRELATE_STREAM,
-                source: undefined,
-                at: Number(rows[0].at),
-                retry: -1,
-                by,
-                lagging: true,
-              },
-            ]
-          : [];
-      } catch (error) {
-        throw new StoreError("claim", { cause: error });
-      } finally {
-        client.release();
-      }
-    }
-
     const client = await this._client("claim");
     try {
       await client.query("BEGIN");
@@ -1330,7 +1293,7 @@ export class PostgresStore implements Store {
       priority?: number;
       lane?: string;
     }>
-  ): Promise<{ subscribed: number; watermark: number }> {
+  ): Promise<{ subscribed: number; watermark: number; correlated: number }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -1379,11 +1342,21 @@ export class PostgresStore implements Store {
           [JSON.stringify(streams)]
         );
       }
-      const { rows } = await client.query<{ max: number | null }>(
-        `SELECT COALESCE(MAX(at), -1) AS max FROM ${this._fqs}`
+      // Watermark and correlate checkpoint in one round trip — correlate
+      // needs both, and it already calls subscribe (#1484).
+      const { rows } = await client.query<{
+        max: number | null;
+        correlated: string | null;
+      }>(
+        `SELECT (SELECT COALESCE(MAX(at), -1) FROM ${this._fqs}) AS max,
+                (SELECT at FROM ${this._fqc} WHERE id = 0) AS correlated`
       );
       await client.query("COMMIT");
-      return { subscribed, watermark: rows[0]?.max ?? -1 };
+      return {
+        subscribed,
+        watermark: rows[0]?.max ?? -1,
+        correlated: Number(rows[0]?.correlated ?? -1),
+      };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw new StoreError("subscribe", { cause: error });
@@ -1398,28 +1371,7 @@ export class PostgresStore implements Store {
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    * @returns Acked leases.
    */
-  async ack(leases: Lease[]): Promise<Lease[]> {
-    // Reserved lane (#1484) — advance the checkpoint and release its lease.
-    let rest = leases;
-    const correlate = leases.find((l) => l.stream === CORRELATE_STREAM);
-    if (correlate) {
-      rest = leases.filter((l) => l !== correlate);
-      const client = await this._client("ack");
-      try {
-        await client.query(
-          `UPDATE ${this._fqc}
-              SET at = GREATEST(at, $2::bigint),
-                  leased_by = NULL, leased_until = NULL
-            WHERE id = 0 AND leased_by = $1`,
-          [correlate.by, correlate.at]
-        );
-      } catch (error) {
-        throw new StoreError("ack", { cause: error });
-      } finally {
-        client.release();
-      }
-      if (rest.length === 0) return [correlate];
-    }
+  async ack(leases: Lease[], correlated?: number): Promise<Lease[]> {
     const client = await this._client("ack");
     try {
       await client.query("BEGIN");
@@ -1460,8 +1412,15 @@ export class PostgresStore implements Store {
       WHERE s.stream = i.stream AND s.leased_by = i.by
       RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane, i.due
       `,
-        [JSON.stringify(rest)]
+        [JSON.stringify(leases)]
       );
+      // The correlate checkpoint rides this ack (#1484) — same transaction,
+      // no round trip of its own. `GREATEST` keeps it monotonic.
+      if (correlated !== undefined)
+        await client.query(
+          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
+          [correlated]
+        );
       await client.query("COMMIT");
 
       return rows

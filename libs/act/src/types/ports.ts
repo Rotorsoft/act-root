@@ -578,20 +578,6 @@ export interface Store extends Disposable, EventSource {
    * @see {@link ack} for acknowledging completion
    * @see {@link block} for blocking failed streams
    */
-  /**
-   * Reserved lane carrying the correlate checkpoint (#1484).
-   *
-   * `claim(1, 0, by, millis, CORRELATE_LANE)` leases the checkpoint — how far
-   * `correlate` has READ the event log — and returns it as the lease's `at`,
-   * or `[]` when another correlator holds it. `ack` on that lease advances and
-   * releases it. Adapters keep the value in their own single-row relation, not
-   * in the subscriptions table, so it is never counted by `prioritize`,
-   * `reset`, `unblock`, `query_streams` or `blocked_streams`.
-   *
-   * No `DrainController` is ever constructed for this lane — lanes come from
-   * `.withLane(...)` declarations plus the implicit `"default"` — so the drain
-   * pipeline never sees it.
-   */
   claim: (
     lagging: number,
     leading: number,
@@ -642,7 +628,26 @@ export interface Store extends Disposable, EventSource {
       /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
       lane?: string;
     }>
-  ) => Promise<{ subscribed: number; watermark: number }>;
+  ) => Promise<{
+    subscribed: number;
+    watermark: number;
+    /**
+     * The correlate checkpoint (#1484): how far `correlate` has **read** the
+     * event log, or `-1` when it has never advanced.
+     *
+     * Distinct from a subscription's `at` (how far a *target* has been
+     * processed) — a run of events resolving to no target moves this and no
+     * watermark. It rides `subscribe`'s existing return, and is advanced by
+     * `ack`'s optional `correlated` argument, so maintaining it costs no
+     * store round trip of its own: `correlate` already calls `subscribe`, and
+     * the drain already calls `ack`.
+     *
+     * Adapters keep it in their own single-row relation, never as a
+     * subscription, so no stream-scoped surface (`prioritize`, `reset`,
+     * `unblock`, `query_streams`, `blocked_streams`) ever counts it.
+     */
+    correlated: number;
+  }>;
 
   /**
    * Finalizes leased streams **atomically**: acknowledges the ones
@@ -681,10 +686,15 @@ export interface Store extends Disposable, EventSource {
    * ));
    * ```
    *
+   * `correlated` advances the correlate checkpoint in the same call — see
+   * {@link subscribe}'s return. Omitted leaves it untouched; a lower value
+   * never regresses it. Piggybacking here is what keeps the checkpoint free:
+   * the drain already acks every cycle.
+   *
    * @see {@link claim} for acquiring leases
    * @see {@link defer} for the standalone (operator-facing) schedule write
    */
-  ack: (leases: Lease[]) => Promise<Lease[]>;
+  ack: (leases: Lease[], correlated?: number) => Promise<Lease[]>;
 
   /**
    * Blocks streams after persistent processing failures.

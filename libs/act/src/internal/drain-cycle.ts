@@ -203,7 +203,9 @@ export async function run_drain_cycle<
    * failure in between would lose the `blocked` event permanently (#1390).
    */
   on_blocked: (blocked: BlockedLease[]) => void,
-  lane?: string
+  lane?: string,
+  /** Current correlate checkpoint, persisted by the ack this cycle makes. */
+  correlated?: () => number | undefined
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
   const leased = await ops.claim(
@@ -320,7 +322,11 @@ export async function run_drain_cycle<
           ? { ...h.lease, at: h.acked_at }
           : [];
   });
-  const acked = await ops.ack(submitted);
+  // The correlate checkpoint rides this ack (#1484). Correlate advances its
+  // cursor in memory; persisting it here costs no round trip of its own,
+  // because the drain acks every cycle anyway. Monotonic in the store, so
+  // repeating a value is a no-op.
+  const acked = await ops.ack(submitted, correlated?.());
 
   // Every adapter gates `ack` on the lease still being held
   // (`WHERE leased_by = by`) — correctly, since that is what stops an
@@ -410,6 +416,12 @@ export type DrainControllerDeps<
   readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
   readonly lane?: string;
+  /**
+   * Current correlate checkpoint (#1484), read at finalize time and persisted
+   * by the `ack` this cycle already makes — so maintaining it costs no store
+   * round trip of its own.
+   */
+  readonly correlated?: () => number | undefined;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
   readonly defaults?: {
     readonly streamLimit?: number;
@@ -605,7 +617,8 @@ export class DrainController<
         eventLimit,
         leaseMillis,
         (b) => this._deps.on_blocked(b),
-        this._deps.lane
+        this._deps.lane,
+        this._deps.correlated
       );
 
       // The store responded (claim/fetch/ack+defer/block all succeeded) —

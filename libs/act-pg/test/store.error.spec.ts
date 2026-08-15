@@ -15,7 +15,7 @@ vi.mock("pg", () => {
   };
 });
 
-import { CORRELATE_LANE, CORRELATE_STREAM, StoreError } from "@rotorsoft/act";
+import { StoreError } from "@rotorsoft/act";
 import * as pg from "pg";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -151,7 +151,7 @@ describe("PostgresStore", () => {
         )
       );
       const result = await store.subscribe([]);
-      expect(result).toEqual({ subscribed: 0, watermark: -1 });
+      expect(result).toEqual({ subscribed: 0, watermark: -1, correlated: -1 });
     });
 
     it("handles undefined rowCount in INSERT", async () => {
@@ -169,7 +169,7 @@ describe("PostgresStore", () => {
         )
       );
       const result = await store.subscribe([{ stream: "s" }]);
-      expect(result).toEqual({ subscribed: 0, watermark: 42 });
+      expect(result).toEqual({ subscribed: 0, watermark: 42, correlated: -1 });
     });
 
     it("wraps a DB error in StoreError", async () => {
@@ -420,47 +420,5 @@ describe("PostgresStore", () => {
         })
       ).rejects.toThrow("truncate fail");
     });
-  });
-});
-
-describe("PostgresStore reserved-lane error paths (#1484)", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  const failing = () => {
-    const release = vi.fn();
-    vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
-      query: vi.fn().mockRejectedValue(new Error("boom")),
-      release,
-    } as never);
-    return { store: new PostgresStore({ port: 5431 }), release };
-  };
-
-  it("claim: wraps a checkpoint-lease failure and releases the client", async () => {
-    const { store, release } = failing();
-    const err = await store
-      .claim(1, 0, "w", 1000, CORRELATE_LANE)
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("claim");
-    expect(release).toHaveBeenCalled();
-  });
-
-  it("ack: wraps a checkpoint-advance failure and releases the client", async () => {
-    const { store, release } = failing();
-    const err = await store
-      .ack([
-        {
-          stream: CORRELATE_STREAM,
-          source: undefined,
-          at: 5,
-          retry: -1,
-          by: "w",
-          lagging: true,
-        },
-      ])
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(StoreError);
-    expect(err.operation).toBe("ack");
-    expect(release).toHaveBeenCalled();
   });
 });

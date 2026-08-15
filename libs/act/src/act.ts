@@ -744,6 +744,7 @@ export class Act<
         batch_handlers: this._batch_handlers,
         handle: this._handle,
         handle_batch: this._handle_batch,
+        correlated: () => this._correlate.checkpoint,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close. Runs the same close machinery as

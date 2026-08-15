@@ -1,4 +1,3 @@
-import { CORRELATE_STREAM } from "@rotorsoft/act";
 import { z } from "zod";
 import {
   act,
@@ -11,24 +10,6 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
-
-/**
- * Fail the next DRAIN ack only. `correlate` acks the reserved checkpoint
- * lease through the same port method (#1484), so a bare
- * `mockRejectedValueOnce` would be consumed by whichever call came first.
- */
-const fail_next_drain_ack = (message: string) => {
-  const real = store().ack.bind(store());
-  let armed = true;
-  return vi.spyOn(store(), "ack").mockImplementation(async (leases) => {
-    const is_checkpoint = leases.some((l) => l.stream === CORRELATE_STREAM);
-    if (armed && !is_checkpoint) {
-      armed = false;
-      throw new StoreError(message);
-    }
-    return real(leases);
-  });
-};
 
 const counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
@@ -471,10 +452,12 @@ describe("lifecycle listener containment (drain finalize)", () => {
     const blocked: unknown[] = [];
     app.on("blocked", (b) => blocked.push(b));
 
-    // Fail the first DRAIN ack. `correlate` acks the reserved checkpoint
-    // lease through the same port method (#1484), so counting every ack
-    // would spend the injection on whichever call came first.
-    const spy = fail_next_drain_ack("ack");
+    let acks = 0;
+    const real_ack = store().ack.bind(store());
+    const spy = vi.spyOn(store(), "ack").mockImplementation(async (leases) => {
+      if (acks++ === 0) throw new StoreError("ack");
+      return real_ack(leases);
+    });
 
     await app.do("tick", { stream: "ack-fail", actor }, {});
     await app.correlate();

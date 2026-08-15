@@ -16,24 +16,30 @@ Step 1 of [RFC 1449](./1449-split-store-port.md), and a prerequisite for the wor
 
 ## Public surface added
 
-**Two constants. No new port methods.**
+**No new port methods, and no extra store round trips.** The checkpoint rides operations the pipeline already performs:
 
 ```ts
-export const CORRELATE_LANE = "__correlate__";
-export const CORRELATE_STREAM = "__correlate__";
+// correlate already calls subscribe — read the checkpoint from its return
+const { watermark, correlated } = await store().subscribe(targets);
+
+// the drain already acks every cycle — persist the advance in the same call
+await store().ack(leases, checkpoint);
 ```
 
-The checkpoint *is* a lease plus a watermark, which is exactly what `claim`/`ack` already mean, so it rides that pair on a reserved lane:
+- `subscribe`'s return grows `correlated: number` — additive.
+- `ack` grows an optional second argument — additive, monotonic in the store, and omitting it leaves the value untouched.
 
-```ts
-const [lease] = await store().claim(1, 0, by, millis, CORRELATE_LANE);
-// lease.at is the checkpoint; [] means another correlator holds it
-await store().ack([{ ...lease, at: last_id }], []);
-```
+Two earlier revisions were rejected on review. Dedicated `lease_correlated` / `ack_correlated` methods were surface creep every third-party adapter would have to implement. Routing through `claim`/`ack` on a reserved lane removed the methods but still cost two extra round trips per scan, and made checkpoint traffic indistinguishable from drain traffic at the port boundary — three existing specs that injected `ack` failures had to be rewritten to tell them apart.
 
-An empty claim is the signal to **skip** the scan, which is what collapses N workers' duplicated correlation into one. An earlier draft added `lease_correlated` / `ack_correlated` as dedicated methods; that is surface creep for an operation the existing pair already expresses, and every third-party adapter would have had to implement both.
+## What this gives up
 
-No `DrainController` is constructed for this lane — lanes come from `.withLane(...)` declarations plus the implicit `"default"` — so the drain pipeline never claims it.
+**Single-writer is not part of this.** The drain's `claim` leases *streams*, not the checkpoint, so N workers each read the same floor and each scan the same range. Durability is solved; deduplication is not.
+
+That is a deliberate trade for zero round trips, and it still improves on the status quo: previously every worker had its *own* in-memory floor that could sit arbitrarily far behind, so they scanned *different* — and larger — ranges. A shared durable floor puts them all at the same, current position.
+
+Mutual exclusion needs a step where exactly one worker wins, which is a store call of its own. Worth adding only if a measurement shows duplicate correlate scans cost something; RFC 1449's numbers put the win in `claim`, not correlate.
+
+**A restart can re-scan.** The checkpoint persists on the drain's ack, so a correlate scan that finds no targets — and is therefore followed by no drain work — leaves the advance in memory only. Correctness is unaffected (the in-memory cursor still moves, and a re-scan re-derives the same targets); the cost is bounded re-reading after a restart.
 
 ## Storage: its own single-row relation
 
@@ -95,7 +101,8 @@ TCK cases run against all three adapters: round-trip an advance, never regress, 
 | | Verdict |
 |---|---|
 | Reserved subscription row | Built and rejected — miscounts six operator surfaces (measured) |
-| Dedicated `lease_correlated` / `ack_correlated` port methods | Rejected — surface creep; `claim`/`ack` already mean lease-plus-watermark |
+| Dedicated `lease_correlated` / `ack_correlated` port methods | Rejected — surface creep every third-party adapter inherits |
+| `claim`/`ack` on a reserved lane | Rejected — no new methods, but two extra round trips per scan, and checkpoint traffic became indistinguishable from drain traffic |
 | Filter `__`-prefixed rows from those surfaces | Zero schema, but the exclusion is an obligation every future adapter inherits |
 | Derive from `MAX(correlated)` | Livelocks past a reaction-less run longer than the page limit (measured) |
 | Persist as an event in a reserved stream | Write amplification on the hot path, and moves the pollution to `query`/`scan` |
