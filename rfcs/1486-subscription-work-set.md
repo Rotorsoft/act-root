@@ -45,7 +45,13 @@ No new port, no new method, no new table. `subscribe` is already the idempotent 
 
 **On the name.** `correlated` names the only component allowed to write it. That is the design rule stated in the field: not `commit` (the store cannot resolve user-code targets), not `notify` (a best-effort channel cannot be the sole producer), only `correlate` — the one component that sees every event regardless of who wrote it. A name like `pending` or `ready` states a fact about the row; this one states who is entitled to assert it.
 
-It is **unrelated to `meta.correlation`**, the causation-chain id threaded through commits. Act uses "correlate" for two different things — the discovery scan and the causation chain — and this field belongs to the first. Worth keeping in mind when reading `correlated` next to `meta.correlation` in the same subsystem; a rename of either is out of scope here.
+**On the relationship to `meta.correlation`.** These are two views of one relation, not two unrelated uses of a word.
+
+Correlate computes the edge *prospectively*: applying a reaction's resolver to a source event yields the target stream it routes to. When that reaction commits, `reactingTo` threads the triggering event through, so the resulting events inherit its correlation id and record it as causation — the same edge, *realized*. This field holds the frontier of the prospective relation; `meta.correlation` holds the identity of a realized chain.
+
+They are not interchangeable, and the difference is worth stating because it is where the two views come apart. A correlate edge exists for reactions that commit nothing — a webhook delivery produces no events, so no correlation-tagged commit ever follows it — and a correlation id exists for chains with no reactions at all, such as a single `app.do`. Prospective routing is a property of the registry; realized provenance is a property of the log.
+
+So the shared vocabulary is earned: both name which events are downstream of which. Reading `correlated` next to `meta.correlation` should suggest a family resemblance, because there is one.
 
 ## Semantics
 
