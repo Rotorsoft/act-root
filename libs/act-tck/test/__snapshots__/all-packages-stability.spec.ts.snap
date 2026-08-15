@@ -40070,6 +40070,39 @@ const wire_safe = <T>(patch: T): T => {
   return out as T;
 };
 
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -40129,7 +40162,28 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
@@ -40184,7 +40238,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // that would not survive JSON.
     const safe_patch = wire_safe(overlay_patch);
     const state = apply_patch(prev, safe_patch) as S;
-    this.state_cache.set(streamId, state);
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
@@ -41038,6 +41095,39 @@ const wire_safe = <T>(patch: T): T => {
   return out as T;
 };
 
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -41097,7 +41187,28 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
@@ -41152,7 +41263,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // that would not survive JSON.
     const safe_patch = wire_safe(overlay_patch);
     const state = apply_patch(prev, safe_patch) as S;
-    this.state_cache.set(streamId, state);
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
@@ -45415,6 +45529,39 @@ const wire_safe = <T>(patch: T): T => {
   return out as T;
 };
 
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -45474,7 +45621,28 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
@@ -45529,7 +45697,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // that would not survive JSON.
     const safe_patch = wire_safe(overlay_patch);
     const state = apply_patch(prev, safe_patch) as S;
-    this.state_cache.set(streamId, state);
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
@@ -45943,6 +46114,39 @@ const wire_safe = <T>(patch: T): T => {
   return out as T;
 };
 
+/**
+ * Keys an \`overlay()\` contributed to a stream's cached state, carried on the
+ * cached object itself.
+ *
+ * \`publish()\` replaces the cache entry with host-derived state, so overlay
+ * data — presence, computed fields — vanished from the cache while live
+ * clients, which had already applied the overlay frame, kept it. A
+ * reconnecting client then reseeded WITHOUT it and had no way to notice: its
+ * \`_v\` matches the server's, so nothing classifies as \`behind\` (#1473).
+ *
+ * A symbol keeps this out of \`Object.keys\`, \`JSON.stringify\` and therefore
+ * off the wire; living on the cached object means it is evicted with the
+ * entry rather than needing a parallel structure to prune.
+ */
+const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
+
+type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
+
+/** Record which keys an overlay owns, accumulating across overlays. */
+const tag_overlay_keys = <S extends object>(
+  state: S,
+  prev: S | undefined,
+  keys: readonly string[]
+): S => {
+  const carried = (prev as WithOverlayKeys | undefined)?.[OVERLAY_KEYS];
+  Object.defineProperty(state, OVERLAY_KEYS, {
+    value: new Set([...(carried ?? []), ...keys]),
+    enumerable: false,
+    configurable: true,
+  });
+  return state;
+};
+
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private state_cache: StateCache<S>;
@@ -46002,7 +46206,28 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.state_cache.set(streamId, state);
+    // Carry overlay-contributed keys across the commit (#1473). Only keys
+    // an \`overlay()\` actually owns, and only when the new domain state does
+    // not speak to them — so a publisher that drops or overwrites a key
+    // still wins, and presence survives a commit as the docs imply.
+    const prev = this.state_cache.get(streamId) as
+      | (S & WithOverlayKeys)
+      | undefined;
+    const overlay_keys = prev?.[OVERLAY_KEYS];
+    let cached = state;
+    if (overlay_keys?.size && prev) {
+      const carried = { ...state } as S;
+      const kept: string[] = [];
+      for (const key of overlay_keys)
+        if (!(key in state) && key in prev) {
+          (carried as Record<string, unknown>)[key] = (
+            prev as Record<string, unknown>
+          )[key];
+          kept.push(key);
+        }
+      cached = tag_overlay_keys(carried, undefined, kept);
+    }
+    this.state_cache.set(streamId, cached);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
@@ -46057,7 +46282,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // that would not survive JSON.
     const safe_patch = wire_safe(overlay_patch);
     const state = apply_patch(prev, safe_patch) as S;
-    this.state_cache.set(streamId, state);
+    this.state_cache.set(
+      streamId,
+      tag_overlay_keys(state, prev, Object.keys(safe_patch as object))
+    );
 
     // \`_overlay: true\` marks this as a version-neutral update so a caught-up
     // client applies it at the current version instead of dropping it as
