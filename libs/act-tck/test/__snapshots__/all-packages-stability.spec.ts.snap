@@ -9792,9 +9792,9 @@ export const subscribe = (
     priority?: number;
     lane?: string;
   }>,
-  correlated_through?: number
+  correlated_at?: number
 ): Promise<{ subscribed: number; watermark: number; correlated: number }> =>
-  store().subscribe(streams, correlated_through);
+  store().subscribe(streams, correlated_at);
 
 // === errors.ts ===
 import type {
@@ -11971,15 +11971,12 @@ export class InMemoryStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (
-      correlated_through !== undefined &&
-      correlated_through > this._correlated
-    )
-      this._correlated = correlated_through;
+    if (correlated_at !== undefined && correlated_at > this._correlated)
+      this._correlated = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -14183,8 +14180,8 @@ export interface Store extends Disposable, EventSource {
       lane?: string;
     }>,
     /**
-     * Advance the correlate checkpoint to this event id — "the log is
-     * correlated through N" (#1484).
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's \`at\` (#1484).
      *
      * \`correlate\` is the only component that knows how far it has read, and
      * it already calls \`subscribe\` with the targets a scan discovered, so the
@@ -14197,7 +14194,7 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_through?: number
+    correlated_at?: number
   ) => Promise<{
     subscribed: number;
     watermark: number;
@@ -27586,9 +27583,9 @@ export const subscribe = (
     priority?: number;
     lane?: string;
   }>,
-  correlated_through?: number
+  correlated_at?: number
 ): Promise<{ subscribed: number; watermark: number; correlated: number }> =>
-  store().subscribe(streams, correlated_through);
+  store().subscribe(streams, correlated_at);
 
 // === errors.ts ===
 import type {
@@ -29765,15 +29762,12 @@ export class InMemoryStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (
-      correlated_through !== undefined &&
-      correlated_through > this._correlated
-    )
-      this._correlated = correlated_through;
+    if (correlated_at !== undefined && correlated_at > this._correlated)
+      this._correlated = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -31940,8 +31934,8 @@ export interface Store extends Disposable, EventSource {
       lane?: string;
     }>,
     /**
-     * Advance the correlate checkpoint to this event id — "the log is
-     * correlated through N" (#1484).
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's \`at\` (#1484).
      *
      * \`correlate\` is the only component that knows how far it has read, and
      * it already calls \`subscribe\` with the targets a scan discovered, so the
@@ -31954,7 +31948,7 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_through?: number
+    correlated_at?: number
   ) => Promise<{
     subscribed: number;
     watermark: number;
@@ -38232,8 +38226,8 @@ export interface Store extends Disposable, EventSource {
       lane?: string;
     }>,
     /**
-     * Advance the correlate checkpoint to this event id — "the log is
-     * correlated through N" (#1484).
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's \`at\` (#1484).
      *
      * \`correlate\` is the only component that knows how far it has read, and
      * it already calls \`subscribe\` with the targets a scan discovered, so the
@@ -38246,7 +38240,7 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_through?: number
+    correlated_at?: number
   ) => Promise<{
     subscribed: number;
     watermark: number;
@@ -51076,7 +51070,7 @@ export class PostgresStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ): Promise<{ subscribed: number; watermark: number; correlated: number }> {
     const client = await this._client("subscribe");
     try {
@@ -51128,10 +51122,10 @@ export class PostgresStore implements Store {
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
-      if (correlated_through !== undefined)
+      if (correlated_at !== undefined)
         await client.query(
           \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0\`,
-          [correlated_through]
+          [correlated_at]
         );
       // Watermark and checkpoint in one round trip — correlate needs both.
       const { rows } = await client.query<{
@@ -53043,7 +53037,7 @@ export class SqliteStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no \`REGEXP\`, and the portable GLOB grammar cannot
@@ -53094,10 +53088,10 @@ export class SqliteStore implements Store {
       );
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). MAX keeps it monotonic.
-      if (correlated_through !== undefined)
+      if (correlated_at !== undefined)
         await tx.execute({
           sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
-          args: [correlated_through],
+          args: [correlated_at],
         });
       // Watermark and checkpoint together — correlate needs both.
       const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");

@@ -702,15 +702,12 @@ export class InMemoryStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (
-      correlated_through !== undefined &&
-      correlated_through > this._correlated
-    )
-      this._correlated = correlated_through;
+    if (correlated_at !== undefined && correlated_at > this._correlated)
+      this._correlated = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {

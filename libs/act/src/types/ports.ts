@@ -629,8 +629,8 @@ export interface Store extends Disposable, EventSource {
       lane?: string;
     }>,
     /**
-     * Advance the correlate checkpoint to this event id — "the log is
-     * correlated through N" (#1484).
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's `at` (#1484).
      *
      * `correlate` is the only component that knows how far it has read, and
      * it already calls `subscribe` with the targets a scan discovered, so the
@@ -643,7 +643,7 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_through?: number
+    correlated_at?: number
   ) => Promise<{
     subscribed: number;
     watermark: number;

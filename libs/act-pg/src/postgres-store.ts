@@ -1293,7 +1293,7 @@ export class PostgresStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ): Promise<{ subscribed: number; watermark: number; correlated: number }> {
     const client = await this._client("subscribe");
     try {
@@ -1345,10 +1345,10 @@ export class PostgresStore implements Store {
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
-      if (correlated_through !== undefined)
+      if (correlated_at !== undefined)
         await client.query(
           `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
-          [correlated_through]
+          [correlated_at]
         );
       // Watermark and checkpoint in one round trip — correlate needs both.
       const { rows } = await client.query<{

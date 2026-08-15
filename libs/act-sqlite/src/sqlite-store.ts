@@ -653,7 +653,7 @@ export class SqliteStore implements Store {
       priority?: number;
       lane?: string;
     }>,
-    correlated_through?: number
+    correlated_at?: number
   ) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
@@ -704,10 +704,10 @@ export class SqliteStore implements Store {
       );
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). MAX keeps it monotonic.
-      if (correlated_through !== undefined)
+      if (correlated_at !== undefined)
         await tx.execute({
           sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
-          args: [correlated_through],
+          args: [correlated_at],
         });
       // Watermark and checkpoint together — correlate needs both.
       const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");

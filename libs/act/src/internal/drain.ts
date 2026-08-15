@@ -85,6 +85,6 @@ export const subscribe = (
     priority?: number;
     lane?: string;
   }>,
-  correlated_through?: number
+  correlated_at?: number
 ): Promise<{ subscribed: number; watermark: number; correlated: number }> =>
-  store().subscribe(streams, correlated_through);
+  store().subscribe(streams, correlated_at);
