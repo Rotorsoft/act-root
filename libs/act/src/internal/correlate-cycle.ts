@@ -14,6 +14,7 @@
  * @internal
  */
 
+import { randomUUID } from "node:crypto";
 import { log, store } from "../ports.js";
 import type {
   Query,
@@ -134,6 +135,16 @@ export class CorrelateCycle<
    * public option) so tests can shrink it; defaults otherwise.
    */
   private readonly _cold_start_back_scan: number;
+  /**
+   * This correlator's lease-holder id (#1484). Stable for the instance's
+   * lifetime, so a re-entrant scan is recognized as the same holder.
+   */
+  private readonly _by = `correlate-${randomUUID()}`;
+  /**
+   * How long a scan may hold the checkpoint lease. Bounds a crashed
+   * correlator's hold; a healthy scan releases on ack long before this.
+   */
+  private readonly _lease_millis = 30_000;
 
   constructor({
     registry,
@@ -155,6 +166,16 @@ export class CorrelateCycle<
     this._run_scoped = run_scoped;
     this._on_init_async = on_init_async;
     this._cold_start_back_scan = cold_start_back_scan;
+  }
+
+  /**
+   * Read the durable checkpoint without holding its lease, for cold start.
+   */
+  private async _read_checkpoint(): Promise<number> {
+    const at = await store().lease_correlated(this._by, this._lease_millis);
+    if (at === undefined) return -1;
+    await store().ack_correlated(this._by, at);
+    return at;
   }
 
   /** Last correlated event id. */
@@ -208,9 +229,22 @@ export class CorrelateCycle<
     // resolvers, back the cursor off the watermark by a bounded window so
     // the crash-window tail (an uncorrelated event now below a busier
     // stream's watermark) is re-discovered. Never floor below -1.
-    this._checkpoint = this._has_dynamic_resolvers
-      ? Math.max(-1, watermark - this._cold_start_back_scan)
-      : watermark;
+    // Resume from the durable checkpoint (#1484) when one exists. On a first
+    // boot it sits at -1, and a full scan of an existing log would be
+    // unbounded, so seed from the old heuristic — the watermark backed off by
+    // a bounded window, which re-discovers the crash-window tail. After the
+    // first scan the checkpoint is exact and the heuristic never runs again.
+    //
+    // Without dynamic resolvers correlate never scans, so the checkpoint is
+    // inert — keep the plain `max(at)` cold start and touch no lease.
+    if (!this._has_dynamic_resolvers) this._checkpoint = watermark;
+    else {
+      const persisted = await this._read_checkpoint();
+      this._checkpoint =
+        persisted >= 0
+          ? persisted
+          : Math.max(-1, watermark - this._cold_start_back_scan);
+    }
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       // +Infinity: a dynamic resolution's priority can never exceed it, so a
@@ -257,94 +291,122 @@ export class CorrelateCycle<
     if (!this._has_dynamic_resolvers)
       return { subscribed: 0, last_id: this._checkpoint };
 
-    // Use checkpoint as floor, allow explicit query.after to override upward
-    const after = Math.max(this._checkpoint, query.after || -1);
-    const correlated = new Map<
-      string,
-      {
-        source?: string;
-        priority: number;
-        lane?: string;
-        payloads: ReactionPayload<TEvents>[];
-      }
-    >();
-    let last_id = after;
-    await store().query<TEvents>(
-      (event) => {
-        last_id = event.id;
-        const register = this._registry.events[event.name];
-        // skip events with no registered reactions
-        if (register) {
-          for (const reaction of register.reactions.values()) {
-            // only evaluate dynamic resolvers — statics are subscribed at init
-            if (typeof reaction.resolver !== "function") continue;
-            const resolved = reaction.resolver(event);
-            // Let a target through when a scan resolves a strictly higher
-            // priority than it was last subscribed at, so the store's
-            // `GREATEST` upsert raises it — the documented runtime `max()`
-            // invariant, which the plain "already subscribed?" dedup silently
-            // froze at first discovery (#1363). A never-seen target defaults to
-            // -Infinity so its first resolution always passes; static targets
-            // sit at +Infinity so a dynamic resolution never re-opens them.
-            if (
-              resolved &&
-              (resolved.priority ?? 0) >
-                (this._subscribed.get(resolved.target) ??
-                  Number.NEGATIVE_INFINITY)
-            ) {
-              const incoming_priority = resolved.priority ?? 0;
-              const entry = correlated.get(resolved.target) || {
-                source: resolved.source,
-                priority: incoming_priority,
-                lane: resolved.lane,
-                payloads: [],
-              };
-              // Multiple reactions targeting the same stream within a
-              // single correlate scan — keep the max priority, and carry the
-              // winning reaction's lane so the highest-priority reaction sets
-              // the lane (matches the subscribe-side `max()` invariant).
-              if (incoming_priority > entry.priority) {
-                entry.priority = incoming_priority;
-                entry.lane = resolved.lane;
+    // Hold the checkpoint's lease for this scan (#1484). `undefined` means
+    // another correlator is already scanning, so this worker skips instead of
+    // repeating the same range and issuing the same subscribe UPSERTs — the
+    // N-fold duplication this replaces.
+    const leased = await store().lease_correlated(this._by, this._lease_millis);
+    if (leased === undefined)
+      return { subscribed: 0, last_id: this._checkpoint };
+    // Trust the durable value over the in-memory one: another worker may have
+    // advanced it since this instance last scanned.
+    this._checkpoint = Math.max(this._checkpoint, leased);
+    // Released on every exit path below — a scan that throws must not park
+    // the checkpoint for a whole lease window, which would stall correlation
+    // for every worker, not just this one.
+    let acked = false;
+    try {
+      // Use checkpoint as floor, allow explicit query.after to override upward
+      const after = Math.max(this._checkpoint, query.after || -1);
+      const correlated = new Map<
+        string,
+        {
+          source?: string;
+          priority: number;
+          lane?: string;
+          payloads: ReactionPayload<TEvents>[];
+        }
+      >();
+      let last_id = after;
+      await store().query<TEvents>(
+        (event) => {
+          last_id = event.id;
+          const register = this._registry.events[event.name];
+          // skip events with no registered reactions
+          if (register) {
+            for (const reaction of register.reactions.values()) {
+              // only evaluate dynamic resolvers — statics are subscribed at init
+              if (typeof reaction.resolver !== "function") continue;
+              const resolved = reaction.resolver(event);
+              // Let a target through when a scan resolves a strictly higher
+              // priority than it was last subscribed at, so the store's
+              // `GREATEST` upsert raises it — the documented runtime `max()`
+              // invariant, which the plain "already subscribed?" dedup silently
+              // froze at first discovery (#1363). A never-seen target defaults to
+              // -Infinity so its first resolution always passes; static targets
+              // sit at +Infinity so a dynamic resolution never re-opens them.
+              if (
+                resolved &&
+                (resolved.priority ?? 0) >
+                  (this._subscribed.get(resolved.target) ??
+                    Number.NEGATIVE_INFINITY)
+              ) {
+                const incoming_priority = resolved.priority ?? 0;
+                const entry = correlated.get(resolved.target) || {
+                  source: resolved.source,
+                  priority: incoming_priority,
+                  lane: resolved.lane,
+                  payloads: [],
+                };
+                // Multiple reactions targeting the same stream within a
+                // single correlate scan — keep the max priority, and carry the
+                // winning reaction's lane so the highest-priority reaction sets
+                // the lane (matches the subscribe-side `max()` invariant).
+                if (incoming_priority > entry.priority) {
+                  entry.priority = incoming_priority;
+                  entry.lane = resolved.lane;
+                }
+                entry.payloads.push({
+                  ...reaction,
+                  source: resolved.source,
+                  event,
+                });
+                correlated.set(resolved.target, entry);
               }
-              entry.payloads.push({
-                ...reaction,
-                source: resolved.source,
-                event,
-              });
-              correlated.set(resolved.target, entry);
             }
           }
-        }
-      },
-      { ...query, after }
-    );
-
-    if (correlated.size) {
-      const streams = [...correlated.entries()].map(
-        ([stream, { source, priority, lane }]) => ({
-          stream,
-          source,
-          priority,
-          lane,
-        })
+        },
+        { ...query, after }
       );
-      const { subscribed } = await this._cd.subscribe(streams);
-      // Advance checkpoint only after subscribe succeeds
-      this._checkpoint = last_id;
-      if (subscribed) {
-        // Record each target at the priority it was just subscribed at (the
-        // within-scan max), so a later lower-or-equal resolution dedups and a
-        // strictly-higher one re-opens the guard above (#1363).
-        for (const { stream, priority } of streams) {
-          this._subscribed.set(stream, priority);
+
+      if (correlated.size) {
+        const streams = [...correlated.entries()].map(
+          ([stream, { source, priority, lane }]) => ({
+            stream,
+            source,
+            priority,
+            lane,
+          })
+        );
+        const { subscribed } = await this._cd.subscribe(streams);
+        // Advance checkpoint only after subscribe succeeds
+        this._checkpoint = last_id;
+        acked = await this._release(last_id);
+        if (subscribed) {
+          // Record each target at the priority it was just subscribed at (the
+          // within-scan max), so a later lower-or-equal resolution dedups and a
+          // strictly-higher one re-opens the guard above (#1363).
+          for (const { stream, priority } of streams) {
+            this._subscribed.set(stream, priority);
+          }
         }
+        return { subscribed, last_id };
       }
-      return { subscribed, last_id };
+      // No streams to subscribe — safe to advance
+      this._checkpoint = last_id;
+      acked = await this._release(last_id);
+      return { subscribed: 0, last_id };
+    } finally {
+      // Failure path: release without advancing, so the next scan re-reads
+      // the range this one did not finish.
+      if (!acked) await this._release(this._checkpoint);
     }
-    // No streams to subscribe — safe to advance
-    this._checkpoint = last_id;
-    return { subscribed: 0, last_id };
+  }
+
+  /** Advance (or merely release) the checkpoint lease. */
+  private async _release(at: number): Promise<boolean> {
+    await store().ack_correlated(this._by, at);
+    return true;
   }
 
   /**

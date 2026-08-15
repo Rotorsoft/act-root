@@ -434,6 +434,21 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Correlate checkpoint (#1484). Its own single-row table rather than a
+    // reserved subscription: a subscription row is counted by every
+    // stream-scoped operator surface (prioritize / reset / unblock /
+    // query_streams / blocked_streams) and would inflate those counts.
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS correlated (
+        id INTEGER PRIMARY KEY CHECK (id = 0),
+        at INTEGER NOT NULL DEFAULT -1,
+        leased_by TEXT,
+        leased_until TEXT
+      )
+    `);
+    await this.client.execute(
+      "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
+    );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
@@ -446,6 +461,7 @@ export class SqliteStore implements Store {
   async drop() {
     await this.client.execute("DROP TABLE IF EXISTS events");
     await this.client.execute("DROP TABLE IF EXISTS streams");
+    await this.client.execute("DROP TABLE IF EXISTS correlated");
   }
 
   async dispose() {
@@ -824,6 +840,62 @@ export class SqliteStore implements Store {
   }
 
   // --- ack: transaction + ownership check (= PG WHERE leased_by) ---
+  /**
+   * Take the checkpoint lease and read it (#1484). One write transaction, so
+   * the availability check and the take cannot interleave.
+   */
+  async lease_correlated(
+    by: string,
+    millis: number
+  ): Promise<number | undefined> {
+    const now = new Date().toISOString();
+    const until = new Date(Date.now() + millis).toISOString();
+    const tx = await this.client.transaction("write");
+    try {
+      const taken = await tx.execute({
+        sql: `UPDATE correlated SET leased_by = ?, leased_until = ?
+               WHERE id = 0
+                 AND (leased_by IS NULL OR leased_by = ? OR leased_until <= ?)`,
+        args: [by, until, by, now],
+      });
+      if (taken.rowsAffected === 0) {
+        await tx.rollback();
+        return undefined;
+      }
+      const read = await tx.execute("SELECT at FROM correlated WHERE id = 0");
+      await tx.commit();
+      return Number(read.rows[0].at);
+    } catch (error) {
+      await tx.rollback();
+      throw new StoreError("lease_correlated", { cause: error });
+    }
+  }
+
+  /** Advance the checkpoint and release its lease, gated on the holder. */
+  async ack_correlated(by: string, at: number): Promise<boolean> {
+    const tx = await this.client.transaction("write");
+    try {
+      const advanced = await tx.execute({
+        sql: `UPDATE correlated SET at = ?, leased_by = NULL, leased_until = NULL
+               WHERE id = 0 AND leased_by = ? AND at < ?`,
+        args: [at, by, at],
+      });
+      if (advanced.rowsAffected === 0)
+        // Not advancing still releases a lease this holder owns, so a
+        // no-progress scan does not park the row.
+        await tx.execute({
+          sql: `UPDATE correlated SET leased_by = NULL, leased_until = NULL
+                 WHERE id = 0 AND leased_by = ?`,
+          args: [by],
+        });
+      await tx.commit();
+      return advanced.rowsAffected > 0;
+    } catch (error) {
+      await tx.rollback();
+      throw new StoreError("ack_correlated", { cause: error });
+    }
+  }
+
   async ack(leases: Lease[]) {
     const tx = await this.client.transaction("write");
     try {

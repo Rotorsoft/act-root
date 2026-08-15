@@ -422,3 +422,33 @@ describe("PostgresStore", () => {
     });
   });
 });
+
+describe("PostgresStore correlate checkpoint error paths (#1484)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("lease_correlated: wraps a driver failure in StoreError and releases", async () => {
+    const release = vi.fn();
+    vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
+      query: vi.fn().mockRejectedValue(new Error("boom")),
+      release,
+    } as never);
+    const store = new PostgresStore({ port: 5431 });
+    const err = await store.lease_correlated("w", 1000).catch((e) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(err.operation).toBe("lease_correlated");
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("ack_correlated: wraps a driver failure in StoreError and releases", async () => {
+    const release = vi.fn();
+    vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
+      query: vi.fn().mockRejectedValue(new Error("boom")),
+      release,
+    } as never);
+    const store = new PostgresStore({ port: 5431 });
+    const err = await store.ack_correlated("w", 5).catch((e) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(err.operation).toBe("ack_correlated");
+    expect(release).toHaveBeenCalled();
+  });
+});

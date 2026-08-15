@@ -1103,6 +1103,83 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(0);
       });
 
+      // The correlate checkpoint (#1484): how far the log has been READ, as
+      // opposed to how far a target has been processed (`at`). It lives in
+      // its own single-row relation precisely so it is invisible to every
+      // stream-scoped surface — the last case asserts that half.
+      //
+      // Unlike every other case here, a singleton cannot be namespaced with
+      // `uid()`, so these read the current value and assert RELATIVE to it.
+      // Absolute expectations would couple the cases to their order.
+      describe("correlate checkpoint", () => {
+        /** Read the checkpoint without leaving a lease behind. */
+        const peek = async () => {
+          const by = `peek-${uid()}`;
+          const at = (await store.lease_correlated(by, 5_000)) as number;
+          await store.ack_correlated(by, at);
+          return at;
+        };
+
+        it("round-trips an advance", async () => {
+          const base = await peek();
+          const by = `c-${uid()}`;
+          expect(await store.lease_correlated(by, 5_000)).toBe(base);
+          expect(await store.ack_correlated(by, base + 10)).toBe(true);
+          expect(await peek()).toBe(base + 10);
+        });
+
+        it("never regresses", async () => {
+          const base = await peek();
+          const by = `c-${uid()}`;
+          await store.lease_correlated(by, 5_000);
+          expect(await store.ack_correlated(by, base - 1)).toBe(false);
+          expect(await peek()).toBe(base);
+        });
+
+        it("hands the lease to one holder at a time", async () => {
+          const base = await peek();
+          const a = `c-${uid()}`;
+          const b = `c-${uid()}`;
+          expect(await store.lease_correlated(a, 30_000)).toBe(base);
+          // The second correlator is told to skip rather than repeat the scan.
+          expect(await store.lease_correlated(b, 30_000)).toBeUndefined();
+          await store.ack_correlated(a, base + 1);
+          // Released — the next correlator gets it, and sees the advance.
+          expect(await store.lease_correlated(b, 5_000)).toBe(base + 1);
+          await store.ack_correlated(b, base + 1);
+        });
+
+        it("releases the lease even when the scan made no progress", async () => {
+          const base = await peek();
+          const a = `c-${uid()}`;
+          await store.lease_correlated(a, 30_000);
+          expect(await store.ack_correlated(a, base)).toBe(false);
+          const b = `c-${uid()}`;
+          expect(await store.lease_correlated(b, 5_000)).toBe(base);
+          await store.ack_correlated(b, base);
+        });
+
+        it("ignores an ack from a holder that lost the lease", async () => {
+          const base = await peek();
+          const a = `c-${uid()}`;
+          await store.lease_correlated(a, 1);
+          await new Promise((r) => setTimeout(r, 25));
+          const b = `c-${uid()}`;
+          expect(await store.lease_correlated(b, 30_000)).toBe(base);
+          // `a`'s lease lapsed; its late ack must not move the checkpoint.
+          expect(await store.ack_correlated(a, base + 5_000)).toBe(false);
+          await store.ack_correlated(b, base);
+          expect(await peek()).toBe(base);
+        });
+
+        it("is invisible to every stream-scoped surface", async () => {
+          const seen: string[] = [];
+          await store.query_streams((p) => seen.push(p.stream), {});
+          expect(seen).not.toContain("__correlate__");
+          expect(seen.some((n) => n.startsWith("correlated"))).toBe(false);
+        });
+      });
+
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = `claim-${uid()}`;
         await store.subscribe([{ stream: s }]);

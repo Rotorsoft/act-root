@@ -337,6 +337,8 @@ export class PostgresStore implements Store {
   readonly config: Config;
   private _fqt: string;
   private _fqs: string;
+  /** Correlate checkpoint table (#1484) — one row, id 0. */
+  private _fqc: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * `notify()` LISTEN handler skips payloads where `by === this._by`,
@@ -430,6 +432,7 @@ export class PostgresStore implements Store {
     this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
+    this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, `this.notify` is `undefined`, the orchestrator skips
@@ -621,6 +624,25 @@ export class PostgresStore implements Store {
           deferred_at timestamptz
         ) TABLESPACE pg_default;`
       );
+      // Correlate checkpoint (#1484). Its own single-row relation rather
+      // than a reserved subscription: a subscription row is counted by every
+      // stream-scoped operator surface (`prioritize`, `reset`, `unblock`,
+      // `query_streams`, `blocked_streams`) and would inflate the counts
+      // they report. The lease columns mirror the streams table so a
+      // crashed correlator's hold expires the same way.
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this._fqc} (
+          id int PRIMARY KEY DEFAULT 0,
+          at bigint NOT NULL DEFAULT -1,
+          leased_by text,
+          leased_until timestamptz,
+          CONSTRAINT ${this.config.table}_correlated_singleton CHECK (id = 0)
+        ) TABLESPACE pg_default;`
+      );
+      await client.query(
+        `INSERT INTO ${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;`
+      );
+
       // Migration for tables created before priority lanes (ACT-102).
       // `ADD COLUMN IF NOT EXISTS` is a no-op when the column is
       // already present, so this is safe on every seed call.
@@ -743,7 +765,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS ${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS ${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS ${this._fqc}, ${this._fqs}';
           IF '${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "${this.config.schema}" CASCADE';
           END IF;
@@ -1339,6 +1361,59 @@ export class PostgresStore implements Store {
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    * @returns Acked leases.
    */
+  /** Take the checkpoint lease and read it (#1484). */
+  async lease_correlated(
+    by: string,
+    millis: number
+  ): Promise<number | undefined> {
+    const client = await this._client("lease_correlated");
+    try {
+      // One statement: the WHERE decides whether the lease is available and
+      // the UPDATE takes it, so two correlators cannot both win.
+      const { rows } = await client.query<{ at: string }>(
+        `UPDATE ${this._fqc}
+            SET leased_by = $1,
+                leased_until = NOW() + ($2::int * INTERVAL '1 millisecond')
+          WHERE id = 0
+            AND (leased_by IS NULL OR leased_by = $1 OR leased_until <= NOW())
+        RETURNING at`,
+        [by, millis]
+      );
+      return rows.length ? Number(rows[0].at) : undefined;
+    } catch (error) {
+      throw new StoreError("lease_correlated", { cause: error });
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Advance the checkpoint and release its lease, gated on the holder. */
+  async ack_correlated(by: string, at: number): Promise<boolean> {
+    const client = await this._client("ack_correlated");
+    try {
+      const { rowCount } = await client.query(
+        `UPDATE ${this._fqc}
+            SET at = GREATEST(at, $2::bigint), leased_by = NULL, leased_until = NULL
+          WHERE id = 0 AND leased_by = $1 AND at < $2::bigint`,
+        [by, at]
+      );
+      if (rowCount) return true;
+      // Not advancing (stale holder, or `at` already ahead) still releases a
+      // lease this holder owns, so a no-progress scan does not park the row.
+      await client.query(
+        `UPDATE ${this._fqc}
+            SET leased_by = NULL, leased_until = NULL
+          WHERE id = 0 AND leased_by = $1`,
+        [by]
+      );
+      return false;
+    } catch (error) {
+      throw new StoreError("ack_correlated", { cause: error });
+    } finally {
+      client.release();
+    }
+  }
+
   async ack(leases: Lease[]): Promise<Lease[]> {
     const client = await this._client("ack");
     try {

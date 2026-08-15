@@ -353,3 +353,25 @@ describe("SqliteStore error paths", () => {
     expect(wiped).toBe(0);
   });
 });
+
+describe("SqliteStore correlate checkpoint error paths (#1484)", () => {
+  it("lease_correlated: rolls back and wraps failure in StoreError", async () => {
+    const db2 = new SqliteStore({ url: ":memory:" });
+    const client = mockClientFailOn("UPDATE correlated SET leased_by");
+    (db2 as unknown as { client: unknown }).client = client;
+    const err = await db2.lease_correlated("w", 1000).catch((e) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(err.operation).toBe("lease_correlated");
+    expect(client._tx.rollback).toHaveBeenCalled();
+  });
+
+  it("ack_correlated: rolls back and wraps failure in StoreError", async () => {
+    const db2 = new SqliteStore({ url: ":memory:" });
+    const client = mockClientFailOn("UPDATE correlated SET at");
+    (db2 as unknown as { client: unknown }).client = client;
+    const err = await db2.ack_correlated("w", 5).catch((e) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(err.operation).toBe("ack_correlated");
+    expect(client._tx.rollback).toHaveBeenCalled();
+  });
+});

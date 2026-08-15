@@ -344,6 +344,10 @@ export class InMemoryStore implements Store {
   private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
+  /** Correlate checkpoint (#1484): how far the log has been READ. */
+  private _correlated = -1;
+  private _correlated_by: string | undefined;
+  private _correlated_until = 0;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -362,6 +366,9 @@ export class InMemoryStore implements Store {
   private _reset_indexes() {
     this._events.length = 0;
     this._next_id = 0;
+    this._correlated = -1;
+    this._correlated_by = undefined;
+    this._correlated_until = 0;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -731,6 +738,35 @@ export class InMemoryStore implements Store {
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
+  /**
+   * Take the checkpoint lease and read it (#1484). Single-threaded, so the
+   * check and the take cannot interleave.
+   */
+  async lease_correlated(by: string, millis: number) {
+    await sleep();
+    const now = Date.now();
+    if (
+      this._correlated_by !== undefined &&
+      this._correlated_by !== by &&
+      this._correlated_until > now
+    )
+      return undefined;
+    this._correlated_by = by;
+    this._correlated_until = now + millis;
+    return this._correlated;
+  }
+
+  /** Advance the checkpoint and release its lease, gated on the holder. */
+  async ack_correlated(by: string, at: number) {
+    await sleep();
+    if (this._correlated_by !== by) return false;
+    this._correlated_by = undefined;
+    this._correlated_until = 0;
+    if (at <= this._correlated) return false;
+    this._correlated = at;
+    return true;
+  }
+
   async ack(leases: Lease[]) {
     await sleep();
     // Acks and defer schedules land in one synchronous pass — the
