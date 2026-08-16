@@ -39,6 +39,8 @@ That is a deliberate trade for zero round trips, and it still improves on the st
 
 Mutual exclusion needs a step where exactly one worker wins, which is a store call of its own. Worth adding only if a measurement shows duplicate correlate scans cost something; RFC 1449's numbers put the win in `claim`, not correlate.
 
+**An empty scan does not persist.** The checkpoint rides `subscribe`, and correlate calls `subscribe` only when a scan actually discovers targets — so a stretch of events resolving to nothing advances the in-memory cursor while the durable one stays put. Correctness is unaffected (a re-scan re-derives the same targets) and the cost is bounded re-reading after a restart. Closing it means issuing a `subscribe([])` on every otherwise-empty scan: a round trip bought to avoid a harmless re-read.
+
 ## Storage: its own single-row relation
 
 ```sql
