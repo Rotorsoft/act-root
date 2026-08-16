@@ -7,7 +7,7 @@
  * from where the scan actually reached.
  */
 import { act, dispose, InMemoryStore, state, store } from "@rotorsoft/act";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 const ZodEmpty = z.object({});
@@ -32,15 +32,34 @@ const worker = () =>
     .build();
 
 /** The checkpoint rides subscribe's return (#1484). */
-const peek = async (s: InMemoryStore) => (await s.subscribe([])).correlated;
+const peek = async (s: InMemoryStore) => (await s.subscribe([])).correlated_at;
 
 afterEach(async () => {
   await dispose()("EXIT").catch(() => {});
 });
 
+/**
+ * Count the events a scan actually reads. Re-scanning is the only observable
+ * difference the durable checkpoint makes: a restart converges on the same
+ * `subscribed` count and the same `last_id` either way — the store's UPSERT
+ * is idempotent and the ids are the same ids — so asserting on those proves
+ * nothing. The work is what changes.
+ */
+const count_scanned = (s: InMemoryStore) => {
+  const counter = { n: 0 };
+  const original = s.query.bind(s);
+  s.query = ((cb: (e: never) => void, q: never) =>
+    original((e) => {
+      counter.n++;
+      cb(e as never);
+    }, q)) as typeof s.query;
+  return counter;
+};
+
 describe("the checkpoint survives a restart", () => {
-  it("resumes where the previous process stopped", async () => {
-    store(new InMemoryStore());
+  it("resumes where the previous process stopped, re-reading nothing", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
     await store().seed();
 
     const w1 = worker();
@@ -50,15 +69,21 @@ describe("the checkpoint survives a restart", () => {
     await w1.shutdown();
 
     // A new process over the same store: its correlate must not re-scan the
-    // range the first one already covered.
+    // range the first one already covered. Without the durable checkpoint it
+    // cold-starts from the subscription watermark backed off by the
+    // back-scan window — which, with the target still undrained at -1, is
+    // the whole log.
+    const scanned = count_scanned(raw);
     const w2 = worker();
     const second = await w2.correlate();
+    expect(scanned.n).toBe(0);
     expect(second.subscribed).toBe(0);
     expect(second.last_id).toBe(first.last_id);
   });
 
-  it("picks up events committed after the checkpoint", async () => {
-    store(new InMemoryStore());
+  it("picks up events committed after the checkpoint, and only those", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
     await store().seed();
     const w1 = worker();
     await w1.do("tick", { stream: "a", actor }, {});
@@ -67,8 +92,12 @@ describe("the checkpoint survives a restart", () => {
 
     const w2 = worker();
     await w2.do("tick", { stream: "b", actor }, {});
+    // `do` reads the stream to fold state, so count only the scan.
+    const scanned = count_scanned(raw);
     const after = await w2.correlate();
     expect(after.subscribed).toBe(1);
+    // The one new event, not the one the first process already correlated.
+    expect(scanned.n).toBe(1);
   });
 });
 

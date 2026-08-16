@@ -653,16 +653,16 @@ export interface Store extends Disposable, EventSource {
      *
      * Distinct from a subscription's `at` (how far a *target* has been
      * processed) — a run of events resolving to no target moves this and no
-     * watermark. It rides `subscribe`'s existing return, and is advanced by
-     * `ack`'s optional `correlated` argument, so maintaining it costs no
-     * store round trip of its own: `correlate` already calls `subscribe`, and
-     * the drain already calls `ack`.
+     * watermark. It rides `subscribe`'s existing return and is advanced by
+     * the same call's `correlated_at` argument, so maintaining it costs no
+     * store round trip of its own: `correlate` already calls `subscribe`
+     * with the targets each scan discovered.
      *
      * Adapters keep it in their own single-row relation, never as a
      * subscription, so no stream-scoped surface (`prioritize`, `reset`,
      * `unblock`, `query_streams`, `blocked_streams`) ever counts it.
      */
-    correlated: number;
+    correlated_at: number;
   }>;
 
   /**

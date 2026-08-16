@@ -202,7 +202,7 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark, correlated } = await store().subscribe([
+    const { watermark, correlated_at } = await store().subscribe([
       ...this._static_targets,
     ]);
     // Without dynamic resolvers correlate never scans, so the checkpoint
@@ -221,8 +221,8 @@ export class CorrelateCycle<
     if (!this._has_dynamic_resolvers) this._checkpoint = watermark;
     else {
       this._checkpoint =
-        correlated >= 0
-          ? correlated
+        correlated_at >= 0
+          ? correlated_at
           : Math.max(-1, watermark - this._cold_start_back_scan);
     }
     this._on_init?.();

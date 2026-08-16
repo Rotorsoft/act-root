@@ -345,7 +345,7 @@ export class InMemoryStore implements Store {
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
-  private _correlated = -1;
+  private _correlated_at = -1;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -364,7 +364,7 @@ export class InMemoryStore implements Store {
   private _reset_indexes() {
     this._events.length = 0;
     this._next_id = 0;
-    this._correlated = -1;
+    this._correlated_at = -1;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -706,8 +706,8 @@ export class InMemoryStore implements Store {
   ) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (correlated_at !== undefined && correlated_at > this._correlated)
-      this._correlated = correlated_at;
+    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+      this._correlated_at = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -732,7 +732,7 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark, correlated: this._correlated };
+    return { subscribed, watermark, correlated_at: this._correlated_at };
   }
 
   /**

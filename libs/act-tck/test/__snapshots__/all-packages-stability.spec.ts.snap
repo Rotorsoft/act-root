@@ -8031,7 +8031,7 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark, correlated } = await store().subscribe([
+    const { watermark, correlated_at } = await store().subscribe([
       ...this._static_targets,
     ]);
     // Without dynamic resolvers correlate never scans, so the checkpoint
@@ -8050,8 +8050,8 @@ export class CorrelateCycle<
     if (!this._has_dynamic_resolvers) this._checkpoint = watermark;
     else {
       this._checkpoint =
-        correlated >= 0
-          ? correlated
+        correlated_at >= 0
+          ? correlated_at
           : Math.max(-1, watermark - this._cold_start_back_scan);
     }
     this._on_init?.();
@@ -9793,7 +9793,7 @@ export const subscribe = (
     lane?: string;
   }>,
   correlated_at?: number
-): Promise<{ subscribed: number; watermark: number; correlated: number }> =>
+): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
   store().subscribe(streams, correlated_at);
 
 // === errors.ts ===
@@ -11614,7 +11614,7 @@ export class InMemoryStore implements Store {
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
-  private _correlated = -1;
+  private _correlated_at = -1;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -11633,7 +11633,7 @@ export class InMemoryStore implements Store {
   private _reset_indexes() {
     this._events.length = 0;
     this._next_id = 0;
-    this._correlated = -1;
+    this._correlated_at = -1;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -11975,8 +11975,8 @@ export class InMemoryStore implements Store {
   ) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (correlated_at !== undefined && correlated_at > this._correlated)
-      this._correlated = correlated_at;
+    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+      this._correlated_at = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -12001,7 +12001,7 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark, correlated: this._correlated };
+    return { subscribed, watermark, correlated_at: this._correlated_at };
   }
 
   /**
@@ -14204,16 +14204,16 @@ export interface Store extends Disposable, EventSource {
      *
      * Distinct from a subscription's \`at\` (how far a *target* has been
      * processed) — a run of events resolving to no target moves this and no
-     * watermark. It rides \`subscribe\`'s existing return, and is advanced by
-     * \`ack\`'s optional \`correlated\` argument, so maintaining it costs no
-     * store round trip of its own: \`correlate\` already calls \`subscribe\`, and
-     * the drain already calls \`ack\`.
+     * watermark. It rides \`subscribe\`'s existing return and is advanced by
+     * the same call's \`correlated_at\` argument, so maintaining it costs no
+     * store round trip of its own: \`correlate\` already calls \`subscribe\`
+     * with the targets each scan discovered.
      *
      * Adapters keep it in their own single-row relation, never as a
      * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
      * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
      */
-    correlated: number;
+    correlated_at: number;
   }>;
 
   /**
@@ -26050,7 +26050,7 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark, correlated } = await store().subscribe([
+    const { watermark, correlated_at } = await store().subscribe([
       ...this._static_targets,
     ]);
     // Without dynamic resolvers correlate never scans, so the checkpoint
@@ -26069,8 +26069,8 @@ export class CorrelateCycle<
     if (!this._has_dynamic_resolvers) this._checkpoint = watermark;
     else {
       this._checkpoint =
-        correlated >= 0
-          ? correlated
+        correlated_at >= 0
+          ? correlated_at
           : Math.max(-1, watermark - this._cold_start_back_scan);
     }
     this._on_init?.();
@@ -27584,7 +27584,7 @@ export const subscribe = (
     lane?: string;
   }>,
   correlated_at?: number
-): Promise<{ subscribed: number; watermark: number; correlated: number }> =>
+): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
   store().subscribe(streams, correlated_at);
 
 // === errors.ts ===
@@ -29405,7 +29405,7 @@ export class InMemoryStore implements Store {
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
-  private _correlated = -1;
+  private _correlated_at = -1;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -29424,7 +29424,7 @@ export class InMemoryStore implements Store {
   private _reset_indexes() {
     this._events.length = 0;
     this._next_id = 0;
-    this._correlated = -1;
+    this._correlated_at = -1;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -29766,8 +29766,8 @@ export class InMemoryStore implements Store {
   ) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (correlated_at !== undefined && correlated_at > this._correlated)
-      this._correlated = correlated_at;
+    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+      this._correlated_at = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -29792,7 +29792,7 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark, correlated: this._correlated };
+    return { subscribed, watermark, correlated_at: this._correlated_at };
   }
 
   /**
@@ -31958,16 +31958,16 @@ export interface Store extends Disposable, EventSource {
      *
      * Distinct from a subscription's \`at\` (how far a *target* has been
      * processed) — a run of events resolving to no target moves this and no
-     * watermark. It rides \`subscribe\`'s existing return, and is advanced by
-     * \`ack\`'s optional \`correlated\` argument, so maintaining it costs no
-     * store round trip of its own: \`correlate\` already calls \`subscribe\`, and
-     * the drain already calls \`ack\`.
+     * watermark. It rides \`subscribe\`'s existing return and is advanced by
+     * the same call's \`correlated_at\` argument, so maintaining it costs no
+     * store round trip of its own: \`correlate\` already calls \`subscribe\`
+     * with the targets each scan discovered.
      *
      * Adapters keep it in their own single-row relation, never as a
      * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
      * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
      */
-    correlated: number;
+    correlated_at: number;
   }>;
 
   /**
@@ -38250,16 +38250,16 @@ export interface Store extends Disposable, EventSource {
      *
      * Distinct from a subscription's \`at\` (how far a *target* has been
      * processed) — a run of events resolving to no target moves this and no
-     * watermark. It rides \`subscribe\`'s existing return, and is advanced by
-     * \`ack\`'s optional \`correlated\` argument, so maintaining it costs no
-     * store round trip of its own: \`correlate\` already calls \`subscribe\`, and
-     * the drain already calls \`ack\`.
+     * watermark. It rides \`subscribe\`'s existing return and is advanced by
+     * the same call's \`correlated_at\` argument, so maintaining it costs no
+     * store round trip of its own: \`correlate\` already calls \`subscribe\`
+     * with the targets each scan discovered.
      *
      * Adapters keep it in their own single-row relation, never as a
      * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
      * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
      */
-    correlated: number;
+    correlated_at: number;
   }>;
 
   /**
@@ -50405,14 +50405,12 @@ export class PostgresStore implements Store {
       // than a reserved subscription: a subscription row is counted by every
       // stream-scoped operator surface (\`prioritize\`, \`reset\`, \`unblock\`,
       // \`query_streams\`, \`blocked_streams\`) and would inflate the counts
-      // they report. The lease columns mirror the streams table so a
-      // crashed correlator's hold expires the same way.
+      // they report. No lease columns: the write is a monotonic \`MAX\`, so
+      // concurrent correlators converge without holding anything.
       await client.query(
         \`CREATE TABLE IF NOT EXISTS \${this._fqc} (
           id int PRIMARY KEY DEFAULT 0,
           at bigint NOT NULL DEFAULT -1,
-          leased_by text,
-          leased_until timestamptz,
           CONSTRAINT \${this.config.table}_correlated_singleton CHECK (id = 0)
         ) TABLESPACE pg_default;\`
       );
@@ -51071,7 +51069,7 @@ export class PostgresStore implements Store {
       lane?: string;
     }>,
     correlated_at?: number
-  ): Promise<{ subscribed: number; watermark: number; correlated: number }> {
+  ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -51130,16 +51128,16 @@ export class PostgresStore implements Store {
       // Watermark and checkpoint in one round trip — correlate needs both.
       const { rows } = await client.query<{
         max: number | null;
-        correlated: string | null;
+        correlated_at: string | null;
       }>(
         \`SELECT (SELECT COALESCE(MAX(at), -1) FROM \${this._fqs}) AS max,
-                (SELECT at FROM \${this._fqc} WHERE id = 0) AS correlated\`
+                (SELECT at FROM \${this._fqc} WHERE id = 0) AS correlated_at\`
       );
       await client.query("COMMIT");
       return {
         subscribed,
         watermark: rows[0]?.max ?? -1,
-        correlated: Number(rows[0]?.correlated ?? -1),
+        correlated_at: Number(rows[0]?.correlated_at ?? -1),
       };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -52825,9 +52823,7 @@ export class SqliteStore implements Store {
     await this.client.execute(\`
       CREATE TABLE IF NOT EXISTS correlated (
         id INTEGER PRIMARY KEY CHECK (id = 0),
-        at INTEGER NOT NULL DEFAULT -1,
-        leased_by TEXT,
-        leased_until TEXT
+        at INTEGER NOT NULL DEFAULT -1
       )
     \`);
     await this.client.execute(
@@ -53101,7 +53097,7 @@ export class SqliteStore implements Store {
         watermark: Number(wm.rows[0].w),
         // \`seed()\` always inserts the singleton row, so this read cannot
         // come back empty — no defensive fallback to leave untested.
-        correlated: Number(cp.rows[0].at),
+        correlated_at: Number(cp.rows[0].at),
       };
     } catch (e) {
       await tx.rollback();
@@ -57394,11 +57390,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       // A singleton cannot be namespaced with \`uid()\` like every other case
       // here, so these read the current value and assert RELATIVE to it.
       describe("correlate checkpoint", () => {
-        const peek = async () => (await store.subscribe([])).correlated;
+        const peek = async () => (await store.subscribe([])).correlated_at;
 
         it("round-trips an advance through subscribe", async () => {
           const base = await peek();
-          expect((await store.subscribe([], base + 10)).correlated).toBe(
+          expect((await store.subscribe([], base + 10)).correlated_at).toBe(
             base + 10
           );
           expect(await peek()).toBe(base + 10);
@@ -57429,12 +57425,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // found, and here is how far I read to find them.
           const base = await peek();
           const s = \`cp-sub-\${uid()}\`;
-          const { subscribed, correlated } = await store.subscribe(
+          const { subscribed, correlated_at } = await store.subscribe(
             [{ stream: s }],
             base + 7
           );
           expect(subscribed).toBe(1);
-          expect(correlated).toBe(base + 7);
+          expect(correlated_at).toBe(base + 7);
         });
 
         it("is invisible to every stream-scoped surface", async () => {

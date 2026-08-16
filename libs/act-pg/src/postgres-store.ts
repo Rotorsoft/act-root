@@ -628,14 +628,12 @@ export class PostgresStore implements Store {
       // than a reserved subscription: a subscription row is counted by every
       // stream-scoped operator surface (`prioritize`, `reset`, `unblock`,
       // `query_streams`, `blocked_streams`) and would inflate the counts
-      // they report. The lease columns mirror the streams table so a
-      // crashed correlator's hold expires the same way.
+      // they report. No lease columns: the write is a monotonic `MAX`, so
+      // concurrent correlators converge without holding anything.
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this._fqc} (
           id int PRIMARY KEY DEFAULT 0,
           at bigint NOT NULL DEFAULT -1,
-          leased_by text,
-          leased_until timestamptz,
           CONSTRAINT ${this.config.table}_correlated_singleton CHECK (id = 0)
         ) TABLESPACE pg_default;`
       );
@@ -1294,7 +1292,7 @@ export class PostgresStore implements Store {
       lane?: string;
     }>,
     correlated_at?: number
-  ): Promise<{ subscribed: number; watermark: number; correlated: number }> {
+  ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -1353,16 +1351,16 @@ export class PostgresStore implements Store {
       // Watermark and checkpoint in one round trip — correlate needs both.
       const { rows } = await client.query<{
         max: number | null;
-        correlated: string | null;
+        correlated_at: string | null;
       }>(
         `SELECT (SELECT COALESCE(MAX(at), -1) FROM ${this._fqs}) AS max,
-                (SELECT at FROM ${this._fqc} WHERE id = 0) AS correlated`
+                (SELECT at FROM ${this._fqc} WHERE id = 0) AS correlated_at`
       );
       await client.query("COMMIT");
       return {
         subscribed,
         watermark: rows[0]?.max ?? -1,
-        correlated: Number(rows[0]?.correlated ?? -1),
+        correlated_at: Number(rows[0]?.correlated_at ?? -1),
       };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});

@@ -441,9 +441,7 @@ export class SqliteStore implements Store {
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS correlated (
         id INTEGER PRIMARY KEY CHECK (id = 0),
-        at INTEGER NOT NULL DEFAULT -1,
-        leased_by TEXT,
-        leased_until TEXT
+        at INTEGER NOT NULL DEFAULT -1
       )
     `);
     await this.client.execute(
@@ -717,7 +715,7 @@ export class SqliteStore implements Store {
         watermark: Number(wm.rows[0].w),
         // `seed()` always inserts the singleton row, so this read cannot
         // come back empty — no defensive fallback to leave untested.
-        correlated: Number(cp.rows[0].at),
+        correlated_at: Number(cp.rows[0].at),
       };
     } catch (e) {
       await tx.rollback();

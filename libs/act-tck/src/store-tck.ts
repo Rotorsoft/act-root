@@ -1112,11 +1112,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       // A singleton cannot be namespaced with `uid()` like every other case
       // here, so these read the current value and assert RELATIVE to it.
       describe("correlate checkpoint", () => {
-        const peek = async () => (await store.subscribe([])).correlated;
+        const peek = async () => (await store.subscribe([])).correlated_at;
 
         it("round-trips an advance through subscribe", async () => {
           const base = await peek();
-          expect((await store.subscribe([], base + 10)).correlated).toBe(
+          expect((await store.subscribe([], base + 10)).correlated_at).toBe(
             base + 10
           );
           expect(await peek()).toBe(base + 10);
@@ -1147,12 +1147,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // found, and here is how far I read to find them.
           const base = await peek();
           const s = `cp-sub-${uid()}`;
-          const { subscribed, correlated } = await store.subscribe(
+          const { subscribed, correlated_at } = await store.subscribe(
             [{ stream: s }],
             base + 7
           );
           expect(subscribed).toBe(1);
-          expect(correlated).toBe(base + 7);
+          expect(correlated_at).toBe(base + 7);
         });
 
         it("is invisible to every stream-scoped surface", async () => {

@@ -16,30 +16,28 @@ Step 1 of [RFC 1449](./1449-split-store-port.md), and a prerequisite for the wor
 
 ## Public surface added
 
-**No new port methods, and no extra store round trips.** The checkpoint rides operations the pipeline already performs:
+**No new port methods, and no extra store round trips.** The checkpoint rides one operation the pipeline already performs:
 
 ```ts
-// correlate already calls subscribe — read the checkpoint from its return
-const { watermark, correlated } = await store().subscribe(targets);
-
-// the drain already acks every cycle — persist the advance in the same call
-await store().ack(leases, checkpoint);
+// correlate already calls subscribe with the targets a scan discovered —
+// read the checkpoint from its return, write the advance with the same call
+const { watermark, correlated_at } = await store().subscribe(targets, at);
 ```
 
-- `subscribe`'s return grows `correlated: number` — additive.
-- `ack` grows an optional second argument — additive, monotonic in the store, and omitting it leaves the value untouched.
+- `subscribe`'s return grows `correlated_at: number` — additive.
+- `subscribe` grows an optional second argument of the same name — additive, monotonic in the store, and omitting it leaves the value untouched.
 
-Two earlier revisions were rejected on review. Dedicated `lease_correlated` / `ack_correlated` methods were surface creep every third-party adapter would have to implement. Routing through `claim`/`ack` on a reserved lane removed the methods but still cost two extra round trips per scan, and made checkpoint traffic indistinguishable from drain traffic at the port boundary — three existing specs that injected `ack` failures had to be rewritten to tell them apart.
+One name in both directions, because it is one value: correlate's own watermark, in the same id space as a subscription's `at`.
+
+Three earlier revisions were rejected on review. Dedicated `lease_correlated` / `ack_correlated` methods were surface creep every third-party adapter would have to implement. Routing through `claim`/`ack` on a reserved lane removed the methods but still cost two extra round trips per scan, and made checkpoint traffic indistinguishable from drain traffic at the port boundary — three existing specs that injected `ack` failures had to be rewritten to tell them apart. Carrying the write on `ack` cost nothing extra but put it in the wrong hands: the drain is not the producer, and a scan that discovers no targets is followed by no drain work, so the advance would live in memory until some later cycle happened to ack — a restart in between re-scans. Writing it from `subscribe` puts the value in the call its own producer already makes, on every scan.
 
 ## What this gives up
 
-**Single-writer is not part of this.** The drain's `claim` leases *streams*, not the checkpoint, so N workers each read the same floor and each scan the same range. Durability is solved; deduplication is not.
+**Single-writer is not part of this.** Nothing leases the checkpoint, so N workers each read the same floor and each scan the same range. Durability is solved; deduplication is not.
 
-That is a deliberate trade for zero round trips, and it still improves on the status quo: previously every worker had its *own* in-memory floor that could sit arbitrarily far behind, so they scanned *different* — and larger — ranges. A shared durable floor puts them all at the same, current position.
+That is a deliberate trade for zero round trips, and it still improves on the status quo: previously every worker had its *own* in-memory floor that could sit arbitrarily far behind, so they scanned *different* — and larger — ranges. A shared durable floor puts them all at the same, current position. The monotonic `GREATEST` write means concurrent correlators converge rather than fight: a lagging worker's advance is ignored, never applied.
 
 Mutual exclusion needs a step where exactly one worker wins, which is a store call of its own. Worth adding only if a measurement shows duplicate correlate scans cost something; RFC 1449's numbers put the win in `claim`, not correlate.
-
-**A restart can re-scan.** The checkpoint persists on the drain's ack, so a correlate scan that finds no targets — and is therefore followed by no drain work — leaves the advance in memory only. Correctness is unaffected (the in-memory cursor still moves, and a re-scan re-derives the same targets); the cost is bounded re-reading after a restart.
 
 ## Storage: its own single-row relation
 
@@ -47,13 +45,11 @@ Mutual exclusion needs a step where exactly one worker wins, which is a store ca
 CREATE TABLE IF NOT EXISTS <table>_correlated (
   id int PRIMARY KEY DEFAULT 0,
   at bigint NOT NULL DEFAULT -1,
-  leased_by text,
-  leased_until timestamptz,
   CHECK (id = 0)
 );
 ```
 
-Created by `seed()` like every other table — seed-sync is the schema story, and this is additive.
+Created by `seed()` like every other table — seed-sync is the schema story, and this is additive. No lease columns: the write is a monotonic `MAX`, so concurrent correlators need nothing to hold.
 
 ### Why not a reserved subscription row
 
@@ -99,16 +95,16 @@ Measured trailing-run lengths make this reachable rather than theoretical: at 5%
 ## Semantics
 
 - **Cold start** reads the persisted value. On a first boot it is `-1`, and a full scan of an existing log would be unbounded, so the old back-scan heuristic seeds it once. From then on the checkpoint is exact and the heuristic never runs again.
-- **A scan holds the lease** for its duration and releases it on every exit path, including failure. A throwing scan that parked the lease would stall correlation for *every* worker until it expired.
-- **The durable value wins** over the in-memory one at the start of each scan: another worker may have advanced it.
-- **A static-only app never touches it.** Correlate does not scan without dynamic resolvers, so the checkpoint stays inert and no lease is taken.
-- **`ack_correlated` never regresses** the stored value and is gated on the holder, so a correlator whose lease lapsed mid-scan cannot clobber its successor's progress.
+- **It advances with the scan that earned it**, in the same `subscribe` that registers the targets that scan discovered — not on a later drain, and not on a cycle that found nothing to subscribe.
+- **The write is monotonic.** `GREATEST` / `MAX` in one statement: a lower or equal value is ignored rather than written, so a lagging worker cannot rewind another's progress and re-sending the same value is a no-op. Omitting the argument leaves it untouched.
+- **The durable value wins** over the in-memory one at init: another worker may have advanced it.
+- **A static-only app never touches it.** Correlate does not scan without dynamic resolvers, so the checkpoint stays inert.
 
 ## Stability / charter impact
 
-**Additive** — two new methods on the `Store` port. Every in-tree adapter implements them; a third-party adapter must add them, which is the usual cost of a port addition and why this RFC exists.
+**Additive** — one optional argument and one return field on `Store.subscribe`, no new methods. Every in-tree adapter implements it; a third-party adapter that ignores the argument and returns `-1` keeps working, degrading only to the previous heuristic cold start.
 
-TCK cases run against all three adapters: round-trip an advance, never regress, one holder at a time, release without progress, ignore a lapsed holder's ack, and — the point of the separate relation — invisibility to every stream-scoped surface.
+TCK cases run against all three adapters: round-trip an advance, persist only when greater, leave it untouched when omitted, advance in the same call that registers discovered targets, and — the point of the separate relation — invisibility to every stream-scoped surface.
 
 ## Alternatives considered
 
@@ -118,6 +114,7 @@ TCK cases run against all three adapters: round-trip an advance, never regress, 
 | Derive from `max(acked.at)` | Rejected — processing runs ahead of the read cursor (measured 25 vs 0), so it skips discovery |
 | Dedicated `lease_correlated` / `ack_correlated` port methods | Rejected — surface creep every third-party adapter inherits |
 | `claim`/`ack` on a reserved lane | Rejected — no new methods, but two extra round trips per scan, and checkpoint traffic became indistinguishable from drain traffic |
+| Write it from `ack`'s optional argument | Rejected — free, but the drain is not the producer: a scan that finds no targets is followed by no ack, so the advance survives only in memory until a later cycle |
 | Filter `__`-prefixed rows from those surfaces | Zero schema, but the exclusion is an obligation every future adapter inherits |
 | Derive from `MAX(correlated)` | Livelocks past a reaction-less run longer than the page limit (measured) |
 | Persist as an event in a reserved stream | Write amplification on the hot path, and moves the pollution to `query`/`scan` |
@@ -125,4 +122,4 @@ TCK cases run against all three adapters: round-trip an advance, never regress, 
 
 ## Open questions
 
-Whether `_lease_millis` (30s) should be operator-tunable. It bounds how long a crashed correlator stalls correlation, and 30s matches the longest recommended `leaseMillis`. Left fixed until someone has a workload that argues otherwise — a knob nobody needs is still a knob everybody has to understand.
+None outstanding. Single-writer coordination is deliberately deferred (see *What this gives up*) until a measurement argues for it.

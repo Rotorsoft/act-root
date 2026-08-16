@@ -23,7 +23,7 @@ const make = (table: string) =>
 const stores = [make("scope_iso_alpha"), make("scope_iso_beta")];
 const [alpha, beta] = stores;
 
-const peek = async (s: PostgresStore) => (await s.subscribe([])).correlated;
+const peek = async (s: PostgresStore) => (await s.subscribe([])).correlated_at;
 
 afterAll(async () => {
   for (const s of stores) {

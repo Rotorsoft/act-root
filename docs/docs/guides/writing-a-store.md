@@ -69,7 +69,7 @@ and try to reshape it in place.
 
 ## The correlate checkpoint
 
-Your adapter owns one more piece of state besides events and subscriptions: **how far `correlate` has read the event log** ([#1484](https://github.com/Rotorsoft/act-root/issues/1484)). It is a single scalar per store, and it rides `subscribe` in both directions — `subscribe` returns it as `correlated`, and the optional `correlated_at` argument advances it.
+Your adapter owns one more piece of state besides events and subscriptions: **how far `correlate` has read the event log** ([#1484](https://github.com/Rotorsoft/act-root/issues/1484)). It is a single scalar per store, and it rides `subscribe` in both directions under one name — the optional `correlated_at` argument advances it, and `correlated_at` comes back in the result.
 
 It rides `subscribe` because `correlate` is its only writer and already calls that method with the targets each scan discovers, so maintaining it costs no round trip of its own.
 
