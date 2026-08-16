@@ -176,8 +176,8 @@ it("should process reactions", async () => {
   const t = target();
   await app.do("CreateItem", t, { name: "Test" });
 
-  await app.correlate();   // discover reaction target streams
-  await app.drain();       // process them
+  await app.correlate();   // discover targets, mark their work
+  await app.drain();       // process what was marked
 
   const items = getItems();
   expect(items[t.stream]).toBeDefined();

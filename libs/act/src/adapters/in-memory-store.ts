@@ -1050,6 +1050,7 @@ export class InMemoryStore implements Store {
         leased_until: s.leased_until,
         lane: s.lane,
         deferred_at: s.deferred_at,
+        correlated_at: s.correlated_at,
       });
       count++;
       if (count >= limit) break;

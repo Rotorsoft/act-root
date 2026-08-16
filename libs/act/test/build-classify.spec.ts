@@ -30,13 +30,12 @@ describe("classify_registry", () => {
     const c = classify_registry(app.registry, app._states);
 
     expect(c.static_targets).toEqual([]);
-    expect(c.has_dynamic_resolvers).toBe(false);
     expect(c.reactive_events.size).toBe(0);
     expect(c.event_to_state.get("Incremented")?.name).toBe("Counter");
     expect(c.event_to_state.get("Decremented")?.name).toBe("Counter");
   });
 
-  it("flags has_dynamic_resolvers and skips dynamic targets in static_targets", () => {
+  it("skips dynamic targets in static_targets", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")
@@ -49,8 +48,6 @@ describe("classify_registry", () => {
       _states: Parameters<typeof classify_registry>[1];
     };
     const c = classify_registry(app.registry, app._states);
-
-    expect(c.has_dynamic_resolvers).toBe(true);
     expect(c.static_targets).toEqual([]);
     expect(c.reactive_events.has("Incremented")).toBe(true);
     expect(c.reactive_events.has("Decremented")).toBe(false);
@@ -79,7 +76,6 @@ describe("classify_registry", () => {
     expect(c.static_targets).toEqual([
       { stream: "dest", source: undefined, priority: 0 },
     ]);
-    expect(c.has_dynamic_resolvers).toBe(false);
     expect(c.reactive_events.has("Incremented")).toBe(true);
     expect(c.reactive_events.has("Decremented")).toBe(true);
   });

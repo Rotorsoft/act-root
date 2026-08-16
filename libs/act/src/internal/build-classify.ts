@@ -5,9 +5,8 @@
  * Build-time classification of the registry + state map. The Act constructor
  * needs four pre-computed inputs to wire its runtime subsystems:
  *
- * - `static_targets`     — known-up-front reaction targets (statics get
- *                         subscribed once at init; dynamics scan per event)
- * - `has_dynamic_resolvers` — short-circuit flag for `correlate()`
+ * - `static_targets`     — known-up-front reaction targets, subscribed once
+ *                         at init (correlate marks them from then on)
  * - `reactive_events`    — event names with at least one reaction (drives
  *                         the drain skip-flag in `do()` and `reset()`)
  * - `event_to_state`      — event-name → owning state, for `close({restart})`
@@ -57,15 +56,14 @@ export type EventLaneSet = ReadonlySet<string> | typeof ALL_LANES;
 
 export type Classification = {
   readonly static_targets: StaticTarget[];
-  readonly has_dynamic_resolvers: boolean;
   readonly reactive_events: ReadonlySet<string>;
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   readonly event_to_lanes: ReadonlyMap<string, EventLaneSet>;
 };
 
 /**
- * Walk the registry once to collect static reaction targets, the dynamic-
- * resolvers flag, the set of reactive event names, and the event-to-state
+ * Walk the registry once to collect static reaction targets, the set of
+ * reactive event names, the per-event lane fan-in, and the event-to-state
  * map. Static targets are deduplicated by (target, source) — two reactions
  * routing to the same projection produce one subscription.
  *
@@ -88,13 +86,11 @@ export function classify_registry<
   const target_lanes = new Map<string, string | undefined>();
   const reactive_events = new Set<string>();
   const event_to_lanes = new Map<string, EventLaneSet>();
-  let has_dynamic_resolvers = false;
 
   for (const [name, register] of Object.entries(registry.events)) {
     if (register.reactions.size > 0) reactive_events.add(name);
     for (const reaction of register.reactions.values()) {
       if (typeof reaction.resolver === "function") {
-        has_dynamic_resolvers = true;
         // Dynamic resolver — lane is opaque until runtime. Mark the
         // event as wildcard so `do()` falls back to arming every
         // controller for any commit of it.
@@ -150,7 +146,6 @@ export function classify_registry<
 
   return {
     static_targets: [...statics.values()],
-    has_dynamic_resolvers,
     reactive_events,
     event_to_state,
     event_to_lanes,

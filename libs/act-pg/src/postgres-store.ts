@@ -1338,15 +1338,13 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       let subscribed = 0;
       if (streams.length) {
-        // Three statements to keep `subscribed` meaning "newly
-        // registered streams" (not "rows touched"):
+        // Two statements, because `subscribed` means "newly registered
+        // streams" and not "rows touched":
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
-        //  2. UPDATE priority on the existing rows whose new value is
-        //     higher than the stored one (ACT-102: keep the max so the
-        //     highest-priority registered reaction wins). Operator
-        //     overrides (which may *decrease*) go through `prioritize()`.
-        //  3. UPDATE lane unconditionally — current subscribe wins (ACT-1103).
-        //  4. UPDATE correlated_at to the max of stored and supplied (#1485).
+        //  2. One UPDATE over the existing rows, carrying all three
+        //     mutable columns. Correlate re-subscribes every target it
+        //     marks (#1487), so this is a per-scan round trip on the
+        //     steady-state path — worth one statement rather than three.
         const { rowCount: inserted } = await client.query(
           `
           INSERT INTO ${this._fqs} (stream, source, priority, lane, retry)
@@ -1361,46 +1359,29 @@ export class PostgresStore implements Store {
           [JSON.stringify(streams)]
         );
         subscribed = inserted ?? 0;
+        // Priority keeps the max (ACT-102: the highest-priority registered
+        // reaction wins; operator overrides, which may *decrease*, go through
+        // `prioritize()`), lane is last-writer-wins (ACT-1103), and the work
+        // mark never regresses (#1485) — `GREATEST` reads through a NULL on
+        // either side, so a first mark lands and an omitted one leaves the
+        // stored value alone. The WHERE keeps the no-op case free of dead
+        // tuples: a row is rewritten only when one of the three would change.
         await client.query(
           `
           UPDATE ${this._fqs} t
-          SET priority = COALESCE((s->>'priority')::int, 0)
+          SET priority = GREATEST(t.priority, COALESCE((s->>'priority')::int, 0)),
+              lane = COALESCE(s->>'lane', 'default'),
+              correlated_at = GREATEST(t.correlated_at, (s->>'correlated_at')::int)
           FROM jsonb_array_elements($1::jsonb) AS s
           WHERE t.stream = s->>'stream'
-            AND COALESCE((s->>'priority')::int, 0) > t.priority
+            AND (COALESCE((s->>'priority')::int, 0) > t.priority
+                 OR t.lane <> COALESCE(s->>'lane', 'default')
+                 OR (s->>'correlated_at' IS NOT NULL
+                     AND (t.correlated_at IS NULL
+                          OR t.correlated_at < (s->>'correlated_at')::int)))
           `,
           [JSON.stringify(streams)]
         );
-        await client.query(
-          `
-          UPDATE ${this._fqs} t
-          SET lane = COALESCE(s->>'lane', 'default')
-          FROM jsonb_array_elements($1::jsonb) AS s
-          WHERE t.stream = s->>'stream'
-            AND t.lane <> COALESCE(s->>'lane', 'default')
-          `,
-          [JSON.stringify(streams)]
-        );
-        // The work mark never regresses (#1485). `t.correlated_at IS NULL OR
-        // t.correlated_at < mark` is the whole rule: the NULL arm is the row's
-        // first mark (a comparison against NULL is unknown, so the predicate
-        // alone would skip it), and it holds for every value including zero
-        // and negatives — the shape the #1445 priority bug was on. Skipped
-        // entirely when no entry carries a mark, so an unmarked subscribe
-        // issues exactly the statements it did before the column existed.
-        if (streams.some((s) => s.correlated_at !== undefined))
-          await client.query(
-            `
-          UPDATE ${this._fqs} t
-          SET correlated_at = (s->>'correlated_at')::int
-          FROM jsonb_array_elements($1::jsonb) AS s
-          WHERE t.stream = s->>'stream'
-            AND s->>'correlated_at' IS NOT NULL
-            AND (t.correlated_at IS NULL
-                 OR t.correlated_at < (s->>'correlated_at')::int)
-          `,
-            [JSON.stringify(streams)]
-          );
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
@@ -1777,7 +1758,7 @@ export class PostgresStore implements Store {
       values.push(query.after);
       conditions.push(`stream > $${values.length}`);
     }
-    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM ${this._fqs}`;
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM ${this._fqs}`;
     if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += ` ORDER BY stream LIMIT $${values.length}`;
@@ -1797,6 +1778,7 @@ export class PostgresStore implements Store {
           priority: number;
           lane: string;
           deferred_at: Date | null;
+          correlated_at: number | null;
         }>(sql, values),
         client.query<{ m: number | null }>(
           `SELECT COALESCE(MAX(id), -1) AS m FROM ${this._fqt}`
@@ -1819,6 +1801,8 @@ export class PostgresStore implements Store {
           // Persisted as timestamptz; surface as ms since epoch (#1221) so
           // the cold-start re-seed can re-arm the drain at the due-time.
           deferred_at: row.deferred_at ? row.deferred_at.getTime() : undefined,
+          // NULL means "no mark yet" — unknown, not "no work" (#1485).
+          correlated_at: row.correlated_at ?? undefined,
         });
         count++;
       }

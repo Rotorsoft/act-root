@@ -1322,6 +1322,32 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           );
           expect(await claimable(s)).toBe(true);
         });
+
+        it("surfaces the mark on query_streams positions", async () => {
+          // Readers other than `claim` need the same distinction it makes:
+          // a watermark below an event id says nothing about pending work,
+          // the mark does. The close-cycle safety guard is the first caller
+          // to ask (#1487), and an unmarked row must read as UNKNOWN there
+          // too — `undefined`, never 0.
+          const marked = `ws-pos-${uid()}`;
+          const unmarked = `ws-pos-none-${uid()}`;
+          await store.subscribe([
+            { stream: marked, source: `ws-none-${uid()}`, correlated_at: 12 },
+            { stream: unmarked, source: `ws-none-${uid()}` },
+          ]);
+          const position = async (stream: string) => {
+            let row: StreamPosition | undefined;
+            await store.query_streams(
+              (p) => {
+                row = p;
+              },
+              { stream, stream_exact: true }
+            );
+            return row;
+          };
+          expect((await position(marked))?.correlated_at).toBe(12);
+          expect((await position(unmarked))?.correlated_at).toBeUndefined();
+        });
       });
 
       it("claims a subscribed stream and ack releases the lease", async () => {

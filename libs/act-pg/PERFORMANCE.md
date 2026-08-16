@@ -558,3 +558,68 @@ RFC 1449.
 The fast arm reads the base table rather than the `eligible` CTE on purpose.
 That CTE is referenced by every legacy arm, so PG materializes it, and a
 materialized scan cannot use the partial index the predicate was built for.
+
+## #1487 — what always-on correlate costs a static-only app
+
+Marking is what makes the work set work, and only `correlate` can mark, so
+correlate now scans for **every** app — including the static-only apps whose
+`correlate()` used to be an early-return that touched no store at all. That is
+the one shape this design can cost someone, so it is measured rather than
+argued about.
+
+`scripts/static-correlate.bench.mjs`, docker PG :5431 (M3 Pro). One state, one
+reaction, one constant target (`.to({ target: "projection" })`), driven through
+the explicit correlate→drain pair — the loop `settle()` runs, awaited, so the
+numbers don't depend on a debounce:
+
+| shape | before (#1496) | after (#1487) | delta |
+|---|---|---|---|
+| catch-up — 5,000 events already in the log, drained to quiescence | 1,698 ms | 1,936 ms | **+14%** |
+| steady — commit one event, catch up, repeat (200 rounds) | 5.60 ms | 7.81 ms | **+2.2 ms per round** |
+
+Per steady-state round the app pays two extra `query` scans (the pass that
+finds the new event, and the pass that finds nothing and ends the loop) plus
+one `subscribe` that carries the mark. Attributed by wrapping the store:
+
+| call | per round | ms |
+|---|---|---|
+| `query` | 4.00 | 1.28 |
+| `claim` | 2.00 | 2.84 |
+| `subscribe` | 1.00 | 1.60 |
+| `ack` | 1.00 | 0.83 |
+| `commit` | 1.00 | 0.69 |
+
+The cost is per **correlate window**, not per event: batching amortizes it,
+which is why the catch-up shape (≈50 events per window) pays 14% where the
+one-event-per-round shape pays 40%. An app that already had a dynamic resolver
+pays nothing new — it was scanning already.
+
+### `subscribe` folded three UPDATEs into one
+
+`subscribe` was seven round trips inside its transaction: `BEGIN`, the INSERT,
+one UPDATE each for `priority`, `lane` and `correlated_at`, the checkpoint
+UPDATE, the watermark SELECT, `COMMIT`. That was fine when subscribe ran only
+on discovery; correlate now calls it on every scan that marks anything, so it
+sits on the steady-state path for every app.
+
+The three column UPDATEs are now one statement — `priority = GREATEST(...)`,
+`lane = COALESCE(...)`, `correlated_at = GREATEST(...)` (PG's `GREATEST` reads
+through a NULL on either side, so a first mark lands and an omitted one leaves
+the stored value alone) — under a WHERE that still rewrites a row only when one
+of the three would actually change, so the no-op case creates no dead tuples.
+
+| | ms per `subscribe` |
+|---|---|
+| Three UPDATEs | 2.33 |
+| **One UPDATE** | **1.60** |
+
+### Reproducing
+
+```bash
+docker compose up -d          # PG on :5431
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/static-correlate.bench.mjs
+```
+
+`EVENTS` and `ROUNDS` override the two workload sizes. The "before" column came
+from the same script run against the previous commit's build.

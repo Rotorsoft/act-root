@@ -4,12 +4,16 @@
  *
  * Correlation — the discovery half of the correlate→drain pair. Owns the
  * lazy init (subscribe static targets, read cold-start watermark), the
- * dynamic-resolver scan that registers new streams as events arrive, and
- * the periodic timer that drives background discovery.
+ * scan that resolves each event to its target streams, and the periodic
+ * timer that drives background discovery.
+ *
+ * The scan is also the **producer of the work mark** (#1487): every target
+ * an event resolves to is subscribed with `correlated_at` = that event's
+ * id, which is how `claim` answers "does this stream have work?" off the
+ * subscription row instead of probing the event log.
  *
  * The Act orchestrator passes registry + classification (which static
- * targets to subscribe, whether any dynamic resolvers exist) at build
- * time; everything past that lives here.
+ * targets to subscribe) at build time; everything past that lives here.
  *
  * @internal
  */
@@ -17,11 +21,12 @@
 import { log, store } from "../ports.js";
 import type {
   Query,
-  ReactionPayload,
   Registry,
   SchemaRegister,
   Schemas,
+  SubscribeInput,
 } from "../types/index.js";
+import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
 
@@ -35,18 +40,27 @@ import { LruMap } from "./lru-map.js";
  *
  * Flooring the cold-start checkpoint at `watermark - BACK_SCAN` re-scans
  * the tail on restart so those in-flight events are re-discovered.
- * Re-scanning already-correlated events is harmless: `_subscribed`
- * dedups and `subscribe` is an idempotent UPSERT. The window bounds the
- * one-time restart cost; steady-state correlation still advances the
- * checkpoint forward normally.
+ * Re-scanning already-correlated events is harmless: a re-issued
+ * `subscribe` is an idempotent UPSERT and a re-issued mark never
+ * regresses. The window bounds the one-time restart cost; steady-state
+ * correlation still advances the checkpoint forward normally.
  *
  * @internal
  */
 const DEFAULT_COLD_START_BACK_SCAN = 10_000;
 
 /**
+ * How many distinct pattern sources keep a compiled `RegExp` around. A
+ * pattern source is declared on a resolver, so the live set is tiny; the
+ * bound only guards a dynamic resolver that mints one per event.
+ *
+ * @internal
+ */
+const PATTERN_CACHE_SIZE = 32;
+
+/**
  * Static resolver target collected at build time. Subscribed once during
- * init; never re-evaluated.
+ * init, then marked by every scan whose events resolve to it.
  *
  * @property priority - Scheduling priority for the resolved target stream.
  *   Combined with peers via `max()` at build time when multiple reactions
@@ -59,6 +73,42 @@ export type StaticTarget = {
   readonly source?: string;
   readonly priority?: number;
   readonly lane?: string;
+};
+
+/**
+ * What a target was last subscribed at, remembered per target so a scan
+ * knows what its subscription row already holds.
+ *
+ * `floor` guards priority upgrades (#1363): a resolution re-subscribes its
+ * own priority/lane only when it beats the floor, and a static target sits
+ * at `+Infinity` so a dynamic resolution never re-opens what the build-time
+ * subscribe owns. `priority`/`lane` are what the row holds, re-sent
+ * verbatim by a resolution that does *not* beat the floor — the work mark
+ * rides `subscribe`, and `subscribe` writes lane unconditionally, so a
+ * mark-carrying upsert has to carry the row's own lane to leave it alone.
+ *
+ * @internal
+ */
+type Subscription = {
+  readonly floor: number;
+  readonly priority: number;
+  readonly lane: string | undefined;
+};
+
+/**
+ * One target accumulated during a scan: the values to subscribe it with,
+ * and the highest event id observed to resolve to it — its work mark,
+ * `undefined` when no scanned event fell inside the target's fetch window.
+ *
+ * @internal
+ */
+type Correlated = {
+  source: string | undefined;
+  priority: number;
+  lane: string | undefined;
+  /** True when priority/lane came from a resolution that beat the floor. */
+  upgraded: boolean;
+  correlated_at: number | undefined;
 };
 
 /**
@@ -80,7 +130,6 @@ export type CorrelateCycleDeps<
 > = {
   registry: Registry<TSchemaReg, TEvents, TActions>;
   static_targets: ReadonlyArray<StaticTarget>;
-  has_dynamic_resolvers: boolean;
   cd: DrainOps<TEvents>;
   max_subscribed_streams: number;
   run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
@@ -99,15 +148,17 @@ export class CorrelateCycle<
   /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
-  // target → the priority it was last subscribed at. A dynamic target is
-  // re-subscribed (so the store's `GREATEST` upsert runs) only when a later
-  // scan resolves a *higher* priority for it — the runtime `max()` invariant
-  // (#1363). Static targets are recorded at +Infinity so a dynamic resolution
-  // never re-opens them (their priority is owned by the build-time subscribe).
-  private readonly _subscribed: LruMap<string, number>;
+  // target → what it was last subscribed at. Every scan re-subscribes the
+  // targets it resolved (that is how the work mark lands), so this no longer
+  // decides *whether* a target is sent — it decides *what* is sent with it:
+  // a resolution raises priority/lane only when it beats the recorded floor,
+  // and otherwise re-sends the row's own values so the mark changes nothing
+  // else. See {@link Subscription}.
+  private readonly _subscribed: LruMap<string, Subscription>;
+  /** Compiled pattern sources, bounded by {@link PATTERN_CACHE_SIZE}. */
+  private readonly _patterns = new LruMap<string, RegExp>(PATTERN_CACHE_SIZE);
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
-  private readonly _has_dynamic_resolvers: boolean;
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
   /**
@@ -138,7 +189,6 @@ export class CorrelateCycle<
   constructor({
     registry,
     static_targets,
-    has_dynamic_resolvers,
     cd,
     max_subscribed_streams,
     run_scoped,
@@ -149,7 +199,6 @@ export class CorrelateCycle<
     this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
-    this._has_dynamic_resolvers = has_dynamic_resolvers;
     this._cd = cd;
     this._on_init = on_init;
     this._run_scoped = run_scoped;
@@ -163,19 +212,9 @@ export class CorrelateCycle<
   }
 
   /**
-   * Whether any reaction uses a dynamic resolver — i.e. whether `correlate`
-   * performs a store scan rather than the static no-op early-return. The
-   * settle loop reads this to avoid recording a fictitious circuit-breaker
-   * success on a static app whose correlate never touches the store (#1329).
-   */
-  get has_dynamic_resolvers(): boolean {
-    return this._has_dynamic_resolvers;
-  }
-
-  /**
    * Initialize correlation state on first call.
-   * - Reads max(at) from store, then floors the cold-start checkpoint at
-   *   `watermark - back_scan` when dynamic resolvers exist, so an event
+   * - Reads the durable correlate checkpoint (and max(at)) from the store,
+   *   flooring a first boot at `watermark - back_scan` so an event
    *   committed-but-not-correlated before a crash is re-scanned on
    *   restart instead of skipped (ACT-1207)
    * - Subscribes static resolver targets (idempotent upsert)
@@ -205,26 +244,32 @@ export class CorrelateCycle<
     const { watermark, correlated_at } = await store().subscribe([
       ...this._static_targets,
     ]);
-    // Without dynamic resolvers correlate never scans, so the checkpoint is
-    // inert — keep the plain `max(at)` cold start.
-    //
-    // With them, resume from the durable checkpoint when one exists (#1484).
-    // On a first boot it sits at -1 and a full scan of an existing log would
-    // be unbounded, so seed from the old heuristic: the watermark backed off
-    // by a bounded window, which re-discovers the crash-window tail (an
+    // Resume from the durable checkpoint when one exists (#1484). On a first
+    // boot it sits at -1 and a full scan of an existing log would be
+    // unbounded, so seed from the old heuristic: the watermark backed off by
+    // a bounded window, which re-discovers the crash-window tail (an
     // uncorrelated event now below a busier stream's watermark). Never floor
     // below -1. After the first scan the checkpoint is exact and the
     // heuristic never runs again.
-    this._checkpoint = !this._has_dynamic_resolvers
-      ? watermark
-      : correlated_at >= 0
+    //
+    // Static-only apps take the same path since #1487: correlate scans for
+    // every app now, because a target that is never scanned is a target that
+    // is never marked.
+    this._checkpoint =
+      correlated_at >= 0
         ? correlated_at
         : Math.max(-1, watermark - this._cold_start_back_scan);
     this._on_init?.();
-    for (const { stream } of this._static_targets) {
-      // +Infinity: a dynamic resolution's priority can never exceed it, so a
-      // static target is never re-subscribed through the dynamic path (#1363).
-      this._subscribed.set(stream, Number.POSITIVE_INFINITY);
+    for (const { stream, priority = 0, lane } of this._static_targets) {
+      // floor +Infinity: a dynamic resolution's priority can never exceed it,
+      // so a static target is never re-opened through the dynamic path
+      // (#1363) — its priority/lane are owned by the build-time subscribe
+      // above, and a scan that marks it re-sends exactly those values.
+      this._subscribed.set(stream, {
+        floor: Number.POSITIVE_INFINITY,
+        priority,
+        lane,
+      });
     }
     // Cold-start defer re-seed (#1221) — after the static targets are
     // subscribed, so a walk of the streams table sees them.
@@ -253,30 +298,44 @@ export class CorrelateCycle<
   }
 
   /**
-   * Discover dynamic-resolver targets in the events past the checkpoint
-   * and register any new streams via `cd.subscribe`. Static targets are
-   * subscribed at init time, so this only walks dynamic resolvers.
+   * Would an event from `stream` be fetched for a target subscribed with
+   * `source`? The subscription's source is the filter `fetch` queries with
+   * — literal names by equality, patterns compiled as a `RegExp` — so an
+   * event outside it is not work for that target and must not mark it.
+   * No source means the target consumes every stream.
+   */
+  private _in_fetch_window(
+    source: string | undefined,
+    stream: string
+  ): boolean {
+    if (source === undefined || source === stream) return true;
+    if (is_literal_source(source)) return false;
+    let pattern = this._patterns.get(source);
+    if (!pattern) {
+      pattern = new RegExp(source);
+      this._patterns.set(source, pattern);
+    }
+    return pattern.test(stream);
+  }
+
+  /**
+   * Scan the events past the checkpoint, resolve each to its target
+   * streams, and record what it found through `cd.subscribe` — new dynamic
+   * targets get registered, and every target an event resolved to gets its
+   * **work mark** raised to that event's id (#1487).
+   *
+   * Both resolver kinds are walked. A static target is already subscribed
+   * at init, but marking it is what makes it claimable without probing the
+   * event log, so the scan runs for every app.
    */
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
     await this.init();
 
-    // No dynamic resolvers — nothing to discover
-    if (!this._has_dynamic_resolvers)
-      return { subscribed: 0, last_id: this._checkpoint };
-
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
-    const correlated = new Map<
-      string,
-      {
-        source?: string;
-        priority: number;
-        lane?: string;
-        payloads: ReactionPayload<TEvents>[];
-      }
-    >();
+    const correlated = new Map<string, Correlated>();
     let last_id = after;
     await store().query<TEvents>(
       (event) => {
@@ -285,76 +344,90 @@ export class CorrelateCycle<
         // skip events with no registered reactions
         if (register) {
           for (const reaction of register.reactions.values()) {
-            // only evaluate dynamic resolvers — statics are subscribed at init
-            if (typeof reaction.resolver !== "function") continue;
-            const resolved = reaction.resolver(event);
-            // Let a target through when a scan resolves a strictly higher
-            // priority than it was last subscribed at, so the store's
-            // `GREATEST` upsert raises it — the documented runtime `max()`
-            // invariant, which the plain "already subscribed?" dedup silently
-            // froze at first discovery (#1363). A never-seen target defaults to
-            // -Infinity so its first resolution always passes; static targets
-            // sit at +Infinity so a dynamic resolution never re-opens them.
-            if (
-              resolved &&
-              (resolved.priority ?? 0) >
-                (this._subscribed.get(resolved.target) ??
-                  Number.NEGATIVE_INFINITY)
-            ) {
-              const incoming_priority = resolved.priority ?? 0;
-              const entry = correlated.get(resolved.target) || {
-                source: resolved.source,
-                priority: incoming_priority,
-                lane: resolved.lane,
-                payloads: [],
-              };
-              // Multiple reactions targeting the same stream within a
-              // single correlate scan — keep the max priority, and carry the
-              // winning reaction's lane so the highest-priority reaction sets
-              // the lane (matches the subscribe-side `max()` invariant).
-              if (incoming_priority > entry.priority) {
-                entry.priority = incoming_priority;
-                entry.lane = resolved.lane;
-              }
-              entry.payloads.push({
-                ...reaction,
-                source: resolved.source,
-                event,
-              });
-              correlated.set(resolved.target, entry);
+            const resolved =
+              typeof reaction.resolver === "function"
+                ? reaction.resolver(event)
+                : reaction.resolver;
+            if (!resolved) continue;
+            // Raise priority/lane only when this resolution beats what the
+            // target was last subscribed at, so the store's `GREATEST` upsert
+            // runs — the documented runtime `max()` invariant, which the
+            // plain "already subscribed?" dedup silently froze at first
+            // discovery (#1363). A never-seen target has no record, so its
+            // first resolution always wins; a static target sits at +Infinity
+            // and never does. Otherwise the row's own values ride along
+            // unchanged, because the mark travels on the same upsert.
+            const recorded = this._subscribed.get(resolved.target);
+            const priority = resolved.priority ?? 0;
+            const upgraded = !recorded || priority > recorded.floor;
+            const carried = upgraded
+              ? { priority, lane: resolved.lane }
+              : { priority: recorded.priority, lane: recorded.lane };
+            const entry = correlated.get(resolved.target) || {
+              source: resolved.source,
+              priority: carried.priority,
+              lane: carried.lane,
+              upgraded,
+              correlated_at: undefined,
+            };
+            // Multiple reactions targeting the same stream within a
+            // single correlate scan — keep the max priority, and carry the
+            // winning reaction's lane so the highest-priority reaction sets
+            // the lane (matches the subscribe-side `max()` invariant).
+            if (carried.priority > entry.priority) {
+              entry.priority = carried.priority;
+              entry.lane = carried.lane;
+              entry.upgraded = upgraded;
             }
+            // The mark is an assertion about the log: only an event the
+            // target's own fetch would return may raise it. Ids ascend
+            // through the scan, so the last one wins.
+            if (this._in_fetch_window(resolved.source, event.stream))
+              entry.correlated_at = event.id;
+            correlated.set(resolved.target, entry);
           }
         }
       },
       { ...query, after }
     );
 
-    if (correlated.size) {
-      const streams = [...correlated.entries()].map(
-        ([stream, { source, priority, lane }]) => ({
+    // A target rides the batch when it has something to say: a mark to
+    // raise, or priority/lane to register. A re-seen target that this scan
+    // found no work for (its source filtered every event out) says neither,
+    // and is left alone.
+    const streams: SubscribeInput[] = [];
+    for (const [stream, entry] of correlated) {
+      if (entry.upgraded || entry.correlated_at !== undefined)
+        streams.push({
           stream,
-          source,
-          priority,
-          lane,
-        })
-      );
+          source: entry.source,
+          priority: entry.priority,
+          lane: entry.lane,
+          correlated_at: entry.correlated_at,
+        });
+    }
+
+    if (streams.length) {
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
       const { subscribed } = await this._cd.subscribe(streams, last_id);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
-      if (subscribed) {
-        // Record each target at the priority it was just subscribed at (the
-        // within-scan max), so a later lower-or-equal resolution dedups and a
-        // strictly-higher one re-opens the guard above (#1363).
-        for (const { stream, priority } of streams) {
-          this._subscribed.set(stream, priority);
-        }
+      // Record what each upgraded target was just subscribed at (the
+      // within-scan max), so a later lower-or-equal resolution carries these
+      // values forward and a strictly-higher one re-opens the guard (#1363).
+      for (const { stream, priority, lane } of streams) {
+        if (correlated.get(stream)?.upgraded)
+          this._subscribed.set(stream, {
+            floor: priority as number,
+            priority: priority as number,
+            lane,
+          });
       }
       return { subscribed, last_id };
     }
-    // No streams to subscribe — safe to advance
+    // Nothing to subscribe — safe to advance
     this._checkpoint = last_id;
     return { subscribed: 0, last_id };
   }

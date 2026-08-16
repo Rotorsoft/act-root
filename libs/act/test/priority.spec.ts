@@ -239,7 +239,7 @@ describe("ACT-102 priority lanes — framework", () => {
       ]);
     });
 
-    it("has_dynamic_resolvers true when any resolver is a function", () => {
+    it("keeps a dynamic-resolver target out of static_targets", () => {
       const Counter = state({ Counter: z.object({ count: z.number() }) })
         .init(() => ({ count: 0 }))
         .emits({ Inc: ZodEmpty })
@@ -255,7 +255,6 @@ describe("ACT-102 priority lanes — framework", () => {
         .build() as unknown as { registry: any; _states: any };
 
       const c = classify_registry(app.registry, app._states);
-      expect(c.has_dynamic_resolvers).toBe(true);
       expect(c.static_targets).toEqual([]);
     });
   });

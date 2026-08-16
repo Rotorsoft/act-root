@@ -97,10 +97,12 @@ For apps with reactions, we can't tombstone a stream that still has pending reac
 
 Optimization: when `reactiveEvents.size === 0`, skip the safety probe entirely (every stream is safe). Most close operations on apps without reactions take this path.
 
-Otherwise, walk `query_streams` (read-only — no leasing, no state mutation), keyset-paginating on the `after` cursor through every matching position so coverage doesn't depend on subscription count. The probe passes `source_matches` scoped to the streams being closed, narrowing the scan to subscriptions whose `source` could match a target; since that filter is best-effort, the probe re-checks source and target in process for each row. For each subscribed reader's position, it marks any target that still has unprocessed events behind that reader.
+Otherwise, walk `query_streams` (read-only — no leasing, no state mutation), keyset-paginating on the `after` cursor through every matching position so coverage doesn't depend on subscription count. The probe passes `source_matches` scoped to the streams being closed, narrowing the scan to subscriptions whose `source` could match a target; since that filter is best-effort, the probe re-checks source and target in process for each row. For each subscribed reader's position, it marks any target that still has **pending work** behind that reader.
 
-- **Reader is behind**: target goes to `skipped`. Callable code can retry close after the reader catches up (e.g., after `await app.settle()`).
-- **Reader is at or past head**: target is `safe`.
+Pending work, not watermark lag — the two stopped being the same thing when correlate became the producer of the work mark ([#1487](https://github.com/Rotorsoft/act-root/issues/1487)). A subscription's watermark advances only over events that resolve to it, so a reader of two of a state's ten event types sits permanently below a head it has no reaction for, and reading that as "in flight" would skip every such stream forever. The probe therefore asks the row the same question `claim` asks: `at < correlated_at`. A row with no mark answers *unknown* and is read conservatively as pending, matching the legacy claim arm it shares a rollout with.
+
+- **Reader has unconsumed work below the head**: target goes to `skipped`. Callable code can retry close after the reader catches up (e.g., after `await app.settle()`).
+- **Reader has consumed everything marked for it**: target is `safe`.
 - **Probe fails**: close() throws. Nothing committed.
 
 ### Phase 3 — Guard with tombstones

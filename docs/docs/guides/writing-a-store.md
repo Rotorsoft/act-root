@@ -21,7 +21,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure. `ack` doubles as the drain's atomic finalize: every entry advances the watermark to `at`, and a lease carrying `due` (ms since epoch) *also* defers the remainder — schedule set, entry's `retry` persisted — in the same transaction as the batch's acks; deferred entries are excluded from the return value
 - `defer(input, deferred_at)` — park streams until a future wall-clock time without advancing their watermark (the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)); covered below
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match. `truncate` targets come in two shapes — full (delete everything, seed a snapshot or tombstone) and windowed (`before` boundary, prefix delete behind a snapshot) — covered below
-- `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane` and, when a stream is parked on an active future defer, an optional `deferred_at` (ms since epoch). The query gained an optional `source_matches` filter — covered below
+- `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`, an optional `deferred_at` (ms since epoch) when the stream is parked on an active future defer, and the optional `correlated_at` **work mark** so a reader can tell "behind the head" from "has work". The query gained an optional `source_matches` filter — covered below
 - `notify(handler)` — *optional* cross-process commit notifications
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)
 
@@ -101,6 +101,12 @@ Four rules, all pinned by the TCK's `work_set` suite:
 - **The operator surfaces leave the mark alone.** `reset` rewinds `at` to
   `-1` and must not clear `correlated_at`, or a rebuild would be unclaimable.
   `unblock`, `defer`, and `prioritize` don't touch it either.
+- **`query_streams` returns it.** `claim` is not the only reader that needs to
+  tell "behind the head" from "has unconsumed work" — the close-cycle safety
+  probe asks the same question of every subscription consuming from a stream
+  it is about to truncate ([#1487](https://github.com/Rotorsoft/act-root/issues/1487)).
+  Surface the column on `StreamPosition.correlated_at`, and surface it as
+  `undefined` when unset: `0` would read as a real mark.
 
 The payoff is an index, not a loop. `at < correlated_at` is a legal partial-index
 predicate — immutable, single-row, no cross-row reference — so the correlated

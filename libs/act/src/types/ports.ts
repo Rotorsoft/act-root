@@ -152,6 +152,14 @@ export type StreamPosition = {
   readonly leased_until?: Date;
   readonly lane?: string;
   readonly deferred_at?: number;
+  /**
+   * The stream's **work mark** — see {@link SubscribeInput.correlated_at}.
+   * `at < correlated_at` is the same predicate {@link Store.claim} applies,
+   * so a reader can tell "behind the head" (`at` lags an event id) from
+   * "has unconsumed work" without probing the event log. `undefined` means
+   * the row carries no mark yet: unknown, not "no work".
+   */
+  readonly correlated_at?: number;
 };
 
 /**

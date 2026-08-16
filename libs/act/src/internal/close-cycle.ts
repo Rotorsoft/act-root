@@ -471,6 +471,19 @@ async function partition_by_safety(
         const source_re = position.source
           ? get_regex(position.source)
           : undefined;
+        // "Behind the head" stopped meaning "has work to do" when correlate
+        // became the producer of the work mark (#1487): a subscription's
+        // watermark advances only over events that resolve to it, so a
+        // consumer of two of a state's ten event types sits permanently below
+        // a head it has no reaction for. Asking the row the same question
+        // `claim` asks keeps the guard honest — and keeps close from skipping
+        // every such stream forever. An unmarked row answers "unknown", which
+        // this probe reads conservatively as pending, matching the legacy
+        // claim arm it shares a rollout with.
+        const has_work =
+          position.correlated_at === undefined ||
+          position.at < position.correlated_at;
+        if (!has_work) return;
         for (const [stream, info] of stream_info) {
           if (
             (!source_re || source_re.test(stream)) &&
