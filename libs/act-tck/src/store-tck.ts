@@ -115,10 +115,10 @@ export type StoreCapabilities = {
    */
   readonly rejects_nonportable_claim_source?: boolean;
   /**
-   * Adapter honors the {@link SubscribeInput.correlated} **work mark**
-   * (#1485): `subscribe` applies it as `GREATEST(correlated, N)` and
+   * Adapter honors the {@link SubscribeInput.correlated_at} **work mark**
+   * (#1485): `subscribe` applies it as `GREATEST(correlated_at, N)` and
    * `claim` serves a marked stream from the subscription row alone
-   * (`at < correlated`) instead of probing the event log. When `true`,
+   * (`at < correlated_at`) instead of probing the event log. When `true`,
    * the TCK runs the work-set suite — mark-then-claim, monotonicity
    * across positive/zero/negative values, `ack` retiring a stream from
    * the claimable set and a later mark re-adding it, and the operator
@@ -1180,9 +1180,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
 
       // The subscription work set (#1485). `correlate` records the highest
-      // event id that resolved to a target as that row's `correlated` mark,
+      // event id that resolved to a target as that row's `correlated_at` mark,
       // and `claim` serves a marked stream from the subscription row alone —
-      // `at < correlated` — instead of probing the event log per row. The
+      // `at < correlated_at` — instead of probing the event log per row. The
       // probe is what makes claim cost O(subscribed streams); the mark makes
       // it O(lease budget).
       //
@@ -1207,19 +1207,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           const s = `ws-mark-${uid()}`;
           await store.subscribe([{ stream: s, source: `ws-src-${uid()}` }]);
           expect(await claimable(s)).toBe(false);
-          await store.subscribe([{ stream: s, correlated: 7 }]);
+          await store.subscribe([{ stream: s, correlated_at: 7 }]);
           expect(await claimable(s)).toBe(true);
           // A source-less subscription carries a mark the same way — the
           // mark is a property of the target, not of how it was sourced.
           const s2 = `ws-mark-nosrc-${uid()}`;
-          await store.subscribe([{ stream: s2, correlated: 7 }]);
+          await store.subscribe([{ stream: s2, correlated_at: 7 }]);
           expect(await claimable(s2)).toBe(true);
         });
 
         it("never regresses the mark, for every value on the number line", async () => {
           const s = `ws-mono-${uid()}`;
           await store.subscribe([
-            { stream: s, source: `ws-none-${uid()}`, correlated: 10 },
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 10 },
           ]);
           // Park the watermark BETWEEN the stored mark and the lower values
           // below. Without this the row stays claimable whatever the mark
@@ -1232,13 +1232,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // Lower, equal, and negative all leave the stored mark alone — the
           // shape the #1445 priority bug was on. Any of them landing would
           // drop `at = 5` out of the claimable set.
-          await store.subscribe([{ stream: s, correlated: 4 }]);
+          await store.subscribe([{ stream: s, correlated_at: 4 }]);
           expect(await claimable(s)).toBe(true);
-          await store.subscribe([{ stream: s, correlated: 5 }]);
+          await store.subscribe([{ stream: s, correlated_at: 5 }]);
           expect(await claimable(s)).toBe(true);
-          await store.subscribe([{ stream: s, correlated: -3 }]);
+          await store.subscribe([{ stream: s, correlated_at: -3 }]);
           expect(await claimable(s)).toBe(true);
-          await store.subscribe([{ stream: s, correlated: 0 }]);
+          await store.subscribe([{ stream: s, correlated_at: 0 }]);
           expect(await claimable(s)).toBe(true);
           // A higher one does advance it: catch the watermark up to the old
           // mark, and only the new one can put the stream back in the set.
@@ -1247,14 +1247,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             { ...(leased2.find((l) => l.stream === s) as Lease), at: 10 },
           ]);
           expect(await claimable(s)).toBe(false);
-          await store.subscribe([{ stream: s, correlated: 11 }]);
+          await store.subscribe([{ stream: s, correlated_at: 11 }]);
           expect(await claimable(s)).toBe(true);
         });
 
         it("retires a stream when ack catches the watermark up to the mark", async () => {
           const s = `ws-retire-${uid()}`;
           await store.subscribe([
-            { stream: s, source: `ws-none-${uid()}`, correlated: 5 },
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 5 },
           ]);
           const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
           const mine = leased.find((l) => l.stream === s);
@@ -1264,14 +1264,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await store.ack([{ ...(mine as Lease), at: 5 }]);
           expect(await claimable(s)).toBe(false);
           // A later mark re-admits it — the set is not one-shot.
-          await store.subscribe([{ stream: s, correlated: 6 }]);
+          await store.subscribe([{ stream: s, correlated_at: 6 }]);
           expect(await claimable(s)).toBe(true);
         });
 
         it("keeps the mark across reset, so a rebuild is claimable", async () => {
           const s = `ws-reset-${uid()}`;
           await store.subscribe([
-            { stream: s, source: `ws-none-${uid()}`, correlated: 3 },
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 3 },
           ]);
           const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
           await store.ack([
@@ -1279,7 +1279,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           ]);
           expect(await claimable(s)).toBe(false);
           // reset rewinds the watermark to -1 and leaves the mark alone, so
-          // `at < correlated` is true again and the replay can be claimed.
+          // `at < correlated_at` is true again and the replay can be claimed.
           await store.reset([s]);
           expect(await claimable(s)).toBe(true);
         });
@@ -1287,7 +1287,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         it("keeps the mark across unblock, defer, and prioritize", async () => {
           const s = `ws-ops-${uid()}`;
           await store.subscribe([
-            { stream: s, source: `ws-none-${uid()}`, correlated: 9 },
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 9 },
           ]);
           const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
           const mine = leased.find((l) => l.stream === s) as Lease;

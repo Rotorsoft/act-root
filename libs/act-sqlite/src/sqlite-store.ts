@@ -407,7 +407,7 @@ export class SqliteStore implements Store {
         priority INTEGER NOT NULL DEFAULT 0,
         lane TEXT NOT NULL DEFAULT 'default',
         deferred_at TEXT,
-        correlated INTEGER
+        correlated_at INTEGER
       )
     `);
     // Migration for tables created before priority lanes (ACT-102).
@@ -442,7 +442,7 @@ export class SqliteStore implements Store {
     // migrates row by row as correlate marks each target.
     try {
       await this.client.execute(
-        "ALTER TABLE streams ADD COLUMN correlated INTEGER"
+        "ALTER TABLE streams ADD COLUMN correlated_at INTEGER"
       );
     } catch {
       // already present
@@ -465,10 +465,10 @@ export class SqliteStore implements Store {
     );
     // The correlated set IS the index (#1485): it holds only streams with
     // work, so `claim` scans candidates instead of every subscription. A
-    // stream leaves when `ack` advances `at` to `correlated`, and re-enters
+    // stream leaves when `ack` advances `at` to `correlated_at`, and re-enters
     // when correlate raises the mark.
     await this.client.execute(
-      "CREATE INDEX IF NOT EXISTS idx_streams_correlated ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated"
+      "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
     // Lane filter index (ACT-1103).
     await this.client.execute(
@@ -684,7 +684,7 @@ export class SqliteStore implements Store {
         source,
         priority = 0,
         lane = "default",
-        correlated,
+        correlated_at,
       } of streams) {
         const inserted = await tx.execute({
           sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane, retry) VALUES (?, ?, ?, ?, -1)",
@@ -709,17 +709,17 @@ export class SqliteStore implements Store {
             args: [lane, stream, lane],
           });
         }
-        // The work mark never regresses (#1485). `WHERE correlated IS NULL OR
-        // correlated < ?` is the whole rule: the NULL arm is the row's first
+        // The work mark never regresses (#1485). `WHERE correlated_at IS
+        // NULL OR correlated_at < ?` is the whole rule: the NULL arm is first
         // mark (a comparison against NULL is unknown, so the predicate alone
         // would skip it), and it holds for every value including zero and
         // negatives. Written here rather than in the INSERT above so an
         // unmarked subscribe never names the column — a table that predates
         // it, and that `seed()` has not migrated, keeps working.
-        if (correlated !== undefined)
+        if (correlated_at !== undefined)
           await tx.execute({
-            sql: "UPDATE streams SET correlated = ? WHERE stream = ? AND (correlated IS NULL OR correlated < ?)",
-            args: [correlated, stream, correlated],
+            sql: "UPDATE streams SET correlated_at = ? WHERE stream = ? AND (correlated_at IS NULL OR correlated_at < ?)",
+            args: [correlated_at, stream, correlated_at],
           });
       }
       const wm = await tx.execute(
@@ -763,15 +763,15 @@ export class SqliteStore implements Store {
       const now = new Date().toISOString();
 
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
-      // `correlated IS NULL OR at < correlated` (#1485) drops marked streams
+      // `correlated_at IS NULL OR at < correlated_at` (#1485) drops marked
       // whose watermark has caught up before they ever reach the probe loop
       // below. NULL means "unknown", so those rows pass through to the legacy
       // probe — an install that predates the column behaves exactly as it did.
       const result = await tx.execute({
-        sql: `SELECT stream, source, at, priority, lane, correlated FROM streams
+        sql: `SELECT stream, source, at, priority, lane, correlated_at FROM streams
               WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
                 AND (deferred_at IS NULL OR deferred_at <= ?)${lane_clause}
-                AND (correlated IS NULL OR at < correlated)
+                AND (correlated_at IS NULL OR at < correlated_at)
               ORDER BY priority DESC, at ASC`,
         args: lane !== undefined ? [now, now, lane] : [now, now],
       });
@@ -789,9 +789,9 @@ export class SqliteStore implements Store {
         const at = Number(row.at);
 
         // A marked row is already known to have work — the SQL above kept
-        // only `at < correlated` — so it skips the probe entirely. This is
+        // only `at < correlated_at` — so it skips the probe entirely. This is
         // the N+1 the work set exists to remove; step 5 deletes the arm below.
-        if (row.correlated !== null) {
+        if (row.correlated_at !== null) {
           candidates.push({
             stream,
             source: source ?? undefined,

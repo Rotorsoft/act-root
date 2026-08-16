@@ -407,23 +407,23 @@ export type SubscribeInput = {
   readonly lane?: string;
   /**
    * Highest event id observed to resolve to this target — the stream's
-   * **work mark** (#1485). Applied as `correlated = GREATEST(correlated, N)`
+   * **work mark** (#1485). Applied as `correlated_at = GREATEST(correlated_at, N)`
    * for every value including zero and negatives; omitted leaves the stored
    * value untouched.
    *
    * A mark is an assertion about the log: `correlate` sets it to the id of a
-   * real event that resolved to this target, so `at < correlated` implies a
+   * real event that resolved to this target, so `at < correlated_at` implies a
    * fetch returns work. `correlate` is the only component entitled to write
    * it — the store cannot resolve user-code targets, and `notify` is
    * best-effort — which is what the name records.
    *
-   * Eligibility follows from it: a stream is claimable iff `at < correlated`.
+   * Eligibility follows from it: a stream is claimable iff `at < correlated_at`.
    * `NULL` means **unknown**, not "no work": those rows fall back to the
    * legacy has-work probe against the event log, which is how installs that
    * predate the column keep working. That arm is deleted once `correlate`
    * marks universally.
    */
-  readonly correlated?: number;
+  readonly correlated_at?: number;
 };
 
 /**

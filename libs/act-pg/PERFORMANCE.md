@@ -536,10 +536,10 @@ framework's most common topology: a per-aggregate reaction
 (`.to(e => ({ target: e.stream }))`) subscribes one stream per aggregate.
 
 `correlate` already knows the answer — it walks events forward and resolves
-each to its targets — and now records it as `streams.correlated`, the highest
+each to its targets — and now records it as `streams.correlated_at`, the highest
 event id observed to resolve to that target. Eligibility becomes `at <
-correlated`, read from the subscription row, and the partial index
-`(lane, priority DESC, at) WHERE blocked = false AND at < correlated` holds
+correlated_at`, read from the subscription row, and the partial index
+`(lane, priority DESC, at) WHERE blocked = false AND at < correlated_at` holds
 only the streams with work.
 
 Measured on docker PG :5431 (M3 Pro), 20,000 subscriptions of which 3 have

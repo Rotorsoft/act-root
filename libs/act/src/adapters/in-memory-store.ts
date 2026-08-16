@@ -54,7 +54,7 @@ class InMemoryStream {
   // Work mark (#1485): highest event id observed to resolve to this target.
   // `undefined` means UNKNOWN — the row predates the mark, so `claim` falls
   // back to the legacy has-work probe rather than treating it as "no work".
-  private _correlated: number | undefined = undefined;
+  private _correlated_mark: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -89,17 +89,20 @@ class InMemoryStream {
     if (priority > this._priority) this._priority = priority;
   }
 
-  get correlated() {
-    return this._correlated;
+  get correlated_at() {
+    return this._correlated_mark;
   }
 
   /**
    * Raise the work mark via {@link subscribe}: keeps the maximum, for every
    * value including zero and negatives, so a mark never regresses.
    */
-  mark(correlated: number) {
-    if (this._correlated === undefined || correlated > this._correlated)
-      this._correlated = correlated;
+  mark(correlated_at: number) {
+    if (
+      this._correlated_mark === undefined ||
+      correlated_at > this._correlated_mark
+    )
+      this._correlated_mark = correlated_at;
   }
 
   /**
@@ -642,10 +645,10 @@ export class InMemoryStore implements Store {
     const has_work = (s: InMemoryStream): boolean => {
       // Fast arm (#1485): a marked stream answers from the subscription row
       // alone — no probe of the event log. `correlate` marks the highest id
-      // that resolved here, so `at < correlated` means a fetch returns work.
+      // that resolved here, so `at < correlated_at` means a fetch returns work.
       // The legacy probe below serves only rows with no mark yet, and is
       // deleted once correlate marks universally.
-      if (s.correlated !== undefined) return s.at < s.correlated;
+      if (s.correlated_at !== undefined) return s.at < s.correlated_at;
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
         const max_id = this._max_event_id_by_stream.get(s.source);
@@ -731,16 +734,16 @@ export class InMemoryStore implements Store {
       source,
       priority = 0,
       lane = DEFAULT_LANE,
-      correlated,
+      correlated_at,
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
         existing.bump_priority(priority);
         existing.lane = lane;
-        if (correlated !== undefined) existing.mark(correlated);
+        if (correlated_at !== undefined) existing.mark(correlated_at);
       } else {
         const created = new InMemoryStream(stream, source, priority, lane);
-        if (correlated !== undefined) created.mark(correlated);
+        if (correlated_at !== undefined) created.mark(correlated_at);
         this._streams.set(stream, created);
         subscribed++;
       }

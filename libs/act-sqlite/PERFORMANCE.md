@@ -131,9 +131,9 @@ one `SELECT 1 FROM events ... LIMIT 1` per eligible subscription row, driven by
 a JS loop. #1448's index fix, which halved the equivalent cost on Postgres,
 has no analogue here — the round trips are the cost.
 
-With `streams.correlated` (#1485) a marked row answers from the subscription
-row alone: the candidate `SELECT` carries `AND (correlated IS NULL OR at <
-correlated)`, so caught-up streams never reach the loop, and the rows that do
+With `streams.correlated_at` (#1485) a marked row answers from the subscription
+row alone: the candidate `SELECT` carries `AND (correlated_at IS NULL OR at <
+correlated_at)`, so caught-up streams never reach the loop, and the rows that do
 skip the probe entirely.
 
 Measured on the same machine as the act-pg entry, 20,000 subscriptions of

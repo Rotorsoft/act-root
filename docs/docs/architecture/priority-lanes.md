@@ -105,7 +105,7 @@ Benchmark in [`@rotorsoft/act-pg`'s `PERFORMANCE.md`](https://github.com/rotorso
 
 All three keep the **max invariant** on `subscribe()` and treat `prioritize()` as an outright set.
 
-Ordering applies **over the correlated set**, not over every subscription ([#1485](https://github.com/Rotorsoft/act-root/issues/1485)). A subscription row carries an optional work mark (`correlated`, the highest event id seen to resolve to that target), and a marked stream is eligible only while `at < correlated`. Priority and lane then order the streams that survive that filter. This changes the cost, not the outcome: the streams excluded are the ones a has-work probe would have rejected anyway, so the same set is ordered the same way — on Postgres out of a partial index (`(lane, priority DESC, at) WHERE blocked = false AND at < correlated`) that contains only streams with work.
+Ordering applies **over the correlated set**, not over every subscription ([#1485](https://github.com/Rotorsoft/act-root/issues/1485)). A subscription row carries an optional work mark (`correlated_at`, the highest event id seen to resolve to that target), and a marked stream is eligible only while `at < correlated_at`. Priority and lane then order the streams that survive that filter. This changes the cost, not the outcome: the streams excluded are the ones a has-work probe would have rejected anyway, so the same set is ordered the same way — on Postgres out of a partial index (`(lane, priority DESC, at) WHERE blocked = false AND at < correlated_at`) that contains only streams with work.
 
 ## See also
 

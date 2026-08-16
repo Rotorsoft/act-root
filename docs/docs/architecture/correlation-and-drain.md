@@ -44,7 +44,7 @@ If `hasDynamicResolvers` is false, `correlate()` becomes effectively a no-op pas
 
 `correlate(query)` scans events past the correlation checkpoint, evaluates each registered dynamic resolver, and registers any new (target, source) pairs as subscribed streams via `store.subscribe`.
 
-Correlate is also the only component entitled to say **which subscribed streams have work**. It is the one that sees every event and can apply a reaction's resolver to it, so it is the one that can record the highest event id resolving to a target — the row's `correlated` work mark ([#1485](https://github.com/Rotorsoft/act-root/issues/1485)). `claim` then reads eligibility off the subscription row (`at < correlated`) rather than re-deriving it from the event log microseconds later. The store side of that mark is in place; correlate begins emitting it in [#1487](https://github.com/Rotorsoft/act-root/issues/1487), and until then every row stays unmarked and `claim` behaves exactly as it does today.
+Correlate is also the only component entitled to say **which subscribed streams have work**. It is the one that sees every event and can apply a reaction's resolver to it, so it is the one that can record the highest event id resolving to a target — the row's `correlated_at` work mark ([#1485](https://github.com/Rotorsoft/act-root/issues/1485)). `claim` then reads eligibility off the subscription row (`at < correlated_at`) rather than re-deriving it from the event log microseconds later. The store side of that mark is in place; correlate begins emitting it in [#1487](https://github.com/Rotorsoft/act-root/issues/1487), and until then every row stays unmarked and `claim` behaves exactly as it does today.
 
 ```
                     correlate({ after, limit })
