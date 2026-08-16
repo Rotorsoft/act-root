@@ -54,7 +54,7 @@ class InMemoryStream {
   // Work mark (#1485): highest event id observed to resolve to this target.
   // `undefined` means UNKNOWN — the row predates the mark, so `claim` falls
   // back to the legacy has-work probe rather than treating it as "no work".
-  private _correlated_mark: number | undefined = undefined;
+  private _correlated_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -90,7 +90,7 @@ class InMemoryStream {
   }
 
   get correlated_at() {
-    return this._correlated_mark;
+    return this._correlated_at;
   }
 
   /**
@@ -99,10 +99,10 @@ class InMemoryStream {
    */
   mark(correlated_at: number) {
     if (
-      this._correlated_mark === undefined ||
-      correlated_at > this._correlated_mark
+      this._correlated_at === undefined ||
+      correlated_at > this._correlated_at
     )
-      this._correlated_mark = correlated_at;
+      this._correlated_at = correlated_at;
   }
 
   /**
