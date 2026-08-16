@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.26.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.3...@rotorsoft/act-v1.26.0) (2026-08-16)
+
+
+### Features
+
+* **act:** make the correlate checkpoint durable ([#1493](https://github.com/rotorsoft/act-root/issues/1493)) ([bea07fb](https://github.com/rotorsoft/act-root/commit/bea07fba0822371cd730108bd917c9e289001321)), closes [#1484](https://github.com/rotorsoft/act-root/issues/1484) [#1484](https://github.com/rotorsoft/act-root/issues/1484)
+
 # [@rotorsoft/act-v1.25.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.25.2...@rotorsoft/act-v1.25.3) (2026-08-15)
 
 
