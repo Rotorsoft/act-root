@@ -627,8 +627,43 @@ export interface Store extends Disposable, EventSource {
       priority?: number;
       /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
       lane?: string;
-    }>
-  ) => Promise<{ subscribed: number; watermark: number }>;
+    }>,
+    /**
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's `at` (#1484).
+     *
+     * `correlate` is the only component that knows how far it has read, and
+     * it already calls `subscribe` with the targets a scan discovered, so the
+     * checkpoint is written by its own producer in its own call. Nothing else
+     * may set it: a checkpoint derived from processing progress runs *ahead*
+     * of the read cursor and silently skips discovery.
+     *
+     * **Persists only when greater than the stored value.** A lower or equal
+     * value is ignored rather than written, so a worker whose cursor lags
+     * cannot rewind it and re-sending the same value is a no-op. Omitted
+     * leaves it untouched.
+     */
+    correlated_at?: number
+  ) => Promise<{
+    subscribed: number;
+    watermark: number;
+    /**
+     * The correlate checkpoint (#1484): how far `correlate` has **read** the
+     * event log, or `-1` when it has never advanced.
+     *
+     * Distinct from a subscription's `at` (how far a *target* has been
+     * processed) — a run of events resolving to no target moves this and no
+     * watermark. It rides `subscribe`'s existing return and is advanced by
+     * the same call's `correlated_at` argument, so maintaining it costs no
+     * store round trip of its own: `correlate` already calls `subscribe`
+     * with the targets each scan discovered.
+     *
+     * Adapters keep it in their own single-row relation, never as a
+     * subscription, so no stream-scoped surface (`prioritize`, `reset`,
+     * `unblock`, `query_streams`, `blocked_streams`) ever counts it.
+     */
+    correlated_at: number;
+  }>;
 
   /**
    * Finalizes leased streams **atomically**: acknowledges the ones

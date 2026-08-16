@@ -434,6 +434,19 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Correlate checkpoint (#1484). Its own single-row table rather than a
+    // reserved subscription: a subscription row is counted by every
+    // stream-scoped operator surface (prioritize / reset / unblock /
+    // query_streams / blocked_streams) and would inflate those counts.
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS correlated (
+        id INTEGER PRIMARY KEY CHECK (id = 0),
+        at INTEGER NOT NULL DEFAULT -1
+      )
+    `);
+    await this.client.execute(
+      "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
+    );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
@@ -446,6 +459,7 @@ export class SqliteStore implements Store {
   async drop() {
     await this.client.execute("DROP TABLE IF EXISTS events");
     await this.client.execute("DROP TABLE IF EXISTS streams");
+    await this.client.execute("DROP TABLE IF EXISTS correlated");
   }
 
   async dispose() {
@@ -636,7 +650,8 @@ export class SqliteStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
+    }>,
+    correlated_at?: number
   ) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
@@ -685,8 +700,23 @@ export class SqliteStore implements Store {
       const wm = await tx.execute(
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
       );
+      // The correlate checkpoint is written by its own producer, in the call
+      // correlate already makes (#1484). MAX keeps it monotonic.
+      if (correlated_at !== undefined)
+        await tx.execute({
+          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
+          args: [correlated_at],
+        });
+      // Watermark and checkpoint together — correlate needs both.
+      const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");
       await tx.commit();
-      return { subscribed, watermark: Number(wm.rows[0].w) };
+      return {
+        subscribed,
+        watermark: Number(wm.rows[0].w),
+        // `seed()` always inserts the singleton row, so this read cannot
+        // come back empty — no defensive fallback to leave untested.
+        correlated_at: Number(cp.rows[0].at),
+      };
     } catch (e) {
       await tx.rollback();
       throw new StoreError("subscribe", { cause: e });

@@ -151,7 +151,11 @@ describe("PostgresStore", () => {
         )
       );
       const result = await store.subscribe([]);
-      expect(result).toEqual({ subscribed: 0, watermark: -1 });
+      expect(result).toEqual({
+        subscribed: 0,
+        watermark: -1,
+        correlated_at: -1,
+      });
     });
 
     it("handles undefined rowCount in INSERT", async () => {
@@ -169,7 +173,11 @@ describe("PostgresStore", () => {
         )
       );
       const result = await store.subscribe([{ stream: "s" }]);
-      expect(result).toEqual({ subscribed: 0, watermark: 42 });
+      expect(result).toEqual({
+        subscribed: 0,
+        watermark: 42,
+        correlated_at: -1,
+      });
     });
 
     it("wraps a DB error in StoreError", async () => {

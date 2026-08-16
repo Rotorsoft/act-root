@@ -46,7 +46,7 @@ interface Store extends Disposable, EventSource {
   drop(): Promise<void>;
   commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
   claim(lagging, leading, by, millis, lane?): Promise<Lease[]>;
-  subscribe(streams): Promise<{ subscribed; watermark }>;
+  subscribe(streams, correlated_at?): Promise<{ subscribed; watermark; correlated_at }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<BlockedLease[]>;
   defer(input: string[] | StreamFilter, deferred_at): Promise<number>;

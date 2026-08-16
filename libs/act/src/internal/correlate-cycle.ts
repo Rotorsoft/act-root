@@ -202,15 +202,24 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark } = await store().subscribe([...this._static_targets]);
-    // Without dynamic resolvers correlate never scans, so the checkpoint
-    // is inert — keep the plain `max(at)` cold start. With dynamic
-    // resolvers, back the cursor off the watermark by a bounded window so
-    // the crash-window tail (an uncorrelated event now below a busier
-    // stream's watermark) is re-discovered. Never floor below -1.
-    this._checkpoint = this._has_dynamic_resolvers
-      ? Math.max(-1, watermark - this._cold_start_back_scan)
-      : watermark;
+    const { watermark, correlated_at } = await store().subscribe([
+      ...this._static_targets,
+    ]);
+    // Without dynamic resolvers correlate never scans, so the checkpoint is
+    // inert — keep the plain `max(at)` cold start.
+    //
+    // With them, resume from the durable checkpoint when one exists (#1484).
+    // On a first boot it sits at -1 and a full scan of an existing log would
+    // be unbounded, so seed from the old heuristic: the watermark backed off
+    // by a bounded window, which re-discovers the crash-window tail (an
+    // uncorrelated event now below a busier stream's watermark). Never floor
+    // below -1. After the first scan the checkpoint is exact and the
+    // heuristic never runs again.
+    this._checkpoint = !this._has_dynamic_resolvers
+      ? watermark
+      : correlated_at >= 0
+        ? correlated_at
+        : Math.max(-1, watermark - this._cold_start_back_scan);
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       // +Infinity: a dynamic resolution's priority can never exceed it, so a
@@ -329,7 +338,10 @@ export class CorrelateCycle<
           lane,
         })
       );
-      const { subscribed } = await this._cd.subscribe(streams);
+      // Persist the read cursor with the targets this scan discovered
+      // (#1484). Correlate is the only component that knows how far it has
+      // read, and it is already making this call.
+      const { subscribed } = await this._cd.subscribe(streams, last_id);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {

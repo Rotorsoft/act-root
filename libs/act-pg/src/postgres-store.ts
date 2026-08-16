@@ -337,6 +337,8 @@ export class PostgresStore implements Store {
   readonly config: Config;
   private _fqt: string;
   private _fqs: string;
+  /** Correlate checkpoint table (#1484) — one row, id 0. */
+  private _fqc: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * `notify()` LISTEN handler skips payloads where `by === this._by`,
@@ -430,6 +432,7 @@ export class PostgresStore implements Store {
     this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
+    this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, `this.notify` is `undefined`, the orchestrator skips
@@ -621,6 +624,23 @@ export class PostgresStore implements Store {
           deferred_at timestamptz
         ) TABLESPACE pg_default;`
       );
+      // Correlate checkpoint (#1484). Its own single-row relation rather
+      // than a reserved subscription: a subscription row is counted by every
+      // stream-scoped operator surface (`prioritize`, `reset`, `unblock`,
+      // `query_streams`, `blocked_streams`) and would inflate the counts
+      // they report. No lease columns: the write is a monotonic `MAX`, so
+      // concurrent correlators converge without holding anything.
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this._fqc} (
+          id int PRIMARY KEY DEFAULT 0,
+          at bigint NOT NULL DEFAULT -1,
+          CONSTRAINT ${this.config.table}_correlated_singleton CHECK (id = 0)
+        ) TABLESPACE pg_default;`
+      );
+      await client.query(
+        `INSERT INTO ${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;`
+      );
+
       // Migration for tables created before priority lanes (ACT-102).
       // `ADD COLUMN IF NOT EXISTS` is a no-op when the column is
       // already present, so this is safe on every seed call.
@@ -743,7 +763,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS ${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS ${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS ${this._fqc}, ${this._fqs}';
           IF '${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "${this.config.schema}" CASCADE';
           END IF;
@@ -1270,8 +1290,9 @@ export class PostgresStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
-  ): Promise<{ subscribed: number; watermark: number }> {
+    }>,
+    correlated_at?: number
+  ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -1320,11 +1341,27 @@ export class PostgresStore implements Store {
           [JSON.stringify(streams)]
         );
       }
-      const { rows } = await client.query<{ max: number | null }>(
-        `SELECT COALESCE(MAX(at), -1) AS max FROM ${this._fqs}`
+      // The correlate checkpoint is written by its own producer, in the call
+      // correlate already makes (#1484). GREATEST keeps it monotonic.
+      if (correlated_at !== undefined)
+        await client.query(
+          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
+          [correlated_at]
+        );
+      // Watermark and checkpoint in one round trip — correlate needs both.
+      const { rows } = await client.query<{
+        max: number | null;
+        correlated_at: string | null;
+      }>(
+        `SELECT (SELECT COALESCE(MAX(at), -1) FROM ${this._fqs}) AS max,
+                (SELECT at FROM ${this._fqc} WHERE id = 0) AS correlated_at`
       );
       await client.query("COMMIT");
-      return { subscribed, watermark: rows[0]?.max ?? -1 };
+      return {
+        subscribed,
+        watermark: rows[0]?.max ?? -1,
+        correlated_at: Number(rows[0]?.correlated_at ?? -1),
+      };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw new StoreError("subscribe", { cause: error });

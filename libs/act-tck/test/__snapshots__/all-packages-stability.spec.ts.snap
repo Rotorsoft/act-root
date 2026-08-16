@@ -8031,15 +8031,24 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark } = await store().subscribe([...this._static_targets]);
-    // Without dynamic resolvers correlate never scans, so the checkpoint
-    // is inert — keep the plain \`max(at)\` cold start. With dynamic
-    // resolvers, back the cursor off the watermark by a bounded window so
-    // the crash-window tail (an uncorrelated event now below a busier
-    // stream's watermark) is re-discovered. Never floor below -1.
-    this._checkpoint = this._has_dynamic_resolvers
-      ? Math.max(-1, watermark - this._cold_start_back_scan)
-      : watermark;
+    const { watermark, correlated_at } = await store().subscribe([
+      ...this._static_targets,
+    ]);
+    // Without dynamic resolvers correlate never scans, so the checkpoint is
+    // inert — keep the plain \`max(at)\` cold start.
+    //
+    // With them, resume from the durable checkpoint when one exists (#1484).
+    // On a first boot it sits at -1 and a full scan of an existing log would
+    // be unbounded, so seed from the old heuristic: the watermark backed off
+    // by a bounded window, which re-discovers the crash-window tail (an
+    // uncorrelated event now below a busier stream's watermark). Never floor
+    // below -1. After the first scan the checkpoint is exact and the
+    // heuristic never runs again.
+    this._checkpoint = !this._has_dynamic_resolvers
+      ? watermark
+      : correlated_at >= 0
+        ? correlated_at
+        : Math.max(-1, watermark - this._cold_start_back_scan);
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       // +Infinity: a dynamic resolution's priority can never exceed it, so a
@@ -8158,7 +8167,10 @@ export class CorrelateCycle<
           lane,
         })
       );
-      const { subscribed } = await this._cd.subscribe(streams);
+      // Persist the read cursor with the targets this scan discovered
+      // (#1484). Correlate is the only component that knows how far it has
+      // read, and it is already making this call.
+      const { subscribed } = await this._cd.subscribe(streams, last_id);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {
@@ -9774,9 +9786,10 @@ export const subscribe = (
     source?: string;
     priority?: number;
     lane?: string;
-  }>
-): Promise<{ subscribed: number; watermark: number }> =>
-  store().subscribe(streams);
+  }>,
+  correlated_at?: number
+): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
+  store().subscribe(streams, correlated_at);
 
 // === errors.ts ===
 import type {
@@ -11595,6 +11608,8 @@ export class InMemoryStore implements Store {
   private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
+  /** Correlate checkpoint (#1484): how far the log has been READ. */
+  private _correlated_at = -1;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -11613,6 +11628,7 @@ export class InMemoryStore implements Store {
   private _reset_indexes() {
     this._events.length = 0;
     this._next_id = 0;
+    this._correlated_at = -1;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -11949,8 +11965,13 @@ export class InMemoryStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
+    }>,
+    correlated_at?: number
   ) {
+    // The correlate checkpoint is written by its own producer, in the call
+    // correlate already makes (#1484). Monotonic: a lower value is ignored.
+    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+      this._correlated_at = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -11975,7 +11996,7 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark };
+    return { subscribed, watermark, correlated_at: this._correlated_at };
   }
 
   /**
@@ -14152,8 +14173,43 @@ export interface Store extends Disposable, EventSource {
       priority?: number;
       /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
       lane?: string;
-    }>
-  ) => Promise<{ subscribed: number; watermark: number }>;
+    }>,
+    /**
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's \`at\` (#1484).
+     *
+     * \`correlate\` is the only component that knows how far it has read, and
+     * it already calls \`subscribe\` with the targets a scan discovered, so the
+     * checkpoint is written by its own producer in its own call. Nothing else
+     * may set it: a checkpoint derived from processing progress runs *ahead*
+     * of the read cursor and silently skips discovery.
+     *
+     * **Persists only when greater than the stored value.** A lower or equal
+     * value is ignored rather than written, so a worker whose cursor lags
+     * cannot rewind it and re-sending the same value is a no-op. Omitted
+     * leaves it untouched.
+     */
+    correlated_at?: number
+  ) => Promise<{
+    subscribed: number;
+    watermark: number;
+    /**
+     * The correlate checkpoint (#1484): how far \`correlate\` has **read** the
+     * event log, or \`-1\` when it has never advanced.
+     *
+     * Distinct from a subscription's \`at\` (how far a *target* has been
+     * processed) — a run of events resolving to no target moves this and no
+     * watermark. It rides \`subscribe\`'s existing return and is advanced by
+     * the same call's \`correlated_at\` argument, so maintaining it costs no
+     * store round trip of its own: \`correlate\` already calls \`subscribe\`
+     * with the targets each scan discovered.
+     *
+     * Adapters keep it in their own single-row relation, never as a
+     * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
+     * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
+     */
+    correlated_at: number;
+  }>;
 
   /**
    * Finalizes leased streams **atomically**: acknowledges the ones
@@ -25989,15 +26045,24 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark } = await store().subscribe([...this._static_targets]);
-    // Without dynamic resolvers correlate never scans, so the checkpoint
-    // is inert — keep the plain \`max(at)\` cold start. With dynamic
-    // resolvers, back the cursor off the watermark by a bounded window so
-    // the crash-window tail (an uncorrelated event now below a busier
-    // stream's watermark) is re-discovered. Never floor below -1.
-    this._checkpoint = this._has_dynamic_resolvers
-      ? Math.max(-1, watermark - this._cold_start_back_scan)
-      : watermark;
+    const { watermark, correlated_at } = await store().subscribe([
+      ...this._static_targets,
+    ]);
+    // Without dynamic resolvers correlate never scans, so the checkpoint is
+    // inert — keep the plain \`max(at)\` cold start.
+    //
+    // With them, resume from the durable checkpoint when one exists (#1484).
+    // On a first boot it sits at -1 and a full scan of an existing log would
+    // be unbounded, so seed from the old heuristic: the watermark backed off
+    // by a bounded window, which re-discovers the crash-window tail (an
+    // uncorrelated event now below a busier stream's watermark). Never floor
+    // below -1. After the first scan the checkpoint is exact and the
+    // heuristic never runs again.
+    this._checkpoint = !this._has_dynamic_resolvers
+      ? watermark
+      : correlated_at >= 0
+        ? correlated_at
+        : Math.max(-1, watermark - this._cold_start_back_scan);
     this._on_init?.();
     for (const { stream } of this._static_targets) {
       // +Infinity: a dynamic resolution's priority can never exceed it, so a
@@ -26116,7 +26181,10 @@ export class CorrelateCycle<
           lane,
         })
       );
-      const { subscribed } = await this._cd.subscribe(streams);
+      // Persist the read cursor with the targets this scan discovered
+      // (#1484). Correlate is the only component that knows how far it has
+      // read, and it is already making this call.
+      const { subscribed } = await this._cd.subscribe(streams, last_id);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {
@@ -27504,9 +27572,10 @@ export const subscribe = (
     source?: string;
     priority?: number;
     lane?: string;
-  }>
-): Promise<{ subscribed: number; watermark: number }> =>
-  store().subscribe(streams);
+  }>,
+  correlated_at?: number
+): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
+  store().subscribe(streams, correlated_at);
 
 // === errors.ts ===
 import type {
@@ -29325,6 +29394,8 @@ export class InMemoryStore implements Store {
   private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
+  /** Correlate checkpoint (#1484): how far the log has been READ. */
+  private _correlated_at = -1;
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -29343,6 +29414,7 @@ export class InMemoryStore implements Store {
   private _reset_indexes() {
     this._events.length = 0;
     this._next_id = 0;
+    this._correlated_at = -1;
     this._stream_versions.clear();
     this._max_event_id_by_stream.clear();
     this._max_non_snap_event_id = -1;
@@ -29679,8 +29751,13 @@ export class InMemoryStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
+    }>,
+    correlated_at?: number
   ) {
+    // The correlate checkpoint is written by its own producer, in the call
+    // correlate already makes (#1484). Monotonic: a lower value is ignored.
+    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+      this._correlated_at = correlated_at;
     await sleep();
     let subscribed = 0;
     for (const {
@@ -29705,7 +29782,7 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark };
+    return { subscribed, watermark, correlated_at: this._correlated_at };
   }
 
   /**
@@ -31845,8 +31922,43 @@ export interface Store extends Disposable, EventSource {
       priority?: number;
       /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
       lane?: string;
-    }>
-  ) => Promise<{ subscribed: number; watermark: number }>;
+    }>,
+    /**
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's \`at\` (#1484).
+     *
+     * \`correlate\` is the only component that knows how far it has read, and
+     * it already calls \`subscribe\` with the targets a scan discovered, so the
+     * checkpoint is written by its own producer in its own call. Nothing else
+     * may set it: a checkpoint derived from processing progress runs *ahead*
+     * of the read cursor and silently skips discovery.
+     *
+     * **Persists only when greater than the stored value.** A lower or equal
+     * value is ignored rather than written, so a worker whose cursor lags
+     * cannot rewind it and re-sending the same value is a no-op. Omitted
+     * leaves it untouched.
+     */
+    correlated_at?: number
+  ) => Promise<{
+    subscribed: number;
+    watermark: number;
+    /**
+     * The correlate checkpoint (#1484): how far \`correlate\` has **read** the
+     * event log, or \`-1\` when it has never advanced.
+     *
+     * Distinct from a subscription's \`at\` (how far a *target* has been
+     * processed) — a run of events resolving to no target moves this and no
+     * watermark. It rides \`subscribe\`'s existing return and is advanced by
+     * the same call's \`correlated_at\` argument, so maintaining it costs no
+     * store round trip of its own: \`correlate\` already calls \`subscribe\`
+     * with the targets each scan discovered.
+     *
+     * Adapters keep it in their own single-row relation, never as a
+     * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
+     * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
+     */
+    correlated_at: number;
+  }>;
 
   /**
    * Finalizes leased streams **atomically**: acknowledges the ones
@@ -38102,8 +38214,43 @@ export interface Store extends Disposable, EventSource {
       priority?: number;
       /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
       lane?: string;
-    }>
-  ) => Promise<{ subscribed: number; watermark: number }>;
+    }>,
+    /**
+     * Advance the correlate checkpoint to this event id — correlate's own
+     * watermark, in the same id space as a subscription's \`at\` (#1484).
+     *
+     * \`correlate\` is the only component that knows how far it has read, and
+     * it already calls \`subscribe\` with the targets a scan discovered, so the
+     * checkpoint is written by its own producer in its own call. Nothing else
+     * may set it: a checkpoint derived from processing progress runs *ahead*
+     * of the read cursor and silently skips discovery.
+     *
+     * **Persists only when greater than the stored value.** A lower or equal
+     * value is ignored rather than written, so a worker whose cursor lags
+     * cannot rewind it and re-sending the same value is a no-op. Omitted
+     * leaves it untouched.
+     */
+    correlated_at?: number
+  ) => Promise<{
+    subscribed: number;
+    watermark: number;
+    /**
+     * The correlate checkpoint (#1484): how far \`correlate\` has **read** the
+     * event log, or \`-1\` when it has never advanced.
+     *
+     * Distinct from a subscription's \`at\` (how far a *target* has been
+     * processed) — a run of events resolving to no target moves this and no
+     * watermark. It rides \`subscribe\`'s existing return and is advanced by
+     * the same call's \`correlated_at\` argument, so maintaining it costs no
+     * store round trip of its own: \`correlate\` already calls \`subscribe\`
+     * with the targets each scan discovered.
+     *
+     * Adapters keep it in their own single-row relation, never as a
+     * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
+     * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
+     */
+    correlated_at: number;
+  }>;
 
   /**
    * Finalizes leased streams **atomically**: acknowledges the ones
@@ -49957,6 +50104,8 @@ export class PostgresStore implements Store {
   readonly config: Config;
   private _fqt: string;
   private _fqs: string;
+  /** Correlate checkpoint table (#1484) — one row, id 0. */
+  private _fqc: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * \`notify()\` LISTEN handler skips payloads where \`by === this._by\`,
@@ -50050,6 +50199,7 @@ export class PostgresStore implements Store {
     this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = \`"\${this.config.schema}"."\${this.config.table}"\`;
     this._fqs = \`"\${this.config.schema}"."\${this.config.table}_streams"\`;
+    this._fqc = \`"\${this.config.schema}"."\${this.config.table}_correlated"\`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, \`this.notify\` is \`undefined\`, the orchestrator skips
@@ -50241,6 +50391,23 @@ export class PostgresStore implements Store {
           deferred_at timestamptz
         ) TABLESPACE pg_default;\`
       );
+      // Correlate checkpoint (#1484). Its own single-row relation rather
+      // than a reserved subscription: a subscription row is counted by every
+      // stream-scoped operator surface (\`prioritize\`, \`reset\`, \`unblock\`,
+      // \`query_streams\`, \`blocked_streams\`) and would inflate the counts
+      // they report. No lease columns: the write is a monotonic \`MAX\`, so
+      // concurrent correlators converge without holding anything.
+      await client.query(
+        \`CREATE TABLE IF NOT EXISTS \${this._fqc} (
+          id int PRIMARY KEY DEFAULT 0,
+          at bigint NOT NULL DEFAULT -1,
+          CONSTRAINT \${this.config.table}_correlated_singleton CHECK (id = 0)
+        ) TABLESPACE pg_default;\`
+      );
+      await client.query(
+        \`INSERT INTO \${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;\`
+      );
+
       // Migration for tables created before priority lanes (ACT-102).
       // \`ADD COLUMN IF NOT EXISTS\` is a no-op when the column is
       // already present, so this is safe on every seed call.
@@ -50363,7 +50530,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '\${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS \${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS \${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS \${this._fqc}, \${this._fqs}';
           IF '\${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "\${this.config.schema}" CASCADE';
           END IF;
@@ -50890,8 +51057,9 @@ export class PostgresStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
-  ): Promise<{ subscribed: number; watermark: number }> {
+    }>,
+    correlated_at?: number
+  ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -50940,11 +51108,27 @@ export class PostgresStore implements Store {
           [JSON.stringify(streams)]
         );
       }
-      const { rows } = await client.query<{ max: number | null }>(
-        \`SELECT COALESCE(MAX(at), -1) AS max FROM \${this._fqs}\`
+      // The correlate checkpoint is written by its own producer, in the call
+      // correlate already makes (#1484). GREATEST keeps it monotonic.
+      if (correlated_at !== undefined)
+        await client.query(
+          \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0\`,
+          [correlated_at]
+        );
+      // Watermark and checkpoint in one round trip — correlate needs both.
+      const { rows } = await client.query<{
+        max: number | null;
+        correlated_at: string | null;
+      }>(
+        \`SELECT (SELECT COALESCE(MAX(at), -1) FROM \${this._fqs}) AS max,
+                (SELECT at FROM \${this._fqc} WHERE id = 0) AS correlated_at\`
       );
       await client.query("COMMIT");
-      return { subscribed, watermark: rows[0]?.max ?? -1 };
+      return {
+        subscribed,
+        watermark: rows[0]?.max ?? -1,
+        correlated_at: Number(rows[0]?.correlated_at ?? -1),
+      };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw new StoreError("subscribe", { cause: error });
@@ -52622,6 +52806,19 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Correlate checkpoint (#1484). Its own single-row table rather than a
+    // reserved subscription: a subscription row is counted by every
+    // stream-scoped operator surface (prioritize / reset / unblock /
+    // query_streams / blocked_streams) and would inflate those counts.
+    await this.client.execute(\`
+      CREATE TABLE IF NOT EXISTS correlated (
+        id INTEGER PRIMARY KEY CHECK (id = 0),
+        at INTEGER NOT NULL DEFAULT -1
+      )
+    \`);
+    await this.client.execute(
+      "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
+    );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
@@ -52634,6 +52831,7 @@ export class SqliteStore implements Store {
   async drop() {
     await this.client.execute("DROP TABLE IF EXISTS events");
     await this.client.execute("DROP TABLE IF EXISTS streams");
+    await this.client.execute("DROP TABLE IF EXISTS correlated");
   }
 
   async dispose() {
@@ -52824,7 +53022,8 @@ export class SqliteStore implements Store {
       source?: string;
       priority?: number;
       lane?: string;
-    }>
+    }>,
+    correlated_at?: number
   ) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no \`REGEXP\`, and the portable GLOB grammar cannot
@@ -52873,8 +53072,23 @@ export class SqliteStore implements Store {
       const wm = await tx.execute(
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
       );
+      // The correlate checkpoint is written by its own producer, in the call
+      // correlate already makes (#1484). MAX keeps it monotonic.
+      if (correlated_at !== undefined)
+        await tx.execute({
+          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
+          args: [correlated_at],
+        });
+      // Watermark and checkpoint together — correlate needs both.
+      const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");
       await tx.commit();
-      return { subscribed, watermark: Number(wm.rows[0].w) };
+      return {
+        subscribed,
+        watermark: Number(wm.rows[0].w),
+        // \`seed()\` always inserts the singleton row, so this read cannot
+        // come back empty — no defensive fallback to leave untested.
+        correlated_at: Number(cp.rows[0].at),
+      };
     } catch (e) {
       await tx.rollback();
       throw new StoreError("subscribe", { cause: e });
@@ -57155,6 +57369,66 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // The next boot re-subscribes at the declared priority and restores it.
         await store.subscribe([{ stream: s }]);
         expect(await read()).toBe(0);
+      });
+
+      // The correlate checkpoint (#1484): how far the log has been READ, as
+      // opposed to how far a target has been processed (\`at\`). Read AND
+      // written by \`subscribe\`, which correlate already calls with the
+      // targets each scan discovers — so it costs no round trip of its own,
+      // and its only writer is the component that knows the value.
+      //
+      // A singleton cannot be namespaced with \`uid()\` like every other case
+      // here, so these read the current value and assert RELATIVE to it.
+      describe("correlate checkpoint", () => {
+        const peek = async () => (await store.subscribe([])).correlated_at;
+
+        it("round-trips an advance through subscribe", async () => {
+          const base = await peek();
+          expect((await store.subscribe([], base + 10)).correlated_at).toBe(
+            base + 10
+          );
+          expect(await peek()).toBe(base + 10);
+        });
+
+        it("persists only when greater than the stored value", async () => {
+          const base = await peek();
+          // Lower — ignored, not written. A worker whose cursor lags must
+          // not be able to rewind the checkpoint.
+          await store.subscribe([], base - 5);
+          expect(await peek()).toBe(base);
+          // Equal — a no-op, so re-sending the same value is safe.
+          await store.subscribe([], base);
+          expect(await peek()).toBe(base);
+          // Greater — advances.
+          await store.subscribe([], base + 3);
+          expect(await peek()).toBe(base + 3);
+        });
+
+        it("is left untouched when subscribe omits it", async () => {
+          const base = await peek();
+          await store.subscribe([]);
+          expect(await peek()).toBe(base);
+        });
+
+        it("advances in the same call that registers discovered targets", async () => {
+          // The shape correlate actually issues: here are the targets I
+          // found, and here is how far I read to find them.
+          const base = await peek();
+          const s = \`cp-sub-\${uid()}\`;
+          const { subscribed, correlated_at } = await store.subscribe(
+            [{ stream: s }],
+            base + 7
+          );
+          expect(subscribed).toBe(1);
+          expect(correlated_at).toBe(base + 7);
+        });
+
+        it("is invisible to every stream-scoped surface", async () => {
+          const seen: string[] = [];
+          await store.query_streams((p) => seen.push(p.stream), {});
+          expect(seen.some((n) => n.startsWith("__correlate"))).toBe(false);
+          expect(seen).not.toContain("correlated");
+        });
       });
 
       it("claims a subscribed stream and ack releases the lease", async () => {

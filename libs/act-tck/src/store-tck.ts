@@ -1103,6 +1103,66 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(0);
       });
 
+      // The correlate checkpoint (#1484): how far the log has been READ, as
+      // opposed to how far a target has been processed (`at`). Read AND
+      // written by `subscribe`, which correlate already calls with the
+      // targets each scan discovers — so it costs no round trip of its own,
+      // and its only writer is the component that knows the value.
+      //
+      // A singleton cannot be namespaced with `uid()` like every other case
+      // here, so these read the current value and assert RELATIVE to it.
+      describe("correlate checkpoint", () => {
+        const peek = async () => (await store.subscribe([])).correlated_at;
+
+        it("round-trips an advance through subscribe", async () => {
+          const base = await peek();
+          expect((await store.subscribe([], base + 10)).correlated_at).toBe(
+            base + 10
+          );
+          expect(await peek()).toBe(base + 10);
+        });
+
+        it("persists only when greater than the stored value", async () => {
+          const base = await peek();
+          // Lower — ignored, not written. A worker whose cursor lags must
+          // not be able to rewind the checkpoint.
+          await store.subscribe([], base - 5);
+          expect(await peek()).toBe(base);
+          // Equal — a no-op, so re-sending the same value is safe.
+          await store.subscribe([], base);
+          expect(await peek()).toBe(base);
+          // Greater — advances.
+          await store.subscribe([], base + 3);
+          expect(await peek()).toBe(base + 3);
+        });
+
+        it("is left untouched when subscribe omits it", async () => {
+          const base = await peek();
+          await store.subscribe([]);
+          expect(await peek()).toBe(base);
+        });
+
+        it("advances in the same call that registers discovered targets", async () => {
+          // The shape correlate actually issues: here are the targets I
+          // found, and here is how far I read to find them.
+          const base = await peek();
+          const s = `cp-sub-${uid()}`;
+          const { subscribed, correlated_at } = await store.subscribe(
+            [{ stream: s }],
+            base + 7
+          );
+          expect(subscribed).toBe(1);
+          expect(correlated_at).toBe(base + 7);
+        });
+
+        it("is invisible to every stream-scoped surface", async () => {
+          const seen: string[] = [];
+          await store.query_streams((p) => seen.push(p.stream), {});
+          expect(seen.some((n) => n.startsWith("__correlate"))).toBe(false);
+          expect(seen).not.toContain("correlated");
+        });
+      });
+
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = `claim-${uid()}`;
         await store.subscribe([{ stream: s }]);
