@@ -123,3 +123,27 @@ their ratio never fails the build.
 
 Run `pnpm -F @rotorsoft/act-sqlite bench:update` in a PR labeled
 `perf-baseline-update`, with the rationale documented here.
+
+## #1485 — the subscription work set: the N+1 probe is gone
+
+The has-work probe was an N+1 **in JavaScript**, inside `transaction("write")`:
+one `SELECT 1 FROM events ... LIMIT 1` per eligible subscription row, driven by
+a JS loop. #1448's index fix, which halved the equivalent cost on Postgres,
+has no analogue here — the round trips are the cost.
+
+With `streams.correlated` (#1485) a marked row answers from the subscription
+row alone: the candidate `SELECT` carries `AND (correlated IS NULL OR at <
+correlated)`, so caught-up streams never reach the loop, and the rows that do
+skip the probe entirely.
+
+Measured on the same machine as the act-pg entry, 20,000 subscriptions of
+which 3 have pending work, 5 claim rounds, `leaseMillis: 0`:
+
+| | ms per claim | leases per round |
+|---|---|---|
+| Legacy probe (unmarked rows) | 221.5 | 3, 3, 3, 3, 3 |
+| **Work set (marked rows)** | **2.2** | 3, 3, 3, 3, 3 |
+
+**100x**, with identical work claimed. This is the measurement RFC 1449 was
+written to produce: at 20k subscribed streams the embedded adapter went from
+a fifth of a second per claim to noise.

@@ -526,3 +526,35 @@ increment and the has-work probe all behave as before. This is a
 throughput-under-contention fix: competing consumers now claim disjoint
 slices of the frontier instead of serializing behind whoever locked it
 first.
+
+## #1485 — the subscription work set: `claim` stops probing the event log
+
+`claim` answered "which subscribed streams have work?" by probing the event
+log once per eligible subscription row. The cost was linear in **subscribed**
+streams rather than in pending work, which is the wrong axis for the
+framework's most common topology: a per-aggregate reaction
+(`.to(e => ({ target: e.stream }))`) subscribes one stream per aggregate.
+
+`correlate` already knows the answer — it walks events forward and resolves
+each to its targets — and now records it as `streams.correlated`, the highest
+event id observed to resolve to that target. Eligibility becomes `at <
+correlated`, read from the subscription row, and the partial index
+`(lane, priority DESC, at) WHERE blocked = false AND at < correlated` holds
+only the streams with work.
+
+Measured on docker PG :5431 (M3 Pro), 20,000 subscriptions of which 3 have
+pending work, 5 claim rounds, `leaseMillis: 0` so a faster path cannot lease
+fewer streams by lapping its own leases:
+
+| | ms per claim | leases per round |
+|---|---|---|
+| Legacy probe (unmarked rows) | 18.1 | 3, 3, 3, 3, 3 |
+| **Work set (marked rows)** | **8.7** | 3, 3, 3, 3, 3 |
+
+**2.1x**, with identical work claimed. The remaining cost is the legacy arm
+still present in the `UNION ALL` for unmarked rows; deleting it is step 5 of
+RFC 1449.
+
+The fast arm reads the base table rather than the `eligible` CTE on purpose.
+That CTE is referenced by every legacy arm, so PG materializes it, and a
+materialized scan cannot use the partial index the predicate was built for.

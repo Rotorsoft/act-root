@@ -389,6 +389,44 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
 };
 
 /**
+ * One target stream to register with {@link Store.subscribe}.
+ */
+export type SubscribeInput = {
+  readonly stream: string;
+  readonly source?: string;
+  /**
+   * Optional scheduling priority for the lagging-frontier `claim()`
+   * ordering. Default `0`. When the same stream is subscribed by multiple
+   * reactions with different priorities, implementations must keep the
+   * **maximum** so the highest-priority reaction wins. Use
+   * {@link Store.prioritize} for runtime overrides that ignore this max —
+   * operator-driven changes.
+   */
+  readonly priority?: number;
+  /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
+  readonly lane?: string;
+  /**
+   * Highest event id observed to resolve to this target — the stream's
+   * **work mark** (#1485). Applied as `correlated = GREATEST(correlated, N)`
+   * for every value including zero and negatives; omitted leaves the stored
+   * value untouched.
+   *
+   * A mark is an assertion about the log: `correlate` sets it to the id of a
+   * real event that resolved to this target, so `at < correlated` implies a
+   * fetch returns work. `correlate` is the only component entitled to write
+   * it — the store cannot resolve user-code targets, and `notify` is
+   * best-effort — which is what the name records.
+   *
+   * Eligibility follows from it: a stream is claimable iff `at < correlated`.
+   * `NULL` means **unknown**, not "no work": those rows fall back to the
+   * legacy has-work probe against the event log, which is how installs that
+   * predate the column keep working. That arm is deleted once `correlate`
+   * marks universally.
+   */
+  readonly correlated?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -613,21 +651,7 @@ export interface Store extends Disposable, EventSource {
    * @see {@link prioritize} for changing priority after subscription
    */
   subscribe: (
-    streams: Array<{
-      stream: string;
-      source?: string;
-      /**
-       * Optional scheduling priority for the lagging-frontier
-       * `claim()` ordering. Default `0`. When the same stream is
-       * subscribed by multiple reactions with different priorities,
-       * implementations must keep the **maximum** so the highest-
-       * priority reaction wins. Use {@link prioritize} for runtime
-       * overrides that ignore this max — operator-driven changes.
-       */
-      priority?: number;
-      /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
-      lane?: string;
-    }>,
+    streams: SubscribeInput[],
     /**
      * Advance the correlate checkpoint to this event id — correlate's own
      * watermark, in the same id space as a subscription's `at` (#1484).

@@ -99,11 +99,13 @@ Benchmark in [`@rotorsoft/act-pg`'s `PERFORMANCE.md`](https://github.com/rotorso
 
 | Adapter | claim ordering | prioritize | schema migration |
 | --- | --- | --- | --- |
-| `PostgresStore` | `ORDER BY priority DESC, at ASC` in lag CTE | `UPDATE ... WHERE priority <> $1 AND ...` | `ALTER TABLE ADD COLUMN IF NOT EXISTS priority` |
+| `PostgresStore` | `ORDER BY priority DESC, at ASC` in lag CTE (over the correlated set — see below) | `UPDATE ... WHERE priority <> $1 AND ...` | `ALTER TABLE ADD COLUMN IF NOT EXISTS priority` |
 | `SqliteStore` | server-side `SELECT ... ORDER BY priority DESC, at ASC` | parameterized UPDATE with LIKE-translated patterns | `ALTER TABLE ADD COLUMN priority` (try/swallow on duplicate) |
 | `InMemoryStore` | sort by `priority DESC, at ASC` in `claim()` | iterate matching streams, set priority directly | n/a |
 
 All three keep the **max invariant** on `subscribe()` and treat `prioritize()` as an outright set.
+
+Ordering applies **over the correlated set**, not over every subscription ([#1485](https://github.com/Rotorsoft/act-root/issues/1485)). A subscription row carries an optional work mark (`correlated`, the highest event id seen to resolve to that target), and a marked stream is eligible only while `at < correlated`. Priority and lane then order the streams that survive that filter. This changes the cost, not the outcome: the streams excluded are the ones a has-work probe would have rejected anyway, so the same set is ordered the same way — on Postgres out of a partial index (`(lane, priority DESC, at) WHERE blocked = false AND at < correlated`) that contains only streams with work.
 
 ## See also
 
