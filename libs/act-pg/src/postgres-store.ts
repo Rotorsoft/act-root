@@ -18,6 +18,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  SubscribeInput,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -621,7 +622,8 @@ export class PostgresStore implements Store {
           leased_until timestamptz,
           priority int NOT NULL DEFAULT 0,
           lane text NOT NULL DEFAULT 'default',
-          deferred_at timestamptz
+          deferred_at timestamptz,
+          correlated_at int
         ) TABLESPACE pg_default;`
       );
       // Correlate checkpoint (#1484). Its own single-row relation rather
@@ -633,7 +635,7 @@ export class PostgresStore implements Store {
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this._fqc} (
           id int PRIMARY KEY DEFAULT 0,
-          at bigint NOT NULL DEFAULT -1,
+          at int NOT NULL DEFAULT -1,
           CONSTRAINT ${this.config.table}_correlated_singleton CHECK (id = 0)
         ) TABLESPACE pg_default;`
       );
@@ -657,6 +659,14 @@ export class PostgresStore implements Store {
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS deferred_at timestamptz;`
+      );
+      // Migration for tables created before the work set (#1485). Nullable
+      // on purpose: NULL means "unknown", which routes the row to the legacy
+      // has-work probe, so an upgraded install behaves exactly as it did and
+      // migrates row by row as correlate marks each target.
+      await client.query(
+        `ALTER TABLE ${this._fqs}
+         ADD COLUMN IF NOT EXISTS correlated_at int;`
       );
       // Migration for tables created before the retry widening (#1190).
       // `claim()` increments `retry` on every acquisition and never
@@ -735,6 +745,18 @@ export class PostgresStore implements Store {
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_lane_ix"
         ON ${this._fqs} (lane);`
+      );
+      // The correlated set IS the index (#1485). `at < correlated_at` is a legal
+      // partial-index predicate — immutable, single-row, no cross-row
+      // reference — so the index holds only streams with work: `LIMIT` pushes
+      // into it, a stream leaves when `ack` advances `at` to `correlated_at`,
+      // and re-enters when correlate raises the mark. That makes `claim` an
+      // index scan of at most `lagging + leading` rows, independent of how
+      // many streams are subscribed.
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_correlated_at_ix"
+        ON ${this._fqs} (lane, priority DESC, at)
+        WHERE blocked = false AND at < correlated_at;`
       );
 
       await client.query("COMMIT");
@@ -1142,7 +1164,7 @@ export class PostgresStore implements Store {
         -- Measured at 10k subscribed streams with 10 pending: 5,792 ms
         -- before, 10.3 ms after. See libs/act-pg/PERFORMANCE.md for #1448.
         eligible AS (
-          SELECT stream, source, at, priority, lane
+          SELECT stream, source, at, priority, lane, correlated_at
           FROM ${this._fqs} s
           WHERE blocked = false
             ${lane_clause}
@@ -1150,6 +1172,26 @@ export class PostgresStore implements Store {
             AND (deferred_at IS NULL OR deferred_at <= NOW())
         ),
         available AS (
+          -- Fast arm (#1485): a marked stream answers from the subscription
+          -- row alone. Read from the base table, NOT from the eligible CTE:
+          -- it is referenced several times so PG materializes it, and a
+          -- materialized scan cannot use the partial index this predicate was
+          -- built for (WHERE blocked = false AND at < correlated_at).
+          -- The comparison is NULL-safe: an unmarked row compares
+          -- unknown and is excluded here, falling through to the legacy arms.
+          SELECT stream, source, at, priority, lane
+          FROM ${this._fqs} s
+          WHERE s.blocked = false
+            AND s.at < s.correlated_at
+            ${lane_clause}
+            AND (s.leased_by IS NULL OR s.leased_until <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+          UNION ALL
+          -- Legacy arms, gated on an absent mark. NULL means "unknown", so
+          -- an install that predates the column probes the event log exactly
+          -- as it did before, and each row migrates to the fast arm the first
+          -- time correlate marks it. Deleted once correlate marks universally.
+          --
           -- Every arm below is watermark-agnostic (#1446): a fresh
           -- subscription sits at -1, and e.id > s.at already answers
           -- correctly there, since the first event has a greater id.
@@ -1159,7 +1201,8 @@ export class PostgresStore implements Store {
           -- Source-less subscription: any non-snapshot event past the
           -- watermark counts, so the id index alone answers it.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.source IS NULL
+          WHERE s.correlated_at IS NULL
+            AND s.source IS NULL
             AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
               WHERE e.id > s.at AND e.name <> '${SNAP_EVENT}' LIMIT 1
@@ -1168,7 +1211,8 @@ export class PostgresStore implements Store {
           -- Literal source (no regex metacharacter): exact equality, so
           -- "s1" never claims "s12", and (stream, id) is usable.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.source IS NOT NULL
+          WHERE s.correlated_at IS NULL
+            AND s.source IS NOT NULL
             AND s.source !~ '${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
@@ -1181,7 +1225,8 @@ export class PostgresStore implements Store {
           -- it anchors. Unavoidably a scan — but only for the subscriptions
           -- that actually declare a pattern.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.source IS NOT NULL
+          WHERE s.correlated_at IS NULL
+            AND s.source IS NOT NULL
             AND s.source ~ '${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM ${this._fqt} e
@@ -1285,12 +1330,7 @@ export class PostgresStore implements Store {
    * @returns subscribed count and current max watermark.
    */
   async subscribe(
-    streams: Array<{
-      stream: string;
-      source?: string;
-      priority?: number;
-      lane?: string;
-    }>,
+    streams: SubscribeInput[],
     correlated_at?: number
   ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
     const client = await this._client("subscribe");
@@ -1306,6 +1346,7 @@ export class PostgresStore implements Store {
         //     highest-priority registered reaction wins). Operator
         //     overrides (which may *decrease*) go through `prioritize()`.
         //  3. UPDATE lane unconditionally — current subscribe wins (ACT-1103).
+        //  4. UPDATE correlated_at to the max of stored and supplied (#1485).
         const { rowCount: inserted } = await client.query(
           `
           INSERT INTO ${this._fqs} (stream, source, priority, lane, retry)
@@ -1340,12 +1381,32 @@ export class PostgresStore implements Store {
           `,
           [JSON.stringify(streams)]
         );
+        // The work mark never regresses (#1485). `t.correlated_at IS NULL OR
+        // t.correlated_at < mark` is the whole rule: the NULL arm is the row's
+        // first mark (a comparison against NULL is unknown, so the predicate
+        // alone would skip it), and it holds for every value including zero
+        // and negatives — the shape the #1445 priority bug was on. Skipped
+        // entirely when no entry carries a mark, so an unmarked subscribe
+        // issues exactly the statements it did before the column existed.
+        if (streams.some((s) => s.correlated_at !== undefined))
+          await client.query(
+            `
+          UPDATE ${this._fqs} t
+          SET correlated_at = (s->>'correlated_at')::int
+          FROM jsonb_array_elements($1::jsonb) AS s
+          WHERE t.stream = s->>'stream'
+            AND s->>'correlated_at' IS NOT NULL
+            AND (t.correlated_at IS NULL
+                 OR t.correlated_at < (s->>'correlated_at')::int)
+          `,
+            [JSON.stringify(streams)]
+          );
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
       if (correlated_at !== undefined)
         await client.query(
-          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0`,
+          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::int) WHERE id = 0`,
           [correlated_at]
         );
       // Watermark and checkpoint in one round trip — correlate needs both.

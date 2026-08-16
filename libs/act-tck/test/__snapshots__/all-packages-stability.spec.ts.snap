@@ -9728,6 +9728,7 @@ import type {
   Fetch,
   Lease,
   Schemas,
+  SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
 
@@ -9781,12 +9782,7 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
 
 export const subscribe = (
-  streams: Array<{
-    stream: string;
-    source?: string;
-    priority?: number;
-    lane?: string;
-  }>,
+  streams: SubscribeInput[],
   correlated_at?: number
 ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
   store().subscribe(streams, correlated_at);
@@ -11291,6 +11287,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source, sleep } from "../utils.js";
 
@@ -11314,6 +11311,10 @@ class InMemoryStream {
   // re-claimed (and \`retry\` is never bumped) until its due-time passes. Unlike
   // in-process backoff, this is durable store state shared across workers.
   private _deferred_at: number | undefined = undefined;
+  // Work mark (#1485): highest event id observed to resolve to this target.
+  // \`undefined\` means UNKNOWN — the row predates the mark, so \`claim\` falls
+  // back to the legacy has-work probe rather than treating it as "no work".
+  private _correlated_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -11346,6 +11347,22 @@ class InMemoryStream {
    */
   bump_priority(priority: number) {
     if (priority > this._priority) this._priority = priority;
+  }
+
+  get correlated_at() {
+    return this._correlated_at;
+  }
+
+  /**
+   * Raise the work mark via {@link subscribe}: keeps the maximum, for every
+   * value including zero and negatives, so a mark never regresses.
+   */
+  mark(correlated_at: number) {
+    if (
+      this._correlated_at === undefined ||
+      correlated_at > this._correlated_at
+    )
+      this._correlated_at = correlated_at;
   }
 
   /**
@@ -11886,6 +11903,12 @@ export class InMemoryStore implements Store {
     // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
     // first event this store ever issues — was silently skipped.
     const has_work = (s: InMemoryStream): boolean => {
+      // Fast arm (#1485): a marked stream answers from the subscription row
+      // alone — no probe of the event log. \`correlate\` marks the highest id
+      // that resolved here, so \`at < correlated_at\` means a fetch returns work.
+      // The legacy probe below serves only rows with no mark yet, and is
+      // deleted once correlate marks universally.
+      if (s.correlated_at !== undefined) return s.at < s.correlated_at;
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
         const max_id = this._max_event_id_by_stream.get(s.source);
@@ -11959,15 +11982,7 @@ export class InMemoryStore implements Store {
    * @param streams - Streams to register with optional source + priority.
    * @returns subscribed count and current max watermark.
    */
-  async subscribe(
-    streams: Array<{
-      stream: string;
-      source?: string;
-      priority?: number;
-      lane?: string;
-    }>,
-    correlated_at?: number
-  ) {
+  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
     if (correlated_at !== undefined && correlated_at > this._correlated_at)
@@ -11979,16 +11994,17 @@ export class InMemoryStore implements Store {
       source,
       priority = 0,
       lane = DEFAULT_LANE,
+      correlated_at,
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
         existing.bump_priority(priority);
         existing.lane = lane;
+        if (correlated_at !== undefined) existing.mark(correlated_at);
       } else {
-        this._streams.set(
-          stream,
-          new InMemoryStream(stream, source, priority, lane)
-        );
+        const created = new InMemoryStream(stream, source, priority, lane);
+        if (correlated_at !== undefined) created.mark(correlated_at);
+        this._streams.set(stream, created);
         subscribed++;
       }
     }
@@ -13935,6 +13951,44 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
 };
 
 /**
+ * One target stream to register with {@link Store.subscribe}.
+ */
+export type SubscribeInput = {
+  readonly stream: string;
+  readonly source?: string;
+  /**
+   * Optional scheduling priority for the lagging-frontier \`claim()\`
+   * ordering. Default \`0\`. When the same stream is subscribed by multiple
+   * reactions with different priorities, implementations must keep the
+   * **maximum** so the highest-priority reaction wins. Use
+   * {@link Store.prioritize} for runtime overrides that ignore this max —
+   * operator-driven changes.
+   */
+  readonly priority?: number;
+  /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
+  readonly lane?: string;
+  /**
+   * Highest event id observed to resolve to this target — the stream's
+   * **work mark** (#1485). Applied as \`correlated_at = GREATEST(correlated_at, N)\`
+   * for every value including zero and negatives; omitted leaves the stored
+   * value untouched.
+   *
+   * A mark is an assertion about the log: \`correlate\` sets it to the id of a
+   * real event that resolved to this target, so \`at < correlated_at\` implies a
+   * fetch returns work. \`correlate\` is the only component entitled to write
+   * it — the store cannot resolve user-code targets, and \`notify\` is
+   * best-effort — which is what the name records.
+   *
+   * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
+   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
+   * legacy has-work probe against the event log, which is how installs that
+   * predate the column keep working. That arm is deleted once \`correlate\`
+   * marks universally.
+   */
+  readonly correlated_at?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -14159,21 +14213,7 @@ export interface Store extends Disposable, EventSource {
    * @see {@link prioritize} for changing priority after subscription
    */
   subscribe: (
-    streams: Array<{
-      stream: string;
-      source?: string;
-      /**
-       * Optional scheduling priority for the lagging-frontier
-       * \`claim()\` ordering. Default \`0\`. When the same stream is
-       * subscribed by multiple reactions with different priorities,
-       * implementations must keep the **maximum** so the highest-
-       * priority reaction wins. Use {@link prioritize} for runtime
-       * overrides that ignore this max — operator-driven changes.
-       */
-      priority?: number;
-      /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
-      lane?: string;
-    }>,
+    streams: SubscribeInput[],
     /**
      * Advance the correlate checkpoint to this event id — correlate's own
      * watermark, in the same id space as a subscription's \`at\` (#1484).
@@ -27514,6 +27554,7 @@ import type {
   Fetch,
   Lease,
   Schemas,
+  SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
 
@@ -27567,12 +27608,7 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
 
 export const subscribe = (
-  streams: Array<{
-    stream: string;
-    source?: string;
-    priority?: number;
-    lane?: string;
-  }>,
+  streams: SubscribeInput[],
   correlated_at?: number
 ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
   store().subscribe(streams, correlated_at);
@@ -29077,6 +29113,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source, sleep } from "../utils.js";
 
@@ -29100,6 +29137,10 @@ class InMemoryStream {
   // re-claimed (and \`retry\` is never bumped) until its due-time passes. Unlike
   // in-process backoff, this is durable store state shared across workers.
   private _deferred_at: number | undefined = undefined;
+  // Work mark (#1485): highest event id observed to resolve to this target.
+  // \`undefined\` means UNKNOWN — the row predates the mark, so \`claim\` falls
+  // back to the legacy has-work probe rather than treating it as "no work".
+  private _correlated_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -29132,6 +29173,22 @@ class InMemoryStream {
    */
   bump_priority(priority: number) {
     if (priority > this._priority) this._priority = priority;
+  }
+
+  get correlated_at() {
+    return this._correlated_at;
+  }
+
+  /**
+   * Raise the work mark via {@link subscribe}: keeps the maximum, for every
+   * value including zero and negatives, so a mark never regresses.
+   */
+  mark(correlated_at: number) {
+    if (
+      this._correlated_at === undefined ||
+      correlated_at > this._correlated_at
+    )
+      this._correlated_at = correlated_at;
   }
 
   /**
@@ -29672,6 +29729,12 @@ export class InMemoryStore implements Store {
     // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
     // first event this store ever issues — was silently skipped.
     const has_work = (s: InMemoryStream): boolean => {
+      // Fast arm (#1485): a marked stream answers from the subscription row
+      // alone — no probe of the event log. \`correlate\` marks the highest id
+      // that resolved here, so \`at < correlated_at\` means a fetch returns work.
+      // The legacy probe below serves only rows with no mark yet, and is
+      // deleted once correlate marks universally.
+      if (s.correlated_at !== undefined) return s.at < s.correlated_at;
       if (!s.source) return s.at < this._max_non_snap_event_id;
       if (is_literal_source(s.source)) {
         const max_id = this._max_event_id_by_stream.get(s.source);
@@ -29745,15 +29808,7 @@ export class InMemoryStore implements Store {
    * @param streams - Streams to register with optional source + priority.
    * @returns subscribed count and current max watermark.
    */
-  async subscribe(
-    streams: Array<{
-      stream: string;
-      source?: string;
-      priority?: number;
-      lane?: string;
-    }>,
-    correlated_at?: number
-  ) {
+  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
     if (correlated_at !== undefined && correlated_at > this._correlated_at)
@@ -29765,16 +29820,17 @@ export class InMemoryStore implements Store {
       source,
       priority = 0,
       lane = DEFAULT_LANE,
+      correlated_at,
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
         existing.bump_priority(priority);
         existing.lane = lane;
+        if (correlated_at !== undefined) existing.mark(correlated_at);
       } else {
-        this._streams.set(
-          stream,
-          new InMemoryStream(stream, source, priority, lane)
-        );
+        const created = new InMemoryStream(stream, source, priority, lane);
+        if (correlated_at !== undefined) created.mark(correlated_at);
+        this._streams.set(stream, created);
         subscribed++;
       }
     }
@@ -31684,6 +31740,44 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
 };
 
 /**
+ * One target stream to register with {@link Store.subscribe}.
+ */
+export type SubscribeInput = {
+  readonly stream: string;
+  readonly source?: string;
+  /**
+   * Optional scheduling priority for the lagging-frontier \`claim()\`
+   * ordering. Default \`0\`. When the same stream is subscribed by multiple
+   * reactions with different priorities, implementations must keep the
+   * **maximum** so the highest-priority reaction wins. Use
+   * {@link Store.prioritize} for runtime overrides that ignore this max —
+   * operator-driven changes.
+   */
+  readonly priority?: number;
+  /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
+  readonly lane?: string;
+  /**
+   * Highest event id observed to resolve to this target — the stream's
+   * **work mark** (#1485). Applied as \`correlated_at = GREATEST(correlated_at, N)\`
+   * for every value including zero and negatives; omitted leaves the stored
+   * value untouched.
+   *
+   * A mark is an assertion about the log: \`correlate\` sets it to the id of a
+   * real event that resolved to this target, so \`at < correlated_at\` implies a
+   * fetch returns work. \`correlate\` is the only component entitled to write
+   * it — the store cannot resolve user-code targets, and \`notify\` is
+   * best-effort — which is what the name records.
+   *
+   * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
+   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
+   * legacy has-work probe against the event log, which is how installs that
+   * predate the column keep working. That arm is deleted once \`correlate\`
+   * marks universally.
+   */
+  readonly correlated_at?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -31908,21 +32002,7 @@ export interface Store extends Disposable, EventSource {
    * @see {@link prioritize} for changing priority after subscription
    */
   subscribe: (
-    streams: Array<{
-      stream: string;
-      source?: string;
-      /**
-       * Optional scheduling priority for the lagging-frontier
-       * \`claim()\` ordering. Default \`0\`. When the same stream is
-       * subscribed by multiple reactions with different priorities,
-       * implementations must keep the **maximum** so the highest-
-       * priority reaction wins. Use {@link prioritize} for runtime
-       * overrides that ignore this max — operator-driven changes.
-       */
-      priority?: number;
-      /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
-      lane?: string;
-    }>,
+    streams: SubscribeInput[],
     /**
      * Advance the correlate checkpoint to this event id — correlate's own
      * watermark, in the same id space as a subscription's \`at\` (#1484).
@@ -37976,6 +38056,44 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
 };
 
 /**
+ * One target stream to register with {@link Store.subscribe}.
+ */
+export type SubscribeInput = {
+  readonly stream: string;
+  readonly source?: string;
+  /**
+   * Optional scheduling priority for the lagging-frontier \`claim()\`
+   * ordering. Default \`0\`. When the same stream is subscribed by multiple
+   * reactions with different priorities, implementations must keep the
+   * **maximum** so the highest-priority reaction wins. Use
+   * {@link Store.prioritize} for runtime overrides that ignore this max —
+   * operator-driven changes.
+   */
+  readonly priority?: number;
+  /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
+  readonly lane?: string;
+  /**
+   * Highest event id observed to resolve to this target — the stream's
+   * **work mark** (#1485). Applied as \`correlated_at = GREATEST(correlated_at, N)\`
+   * for every value including zero and negatives; omitted leaves the stored
+   * value untouched.
+   *
+   * A mark is an assertion about the log: \`correlate\` sets it to the id of a
+   * real event that resolved to this target, so \`at < correlated_at\` implies a
+   * fetch returns work. \`correlate\` is the only component entitled to write
+   * it — the store cannot resolve user-code targets, and \`notify\` is
+   * best-effort — which is what the name records.
+   *
+   * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
+   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
+   * legacy has-work probe against the event log, which is how installs that
+   * predate the column keep working. That arm is deleted once \`correlate\`
+   * marks universally.
+   */
+  readonly correlated_at?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -38200,21 +38318,7 @@ export interface Store extends Disposable, EventSource {
    * @see {@link prioritize} for changing priority after subscription
    */
   subscribe: (
-    streams: Array<{
-      stream: string;
-      source?: string;
-      /**
-       * Optional scheduling priority for the lagging-frontier
-       * \`claim()\` ordering. Default \`0\`. When the same stream is
-       * subscribed by multiple reactions with different priorities,
-       * implementations must keep the **maximum** so the highest-
-       * priority reaction wins. Use {@link prioritize} for runtime
-       * overrides that ignore this max — operator-driven changes.
-       */
-      priority?: number;
-      /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
-      lane?: string;
-    }>,
+    streams: SubscribeInput[],
     /**
      * Advance the correlate checkpoint to this event id — correlate's own
      * watermark, in the same id space as a subscription's \`at\` (#1484).
@@ -49785,6 +49889,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  SubscribeInput,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -50388,7 +50493,8 @@ export class PostgresStore implements Store {
           leased_until timestamptz,
           priority int NOT NULL DEFAULT 0,
           lane text NOT NULL DEFAULT 'default',
-          deferred_at timestamptz
+          deferred_at timestamptz,
+          correlated_at int
         ) TABLESPACE pg_default;\`
       );
       // Correlate checkpoint (#1484). Its own single-row relation rather
@@ -50400,7 +50506,7 @@ export class PostgresStore implements Store {
       await client.query(
         \`CREATE TABLE IF NOT EXISTS \${this._fqc} (
           id int PRIMARY KEY DEFAULT 0,
-          at bigint NOT NULL DEFAULT -1,
+          at int NOT NULL DEFAULT -1,
           CONSTRAINT \${this.config.table}_correlated_singleton CHECK (id = 0)
         ) TABLESPACE pg_default;\`
       );
@@ -50424,6 +50530,14 @@ export class PostgresStore implements Store {
       await client.query(
         \`ALTER TABLE \${this._fqs}
          ADD COLUMN IF NOT EXISTS deferred_at timestamptz;\`
+      );
+      // Migration for tables created before the work set (#1485). Nullable
+      // on purpose: NULL means "unknown", which routes the row to the legacy
+      // has-work probe, so an upgraded install behaves exactly as it did and
+      // migrates row by row as correlate marks each target.
+      await client.query(
+        \`ALTER TABLE \${this._fqs}
+         ADD COLUMN IF NOT EXISTS correlated_at int;\`
       );
       // Migration for tables created before the retry widening (#1190).
       // \`claim()\` increments \`retry\` on every acquisition and never
@@ -50502,6 +50616,18 @@ export class PostgresStore implements Store {
       await client.query(
         \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_streams_lane_ix"
         ON \${this._fqs} (lane);\`
+      );
+      // The correlated set IS the index (#1485). \`at < correlated_at\` is a legal
+      // partial-index predicate — immutable, single-row, no cross-row
+      // reference — so the index holds only streams with work: \`LIMIT\` pushes
+      // into it, a stream leaves when \`ack\` advances \`at\` to \`correlated_at\`,
+      // and re-enters when correlate raises the mark. That makes \`claim\` an
+      // index scan of at most \`lagging + leading\` rows, independent of how
+      // many streams are subscribed.
+      await client.query(
+        \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_streams_correlated_at_ix"
+        ON \${this._fqs} (lane, priority DESC, at)
+        WHERE blocked = false AND at < correlated_at;\`
       );
 
       await client.query("COMMIT");
@@ -50909,7 +51035,7 @@ export class PostgresStore implements Store {
         -- Measured at 10k subscribed streams with 10 pending: 5,792 ms
         -- before, 10.3 ms after. See libs/act-pg/PERFORMANCE.md for #1448.
         eligible AS (
-          SELECT stream, source, at, priority, lane
+          SELECT stream, source, at, priority, lane, correlated_at
           FROM \${this._fqs} s
           WHERE blocked = false
             \${lane_clause}
@@ -50917,6 +51043,26 @@ export class PostgresStore implements Store {
             AND (deferred_at IS NULL OR deferred_at <= NOW())
         ),
         available AS (
+          -- Fast arm (#1485): a marked stream answers from the subscription
+          -- row alone. Read from the base table, NOT from the eligible CTE:
+          -- it is referenced several times so PG materializes it, and a
+          -- materialized scan cannot use the partial index this predicate was
+          -- built for (WHERE blocked = false AND at < correlated_at).
+          -- The comparison is NULL-safe: an unmarked row compares
+          -- unknown and is excluded here, falling through to the legacy arms.
+          SELECT stream, source, at, priority, lane
+          FROM \${this._fqs} s
+          WHERE s.blocked = false
+            AND s.at < s.correlated_at
+            \${lane_clause}
+            AND (s.leased_by IS NULL OR s.leased_until <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+          UNION ALL
+          -- Legacy arms, gated on an absent mark. NULL means "unknown", so
+          -- an install that predates the column probes the event log exactly
+          -- as it did before, and each row migrates to the fast arm the first
+          -- time correlate marks it. Deleted once correlate marks universally.
+          --
           -- Every arm below is watermark-agnostic (#1446): a fresh
           -- subscription sits at -1, and e.id > s.at already answers
           -- correctly there, since the first event has a greater id.
@@ -50926,7 +51072,8 @@ export class PostgresStore implements Store {
           -- Source-less subscription: any non-snapshot event past the
           -- watermark counts, so the id index alone answers it.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.source IS NULL
+          WHERE s.correlated_at IS NULL
+            AND s.source IS NULL
             AND EXISTS (
               SELECT 1 FROM \${this._fqt} e
               WHERE e.id > s.at AND e.name <> '\${SNAP_EVENT}' LIMIT 1
@@ -50935,7 +51082,8 @@ export class PostgresStore implements Store {
           -- Literal source (no regex metacharacter): exact equality, so
           -- "s1" never claims "s12", and (stream, id) is usable.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.source IS NOT NULL
+          WHERE s.correlated_at IS NULL
+            AND s.source IS NOT NULL
             AND s.source !~ '\${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM \${this._fqt} e
@@ -50948,7 +51096,8 @@ export class PostgresStore implements Store {
           -- it anchors. Unavoidably a scan — but only for the subscriptions
           -- that actually declare a pattern.
           SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.source IS NOT NULL
+          WHERE s.correlated_at IS NULL
+            AND s.source IS NOT NULL
             AND s.source ~ '\${SOURCE_METACHARACTER_CLASS}'
             AND EXISTS (
               SELECT 1 FROM \${this._fqt} e
@@ -51052,12 +51201,7 @@ export class PostgresStore implements Store {
    * @returns subscribed count and current max watermark.
    */
   async subscribe(
-    streams: Array<{
-      stream: string;
-      source?: string;
-      priority?: number;
-      lane?: string;
-    }>,
+    streams: SubscribeInput[],
     correlated_at?: number
   ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
     const client = await this._client("subscribe");
@@ -51073,6 +51217,7 @@ export class PostgresStore implements Store {
         //     highest-priority registered reaction wins). Operator
         //     overrides (which may *decrease*) go through \`prioritize()\`.
         //  3. UPDATE lane unconditionally — current subscribe wins (ACT-1103).
+        //  4. UPDATE correlated_at to the max of stored and supplied (#1485).
         const { rowCount: inserted } = await client.query(
           \`
           INSERT INTO \${this._fqs} (stream, source, priority, lane, retry)
@@ -51107,12 +51252,32 @@ export class PostgresStore implements Store {
           \`,
           [JSON.stringify(streams)]
         );
+        // The work mark never regresses (#1485). \`t.correlated_at IS NULL OR
+        // t.correlated_at < mark\` is the whole rule: the NULL arm is the row's
+        // first mark (a comparison against NULL is unknown, so the predicate
+        // alone would skip it), and it holds for every value including zero
+        // and negatives — the shape the #1445 priority bug was on. Skipped
+        // entirely when no entry carries a mark, so an unmarked subscribe
+        // issues exactly the statements it did before the column existed.
+        if (streams.some((s) => s.correlated_at !== undefined))
+          await client.query(
+            \`
+          UPDATE \${this._fqs} t
+          SET correlated_at = (s->>'correlated_at')::int
+          FROM jsonb_array_elements($1::jsonb) AS s
+          WHERE t.stream = s->>'stream'
+            AND s->>'correlated_at' IS NOT NULL
+            AND (t.correlated_at IS NULL
+                 OR t.correlated_at < (s->>'correlated_at')::int)
+          \`,
+            [JSON.stringify(streams)]
+          );
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
       if (correlated_at !== undefined)
         await client.query(
-          \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::bigint) WHERE id = 0\`,
+          \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::int) WHERE id = 0\`,
           [correlated_at]
         );
       // Watermark and checkpoint in one round trip — correlate needs both.
@@ -52386,6 +52551,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  SubscribeInput,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -52777,7 +52943,8 @@ export class SqliteStore implements Store {
         leased_until TEXT,
         priority INTEGER NOT NULL DEFAULT 0,
         lane TEXT NOT NULL DEFAULT 'default',
-        deferred_at TEXT
+        deferred_at TEXT,
+        correlated_at INTEGER
       )
     \`);
     // Migration for tables created before priority lanes (ACT-102).
@@ -52806,6 +52973,17 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Migration for tables created before the work set (#1485). Nullable on
+    // purpose: NULL means "unknown", which routes the row to the legacy
+    // has-work probe, so an upgraded install behaves exactly as it did and
+    // migrates row by row as correlate marks each target.
+    try {
+      await this.client.execute(
+        "ALTER TABLE streams ADD COLUMN correlated_at INTEGER"
+      );
+    } catch {
+      // already present
+    }
     // Correlate checkpoint (#1484). Its own single-row table rather than a
     // reserved subscription: a subscription row is counted by every
     // stream-scoped operator surface (prioritize / reset / unblock /
@@ -52821,6 +52999,13 @@ export class SqliteStore implements Store {
     );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
+    );
+    // The correlated set IS the index (#1485): it holds only streams with
+    // work, so \`claim\` scans candidates instead of every subscription. A
+    // stream leaves when \`ack\` advances \`at\` to \`correlated_at\`, and re-enters
+    // when correlate raises the mark.
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
     // Lane filter index (ACT-1103).
     await this.client.execute(
@@ -53016,15 +53201,7 @@ export class SqliteStore implements Store {
   //     plus a UPDATE pass to keep the *max* priority across reactions
   //     targeting the same stream (ACT-102). Operator overrides go
   //     through \`prioritize()\` instead.
-  async subscribe(
-    streams: Array<{
-      stream: string;
-      source?: string;
-      priority?: number;
-      lane?: string;
-    }>,
-    correlated_at?: number
-  ) {
+  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no \`REGEXP\`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
@@ -53044,6 +53221,7 @@ export class SqliteStore implements Store {
         source,
         priority = 0,
         lane = "default",
+        correlated_at,
       } of streams) {
         const inserted = await tx.execute({
           sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane, retry) VALUES (?, ?, ?, ?, -1)",
@@ -53068,6 +53246,18 @@ export class SqliteStore implements Store {
             args: [lane, stream, lane],
           });
         }
+        // The work mark never regresses (#1485). \`WHERE correlated_at IS
+        // NULL OR correlated_at < ?\` is the whole rule: the NULL arm is first
+        // mark (a comparison against NULL is unknown, so the predicate alone
+        // would skip it), and it holds for every value including zero and
+        // negatives. Written here rather than in the INSERT above so an
+        // unmarked subscribe never names the column — a table that predates
+        // it, and that \`seed()\` has not migrated, keeps working.
+        if (correlated_at !== undefined)
+          await tx.execute({
+            sql: "UPDATE streams SET correlated_at = ? WHERE stream = ? AND (correlated_at IS NULL OR correlated_at < ?)",
+            args: [correlated_at, stream, correlated_at],
+          });
       }
       const wm = await tx.execute(
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
@@ -53110,10 +53300,15 @@ export class SqliteStore implements Store {
       const now = new Date().toISOString();
 
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
+      // \`correlated_at IS NULL OR at < correlated_at\` (#1485) drops marked
+      // whose watermark has caught up before they ever reach the probe loop
+      // below. NULL means "unknown", so those rows pass through to the legacy
+      // probe — an install that predates the column behaves exactly as it did.
       const result = await tx.execute({
-        sql: \`SELECT stream, source, at, priority, lane FROM streams
+        sql: \`SELECT stream, source, at, priority, lane, correlated_at FROM streams
               WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
                 AND (deferred_at IS NULL OR deferred_at <= ?)\${lane_clause}
+                AND (correlated_at IS NULL OR at < correlated_at)
               ORDER BY priority DESC, at ASC\`,
         args: lane !== undefined ? [now, now, lane] : [now, now],
       });
@@ -53129,6 +53324,20 @@ export class SqliteStore implements Store {
         const stream = row.stream as string;
         const source = row.source as string | null;
         const at = Number(row.at);
+
+        // A marked row is already known to have work — the SQL above kept
+        // only \`at < correlated_at\` — so it skips the probe entirely. This is
+        // the N+1 the work set exists to remove; step 5 deletes the arm below.
+        if (row.correlated_at !== null) {
+          candidates.push({
+            stream,
+            source: source ?? undefined,
+            at,
+            priority: Number(row.priority),
+            lane: row.lane as string,
+          });
+          continue;
+        }
 
         let has_events: boolean;
         if (source) {
@@ -56382,6 +56591,22 @@ export type StoreCapabilities = {
    * to InMemory/PG for full regex claim sources.
    */
   readonly rejects_nonportable_claim_source?: boolean;
+  /**
+   * Adapter honors the {@link SubscribeInput.correlated_at} **work mark**
+   * (#1485): \`subscribe\` applies it as \`GREATEST(correlated_at, N)\` and
+   * \`claim\` serves a marked stream from the subscription row alone
+   * (\`at < correlated_at\`) instead of probing the event log. When \`true\`,
+   * the TCK runs the work-set suite — mark-then-claim, monotonicity
+   * across positive/zero/negative values, \`ack\` retiring a stream from
+   * the claimable set and a later mark re-adding it, and the operator
+   * surfaces (\`reset\`, \`unblock\`, \`defer\`, \`prioritize\`) leaving the mark
+   * intact.
+   *
+   * An adapter that ignores the field keeps working through the legacy
+   * has-work probe and leaves this \`false\`. The flag disappears once the
+   * legacy arm is deleted and the mark becomes the only eligibility rule.
+   */
+  readonly work_set?: boolean;
 };
 
 /**
@@ -57428,6 +57653,151 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await store.query_streams((p) => seen.push(p.stream), {});
           expect(seen.some((n) => n.startsWith("__correlate"))).toBe(false);
           expect(seen).not.toContain("correlated");
+        });
+      });
+
+      // The subscription work set (#1485). \`correlate\` records the highest
+      // event id that resolved to a target as that row's \`correlated_at\` mark,
+      // and \`claim\` serves a marked stream from the subscription row alone —
+      // \`at < correlated_at\` — instead of probing the event log per row. The
+      // probe is what makes claim cost O(subscribed streams); the mark makes
+      // it O(lease budget).
+      //
+      // \`NULL\` means UNKNOWN, not "no work": an unmarked row falls back to
+      // the legacy probe, which is how an install that predates the column
+      // keeps working. That arm is deleted once correlate marks universally.
+      describe.skipIf(!caps.work_set)("subscription work set", () => {
+        /** Claim just this stream, and say whether it came back. */
+        const claimable = async (stream: string) => {
+          const leased = await store.claim(100, 0, \`w-\${uid()}\`, 1);
+          const mine = leased.find((l) => l.stream === stream);
+          // Release immediately so the next assertion is not fighting a
+          // lease this helper took.
+          if (mine) await store.ack([{ ...mine, at: mine.at }]);
+          return mine !== undefined;
+        };
+
+        it("claims a marked stream without probing the event log", async () => {
+          // The source has no events at all, so the legacy probe would say
+          // "no work" — only the mark can make this claimable. That is the
+          // whole point: eligibility comes from the subscription row.
+          const s = \`ws-mark-\${uid()}\`;
+          await store.subscribe([{ stream: s, source: \`ws-src-\${uid()}\` }]);
+          expect(await claimable(s)).toBe(false);
+          await store.subscribe([{ stream: s, correlated_at: 7 }]);
+          expect(await claimable(s)).toBe(true);
+          // A source-less subscription carries a mark the same way — the
+          // mark is a property of the target, not of how it was sourced.
+          const s2 = \`ws-mark-nosrc-\${uid()}\`;
+          await store.subscribe([{ stream: s2, correlated_at: 7 }]);
+          expect(await claimable(s2)).toBe(true);
+        });
+
+        it("never regresses the mark, for every value on the number line", async () => {
+          const s = \`ws-mono-\${uid()}\`;
+          await store.subscribe([
+            { stream: s, source: \`ws-none-\${uid()}\`, correlated_at: 10 },
+          ]);
+          // Park the watermark BETWEEN the stored mark and the lower values
+          // below. Without this the row stays claimable whatever the mark
+          // regressed to, and the assertions would prove nothing.
+          const leased = await store.claim(100, 0, \`w-\${uid()}\`, 10_000);
+          await store.ack([
+            { ...(leased.find((l) => l.stream === s) as Lease), at: 5 },
+          ]);
+          expect(await claimable(s)).toBe(true);
+          // Lower, equal, and negative all leave the stored mark alone — the
+          // shape the #1445 priority bug was on. Any of them landing would
+          // drop \`at = 5\` out of the claimable set.
+          await store.subscribe([{ stream: s, correlated_at: 4 }]);
+          expect(await claimable(s)).toBe(true);
+          await store.subscribe([{ stream: s, correlated_at: 5 }]);
+          expect(await claimable(s)).toBe(true);
+          await store.subscribe([{ stream: s, correlated_at: -3 }]);
+          expect(await claimable(s)).toBe(true);
+          await store.subscribe([{ stream: s, correlated_at: 0 }]);
+          expect(await claimable(s)).toBe(true);
+          // A higher one does advance it: catch the watermark up to the old
+          // mark, and only the new one can put the stream back in the set.
+          const leased2 = await store.claim(100, 0, \`w-\${uid()}\`, 10_000);
+          await store.ack([
+            { ...(leased2.find((l) => l.stream === s) as Lease), at: 10 },
+          ]);
+          expect(await claimable(s)).toBe(false);
+          await store.subscribe([{ stream: s, correlated_at: 11 }]);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("retires a stream when ack catches the watermark up to the mark", async () => {
+          const s = \`ws-retire-\${uid()}\`;
+          await store.subscribe([
+            { stream: s, source: \`ws-none-\${uid()}\`, correlated_at: 5 },
+          ]);
+          const leased = await store.claim(100, 0, \`w-\${uid()}\`, 10_000);
+          const mine = leased.find((l) => l.stream === s);
+          expect(mine).toBeDefined();
+          // Watermark now equals the mark: nothing left that correlate
+          // has seen, so the stream drops out of the claimable set.
+          await store.ack([{ ...(mine as Lease), at: 5 }]);
+          expect(await claimable(s)).toBe(false);
+          // A later mark re-admits it — the set is not one-shot.
+          await store.subscribe([{ stream: s, correlated_at: 6 }]);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("keeps the mark across reset, so a rebuild is claimable", async () => {
+          const s = \`ws-reset-\${uid()}\`;
+          await store.subscribe([
+            { stream: s, source: \`ws-none-\${uid()}\`, correlated_at: 3 },
+          ]);
+          const leased = await store.claim(100, 0, \`w-\${uid()}\`, 10_000);
+          await store.ack([
+            { ...(leased.find((l) => l.stream === s) as Lease), at: 3 },
+          ]);
+          expect(await claimable(s)).toBe(false);
+          // reset rewinds the watermark to -1 and leaves the mark alone, so
+          // \`at < correlated_at\` is true again and the replay can be claimed.
+          await store.reset([s]);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("keeps the mark across unblock, defer, and prioritize", async () => {
+          const s = \`ws-ops-\${uid()}\`;
+          await store.subscribe([
+            { stream: s, source: \`ws-none-\${uid()}\`, correlated_at: 9 },
+          ]);
+          const leased = await store.claim(100, 0, \`w-\${uid()}\`, 10_000);
+          const mine = leased.find((l) => l.stream === s) as Lease;
+          await store.block([{ ...mine, error: "poison" }]);
+          expect(await claimable(s)).toBe(false);
+          expect(await store.unblock([s])).toBe(1);
+          expect(await claimable(s)).toBe(true);
+          // Deferred to the future: held out of claim, mark untouched.
+          await store.defer([s], Date.now() + 60_000);
+          expect(await claimable(s)).toBe(false);
+          await store.defer([s], Date.now() - 1);
+          expect(await claimable(s)).toBe(true);
+          // Operator priority override does not disturb eligibility.
+          await store.prioritize({ stream: s, stream_exact: true }, 5);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("falls back to the legacy probe for an unmarked stream", async () => {
+          // No mark: the row is UNKNOWN, not "no work", so the event log
+          // still decides. This is what keeps a pre-upgrade install working
+          // until correlate has marked each of its targets.
+          const s = \`ws-legacy-\${uid()}\`;
+          const src = \`ws-legacy-src-\${uid()}\`;
+          // Scoped to its own source: a source-less subscription probes for
+          // ANY event in the store, which the shared TCK store always has.
+          await store.subscribe([{ stream: s, source: src }]);
+          expect(await claimable(s)).toBe(false);
+          await store.commit<CounterEvents>(
+            src,
+            [inc(1)],
+            make_meta({ stream: src })
+          );
+          expect(await claimable(s)).toBe(true);
         });
       });
 

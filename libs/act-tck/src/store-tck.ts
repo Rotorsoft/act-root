@@ -114,6 +114,22 @@ export type StoreCapabilities = {
    * to InMemory/PG for full regex claim sources.
    */
   readonly rejects_nonportable_claim_source?: boolean;
+  /**
+   * Adapter honors the {@link SubscribeInput.correlated_at} **work mark**
+   * (#1485): `subscribe` applies it as `GREATEST(correlated_at, N)` and
+   * `claim` serves a marked stream from the subscription row alone
+   * (`at < correlated_at`) instead of probing the event log. When `true`,
+   * the TCK runs the work-set suite — mark-then-claim, monotonicity
+   * across positive/zero/negative values, `ack` retiring a stream from
+   * the claimable set and a later mark re-adding it, and the operator
+   * surfaces (`reset`, `unblock`, `defer`, `prioritize`) leaving the mark
+   * intact.
+   *
+   * An adapter that ignores the field keeps working through the legacy
+   * has-work probe and leaves this `false`. The flag disappears once the
+   * legacy arm is deleted and the mark becomes the only eligibility rule.
+   */
+  readonly work_set?: boolean;
 };
 
 /**
@@ -1160,6 +1176,151 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await store.query_streams((p) => seen.push(p.stream), {});
           expect(seen.some((n) => n.startsWith("__correlate"))).toBe(false);
           expect(seen).not.toContain("correlated");
+        });
+      });
+
+      // The subscription work set (#1485). `correlate` records the highest
+      // event id that resolved to a target as that row's `correlated_at` mark,
+      // and `claim` serves a marked stream from the subscription row alone —
+      // `at < correlated_at` — instead of probing the event log per row. The
+      // probe is what makes claim cost O(subscribed streams); the mark makes
+      // it O(lease budget).
+      //
+      // `NULL` means UNKNOWN, not "no work": an unmarked row falls back to
+      // the legacy probe, which is how an install that predates the column
+      // keeps working. That arm is deleted once correlate marks universally.
+      describe.skipIf(!caps.work_set)("subscription work set", () => {
+        /** Claim just this stream, and say whether it came back. */
+        const claimable = async (stream: string) => {
+          const leased = await store.claim(100, 0, `w-${uid()}`, 1);
+          const mine = leased.find((l) => l.stream === stream);
+          // Release immediately so the next assertion is not fighting a
+          // lease this helper took.
+          if (mine) await store.ack([{ ...mine, at: mine.at }]);
+          return mine !== undefined;
+        };
+
+        it("claims a marked stream without probing the event log", async () => {
+          // The source has no events at all, so the legacy probe would say
+          // "no work" — only the mark can make this claimable. That is the
+          // whole point: eligibility comes from the subscription row.
+          const s = `ws-mark-${uid()}`;
+          await store.subscribe([{ stream: s, source: `ws-src-${uid()}` }]);
+          expect(await claimable(s)).toBe(false);
+          await store.subscribe([{ stream: s, correlated_at: 7 }]);
+          expect(await claimable(s)).toBe(true);
+          // A source-less subscription carries a mark the same way — the
+          // mark is a property of the target, not of how it was sourced.
+          const s2 = `ws-mark-nosrc-${uid()}`;
+          await store.subscribe([{ stream: s2, correlated_at: 7 }]);
+          expect(await claimable(s2)).toBe(true);
+        });
+
+        it("never regresses the mark, for every value on the number line", async () => {
+          const s = `ws-mono-${uid()}`;
+          await store.subscribe([
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 10 },
+          ]);
+          // Park the watermark BETWEEN the stored mark and the lower values
+          // below. Without this the row stays claimable whatever the mark
+          // regressed to, and the assertions would prove nothing.
+          const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
+          await store.ack([
+            { ...(leased.find((l) => l.stream === s) as Lease), at: 5 },
+          ]);
+          expect(await claimable(s)).toBe(true);
+          // Lower, equal, and negative all leave the stored mark alone — the
+          // shape the #1445 priority bug was on. Any of them landing would
+          // drop `at = 5` out of the claimable set.
+          await store.subscribe([{ stream: s, correlated_at: 4 }]);
+          expect(await claimable(s)).toBe(true);
+          await store.subscribe([{ stream: s, correlated_at: 5 }]);
+          expect(await claimable(s)).toBe(true);
+          await store.subscribe([{ stream: s, correlated_at: -3 }]);
+          expect(await claimable(s)).toBe(true);
+          await store.subscribe([{ stream: s, correlated_at: 0 }]);
+          expect(await claimable(s)).toBe(true);
+          // A higher one does advance it: catch the watermark up to the old
+          // mark, and only the new one can put the stream back in the set.
+          const leased2 = await store.claim(100, 0, `w-${uid()}`, 10_000);
+          await store.ack([
+            { ...(leased2.find((l) => l.stream === s) as Lease), at: 10 },
+          ]);
+          expect(await claimable(s)).toBe(false);
+          await store.subscribe([{ stream: s, correlated_at: 11 }]);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("retires a stream when ack catches the watermark up to the mark", async () => {
+          const s = `ws-retire-${uid()}`;
+          await store.subscribe([
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 5 },
+          ]);
+          const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
+          const mine = leased.find((l) => l.stream === s);
+          expect(mine).toBeDefined();
+          // Watermark now equals the mark: nothing left that correlate
+          // has seen, so the stream drops out of the claimable set.
+          await store.ack([{ ...(mine as Lease), at: 5 }]);
+          expect(await claimable(s)).toBe(false);
+          // A later mark re-admits it — the set is not one-shot.
+          await store.subscribe([{ stream: s, correlated_at: 6 }]);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("keeps the mark across reset, so a rebuild is claimable", async () => {
+          const s = `ws-reset-${uid()}`;
+          await store.subscribe([
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 3 },
+          ]);
+          const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
+          await store.ack([
+            { ...(leased.find((l) => l.stream === s) as Lease), at: 3 },
+          ]);
+          expect(await claimable(s)).toBe(false);
+          // reset rewinds the watermark to -1 and leaves the mark alone, so
+          // `at < correlated_at` is true again and the replay can be claimed.
+          await store.reset([s]);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("keeps the mark across unblock, defer, and prioritize", async () => {
+          const s = `ws-ops-${uid()}`;
+          await store.subscribe([
+            { stream: s, source: `ws-none-${uid()}`, correlated_at: 9 },
+          ]);
+          const leased = await store.claim(100, 0, `w-${uid()}`, 10_000);
+          const mine = leased.find((l) => l.stream === s) as Lease;
+          await store.block([{ ...mine, error: "poison" }]);
+          expect(await claimable(s)).toBe(false);
+          expect(await store.unblock([s])).toBe(1);
+          expect(await claimable(s)).toBe(true);
+          // Deferred to the future: held out of claim, mark untouched.
+          await store.defer([s], Date.now() + 60_000);
+          expect(await claimable(s)).toBe(false);
+          await store.defer([s], Date.now() - 1);
+          expect(await claimable(s)).toBe(true);
+          // Operator priority override does not disturb eligibility.
+          await store.prioritize({ stream: s, stream_exact: true }, 5);
+          expect(await claimable(s)).toBe(true);
+        });
+
+        it("falls back to the legacy probe for an unmarked stream", async () => {
+          // No mark: the row is UNKNOWN, not "no work", so the event log
+          // still decides. This is what keeps a pre-upgrade install working
+          // until correlate has marked each of its targets.
+          const s = `ws-legacy-${uid()}`;
+          const src = `ws-legacy-src-${uid()}`;
+          // Scoped to its own source: a source-less subscription probes for
+          // ANY event in the store, which the shared TCK store always has.
+          await store.subscribe([{ stream: s, source: src }]);
+          expect(await claimable(s)).toBe(false);
+          await store.commit<CounterEvents>(
+            src,
+            [inc(1)],
+            make_meta({ stream: src })
+          );
+          expect(await claimable(s)).toBe(true);
         });
       });
 

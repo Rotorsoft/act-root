@@ -15,7 +15,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `commit(stream, msgs, meta, expectedVersion?)` — append events atomically with optimistic concurrency. Map a `(stream, version)` unique-constraint violation to `ConcurrencyError` (Postgres keys off SQLSTATE `23505`, SQLite off its unique-constraint message) and wrap every other driver error in `StoreError('commit')` — never rethrow a raw dialect error, or callers can't tell a losable concurrency race from a real fault ([#1202](https://github.com/Rotorsoft/act-root/issues/1202))
 - `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support. Respecting the `after` / `limit` pair is what gives `scan` bounded-memory restore: the framework paginates by re-issuing `query` per batch, so any adapter that already honors those filters gets memory-safe scans for free. Stream/source filters must honor the portable regex grammar (`^` / `$` anchors, `.`, `.*`, literal characters — literal `_` / `%` included) and match **case-sensitively** on every adapter: Postgres uses POSIX `~`, InMemory a `RegExp`, and SQLite `GLOB` (case-sensitive, where `.*` → `*` and `.` → `?`) rather than `LIKE`, whose ASCII case-insensitivity would let `^order-` overmatch `Order-x` ([#1197](https://github.com/Rotorsoft/act-root/issues/1197)). If your backend can't express a richer pattern exactly, **throw `ValidationError`** instead of approximating — the TCK's "stream filter grammar" suite enforces both halves ([#1114](https://github.com/Rotorsoft/act-root/issues/1114)). Two edge inputs are contractual: an empty `names: []` is an explicit empty allow-list that matches **no** events (an omitted `names` matches all), and `before` / `after` are honored at their falsy-zero values — a `before: 0` or `after: 0` is a real id bound (`id < before` / `id > after`), not a dropped filter ([#1199](https://github.com/Rotorsoft/act-root/issues/1199)). A `Date` in an event's `data` **or `pii`** round-trips as a `Date`: adapters that store JSON revive ISO-8601-shaped strings on read (Postgres and SQLite both run the same reviver, on the pii read path as well as `data`/`meta` — [#1365](https://github.com/Rotorsoft/act-root/issues/1365)), with the documented caveat that any plain string shaped like an ISO-8601 timestamp is revived to a `Date`, and a timezone-less ISO string parses in local time ([#1198](https://github.com/Rotorsoft/act-root/issues/1198))
 - `claim(lagging, leading, by, millis, lane?)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
-- `subscribe(streams, correlated_at?)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning). It also carries the **correlate checkpoint**, read from the return and written by the optional argument — covered below
+- `subscribe(streams, correlated_at?)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning) and an optional `correlated_at` **work mark** that decides claim eligibility — both covered below. It also carries the **correlate checkpoint**, read from the return and written by the optional second argument
 
   Registering a stream does **not** make it claimable on its own. `claim` follows work: a subscription with no matching event past its watermark is not returned, and that includes a fresh one sitting at `at = -1` ([#1446](https://github.com/Rotorsoft/act-root/issues/1446)). Do not special-case the fresh watermark into "claimable" — an `id > at` comparison already answers correctly at `-1`, since the first event's id is greater than it. Handing out an empty lease costs a cycle, and its no-op ack can advance the watermark past an event committed mid-cycle.
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure. `ack` doubles as the drain's atomic finalize: every entry advances the watermark to `at`, and a lease carrying `due` (ms since epoch) *also* defers the remainder — schedule set, entry's `retry` persisted — in the same transaction as the batch's acks; deferred entries are excluded from the return value
@@ -66,6 +66,61 @@ bring existing events in from another system or shape, seed a fresh store
 and import via `scan`/`restore` (see § Implementing `Store.restore` below
 and the inspector's transfer pipeline) — never point Act at a foreign table
 and try to reshape it in place.
+
+## The work set
+
+`claim` has to answer "which subscribed streams have unconsumed work?". The
+obvious implementation asks the event log — `EXISTS (SELECT 1 FROM events
+WHERE id > at ...)` per eligible subscription — and that is what every adapter
+did. It costs O(**subscribed** streams) per claim per worker, which is the
+wrong axis: a per-aggregate reaction (`.to(e => ({ target: e.stream }))`)
+subscribes one stream per aggregate, so the probe grows with the domain rather
+than with the backlog.
+
+`SubscribeInput.correlated_at` ([#1485](https://github.com/Rotorsoft/act-root/issues/1485))
+lets the subscription row answer instead. It is the highest event id observed
+to resolve to that target, and a stream is claimable exactly while
+`at < correlated_at`.
+
+Four rules, all pinned by the TCK's `work_set` suite:
+
+- **It never regresses.** `GREATEST` / `MAX` in the same statement that
+  UPSERTs the row, applied for every value including zero and negatives — a
+  lower or equal mark is ignored, not written. (An earlier version of the
+  `priority` column gated its merge on `> 0` and made a stored negative
+  unraisable; that is the bug this rule exists to not repeat.)
+- **Omitted leaves it untouched**, and an unmarked `subscribe` should not
+  write the column at all — keep it out of the INSERT column list so a table
+  that predates the column still accepts an unmarked subscribe.
+- **`NULL` means unknown, not "no work".** An unmarked row must fall back to
+  the legacy probe. That is the entire upgrade story: existing rows behave
+  exactly as they did, and each converts permanently the first time correlate
+  marks it. Do not backfill the column — `correlated_at = MAX(id)` makes every
+  stream look pending at once and drains the whole table through empty
+  fetches.
+- **The operator surfaces leave the mark alone.** `reset` rewinds `at` to
+  `-1` and must not clear `correlated_at`, or a rebuild would be unclaimable.
+  `unblock`, `defer`, and `prioritize` don't touch it either.
+
+The payoff is an index, not a loop. `at < correlated_at` is a legal partial-index
+predicate — immutable, single-row, no cross-row reference — so the correlated
+set *is* an index:
+
+```sql
+CREATE INDEX <table>_streams_correlated_at_ix
+  ON <schema>.<table>_streams (lane, priority DESC, at)
+  WHERE blocked = false AND at < correlated_at;
+```
+
+It holds only streams with work. A stream leaves when `ack` advances `at` to
+`correlated_at` and re-enters when correlate raises the mark. One caveat if you
+build the equivalent: keep the eligibility predicate on the **base table**. If
+your claim query routes it through a CTE that other arms also reference, the
+planner materializes that CTE and the partial index becomes unreachable.
+
+Measured at 20,000 subscriptions with 3 holding work: 18.1 ms → 8.7 ms per
+claim on Postgres, and 221.5 ms → 2.2 ms on SQLite, with identical leases per
+round. The `PERFORMANCE.md` in each adapter carries the method.
 
 ## The correlate checkpoint
 

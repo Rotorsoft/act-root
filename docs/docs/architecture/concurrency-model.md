@@ -67,6 +67,8 @@ The reasoning: reactions are inherently asynchronous catch-up. By the time a rea
 
 The drain pipeline polls for streams that have new events past their last-processed watermark, claims them via `FOR UPDATE SKIP LOCKED`, processes their events, then acks (releases the lease and advances the watermark) or blocks (marks the stream failed after exceeding retry budget).
 
+**How a stream is found to have work** is moving from *asking* to *being told* ([#1485](https://github.com/Rotorsoft/act-root/issues/1485)). Historically `claim` probed the event log once per eligible subscription (`EXISTS (SELECT 1 FROM events WHERE id > at ...)`), which costs O(subscribed streams) per claim per worker regardless of how much work is pending. A subscription row now carries an optional **work mark**, `correlated_at`: the highest event id observed to resolve to that target. A marked stream is claimable exactly while `at < correlated_at`, answered from the subscription row with no reference to the event log. `NULL` means *unknown*, not *no work* — those rows still take the probe, which is what lets an existing install upgrade without a migration and convert row by row. `correlate` is the only component entitled to write a mark, because it is the only one that sees every event and can apply a reaction's resolver to it; the store cannot, and `notify` is best-effort.
+
 ```
 worker A                  store                     worker B
   │  claim(by="A")             │                          │

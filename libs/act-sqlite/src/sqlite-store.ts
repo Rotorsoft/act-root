@@ -14,6 +14,7 @@ import type {
   StreamFilter,
   StreamPosition,
   StreamStats,
+  SubscribeInput,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -405,7 +406,8 @@ export class SqliteStore implements Store {
         leased_until TEXT,
         priority INTEGER NOT NULL DEFAULT 0,
         lane TEXT NOT NULL DEFAULT 'default',
-        deferred_at TEXT
+        deferred_at TEXT,
+        correlated_at INTEGER
       )
     `);
     // Migration for tables created before priority lanes (ACT-102).
@@ -434,6 +436,17 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Migration for tables created before the work set (#1485). Nullable on
+    // purpose: NULL means "unknown", which routes the row to the legacy
+    // has-work probe, so an upgraded install behaves exactly as it did and
+    // migrates row by row as correlate marks each target.
+    try {
+      await this.client.execute(
+        "ALTER TABLE streams ADD COLUMN correlated_at INTEGER"
+      );
+    } catch {
+      // already present
+    }
     // Correlate checkpoint (#1484). Its own single-row table rather than a
     // reserved subscription: a subscription row is counted by every
     // stream-scoped operator surface (prioritize / reset / unblock /
@@ -449,6 +462,13 @@ export class SqliteStore implements Store {
     );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
+    );
+    // The correlated set IS the index (#1485): it holds only streams with
+    // work, so `claim` scans candidates instead of every subscription. A
+    // stream leaves when `ack` advances `at` to `correlated_at`, and re-enters
+    // when correlate raises the mark.
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
     // Lane filter index (ACT-1103).
     await this.client.execute(
@@ -644,15 +664,7 @@ export class SqliteStore implements Store {
   //     plus a UPDATE pass to keep the *max* priority across reactions
   //     targeting the same stream (ACT-102). Operator overrides go
   //     through `prioritize()` instead.
-  async subscribe(
-    streams: Array<{
-      stream: string;
-      source?: string;
-      priority?: number;
-      lane?: string;
-    }>,
-    correlated_at?: number
-  ) {
+  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
@@ -672,6 +684,7 @@ export class SqliteStore implements Store {
         source,
         priority = 0,
         lane = "default",
+        correlated_at,
       } of streams) {
         const inserted = await tx.execute({
           sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane, retry) VALUES (?, ?, ?, ?, -1)",
@@ -696,6 +709,18 @@ export class SqliteStore implements Store {
             args: [lane, stream, lane],
           });
         }
+        // The work mark never regresses (#1485). `WHERE correlated_at IS
+        // NULL OR correlated_at < ?` is the whole rule: the NULL arm is first
+        // mark (a comparison against NULL is unknown, so the predicate alone
+        // would skip it), and it holds for every value including zero and
+        // negatives. Written here rather than in the INSERT above so an
+        // unmarked subscribe never names the column — a table that predates
+        // it, and that `seed()` has not migrated, keeps working.
+        if (correlated_at !== undefined)
+          await tx.execute({
+            sql: "UPDATE streams SET correlated_at = ? WHERE stream = ? AND (correlated_at IS NULL OR correlated_at < ?)",
+            args: [correlated_at, stream, correlated_at],
+          });
       }
       const wm = await tx.execute(
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
@@ -738,10 +763,15 @@ export class SqliteStore implements Store {
       const now = new Date().toISOString();
 
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
+      // `correlated_at IS NULL OR at < correlated_at` (#1485) drops marked
+      // whose watermark has caught up before they ever reach the probe loop
+      // below. NULL means "unknown", so those rows pass through to the legacy
+      // probe — an install that predates the column behaves exactly as it did.
       const result = await tx.execute({
-        sql: `SELECT stream, source, at, priority, lane FROM streams
+        sql: `SELECT stream, source, at, priority, lane, correlated_at FROM streams
               WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
                 AND (deferred_at IS NULL OR deferred_at <= ?)${lane_clause}
+                AND (correlated_at IS NULL OR at < correlated_at)
               ORDER BY priority DESC, at ASC`,
         args: lane !== undefined ? [now, now, lane] : [now, now],
       });
@@ -757,6 +787,20 @@ export class SqliteStore implements Store {
         const stream = row.stream as string;
         const source = row.source as string | null;
         const at = Number(row.at);
+
+        // A marked row is already known to have work — the SQL above kept
+        // only `at < correlated_at` — so it skips the probe entirely. This is
+        // the N+1 the work set exists to remove; step 5 deletes the arm below.
+        if (row.correlated_at !== null) {
+          candidates.push({
+            stream,
+            source: source ?? undefined,
+            at,
+            priority: Number(row.priority),
+            lane: row.lane as string,
+          });
+          continue;
+        }
 
         let has_events: boolean;
         if (source) {
