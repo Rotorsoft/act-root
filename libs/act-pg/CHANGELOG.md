@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.14.0...@rotorsoft/act-pg-v1.15.0) (2026-08-16)
+
+
+### Features
+
+* **act:** subscription work set — claim reads eligibility off the subscription row ([#1496](https://github.com/rotorsoft/act-root/issues/1496)) ([d31452c](https://github.com/rotorsoft/act-root/commit/d31452c823cda9ed90d9e50f23cee0443978dead)), closes [#1484](https://github.com/rotorsoft/act-root/issues/1484)
+
 # [@rotorsoft/act-pg-v1.14.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.13.19...@rotorsoft/act-pg-v1.14.0) (2026-08-16)
 
 
