@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.15.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.15.0...@rotorsoft/act-pg-v1.15.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#1504](https://github.com/rotorsoft/act-root/issues/1504)) ([fab0eed](https://github.com/rotorsoft/act-root/commit/fab0eedafcee951bf68ed5fef0cfaea3984529fc))
+
 # [@rotorsoft/act-pg-v1.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.14.0...@rotorsoft/act-pg-v1.15.0) (2026-08-16)
 
 
