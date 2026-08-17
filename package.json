@@ -61,9 +61,9 @@
     "@rotorsoft/act-pg": "workspace:^"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.7",
-    "@commitlint/cli": "^21.2.1",
-    "@commitlint/config-conventional": "^21.2.0",
+    "@biomejs/biome": "^2.5.8",
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
     "@fast-check/vitest": "^0.4.1",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -88,7 +88,7 @@
     "simple-git-hooks": "^2.13.1",
     "tsconfig-paths": "^4.2.0",
     "tsup": "^8.5.1",
-    "tsx": "^4.23.10",
+    "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
