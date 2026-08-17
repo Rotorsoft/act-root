@@ -418,7 +418,7 @@ importers:
         specifier: ^9.6.1
         version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.5)(supports-color@10.2.2))(vitest@4.1.10)
       '@types/pg':
-        specifier: ^8.20.4
+        specifier: ^8.21.0
         version: 8.21.0
 
   libs/act-pino:
@@ -621,7 +621,7 @@ importers:
         specifier: ^3.0.4
         version: 3.0.4
       '@types/pg':
-        specifier: ^8.20.4
+        specifier: ^8.21.0
         version: 8.21.0
       '@types/react':
         specifier: ^19.2.18
@@ -747,7 +747,7 @@ importers:
         specifier: ^5.0.6
         version: 5.0.6
       '@types/pg':
-        specifier: ^8.20.4
+        specifier: ^8.21.0
         version: 8.21.0
       tsx:
         specifier: ^4.23.10
