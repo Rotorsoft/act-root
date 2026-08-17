@@ -96,13 +96,13 @@
     "mutation": "stryker run"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.1.0",
+    "@hono/node-server": "^2.1.1",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.18.0",
     "express": "^5.2.1",
-    "fastify": "^5.11.2",
-    "hono": "^4.13.1"
+    "fastify": "^5.11.3",
+    "hono": "^4.13.2"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
