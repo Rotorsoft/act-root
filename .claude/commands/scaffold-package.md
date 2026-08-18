@@ -20,8 +20,8 @@ Verify with `git ls-remote --tags origin | grep act-$ARGUMENTS`.
 ## Scaffolding checklist (in order)
 
 1. **Baseline tag** — pushed above. First `feat(act-$ARGUMENTS):` commit will cut `0.1.0`.
-2. **Directory structure** — `libs/act-$ARGUMENTS/{src,test}/`, mirror `libs/act-sse/` shape.
-3. **`package.json`** — copy from `act-sse` or `act-http`. Update name, version (`0.0.0`), description, keywords, peer-deps on `@rotorsoft/act` if it's an adapter.
+2. **Directory structure** — `libs/act-$ARGUMENTS/{src,test}/`, mirror `libs/act-pino/` shape.
+3. **`package.json`** — copy from `act-pino` or `act-http`. Update name, version (`0.0.0`), description, keywords, peer-deps on `@rotorsoft/act` if it's an adapter.
 4. **`tsconfig.json` + `tsconfig.build.json`** — copy from a sibling, update `references`.
 5. **`tsup.config.ts`** — copy from sibling. Adjust `entry` if subpath exports.
 6. **`.releaserc.json`** — copy from sibling, update `tagFormat` to `@rotorsoft/act-$ARGUMENTS-v${version}`.
