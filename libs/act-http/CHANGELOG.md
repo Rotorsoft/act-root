@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.9.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.7...@rotorsoft/act-http-v1.9.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act:** match GitHub's owner casing in repository.url ([a719f54](https://github.com/Rotorsoft/act-root/commit/a719f548acb22cd303a229a4c4dafbf8f8e4f5b7))
+
 # [@rotorsoft/act-http-v1.9.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.6...@rotorsoft/act-http-v1.9.7) (2026-08-17)
 
 
