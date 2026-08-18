@@ -92,12 +92,14 @@ Four rules, all pinned by the TCK's `work_set` suite:
 - **Omitted leaves it untouched**, and an unmarked `subscribe` should not
   write the column at all — keep it out of the INSERT column list so a table
   that predates the column still accepts an unmarked subscribe.
-- **`NULL` means unknown, not "no work".** An unmarked row must fall back to
-  the legacy probe. That is the entire upgrade story: existing rows behave
-  exactly as they did, and each converts permanently the first time correlate
-  marks it. Do not backfill the column — `correlated_at = MAX(id)` makes every
-  stream look pending at once and drains the whole table through empty
-  fetches.
+- **A row with no mark is not claimable.** `NULL` means correlate has not
+  spoken for that row, and `claim` has nothing else to consult — it does not
+  read the event log at all ([#1488](https://github.com/Rotorsoft/act-root/issues/1488)).
+  Rows that predate the column are given one in `seed()`, set to the log's
+  head: deliberately an over-estimate meaning "worth one look", which the
+  first drain replaces with an honest position after one fetch and ack. Do
+  that as a single statement over the NULL rows rather than probing each one
+  — the cost is one extra cycle per pre-existing subscription, once.
 - **The operator surfaces leave the mark alone.** `reset` rewinds `at` to
   `-1` and must not clear `correlated_at`, or a rebuild would be unclaimable.
   `unblock`, `defer`, and `prioritize` don't touch it either.

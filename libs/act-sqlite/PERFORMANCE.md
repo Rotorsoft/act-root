@@ -147,3 +147,36 @@ which 3 have pending work, 5 claim rounds, `leaseMillis: 0`:
 **100x**, with identical work claimed. This is the measurement RFC 1449 was
 written to produce: at 20k subscribed streams the embedded adapter went from
 a fifth of a second per claim to noise.
+
+## #1488 — the JavaScript N+1 inside the writer lock is gone
+
+`claim` used to select every eligible subscription with no limit, then run one
+`SELECT 1 FROM events … LIMIT 1` per candidate in a JavaScript loop with no
+early exit — all inside `transaction("write")`, so the cost was linear in
+subscribed streams and every concurrent commit queued behind it. #1448's index
+fix could not port here, because the probe was in JS rather than in SQL.
+
+It is now three bounded index reads (the priority frontier, the fairness
+reserve's watermark order, and the leading frontier), unioned, over the
+partial index `WHERE blocked = 0 AND at < correlated_at`.
+
+`scripts/claim-scale.bench.mjs`, file-backed libSQL (M3 Pro), 10 of N streams
+marked pending:
+
+| subscribed | probe (#1482) | work mark (#1488) |
+|---|---|---|
+| 1,000 | 11.50 ms | 0.93 ms |
+| 5,000 | 54.86 ms | 3.16 ms |
+| 10,000 | 113.17 ms | 6.41 ms |
+| 20,000 | 232.52 ms | **13.43 ms** |
+| 50,000 | 603.55 ms | 44.76 ms |
+
+**17 to 18× across the range**, and none of it holds the writer lock against
+an N+1 any more.
+
+Unlike act-pg, the cost still grows with subscribed streams rather than going
+flat. `EXPLAIN QUERY PLAN` confirms the planner picks the partial index, so
+the ordering is not the problem and something else on that path scales;
+finding it is tracked in [#1510](https://github.com/Rotorsoft/act-root/issues/1510)
+rather than guessed at here. The measured win stands either way, and the
+adapter's ceiling moved by an order of magnitude.

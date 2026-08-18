@@ -53269,6 +53269,14 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
+    // The same set without the lane prefix. SQLite can only use an index for
+    // ORDER BY when the leading columns are constrained, so a claim with no
+    // lane filter — the shape every app that never calls \`.withLane\` issues —
+    // could not use the index above and fell back to sorting the whole
+    // eligible set. With this one the scan stops at \`lagging + leading\` rows.
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at_any_lane ON streams(priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
+    );
     // Lane filter index (ACT-1103).
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_lane ON streams(lane)"
