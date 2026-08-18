@@ -393,17 +393,25 @@ jobs:
       - name: pull latest master
         run: git pull origin master --rebase
 
+      # Publishes with npm TRUSTED PUBLISHING — no long-lived token. pnpm
+      # exchanges the job's OIDC identity (the `id-token: write` permission
+      # above) for a short-lived npm token scoped to the package being
+      # published, which npm grants only to the repo + workflow filename
+      # registered as that package's Trusted Publisher on npmjs.com. A
+      # publish from anywhere else has no identity to trade.
+      #
+      # `NPM_TOKEN` / `NODE_AUTH_TOKEN` were removed with the migration
+      # (npm_migration.md). Note pnpm attempts the OIDC exchange whether or
+      # not a static token is present, so their absence is not what enables
+      # this — the Trusted Publisher registration is. Adding a token back
+      # would only reinstate a credential that can leak.
       - name: release ${{ matrix.lib }}
         working-directory: libs/${{ matrix.lib }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # Publish with npm provenance (issue #1142). The actual publish is
-          # `pnpm publish` via @semantic-release/exec (`@semantic-release/npm`
-          # runs with npmPublish: false), and pnpm delegates the registry
-          # publish to the npm CLI — which reads NPM_CONFIG_* env config, so
-          # this flips provenance on without touching each lib's .releaserc.
-          # Requires the job-level `id-token: write` permission above.
+          # Provenance attestation (issue #1142). Trusted publishing turns
+          # this on by default; kept explicit so the intent survives a change
+          # of publish path, and because `pnpm publish` delegates to the npm
+          # CLI, which reads NPM_CONFIG_* from the environment.
           NPM_CONFIG_PROVENANCE: true
         run: npx semantic-release
