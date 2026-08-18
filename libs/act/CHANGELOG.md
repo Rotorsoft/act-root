@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.28.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.27.0...@rotorsoft/act-v1.28.0) (2026-08-18)
+
+
+### Features
+
+* **act:** correlate becomes the universal producer of the work mark ([#1497](https://github.com/rotorsoft/act-root/issues/1497)) ([0fe7380](https://github.com/rotorsoft/act-root/commit/0fe7380f2d5dc94080b24776f3bd6ca46a55d603)), closes [#1496](https://github.com/rotorsoft/act-root/issues/1496) [#1487](https://github.com/rotorsoft/act-root/issues/1487)
+
 # [@rotorsoft/act-v1.27.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.26.0...@rotorsoft/act-v1.27.0) (2026-08-16)
 
 
