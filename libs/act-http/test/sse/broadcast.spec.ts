@@ -279,7 +279,7 @@ describe("subscriber containment and overlay cache misses (#1423)", () => {
     expect(missed).toEqual([]);
   });
 
-  it("uses safe defaults when no hooks are supplied", () => {
+  it("uses safe defaults when no hooks are supplied", async () => {
     const bc = new BroadcastChannel<TestState>({ cacheSize: 1 });
     const delivered: string[] = [];
     bc.subscribe("a", () => {
@@ -289,10 +289,13 @@ describe("subscriber containment and overlay cache misses (#1423)", () => {
 
     const spy = vi.spyOn(log(), "error").mockImplementation(() => {});
     // Default onSubscriberError routes through the framework logger; the
-    // frame still reaches the other subscribers.
+    // frame still reaches the other subscribers. The logger is reached by
+    // dynamic import — the SSE subpath must not carry a static dependency on
+    // the framework, which browser bundles cannot load — so the log lands a
+    // microtask later while delivery stays synchronous.
     expect(() => bc.publish("a", st(0), [{ count: 1 }])).not.toThrow();
     expect(delivered).toEqual(["second"]);
-    expect(spy).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
     spy.mockRestore();
 
     // Default onOverlayMiss is a silent no-op — behavior unchanged.

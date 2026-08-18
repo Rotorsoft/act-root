@@ -42,6 +42,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",
+    "check:browser-safe": "node scripts/check-browser-safe.mjs",
     "check:readmes": "node scripts/check-lib-readmes.mjs",
     "paths:sync": "node scripts/derive-tsconfig-paths.mjs --write",
     "paths:check": "node scripts/derive-tsconfig-paths.mjs --check",
