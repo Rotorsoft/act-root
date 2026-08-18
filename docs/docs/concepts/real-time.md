@@ -225,6 +225,11 @@ export const onStateChange = publicProcedure
 
 ### applyPatchMessage
 
+:::note Safe to import from a browser
+The `sse` subpath's client half — `applyPatchMessage`, `patch`, and the wire types — depends only on `@rotorsoft/act-patch`, which has no dependencies of its own. The server half (`BroadcastChannel`) reaches the framework through a dynamic import, so a bundler never pulls Node APIs such as `AsyncLocalStorage` into a client bundle. CI enforces this with `pnpm check:browser-safe`, which walks the built subpath's static import graph and fails on any Node builtin.
+:::
+
+
 ```typescript no-check
 import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 

@@ -1,4 +1,3 @@
-import { log } from "@rotorsoft/act";
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
@@ -123,6 +122,25 @@ const OVERLAY_KEYS = Symbol("act.sse.overlay_keys");
 
 type WithOverlayKeys = { [OVERLAY_KEYS]?: ReadonlySet<string> };
 
+/**
+ * Default `onSubscriberError` — routes through the framework logger, so a
+ * throwing subscriber lands wherever the host already sends framework logs.
+ *
+ * The logger is reached through a dynamic import on purpose. This module sits
+ * in the `sse` subpath alongside `applyPatchMessage` and the wire types, which
+ * browser code imports; a static `import { log } from "@rotorsoft/act"` puts
+ * the whole framework in that bundle, and the framework builds an
+ * `AsyncLocalStorage` the moment it loads — a Node API the browser stubs out
+ * and throws on. Only a server ever constructs a `BroadcastChannel`, so this
+ * path never runs client-side, and the import stays out of the static graph
+ * where the bundler would follow it.
+ */
+const default_subscriber_error = (error: unknown, streamId: string): void => {
+  void import("@rotorsoft/act").then(({ log }) =>
+    log().error(error, `sse subscriber threw for "${streamId}"`)
+  );
+};
+
 /** Record which keys an overlay owns, accumulating across overlays. */
 const tag_overlay_keys = <S extends object>(
   state: S,
@@ -179,9 +197,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     );
     this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
     this.on_subscriber_error =
-      options?.onSubscriberError ??
-      ((error, streamId) =>
-        log().error(error, `sse subscriber threw for "${streamId}"`));
+      options?.onSubscriberError ?? default_subscriber_error;
   }
 
   /**

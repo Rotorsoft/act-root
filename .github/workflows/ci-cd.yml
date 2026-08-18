@@ -154,6 +154,15 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
+      # Browser-safety gate. A published subpath that client code imports
+      # (`@rotorsoft/act-http/sse`) must not statically reach a Node API:
+      # #1423 added `import { log } from "@rotorsoft/act"` to the server half
+      # of that barrel, which put the framework — and the AsyncLocalStorage it
+      # builds at module scope — into every browser bundle touching it. Nothing
+      # here builds a browser bundle, so it sat for ten days. Walks `dist/`, so
+      # it runs after build.
+      - run: pnpm check:browser-safe
+
       # Section-presence check for libs/*/README.md — ticket #751.
       # Fails the build if any lib README is missing one of the required
       # canonical sections (Title + tagline, Why, Installation, Quick start,
