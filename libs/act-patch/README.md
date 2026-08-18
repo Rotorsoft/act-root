@@ -20,6 +20,8 @@ Used internally by `@rotorsoft/act` state reducers and `@rotorsoft/act-http/sse`
 pnpm add @rotorsoft/act-patch
 ```
 
+Published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements), so every version on the registry carries a signed attestation of the repository, commit, and workflow run that built it.
+
 ## Quick start
 
 ```ts
