@@ -45,6 +45,13 @@
       "matchDepTypes": ["pnpm.overrides"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "The docs package is a deliberate TypeScript 6 island (CLAUDE.md \u00a7 Important Constraints). typedoc caps its `typescript` peer at 6.x, and on TS7 it dies inside typedoc reading 'PropertyDeclaration', taking `pnpm -F docs build:all` with it; `check:snippets` fails separately with 'ts.createProgram is not a function', since the TS7 native compiler does not expose the JS API that script uses. The rest of the workspace is on TS7 and pnpm's per-package isolation keeps the two apart. Closed #1342 for exactly this. Revisit when typedoc supports TS7 \u2014 and delete this rule then rather than widening it.",
+      "matchFileNames": ["docs/package.json"],
+      "matchPackageNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ],
   "lockFileMaintenance": {
