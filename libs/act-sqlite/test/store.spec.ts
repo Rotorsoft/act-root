@@ -105,30 +105,12 @@ describe("sqlite store (adapter-specific)", () => {
     expect(exact[0].stream).toBe("anchor-prefix-1");
   });
 
-  it("claims streams whose exact source has committed events", async () => {
-    await store().commit("src-exact-alpha", [{ name: "sp", data: {} }], {
-      correlation: "",
-      causation: {},
-    });
-    await store().subscribe([
-      { stream: "src-listener", source: "src-exact-alpha" },
-    ]);
-
-    const leases = await store().claim(10, 0, "src-worker", 30000);
-    const target = leases.find((l) => l.stream === "src-listener");
-    expect(target).toBeDefined();
-    expect(target!.source).toBe("src-exact-alpha");
-    if (leases.length) await store().ack(leases.map((l) => ({ ...l, at: 0 })));
-  });
-
-  it("does not claim when the exact source has no events", async () => {
-    await store().subscribe([
-      { stream: "src-no-match", source: "never-committed-anywhere" },
-    ]);
-    const leases = await store().claim(10, 0, "ghost-worker", 30000);
-    expect(leases.find((l) => l.stream === "src-no-match")).toBeUndefined();
-    if (leases.length) await store().ack(leases.map((l) => ({ ...l, at: 0 })));
-  });
+  // Two cases lived here — "claims a subscription whose exact source has
+  // events" and "does not claim when the exact source has no events". Both
+  // asserted that `claim` matched a subscription's source against the event
+  // log, which it stopped doing in #1488: eligibility is the row's mark, and
+  // the source window is applied by correlate when it decides what to mark.
+  // Coverage moved to `libs/act/test/correlate-work-mark.spec.ts`.
 
   // The TCK keyset-pagination case exercises only the cheap heads-only
   // path (no count/names). This drives the *full-scan* path (#1010) so

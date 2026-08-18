@@ -39,17 +39,6 @@ import pg from "pg";
 
 const logger: Logger = log();
 
-/**
- * POSIX regex bracket expression matching any single reaction-`source`
- * metacharacter (`^ $ . * + ? ( ) [ ] { } | \`). A source that matches
- * none of these is a literal stream name, claimed by equality; one that
- * matches any is a pattern, claimed with `~`. Mirrors `is_literal_source`
- * in `@rotorsoft/act` so the SQL classification agrees with the core
- * helper. `]` leads and `\\` escapes the backslash; PG advanced regex
- * honors backslash escapes inside brackets.
- */
-const SOURCE_METACHARACTER_CLASS = "[]^$.*+?()[{}|\\\\]";
-
 const { Pool, types } = pg;
 
 /**
@@ -660,13 +649,32 @@ export class PostgresStore implements Store {
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS deferred_at timestamptz;`
       );
-      // Migration for tables created before the work set (#1485). Nullable
-      // on purpose: NULL means "unknown", which routes the row to the legacy
-      // has-work probe, so an upgraded install behaves exactly as it did and
-      // migrates row by row as correlate marks each target.
+      // Migration for tables created before the work set (#1485).
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS correlated_at int;`
+      );
+      // Rows that predate the mark get one, at the log's head (#1488).
+      // `claim` is mark-only now, so a row left at NULL would silently stop
+      // being served, and correlate cannot rescue it — its checkpoint is
+      // long past those events.
+      //
+      // This is the one mark the system writes without having resolved an
+      // event to the target, and it is deliberately an over-estimate: it
+      // says "worth one look", not "there is work here". The first drain
+      // pass claims each such stream once, fetches its window, handles
+      // whatever is really there, and acks — after which the watermark
+      // catches up to the mark and the stream leaves the claimable set with
+      // an honest position. One extra cycle per pre-existing subscription,
+      // paid once, in exchange for a schema step with no per-row probing.
+      //
+      // NULL rows created *after* the upgrade (a static target subscribed
+      // but not yet correlated) are picked up by the same statement on a
+      // later seed, which costs them the same single empty cycle.
+      await client.query(
+        `UPDATE ${this._fqs}
+         SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM ${this._fqt})
+         WHERE correlated_at IS NULL;`
       );
       // Migration for tables created before the retry widening (#1190).
       // `claim()` increments `retry` on every acquisition and never
@@ -1147,38 +1155,32 @@ export class PostgresStore implements Store {
         -- and lock EVERY claimable stream for this transaction, starving
         -- overlapping competing consumers. We only lock the small
         -- lagging+leading candidate slice, down in the "locked" CTE.
-        -- Eligibility, split by SOURCE CLASS rather than expressed as one
-        -- disjunction (#1448). The three classes are mutually exclusive, so
-        -- the UNION ALL returns exactly what the old OR-chain did — but each
-        -- arm now carries a single, planner-legible predicate.
         --
-        -- That matters for one arm in particular. Written as
-        -- "s.source IS NULL OR (... AND e.stream = s.source) OR (... ~ ...)",
-        -- the equality is buried inside a disjunction and is NOT sargable:
-        -- no index on (stream, id) can serve it, so every probe degenerated
-        -- into a forward scan of the pk from the stream's watermark. With
-        -- the classes separated, the literal arm — every per-aggregate
-        -- .to(e => ({target: e.stream})) reaction, i.e. the overwhelming
-        -- majority — becomes an index seek on (stream, id).
+        -- Eligibility is a pure subscription-table predicate (#1488).
+        -- claim does not read the event log at all: correlate marks the
+        -- highest event id that resolves to a target, and at <
+        -- correlated_at is the whole question. The probe this replaced ran
+        -- an EXISTS against the events table once per eligible row, which
+        -- cost O(subscribed streams) per claim per worker no matter how
+        -- little work was pending.
         --
-        -- Measured at 10k subscribed streams with 10 pending: 5,792 ms
-        -- before, 10.3 ms after. See libs/act-pg/PERFORMANCE.md for #1448.
-        eligible AS (
-          SELECT stream, source, at, priority, lane, correlated_at
-          FROM ${this._fqs} s
-          WHERE blocked = false
-            ${lane_clause}
-            AND (leased_by IS NULL OR leased_until <= NOW())
-            AND (deferred_at IS NULL OR deferred_at <= NOW())
-        ),
+        -- Read from the base table so the planner can use the partial index
+        -- built for exactly this predicate:
+        --   (lane, priority DESC, at) WHERE blocked = false
+        --                               AND at < correlated_at
+        -- It contains only streams with work, so LIMIT pushes into it and a
+        -- claim scans at most lagging + leading rows. A stream leaves the
+        -- index when ack advances at to the mark, and re-enters when
+        -- correlate raises it.
+        --
+        -- The comparison is NULL-safe by SQL's own rules: an unmarked row
+        -- compares unknown and is excluded. That is definitional now
+        -- (#1446) — a subscription is claimable iff a mark says so — where
+        -- before #1488 it meant "unknown, fall through to the probe". An
+        -- install upgrading from before the column needs one correlate pass
+        -- from a rewound checkpoint to mark its rows; see the runbook in
+        -- docs/docs/guides/production-checklist.md.
         available AS (
-          -- Fast arm (#1485): a marked stream answers from the subscription
-          -- row alone. Read from the base table, NOT from the eligible CTE:
-          -- it is referenced several times so PG materializes it, and a
-          -- materialized scan cannot use the partial index this predicate was
-          -- built for (WHERE blocked = false AND at < correlated_at).
-          -- The comparison is NULL-safe: an unmarked row compares
-          -- unknown and is excluded here, falling through to the legacy arms.
           SELECT stream, source, at, priority, lane
           FROM ${this._fqs} s
           WHERE s.blocked = false
@@ -1186,53 +1188,6 @@ export class PostgresStore implements Store {
             ${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
             AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
-          UNION ALL
-          -- Legacy arms, gated on an absent mark. NULL means "unknown", so
-          -- an install that predates the column probes the event log exactly
-          -- as it did before, and each row migrates to the fast arm the first
-          -- time correlate marks it. Deleted once correlate marks universally.
-          --
-          -- Every arm below is watermark-agnostic (#1446): a fresh
-          -- subscription sits at -1, and e.id > s.at already answers
-          -- correctly there, since the first event has a greater id.
-          -- There used to be a fourth arm claiming at < 0 unconditionally,
-          -- which handed out an empty lease and a no-op ack for every
-          -- subscription with no matching events yet.
-          -- Source-less subscription: any non-snapshot event past the
-          -- watermark counts, so the id index alone answers it.
-          SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.correlated_at IS NULL
-            AND s.source IS NULL
-            AND EXISTS (
-              SELECT 1 FROM ${this._fqt} e
-              WHERE e.id > s.at AND e.name <> '${SNAP_EVENT}' LIMIT 1
-            )
-          UNION ALL
-          -- Literal source (no regex metacharacter): exact equality, so
-          -- "s1" never claims "s12", and (stream, id) is usable.
-          SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.correlated_at IS NULL
-            AND s.source IS NOT NULL
-            AND s.source !~ '${SOURCE_METACHARACTER_CLASS}'
-            AND EXISTS (
-              SELECT 1 FROM ${this._fqt} e
-              WHERE e.stream = s.source AND e.id > s.at
-                AND e.name <> '${SNAP_EVENT}' LIMIT 1
-            )
-          UNION ALL
-          -- Pattern source (e.g. '^(A|B)$'): POSIX match, so the
-          -- calculator's static regex reaction is claimed for every stream
-          -- it anchors. Unavoidably a scan — but only for the subscriptions
-          -- that actually declare a pattern.
-          SELECT stream, source, at, priority, lane FROM eligible s
-          WHERE s.correlated_at IS NULL
-            AND s.source IS NOT NULL
-            AND s.source ~ '${SOURCE_METACHARACTER_CLASS}'
-            AND EXISTS (
-              SELECT 1 FROM ${this._fqt} e
-              WHERE e.id > s.at AND e.name <> '${SNAP_EVENT}'
-                AND e.stream ~ s.source LIMIT 1
-            )
         ),
         -- Priority lanes (ACT-102): higher priority first, then
         -- lagging-watermark order. With everyone at priority=0 the

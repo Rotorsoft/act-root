@@ -264,9 +264,7 @@ describe("SqliteStore error paths", () => {
   });
 
   it("claim: rolls back and wraps SELECT failure in StoreError", async () => {
-    const client = mockClientFailOn(
-      "SELECT stream, source, at, priority, lane, correlated_at FROM streams"
-    );
+    const client = mockClientFailOn("ORDER BY priority DESC, at ASC");
     (db as unknown as { client: unknown }).client = client;
     await expect(db.claim(1, 0, "w", 1000)).rejects.toThrow(StoreError);
     expect(client._tx.rollback).toHaveBeenCalled();

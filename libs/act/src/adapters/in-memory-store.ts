@@ -29,7 +29,7 @@ import type {
   StreamStats,
   SubscribeInput,
 } from "../types/index.js";
-import { is_literal_source, sleep } from "../utils.js";
+import { sleep } from "../utils.js";
 
 /**
  * @internal
@@ -627,39 +627,17 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // Has-work probe. A **literal** `source` (no regex metacharacters) is
-    // matched by exact map lookup — the fast, index-friendly path that
-    // covers every autoclose/dynamic-resolver source. A **pattern** source
-    // (e.g. the calculator's `^(A|B)$`) is compiled to a RegExp once per
-    // candidate subscription and tested against every stream whose max
-    // event id has advanced past the watermark.
-    // A fresh subscription (`at = -1`) is not special-cased into being
-    // claimable (#1446): "no matching events" means "no work" whatever the
-    // watermark says, and every comparison below already answers correctly
-    // at `-1` — the first event on a fresh stream has an id greater than
-    // it. The short-circuit that used to live here cost an empty lease and
-    // a no-op ack per subscription, and that ack was not harmless: an
-    // event committed between the cycle's fetch and its ack was acked past
-    // (drain's empty-fetch watermark seeds at 0), so event id 0 — the
-    // first event this store ever issues — was silently skipped.
-    const has_work = (s: InMemoryStream): boolean => {
-      // Fast arm (#1485): a marked stream answers from the subscription row
-      // alone — no probe of the event log. `correlate` marks the highest id
-      // that resolved here, so `at < correlated_at` means a fetch returns work.
-      // The legacy probe below serves only rows with no mark yet, and is
-      // deleted once correlate marks universally.
-      if (s.correlated_at !== undefined) return s.at < s.correlated_at;
-      if (!s.source) return s.at < this._max_non_snap_event_id;
-      if (is_literal_source(s.source)) {
-        const max_id = this._max_event_id_by_stream.get(s.source);
-        return max_id !== undefined && max_id > s.at;
-      }
-      const re = new RegExp(s.source);
-      for (const [stream_name, max_id] of this._max_event_id_by_stream) {
-        if (max_id > s.at && re.test(stream_name)) return true;
-      }
-      return false;
-    };
+    // Eligibility is a pure subscription-row predicate (#1488). `claim`
+    // never looks at the event log: `correlate` records the highest event id
+    // that resolves to a target, and `at < correlated_at` is the whole
+    // question. The probe this replaced walked the event index once per
+    // eligible subscription, matching `source` literally or as a pattern —
+    // matching that now happens in correlate, when it decides what to mark.
+    //
+    // An unmarked row is not claimable, by definition (#1446): `undefined`
+    // means the row has never been correlated, not that it has no work.
+    const has_work = (s: InMemoryStream): boolean =>
+      s.correlated_at !== undefined && s.at < s.correlated_at;
     const available = [...this._streams.values()].filter(
       (s) =>
         s.is_available && has_work(s) && (lane === undefined || s.lane === lane)

@@ -8,7 +8,39 @@ import {
   state,
   store,
 } from "../src/index.js";
-import type { AuditFinding } from "../src/types/index.js";
+import type { AuditFinding, Store } from "../src/types/index.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 /**
  * #723 / ACT-708.5 — `app.audit()` smoke tests for slice 1.
@@ -512,6 +544,7 @@ describe("audit", () => {
       // drain machinery normally drives blocking; for tests we
       // hit the store directly.
       await store().subscribe([{ stream: "w1", source: "w1" }]);
+      await mark_all(store());
       const claimed = await store().claim(1, 1, "audit-test", 60_000);
       if (claimed.length > 0) {
         await store().block([
@@ -627,6 +660,7 @@ describe("audit", () => {
       // Lease for a very short window — by the time the audit runs,
       // leased_until is in the past but no ack/block has cleared
       // leased_by.
+      await mark_all(store());
       await store().claim(1, 1, "audit-stuck-test", 5);
       await sleep(20);
 

@@ -6,7 +6,40 @@
 
 import { randomUUID } from "node:crypto";
 import { dispose, store } from "@rotorsoft/act";
+import type { Store } from "@rotorsoft/act/types";
 import { PostgresStore } from "../src/postgres-store.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 const PORT = 5431;
 const SCHEMA = "act_priority_test";
@@ -43,6 +76,7 @@ describe("PostgresStore priority lanes", () => {
       { stream: "high", source: "src", priority: 5 },
     ]);
 
+    await mark_all(store());
     const leases = await store().claim(1, 0, randomUUID(), 5_000);
     expect(leases.map((l) => l.stream)).toEqual(["high"]);
   });
@@ -114,6 +148,7 @@ describe("PostgresStore priority lanes", () => {
       { stream: "ok", source: "src" },
       { stream: "bad", source: "src" },
     ]);
+    await mark_all(store());
     const leases = await store().claim(2, 0, randomUUID(), 5_000);
     const badLease = leases.find((l) => l.stream === "bad")!;
     await store().block([{ ...badLease, error: "boom" }]);
