@@ -43,7 +43,6 @@
       "@rotorsoft/act-pg": ["./libs/act-pg/src/index.ts"],
       "@rotorsoft/act-pino": ["./libs/act-pino/src/index.ts"],
       "@rotorsoft/act-sqlite": ["./libs/act-sqlite/src/index.ts"],
-      "@rotorsoft/act-sse": ["./libs/act-sse/src/index.ts"],
       "@rotorsoft/act-tck": ["./libs/act-tck/src/index.ts"],
       "@rotorsoft/*": ["./libs/*/src/index.ts"]
     }

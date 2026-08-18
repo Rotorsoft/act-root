@@ -102,7 +102,7 @@ We remove public surface slowly and with warning. The general rule: **a deprecat
 - **API surface** (builder methods, `IAct` methods, public types, lifecycle events). A deprecated entry point stays functional, is marked deprecated in its doc-comment and in the release notes for the minor that deprecates it, and is removed only in a subsequent major with a migration note in the changelog. Renames ship the old name as a deprecated alias for at least one minor where feasible (see [How we evolve in each category](#how-we-evolve-in-each-category)).
 - **Events on disk** are never deprecated out from under you — they are append-only history. Breaking an event's shape means adding a new versioned name (`Foo` → `Foo_v2`); the old reducer keeps replaying historical `Foo` events indefinitely. Adding `Foo_v2` to `.emits({...})` auto-deprecates `Foo` for *emission* only: new writes use the current version, replay of old events is untouched. See [Event Schema Evolution](docs/docs/architecture/event-schema-evolution.md).
 - **Deprecation is observable at startup.** The `_v<n>` versioned-event-name convention is load-bearing: `act().build()` emits a one-line advisory enumerating every deprecated event version in scope, and `app.registry.deprecated_events(state_name)` exposes the set programmatically for callers that want to enforce their own policy. Static `.emit("Foo")` targeting a deprecated version throws at build time, so the most common mistake fails fast.
-- **Deprecated packages** carry their own removal note. `@rotorsoft/act-sse` is the current example — its surface moved to `@rotorsoft/act-http/sse`, it receives bug fixes only, and it is scheduled for removal in a future major. Migrate by changing the import path.
+- **Deprecated packages** carry their own removal note, and are removed only after the replacement has shipped and the package is marked deprecated on npm. `@rotorsoft/act-sse` was the worked example: its surface moved to `@rotorsoft/act-http/sse`, it spent the rest of the `1.x` line as a re-export shim, and it is no longer published from this repo. Versions already on npm keep working — migrate by changing the import path.
 
 ## Security fixes
 
@@ -126,9 +126,9 @@ The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md):
 | `@rotorsoft/act-pg` | Yes — `Store` adapter, same contract |
 | `@rotorsoft/act-sqlite` | Yes — `Store` adapter, same contract |
 | `@rotorsoft/act-patch` | Yes — stable utility, depended on by `act` reducers |
-| `@rotorsoft/act-http` | Yes — umbrella for HTTP integrations (`webhook` helper plus an `sse` subpath that hosts the surface formerly published as `@rotorsoft/act-sse`) |
+| `@rotorsoft/act-http` | Yes — umbrella for HTTP integrations (`webhook` helper plus an `sse` subpath that hosts the surface formerly published as `@rotorsoft/act-sse`, removed from this repo) |
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
-| `@rotorsoft/act-sse` | **Deprecated**. Surface moved to `@rotorsoft/act-http/sse`; bug fixes only, scheduled for removal in a future release. Migrate by changing the import path. |
+| `@rotorsoft/act-sse` | **Removed from this repo.** Deprecated on npm; the surface lives at `@rotorsoft/act-http/sse`. Published `1.x` versions keep working — migrate by changing the import path. |
 | `@rotorsoft/act-diagram` | Yes — shipped 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
 | `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) is on the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
 

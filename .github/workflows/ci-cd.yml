@@ -76,7 +76,6 @@ jobs:
           filters: |
             act-patch:   ['libs/act-patch/**']
             act:         ['libs/act/**']
-            act-sse:     ['libs/act-sse/**']
             act-http:    ['libs/act-http/**']
             act-pg:      ['libs/act-pg/**']
             act-sqlite:  ['libs/act-sqlite/**']

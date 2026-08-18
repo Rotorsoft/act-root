@@ -462,12 +462,6 @@ importers:
         specifier: ^9.6.1
         version: 9.6.1(@stryker-mutator/core@9.6.1(@types/node@25.9.5)(supports-color@10.2.2))(vitest@4.1.10)
 
-  libs/act-sse:
-    dependencies:
-      '@rotorsoft/act-http':
-        specifier: workspace:^
-        version: link:../act-http
-
   libs/act-tck:
     devDependencies:
       '@fast-check/vitest':
