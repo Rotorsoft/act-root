@@ -144,4 +144,6 @@ Docs updated in the same PR: `concurrency-model.md`, `correlation-and-drain.md`,
 
 ## Open questions
 
-None blocking. One to revisit after step 5's numbers: whether `correlated_at` should be capped or compacted for a target that is marked far ahead of its watermark for a long time (a blocked stream accumulating marks). The mark is a single scalar, so there is nothing to grow — but the index churn of a stream repeatedly entering and leaving the correlated set under sustained commit load is the design's principal unknown and is measured in step 5.
+None blocking. One to revisit after step 5's numbers: whether `correlated_at` should be capped or compacted for a target that is marked far ahead of its watermark for a long time (a blocked stream accumulating marks). The mark is a single scalar, so there is nothing to grow — but the index churn of a stream repeatedly entering and leaving the correlated set under sustained commit load is the design's principal unknown.
+
+That unknown grew a second half once step 4 made `correlate` the producer: `subscribe` moved onto the steady-state path, and correlate is not single-writer, so N workers write the same marks to the same rows. Both are measured in [#1510](https://github.com/Rotorsoft/act-root/issues/1510) rather than in step 5, since step 5 should not remove the fallback before the numbers exist.
