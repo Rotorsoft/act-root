@@ -269,6 +269,9 @@ describe("windowed close", () => {
         logger: console as never,
         correlation: "test",
         probe_page_size: 1,
+        // No orchestrator here: report the log as already correlated so
+        // the probe's own pagination is what the test exercises.
+        catch_up_correlation: async () => Number.MAX_SAFE_INTEGER,
       }
     );
     // Fresh subscriptions sit at -1 → boundary capped below every

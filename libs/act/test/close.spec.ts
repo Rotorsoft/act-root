@@ -479,9 +479,74 @@ describe("close", () => {
       logger: a._logger as never,
       correlation: "probe-pagination-test",
       probe_page_size: 1,
+      catch_up_correlation: async () => Number.MAX_SAFE_INTEGER,
     });
 
     expect(result.skipped).toEqual(["paged-src"]);
+    expect(result.truncated.size).toBe(0);
+  });
+
+  it("skips a stream when correlation cannot catch up to its head (#1487)", async () => {
+    // The bounded catch-up gives up — an enormous backlog, or a log being
+    // written faster than the scan reads it. Everything still above the read
+    // cursor is held back rather than trusted, because an unread event raises
+    // no mark and would make every reader look caught up.
+    const stalledApp = act()
+      .withState(counter)
+      .on("incremented")
+      .do(async function react() {
+        await Promise.resolve();
+      })
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    await stalledApp.do(
+      "increment",
+      { stream: "stalled-src", actor },
+      { by: 1 }
+    );
+    await stalledApp.correlate();
+
+    const a = stalledApp as unknown as Record<string, unknown>;
+    const reactive = a._reactive_events as { size: number };
+    const es = a._es as Record<string, never>;
+    const result = await run_close_cycle([{ stream: "stalled-src" }], {
+      reactive_events_size: reactive.size,
+      event_to_state: a._event_to_state as never,
+      load: es.load,
+      tombstone: es.tombstone,
+      logger: a._logger as never,
+      correlation: "catch-up-stall-test",
+      // Reports a cursor below the head however far it is asked to go.
+      catch_up_correlation: async () => -1,
+    });
+
+    expect(result.skipped).toEqual(["stalled-src"]);
+    expect(result.truncated.size).toBe(0);
+  });
+
+  it("skips rather than loops when correlation cannot advance at all (#1487)", async () => {
+    // A writer-only instance (`drain: false`) has no local correlation, so
+    // the cursor never moves however many passes it is given. The catch-up
+    // has to notice the lack of progress and stop, and the close then holds
+    // the stream back — it cannot know whether a reaction still needs it.
+    const writerOnly = act()
+      .withState(counter)
+      .on("incremented")
+      .do(async function react() {
+        await Promise.resolve();
+      })
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build({ drain: false });
+
+    await writerOnly.do(
+      "increment",
+      { stream: "writer-src", actor },
+      { by: 1 }
+    );
+    const result = await writerOnly.close([{ stream: "writer-src" }]);
+
+    expect(result.skipped).toEqual(["writer-src"]);
     expect(result.truncated.size).toBe(0);
   });
 

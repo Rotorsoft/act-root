@@ -211,6 +211,50 @@ describe("a mark rides an upsert that changes nothing else", () => {
 });
 
 describe("close sees pending work, not watermark lag", () => {
+  it("holds back a stream whose tail correlate has not read yet", async () => {
+    // Asking "does this reader have unconsumed work?" is only fair about
+    // events correlate has resolved. An uncorrelated tail raises no marks, so
+    // every reader answers "caught up" — and the reader that needs those
+    // events may not even be subscribed yet, since its subscription is itself
+    // a product of correlating them. Before the catch-up in the safety probe,
+    // this truncated the stream and the reaction never ran.
+    const handled: number[] = [];
+    const { app } = await open(
+      act()
+        .withState(Ticker)
+        .on("Ticked")
+        .do(async function react(e) {
+          handled.push(e.id);
+        })
+        .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+    );
+
+    await app.do("tick", { stream: "s1", actor }, {});
+    await app.correlate();
+    await app.drain();
+    expect(handled).toHaveLength(1);
+
+    // Push the read cursor far behind the head — further than the window
+    // `close` correlates on its own — then commit real work for `out-s1`.
+    for (let i = 0; i < 1100; i++)
+      await app.do("tick", { stream: "noise", actor }, {});
+    const [tail] = await app.do("tick", { stream: "s1", actor }, {});
+    const tail_id = (tail.event as { id: number }).id;
+
+    const result = await app.close([{ stream: "s1" }]);
+
+    expect(result.truncated.has("s1")).toBe(false);
+    expect(result.skipped).toEqual(["s1"]);
+    // The unprocessed event is still there to be reacted to. Truncating it
+    // would have retired the stream with that reaction never run.
+    const survivors = await app.query_array({
+      stream: "s1",
+      stream_exact: true,
+    });
+    expect(survivors.some((e) => e.id === tail_id)).toBe(true);
+    expect(handled).not.toContain(tail_id);
+  });
+
   it("closes a stream whose head has no reaction to consume it", async () => {
     const { app, store } = await open(
       act()

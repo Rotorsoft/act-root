@@ -122,6 +122,19 @@ import type {
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
+ * Scan window and pass cap for the correlation catch-up the close-cycle
+ * safety probe runs (#1487). The probe cannot judge pending work over
+ * events correlate has not resolved, so it advances the cursor to the head
+ * of the streams being closed first — bounded, so a close behind a large
+ * backlog skips the stream (the documented retryable outcome) rather than
+ * scanning the whole log inside an operator call.
+ *
+ * @internal
+ */
+const CLOSE_CATCH_UP_LIMIT = 1000;
+const CLOSE_CATCH_UP_PASSES = 20;
+
+/**
  * Default debounce window (ms) for `settle()` when neither the per-call
  * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
  * Coalesces commits in the same tick and small bursts; sub-perceptible
@@ -755,6 +768,7 @@ export class Act<
           const close_actor = { id: "$close", name: "close" };
           const result = await run_close_cycle(targets, {
             reactive_events_size: this._reactive_events.size,
+            catch_up_correlation: (until) => this._catch_up_correlation(until),
             event_to_state: this._event_to_state,
             load: this._es.load,
             tombstone: this._es.tombstone,
@@ -2076,6 +2090,31 @@ export class Act<
    * removed, so a later correlate can re-subscribe it (#1398). Restart
    * targets keep their row, so only fully-retired streams are forgotten.
    */
+  /**
+   * Advance correlation until the read cursor reaches `until`, and report
+   * where it landed (#1487). Used by the close cycle's safety probe, which
+   * cannot judge a subscription's pending work over events correlate has
+   * not resolved yet.
+   *
+   * Bounded on both ends: it stops as soon as a pass makes no progress (the
+   * log has no more to give), and after {@link CLOSE_CATCH_UP_PASSES}
+   * windows, so a close behind an enormous backlog degrades to skipping the
+   * stream — the documented retryable outcome — instead of scanning the
+   * whole log inside an operator call.
+   */
+  private async _catch_up_correlation(until: number): Promise<number> {
+    for (
+      let pass = 0;
+      pass < CLOSE_CATCH_UP_PASSES && this._correlate.checkpoint < until;
+      pass++
+    ) {
+      const before = this._correlate.checkpoint;
+      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
+      if (this._correlate.checkpoint <= before) break;
+    }
+    return this._correlate.checkpoint;
+  }
+
   private _forget_closed_subscriptions(result: CloseResult): void {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
@@ -2096,6 +2135,7 @@ export class Act<
       const close_actor = { id: "$close", name: "close" };
       const result = await run_close_cycle(targets, {
         reactive_events_size: this._reactive_events.size,
+        catch_up_correlation: (until) => this._catch_up_correlation(until),
         event_to_state: this._event_to_state,
         load: this._es.load,
         tombstone: this._es.tombstone,

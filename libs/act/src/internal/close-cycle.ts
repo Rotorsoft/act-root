@@ -50,6 +50,25 @@ export type CloseCycleDeps = {
    */
   readonly probe_page_size?: number;
   /**
+   * Advance correlation to at least `until` (an event id) and return how
+   * far it actually got (#1487).
+   *
+   * The safety probe asks each subscription whether it has unconsumed
+   * work, which is only a fair question about events correlate has already
+   * resolved. An event past the read cursor has raised no mark yet, so
+   * every reader answers "caught up" about it — including a reader that
+   * does not exist yet, because the subscription a dynamic resolver would
+   * create is itself a product of correlating that event.
+   *
+   * Refusing to close is the wrong answer: the autoclose path fires *from*
+   * the event that reaches the terminal state, so its own trigger is
+   * routinely uncorrelated, and a retired stream gets no further commits to
+   * retry with. So the cycle makes the precondition true instead — it
+   * correlates the tail, then decides. Whatever remains above the cursor
+   * afterwards is held back as pending.
+   */
+  readonly catch_up_correlation: (until: number) => Promise<number>;
+  /**
    * Per-stream critical section (#1222). The windowed branch is
    * deliberately guard-free at the store level — a past cutoff makes the
    * boundary immutable, so a concurrent append can never race the prune.
@@ -169,7 +188,8 @@ export async function run_close_cycle(
     stream_info,
     deps.reactive_events_size,
     skipped,
-    deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
+    deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE,
+    deps.catch_up_correlation
   );
   if (!safe.length) return { truncated: windowed_result, skipped };
 
@@ -425,9 +445,25 @@ async function partition_by_safety(
   stream_info: Map<string, StreamHead>,
   reactive_events_size: number,
   skipped: string[],
-  page_size: number
+  page_size: number,
+  catch_up_correlation: (until: number) => Promise<number>
 ): Promise<string[]> {
   if (reactive_events_size === 0) return [...stream_info.keys()];
+
+  // Correlate the tail first (#1487). A head past the read cursor has
+  // raised no mark, so the probe below would read every reader as caught
+  // up on it — and the reader that needs it may not even be subscribed
+  // yet. Catching up both raises the marks and creates those subscriptions,
+  // so the probe answers about the real state of the log. Anything still
+  // above the cursor afterwards (the log outran us) is held back.
+  let needed = -1;
+  for (const info of stream_info.values())
+    needed = Math.max(needed, info.max_id);
+  const checkpoint = await catch_up_correlation(needed);
+  const uncorrelated = new Set<string>();
+  for (const [stream, info] of stream_info) {
+    if (checkpoint < info.max_id) uncorrelated.add(stream);
+  }
 
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
@@ -501,7 +537,8 @@ async function partition_by_safety(
 
   const safe: string[] = [];
   for (const [stream] of stream_info) {
-    if (pending_set.has(stream)) skipped.push(stream);
+    if (pending_set.has(stream) || uncorrelated.has(stream))
+      skipped.push(stream);
     else safe.push(stream);
   }
   return safe;
