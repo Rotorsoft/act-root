@@ -111,6 +111,30 @@ the recovery, and the first successful publish is the validation.
 - [ ] Confirm the log shows a successful exchange rather than `Skipped OIDC`
 - [ ] Confirm the published version shows provenance on npmjs.com
 
+### Case-sensitive `repository.url` (found by the canary)
+
+The first trusted publish got past auth and failed provenance verification
+instead:
+
+```
+[E422] Error verifying sigstore provenance bundle: Failed to validate repository
+information: package.json: "repository.url" is
+"git+https://github.com/rotorsoft/act-root.git", expected to match
+"https://github.com/Rotorsoft/act-root" from provenance
+```
+
+The attestation records GitHub's canonical owner casing (`Rotorsoft`); every
+`package.json` in the repo said `rotorsoft`. npm compares them exactly.
+
+**Each package needs the one-word fix before its first trusted publish**, and
+it must ride a commit that touches only that package — the `changes` job keys
+the release matrix on `libs/<lib>/**`, so fixing all thirteen at once would
+fire a release for every library, and each one without a registered publisher
+fails and strands a tag.
+
+- [x] `@rotorsoft/act-patch` + root `package.json`
+- [ ] The other twelve, one per package as its publisher is registered
+
 ### Then the rest
 
 - [ ] Register Trusted Publishers for the remaining twelve packages
@@ -129,6 +153,7 @@ publish step, so four releases exist in git and not on npm:
 | `@rotorsoft/act-pg` | 1.16.0 | 1.15.1 |
 | `@rotorsoft/act-sqlite` | 1.16.0 | 1.15.0 |
 | `@rotorsoft/act-tck` | 1.33.0 | 1.32.0 |
+| `@rotorsoft/act-patch` | 1.2.8 | 1.2.7 | (the canary's first attempt, failed on the casing above)
 
 No GitHub releases were created either — that plugin also runs after publish.
 

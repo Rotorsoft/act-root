@@ -25,12 +25,12 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rotorsoft/act-root.git"
+    "url": "git+https://github.com/Rotorsoft/act-root.git"
   },
   "bugs": {
-    "url": "https://github.com/rotorsoft/act-root/issues"
+    "url": "https://github.com/Rotorsoft/act-root/issues"
   },
-  "homepage": "https://github.com/rotorsoft/act-root#readme",
+  "homepage": "https://github.com/Rotorsoft/act-root#readme",
   "scripts": {
     "clean": "pnpm -r run clean",
     "build": "pnpm -r build",
