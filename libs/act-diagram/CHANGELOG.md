@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.0.18](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.17...@rotorsoft/act-diagram-v1.0.18) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act:** match GitHub's owner casing in repository.url ([a719f54](https://github.com/Rotorsoft/act-root/commit/a719f548acb22cd303a229a4c4dafbf8f8e4f5b7))
+
 # [@rotorsoft/act-diagram-v1.0.17](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.16...@rotorsoft/act-diagram-v1.0.17) (2026-08-17)
 
 
