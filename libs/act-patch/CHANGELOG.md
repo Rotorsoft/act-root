@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.7...@rotorsoft/act-patch-v1.2.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act-patch:** publish through npm trusted publishing ([db98258](https://github.com/rotorsoft/act-root/commit/db98258ccd8cb8b503baeb4e83327aef72107ea9)), closes [#1512](https://github.com/rotorsoft/act-root/issues/1512)
+
 # [@rotorsoft/act-patch-v1.2.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.6...@rotorsoft/act-patch-v1.2.7) (2026-08-03)
 
 
