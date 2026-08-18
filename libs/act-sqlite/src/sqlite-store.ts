@@ -1150,7 +1150,7 @@ export class SqliteStore implements Store {
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
     let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at FROM streams WHERE 1=1";
+      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE 1=1";
     const args: unknown[] = [];
 
     if (query?.stream !== undefined) {
@@ -1198,6 +1198,8 @@ export class SqliteStore implements Store {
       // Persisted as an ISO string (like leased_until); surface as ms since
       // epoch (#1221) so the cold-start re-seed re-arms at the due-time.
       const deferred_at = row.deferred_at as string | null;
+      // NULL means "no mark yet" — unknown, not "no work" (#1485).
+      const correlated_at = row.correlated_at as number | null;
       callback({
         stream: row.stream as string,
         source: (row.source as string | null) ?? undefined,
@@ -1210,6 +1212,7 @@ export class SqliteStore implements Store {
         leased_until: leased_until ? new Date(leased_until) : undefined,
         lane: row.lane as string,
         deferred_at: deferred_at ? new Date(deferred_at).getTime() : undefined,
+        correlated_at: correlated_at ?? undefined,
       });
       count++;
     }

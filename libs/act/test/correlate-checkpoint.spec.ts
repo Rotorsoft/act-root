@@ -126,8 +126,8 @@ describe("the checkpoint is persisted by correlate's own subscribe", () => {
   });
 });
 
-describe("a static-only app never touches the checkpoint", () => {
-  it("leaves it untouched", async () => {
+describe("a static-only app advances the checkpoint too (#1487)", () => {
+  it("persists how far the scan read, because it scans now", async () => {
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
@@ -139,8 +139,11 @@ describe("a static-only app never touches the checkpoint", () => {
       .build();
 
     await app.do("tick", { stream: "src", actor }, {});
-    await app.correlate();
+    const scan = await app.correlate();
 
-    expect(await peek(raw)).toBe(-1);
+    // Correlate marks the static target, so it subscribes — and the cursor
+    // rides that same call. Before #1487 correlate returned without reading
+    // anything and the checkpoint stayed at -1.
+    expect(await peek(raw)).toBe(scan.last_id);
   });
 });

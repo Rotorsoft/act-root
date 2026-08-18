@@ -175,6 +175,12 @@ describe("pg store", () => {
       expect(onDecremented).not.toHaveBeenCalled();
 
       await app.do("decrement", { stream: "blocking", actor }, {});
+      // Correlate the new event before draining it: claim reads eligibility
+      // off the subscription row's work mark (#1487), and only correlate
+      // raises that mark. The retries below need no further correlate —
+      // a failed handler doesn't advance the watermark, so the stream stays
+      // below the mark until it succeeds or blocks.
+      await app.correlate({ limit: 100 });
 
       await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
       expect(onDecremented).toHaveBeenCalledTimes(1);

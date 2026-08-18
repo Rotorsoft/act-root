@@ -60,7 +60,6 @@ describe("settle loop wake-up during a running cycle (ACT-1205)", () => {
         },
         on_settled: () => {},
         breaker,
-        correlate_probes_store: true,
       },
       0
     );
@@ -128,7 +127,6 @@ describe("settle loop paginates past inert windows (ACT-1309)", () => {
         drain: async () => empty_drain(),
         on_settled: () => settled_signal(),
         breaker,
-        correlate_probes_store: true,
       },
       0
     );
@@ -145,12 +143,14 @@ describe("settle loop paginates past inert windows (ACT-1309)", () => {
 });
 
 /**
- * #1329 — the settle loop must not record a circuit-breaker `passed()` when
- * correlate didn't probe the store. On a static-reaction app correlate is a
- * no-op early-return; recording a fictitious success there re-closes an OPEN
- * breaker mid-outage and lets the drain hammer the down store.
+ * #1329 — a settle pass records a circuit-breaker `passed()` only when
+ * correlate really probed the store. It always does since #1487: correlate
+ * scans for every app, so the pass that used to be a no-op early-return on a
+ * static-reaction app (whose fictitious success re-closed an OPEN breaker
+ * mid-outage and let the drain hammer the down store) is now a real store
+ * query that fails when the store is down.
  */
-describe("settle breaker success is gated on a real correlate probe (#1329)", () => {
+describe("settle breaker success rides a real correlate probe (#1329)", () => {
   const open_breaker = () => {
     const breaker = new CircuitBreaker({
       failureThreshold: 1,
@@ -161,42 +161,52 @@ describe("settle breaker success is gated on a real correlate probe (#1329)", ()
     return breaker;
   };
 
+  /** Runs one pass, resolving whichever way the pass ends. */
   const run_pass = async (
     breaker: CircuitBreaker,
-    correlate_probes_store: boolean
+    correlate: () => Promise<{ subscribed: number; last_id: number }>
   ) => {
-    let settled_resolve!: () => void;
-    const settled = new Promise<void>((r) => {
-      settled_resolve = r;
+    let done!: () => void;
+    const finished = new Promise<void>((r) => {
+      done = r;
     });
     const loop = new SettleLoop<Schemas>(
       {
         init: async () => {},
         checkpoint: () => 5,
-        // No-op correlate (static app shape): no store call.
-        correlate: async () => ({ subscribed: 0, last_id: 5 }),
+        correlate: async (q) => {
+          try {
+            return await correlate();
+          } finally {
+            // The failing arm never reaches on_settled — release here so the
+            // assertion runs either way. `q` keeps the signature honest.
+            void q;
+            setTimeout(done, 0);
+          }
+        },
         drain: async () => empty_drain(),
-        on_settled: () => settled_resolve(),
+        on_settled: () => done(),
         breaker,
-        correlate_probes_store,
       },
       0
     );
     loop.schedule({ debounceMs: 0 });
-    await settled;
+    await finished;
     loop.stop();
   };
 
-  it("does not close an OPEN breaker when correlate did not probe the store", async () => {
+  it("closes the breaker when the scan returns (control)", async () => {
     const breaker = open_breaker();
-    await run_pass(breaker, false);
-    expect(breaker.state(1000)).toBe("open");
+    await run_pass(breaker, async () => ({ subscribed: 0, last_id: 5 }));
+    expect(breaker.state(1000)).toBe("closed");
   });
 
-  it("still closes the breaker when correlate probed the store (control)", async () => {
+  it("leaves the breaker OPEN when the scan fails against a down store", async () => {
     const breaker = open_breaker();
-    await run_pass(breaker, true);
-    expect(breaker.state(1000)).toBe("closed");
+    await run_pass(breaker, async () => {
+      throw new Error("store down");
+    });
+    expect(breaker.state(1000)).toBe("open");
   });
 });
 

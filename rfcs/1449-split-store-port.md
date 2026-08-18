@@ -97,6 +97,9 @@ Two designs were built and rejected on evidence along the way — a reserved sub
 | Alternative | Why not |
 |---|---|
 | Commit-side dirty set (outbox) | The store cannot resolve user-code targets, and commit-time resolution misses every non-local writer. Also write amplification on the hottest path, and two commits resolving to one target serialize on one row. |
+| **`commit` carries marks the orchestrator resolved** | Considered again after step 4, since `do()` holds the events and their ids with a transaction already open, which would make marking free and atomic. **It defeats the goal.** An event-log write and a subscription write in one transaction is precisely the coupling step 6 exists to break, and the atomicity that makes it attractive *is* the cross-store transaction the split cannot have. The orchestrator-resolves framing answers the outbox objection above but not this one. Off the table unless step 6 is abandoned. |
+| **`claim` returns the next scan window with its leases** | Two reads collapse into one round trip, and it works mechanically. It also puts the event log back inside `claim`, which is the join this RFC exists to remove, and forecloses step 6 outright. |
+| **Marks ride `ack`** | Split-safe (both are subscription-side) and the information is free — the drain already re-runs every resolver on each fetched event. But it only sees events inside the source windows of streams it leased, which excludes everything discovery is for, and it cannot advance the checkpoint, so correlate still scans the same range. Front-runs correlate rather than replacing it: a latency win, not a cost win. Revisit only if a measurement says latency-to-first-claim is the complaint. |
 | `notify` carries the routing | A documented best-effort channel cannot be the sole producer without a pull backstop, which reinstates the join. |
 | In-memory hot set fed by `notify` | Per-process, lost on restart, and the O(N) probe remains as the backstop — a mitigation, not a fix. |
 | Bucket/partition the streams table | Constant-factor only, and requires static worker→bucket assignment, surrendering the assignment-free elasticity `SKIP LOCKED` provides. |
@@ -112,9 +115,25 @@ Each step ships independently and is valuable on its own.
 | 1 | **Durable correlate checkpoint** — ✅ shipped in [#1493](https://github.com/Rotorsoft/act-root/pull/1493). Its own single-row relation per scope; read from `subscribe`'s return, advanced by `ack`, so it costs no round trip of its own. | restart resumes exactly | Single-writer was deliberately dropped — see below. |
 | 2 | **RFC for the work set** — ✅ [`rfcs/1486-subscription-work-set.md`](./1486-subscription-work-set.md). | docs | Gates the public surface; settles the three open questions below. |
 | 3 | **`correlated` column + partial index + `subscribe({correlated})`** on PG, SQLite, InMemory, with TCK cases and the `correlated IS NULL` legacy arm. | dark — no behavior change | The bulk of the work. |
-| 4 | **Correlate becomes the universal producer** — resolves static targets too, no longer early-returns for static-only apps, records `correlated`. | behavior change | Needs the static-only-app cost numbers from step 0. |
-| 5 | **Delete the legacy probe arm** + add an opt-in reconciliation sweep. | payoff | `claim` stops touching the event log on both adapters. |
+| 4 | **Correlate becomes the universal producer** — ✅ shipped in [#1487](https://github.com/Rotorsoft/act-root/issues/1487). Resolves static targets too, no longer early-returns for static-only apps, records `correlated_at` for every target an event resolves to. | behavior change | Measured cost to a static-only app: +14% catch-up, +2.2 ms per one-event settle round on act-pg. Two consequences fell out — `drain()` alone no longer picks up a commit no correlate has seen, and the close-cycle safety probe had to stop reading watermark lag as pending work ([RFC 1487](./1487-work-mark-on-stream-positions.md)). |
+| 5 | **Delete the legacy probe arm** + add an opt-in reconciliation sweep. | payoff | `claim` stops touching the event log on both adapters. The conservative "unmarked row = pending" arm in the close-cycle probe goes with it. **Blocked on [#1510](https://github.com/Rotorsoft/act-root/issues/1510)** — the fallback should not be removed before the costs below are measured and an operator can see what is still unmarked. |
 | 6 | *(demand-gated)* **Split the port** — `EventStore` + `SubscriptionStore`, resumable two-phase `truncate`, second TCK. | | Judged then as "is a second port worth the deployment flexibility". |
+
+### What steps 3 and 4 cost, and the rule that came out of it
+
+Tracked in [#1510](https://github.com/Rotorsoft/act-root/issues/1510). This RFC anticipated exactly one cost — the static-only app paying for a scan it used to skip — and gated step 4 on measuring it (+14% on a 5,000-event catch-up, +2.2 ms per one-event settle round on act-pg). Three more surfaced while building it.
+
+**Writing marks landed on the steady-state path.** `subscribe` used to run on discovery only; correlate now calls it on every scan that marks anything. Part of an O(subscribed streams) *read* has become a per-scan *write*, against the rows `claim` locks and the partial index the design rests on — and since correlate is deliberately not single-writer (RFC 1484), N workers scan the same range and write the same marks. On act-pg the write is ~1.6 ms of the 2.2 ms, after `subscribe` folded its three column UPDATEs into one.
+
+**A watermark changed meaning, and not every reader was found by the type system.** It used to mean "how far this subscription has *seen*", because the probe served a reader every event in its source window and it acked past the irrelevant ones. It now means "how far this subscription has *consumed its own work*". Any reader treating watermark-versus-head as "still busy" is now wrong. The close-cycle safety probe was wrong badly enough to skip every affected close forever, fixed in step 4 by asking `at < correlated_at` and surfacing the mark on `StreamPosition` ([RFC 1487](./1487-work-mark-on-stream-positions.md)). Two readers remain: the windowed close's prune cap, which fails safe by pruning less and can therefore prune nothing at all indefinitely, and `app.audit()` plus the Prometheus alert rules, which report distance-from-head as lag.
+
+**The headline number has never come from an application.** The claim measurements in step 3 used marks seeded directly by SQL. Steps 5 and 6 need the grid re-run with marks a real app produced.
+
+#### The rule
+
+> **A mark can be pushed from anywhere; the read cursor can only be pulled. And no optimization may put an event-log write and a subscription write in one transaction.**
+
+The first half is why `notify`, a commit, or a drain may all legitimately *raise* a mark, while only a contiguous forward scan may advance the correlate checkpoint — anything else silently skips discovery. The second half is what disqualifies the otherwise-attractive commit-side option above. Together they leave one class of optimization that is always safe here: **local, in-process caching.** A cache changes no contract, adds no column, and cannot weld the halves together, which is why #1510 centers on it — caching the "nothing new since I last looked" answer, the marks this worker already wrote, the immutable events themselves (read two or three times per cycle today by the same process), and the resolver results the drain recomputes. Claim eligibility is the one thing never cached: leases are contended and must stay authoritative in the store.
 
 ### Migration
 
@@ -126,23 +145,26 @@ Bootstrapping existing rows is the real sub-decision. Backfilling `correlated = 
 
 Benchmarks run on real adapters only (act-pg on docker :5431, act-sqlite); InMemory may appear as a reference row, never as the primary number.
 
-1. **Claim time flat in subscribed-stream count** across 1k/10k/100k streams × 1%/10%/100% hit rate, on both adapters. This is the headline criterion.
-2. **No regression for a static-only app** from always-on correlate — the one place this design can cost someone.
-3. **N-worker contention** at 2/4/8 workers: aggregate claim throughput, correlated-index churn under sustained commit load, and correlate write contention with and without step 1's leased checkpoint.
-4. **Commit path flat** — the design does not touch `commit`; verify empirically.
-5. `store-split-claim.bench.mjs` re-run against the mark rather than the joined baseline, so step 6 is decided on new numbers.
+1. **Claim time flat in subscribed-stream count** across 1k/10k/100k streams × 1%/10%/100% hit rate, on both adapters. This is the headline criterion. ⏳ *Open — step 3's numbers came from SQL-seeded marks; #1510 re-runs it with marks an application produced.*
+2. **No regression for a static-only app** from always-on correlate — the one place this design can cost someone. ⚠️ *Measured in step 4 and it does regress: +14% catch-up, +2.2 ms per one-event settle round on act-pg. #1510 carries the plan to take that back out with local caches.*
+3. **N-worker contention** at 2/4/8 workers: aggregate claim throughput, correlated-index churn under sustained commit load, and correlate write contention with and without step 1's leased checkpoint. ⏳ *Open, and now the most load-bearing one — step 4 put a write on the steady-state path. Tracked in #1510.*
+4. **Commit path flat** — the design does not touch `commit`; verify empirically. ⏳ *Open. Still true by construction, since the commit-side option above was rejected.*
+5. `store-split-claim.bench.mjs` re-run against the mark rather than the joined baseline, so step 6 is decided on new numbers. ⏳ *Open, tracked in #1510.*
 
 Benchmark construction: assign event ids in randomized order so a stream's watermark lands at a random point in the global sequence. Seeding version-by-version, or modelling has-work as `at = -1`, sorts every pending stream to the front of `ORDER BY at ASC` and understates the cost by orders of magnitude.
 
 ## Public surface added
 
-One optional field on an existing port method:
+Two optional fields, both named `correlated_at`, on surfaces that already exist:
 
 ```ts
-Store.subscribe(streams: { stream, source?, priority?, lane?, correlated? }[])
+Store.subscribe(streams: { stream, source?, priority?, lane?, correlated_at? }[], correlated_at?)
+StreamPosition = { …, correlated_at?: number }
 ```
 
-No new port, no new method, no new table. `subscribe` is already the idempotent UPSERT called from the right place, which keeps "record the target" and "record its frontier" in one statement.
+The first is the mark itself (step 3, [RFC 1486](./1486-subscription-work-set.md)); `subscribe` is already the idempotent UPSERT called from the right place, which keeps "record the target" and "record its frontier" in one statement. The second exposes the same value to readers other than `claim` (step 4, [RFC 1487](./1487-work-mark-on-stream-positions.md)) — needed the moment a watermark stopped answering "does this subscription still have work?". The `subscribe` method's second argument, the durable correlate checkpoint, came earlier with RFC 1484.
+
+No new port, no new method, no new table.
 
 ## Stability / charter impact
 
@@ -154,6 +176,8 @@ No new port, no new method, no new table. `subscribe` is already the idempotent 
 
 ## Open questions
 
-1. Does `correlated` belong on the subscription row (step 1) or in its own relation from the start? A separate `streams_correlated(stream, at)` table is the same semantics with a physical seam, making step 6 a repackaging rather than a migration. It costs a join on the claim path today for flexibility that may never be exercised.
-2. What is the reconciliation sweep's trigger in step 5 — operator-invoked, periodic, or on cold start only?
-3. Should a stream with no mark ever be claimable? Making it definitionally not-claimable settles #1446, but forecloses "claim everything once at boot" as a recovery tool.
+The three questions this RFC opened were answered by [RFC 1486](./1486-subscription-work-set.md) and are recorded there: the mark lives on the subscription row, a stream with no mark is not claimable, and the reconciliation sweep is operator-invoked. What remains open belongs to the follow-through in #1510:
+
+1. Does correlate's write load hold up at the worker counts we would actually deploy, or does it need single-writer correlate after all (rejected in RFC 1484 for want of evidence)?
+2. How far do local caches take the cost back — and if they don't take it far enough, what is left that does not weld the two halves together?
+3. What should a windowed close cap its prune at, now that a caught-up subscription can sit permanently below the head? The correlate checkpoint is the likely answer; it needs working through.

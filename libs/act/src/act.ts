@@ -122,6 +122,19 @@ import type {
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
+ * Scan window and pass cap for the correlation catch-up the close-cycle
+ * safety probe runs (#1487). The probe cannot judge pending work over
+ * events correlate has not resolved, so it advances the cursor to the head
+ * of the streams being closed first — bounded, so a close behind a large
+ * backlog skips the stream (the documented retryable outcome) rather than
+ * scanning the whole log inside an operator call.
+ *
+ * @internal
+ */
+const CLOSE_CATCH_UP_LIMIT = 1000;
+const CLOSE_CATCH_UP_PASSES = 20;
+
+/**
  * Default debounce window (ms) for `settle()` when neither the per-call
  * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
  * Coalesces commits in the same tick and small bursts; sub-perceptible
@@ -755,6 +768,7 @@ export class Act<
           const close_actor = { id: "$close", name: "close" };
           const result = await run_close_cycle(targets, {
             reactive_events_size: this._reactive_events.size,
+            catch_up_correlation: (until) => this._catch_up_correlation(until),
             event_to_state: this._event_to_state,
             load: this._es.load,
             tombstone: this._es.tombstone,
@@ -867,7 +881,6 @@ export class Act<
     return new CorrelateCycle({
       registry: this.registry,
       static_targets: classification.static_targets,
-      has_dynamic_resolvers: classification.has_dynamic_resolvers,
       cd: this._cd,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
@@ -934,10 +947,6 @@ export class Act<
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
-        // Static-reaction apps' correlate is a no-op (no store call), so a
-        // settle pass carries no store-health signal — don't let it record a
-        // breaker success (#1329).
-        correlate_probes_store: this._correlate.has_dynamic_resolvers,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -1458,8 +1467,13 @@ export class Act<
    * Drain uses a dual-frontier strategy to balance processing of new streams (lagging)
    * vs active streams (leading). The ratio adapts based on event pressure.
    *
-   * Call `correlate()` before `drain()` to discover target streams. For a higher-level
-   * API that handles debouncing, correlation, and signaling automatically, use {@link settle}.
+   * Call `correlate()` before `drain()`. It is not only how dynamic targets
+   * are discovered: a stream is claimable while `at < correlated_at`, and
+   * `correlate` is the only component that raises that mark (#1487), so a
+   * commit no correlate has seen is not drainable — including for static
+   * targets, which were served by a probe of the event log before. For a
+   * higher-level API that handles debouncing, correlation, and signaling
+   * automatically, use {@link settle}.
    *
    * @param options - Drain configuration — see {@link DrainOptions} for fields
    *   (`streamLimit`, `eventLimit`, `leaseMillis`).
@@ -2076,6 +2090,31 @@ export class Act<
    * removed, so a later correlate can re-subscribe it (#1398). Restart
    * targets keep their row, so only fully-retired streams are forgotten.
    */
+  /**
+   * Advance correlation until the read cursor reaches `until`, and report
+   * where it landed (#1487). Used by the close cycle's safety probe, which
+   * cannot judge a subscription's pending work over events correlate has
+   * not resolved yet.
+   *
+   * Bounded on both ends: it stops as soon as a pass makes no progress (the
+   * log has no more to give), and after {@link CLOSE_CATCH_UP_PASSES}
+   * windows, so a close behind an enormous backlog degrades to skipping the
+   * stream — the documented retryable outcome — instead of scanning the
+   * whole log inside an operator call.
+   */
+  private async _catch_up_correlation(until: number): Promise<number> {
+    for (
+      let pass = 0;
+      pass < CLOSE_CATCH_UP_PASSES && this._correlate.checkpoint < until;
+      pass++
+    ) {
+      const before = this._correlate.checkpoint;
+      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
+      if (this._correlate.checkpoint <= before) break;
+    }
+    return this._correlate.checkpoint;
+  }
+
   private _forget_closed_subscriptions(result: CloseResult): void {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
@@ -2096,6 +2135,7 @@ export class Act<
       const close_actor = { id: "$close", name: "close" };
       const result = await run_close_cycle(targets, {
         reactive_events_size: this._reactive_events.size,
+        catch_up_correlation: (until) => this._catch_up_correlation(until),
         event_to_state: this._event_to_state,
         load: this._es.load,
         tombstone: this._es.tombstone,
