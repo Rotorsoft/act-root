@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.28.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.28.0...@rotorsoft/act-v1.28.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act:** match GitHub's owner casing in repository.url ([a719f54](https://github.com/Rotorsoft/act-root/commit/a719f548acb22cd303a229a4c4dafbf8f8e4f5b7))
+
 # [@rotorsoft/act-v1.28.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.27.0...@rotorsoft/act-v1.28.0) (2026-08-18)
 
 
