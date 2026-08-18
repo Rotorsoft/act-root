@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.29.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.28.1...@rotorsoft/act-v1.29.0) (2026-08-18)
+
+
+### Features
+
+* **act:** claim reads the work mark and nothing else ([#1511](https://github.com/Rotorsoft/act-root/issues/1511)) ([579c775](https://github.com/Rotorsoft/act-root/commit/579c7751f66a51eacb374bb6350d51c869af093c)), closes [#1446](https://github.com/Rotorsoft/act-root/issues/1446) [#1510](https://github.com/Rotorsoft/act-root/issues/1510)
+
 # [@rotorsoft/act-v1.28.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.28.0...@rotorsoft/act-v1.28.1) (2026-08-18)
 
 
