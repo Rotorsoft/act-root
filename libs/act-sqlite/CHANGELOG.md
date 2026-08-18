@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.16.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.16.0...@rotorsoft/act-sqlite-v1.16.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act:** match GitHub's owner casing in repository.url ([a719f54](https://github.com/Rotorsoft/act-root/commit/a719f548acb22cd303a229a4c4dafbf8f8e4f5b7))
+
 # [@rotorsoft/act-sqlite-v1.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.15.0...@rotorsoft/act-sqlite-v1.16.0) (2026-08-18)
 
 
