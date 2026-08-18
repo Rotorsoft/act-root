@@ -15,6 +15,39 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, state, ZodEmpty } from "../src/index.js";
 import { classify_registry } from "../src/internal/build-classify.js";
 import { dispose, store } from "../src/ports.js";
+import type { Store } from "../src/types/index.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 describe("ACT-102 priority lanes — framework", () => {
   beforeEach(() => {
@@ -39,6 +72,7 @@ describe("ACT-102 priority lanes — framework", () => {
         { stream: "high", source: "src", priority: 10 },
       ]);
 
+      await mark_all(store());
       const leases = await store().claim(1, 0, "w", 1000);
       expect(leases).toHaveLength(1);
       expect(leases[0].stream).toBe("high");
@@ -63,6 +97,7 @@ describe("ACT-102 priority lanes — framework", () => {
         { stream: "earlier", source: "src" },
       ]);
 
+      await mark_all(store());
       const leases = await store().claim(2, 0, "w", 1000);
       // No priorities → tie-break is whatever the adapter's natural
       // ordering yields. Both should come back; the contract is just
@@ -95,6 +130,7 @@ describe("ACT-102 priority lanes — framework", () => {
       let low_claimed_at = -1;
       const MAX_CYCLES = 20;
       for (let cycle = 0; cycle < MAX_CYCLES; cycle++) {
+        await mark_all(store());
         const leases = await store().claim(4, 0, by, 1000);
         if (leases.some((l) => l.stream === "low")) {
           low_claimed_at = cycle;
@@ -179,6 +215,7 @@ describe("ACT-102 priority lanes — framework", () => {
         { stream: "ok", source: "src" },
         { stream: "bad", source: "src" },
       ]);
+      await mark_all(store());
       const leases = await store().claim(2, 0, "w", 1000);
       const badLease = leases.find((l) => l.stream === "bad")!;
       await store().block([{ ...badLease, error: "boom" }]);

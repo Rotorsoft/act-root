@@ -1,5 +1,38 @@
+import type { Store } from "@rotorsoft/act/types";
 import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 /**
  * #1190: `streams.retry` was `smallint` (max 32767). `claim()` does
@@ -41,6 +74,7 @@ describe("pg streams.retry does not overflow at the smallint ceiling", () => {
         causation: {},
       } as never);
 
+      await mark_all(s);
       const leases = await s.claim(10, 0, "worker", 10_000);
       const lease = leases.find((l) => l.stream === "poison-1");
       expect(lease).toBeDefined();

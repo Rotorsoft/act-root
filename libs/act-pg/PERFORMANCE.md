@@ -623,3 +623,34 @@ LOG_LEVEL=error node libs/act-pg/scripts/static-correlate.bench.mjs
 
 `EVENTS` and `ROUNDS` override the two workload sizes. The "before" column came
 from the same script run against the previous commit's build.
+
+## #1488 — claim stops reading the event log
+
+The has-work probe is gone. Eligibility is `at < correlated_at` on the
+subscription row, served by the partial index built for it, and `claim`
+issues no query against the events table at all.
+
+`scripts/claim-scale.bench.mjs`, docker PG :5431 (M3 Pro), marks seeded the
+way correlate leaves them — a pending stream marked above its watermark, a
+caught-up stream marked at it — with event ids in randomized order so a
+watermark lands at a random point in the global sequence:
+
+| subscribed | 1% pending | 10% pending | 100% pending |
+|---|---|---|---|
+| 1,000 | 1.72 ms | 1.58 ms | 2.18 ms |
+| 10,000 | 1.52 ms | 2.25 ms | 8.75 ms |
+| 100,000 | **2.30 ms** | 9.16 ms | 91.37 ms |
+
+**The headline: claim time is flat in subscribed-stream count.** At 1% pending
+it is 1.7 / 1.5 / 2.3 ms from 1k to 100k. The probe's own numbers on the same
+machine (#1482) were 3.62 / 12.08 / **180.31 ms** — the cost axis that grew
+with domain size is gone.
+
+What the cost tracks now is **eligible** rows, not subscribed ones: at 100%
+pending, 100k streams cost 91 ms. That is the right axis — it is proportional
+to the backlog rather than to how much history the app has accumulated — and
+an app whose every subscription is behind has a bigger problem than claim
+latency. The residual there is the fairness reserve's `NOT IN (SELECT …
+LIMIT)` arm, which materializes the eligible set instead of pushing its limit
+into the index; worth revisiting if a real workload lives at a high pending
+fraction.

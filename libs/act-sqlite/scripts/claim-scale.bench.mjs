@@ -61,13 +61,16 @@ async function seed(streams) {
     ORDER BY random()
   `);
 
-  // Every subscription sits at its stream's head except a random `PENDING`
-  // few, which sit one event behind.
+  // Every subscription sits one event behind its stream's head, and carries
+  // the mark correlate would have left it: a random `PENDING` few are marked
+  // at the head (work to do), the rest at their own watermark (caught up).
+  // Marking everything would make every subscription eligible and measure a
+  // different system (#1488).
   await client.execute(`
-    INSERT INTO streams (stream, source, at, retry, blocked, priority, lane)
-    SELECT m.stream, m.stream,
-           CASE WHEN m.rn <= ${PENDING} THEN m.prev ELSE m.top END,
-           -1, 0, 0, 'default'
+    INSERT INTO streams
+      (stream, source, at, retry, blocked, priority, lane, correlated_at)
+    SELECT m.stream, m.stream, m.prev, -1, 0, 0, 'default',
+           CASE WHEN m.rn <= ${PENDING} THEN m.top ELSE m.prev END
     FROM (SELECT stream,
                  MAX(id) AS top,
                  MAX(id) - 1 AS prev,
@@ -76,13 +79,13 @@ async function seed(streams) {
   `);
   await client.execute("ANALYZE");
   const { rows } = await client.execute(
-    "SELECT COUNT(*) AS n FROM streams s WHERE EXISTS (SELECT 1 FROM events e WHERE e.stream = s.source AND e.id > s.at)"
+    "SELECT COUNT(*) AS n FROM streams WHERE at < correlated_at"
   );
   return { store, pending: Number(rows[0].n) };
 }
 
 const main = async () => {
-  console.log("Real SqliteStore.claim(), 10 of N streams pending:");
+  console.log("Real SqliteStore.claim(), 10 of N streams marked pending:");
   console.log("");
   console.log("subscribed | claim latency | leased");
   console.log("-----------|---------------|-------");

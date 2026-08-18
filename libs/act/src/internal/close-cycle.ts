@@ -513,11 +513,14 @@ async function partition_by_safety(
         // consumer of two of a state's ten event types sits permanently below
         // a head it has no reaction for. Asking the row the same question
         // `claim` asks keeps the guard honest — and keeps close from skipping
-        // every such stream forever. An unmarked row answers "unknown", which
-        // this probe reads conservatively as pending, matching the legacy
-        // claim arm it shares a rollout with.
+        // every such stream forever.
+        //
+        // An unmarked row is not pending, and that is now definitional rather
+        // than conservative (#1488): `claim` will never serve it either, so
+        // there is no consumer to wait for. The catch-up above is what makes
+        // the reading safe — any mark that was owed has landed by here.
         const has_work =
-          position.correlated_at === undefined ||
+          position.correlated_at !== undefined &&
           position.at < position.correlated_at;
         if (!has_work) return;
         for (const [stream, info] of stream_info) {

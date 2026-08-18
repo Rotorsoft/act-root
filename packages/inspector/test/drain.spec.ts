@@ -13,9 +13,42 @@
  */
 import { randomUUID } from "node:crypto";
 import type { InMemoryStore } from "@rotorsoft/act";
+import type { Store } from "@rotorsoft/act/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getActiveStore, inspectorRouter } from "../src/server/router.js";
 import { seed } from "./helpers.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 const caller = inspectorRouter.createCaller({});
 let store: InMemoryStore;
@@ -49,6 +82,7 @@ async function fixture() {
   ]);
 
   // Bring sub-healthy fully caught up via ack so gap = 0.
+  await mark_all(store);
   const claimed = await store.claim(10, 10, randomUUID(), 30_000);
   const healthy = claimed.find((l) => l.stream === "sub-healthy");
   if (healthy) {
@@ -61,6 +95,7 @@ async function fixture() {
   }
   // Acquire an exclusive lease on sub-leased and leave it held — the
   // dashboard's "active leases" panel reads this row.
+  await mark_all(store);
   await store.claim(10, 10, "worker-A", 60_000);
 }
 

@@ -1616,15 +1616,22 @@ export class Act<
     // checkpoint stays where it was.
     if (!this._drain) return { subscribed: 0, last_id: -1 };
     return this._scoped(async () => {
-      const result = await this._correlate.correlate(query);
+      const { subscribed, last_id, marked } =
+        await this._correlate.correlate(query);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
       // claim in the window before the subscription lands, and nothing
       // re-arms until an unrelated commit — starving the fresh stream
       // on an otherwise idle system.
-      if (result.subscribed > 0 && this._reactive_events.size > 0)
+      //
+      // A raised mark arms for the same reason (#1488). Eligibility comes
+      // from the mark now, so a target that was already subscribed goes from
+      // "nothing to do" to "claimable" without its row being new — and a
+      // worker that disarmed on an empty claim moments earlier would sleep
+      // through it.
+      if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
         this._arm_all();
-      return result;
+      return { subscribed, last_id };
     });
   }
 

@@ -436,10 +436,7 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
-    // Migration for tables created before the work set (#1485). Nullable on
-    // purpose: NULL means "unknown", which routes the row to the legacy
-    // has-work probe, so an upgraded install behaves exactly as it did and
-    // migrates row by row as correlate marks each target.
+    // Migration for tables created before the work set (#1485).
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN correlated_at INTEGER"
@@ -447,6 +444,22 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Rows that predate the mark get one, at the log's head (#1488).
+    // `claim` is mark-only now, so a row left at NULL would silently stop
+    // being served, and correlate cannot rescue it — its checkpoint is long
+    // past those events.
+    //
+    // Deliberately an over-estimate: it says "worth one look", not "there is
+    // work here". The first drain pass claims each such stream once, fetches
+    // its window, handles whatever is really there, and acks — after which
+    // the watermark catches the mark and the stream leaves the claimable set
+    // with an honest position. One extra cycle per pre-existing subscription,
+    // paid once, in exchange for a schema step with no per-row probing.
+    await this.client.execute(
+      `UPDATE streams
+       SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM events)
+       WHERE correlated_at IS NULL`
+    );
     // Correlate checkpoint (#1484). Its own single-row table rather than a
     // reserved subscription: a subscription row is counted by every
     // stream-scoped operator surface (prioritize / reset / unblock /
@@ -469,6 +482,14 @@ export class SqliteStore implements Store {
     // when correlate raises the mark.
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at ON streams(lane, priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
+    );
+    // The same set without the lane prefix. SQLite can only use an index for
+    // ORDER BY when the leading columns are constrained, so a claim with no
+    // lane filter — the shape every app that never calls `.withLane` issues —
+    // could not use the index above and fell back to sorting the whole
+    // eligible set. With this one the scan stops at `lagging + leading` rows.
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at_any_lane ON streams(priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
     // Lane filter index (ACT-1103).
     await this.client.execute(
@@ -763,82 +784,66 @@ export class SqliteStore implements Store {
       const now = new Date().toISOString();
 
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
-      // `correlated_at IS NULL OR at < correlated_at` (#1485) drops marked
-      // whose watermark has caught up before they ever reach the probe loop
-      // below. NULL means "unknown", so those rows pass through to the legacy
-      // probe — an install that predates the column behaves exactly as it did.
-      const result = await tx.execute({
-        sql: `SELECT stream, source, at, priority, lane, correlated_at FROM streams
-              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
+      // Eligibility is a pure subscription-table predicate (#1488). `claim`
+      // does not read the events table at all: correlate records the highest
+      // event id that resolves to a target, and `at < correlated_at` is the
+      // whole question, answered by the partial index built for it.
+      //
+      // What this replaced was the worst shape in the adapter — every
+      // eligible row selected with no limit, then one `SELECT 1 FROM events`
+      // per candidate in a JavaScript loop with no early exit, all inside
+      // `transaction("write")`, so a claim's cost was linear in subscribed
+      // streams and every concurrent commit queued behind it. There was no
+      // index fix available for it, because the probe was in JS rather than
+      // in SQL.
+      //
+      // A row with no mark is not claimable, by definition (#1446): NULL
+      // means the row has never been correlated, not that it has no work.
+      // An install upgrading from before the column needs one correlate pass
+      // from a rewound checkpoint — see the runbook in
+      // docs/docs/guides/production-checklist.md.
+      // Three bounded reads, unioned, so the scan is O(lease budget)
+      // rather than O(streams with work): the priority frontier, the
+      // fairness reserve's pure-watermark order, and the leading frontier.
+      // Their union is a superset of every row the split below can pick —
+      // the fairness reserve needs at most `lagging` rows by `at ASC`, since
+      // in the worst case every priority pick is also a lowest-watermark one.
+      const elig = `blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
                 AND (deferred_at IS NULL OR deferred_at <= ?)${lane_clause}
-                AND (correlated_at IS NULL OR at < correlated_at)
-              ORDER BY priority DESC, at ASC`,
-        args: lane !== undefined ? [now, now, lane] : [now, now],
+                AND at < correlated_at`;
+      const cols = "stream, source, at, priority, lane";
+      const where_args = lane !== undefined ? [now, now, lane] : [now, now];
+      const result = await tx.execute({
+        sql: `SELECT ${cols} FROM (SELECT ${cols} FROM streams WHERE ${elig}
+                ORDER BY priority DESC, at ASC LIMIT ?)
+              UNION
+              SELECT ${cols} FROM (SELECT ${cols} FROM streams WHERE ${elig}
+                ORDER BY at ASC LIMIT ?)
+              UNION
+              SELECT ${cols} FROM (SELECT ${cols} FROM streams WHERE ${elig}
+                ORDER BY at DESC LIMIT ?)`,
+        args: [
+          ...where_args,
+          lagging,
+          ...where_args,
+          lagging,
+          ...where_args,
+          leading,
+        ],
       });
 
-      const candidates: {
-        stream: string;
-        source: string | undefined;
-        at: number;
-        priority: number;
-        lane: string;
-      }[] = [];
-      for (const row of result.rows) {
-        const stream = row.stream as string;
-        const source = row.source as string | null;
-        const at = Number(row.at);
-
-        // A marked row is already known to have work — the SQL above kept
-        // only `at < correlated_at` — so it skips the probe entirely. This is
-        // the N+1 the work set exists to remove; step 5 deletes the arm below.
-        if (row.correlated_at !== null) {
-          candidates.push({
-            stream,
-            source: source ?? undefined,
-            at,
-            priority: Number(row.priority),
-            lane: row.lane as string,
-          });
-          continue;
-        }
-
-        let has_events: boolean;
-        if (source) {
-          // Has-work probe. A literal `source` (no regex metacharacter)
-          // matches by equality — index-friendly, and exact so "s1" never
-          // claims "s12". A portable pattern (anchors, `.`, `.*`) matches
-          // via the same GLOB translation the StreamFilter surfaces use.
-          // Non-portable patterns (alternation/grouping) never reach here:
-          // `subscribe` rejects them up front, so `streamPatternToGlob`
-          // below only sees the portable subset.
-          const check = is_literal_source(source)
-            ? await tx.execute({
-                sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream = ? LIMIT 1`,
-                args: [at, source],
-              })
-            : await tx.execute({
-                sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream GLOB ? LIMIT 1`,
-                args: [at, streamPatternToGlob(source)],
-              });
-          has_events = check.rows.length > 0;
-        } else {
-          const check = await tx.execute({
-            sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' LIMIT 1`,
-            args: [at],
-          });
-          has_events = check.rows.length > 0;
-        }
-
-        if (has_events) {
-          candidates.push({
-            stream,
-            source: source ?? undefined,
-            at,
-            priority: Number(row.priority),
-            lane: row.lane as string,
-          });
-        }
-      }
+      // UNION does not preserve the operands' order, so re-establish the
+      // one the split below reads: priority DESC, then watermark ASC. Over
+      // this superset that yields the same head as the unbounded scan did.
+      const candidates = result.rows
+        .map((row) => ({
+          stream: row.stream as string,
+          source: (row.source as string | null) ?? undefined,
+          at: Number(row.at),
+          priority: Number(row.priority),
+          lane: row.lane as string,
+        }))
+        .sort((a, b) => b.priority - a.priority || a.at - b.at);
 
       // Dual frontier: lagging (priority DESC, watermark ASC — ACT-102)
       // + leading (newest first). The candidates list arrives sorted

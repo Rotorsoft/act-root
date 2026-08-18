@@ -330,7 +330,7 @@ export class CorrelateCycle<
    */
   async correlate(
     query: Query = { after: -1, limit: 10 }
-  ): Promise<{ subscribed: number; last_id: number }> {
+  ): Promise<{ subscribed: number; last_id: number; marked: number }> {
     await this.init();
 
     // Use checkpoint as floor, allow explicit query.after to override upward
@@ -412,6 +412,14 @@ export class CorrelateCycle<
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
       const { subscribed } = await this._cd.subscribe(streams, last_id);
+      // Raising a mark is work becoming claimable, exactly like registering
+      // a new target — the orchestrator arms on both (#1488). A target that
+      // was already subscribed reports `subscribed: 0`, so arming on that
+      // alone leaves freshly marked work sitting until an unrelated commit
+      // wakes the lane.
+      const marked = streams.filter(
+        (entry) => entry.correlated_at !== undefined
+      ).length;
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       // Record what each upgraded target was just subscribed at (the
@@ -425,11 +433,11 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id };
+      return { subscribed, last_id, marked };
     }
     // Nothing to subscribe — safe to advance
     this._checkpoint = last_id;
-    return { subscribed: 0, last_id };
+    return { subscribed: 0, last_id, marked: 0 };
   }
 
   /**

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { act, InMemoryCache, InMemoryStore, state } from "../src/index.js";
+import { store as store_port } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
 import type { Store } from "../src/types/index.js";
 
@@ -82,6 +83,14 @@ describe("correlate cold-start checkpoint overshoot (ACT-1207)", () => {
           { stream: `order-h${i}`, actor },
           { sku: `h${i}` }
         );
+        // Mark the static target by hand rather than correlating (#1488).
+        // `claim` follows marks now, so a drain-only loop would find nothing
+        // — but running correlate here would also discover the dynamic
+        // target, which is the very thing this scenario needs left undone.
+        const { maxEventId } = await store_port().query_streams(() => {});
+        await store_port().subscribe([
+          { stream: "audit", correlated_at: maxEventId },
+        ]);
         for (;;) {
           const d = await app1.drain({ leaseMillis: 10_000, eventLimit: 100 });
           if (d.acked.length === 0) break;

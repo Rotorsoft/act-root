@@ -21,7 +21,40 @@
  * malformed-payload robustness on a single listener.
  */
 import { sleep } from "@rotorsoft/act";
+import type { Store } from "@rotorsoft/act/types";
 import { PostgresStore } from "../src/postgres-store.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 const PORT = 5431;
 const SCHEMA = "schema_notify_contract_test";
@@ -128,6 +161,7 @@ describe("PostgresStore notify contract", () => {
     // (subscribe + claim, the drain's polling primitives) and every
     // event is fetchable — at-least-once delivery is preserved.
     await b.subscribe([{ stream: "stream-oversize" }]);
+    await mark_all(b);
     const leases = await b.claim(100, 0, "poll-worker", 10_000);
     expect(leases.map((l) => l.stream)).toContain("stream-oversize");
 

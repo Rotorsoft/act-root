@@ -17,6 +17,7 @@ import type {
   Store,
   StoreNotification,
   StreamPosition,
+  SubscribeInput,
 } from "@rotorsoft/act/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
@@ -125,9 +126,9 @@ export type StoreCapabilities = {
    * surfaces (`reset`, `unblock`, `defer`, `prioritize`) leaving the mark
    * intact.
    *
-   * An adapter that ignores the field keeps working through the legacy
-   * has-work probe and leaves this `false`. The flag disappears once the
-   * legacy arm is deleted and the mark becomes the only eligibility rule.
+   * @deprecated Ignored since #1488 — the mark is the only eligibility
+   * rule, so this suite always runs. The field is kept so an adapter that
+   * still passes `work_set: true` keeps compiling.
    */
   readonly work_set?: boolean;
 };
@@ -230,6 +231,59 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // create a branch every adapter has to disprove. `{ ...undefined }`
     // is a runtime no-op that yields `{}`.
     const caps: StoreCapabilities = { ...options.capabilities };
+
+    const is_literal = (source: string) => !/[\]^$.*+?()[{}|\\]/.test(source);
+
+    // Stand in for `correlate`, which a store test has no orchestrator to
+    // run. `claim` follows marks since #1488 — committing an event is not
+    // enough to make a stream claimable — so a test that expects work to be
+    // claimed has to mark it, and mark it *honestly*: the highest event id
+    // inside the subscription's own fetch window, which is what correlate
+    // records. A source-less row sees every stream, a literal source only
+    // its own, a pattern source the streams it matches.
+    const correlate = async (target: Store = store) => {
+      const rows: {
+        stream: string;
+        source?: string;
+        at: number;
+        priority: number;
+        lane?: string;
+      }[] = [];
+      await target.query_streams(
+        (p) =>
+          rows.push({
+            stream: p.stream,
+            source: p.source,
+            at: p.at,
+            priority: p.priority,
+            lane: p.lane,
+          }),
+        { limit: 1000 }
+      );
+      // Carry the row's own priority and lane back with the mark: `subscribe`
+      // writes lane unconditionally, so a mark-only upsert would re-lane the
+      // row to "default" — the trap #1487 hit in the orchestrator.
+      const marks: SubscribeInput[] = [];
+      for (const row of rows) {
+        let mark = -1;
+        await target.query(
+          (e) => {
+            mark = Math.max(mark, e.id);
+          },
+          row.source !== undefined
+            ? { stream: row.source, stream_exact: is_literal(row.source) }
+            : {}
+        );
+        if (mark > row.at)
+          marks.push({
+            stream: row.stream,
+            priority: row.priority,
+            lane: row.lane,
+            correlated_at: mark,
+          });
+      }
+      if (marks.length) await target.subscribe(marks);
+    };
 
     beforeAll(async () => {
       store = await options.factory();
@@ -1026,19 +1080,24 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `fresh-empty-${uid()}`;
         const src = `fresh-src-${uid()}`;
         await store.subscribe([{ stream: s, source: src }]);
+        await correlate();
         const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
         expect(leases.filter((l) => l.stream === s)).toHaveLength(0);
       });
 
-      it("claims a fresh subscription as soon as its first event lands", async () => {
+      it("claims a fresh subscription as soon as its first event is marked", async () => {
         const s = `fresh-first-${uid()}`;
         const src = `fresh-first-src-${uid()}`;
         await store.subscribe([{ stream: s, source: src }]);
-        await store.commit<CounterEvents>(
+        const [first] = await store.commit<CounterEvents>(
           src,
           [inc(1)],
           make_meta({ stream: src })
         );
+        // Committing is not enough since #1488: `claim` follows marks, and
+        // only `correlate` raises one. This is that call.
+        await store.subscribe([{ stream: s, correlated_at: first.id }]);
+        await correlate();
         const leases = await store.claim(5, 5, `w-${uid()}`, 5_000);
         const mine = leases.filter((l) => l.stream === s);
         expect(mine).toHaveLength(1);
@@ -1189,7 +1248,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       // `NULL` means UNKNOWN, not "no work": an unmarked row falls back to
       // the legacy probe, which is how an install that predates the column
       // keeps working. That arm is deleted once correlate marks universally.
-      describe.skipIf(!caps.work_set)("subscription work set", () => {
+      describe("subscription work set", () => {
         /** Claim just this stream, and say whether it came back. */
         const claimable = async (stream: string) => {
           const leased = await store.claim(100, 0, `w-${uid()}`, 1);
@@ -1305,21 +1364,21 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(await claimable(s)).toBe(true);
         });
 
-        it("falls back to the legacy probe for an unmarked stream", async () => {
-          // No mark: the row is UNKNOWN, not "no work", so the event log
-          // still decides. This is what keeps a pre-upgrade install working
-          // until correlate has marked each of its targets.
-          const s = `ws-legacy-${uid()}`;
-          const src = `ws-legacy-src-${uid()}`;
-          // Scoped to its own source: a source-less subscription probes for
-          // ANY event in the store, which the shared TCK store always has.
+        it("never claims an unmarked stream, however much work the log holds", async () => {
+          // NULL is not "no work" and no longer "unknown, go and look" — it
+          // is "correlate has not spoken for this row", and `claim` has
+          // nothing else to consult since #1488. The events below are real
+          // work for this subscription; only the mark makes them claimable.
+          const s = `ws-unmarked-${uid()}`;
+          const src = `ws-unmarked-src-${uid()}`;
           await store.subscribe([{ stream: s, source: src }]);
-          expect(await claimable(s)).toBe(false);
-          await store.commit<CounterEvents>(
+          const [event] = await store.commit<CounterEvents>(
             src,
             [inc(1)],
             make_meta({ stream: src })
           );
+          expect(await claimable(s)).toBe(false);
+          await store.subscribe([{ stream: s, correlated_at: event.id }]);
           expect(await claimable(s)).toBe(true);
         });
 
@@ -1359,6 +1418,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           make_meta({ stream: s })
         );
         const by = `worker-${uid()}`;
+        await correlate();
         const leased = await store.claim(100, 0, by, 10_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -1386,6 +1446,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leasedA = await store.claim(100, 0, `wA-${uid()}`, 100_000);
         const targetA = leasedA.find((l) => l.stream === s);
         expect(targetA).toBeDefined();
@@ -1399,6 +1460,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(2)],
           make_meta({ stream: other })
         );
+        await correlate();
         const leasedB = await store.claim(100, 0, `wB-${uid()}`, 100_000);
         expect(leasedB.length).toBeGreaterThan(0);
         expect(leasedB.find((l) => l.stream === s)).toBeUndefined();
@@ -1419,6 +1481,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
 
         // A takes a lease it will overrun.
+        await correlate();
         const leasedA = await store.claim(100, 0, `wA-${uid()}`, 1);
         const a = leasedA.find((l) => l.stream === s) as Lease;
         expect(a).toBeDefined();
@@ -1428,6 +1491,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await new Promise((r) => setTimeout(r, 50));
 
         // B steals it, and the claim advances the budget again.
+        await correlate();
         const leasedB = await store.claim(100, 0, `wB-${uid()}`, 100_000);
         const b = leasedB.find((l) => l.stream === s) as Lease;
         expect(b).toBeDefined();
@@ -1456,10 +1520,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1), inc(2)],
           make_meta({ stream: s })
         );
+        await correlate();
         const first = await store.claim(100, 0, `w-${uid()}`, 1);
         const mine = first.find((l) => l.stream === s);
         expect(mine).toBeDefined();
         await store.ack([{ ...(mine as Lease), at: (mine as Lease).at + 1 }]);
+        await correlate();
         const second = await store.claim(0, 100, `w-${uid()}`, 1);
         expect(second.find((l) => l.stream === s)).toBeDefined();
       });
@@ -1503,6 +1569,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           let low_claimed = false;
           const MAX_CYCLES = 20;
           for (let cycle = 0; cycle < MAX_CYCLES && !low_claimed; cycle++) {
+            await correlate(fresh);
             const leases = await fresh.claim(4, 0, by, 1000);
             if (leases.some((l) => l.stream === low)) {
               low_claimed = true;
@@ -1536,6 +1603,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         // Asking for both frontiers with overlapping budgets must not
         // return the same stream twice.
+        await correlate();
         const claimed = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const matches = claimed.filter((l) => l.stream === s);
         expect(matches).toHaveLength(1);
@@ -1555,6 +1623,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(2)],
           make_meta({ stream: sibling })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `right-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         const sibling_lease = leased.find((l) => l.stream === sibling);
@@ -1574,6 +1643,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `ack-stale-${uid()}`;
         await store.subscribe([{ stream: s }]);
         const by = `w-${uid()}`;
+        await correlate();
         const leased = await store.claim(100, 0, by, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -1589,6 +1659,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         try {
           await fresh.drop();
           await fresh.seed();
+          await correlate(fresh);
           const claimed = await fresh.claim(1, 1, `w-${uid()}`, 1000);
           expect(claimed).toEqual([]);
         } finally {
@@ -1623,11 +1694,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // First claim = first attempt. A 0ms lease is released
           // immediately, so the re-claim below sees a claimable stream
           // deterministically (no wall-clock race on lease expiry).
+          await correlate(fresh);
           const first = await fresh.claim(1, 0, `w-${uid()}`, 0);
           const f = first.find((l) => l.stream === s);
           expect(f).toBeDefined();
           expect(f!.retry).toBe(0);
           // Re-claim without an intervening ack = the first retry.
+          await correlate(fresh);
           const second = await fresh.claim(1, 0, `w-${uid()}`, 100_000);
           const sec = second.find((l) => l.stream === s);
           expect(sec).toBeDefined();
@@ -1651,11 +1724,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           );
           // Lagging-only budget: the stream is claimed from the lagging
           // frontier → lagging must be true.
+          await correlate(fresh);
           const lag = await fresh.claim(1, 0, `w-${uid()}`, 0);
           expect(lag.find((l) => l.stream === s)?.lagging).toBe(true);
           // Leading-only budget on the released lease: claimed from the
           // leading frontier → lagging must be false. `lagging` is
           // frontier membership, not a function of the stream's watermark.
+          await correlate(fresh);
           const lead = await fresh.claim(0, 1, `w-${uid()}`, 100_000);
           expect(lead.find((l) => l.stream === s)?.lagging).toBe(false);
         } finally {
@@ -1679,9 +1754,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.subscribe([{ stream: s }]);
           const [e1] = await seed_stream(fresh, s, 1);
           // Worker A claims and "dies" — its 0ms lease is already expired.
+          await correlate(fresh);
           const a = await fresh.claim(1, 0, `wA-${uid()}`, 0);
           expect(a.find((l) => l.stream === s)?.retry).toBe(0);
           // Worker B reclaims after the timeout: the budget marches.
+          await correlate(fresh);
           const b = await fresh.claim(1, 0, `wB-${uid()}`, 30_000);
           const b_lease = b.find((l) => l.stream === s);
           expect(b_lease).toBeDefined();
@@ -1689,6 +1766,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // Ack resets the budget: the next claim is a first attempt again.
           await fresh.ack([{ ...(b_lease as Lease), at: e1.id }]);
           await seed_stream(fresh, s, 1);
+          await correlate(fresh);
           const c = await fresh.claim(1, 0, `wC-${uid()}`, 30_000);
           expect(c.find((l) => l.stream === s)?.retry).toBe(0);
         } finally {
@@ -1697,57 +1775,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // ACT-1182: a subscription's `source` is an **exact stream name** in
-    // claim()'s has-work probe — never a regex, LIKE pattern, or substring.
-    // Every shipped resolver (autoclose, dynamic per-aggregate reactions)
-    // produces exact names, and exact equality keeps the probe on the
-    // adapter's stream index. Pattern matching belongs to the StreamFilter
-    // surfaces (`query_streams`, `reset`, `unblock`), not to claim. Before
-    // these cases, InMemory compiled `source` into an unanchored RegExp and
-    // SQLite into a contains-LIKE — both silently overmatched sibling
-    // streams sharing a prefix.
-    describe("claim source matching", () => {
-      it("treats source as an exact stream name — no substring or pattern overmatch", async () => {
-        const fresh = await options.factory();
-        try {
-          await fresh.drop();
-          await fresh.seed();
-          const base = `src-${uid()}`;
-          const sibling = `${base}2`; // `base` is a strict prefix of `sibling`
-          const target = `agg-${uid()}`;
-          const control = `ctl-${uid()}`;
-          await fresh.subscribe([
-            { stream: target, source: base },
-            // Control subscription sourced from the sibling — it DOES see
-            // the sibling commit below, so the negative assertion runs
-            // through a populated claim result.
-            { stream: control, source: sibling },
-          ]);
-          // Advance the watermarks past -1 first — fresh subscriptions are
-          // claimable unconditionally on some adapters.
-          const [seeded] = await seed_stream(fresh, base, 1);
-          const [ctl_seeded] = await seed_stream(fresh, sibling, 1);
-          const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-          const mine = first.find((l) => l.stream === target);
-          const ctl = first.find((l) => l.stream === control);
-          expect(mine).toBeDefined();
-          expect(ctl).toBeDefined();
-          await fresh.ack([
-            { ...(mine as Lease), at: seeded.id },
-            { ...(ctl as Lease), at: ctl_seeded.id },
-          ]);
-          // New events land only on the *sibling* stream. An exact-source
-          // subscription on `base` must not see them as work; the control
-          // sourced from the sibling must.
-          await seed_stream(fresh, sibling, 1);
-          const second = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-          expect(second.find((l) => l.stream === control)).toBeDefined();
-          expect(second.find((l) => l.stream === target)).toBeUndefined();
-        } finally {
-          await fresh.dispose();
-        }
-      });
-
+    // A subscription's `source` is the window its FETCH reads — a literal
+    // stream name matched by equality, or a portable pattern. It is no
+    // longer anything to `claim`, which since #1488 answers eligibility
+    // from the row's mark alone and never reads the event log.
+    //
+    // The matching itself did not disappear, it moved up a layer: correlate
+    // applies it when deciding which events may raise a target's mark
+    // (`_in_fetch_window`, #1487), and the cases that used to live here —
+    // exact names never overmatching a sibling prefix (ACT-1182), pattern
+    // sources claiming only on a real match (ACT-1220) — are now in
+    // `libs/act/test/correlate-work-mark.spec.ts`. What remains here is
+    // what the store still owns: the fetch window, source portability, and
+    // lease exclusivity.
+    describe("source windows and lease exclusivity", () => {
       it("receives exactly its source stream's events", async () => {
         const fresh = await options.factory();
         try {
@@ -1757,6 +1798,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           const target = `agg-${uid()}`;
           await fresh.subscribe([{ stream: target, source: base }]);
           const [e1] = await seed_stream(fresh, base, 1);
+          await correlate(fresh);
           const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
           const f = first.find((l) => l.stream === target);
           expect(f).toBeDefined();
@@ -1766,6 +1808,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // again, and the fetch window (source + after watermark) yields
           // exactly the new event.
           const [e2] = await seed_stream(fresh, base, 1);
+          await correlate(fresh);
           const second = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
           const sec = second.find((l) => l.stream === target);
           expect(sec).toBeDefined();
@@ -1797,6 +1840,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.subscribe([{ stream: target, source: base }]);
           const [b1] = await seed_stream(fresh, base, 1);
           await seed_stream(fresh, sibling, 1);
+          await correlate(fresh);
           const claimed = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
           const lease = claimed.find((l) => l.stream === target);
           expect(lease).toBeDefined();
@@ -1813,91 +1857,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // ACT-1220: a **pattern** source (one carrying regex metacharacters) is
-    // matched as a full RegExp against candidate streams. This restores the
-    // calculator's shipped `source: "^(A|B)$"` static reaction, which
-    // #1215's exact-only claim contract silently broke — the Board
-    // projection stopped being claimed because `_max_event_id_by_stream.get(
-    // "^(A|B)$")` is always undefined. Literal sources keep the fast exact
-    // path; only sources with metacharacters compile to a RegExp.
-    describe.skipIf(!caps.pattern_claim_source)(
-      "claim pattern source matching (capability)",
-      () => {
-        it("claims a pattern-source target when any matched stream has work (^(A|B)$)", async () => {
-          const fresh = await options.factory();
-          try {
-            await fresh.drop();
-            await fresh.seed();
-            const a = `A-${uid()}`;
-            const b = `B-${uid()}`;
-            const target = `board-${uid()}`;
-            const pattern = `^(${a}|${b})$`;
-            await fresh.subscribe([{ stream: target, source: pattern }]);
-            // Commit to A only — the pattern must match it and claim.
-            const [ea] = await seed_stream(fresh, a, 1);
-            const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-            const l1 = first.find((s) => s.stream === target);
-            expect(l1).toBeDefined();
-            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
-            // Now commit to B — the same pattern-source target must claim
-            // again for the second matched stream.
-            const [eb] = await seed_stream(fresh, b, 1);
-            const second = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-            expect(second.find((s) => s.stream === target)).toBeDefined();
-            expect(eb.stream).toBe(b);
-          } finally {
-            await fresh.dispose();
-          }
-        });
-
-        it("does not claim a pattern-source target when no matched stream has work", async () => {
-          const fresh = await options.factory();
-          try {
-            await fresh.drop();
-            await fresh.seed();
-            const a = `A-${uid()}`;
-            const b = `B-${uid()}`;
-            const other = `Z-${uid()}`;
-            const target = `board-${uid()}`;
-            const control = `ctl-${uid()}`;
-            const pattern = `^(${a}|${b})$`;
-            // The control target sources from `other` (a literal). It DOES
-            // see the `other` commit below, so the second claim is
-            // non-empty and the negative assertion runs through a
-            // populated result — the pattern target must simply be absent.
-            await fresh.subscribe([
-              { stream: target, source: pattern },
-              { stream: control, source: other },
-            ]);
-            // Advance the target's watermark past -1 first, so the
-            // negative assertion below runs against a settled stream
-            // rather than a fresh one.
-            const [ea] = await seed_stream(fresh, a, 1);
-            const first = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-            const l1 = first.find((s) => s.stream === target);
-            expect(l1).toBeDefined();
-            // The control is not in this claim: its source has no events
-            // yet, and a subscription with no matching work is not claimed
-            // (#1446). It becomes claimable only on the commit below,
-            // which is what makes the second claim non-empty.
-            expect(first.map((s) => s.stream)).not.toContain(control);
-            // Ack the pattern target so its lease isn't held into the
-            // second claim.
-            await fresh.ack([{ ...(l1 as Lease), at: ea.id }]);
-            // Now activity on a stream the pattern does NOT match must not
-            // make the target claimable again — but the control sourced
-            // from that stream must.
-            await seed_stream(fresh, other, 1);
-            const claimed = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-            const streams = claimed.map((s) => s.stream);
-            expect(streams).toContain(control);
-            expect(streams).not.toContain(target);
-          } finally {
-            await fresh.dispose();
-          }
-        });
-      }
-    );
+    // ACT-1220's pattern-source claim cases are gone with the probe (#1488).
+    // A pattern source (one carrying regex metacharacters, like the
+    // calculator's `^(A|B)$`) is still matched as a full RegExp — but by
+    // correlate, when it decides which events may raise a target's mark,
+    // not by `claim`, which no longer reads the event log. The cases now
+    // live in `libs/act/test/correlate-work-mark.spec.ts`.
 
     // ACT-1220: adapters that cannot faithfully run an arbitrary regex in
     // claim reject a non-portable claim source loudly at subscribe() —
@@ -1915,24 +1880,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
                 { stream: `board-${uid()}`, source: `^(${uid()}|${uid()})$` },
               ])
             ).rejects.toThrow(ValidationError);
-          } finally {
-            await fresh.dispose();
-          }
-        });
-
-        it("accepts a portable-subset pattern claim source (^prefix.*) and claims on match", async () => {
-          const fresh = await options.factory();
-          try {
-            await fresh.drop();
-            await fresh.seed();
-            const prefix = `pfx${uid()}`.replace(/-/g, "");
-            const matched = `${prefix}child`;
-            const target = `board-${uid()}`;
-            await fresh.subscribe([{ stream: target, source: `^${prefix}.*` }]);
-            const [e] = await seed_stream(fresh, matched, 1);
-            const claimed = await fresh.claim(100, 0, `w-${uid()}`, 30_000);
-            expect(claimed.find((s) => s.stream === target)).toBeDefined();
-            expect(e.stream).toBe(matched);
           } finally {
             await fresh.dispose();
           }
@@ -1973,6 +1920,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // Overlapping budgets so both workers target the same set;
           // SKIP LOCKED (pg) / atomic lease (in-memory) must hand each
           // stream to at most one worker.
+          await correlate(fresh);
           const [a, b] = await Promise.all([
             fresh.claim(100, 100, `wA-${uid()}`, 60_000),
             fresh.claim(100, 100, `wB-${uid()}`, 60_000),
@@ -2004,6 +1952,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           const other = `unexpired-other-${uid()}`;
           await fresh.subscribe([{ stream: s }]);
           await seed_stream(fresh, s, 1);
+          await correlate(fresh);
           const a = await fresh.claim(100, 100, `wA-${uid()}`, 60_000);
           expect(a.find((l) => l.stream === s)).toBeDefined();
           // Subscribe `other` only AFTER A's claim so B's claim comes back
@@ -2011,6 +1960,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // array (mirrors "does not double-claim a held lease").
           await fresh.subscribe([{ stream: other }]);
           await seed_stream(fresh, other, 1);
+          await correlate(fresh);
           const b = await fresh.claim(100, 100, `wB-${uid()}`, 60_000);
           expect(b.find((l) => l.stream === other)).toBeDefined();
           expect(b.find((l) => l.stream === s)).toBeUndefined();
@@ -2028,6 +1978,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.subscribe([{ stream: s }]);
           const [e1] = await seed_stream(fresh, s, 1);
           // The original holder "dies": a 0ms lease is expired on arrival.
+          await correlate(fresh);
           const dead = await fresh.claim(100, 0, `wDead-${uid()}`, 0);
           expect(dead.find((l) => l.stream === s)?.retry).toBe(0);
           // Two workers race for the expired lease — exactly one wins,
@@ -2043,6 +1994,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // Ack by the winning worker resets the shared budget.
           await fresh.ack([{ ...winners[0], at: e1.id }]);
           await seed_stream(fresh, s, 1);
+          await correlate(fresh);
           const again = await fresh.claim(100, 0, `wNext-${uid()}`, 60_000);
           expect(again.find((l) => l.stream === s)?.retry).toBe(0);
         } finally {
@@ -2060,6 +2012,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -2070,6 +2023,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ]);
         expect(blocked).toHaveLength(1);
         expect(blocked[0].error).toBe("boom");
+        await correlate();
         const again = await store.claim(100, 100, `w2-${uid()}`, 100_000);
         expect(again.find((l) => l.stream === s)).toBeUndefined();
       });
@@ -2089,6 +2043,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -2118,6 +2073,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `right-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -2137,6 +2093,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -2170,6 +2127,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           );
         // Defer far into the future — claim must skip it.
         expect(await store.defer([s], Date.now() + 3_600_000)).toBe(1);
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         expect(leased.find((l) => l.stream === ctl)).toBeDefined();
         expect(leased.find((l) => l.stream === s)).toBeUndefined();
@@ -2185,6 +2143,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         // A due-time already in the past is not a constraint.
         expect(await store.defer([s], Date.now() - 1_000)).toBe(1);
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -2204,10 +2163,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         await store.defer([s], Date.now() + 3_600_000);
         // Several claim attempts while deferred — none should touch the row.
+        await correlate();
         await store.claim(100, 100, `w1-${uid()}`, 100_000);
+        await correlate();
         await store.claim(100, 100, `w2-${uid()}`, 100_000);
         // Re-defer into the past so it becomes claimable, then observe retry.
         await store.defer([s], Date.now() - 1_000);
+        await correlate();
         const leased = await store.claim(100, 100, `w3-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -2228,6 +2190,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         await store.defer([s], Date.now() + 3_600_000);
         expect(await store.reset([s])).toBe(1);
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         expect(leased.find((l) => l.stream === s)).toBeDefined();
       });
@@ -2288,6 +2251,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           Date.now() + 3_600_000
         );
         expect(n).toBe(2);
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         expect(leased.find((l) => l.stream === ctl)).toBeDefined();
         expect(leased.find((l) => l.stream === a)).toBeUndefined();
@@ -2331,6 +2295,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: ctl })
         );
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const s_lease = leased.find((l) => l.stream === s)!;
         const ctl_lease = leased.find((l) => l.stream === ctl)!;
@@ -2348,6 +2313,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(2)],
           make_meta({ stream: ctl })
         );
+        await correlate();
         const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
         expect(again.find((l) => l.stream === ctl)).toBeDefined();
         expect(again.find((l) => l.stream === s)).toBeUndefined();
@@ -2367,9 +2333,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
         await store.ack([{ ...mine, due: Date.now() - 1_000, retry: -1 }]);
+        await correlate();
         const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const re = again.find((l) => l.stream === s);
         expect(re).toBeDefined();
@@ -2390,11 +2358,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
         // Persist retry 3 with a past due-time so it's immediately re-claimable.
         // `at` = the claim watermark (no progress), so the advance is a no-op.
         await store.ack([{ ...mine, due: Date.now() - 1_000, retry: 3 }]);
+        await correlate();
         const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const re = again.find((l) => l.stream === s);
         expect(re).toBeDefined();
@@ -2422,6 +2392,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
         expect(mine.at).toBeLessThan(e1.id); // fresh stream — floor below e1
@@ -2430,6 +2401,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.ack([
           { ...mine, at: e1.id, due: Date.now() - 1_000, retry: 2 },
         ]);
+        await correlate();
         const again = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const re = again.find((l) => l.stream === s);
         expect(re).toBeDefined();
@@ -2448,6 +2420,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s)!;
         await store.ack([
@@ -2468,11 +2441,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
         await store.ack([{ ...(mine as Lease), at: 99 }]);
         expect(await store.reset([s])).toBe(1);
+        await correlate();
         const after = await store.claim(100, 0, `w2-${uid()}`, 100_000);
         const back = after.find((l) => l.stream === s);
         expect(back).toBeDefined();
@@ -2487,12 +2462,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         const others = leased.filter((l) => l.stream !== s);
         await store.ack(others);
         await store.block([{ ...(mine as Lease), error: "boom" }]);
         expect(await store.reset([s])).toBe(1);
+        await correlate();
         const after = await store.claim(100, 0, `w2-${uid()}`, 100_000);
         expect(after.find((l) => l.stream === s)).toBeDefined();
       });
@@ -2533,11 +2510,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
 
         // First lease + ack first event → watermark advances.
+        await correlate();
         const first = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const m1 = first.find((l) => l.stream === s);
         await store.ack([{ ...(m1 as Lease), at: m1!.at }]);
 
         // Capture watermark before block.
+        await correlate();
         const before_block = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const m2 = before_block.find((l) => l.stream === s);
         expect(m2).toBeDefined();
@@ -2560,6 +2539,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
         // Unblock — claim picks it back up at the same watermark.
         expect(await store.unblock([s])).toBe(1);
+        await correlate();
         const after = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const back = after.find((l) => l.stream === s);
         expect(back).toBeDefined();
@@ -2598,6 +2578,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s2 })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const m1 = leased.find((l) => l.stream === s1);
         const others = leased.filter((l) => l.stream !== s1);
@@ -2629,6 +2610,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           make_meta({ stream: s3 })
         );
         // Block all three.
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const blockable: BlockedLease[] = leased
           .filter((l) => l.stream === s1 || l.stream === s2 || l.stream === s3)
@@ -2649,6 +2631,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(count).toBe(2);
 
         // s3 is still blocked.
+        await correlate();
         const after = await store.claim(100, 0, `w-${uid()}`, 100_000);
         expect(after.find((l) => l.stream === s3)).toBeUndefined();
         // s1 and s2 are unblocked and claimable.
@@ -2676,6 +2659,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s2 })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.filter((l) => l.stream === s1 || l.stream === s2);
         await store.ack(leased.filter((l) => !mine.includes(l)));
@@ -2737,6 +2721,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           make_meta({ stream: other })
         );
         // Advance watermarks for all three so the reset is observable.
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.filter(
           (l) => l.stream === s1 || l.stream === s2 || l.stream === other
@@ -2780,6 +2765,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s2 })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const m1 = leased.find((l) => l.stream === s1);
         await store.ack(leased.filter((l) => l.stream !== s1));
@@ -2885,6 +2871,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { stream: sub_slow, source: src2, lane: "slow" },
         ]);
 
+        await correlate();
         const slow = await store.claim(50, 0, `w-slow-${tag}`, 1_000, "slow");
         const slow_mine = slow.filter(
           (l) => l.stream === sub_default || l.stream === sub_slow
@@ -2893,6 +2880,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(slow_mine[0]?.lane).toBe("slow");
         await store.ack(slow_mine.map((l) => ({ ...l, at: l.at + 1 })));
 
+        await correlate();
         const all = await store.claim(50, 0, `w-all-${tag}`, 1_000);
         const all_mine = all
           .filter((l) => l.stream === sub_default || l.stream === sub_slow)
@@ -2957,6 +2945,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { stream: a, source: src, lane: `rslow-${tag}` },
           { stream: b, source: src, lane: `rfast-${tag}` },
         ]);
+        await correlate();
         const leases = await store.claim(50, 0, `w-${tag}`, 5_000);
         const mine = leases.filter((l) => l.stream === a || l.stream === b);
         await store.ack(mine.map((l) => ({ ...l, at: l.at + 1 })));
@@ -2991,6 +2980,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { stream: a, source: src, lane: `uslow-${tag}` },
           { stream: b, source: src, lane: `ufast-${tag}` },
         ]);
+        await correlate();
         const leases = await store.claim(50, 0, `w-${tag}`, 5_000);
         const mine = leases.filter((l) => l.stream === a || l.stream === b);
         await store.block(mine.map((l) => ({ ...l, error: "boom" })));
@@ -3436,6 +3426,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: s })
         );
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         const others = leased.filter((l) => l.stream !== s);
@@ -3738,6 +3729,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
 
         // Block stream `a` via the standard claim → block path.
+        await correlate();
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === a);
         expect(mine).toBeDefined();

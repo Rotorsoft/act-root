@@ -1,5 +1,38 @@
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { dispose, store } from "../src/index.js";
+import type { Store } from "../src/types/index.js";
+
+/**
+ * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * so a test that commits events has to say which of them resolve where.
+ * Marks every subscription up to the log head, which is honest for these
+ * fixtures — their sources carry the events under test.
+ */
+const mark_all = async (s: Store) => {
+  const rows: {
+    stream: string;
+    at: number;
+    priority: number;
+    lane?: string;
+  }[] = [];
+  const { maxEventId } = await s.query_streams((p) =>
+    rows.push({
+      stream: p.stream,
+      at: p.at,
+      priority: p.priority,
+      lane: p.lane,
+    })
+  );
+  const marks = rows
+    .filter((r) => r.at < maxEventId)
+    .map((r) => ({
+      stream: r.stream,
+      priority: r.priority,
+      lane: r.lane,
+      correlated_at: maxEventId,
+    }));
+  if (marks.length) await s.subscribe(marks);
+};
 
 // Contract-level cases live in `in-memory-store-tck.spec.ts` (via the
 // shared Store TCK in `@rotorsoft/act-tck`). This file only covers
@@ -17,29 +50,11 @@ describe("InMemoryStore (adapter-specific)", () => {
     await dispose()();
   });
 
-  it("claims by exact source and ignores sources with no committed events", async () => {
-    const s = store();
-    await s.commit("order-1", [{ name: "A", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
-    // One subscriber on an exact source with events, one on a source
-    // that never receives a commit.
-    await s.subscribe([
-      { stream: "sub-1", source: "order-1" },
-      { stream: "sub-2", source: "ghost" },
-    ]);
-    // Advance their watermarks so hasWork() does not short-circuit on at < 0.
-    const first = await s.claim(2, 0, "actor", 10);
-    await s.ack(first.map((l) => ({ ...l, at: 0 })));
-    // Commit a fresh event so only the exact source has work past the watermark.
-    await s.commit("order-1", [{ name: "A", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
-    const claimed = await s.claim(2, 0, "actor2", 10000);
-    expect(claimed.map((l) => l.stream)).toEqual(["sub-1"]);
-  });
+  // "claims by exact source and ignores sources with no committed events"
+  // lived here until #1488. `claim` no longer reads the event log, so it has
+  // no source to match — correlate applies the source window when it decides
+  // which events may raise a mark, and the coverage moved with it to
+  // `correlate-work-mark.spec.ts`.
 
   it("binary-searches id bounds on backward scans across truncation holes", async () => {
     const s = store();
@@ -77,6 +92,7 @@ describe("InMemoryStore (adapter-specific)", () => {
     await s.subscribe([{ stream: "sub", source: "src" }]);
 
     // Nothing committed yet, so there is nothing to claim.
+    await mark_all(s);
     expect(await s.claim(5, 5, "w", 5_000)).toHaveLength(0);
 
     // The first event this store ever issues carries id 0.
@@ -88,6 +104,7 @@ describe("InMemoryStore (adapter-specific)", () => {
 
     // It must be claimable, and the lease must open at -1 so the event
     // sits inside the fetch window rather than behind it.
+    await mark_all(s);
     const leases = await s.claim(5, 5, "w", 5_000);
     expect(leases).toHaveLength(1);
     expect(leases[0].at).toBe(-1);

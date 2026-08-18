@@ -114,12 +114,45 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
    * unprocessed events, record deliveries, ack the new watermark. Returns
    * the set of streams this worker claimed in the step.
    */
+  /**
+   * Correlate's job, done by hand (#1488): `claim` follows the work mark, so
+   * a worker only sees what has been marked. Marking to the log head before
+   * each step is what the orchestrator's correlate would have done, and
+   * keeps this suite about lease exclusivity rather than discovery.
+   */
+  const markAll = async (w: PostgresStore) => {
+    const rows: {
+      stream: string;
+      at: number;
+      priority: number;
+      lane?: string;
+    }[] = [];
+    const { maxEventId } = await w.query_streams((p) =>
+      rows.push({
+        stream: p.stream,
+        at: p.at,
+        priority: p.priority,
+        lane: p.lane,
+      })
+    );
+    const marks = rows
+      .filter((r) => r.at < maxEventId)
+      .map((r) => ({
+        stream: r.stream,
+        priority: r.priority,
+        lane: r.lane,
+        correlated_at: maxEventId,
+      }));
+    if (marks.length) await w.subscribe(marks);
+  };
+
   const drainStep = async (
     w: PostgresStore,
     by: string,
     deliveries: Delivery[],
     opts: { lagging: number; leading: number; leaseMillis: number }
   ): Promise<Set<string>> => {
+    await markAll(w);
     const leases = await w.claim(
       opts.lagging,
       opts.leading,
@@ -203,6 +236,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
     const B = newWorker();
 
     // A claims the only claimable stream and holds a long lease.
+    await markAll(control);
     const aLeases = await A.claim(4, 4, "c2-A", 30_000);
     const aLease = aLeases.find((l) => l.stream === stream);
     expect(aLease).toBeDefined();
@@ -284,6 +318,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
 
       // A takes the 5 most-behind streams (at 0..4); B takes the 5 most-ahead
       // (at 15..19). Disjoint candidate sets — on correct locking both succeed.
+      await markAll(A);
       const [aLeases, bLeases] = await Promise.all([
         A.claim(5, 0, "c-lock-A", 30_000),
         B.claim(0, 5, "c-lock-B", 30_000),
@@ -319,6 +354,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
 
     const A = newWorker();
     const B = newWorker();
+    await markAll(A);
     const aLeases = await A.claim(4, 4, "c3-A", 30_000);
     const poisonLease = aLeases.find((l) => l.stream === poison);
     expect(poisonLease).toBeDefined();
