@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.9.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.8...@rotorsoft/act-http-v1.9.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act-http:** keep the sse subpath importable from a browser ([#1514](https://github.com/Rotorsoft/act-root/issues/1514)) ([42050e0](https://github.com/Rotorsoft/act-root/commit/42050e03d1f7117df6bac16a63c1ea89505d6ab5)), closes [#1423](https://github.com/Rotorsoft/act-root/issues/1423) [#1423](https://github.com/Rotorsoft/act-root/issues/1423)
+
 # [@rotorsoft/act-http-v1.9.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.7...@rotorsoft/act-http-v1.9.8) (2026-08-18)
 
 
