@@ -133,11 +133,11 @@ fire a release for every library, and each one without a registered publisher
 fails and strands a tag.
 
 - [x] `@rotorsoft/act-patch` + root `package.json`
-- [ ] The other twelve, one per package as its publisher is registered
+- [x] The other twelve, in one commit once every publisher was registered
 
 ### Then the rest
 
-- [ ] Register Trusted Publishers for the remaining twelve packages
+- [x] Register Trusted Publishers for the remaining twelve packages
 - [ ] Delete the `NPM_TOKEN` repository secret
 - [ ] Keep `NPM_CONFIG_PROVENANCE: true` — trusted publishing enables provenance
       by default, but the explicit flag survives a change of publish path

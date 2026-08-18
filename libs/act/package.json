@@ -16,12 +16,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "url": "git+https://github.com/Rotorsoft/act-root.git",
     "directory": "libs/act"
   },
-  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act#readme",
+  "homepage": "https://github.com/Rotorsoft/act-root/tree/master/libs/act#readme",
   "bugs": {
-    "url": "https://github.com/rotorsoft/act-root/issues"
+    "url": "https://github.com/Rotorsoft/act-root/issues"
   },
   "files": [
     "dist"
