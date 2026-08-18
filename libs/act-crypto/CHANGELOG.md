@@ -1,3 +1,10 @@
+# [@rotorsoft/act-crypto-v0.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.4...@rotorsoft/act-crypto-v0.1.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **act:** match GitHub's owner casing in repository.url ([a719f54](https://github.com/Rotorsoft/act-root/commit/a719f548acb22cd303a229a4c4dafbf8f8e4f5b7))
+
 # [@rotorsoft/act-crypto-v0.1.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.3...@rotorsoft/act-crypto-v0.1.4) (2026-08-06)
 
 
