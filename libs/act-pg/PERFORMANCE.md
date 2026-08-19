@@ -811,3 +811,93 @@ in watermark order and filters. Lanes partition the set, so each holds fewer
 rows — but a highly selective lane on a large table will walk further than it
 would with a `(lane, at)` index. Not added here: it would be a third index on
 the hottest-written table, and no measured workload needs it yet.
+## #1510 — the subscription workload under N workers, and whether a hybrid would help
+
+RFC 1449's acceptance criterion 3, and the measurement that was supposed to
+justify moving subscriptions to a different system. It argues against it.
+
+`scripts/subscription-contention.bench.mjs`, docker PG :5431 (M3 Pro), 20,000
+subscriptions, 10s per cell. Workers run the real `claim` → `ack` loop; a
+marker task stands in for correlate, re-marking 200 streams per batch
+continuously, which is the write #1487 put on the steady-state path.
+
+Two arms, identical subscription traffic — `isolated` has no event-log writes,
+`shared` runs a concurrent committer, which is production.
+
+| W | arm | claim p50 | claim p99 | claims/s | leased/s | ack p99 | sub p99 | HOT% | idx +MB |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | isolated | 20.01 ms | 26.71 | 44 | 439 | 5.30 | 13.28 | 14% | 1.7 |
+| 1 | shared | 16.63 ms | 20.66 | 55 | 548 | 3.33 | 8.94 | 17% | 1.7 |
+| 2 | isolated | 17.74 ms | 27.39 | 98 | 859 | 4.16 | 12.89 | 21% | 1.8 |
+| 2 | shared | 17.22 ms | 26.21 | 97 | 885 | 3.65 | 8.25 | 22% | 1.7 |
+| 4 | isolated | 17.11 ms | 27.23 | 205 | 1343 | 4.86 | 13.40 | 27% | 1.9 |
+| 4 | shared | 17.53 ms | 24.96 | 204 | 1298 | 4.90 | 12.62 | 26% | 2.0 |
+| 8 | isolated | 20.18 ms | 35.56 | 342 | 1780 | 7.87 | 20.23 | 30% | 2.3 |
+| 8 | shared | 20.69 ms | 42.73 | 333 | 1753 | 8.31 | 23.34 | 30% | 2.3 |
+
+### The event log next to the subscriptions costs nothing
+
+`isolated` and `shared` are the same numbers. At 8 workers: 20.18 vs 20.69 ms
+p50, 342 vs 333 claims/s. The only visible difference is claim p99 (35.6 vs
+42.7), which is tail noise at this sample size.
+
+**This kills the "second Postgres instance" hybrid.** That design isolates the
+subscription table from the log's WAL, vacuum budget and connection pool — and
+the measurement says those are not what is costing anything. Separating two
+workloads that do not contend buys nothing. Recorded because the opposite was
+the intuitive answer and was written down as the likely first move.
+
+### Competing consumers scale
+
+Claim throughput is near-linear to 8 workers (44 → 98 → 205 → 342 per second,
+7.8×). `leased/s` grows sub-linearly (439 → 1780, 4×) because later workers
+`SKIP LOCKED` past a frontier the earlier ones already took — expected, and the
+reason it is a separate column. No contention collapse; p50 is flat across the
+whole range.
+
+### What is real: the index that makes claim fast makes ack expensive
+
+Only **14–38% of updates are HOT**. A heap-only tuple update avoids touching
+indexes, and this workload cannot use one: `ack` advances `at`, `at` is a key
+column of the partial claim index `(lane, priority DESC, at) WHERE blocked =
+false AND at < correlated_at`, and moving `at` also changes that index's
+membership predicate. So the majority of acks write index entries and leave
+dead ones behind — 2–3 MB of index growth per 10-second cell under load.
+
+That is structural rather than a tuning miss. It is the cost side of the trade
+#1485 made: the read got cheap because the write maintains an index.
+
+Within a run the degradation is mild — claim p50 in the last third of a 20s
+run is **1.10–1.12×** the first third, with autovacuum running 0–1 times. The
+long-run shape is not measured here.
+
+### What this means for a hybrid
+
+Only a store without MVCC removes this — the churn follows from how Postgres
+answers an UPDATE, not from where the table lives. So the hybrid question
+narrows to a different engine (Redis: a score update on a sorted set leaves no
+dead tuple), and stops being about co-location at all.
+
+Whether that is worth a second system depends on the long-run bloat curve,
+which needs a longer run than this. **Nothing here justifies building one yet.**
+
+### Caveats, because they bound the conclusions
+
+- The N "workers" are async tasks in one Node process against one pool, not
+  separate processes. Real competing consumers add network and per-process
+  pool effects this does not capture.
+- 10–20 second cells are far too short for autovacuum steady state. The
+  drift number is a hint, not the long-run answer.
+- `HIT_RATE` seeds the initial pending fraction, but the marker immediately
+  starts making streams eligible again, so it barely moves the result. That is
+  faithful to production, where correlate marks continuously — but it means
+  this bench does not measure a genuinely idle system.
+
+### Reproducing
+
+```bash
+docker compose up -d
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/subscription-contention.bench.mjs
+# STREAMS / SECONDS / WORKERS / HIT_RATE override the shape
+```
