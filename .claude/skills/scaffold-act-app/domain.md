@@ -332,13 +332,13 @@ export const app = appBuilder.build();
 
 **Export the builder for tests**: `fixture()` / `sandbox()` need the *unbuilt* builder (they call `.build()` with a scoped store/cache themselves). Export `appBuilder` alongside the built `app` so tests get their own isolated Act per run.
 
-> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §7 (Correlate Before Drain).
+> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()`. Correlate both discovers target streams and marks which ones have work; a stream is claimable only while its watermark is below that mark, so a commit alone does not make it drainable. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §7 (Correlate Before Drain).
 
 ## Tests
 
 **What to test and what not to:** Test domain behavior — actions produce correct events, invariants reject invalid state transitions, reactions trigger expected downstream actions, projections build correct read models. Do NOT test framework internals (event storage, cache behavior, version numbering). Trust the framework for infrastructure; verify your business logic.
 
-**Testing reactions requires two steps:** First `correlate()` to discover target streams, then `drain()` to process them. A common AI mistake is calling only `drain()` — it returns empty because no streams were registered. In tests, always call both explicitly. In production, `settle()` handles this automatically.
+**Testing reactions requires two steps:** First `correlate()` — which discovers target streams *and* marks the work waiting on them — then `drain()` to claim and process it. A common AI mistake is calling only `drain()`; it returns empty, because `claim` follows the mark and nothing has raised one. That applies to already-registered and static targets too, not just newly discovered ones. In tests, always call both explicitly. In production, `settle()` handles this automatically.
 
 ```typescript
 import { expect } from "vitest";
@@ -367,7 +367,7 @@ test("processes reactions and projections", async ({ app }) => {
   clearItems();             // reset in-memory projection before this test
   const t = target();
   await app.do("CreateItem", t, { name: "Test" });
-  await app.correlate();    // discover reaction target streams first
+  await app.correlate();    // discover targets AND mark their work
   await app.drain({ streamLimit: 10, eventLimit: 100 });
 
   // Verify projection was updated

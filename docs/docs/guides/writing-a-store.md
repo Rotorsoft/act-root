@@ -72,10 +72,11 @@ and try to reshape it in place.
 `claim` has to answer "which subscribed streams have unconsumed work?". The
 obvious implementation asks the event log — `EXISTS (SELECT 1 FROM events
 WHERE id > at ...)` per eligible subscription — and that is what every adapter
-did. It costs O(**subscribed** streams) per claim per worker, which is the
-wrong axis: a per-aggregate reaction (`.to(e => ({ target: e.stream }))`)
-subscribes one stream per aggregate, so the probe grows with the domain rather
-than with the backlog.
+did until [#1488](https://github.com/Rotorsoft/act-root/issues/1488). It costs
+O(**subscribed** streams) per claim per worker, which is the wrong axis: a
+per-aggregate reaction (`.to(e => ({ target: e.stream }))`) subscribes one
+stream per aggregate, so the cost grew with the domain rather than with the
+backlog. **Your adapter must not do this.** `claim` reads no events at all.
 
 `SubscribeInput.correlated_at` ([#1485](https://github.com/Rotorsoft/act-root/issues/1485))
 lets the subscription row answer instead. It is the highest event id observed

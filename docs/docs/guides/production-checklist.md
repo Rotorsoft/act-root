@@ -306,6 +306,24 @@ To catch a half-configured rollout early, each instance logs a one-line startup 
 
 See [Configuration → Lanes](../concepts/configuration.md#lanes) for the full API surface, and `libs/act/PERFORMANCE.md § Lane Fan-out` for the headline number: ~7× faster fast-event latency under slow-lane backpressure on Postgres.
 
+## 12. Upgrading an install that predates the work mark
+
+Only relevant once, when moving an existing deployment onto a build that carries [#1488](https://github.com/Rotorsoft/act-root/issues/1488). New installs need nothing here.
+
+`claim` no longer reads the event log. A subscription is claimable while its watermark sits below its **work mark** (`correlated_at`), and only `correlate` raises a mark — so a row that has never been correlated is, by definition, not claimable.
+
+Rows created before the column existed have no mark, and `correlate` cannot rescue them: its checkpoint is far past the events those rows are waiting on. **`seed()` handles this for you.** It marks every unmarked row at the log's head — deliberately an over-estimate, meaning "worth one look" rather than "there is work here". The first drain claims each such stream once, fetches its window, handles whatever is genuinely there, acks, and the row settles at an honest position.
+
+What that costs is **one extra drain cycle per pre-existing subscription**, paid once. On an install with a large number of subscribed streams, expect the first settle after the upgrade to be busier than usual and to mostly do nothing — those are the empty fetches converting guesses into real watermarks.
+
+What to check afterwards:
+
+- Reactions resume. `app.blocked_streams()` should be no longer than it was before the upgrade.
+- The first settle drains to quiescence rather than looping. If it does not, the streams still moving are the ones with real backlog.
+- Nothing needs rewinding by hand. If you find yourself reaching for `app.reset(...)` to "wake up" a stream, stop — `reset` sets the watermark to `-1` and replays *everything*, which on a webhook target means re-firing its entire history. The mark, not the watermark, is what decides claimability.
+
+Run `seed()` as part of the deploy, the way you already do for schema sync — there is no separate migration step and no operator-invoked sweep.
+
 ## Pre-deploy quick check
 
 Before pushing to production, walk this list mentally:

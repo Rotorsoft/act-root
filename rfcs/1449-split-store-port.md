@@ -80,7 +80,13 @@ With `claim` reading only its own tables, `Store` divides cleanly:
 
 `truncate` remains the one genuinely cross-store operation and needs a resumable two-phase protocol. Tractable: close is low-cadence and #1389 already made an interrupted close resumable.
 
-**Build this only on demand.** It buys a deployment option and no performance that step 1 has not already delivered, at the cost of a second port, a second TCK, and an untested adapter × adapter matrix.
+**Build this only on demand — and the demand may never arrive.** It buys a deployment option and no performance that step 1 has not already delivered, at the cost of a second port, a second TCK, and an untested adapter × adapter matrix.
+
+The deployment option turned out not to need the split at all. A **hybrid adapter** implements the existing single `Store` and routes internally — event-log methods to one system, subscription methods to another — so callers keep one interface and the seam is an implementation detail. `@rotorsoft/act-notify`'s `withBroker(store, broker)` is the same shape already in-tree.
+
+What made this possible is step 5. While `claim` probed the event log, a hybrid would have had to read across both systems on the hottest path in the framework — the very join this RFC exists to delete, reintroduced at the adapter boundary. Once eligibility became `at < correlated_at` on the subscription row, every method belongs cleanly to one half.
+
+So the split is deferred to 2.0 (it renames a charter-covered surface) and reopens only on evidence: implementors writing the same delegation boilerplate, or `truncate`'s two-phase protocol proving genuinely awkward behind one interface. `truncate` stays the one cross-store operation either way.
 
 ### Prerequisite — shipped, with one half deferred
 
@@ -117,7 +123,7 @@ Each step ships independently and is valuable on its own.
 | 3 | **`correlated` column + partial index + `subscribe({correlated})`** on PG, SQLite, InMemory, with TCK cases and the `correlated IS NULL` legacy arm. | dark — no behavior change | The bulk of the work. |
 | 4 | **Correlate becomes the universal producer** — ✅ shipped in [#1487](https://github.com/Rotorsoft/act-root/issues/1487). Resolves static targets too, no longer early-returns for static-only apps, records `correlated_at` for every target an event resolves to. | behavior change | Measured cost to a static-only app: +14% catch-up, +2.2 ms per one-event settle round on act-pg. Two consequences fell out — `drain()` alone no longer picks up a commit no correlate has seen, and the close-cycle safety probe had to stop reading watermark lag as pending work ([RFC 1487](./1487-work-mark-on-stream-positions.md)). |
 | 5 | **Delete the legacy probe arm** — ✅ shipped in [#1488](https://github.com/Rotorsoft/act-root/issues/1488). `claim` reads no events on any adapter; a row with no mark is not claimable, definitionally. | payoff | Claim time is now **flat in subscribed streams**: 180 ms → 2.3 ms at 100k on act-pg, 232 ms → 13 ms at 20k on act-sqlite. No reconciliation sweep was needed — `seed()` marks pre-existing rows at the log's head ("worth one look"), and the first drain replaces the guess. Source matching left the store with the probe; it lives in correlate now. |
-| 6 | *(demand-gated)* **Split the port** — `EventStore` + `SubscriptionStore`, resumable two-phase `truncate`, second TCK. | | Judged then as "is a second port worth the deployment flexibility". |
+| 6 | *(deferred to 2.0, likely superseded)* **Split the port** — `EventStore` + `SubscriptionStore`. | | The deployment flexibility is reachable without it: a **hybrid adapter** implements the single `Store` and routes each half to a different system. Step 5 is what made that possible — while `claim` probed the log, a hybrid needed a cross-store read on the hottest path. Splitting the port is a charter-breaking rename, so it moved to the 2.0 milestone; see [#1489](https://github.com/Rotorsoft/act-root/issues/1489). |
 
 ### What steps 3 and 4 cost, and the rule that came out of it
 
