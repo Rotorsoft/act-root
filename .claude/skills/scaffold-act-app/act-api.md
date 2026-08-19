@@ -330,14 +330,16 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 
 ## 7. Correlate Before Drain — settle() Pattern
 
-`app.correlate()` scans events, resolves reaction targets, and **registers new streams** with the store via `store().subscribe()`. Without this step, `drain()` won't find streams to process.
+`app.correlate()` scans events, resolves each one to its reaction targets, and records what it found via `store().subscribe()` — registering new target streams, and marking every target that has work waiting.
+
+That second half is why `drain()` alone finds nothing. A stream is claimable only while its watermark sits below its **work mark**, and `correlate` is the only thing that raises a mark. So this holds even for a target that was registered long ago and for a static `.to("name")` target — committing an event does not make it drainable, correlating it does.
 
 ```typescript
-// ✅ Correct — correlate discovers streams, then drain processes them
+// ✅ Correct — correlate marks the work, then drain claims it
 await app.correlate();
 await app.drain();
 
-// ❌ Wrong — drain has no streams to process
+// ❌ Wrong — nothing has marked the new events as claimable
 await app.drain();  // returns empty results
 ```
 
