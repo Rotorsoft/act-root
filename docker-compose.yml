@@ -17,3 +17,26 @@ services:
       retries: 5
     ports:
       - "5431:5432"
+
+  # Second Postgres, benchmarks only (#1510). A hybrid store puts the
+  # subscription half on its own instance, and measuring that honestly needs a
+  # real second server — a second database on the same server would share a
+  # WAL and a checkpointer, hiding both the benefit and the extra network hop
+  # the split actually costs. Not used by the test suite; `docker compose up
+  # postgres` still starts only the primary.
+  postgres-subs:
+    container_name: act-pg-subs
+    image: postgres:17-alpine
+    restart: always
+    profiles: ["bench"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
