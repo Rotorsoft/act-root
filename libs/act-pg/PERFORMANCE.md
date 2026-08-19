@@ -835,17 +835,19 @@ Two arms, identical subscription traffic — `isolated` has no event-log writes,
 | 8 | isolated | 20.18 ms | 35.56 | 342 | 1780 | 7.87 | 20.23 | 30% | 2.3 |
 | 8 | shared | 20.69 ms | 42.73 | 333 | 1753 | 8.31 | 23.34 | 30% | 2.3 |
 
-### The event log next to the subscriptions costs nothing
+### The event log next to the subscriptions costs the *subscriptions* nothing
 
 `isolated` and `shared` are the same numbers. At 8 workers: 20.18 vs 20.69 ms
 p50, 342 vs 333 claims/s. The only visible difference is claim p99 (35.6 vs
 42.7), which is tail noise at this sample size.
 
-**This kills the "second Postgres instance" hybrid.** That design isolates the
-subscription table from the log's WAL, vacuum budget and connection pool — and
-the measurement says those are not what is costing anything. Separating two
-workloads that do not contend buys nothing. Recorded because the opposite was
-the intuitive answer and was written down as the likely first move.
+> **This section asked the question in the wrong direction, and the conclusion
+> that followed was wrong.** It measured whether event-log writes slow the
+> subscription workload — they do not — and concluded a split would buy
+> nothing. The reverse turns out to be false: the subscription workload slows
+> the *event log* by about 2×. See the next section, which measures the real
+> split. The contention is asymmetric, and the direction that matters is the
+> one this arm did not test.
 
 ### Competing consumers scale
 
@@ -873,13 +875,12 @@ long-run shape is not measured here.
 
 ### What this means for a hybrid
 
-Only a store without MVCC removes this — the churn follows from how Postgres
-answers an UPDATE, not from where the table lives. So the hybrid question
-narrows to a different engine (Redis: a score update on a sorted set leaves no
-dead tuple), and stops being about co-location at all.
+Only a store without MVCC removes the index churn — it follows from how
+Postgres answers an UPDATE, not from where the table lives. That part still
+holds, and Redis remains the candidate for it.
 
-Whether that is worth a second system depends on the long-run bloat curve,
-which needs a longer run than this. **Nothing here justifies building one yet.**
+But co-location turned out to matter for a reason this arm could not see; the
+next section measures it.
 
 ### Caveats, because they bound the conclusions
 
@@ -900,4 +901,77 @@ docker compose up -d
 pnpm build
 LOG_LEVEL=error node libs/act-pg/scripts/subscription-contention.bench.mjs
 # STREAMS / SECONDS / WORKERS / HIT_RATE override the shape
+```
+
+
+## #1510 — the real split, measured: events on one server, subscriptions on another
+
+The section above compared the subscription workload with and without event-log
+writes *on the same server*. That is a proxy for a split, and it only captures
+the benefit side. A real split also costs something: every `claim` and `ack`
+crosses to a second server, behind its own pool, with no shared transaction.
+
+`scripts/hybrid-split.bench.mjs` measures both arms end to end. `single` is one
+`PostgresStore` on :5431. `split` is a hybrid store routing event-log methods
+to :5431 and subscription methods to :5432 — a genuinely separate instance, not
+a second database, so the WAL and checkpointer are separate too.
+
+20,000 subscriptions, 10s per cell, a drain worker pool, a marker standing in
+for correlate, and a committer writing events throughout.
+
+| arm | W | claim p50 | claim p99 | leased/s | ack p50 | sub p50 | commit p50 | commits/s |
+|---|---|---|---|---|---|---|---|---|
+| single | 1 | 16.02 ms | 17.74 | 569 | 1.07 | 4.45 | 1.43 ms | 716 |
+| **split** | 1 | 15.73 ms | 17.64 | 599 | 0.87 | 3.64 | **0.66 ms** | **1455** |
+| single | 2 | 16.09 ms | 18.78 | 768 | 1.15 | 4.76 | 1.41 ms | 704 |
+| **split** | 2 | 15.73 ms | 17.60 | 789 | 0.94 | 3.75 | **0.74 ms** | **1273** |
+| single | 4 | 16.74 ms | 20.09 | 1262 | 1.80 | 6.10 | 1.59 ms | 571 |
+| **split** | 4 | 16.43 ms | 23.19 | 1342 | 1.57 | 5.12 | 1.56 ms | 610 |
+| single | 8 | 19.79 ms | 28.94 | 1601 | 2.89 | 11.79 | 2.48 ms | 368 |
+| **split** | 8 | 20.03 ms | 29.73 | 1728 | 2.56 | 9.04 | 2.44 ms | 380 |
+
+### The split is free
+
+Claim p50 is **0.96–1.01×** across every worker count. The extra network hop —
+the cost that would have killed the idea — does not show up at all. `ack` and
+`subscribe` are consistently *faster* (0.73–0.89× and ~0.8×), and `leased/s` is
+3–10% higher.
+
+That is the load-bearing negative result. A hybrid does not have to justify a
+latency penalty, because there isn't one.
+
+### The split roughly doubles commit throughput
+
+**716 → 1455 commits/s at one worker, 704 → 1273 at two**, with commit p50
+halving (1.43 → 0.66 ms). Reproduced across runs.
+
+This is the finding the earlier arm missed by asking the question backwards.
+**The contention is asymmetric**: event-log writes do not slow the subscription
+workload, but the subscription workload slows the event log by about 2×. Drain
+traffic is background work; commits are the user-facing write path. Halving
+foreground write throughput to run background work is exactly the problem a
+split exists to fix.
+
+The advantage narrows at 4–8 workers (1.03–1.07×), and the likely reason is the
+benchmark client rather than the servers: everything runs as async tasks in one
+Node process against one pool, so at high concurrency the client saturates and
+compresses every difference toward 1.0. A multi-process client would probably
+widen the gap rather than close it — which is the next measurement, not a
+conclusion to draw now.
+
+### Caveats
+
+- Single Node process for all arms; client-bound at 8 workers (see above).
+- Two containers on one host — same CPU and disk. A real deployment separates
+  those too, which should favour the split further.
+- `truncate` and `restore` are not exercised. They are the two operations that
+  genuinely span both stores and the real work a production hybrid owes.
+
+### Reproducing
+
+```bash
+docker compose --profile bench up -d postgres-subs
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/hybrid-split.bench.mjs
+# STREAMS / SECONDS / WORKERS / SUBS_PORT override the shape
 ```
