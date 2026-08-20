@@ -58,6 +58,36 @@ const subscribe = [];
 const commit = [];
 let leased = 0;
 
+/**
+ * Optional periodic reporting, used by the soak benchmark.
+ *
+ * A one-shot report at the end answers "how fast was it", which is all a
+ * ten-second cell can support. A run measuring whether degradation settles or
+ * compounds needs the shape over time, so when `REPORT_MS` is set the worker
+ * flushes and clears its samples on that interval and the parent buckets them
+ * into windows. Unset — the case for `hybrid-split.bench.mjs` — nothing here
+ * runs and the worker reports once, as before.
+ */
+const report_ms = Number(process.env.REPORT_MS ?? 0);
+const take = (xs) => xs.splice(0, xs.length);
+if (report_ms > 0) {
+  const timer = setInterval(() => {
+    process.send?.({
+      partial: true,
+      role,
+      at: Date.now(),
+      claim: take(claim),
+      ack: take(ack),
+      subscribe: take(subscribe),
+      commit: take(commit),
+      leased,
+    });
+    leased = 0;
+  }, report_ms);
+  // Never let the reporting timer be the reason the process stays alive.
+  timer.unref();
+}
+
 async function drain() {
   const by = `w${WORKER_ID}`;
   while (Date.now() < deadline) {
