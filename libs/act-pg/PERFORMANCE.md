@@ -730,3 +730,84 @@ nobody has heard from — the #1329 bug, which #1487 closed by making correlate
 always scan and this change reopens by letting it skip. Correlate now reports
 whether it read anything and the settle loop gates `breaker.passed()` on that,
 which is more accurate than either previous static answer.
+## #1510 — the fairness reserve stops materializing the eligible set
+
+`claim` built its candidate frontier from a CTE (`available`) referenced by
+three arms. Postgres materializes a CTE referenced more than once, so every
+`LIMIT` was applied to a fully-built result rather than pushing into the
+partial index. `EXPLAIN` on 100,000 subscriptions, for a claim that returns 8
+rows:
+
+```
+CTE available
+  ->  Bitmap Heap Scan on streams  (actual rows=100000)
+->  Limit  (actual rows=6)
+      ->  Sort  (Sort Method: top-N heapsort)
+            ->  CTE Scan on available  (actual rows=100000)
+```
+
+One hundred thousand rows read and sorted to return six.
+
+Two changes. Each limited arm now reads the **base table** with the
+eligibility predicate repeated, so the planner can stop at the limit — the
+same lesson #1485 recorded for the fast arm, applied to the rest of the query.
+And a second partial index orders by watermark alone, `(at) WHERE blocked =
+false AND at < correlated_at`, because the fairness reserve and the leading
+frontier both sort by `at` with priority ignored, which the existing
+`(lane, priority DESC, at)` index cannot serve.
+
+Isolated, on the query alone at 100k subscriptions:
+
+| | latency | plan |
+|---|---|---|
+| CTE (before) | 75.6 ms | materialize 100,000, top-N sort |
+| base-table rewrite only | 19.9 ms | priority arm becomes an index scan of 6 |
+| **rewrite + `(at)` index** | **2.0 ms** | **both arms index scans, 6 and 2 rows** |
+
+### End to end: claim is now flat in *both* dimensions
+
+`scripts/claim-scale.bench.mjs`, marks seeded as correlate leaves them:
+
+| subscribed | 1% pending | 10% pending | 100% pending |
+|---|---|---|---|
+| 1,000 — before | 1.72 ms | 1.58 ms | 2.18 ms |
+| 1,000 — after | 2.09 ms | 1.39 ms | 1.49 ms |
+| 10,000 — before | 1.52 ms | 2.25 ms | 8.75 ms |
+| 10,000 — after | 1.63 ms | 1.48 ms | 1.56 ms |
+| 100,000 — before | 2.30 ms | 9.16 ms | **91.37 ms** |
+| 100,000 — after | **1.72 ms** | **1.57 ms** | **1.51 ms** |
+
+#1488 made claim flat in *subscribed* streams, leaving a cost proportional to
+*eligible* rows — 91 ms when everything was pending. That axis is gone too:
+1.4–2.1 ms across the whole grid, whatever the hit rate.
+
+### Under concurrent load, and the write cost
+
+`scripts/subscription-contention.bench.mjs`, 20,000 subscriptions, 8 workers,
+concurrent commits:
+
+| | before | after |
+|---|---|---|
+| claim p50 | 20.69 ms | **2.52 ms** |
+| claims/s | 333 | **2,186** |
+| leased/s | 1,753 | **6,766** |
+| HOT update % | 30% | 41% |
+| index growth / 10s | 2.3 MB | 2.8 MB |
+| within-run drift | 1.10× | 1.04× |
+
+**8× the latency, 6.6× the claim throughput, 3.9× the work actually leased.**
+
+The second index has to be paid for on a table whose write churn is the
+measured pathology, so that was the thing to check rather than assume: index
+growth rises 22%, which is the expected cost of one more index — and the HOT
+update fraction *improved* (30% → 41%) rather than degrading, along with the
+within-run drift. Claim pays tens of milliseconds once per cycle; the extra
+maintenance is tens of microseconds on the same cycle.
+
+### Caveat on lane-filtered claims
+
+The `(at)` index does not carry `lane`, so a claim filtered to one lane scans
+in watermark order and filters. Lanes partition the set, so each holds fewer
+rows — but a highly selective lane on a large table will walk further than it
+would with a `(lane, at)` index. Not added here: it would be a third index on
+the hottest-written table, and no measured workload needs it yet.

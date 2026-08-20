@@ -766,6 +766,23 @@ export class PostgresStore implements Store {
         ON ${this._fqs} (lane, priority DESC, at)
         WHERE blocked = false AND at < correlated_at;`
       );
+      // The same set ordered by watermark alone (#1510). `claim`'s fairness
+      // reserve and its leading frontier both order by `at` with the priority
+      // column ignored, which the index above cannot serve — its leading key
+      // is `lane`, and `priority` sits between that and `at`. Without this,
+      // those two arms fall back to sorting the whole eligible set: 19.9 ms
+      // for a claim returning 8 rows at 100k subscriptions, against 2.0 ms
+      // with it.
+      //
+      // It costs a second index entry per `ack`, on a table whose write churn
+      // is already the measured pathology — worth it because a claim happens
+      // once per cycle and pays tens of milliseconds, while the extra
+      // maintenance is tens of microseconds on the same cycle.
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_at_ix"
+        ON ${this._fqs} (at)
+        WHERE blocked = false AND at < correlated_at;`
+      );
 
       await client.query("COMMIT");
       logger.info(
@@ -1164,67 +1181,64 @@ export class PostgresStore implements Store {
         -- cost O(subscribed streams) per claim per worker no matter how
         -- little work was pending.
         --
-        -- Read from the base table so the planner can use the partial index
-        -- built for exactly this predicate:
-        --   (lane, priority DESC, at) WHERE blocked = false
-        --                               AND at < correlated_at
-        -- It contains only streams with work, so LIMIT pushes into it and a
-        -- claim scans at most lagging + leading rows. A stream leaves the
-        -- index when ack advances at to the mark, and re-enters when
-        -- correlate raises it.
+        -- The predicate is repeated in each arm below rather than factored
+        -- into a shared CTE, and that repetition is load-bearing (#1510). A
+        -- CTE referenced more than once is materialized, so LIMIT 8 was
+        -- applied to a fully-built 100,000-row result instead of pushing into
+        -- the index: measured at 75.6 ms for a claim that returns 8 rows.
+        -- Reading the base table in each arm lets the planner stop after the
+        -- limit — 19.9 ms with the existing index, 2.0 ms once the
+        -- at-ordered partial index below serves the two watermark arms.
         --
-        -- The comparison is NULL-safe by SQL's own rules: an unmarked row
-        -- compares unknown and is excluded. That is definitional now
-        -- (#1446) — a subscription is claimable iff a mark says so — where
-        -- before #1488 it meant "unknown, fall through to the probe". An
-        -- install upgrading from before the column needs one correlate pass
-        -- from a rewound checkpoint to mark its rows; see the runbook in
-        -- docs/docs/guides/production-checklist.md.
-        available AS (
-          SELECT stream, source, at, priority, lane
+        -- A row with no mark compares unknown and is excluded by SQL's own
+        -- rules. That is definitional (#1446): a subscription is claimable iff
+        -- a mark says so. seed() marks rows that predate the column.
+        --
+        -- Priority lanes (ACT-102): higher priority first, then
+        -- lagging-watermark order. With everyone at priority=0 the ORDER BY
+        -- collapses to plain at ASC, so existing workloads see no change.
+        --
+        -- The lagging frontier is a UNION of two portions (ACT-1223): the
+        -- priority portion takes the first (lagging - fair) slots by
+        -- priority DESC, at ASC; a fairness reserve then fills fair more
+        -- by pure at ASC (priority ignored), excluding the ones already
+        -- chosen, so a default-priority lagging stream is never starved out
+        -- by sustained higher-priority load.
+        prio AS (
+          SELECT stream, source, at, lane, TRUE AS lagging
           FROM ${this._fqs} s
           WHERE s.blocked = false
             AND s.at < s.correlated_at
             ${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
             AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+          ORDER BY s.priority DESC, s.at ASC
+          LIMIT ($1::int - $5::int)
         ),
-        -- Priority lanes (ACT-102): higher priority first, then
-        -- lagging-watermark order. With everyone at priority=0 the
-        -- ORDER BY collapses to plain at ASC so existing workloads
-        -- see no behavior change.
-        --
-        -- The lagging frontier is a UNION of two portions (ACT-1223): the
-        -- priority-ordered portion takes the first (lagging - fair) slots
-        -- by priority DESC, at ASC; a fairness reserve then fills fair more
-        -- slots by pure at ASC (priority ignored), excluding the ones
-        -- already chosen, so a default-priority lagging stream is never
-        -- starved out by sustained higher-priority load. With all
-        -- priorities equal both portions order by at, a no-op merge.
+        fair AS (
+          SELECT stream, source, at, lane, TRUE AS lagging
+          FROM ${this._fqs} s
+          WHERE s.blocked = false
+            AND s.at < s.correlated_at
+            ${lane_clause}
+            AND (s.leased_by IS NULL OR s.leased_until <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND s.stream NOT IN (SELECT stream FROM prio)
+          ORDER BY s.at ASC
+          LIMIT $5
+        ),
         lag AS (
-          (
-            SELECT stream, source, at, lane, TRUE AS lagging
-            FROM available
-            ORDER BY priority DESC, at ASC
-            LIMIT ($1::int - $5::int)
-          )
-          UNION
-          (
-            SELECT stream, source, at, lane, TRUE AS lagging
-            FROM available
-            WHERE stream NOT IN (
-              SELECT stream FROM available
-              ORDER BY priority DESC, at ASC
-              LIMIT ($1::int - $5::int)
-            )
-            ORDER BY at ASC
-            LIMIT $5
-          )
+          SELECT * FROM prio UNION SELECT * FROM fair
         ),
         lead AS (
           SELECT stream, source, at, lane, FALSE AS lagging
-          FROM available
-          ORDER BY at DESC
+          FROM ${this._fqs} s
+          WHERE s.blocked = false
+            AND s.at < s.correlated_at
+            ${lane_clause}
+            AND (s.leased_by IS NULL OR s.leased_until <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+          ORDER BY s.at DESC
           LIMIT $2
         ),
         combined AS (
