@@ -266,6 +266,19 @@ preserve it; splitting stores removes the coupling instead. If the
 table is divisible along a context or tenant seam, split it. Continue
 to Gate 4 only when the workload is one giant *indivisible* context.
 
+**A different seam, when commits are what hurt.** Splitting by context
+divides the data by what it is *about*. There is a second cut, by what
+it is *for*: the event log on one database and the subscription table on
+another, behind one `Store` so no application code changes. The log is
+append-only and cold; the subscription table is tiny and rewritten on
+every claim, ack and mark, and the contention between them turns out to
+be one-directional — drain traffic slows commits, not the reverse.
+Measured at roughly double the commit throughput for no change in claim
+latency. Reach for
+[recipes/scaling/hybrid-store/](./hybrid-store/) when commit latency is
+the complaint and drain traffic is heavy; it needs no context seam, so
+it applies to the single indivisible workload too.
+
 ## Gate 4: Is your workload one of the four genuine extremes?
 
 Partitioning is operationally heavy. It rewrites the events table, makes the
