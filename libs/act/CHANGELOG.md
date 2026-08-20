@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.29.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.29.1...@rotorsoft/act-v1.29.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **inspector:** report pending work, not distance to the head ([#1528](https://github.com/Rotorsoft/act-root/issues/1528)) ([7d9e830](https://github.com/Rotorsoft/act-root/commit/7d9e830650e56f8666c403854b93a0178a5c62d9)), closes [#1521](https://github.com/Rotorsoft/act-root/issues/1521)
+
 # [@rotorsoft/act-v1.29.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.29.0...@rotorsoft/act-v1.29.1) (2026-08-20)
 
 
