@@ -1014,7 +1014,20 @@ export const inspectorRouter = t.router({
       const laneCounts = new Map<string, number>();
 
       for (const p of positions) {
-        const gap = Math.max(0, maxEventId - p.at);
+        // Pending work, not distance to the head (#1521). A subscription's
+        // watermark advances only over events that resolve to it, so a
+        // reaction handling a subset of a state's events sits permanently
+        // below the head with nothing to do — and showed here as a large gap,
+        // counted as `lagging`, sorted to the top of the blocked view. The
+        // mark is what says whether work is actually waiting.
+        //
+        // An unmarked row has no mark to read (an install that predates the
+        // column, before `seed()` has marked it), so it keeps the head
+        // distance: an upper bound, and the same number this always showed.
+        const gap =
+          p.correlated_at !== undefined
+            ? Math.max(0, p.correlated_at - p.at)
+            : Math.max(0, maxEventId - p.at);
         gaps.push(gap);
         priorityCounts.set(
           p.priority,

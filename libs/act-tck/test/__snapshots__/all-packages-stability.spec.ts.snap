@@ -14069,7 +14069,13 @@ export type QueryStreams = {
  * Result of a {@link Store.query_streams} call.
  *
  * @property maxEventId - Highest event id in the store (-1 when empty).
- *   UI uses this to compute lag as \`maxEventId - position.at\`.
+ *   An upper bound on how far any subscription could be behind — **not** a
+ *   lag measurement. A subscription's watermark advances only over events
+ *   that resolve to it, so a reader handling a subset of a state's events
+ *   sits permanently below this with nothing pending. For "does this
+ *   subscription have work waiting?", compare its \`at\` against its own
+ *   \`correlated_at\` (see {@link StreamPosition.correlated_at}); fall back to
+ *   this only for a row that carries no mark yet.
  * @property count - Number of stream positions delivered to the callback.
  */
 export type QueryStreamsResult = {
@@ -32123,7 +32129,13 @@ export type QueryStreams = {
  * Result of a {@link Store.query_streams} call.
  *
  * @property maxEventId - Highest event id in the store (-1 when empty).
- *   UI uses this to compute lag as \`maxEventId - position.at\`.
+ *   An upper bound on how far any subscription could be behind — **not** a
+ *   lag measurement. A subscription's watermark advances only over events
+ *   that resolve to it, so a reader handling a subset of a state's events
+ *   sits permanently below this with nothing pending. For "does this
+ *   subscription have work waiting?", compare its \`at\` against its own
+ *   \`correlated_at\` (see {@link StreamPosition.correlated_at}); fall back to
+ *   this only for a row that carries no mark yet.
  * @property count - Number of stream positions delivered to the callback.
  */
 export type QueryStreamsResult = {
@@ -38437,7 +38449,13 @@ export type QueryStreams = {
  * Result of a {@link Store.query_streams} call.
  *
  * @property maxEventId - Highest event id in the store (-1 when empty).
- *   UI uses this to compute lag as \`maxEventId - position.at\`.
+ *   An upper bound on how far any subscription could be behind — **not** a
+ *   lag measurement. A subscription's watermark advances only over events
+ *   that resolve to it, so a reader handling a subset of a state's events
+ *   sits permanently below this with nothing pending. For "does this
+ *   subscription have work waiting?", compare its \`at\` against its own
+ *   \`correlated_at\` (see {@link StreamPosition.correlated_at}); fall back to
+ *   this only for a row that carries no mark yet.
  * @property count - Number of stream positions delivered to the callback.
  */
 export type QueryStreamsResult = {
