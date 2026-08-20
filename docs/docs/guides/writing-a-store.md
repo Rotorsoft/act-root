@@ -291,6 +291,38 @@ Why the boundary anchors on a real snapshot: the framework's `load()` resets sta
 
 The TCK pins all of this in the `describe("windowed (before boundary)")` block of `store-tck.ts`: prefix deleted behind the closest safe snapshot, `max_id` cap honored, no-snapshot no-op, subscriptions preserved (explicitly contrasted with the full truncate), mixed full + windowed batches, and the stream staying writable and readable after a prune. Pass that block and windowed closes work on your backend with no further wiring.
 
+## Splitting retirement across two systems
+
+A full `truncate` target does three things atomically: delete the stream's events, seed a final marker, and remove its subscription row. If your event log and your subscriptions live in the **same** database, that is one transaction and there is nothing more to think about.
+
+If they live apart — the shape the [hybrid-store recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/hybrid-store) uses — no transaction spans both, and you have to sequence two calls. Two things to get right.
+
+**Use `truncate` on both halves.** `truncate` is already the verb that retires a subscription, so pointing it at the subscription store retires the row there. There is no separate "remove this subscription" method, and you do not need one:
+
+```ts no-check
+truncate: async (targets) => {
+  const result = await log.truncate(targets);
+  const retired = targets
+    .filter(
+      (t) =>
+        t.before === undefined &&   // windowed targets keep subscriptions
+        t.snapshot === undefined && // restart targets keep subscriptions (#1398)
+        result.has(t.stream)        // absent means skipped, never truncated
+    )
+    .map((t) => ({ stream: t.stream }));
+  if (retired.length) await subs.truncate(retired);
+  return result;
+},
+```
+
+Forward a **bare** `{ stream }` rather than the original target. Passing the original would seed a restart snapshot's state into the subscription store, copying domain data — possibly sensitive — into a database that should only ever hold watermarks.
+
+**Do not use `reset` for this.** It reads like the subscription-side verb and does the opposite of what you want: `reset` rewinds the watermark to -1 and deliberately leaves the work mark untouched, so `at < correlated_at` becomes true and the stream you meant to retire becomes **claimable again**. That is correct behaviour — it is what makes `app.reset(...)` replay a projection — but it is not retirement.
+
+**Truncate the log first.** Its truncate commits the tombstone that stops new events landing on the stream, so a crash between the two calls leaves an orphaned subscription row: it points at a stream whose events are gone, claims nothing, and is reaped by the next close of that stream. The reverse order leaves a live stream with **no** subscription, which silently stops delivery and never heals. `Act.close` is already resumable after an interrupted truncate ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is what makes the window recoverable rather than merely rare.
+
+The store TCK already pins every fact this relies on — restart keeps the row while retire drops it, windowed leaves subscriptions untouched, and `reset` re-arms a caught-up subscription — so a composition built from them inherits those guarantees.
+
 ## Implementing `Store.restore` (optional)
 
 `Store.restore` is the offline wipe-and-rebuild primitive. Capability-gated, because not every backend can atomically wipe and reinsert in one transaction (Kafka-fronted stores, partitioned multi-shard adapters, append-only object-storage logs). If your adapter can hold the operation under a single transaction or equivalent, implementing it earns the inspector's transfer dialog, the framework's cross-adapter migration story, and the compaction path.

@@ -115,21 +115,54 @@ the whole builder API are unaware there are two databases.
 the only place this recipe owes real work. A full close deletes a stream's
 events, seeds a tombstone, *and* removes the subscription row.
 
-The implementation does the log first, deliberately. Its truncate commits the
-tombstone that stops new events landing on the stream, so a crash between the
-two halves leaves an orphaned subscription row — pointing at a stream whose
-events are gone, claiming nothing, and reaped by the next close. The reverse
-order would leave a live stream with no subscription, which silently stops
-delivery: a worse failure, and one that does not heal itself. `Act.close` is
-already resumable after an interrupted truncate
-([#1389](https://github.com/Rotorsoft/act-root/issues/1389)).
+The resolution is smaller than it looks: **`truncate` is already the verb that
+retires a subscription.** Pointing it at the subscription store retires the row
+there, exactly as it would if both halves shared a database — the same fan-out
+`seed`, `drop` and `dispose` already use. No new store method is needed.
 
-This is framework work currently pushed into userland — every hybrid adapter
-re-derives the same ordering argument, and getting it backwards fails
-silently. [#1527](https://github.com/Rotorsoft/act-root/issues/1527) tracks
-moving the subscription-retirement step out of `truncate` and into the close
-cycle, which already sequences and resumes phases, so a hybrid could delegate
-`truncate` like everything else.
+```ts
+truncate: async (targets) => {
+  const result = await log.truncate(targets);
+  const retired = targets
+    .filter(
+      (t) =>
+        t.before === undefined &&      // windowed: subscriptions stay by contract
+        t.snapshot === undefined &&    // restart: the stream lives on, keep it
+        result.has(t.stream)           // skipped: never truncated at all
+    )
+    .map((t) => ({ stream: t.stream }));
+  if (retired.length) await subs.truncate(retired);
+  return result;
+},
+```
+
+Those three filters are not judgement calls — each maps onto a case the store
+TCK already pins, so the composition inherits its guarantees rather than
+restating them.
+
+Stripping each target to `{ stream }` matters. Forwarding the original would
+seed a restart snapshot's *state* into the subscription store, copying domain
+data — possibly sensitive — into a database with no business holding it. A bare
+target seeds a tombstone instead, and costs one inert row in an events table
+the hybrid never reads.
+
+**Do not reach for `reset`.** It looks like the subscription-side verb and is
+the wrong one. `reset` rewinds the watermark to -1 and deliberately leaves the
+work mark alone, so `at < correlated_at` becomes true and the retired
+subscription turns **claimable again** — the opposite of retiring it. That
+behaviour is correct and TCK-pinned, because it is what makes a projection
+rebuild replay; it is simply not retirement. An earlier version of this recipe
+made exactly that mistake.
+
+Order still matters, and it is the part a hybrid genuinely owns. The log goes
+first, because its truncate commits the tombstone that stops new events landing
+on the stream. A crash between the two leaves an orphaned subscription row
+pointing at a stream whose events are gone: it claims nothing and is reaped by
+the next close. The reverse order would leave a live stream with no
+subscription, which silently stops delivery — a worse failure, and one that
+does not heal itself. `Act.close` is already resumable after an interrupted
+truncate ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is
+what keeps the window recoverable rather than merely rare.
 
 **Two systems to operate.** Backup, monitoring, failover, version skew. The
 honest framing: losing the subscription store costs *redelivery*, not data.
