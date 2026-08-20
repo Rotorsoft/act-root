@@ -1,3 +1,15 @@
+# [@rotorsoft/act-v1.29.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.29.0...@rotorsoft/act-v1.29.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **act:** cap a windowed prune at pending work, not watermark lag ([#1525](https://github.com/Rotorsoft/act-root/issues/1525)) ([365d185](https://github.com/Rotorsoft/act-root/commit/365d1855a96e5543341c637f9ba572e76087cced)), closes [#1520](https://github.com/Rotorsoft/act-root/issues/1520)
+
+
+### Performance Improvements
+
+* **act:** let correlate sit still when nothing has happened ([#1517](https://github.com/Rotorsoft/act-root/issues/1517)) ([5e33afd](https://github.com/Rotorsoft/act-root/commit/5e33afd4096444013c5f58b2d7dfb64f30841861)), closes [#1329](https://github.com/Rotorsoft/act-root/issues/1329)
+
 # [@rotorsoft/act-v1.29.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.28.1...@rotorsoft/act-v1.29.0) (2026-08-18)
 
 
