@@ -952,7 +952,11 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no `before`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
+   * 2. Removes the stream's entry from the streams table — **or leaves it
+   *    to {@link retire}**, which the orchestrator calls with the retired
+   *    streams after a successful truncate. A store whose event log and
+   *    subscriptions live on different systems cannot do this atomically
+   *    with step 1, and should implement {@link retire} instead.
    * 3. Inserts a `__snapshot__` (when `snapshot` is provided) or
    *    `__tombstone__` event as the sole event on the stream
    *
@@ -989,6 +993,50 @@ export interface Store extends Disposable, EventSource {
       max_id?: number;
     }>
   ) => Promise<TruncateResult>;
+
+  /**
+   * Removes the subscription rows for fully-retired streams.
+   *
+   * **Capability-gated.** Adapters may omit it — the orchestrator calls it
+   * through `?.`, so a store without it behaves exactly as before and keeps
+   * retiring subscriptions inside {@link truncate}.
+   *
+   * Exists so retirement can be **two steps instead of one transaction**.
+   * `truncate` retires a stream by deleting its events, seeding a tombstone,
+   * and removing its subscription — all atomically. A store whose event log
+   * and subscriptions live on different systems has no transaction spanning
+   * both, so it cannot satisfy that contract; before this method it could
+   * only approximate it and document the gap.
+   *
+   * {@link Act.close} calls this **after** a successful truncate, with the
+   * streams that were seeded with a `__tombstone__` (retired) rather than a
+   * `__snapshot__` (restarted, and keeping its subscription). That order is
+   * deliberate and fixed here so no adapter has to re-derive it: the log's
+   * truncate commits the tombstone that stops new events landing, so a crash
+   * between the two steps orphans a subscription row that claims nothing and
+   * is reaped by the next close. The reverse order would leave a live stream
+   * with no subscription — delivery silently stops, and nothing heals it.
+   *
+   * Must be **idempotent**: retiring a stream with no subscription row is a
+   * no-op returning 0. Adapters whose `truncate` already removed the row
+   * satisfy this trivially.
+   *
+   * Only ever removes subscriptions. It must not touch the event log —
+   * `truncate` owns that half.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   *
+   * @example A hybrid store delegating each half
+   * ```typescript
+   * truncate: (targets) => log.truncate(targets),
+   * retire: (streams) => subs.retire!(streams),
+   * ```
+   *
+   * @see {@link truncate} for the event-log half of retirement
+   * @see {@link Act.close} for the orchestration that sequences the two
+   */
+  retire?: (streams: string[]) => Promise<number>;
 
   /**
    * Atomically wipe the store and commit a fresh sequence of events

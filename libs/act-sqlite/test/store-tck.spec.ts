@@ -17,6 +17,7 @@ runStoreTck({
   default_factory: () => new SqliteStore(undefined as never),
   capabilities: {
     restore: true,
+    retire: true,
     pii_isolation: true,
     rejects_nonportable_claim_source: true,
     work_set: true,

@@ -2150,11 +2150,33 @@ export class Act<
     return this._correlate.checkpoint;
   }
 
-  private _forget_closed_subscriptions(result: CloseResult): void {
+  /**
+   * Retire the subscriptions of streams the close just tombstoned — in this
+   * process, and in the store.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and keeps its subscription.
+   *
+   * The store call runs **after** `truncate`, and the order is fixed here so
+   * no adapter has to re-derive it. Truncate commits the tombstone that stops
+   * new events landing, so a crash between the two leaves an orphaned
+   * subscription row that claims nothing and is reaped by the next close. The
+   * reverse order would leave a live stream with no subscription — delivery
+   * silently stops, and nothing heals it.
+   *
+   * `retire` is capability-gated: a store that removes the row inside its own
+   * `truncate` transaction omits it, and this becomes a no-op.
+   */
+  private async _forget_closed_subscriptions(
+    result: CloseResult
+  ): Promise<void> {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
       .map(([stream]) => stream);
-    if (retired.length) this._correlate.forget_subscribed(retired);
+    if (retired.length) {
+      this._correlate.forget_subscribed(retired);
+      await store().retire?.(retired);
+    }
   }
 
   async close(targets: CloseTarget[]): Promise<CloseResult> {
@@ -2179,7 +2201,7 @@ export class Act<
         with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
-      this._forget_closed_subscriptions(result);
+      await this._forget_closed_subscriptions(result);
       this.emit("closed", result);
       return result;
     });

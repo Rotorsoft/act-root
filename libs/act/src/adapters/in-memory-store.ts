@@ -1155,6 +1155,24 @@ export class InMemoryStore implements Store {
    *   or a `before`/`max_id` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
    */
+  /**
+   * Removes subscription rows for retired streams.
+   *
+   * Here `truncate` already dropped them inside the same call, so this is
+   * normally a no-op returning 0 — which is exactly the idempotency the
+   * contract requires. It exists so the in-memory store exercises the same
+   * two-step retirement path the durable adapters and hybrids use, rather
+   * than leaving it only reachable through a store nobody runs in tests.
+   */
+  async retire(streams: string[]): Promise<number> {
+    await sleep();
+    let removed = 0;
+    for (const stream of streams) {
+      if (this._streams.delete(stream)) removed++;
+    }
+    return removed;
+  }
+
   async truncate(
     targets: Array<{
       stream: string;

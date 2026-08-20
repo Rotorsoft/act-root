@@ -60,6 +60,19 @@ export type StoreCapabilities = {
    */
   readonly restore?: boolean;
   /**
+   * Adapter implements {@link Store.retire}. When `true`, the TCK runs
+   * the retirement suite — removes the subscription row, returns the
+   * count, is idempotent on a stream with no row, no-ops on an empty
+   * list, leaves sibling subscriptions alone, and never touches the
+   * event log.
+   *
+   * Optional because retirement is normally done inside `truncate`'s
+   * transaction. A store whose event log and subscriptions live on
+   * different systems has no such transaction and implements this
+   * instead, letting {@link Act.close} sequence the two halves.
+   */
+  readonly retire?: boolean;
+  /**
    * Adapter supports sensitive-data isolation (#566): accepts the
    * optional `pii` field on commit messages, returns it on load
    * outputs, and implements {@link Store.forget_pii}. When `true`,
@@ -4014,6 +4027,97 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         for (let i = 1; i < committed.length; i++) {
           expect(committed[i].id).toBeGreaterThan(committed[i - 1].id);
         }
+      });
+    });
+
+    /**
+     * Retirement's subscription half (#1527).
+     *
+     * `truncate` normally removes the subscription row inside its own
+     * transaction, which is why this is capability-gated rather than
+     * required. A store whose event log and subscriptions live on different
+     * systems has no transaction spanning both, so it delegates `truncate`
+     * to the log half and implements `retire` against the subscription half,
+     * letting `Act.close` sequence the two.
+     *
+     * The cases below pin what such a store may rely on. Note that an
+     * adapter whose `truncate` already dropped the row satisfies most of
+     * them by returning 0 — idempotency is the point, not the row count.
+     */
+    describe.skipIf(!caps.retire)("retire (capability)", () => {
+      /**
+       * Which subscription rows exist for `stream`, by anchored literal.
+       *
+       * Shared rather than inlined per case: an inline collector in a case
+       * that expects nothing back is a callback that never runs, which reads
+       * as dead code in coverage. Character classes stay out of the pattern —
+       * they are outside the portable regex subset every adapter supports.
+       */
+      const subscribed_rows = async (stream: string) => {
+        const rows: string[] = [];
+        await store.query_streams((p) => rows.push(p.stream), {
+          stream: `^${stream}$`,
+        });
+        return rows;
+      };
+
+      it("removes the subscription and reports how many it removed", async () => {
+        const s = `retire-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        expect(await subscribed_rows(s)).toEqual([s]);
+
+        expect(await store.retire!([s])).toBe(1);
+
+        expect(await subscribed_rows(s)).toEqual([]);
+      });
+
+      it("is idempotent — retiring an already-retired stream removes nothing", async () => {
+        const s = `retire-idem-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        expect(await store.retire!([s])).toBe(1);
+        // The contract's central requirement: an adapter whose `truncate`
+        // already dropped the row must not fail when the orchestrator calls
+        // `retire` afterwards.
+        expect(await store.retire!([s])).toBe(0);
+      });
+
+      it("no-ops on a stream that was never subscribed", async () => {
+        expect(await store.retire!([`retire-absent-${uid()}`])).toBe(0);
+      });
+
+      it("no-ops on an empty list", async () => {
+        expect(await store.retire!([])).toBe(0);
+      });
+
+      it("leaves sibling subscriptions alone", async () => {
+        const tag = uid();
+        const gone = `retire-a-${tag}`;
+        const kept = `retire-b-${tag}`;
+        await store.subscribe([{ stream: gone }, { stream: kept }]);
+
+        expect(await store.retire!([gone])).toBe(1);
+
+        expect(await subscribed_rows(gone)).toEqual([]);
+        expect(await subscribed_rows(kept)).toEqual([kept]);
+      });
+
+      it("removes only the subscription — the event log is untouched", async () => {
+        const s = `retire-events-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.subscribe([{ stream: s }]);
+
+        expect(await store.retire!([s])).toBe(1);
+
+        // `retire` owns the subscription half and nothing else. A store that
+        // deleted events here would silently destroy history on every close
+        // of a restarted stream.
+        const events: number[] = [];
+        await store.query((e) => events.push(e.id), { stream: s });
+        expect(events).toHaveLength(2);
       });
     });
 

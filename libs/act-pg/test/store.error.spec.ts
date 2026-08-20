@@ -295,6 +295,22 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("retire", () => {
+    it("returns 0 for an empty list without touching the pool", async () => {
+      const connect = vi.spyOn(pg.Pool.prototype, "connect");
+      expect(await store.retire([])).toBe(0);
+      expect(connect).not.toHaveBeenCalled();
+    });
+
+    it("returns 0 when rowCount is null (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        makeClient(vi.fn().mockResolvedValue({ rowCount: null }))
+      );
+      expect(await store.retire(["s"])).toBe(0);
+    });
+  });
+
   describe("prioritize", () => {
     it("returns 0 when rowCount is undefined (defensive)", async () => {
       vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(

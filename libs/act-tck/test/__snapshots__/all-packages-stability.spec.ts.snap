@@ -2984,11 +2984,33 @@ export class Act<
     return this._correlate.checkpoint;
   }
 
-  private _forget_closed_subscriptions(result: CloseResult): void {
+  /**
+   * Retire the subscriptions of streams the close just tombstoned — in this
+   * process, and in the store.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and keeps its subscription.
+   *
+   * The store call runs **after** \`truncate\`, and the order is fixed here so
+   * no adapter has to re-derive it. Truncate commits the tombstone that stops
+   * new events landing, so a crash between the two leaves an orphaned
+   * subscription row that claims nothing and is reaped by the next close. The
+   * reverse order would leave a live stream with no subscription — delivery
+   * silently stops, and nothing heals it.
+   *
+   * \`retire\` is capability-gated: a store that removes the row inside its own
+   * \`truncate\` transaction omits it, and this becomes a no-op.
+   */
+  private async _forget_closed_subscriptions(
+    result: CloseResult
+  ): Promise<void> {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
       .map(([stream]) => stream);
-    if (retired.length) this._correlate.forget_subscribed(retired);
+    if (retired.length) {
+      this._correlate.forget_subscribed(retired);
+      await store().retire?.(retired);
+    }
   }
 
   async close(targets: CloseTarget[]): Promise<CloseResult> {
@@ -3013,7 +3035,7 @@ export class Act<
         with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
-      this._forget_closed_subscriptions(result);
+      await this._forget_closed_subscriptions(result);
       this.emit("closed", result);
       return result;
     });
@@ -12703,6 +12725,24 @@ export class InMemoryStore implements Store {
    *   or a \`before\`/\`max_id\` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event.
    */
+  /**
+   * Removes subscription rows for retired streams.
+   *
+   * Here \`truncate\` already dropped them inside the same call, so this is
+   * normally a no-op returning 0 — which is exactly the idempotency the
+   * contract requires. It exists so the in-memory store exercises the same
+   * two-step retirement path the durable adapters and hybrids use, rather
+   * than leaving it only reachable through a store nobody runs in tests.
+   */
+  async retire(streams: string[]): Promise<number> {
+    await sleep();
+    let removed = 0;
+    for (const stream of streams) {
+      if (this._streams.delete(stream)) removed++;
+    }
+    return removed;
+  }
+
   async truncate(
     targets: Array<{
       stream: string;
@@ -14781,7 +14821,11 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
+   * 2. Removes the stream's entry from the streams table — **or leaves it
+   *    to {@link retire}**, which the orchestrator calls with the retired
+   *    streams after a successful truncate. A store whose event log and
+   *    subscriptions live on different systems cannot do this atomically
+   *    with step 1, and should implement {@link retire} instead.
    * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
    *
@@ -14818,6 +14862,50 @@ export interface Store extends Disposable, EventSource {
       max_id?: number;
     }>
   ) => Promise<TruncateResult>;
+
+  /**
+   * Removes the subscription rows for fully-retired streams.
+   *
+   * **Capability-gated.** Adapters may omit it — the orchestrator calls it
+   * through \`?.\`, so a store without it behaves exactly as before and keeps
+   * retiring subscriptions inside {@link truncate}.
+   *
+   * Exists so retirement can be **two steps instead of one transaction**.
+   * \`truncate\` retires a stream by deleting its events, seeding a tombstone,
+   * and removing its subscription — all atomically. A store whose event log
+   * and subscriptions live on different systems has no transaction spanning
+   * both, so it cannot satisfy that contract; before this method it could
+   * only approximate it and document the gap.
+   *
+   * {@link Act.close} calls this **after** a successful truncate, with the
+   * streams that were seeded with a \`__tombstone__\` (retired) rather than a
+   * \`__snapshot__\` (restarted, and keeping its subscription). That order is
+   * deliberate and fixed here so no adapter has to re-derive it: the log's
+   * truncate commits the tombstone that stops new events landing, so a crash
+   * between the two steps orphans a subscription row that claims nothing and
+   * is reaped by the next close. The reverse order would leave a live stream
+   * with no subscription — delivery silently stops, and nothing heals it.
+   *
+   * Must be **idempotent**: retiring a stream with no subscription row is a
+   * no-op returning 0. Adapters whose \`truncate\` already removed the row
+   * satisfy this trivially.
+   *
+   * Only ever removes subscriptions. It must not touch the event log —
+   * \`truncate\` owns that half.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   *
+   * @example A hybrid store delegating each half
+   * \`\`\`typescript
+   * truncate: (targets) => log.truncate(targets),
+   * retire: (streams) => subs.retire!(streams),
+   * \`\`\`
+   *
+   * @see {@link truncate} for the event-log half of retirement
+   * @see {@link Act.close} for the orchestration that sequences the two
+   */
+  retire?: (streams: string[]) => Promise<number>;
 
   /**
    * Atomically wipe the store and commit a fresh sequence of events
@@ -21429,11 +21517,33 @@ export class Act<
     return this._correlate.checkpoint;
   }
 
-  private _forget_closed_subscriptions(result: CloseResult): void {
+  /**
+   * Retire the subscriptions of streams the close just tombstoned — in this
+   * process, and in the store.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and keeps its subscription.
+   *
+   * The store call runs **after** \`truncate\`, and the order is fixed here so
+   * no adapter has to re-derive it. Truncate commits the tombstone that stops
+   * new events landing, so a crash between the two leaves an orphaned
+   * subscription row that claims nothing and is reaped by the next close. The
+   * reverse order would leave a live stream with no subscription — delivery
+   * silently stops, and nothing heals it.
+   *
+   * \`retire\` is capability-gated: a store that removes the row inside its own
+   * \`truncate\` transaction omits it, and this becomes a no-op.
+   */
+  private async _forget_closed_subscriptions(
+    result: CloseResult
+  ): Promise<void> {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
       .map(([stream]) => stream);
-    if (retired.length) this._correlate.forget_subscribed(retired);
+    if (retired.length) {
+      this._correlate.forget_subscribed(retired);
+      await store().retire?.(retired);
+    }
   }
 
   async close(targets: CloseTarget[]): Promise<CloseResult> {
@@ -21458,7 +21568,7 @@ export class Act<
         with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
       });
 
-      this._forget_closed_subscriptions(result);
+      await this._forget_closed_subscriptions(result);
       this.emit("closed", result);
       return result;
     });
@@ -30800,6 +30910,24 @@ export class InMemoryStore implements Store {
    *   or a \`before\`/\`max_id\` boundary for a windowed prefix delete.
    * @returns Map keyed by stream name, each entry with \`deleted\` count and \`committed\` event.
    */
+  /**
+   * Removes subscription rows for retired streams.
+   *
+   * Here \`truncate\` already dropped them inside the same call, so this is
+   * normally a no-op returning 0 — which is exactly the idempotency the
+   * contract requires. It exists so the in-memory store exercises the same
+   * two-step retirement path the durable adapters and hybrids use, rather
+   * than leaving it only reachable through a store nobody runs in tests.
+   */
+  async retire(streams: string[]): Promise<number> {
+    await sleep();
+    let removed = 0;
+    for (const stream of streams) {
+      if (this._streams.delete(stream)) removed++;
+    }
+    return removed;
+  }
+
   async truncate(
     targets: Array<{
       stream: string;
@@ -32841,7 +32969,11 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
+   * 2. Removes the stream's entry from the streams table — **or leaves it
+   *    to {@link retire}**, which the orchestrator calls with the retired
+   *    streams after a successful truncate. A store whose event log and
+   *    subscriptions live on different systems cannot do this atomically
+   *    with step 1, and should implement {@link retire} instead.
    * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
    *
@@ -32878,6 +33010,50 @@ export interface Store extends Disposable, EventSource {
       max_id?: number;
     }>
   ) => Promise<TruncateResult>;
+
+  /**
+   * Removes the subscription rows for fully-retired streams.
+   *
+   * **Capability-gated.** Adapters may omit it — the orchestrator calls it
+   * through \`?.\`, so a store without it behaves exactly as before and keeps
+   * retiring subscriptions inside {@link truncate}.
+   *
+   * Exists so retirement can be **two steps instead of one transaction**.
+   * \`truncate\` retires a stream by deleting its events, seeding a tombstone,
+   * and removing its subscription — all atomically. A store whose event log
+   * and subscriptions live on different systems has no transaction spanning
+   * both, so it cannot satisfy that contract; before this method it could
+   * only approximate it and document the gap.
+   *
+   * {@link Act.close} calls this **after** a successful truncate, with the
+   * streams that were seeded with a \`__tombstone__\` (retired) rather than a
+   * \`__snapshot__\` (restarted, and keeping its subscription). That order is
+   * deliberate and fixed here so no adapter has to re-derive it: the log's
+   * truncate commits the tombstone that stops new events landing, so a crash
+   * between the two steps orphans a subscription row that claims nothing and
+   * is reaped by the next close. The reverse order would leave a live stream
+   * with no subscription — delivery silently stops, and nothing heals it.
+   *
+   * Must be **idempotent**: retiring a stream with no subscription row is a
+   * no-op returning 0. Adapters whose \`truncate\` already removed the row
+   * satisfy this trivially.
+   *
+   * Only ever removes subscriptions. It must not touch the event log —
+   * \`truncate\` owns that half.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   *
+   * @example A hybrid store delegating each half
+   * \`\`\`typescript
+   * truncate: (targets) => log.truncate(targets),
+   * retire: (streams) => subs.retire!(streams),
+   * \`\`\`
+   *
+   * @see {@link truncate} for the event-log half of retirement
+   * @see {@link Act.close} for the orchestration that sequences the two
+   */
+  retire?: (streams: string[]) => Promise<number>;
 
   /**
    * Atomically wipe the store and commit a fresh sequence of events
@@ -39161,7 +39337,11 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
+   * 2. Removes the stream's entry from the streams table — **or leaves it
+   *    to {@link retire}**, which the orchestrator calls with the retired
+   *    streams after a successful truncate. A store whose event log and
+   *    subscriptions live on different systems cannot do this atomically
+   *    with step 1, and should implement {@link retire} instead.
    * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
    *
@@ -39198,6 +39378,50 @@ export interface Store extends Disposable, EventSource {
       max_id?: number;
     }>
   ) => Promise<TruncateResult>;
+
+  /**
+   * Removes the subscription rows for fully-retired streams.
+   *
+   * **Capability-gated.** Adapters may omit it — the orchestrator calls it
+   * through \`?.\`, so a store without it behaves exactly as before and keeps
+   * retiring subscriptions inside {@link truncate}.
+   *
+   * Exists so retirement can be **two steps instead of one transaction**.
+   * \`truncate\` retires a stream by deleting its events, seeding a tombstone,
+   * and removing its subscription — all atomically. A store whose event log
+   * and subscriptions live on different systems has no transaction spanning
+   * both, so it cannot satisfy that contract; before this method it could
+   * only approximate it and document the gap.
+   *
+   * {@link Act.close} calls this **after** a successful truncate, with the
+   * streams that were seeded with a \`__tombstone__\` (retired) rather than a
+   * \`__snapshot__\` (restarted, and keeping its subscription). That order is
+   * deliberate and fixed here so no adapter has to re-derive it: the log's
+   * truncate commits the tombstone that stops new events landing, so a crash
+   * between the two steps orphans a subscription row that claims nothing and
+   * is reaped by the next close. The reverse order would leave a live stream
+   * with no subscription — delivery silently stops, and nothing heals it.
+   *
+   * Must be **idempotent**: retiring a stream with no subscription row is a
+   * no-op returning 0. Adapters whose \`truncate\` already removed the row
+   * satisfy this trivially.
+   *
+   * Only ever removes subscriptions. It must not touch the event log —
+   * \`truncate\` owns that half.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   *
+   * @example A hybrid store delegating each half
+   * \`\`\`typescript
+   * truncate: (targets) => log.truncate(targets),
+   * retire: (streams) => subs.retire!(streams),
+   * \`\`\`
+   *
+   * @see {@link truncate} for the event-log half of retirement
+   * @see {@link Act.close} for the orchestration that sequences the two
+   */
+  retire?: (streams: string[]) => Promise<number>;
 
   /**
    * Atomically wipe the store and commit a fresh sequence of events
@@ -52752,6 +52976,32 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Removes subscription rows for retired streams.
+   *
+   * \`truncate\` already drops them in its own transaction, so this normally
+   * removes nothing and returns 0 — the idempotency the contract requires.
+   * It exists so a hybrid store whose subscriptions live on a separate
+   * Postgres can delegate the subscription half of retirement here while its
+   * event log handles \`truncate\`.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   */
+  async retire(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    const client = await this._client("retire");
+    try {
+      const result = await client.query(
+        \`DELETE FROM \${this._fqs} WHERE stream = ANY($1::text[])\`,
+        [streams]
+      );
+      return result.rowCount ?? 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
    * Windowed targets (\`before\` set) prune the prefix below the closest safe
    * \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
@@ -54670,6 +54920,27 @@ export class SqliteStore implements Store {
     const result = await this.client.execute({
       sql,
       args: [priority, priority, ...filterArgs] as any[],
+    });
+    return result.rowsAffected;
+  }
+
+  /**
+   * Removes subscription rows for retired streams.
+   *
+   * \`truncate\` already drops them inside its transaction, so this normally
+   * removes nothing and returns 0 — the idempotency the contract requires.
+   * It exists so the two-step retirement path is exercised on every in-tree
+   * adapter rather than only on the ones a hybrid would use.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   */
+  async retire(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    const placeholders = streams.map(() => "?").join(",");
+    const result = await this.client.execute({
+      sql: \`DELETE FROM streams WHERE stream IN (\${placeholders})\`,
+      args: streams,
     });
     return result.rowsAffected;
   }
@@ -57170,6 +57441,19 @@ export type StoreCapabilities = {
    * rollback on mid-iteration throw.
    */
   readonly restore?: boolean;
+  /**
+   * Adapter implements {@link Store.retire}. When \`true\`, the TCK runs
+   * the retirement suite — removes the subscription row, returns the
+   * count, is idempotent on a stream with no row, no-ops on an empty
+   * list, leaves sibling subscriptions alone, and never touches the
+   * event log.
+   *
+   * Optional because retirement is normally done inside \`truncate\`'s
+   * transaction. A store whose event log and subscriptions live on
+   * different systems has no such transaction and implements this
+   * instead, letting {@link Act.close} sequence the two halves.
+   */
+  readonly retire?: boolean;
   /**
    * Adapter supports sensitive-data isolation (#566): accepts the
    * optional \`pii\` field on commit messages, returns it on load
@@ -61125,6 +61409,97 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         for (let i = 1; i < committed.length; i++) {
           expect(committed[i].id).toBeGreaterThan(committed[i - 1].id);
         }
+      });
+    });
+
+    /**
+     * Retirement's subscription half (#1527).
+     *
+     * \`truncate\` normally removes the subscription row inside its own
+     * transaction, which is why this is capability-gated rather than
+     * required. A store whose event log and subscriptions live on different
+     * systems has no transaction spanning both, so it delegates \`truncate\`
+     * to the log half and implements \`retire\` against the subscription half,
+     * letting \`Act.close\` sequence the two.
+     *
+     * The cases below pin what such a store may rely on. Note that an
+     * adapter whose \`truncate\` already dropped the row satisfies most of
+     * them by returning 0 — idempotency is the point, not the row count.
+     */
+    describe.skipIf(!caps.retire)("retire (capability)", () => {
+      /**
+       * Which subscription rows exist for \`stream\`, by anchored literal.
+       *
+       * Shared rather than inlined per case: an inline collector in a case
+       * that expects nothing back is a callback that never runs, which reads
+       * as dead code in coverage. Character classes stay out of the pattern —
+       * they are outside the portable regex subset every adapter supports.
+       */
+      const subscribed_rows = async (stream: string) => {
+        const rows: string[] = [];
+        await store.query_streams((p) => rows.push(p.stream), {
+          stream: \`^\${stream}$\`,
+        });
+        return rows;
+      };
+
+      it("removes the subscription and reports how many it removed", async () => {
+        const s = \`retire-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        expect(await subscribed_rows(s)).toEqual([s]);
+
+        expect(await store.retire!([s])).toBe(1);
+
+        expect(await subscribed_rows(s)).toEqual([]);
+      });
+
+      it("is idempotent — retiring an already-retired stream removes nothing", async () => {
+        const s = \`retire-idem-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        expect(await store.retire!([s])).toBe(1);
+        // The contract's central requirement: an adapter whose \`truncate\`
+        // already dropped the row must not fail when the orchestrator calls
+        // \`retire\` afterwards.
+        expect(await store.retire!([s])).toBe(0);
+      });
+
+      it("no-ops on a stream that was never subscribed", async () => {
+        expect(await store.retire!([\`retire-absent-\${uid()}\`])).toBe(0);
+      });
+
+      it("no-ops on an empty list", async () => {
+        expect(await store.retire!([])).toBe(0);
+      });
+
+      it("leaves sibling subscriptions alone", async () => {
+        const tag = uid();
+        const gone = \`retire-a-\${tag}\`;
+        const kept = \`retire-b-\${tag}\`;
+        await store.subscribe([{ stream: gone }, { stream: kept }]);
+
+        expect(await store.retire!([gone])).toBe(1);
+
+        expect(await subscribed_rows(gone)).toEqual([]);
+        expect(await subscribed_rows(kept)).toEqual([kept]);
+      });
+
+      it("removes only the subscription — the event log is untouched", async () => {
+        const s = \`retire-events-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.subscribe([{ stream: s }]);
+
+        expect(await store.retire!([s])).toBe(1);
+
+        // \`retire\` owns the subscription half and nothing else. A store that
+        // deleted events here would silently destroy history on every close
+        // of a restarted stream.
+        const events: number[] = [];
+        await store.query((e) => events.push(e.id), { stream: s });
+        expect(events).toHaveLength(2);
       });
     });
 

@@ -4,6 +4,8 @@ import {
   ConcurrencyError,
   cache,
   dispose,
+  InMemoryCache,
+  InMemoryStore,
   log,
   SNAP_EVENT,
   StreamClosedError,
@@ -803,5 +805,113 @@ describe("close and reaction subscriptions (#1398)", () => {
     await store().query_streams((p) => rows.push(p.stream), { limit: 100 });
     expect(rows).not.toContain("SS");
     await app.shutdown();
+  });
+
+  describe("retiring subscriptions (#1527)", () => {
+    /**
+     * `retire` is the subscription half of retirement, split out of
+     * `truncate` so a store whose event log and subscriptions live on
+     * different systems can implement each half separately. These pin the
+     * orchestration contract such a store depends on: which streams it is
+     * called with, and that a store without it still works.
+     *
+     * Each case builds its Act on a `scoped` store so it can substitute a
+     * spy — the port singleton injects once per process and ignores later
+     * adapters, so swapping it mid-suite silently does nothing.
+     */
+    const retire_actor = { id: "retire", name: "Retire" };
+    const retire_counter = state({
+      RetireCounter: z.object({ count: z.number() }),
+    })
+      .init(() => ({ count: 0 }))
+      .emits({ bumped: z.object({ by: z.number() }) })
+      .patch({ bumped: ({ data }, s) => ({ count: s.count + data.by }) })
+      .on({ bump: z.object({ by: z.number() }) })
+      .emit((a) => ["bumped", { by: a.by }])
+      .build();
+
+    const retiring_app = async (
+      wrap: (base: InMemoryStore) => InMemoryStore
+    ) => {
+      const base = new InMemoryStore();
+      await base.seed();
+      const scoped_store = wrap(base);
+      const app = act()
+        .withState(retire_counter)
+        .on("bumped")
+        .do(async function onBumped() {
+          await Promise.resolve();
+        })
+        .to("retire-reaction-target")
+        .build({ scoped: { store: scoped_store, cache: new InMemoryCache() } });
+      return { app, scoped_store };
+    };
+
+    it("calls retire with the tombstoned streams, not the restarted ones", async () => {
+      const calls: string[][] = [];
+      const { app } = await retiring_app(
+        (base) =>
+          new Proxy(base, {
+            get(target, prop) {
+              // The spy still delegates: the in-memory truncate already
+              // dropped the rows, so the follow-up call must stay a
+              // harmless no-op rather than throwing.
+              if (prop === "retire")
+                return async (streams: string[]) => {
+                  calls.push([...streams]);
+                  return base.retire(streams);
+                };
+              const value = Reflect.get(target, prop);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as InMemoryStore
+      );
+
+      await app.do("bump", { stream: "gone", actor: retire_actor }, { by: 1 });
+      await app.do("bump", { stream: "kept", actor: retire_actor }, { by: 1 });
+      await app.correlate();
+      await app.drain();
+
+      await app.close([{ stream: "gone" }, { stream: "kept", restart: true }]);
+
+      // A tombstone seed means retired; a snapshot seed means restarted and
+      // still consuming, so its subscription must survive.
+      expect(calls).toEqual([["gone"]]);
+      await app.shutdown();
+    });
+
+    it("closes normally against a store that does not implement retire", async () => {
+      const { app, scoped_store } = await retiring_app(
+        (base) =>
+          new Proxy(base, {
+            get(target, prop) {
+              if (prop === "retire") return undefined;
+              const value = Reflect.get(target, prop);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }) as InMemoryStore
+      );
+
+      await app.do(
+        "bump",
+        { stream: "no-retire", actor: retire_actor },
+        { by: 1 }
+      );
+      await app.correlate();
+      await app.drain();
+
+      const result = await app.close([{ stream: "no-retire" }]);
+      expect(result.truncated.get("no-retire")!.committed.name).toBe(
+        TOMBSTONE_EVENT
+      );
+      // truncate removed the row itself, which is the pre-#1527 behaviour
+      // every existing adapter keeps.
+      const rows: string[] = [];
+      await scoped_store.query_streams((p) => rows.push(p.stream), {
+        limit: 100,
+      });
+      expect(rows).not.toContain("no-retire");
+      await app.shutdown();
+    });
   });
 });

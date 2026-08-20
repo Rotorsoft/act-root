@@ -2261,6 +2261,32 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Removes subscription rows for retired streams.
+   *
+   * `truncate` already drops them in its own transaction, so this normally
+   * removes nothing and returns 0 — the idempotency the contract requires.
+   * It exists so a hybrid store whose subscriptions live on a separate
+   * Postgres can delegate the subscription half of retirement here while its
+   * event log handles `truncate`.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   */
+  async retire(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    const client = await this._client("retire");
+    try {
+      const result = await client.query(
+        `DELETE FROM ${this._fqs} WHERE stream = ANY($1::text[])`,
+        [streams]
+      );
+      return result.rowCount ?? 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
    * Windowed targets (`before` set) prune the prefix below the closest safe
    * `__snapshot__` instead — no seed, subscriptions untouched, no-op when no

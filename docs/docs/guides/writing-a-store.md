@@ -215,6 +215,8 @@ When `notify: true`, the TCK runs the cross-instance conformance cases: a listen
 
 The `restore` capability is the other opt-in today. Skip it (`capabilities.restore: false` or just omit) and the TCK's restore cases stay parked. Flip it on once you've implemented `Store.restore` — see the next section for the contract.
 
+`retire` is the third. Skip it and retirement stays a single transaction inside `truncate`, which is what every in-tree adapter does. Flip it on if your event log and subscriptions live on different systems — see [Retiring subscriptions separately](#retiring-subscriptions-separately-optional).
+
 ## Deferring a stream (`defer` and the `claim` skip)
 
 `defer` is the persistence behind the deferred-reaction outcome ([#1090](https://github.com/Rotorsoft/act-root/issues/1090)). A reaction handler can decide it has nothing useful to do until some future moment — a cooldown hasn't elapsed, a deadline is still hours out — and ask to be revisited then instead of acking (which would consume the event) or failing (which would burn a retry). The store is what makes that decision durable: an in-process timer alone would forget the deferral on restart and would not stop a *different* worker from re-claiming the same stream a millisecond later.
@@ -264,6 +266,8 @@ The subtle part is that the **sort comparator and the cursor comparator must be 
 
 A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream, remove the stream's row from the streams/subscriptions table, and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. After the transaction the stream has one row and no subscription state.
 
+If you cannot do all three in one transaction — because your subscriptions live on a different system — implement [`retire`](#retiring-subscriptions-separately-optional) and let the orchestrator sequence the two halves instead.
+
 A **windowed** target (`{ stream, before, max_id? }`, [#1011](https://github.com/Rotorsoft/act-root/issues/1011)) is a pure prefix delete on a stream that stays live. The adapter's job is to find the **closest safe boundary** — the latest `__snapshot__` event with `created < before` and, when `max_id` is supplied, `id <= max_id` — and delete every event with an id below it. The snapshot itself and everything after it survive. The SQL shape on Postgres:
 
 ```sql no-check
@@ -290,6 +294,40 @@ The contract points adapter authors get wrong first:
 Why the boundary anchors on a real snapshot: the framework's `load()` resets state at each `__snapshot__` on replay, so events below the latest snapshot contribute nothing to any load result — deleting them cannot change what `load()` returns. The `max_id` cap is the consumer-safety half: the orchestrator probes the minimum subscription watermark before calling you, so the boundary never rises past what the laggiest reaction has read.
 
 The TCK pins all of this in the `describe("windowed (before boundary)")` block of `store-tck.ts`: prefix deleted behind the closest safe snapshot, `max_id` cap honored, no-snapshot no-op, subscriptions preserved (explicitly contrasted with the full truncate), mixed full + windowed batches, and the stream staying writable and readable after a prune. Pass that block and windowed closes work on your backend with no further wiring.
+
+## Retiring subscriptions separately (optional)
+
+Everything above assumes one transaction can delete a stream's events *and* remove its subscription. That assumption breaks the moment the two live on different systems — the shape the [hybrid-store recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/hybrid-store) uses to put an event log on one database and subscriptions on another.
+
+`Store.retire(streams)` ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)) is the subscription half on its own:
+
+```ts no-check
+async retire(streams: string[]): Promise<number> {
+  if (!streams.length) return 0;
+  const result = await this.client.query(
+    `DELETE FROM ${this.streams_table} WHERE stream = ANY($1::text[])`,
+    [streams]
+  );
+  return result.rowCount ?? 0;
+}
+```
+
+Three rules:
+
+- **Subscriptions only.** Never touch the event log. `truncate` owns that half, and a `retire` that deleted events would destroy history every time a restarted stream closed.
+- **Idempotent.** Retiring a stream with no subscription row returns 0, not an error. This is the central requirement, because the orchestrator calls `retire` after `truncate` unconditionally — so an adapter whose `truncate` already removed the row gets called anyway and must shrug.
+- **The orchestrator decides who gets retired, and when.** `Act.close` calls it after a successful truncate, with only the streams seeded with a `__tombstone__`. A stream seeded with a `__snapshot__` was restarted, is still consuming, and keeps its subscription.
+
+**Why the order is fixed rather than left to you.** Truncate goes first because it commits the tombstone that stops new events landing on the stream. A crash between the two steps leaves an orphaned subscription row: it points at a stream whose events are gone, claims nothing, and is reaped by the next close. The reverse order would leave a live stream with no subscription — delivery silently stops and nothing heals it. That reasoning used to live in a recipe comment where every adapter author had to re-derive it; now it lives in the orchestrator and you inherit it.
+
+A hybrid adapter's whole retirement story becomes two delegations:
+
+```ts no-check
+truncate: (targets) => log.truncate(targets),
+retire: (streams) => subs.retire!(streams),
+```
+
+Opt in with `capabilities: { retire: true }` and the TCK runs the suite: removes the row and reports the count, idempotent on an already-retired stream, no-op on an unknown stream and on an empty list, leaves siblings alone, and leaves the event log untouched.
 
 ## Implementing `Store.restore` (optional)
 

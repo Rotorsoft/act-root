@@ -111,25 +111,33 @@ the whole builder API are unaware there are two databases.
 
 ## What you take on
 
-**`truncate` spans both stores, and there is no shared transaction.** It is
-the only place this recipe owes real work. A full close deletes a stream's
-events, seeds a tombstone, *and* removes the subscription row.
+**`truncate` used to span both stores. It no longer does.**
 
-The implementation does the log first, deliberately. Its truncate commits the
-tombstone that stops new events landing on the stream, so a crash between the
-two halves leaves an orphaned subscription row — pointing at a stream whose
-events are gone, claiming nothing, and reaped by the next close. The reverse
-order would leave a live stream with no subscription, which silently stops
-delivery: a worse failure, and one that does not heal itself. `Act.close` is
-already resumable after an interrupted truncate
-([#1389](https://github.com/Rotorsoft/act-root/issues/1389)).
+Retiring a stream deletes its events, seeds a tombstone, and forgets its
+subscription. Until [#1527](https://github.com/Rotorsoft/act-root/issues/1527)
+the `Store` contract required all three in one transaction, which a hybrid
+cannot provide — so this recipe had to call the two halves itself, pick an
+order, and accept a crash window. That ordering argument was subtle and getting
+it backwards failed silently, which made it the one place a hybrid owed real
+work rather than delegation.
 
-This is framework work currently pushed into userland — every hybrid adapter
-re-derives the same ordering argument, and getting it backwards fails
-silently. [#1527](https://github.com/Rotorsoft/act-root/issues/1527) tracks
-moving the subscription-retirement step out of `truncate` and into the close
-cycle, which already sequences and resumes phases, so a hybrid could delegate
-`truncate` like everything else.
+The port now splits it. `truncate` is the event-log half; the optional
+`retire(streams)` is the subscription half, and `Act.close` calls it after a
+successful truncate with the streams it actually retired. The recipe is two
+more delegations:
+
+```ts
+truncate: log.truncate.bind(log),
+retire: subs.retire?.bind(subs),
+```
+
+The crash window still exists — two systems, no shared transaction, nothing
+changes that. What changed is who reasons about it. The orchestrator fixes the
+order (log first, so the tombstone that stops new events landing is committed
+before the subscription goes), and `Act.close` is already resumable after an
+interrupted truncate
+([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), so an orphaned
+subscription row claims nothing and is reaped by the next close.
 
 **Two systems to operate.** Backup, monitoring, failover, version skew. The
 honest framing: losing the subscription store costs *redelivery*, not data.

@@ -1564,6 +1564,27 @@ export class SqliteStore implements Store {
     return result.rowsAffected;
   }
 
+  /**
+   * Removes subscription rows for retired streams.
+   *
+   * `truncate` already drops them inside its transaction, so this normally
+   * removes nothing and returns 0 — the idempotency the contract requires.
+   * It exists so the two-step retirement path is exercised on every in-tree
+   * adapter rather than only on the ones a hybrid would use.
+   *
+   * @param streams - Streams whose subscriptions should be removed
+   * @returns How many subscription rows were removed
+   */
+  async retire(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    const placeholders = streams.map(() => "?").join(",");
+    const result = await this.client.execute({
+      sql: `DELETE FROM streams WHERE stream IN (${placeholders})`,
+      args: streams,
+    });
+    return result.rowsAffected;
+  }
+
   // --- truncate: transactional delete + seed ---
   // Windowed targets (`before` set) prune the prefix below the closest safe
   // `__snapshot__` instead — no seed, subscriptions untouched, no-op when no

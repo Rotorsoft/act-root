@@ -84,37 +84,33 @@ export const hybridStore = (log: Store, subs: Store): Store => ({
   },
 
   /**
-   * The one operation that genuinely spans both stores, and the only place a
-   * hybrid owes real work rather than delegation.
+   * Retiring a stream deletes its events, seeds a tombstone or snapshot, and
+   * forgets its subscription. The first two are event-log work; the third is
+   * subscription work. Before
+   * [#1527](https://github.com/Rotorsoft/act-root/issues/1527) `truncate` had
+   * to do all three atomically, which a hybrid cannot — so this file was the
+   * one place a hybrid owed real work rather than delegation, and it had to
+   * reason about crash windows across two systems.
    *
-   * A **windowed** target (`before` set) is a pure prefix delete on the event
-   * log and leaves the subscriptions table untouched, so it needs nothing
-   * special. A **full** target deletes the stream's events, seeds a tombstone
-   * or snapshot, *and* removes the subscription row — two systems, no shared
-   * transaction.
-   *
-   * Order matters. The log goes first, because its truncate is the one that
-   * commits the tombstone that stops new events landing on the stream. If the
-   * process dies between the two, the subscription row is orphaned: it points
-   * at a stream whose events are gone, claims nothing (its watermark is at or
-   * above the seed), and is removed by the next close of that stream. The
-   * reverse order would leave a live stream with no subscription, which
-   * silently stops delivery — a worse failure with no self-healing.
-   *
-   * `Act.close` is already resumable after an interrupted truncate
-   * ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is
-   * what makes the crash window recoverable rather than merely rare.
+   * Now `truncate` is the event-log half alone, and `retire` below is the
+   * subscription half. `Act.close` sequences them.
    */
-  truncate: async (targets) => {
-    const result = await log.truncate(targets);
-    const retired = targets
-      .filter((t) => t.before === undefined && result.has(t.stream))
-      .map((t) => t.stream);
-    // `reset` is the subscription-side verb that exists on the port; a
-    // dedicated adapter would delete the rows outright. Resetting is the
-    // conservative choice — a rewound watermark redelivers, which
-    // at-least-once already permits, whereas a missed delete does not.
-    if (retired.length) await subs.reset(retired);
-    return result;
-  },
+  truncate: log.truncate.bind(log),
+
+  /**
+   * The subscription half of retirement.
+   *
+   * `Act.close` calls this **after** a successful truncate, with only the
+   * streams it seeded with a tombstone — a stream seeded with a snapshot was
+   * restarted, is still consuming, and keeps its subscription.
+   *
+   * The ordering argument that used to live here now lives in the
+   * orchestrator, so every hybrid inherits it instead of re-deriving it: the
+   * log goes first because its truncate commits the tombstone that stops new
+   * events landing, so a crash between the two steps leaves an orphaned
+   * subscription row that claims nothing and is reaped by the next close. The
+   * reverse order would leave a live stream with no subscription, which
+   * silently stops delivery and never heals.
+   */
+  retire: subs.retire?.bind(subs),
 });
