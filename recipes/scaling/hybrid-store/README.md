@@ -114,6 +114,13 @@ delivery: a worse failure, and one that does not heal itself. `Act.close` is
 already resumable after an interrupted truncate
 ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)).
 
+This is framework work currently pushed into userland — every hybrid adapter
+re-derives the same ordering argument, and getting it backwards fails
+silently. [#1527](https://github.com/Rotorsoft/act-root/issues/1527) tracks
+moving the subscription-retirement step out of `truncate` and into the close
+cycle, which already sequences and resumes phases, so a hybrid could delegate
+`truncate` like everything else.
+
 **Two systems to operate.** Backup, monitoring, failover, version skew. The
 honest framing: losing the subscription store costs *redelivery*, not data.
 Watermarks are the only record of what has been processed — the log records

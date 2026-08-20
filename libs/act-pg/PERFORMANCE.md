@@ -982,7 +982,9 @@ conclusion to draw now.
 - Two containers on one host — same CPU and disk. A real deployment separates
   those too, which should favour the split further.
 - `truncate` and `restore` are not exercised. They are the two operations that
-  genuinely span both stores and the real work a production hybrid owes.
+  genuinely span both stores and the real work a production hybrid owes — the
+  coupling itself is tracked in
+  [#1527](https://github.com/Rotorsoft/act-root/issues/1527).
 
 ### Reproducing
 
