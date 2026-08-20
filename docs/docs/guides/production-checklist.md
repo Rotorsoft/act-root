@@ -324,6 +324,25 @@ What to check afterwards:
 
 Run `seed()` as part of the deploy, the way you already do for schema sync — there is no separate migration step and no operator-invoked sweep.
 
+## 13. Reindex the subscriptions table periodically
+
+The subscriptions table is small and updated constantly — every claim and every ack rewrites a row. Postgres answers an update by writing a new copy of the row and leaving the old one for autovacuum to reclaim, so the table and its indexes accumulate dead space under steady drain traffic.
+
+The table itself is fine. Autovacuum keeps up with it, and its size holds flat. **The indexes are what drift**: they keep growing and their pages end up roughly half empty, because `ack` moves `at`, and `at` is both a key column of the claim index and part of the condition deciding which rows belong in it. That combination stops Postgres from taking its cheaper update path, so most acks leave index work behind.
+
+This is housekeeping, not a design problem — the fix is one command, run on whatever cadence your monitoring justifies:
+
+```sql
+REINDEX INDEX CONCURRENTLY <table>_streams_at_ix;
+REINDEX INDEX CONCURRENTLY <table>_streams_claim_ix;
+```
+
+`CONCURRENTLY` keeps the table readable and writable throughout, so this is safe to run against a live system.
+
+**Whether you need it at all depends on your drain volume.** A deployment acking a few hundred times a second will not notice for a very long time. If you want the number rather than a rule of thumb, watch `pg_stat_user_tables.n_dead_tup` (it should hold flat, not climb) and `pgstatindex(...).avg_leaf_density` on the claim index (falling well below ~60% is the signal), or run [`libs/act-pg/scripts/bloat-soak.bench.mjs`](https://github.com/Rotorsoft/act-root/blob/master/libs/act-pg/scripts/bloat-soak.bench.mjs) against a copy of your workload.
+
+This is the only ongoing maintenance the subscription side asks for, and it is why Act stays on Postgres for subscriptions rather than reaching for a store without this behaviour — a scheduled reindex is a much smaller thing to operate than a second database.
+
 ## Pre-deploy quick check
 
 Before pushing to production, walk this list mentally:
@@ -339,5 +358,6 @@ Before pushing to production, walk this list mentally:
 - [ ] Lifecycle metrics exported (blocked, settled, concurrency)
 - [ ] Lanes sized per latency class (or all reactions sharing one timing budget is genuinely fine)
 - [ ] Disaster-recovery plan is `pg_dump` / file copy — not `app.restore` (which is for content-level migration / compaction, not DR)
+- [ ] Periodic `REINDEX INDEX CONCURRENTLY` on the subscription indexes, if drain volume is high
 
 Once these are in place, the framework runs itself.
