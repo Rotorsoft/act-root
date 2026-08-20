@@ -421,6 +421,20 @@ describe("extract_identifier_assignments", () => {
     expect(out.get("Foo")).toBe("fn(a, b, c) + arr[0]");
   });
 
+  /**
+   * These guards separate a complexity class, not a speed, so the threshold
+   * only has to sit between the two. Measured on the same input (50,000
+   * repetitions, ~400 KB): the bounded `{1,256}` form runs in **27 ms**, the
+   * unbounded form it replaced in **8,227 ms** — 300× apart.
+   *
+   * The original 100 ms sat ~3× above the real cost, which is inside the
+   * noise of a shared CI runner: it failed at 103, 131 and 137 ms on three
+   * unrelated PRs in one day with nothing actually wrong. 2 s is ~15× above
+   * the good case even on CI (which runs this ~4× slower than a dev machine)
+   * and still comfortably below the bad one.
+   */
+  const REDOS_BUDGET_MS = 2_000;
+
   it("handles pathological whitespace runs in linear time (ReDoS guard)", () => {
     // CodeQL flagged the original regex as polynomial on inputs like
     // `#let $:` + N spaces, no `=`. Build a worst-case source and make
@@ -430,20 +444,19 @@ describe("extract_identifier_assignments", () => {
     const out = extract_identifier_assignments(pathological);
     const elapsed = Date.now() - start;
     expect(out.size).toBe(0);
-    expect(elapsed).toBeLessThan(100);
+    expect(elapsed).toBeLessThan(REDOS_BUDGET_MS);
   });
 
   it("handles many `#let $:` repetitions in linear time (ReDoS guard)", () => {
     // CodeQL alert #29: with the previous regex, each `#let $:` repetition
     // restarted the type-annotation arm, which then greedily scanned the
     // remaining input looking for an `=`. N positions × O(N) scan was
-    // O(N²). The bounded `{1,256}` cap keeps the per-position work
-    // constant, so 50K repetitions stay well under 100ms.
+    // O(N²). The bounded `{1,256}` cap keeps the per-position work constant.
     const pathological = "#let $:".repeat(50_000);
     const start = Date.now();
     const out = extract_identifier_assignments(pathological);
     const elapsed = Date.now() - start;
     expect(out.size).toBe(0);
-    expect(elapsed).toBeLessThan(100);
+    expect(elapsed).toBeLessThan(REDOS_BUDGET_MS);
   });
 });
