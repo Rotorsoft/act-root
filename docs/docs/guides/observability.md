@@ -233,7 +233,9 @@ Be clear about what this buys you: **log shipping, not tracing.** Act does not c
 
 ## Where the inspector fits
 
-The `act-inspector` workspace package is **incident forensics, not continuous monitoring**. It reads the same `query_streams` / `query` primitives your metrics poll, but through a UI built for a human mid-incident: which streams are blocked, what the last error was, how far a projection's watermark lags the head, what a specific stream's event history looks like. When the `act_streams_blocked` alert fires, the inspector is where you go to decide between `app.unblock()` and a code fix — pointed at the production store read-only, or at a snapshot copy. It is not a runtime dependency, it doesn't scrape, and nothing on this page replaces it or is replaced by it.
+> **Reading lag correctly.** A subscription's watermark advances only over events that *resolve to it*, so a reaction handling a subset of a state's events sits permanently below the stream's head with nothing pending. Distance to the head is therefore an upper bound, not a backlog — compare a subscription's `at` against its own `correlated_at` for the real answer ([#1521](https://github.com/Rotorsoft/act-root/issues/1521)). The inspector does this; anything you build on `query_streams` should too.
+
+The `act-inspector` workspace package is **incident forensics, not continuous monitoring**. It reads the same `query_streams` / `query` primitives your metrics poll, but through a UI built for a human mid-incident: which streams are blocked, what the last error was, how much work a projection still has waiting, what a specific stream's event history looks like. When the `act_streams_blocked` alert fires, the inspector is where you go to decide between `app.unblock()` and a code fix — pointed at the production store read-only, or at a snapshot copy. It is not a runtime dependency, it doesn't scrape, and nothing on this page replaces it or is replaced by it.
 
 ## What pages, what doesn't
 

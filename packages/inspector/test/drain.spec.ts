@@ -144,6 +144,47 @@ describe("drainStatus", () => {
     expect(status.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("reports pending work, not distance to the head (#1521)", async () => {
+    // A reader that has consumed everything marked for it is healthy, however
+    // far its watermark sits below the log's head. That is the ordinary shape
+    // of a reaction handling a subset of a state's events: its watermark only
+    // advances over events that resolve to it, so it is permanently behind
+    // the head with nothing to do.
+    for (let i = 0; i < 20; i++) {
+      await seed(store, "src-quiet", "tick", { i }, i - 1);
+    }
+    await store.subscribe([
+      // Marked well below the head, and caught up to that mark.
+      { stream: "sub-caught-up", source: "src-quiet", correlated_at: 3 },
+    ]);
+    const claimed = await store.claim(10, 10, randomUUID(), 30_000);
+    const mine = claimed.find((l) => l.stream === "sub-caught-up");
+    if (mine) await store.ack([{ ...mine, at: 3 }]);
+
+    const status = await caller.drainStatus();
+    const row = status.histogram.reduce((acc, b) => acc + b.count, 0);
+    expect(row).toBe(1);
+    // Head distance is 16; pending work is 0. Counting the head distance
+    // classified this as `lagging` and showed a backlog that does not exist.
+    expect(status.maxEventId).toBe(19);
+    expect(status.lagging).toBe(0);
+    expect(status.healthy).toBe(1);
+  });
+
+  it("falls back to head distance for a row that carries no mark", async () => {
+    // An install that predates the work-mark column, before `seed()` has
+    // marked its rows: there is no mark to read, so the upper bound is the
+    // best available answer and the number is what it always was.
+    for (let i = 0; i < 20; i++) {
+      await seed(store, "src-old", "tick", { i }, i - 1);
+    }
+    await store.subscribe([{ stream: "sub-unmarked", source: "src-old" }]);
+
+    const status = await caller.drainStatus();
+    expect(status.lagging).toBe(1);
+    expect(status.healthy).toBe(0);
+  });
+
   it("returns a zeroed snapshot when no streams are subscribed", async () => {
     const status = await caller.drainStatus();
     expect(status.total).toBe(0);
