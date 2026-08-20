@@ -144,6 +144,7 @@ When an Act application hits the edges (events table growing without bound, cool
 | Close-the-books patterns (`.autocloses({...})`) | [recipes/scaling/close-the-books/README.md](recipes/scaling/close-the-books/README.md) |
 | Cold-tier archival (`.archives(...)` + S3 / JSONL) | [recipes/scaling/archival/README.md](recipes/scaling/archival/README.md) |
 | Scale-out by splitting stores (per-context/tenant `ActOptions.scoped`) | [recipes/scaling/split-stores/README.md](recipes/scaling/split-stores/README.md) |
+| Hybrid store — event log and subscriptions on separate databases, behind one `Store` | [recipes/scaling/hybrid-store/README.md](recipes/scaling/hybrid-store/README.md) |
 | Lift the LISTEN/NOTIFY fanout ceiling (act-notify + Redis) | [recipes/scaling/notify-broker/README.md](recipes/scaling/notify-broker/README.md) |
 | Partitioning gating page (the "don't" page) | [recipes/scaling/partitioning/README.md](recipes/scaling/partitioning/README.md) |
 | HASH-on-stream partition recipe (SQL + run.sh) | [recipes/scaling/partitioning/hash-on-stream/](recipes/scaling/partitioning/hash-on-stream/README.md) |
