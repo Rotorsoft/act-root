@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.34.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.34.2...@rotorsoft/act-tck-v1.34.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **act:** cap a windowed prune at pending work, not watermark lag ([#1525](https://github.com/Rotorsoft/act-root/issues/1525)) ([365d185](https://github.com/Rotorsoft/act-root/commit/365d1855a96e5543341c637f9ba572e76087cced)), closes [#1520](https://github.com/Rotorsoft/act-root/issues/1520)
+
 # [@rotorsoft/act-tck-v1.34.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.34.1...@rotorsoft/act-tck-v1.34.2) (2026-08-20)
 
 
