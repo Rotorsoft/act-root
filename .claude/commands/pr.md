@@ -17,6 +17,13 @@ Open a pull request for the current branch following the Act project conventions
    - **Sections per concern** — each major change gets its own `##` section with the rationale, not just the diff.
    - **Test plan** — Markdown checkbox list. Pre-tick items already verified locally (typecheck, test, lint, coverage). Leave CI/review boxes unchecked.
    - **Stability charter impact** — call out additive vs. breaking with files touched. Skip the section only if no charter-covered files changed.
+
+     **Decide the `rfc-gate` line here, before opening the PR — not after CI fails.** The gate fires whenever the stability snapshot *grows*, and that snapshot captures **source text**, so a new doc comment or an internal helper trips it even though nothing public changed. Any PR touching `libs/*/src` should assume it will fire.
+
+     - Genuinely adds public surface (new export, builder method, port method, lifecycle event, new field on an exported type) → the PR needs an `rfcs/NNNN-*.md`, linked in the body.
+     - Snapshot grew but no public surface was added → put `rfc-gate: exempt — <why>` in the body **at creation time**, naming what actually grew (comments, an internal parameter, a private helper).
+
+     Reactively editing the body after a red gate has cost a CI cycle on four PRs; the decision is knowable before pushing.
    - **Follow-ups** — parked work referenced as separate tickets.
 5. Open with `gh pr create --title ... --body "$(cat <<'EOF' ... EOF)"` and HEREDOC the body so Markdown formatting survives.
 6. Print the resulting URL.
