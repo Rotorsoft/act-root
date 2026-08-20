@@ -813,6 +813,14 @@ would with a `(lane, at)` index. Not added here: it would be a third index on
 the hottest-written table, and no measured workload needs it yet.
 ## #1510 — the subscription workload under N workers, and whether a hybrid would help
 
+> **Claim numbers here are superseded.** These cells were measured before
+> [#1518](https://github.com/Rotorsoft/act-root/pull/1518) stopped `claim` from
+> materializing the eligible set: claim p50 at 8 workers went 20.69 ms → 2.52 ms
+> and throughput 333 → 2,186/s. The *findings* below are unaffected — the
+> asymmetric contention, the HOT-update fraction and the index-churn shape are
+> properties of the write path, which #1518 did not touch — but read the claim
+> latencies as the historical baseline they are, not as current behaviour.
+
 RFC 1449's acceptance criterion 3, and the measurement that was supposed to
 justify moving subscriptions to a different system. It argues against it.
 
@@ -905,6 +913,14 @@ LOG_LEVEL=error node libs/act-pg/scripts/subscription-contention.bench.mjs
 
 
 ## #1510 — the real split, measured: events on one server, subscriptions on another
+
+> **Claim numbers here are superseded.** These cells were measured before
+> [#1518](https://github.com/Rotorsoft/act-root/pull/1518) stopped `claim` from
+> materializing the eligible set: claim p50 at 8 workers went 20.69 ms → 2.52 ms
+> and throughput 333 → 2,186/s. The *findings* below are unaffected — the
+> asymmetric contention, the HOT-update fraction and the index-churn shape are
+> properties of the write path, which #1518 did not touch — but read the claim
+> latencies as the historical baseline they are, not as current behaviour.
 
 The section above compared the subscription workload with and without event-log
 writes *on the same server*. That is a proxy for a split, and it only captures
