@@ -34,7 +34,7 @@ export type SettleDeps<TEvents extends Schemas> = {
   readonly checkpoint: () => number;
   readonly correlate: (
     query: Query
-  ) => Promise<{ subscribed: number; last_id: number }>;
+  ) => Promise<{ subscribed: number; last_id: number; scanned?: boolean }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
   /**
@@ -134,16 +134,18 @@ export class SettleLoop<TEvents extends Schemas> {
         // `maxPasses` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const after_before = this._deps.checkpoint();
-          const { subscribed, last_id } = await this._deps.correlate({
+          const { subscribed, last_id, scanned } = await this._deps.correlate({
             ...correlate_query,
             after: after_before,
           });
-          // correlate (subscribe + query) succeeded — the store responded, so
-          // the pass carries a real health signal. It always does since
-          // #1487: correlate scans for every app, including static-only ones
-          // whose correlate used to be a no-op early-return that touched
-          // nothing and could not be allowed to record a success (#1329).
-          this._deps.breaker.passed();
+          // A scan that reached the store and came back is a real health
+          // signal; a disarmed pass that returned without touching it is not.
+          // Recording the latter would re-close an OPEN breaker mid-outage and
+          // let the drain below hammer a store nobody has heard from — the
+          // #1329 bug, which #1487 closed by making correlate always scan and
+          // #1510 reopened by letting it skip. So the question is asked per
+          // pass now, which is more accurate than either static answer.
+          if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           settled_drain = settled_drain
             ? {

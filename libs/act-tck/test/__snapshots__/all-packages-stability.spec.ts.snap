@@ -1777,7 +1777,7 @@ export class Act<
         // the scoped store and \`_initialized\` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this.correlate(q),
+        correlate: (q) => this._correlate_scanned(q),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -2344,6 +2344,10 @@ export class Act<
 
   /** Arm every active lane controller (ACT-1103). */
   private _arm_all(): void {
+    // Correlate is armed alongside the drain (#1510): a commit is exactly the
+    // event that might give a scan something to find, and without this the
+    // scan runs on every settle pass whether or not anything happened.
+    this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
@@ -2368,6 +2372,7 @@ export class Act<
       for (const lane of set) to_arm.add(lane);
     }
     if (to_arm.size === 0) return false;
+    this._correlate.arm();
     for (const lane of to_arm) this._drain_controllers.get(lane)?.arm();
     return true;
   }
@@ -2445,12 +2450,27 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
+    const { subscribed, last_id } = await this._correlate_scanned(query);
+    return { subscribed, last_id };
+  }
+
+  /**
+   * \`correlate\` plus whether the pass actually read the store (#1510).
+   *
+   * The settle loop needs that extra bit to decide whether the pass carries a
+   * circuit-breaker health signal, and a disarmed pass carries none. It stays
+   * internal rather than widening the public \`correlate\` return, which is
+   * charter-covered and has no use for it.
+   */
+  private async _correlate_scanned(
+    query: Query
+  ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
     // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
     // checkpoint stays where it was.
-    if (!this._drain) return { subscribed: 0, last_id: -1 };
+    if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
-      const { subscribed, last_id, marked } =
+      const { subscribed, last_id, marked, scanned } =
         await this._correlate.correlate(query);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
@@ -2463,9 +2483,14 @@ export class Act<
       // "nothing to do" to "claimable" without its row being new — and a
       // worker that disarmed on an empty claim moments earlier would sleep
       // through it.
+      //
+      // Arming here also re-arms CORRELATE itself, which is what keeps a
+      // backlog moving: a scan that found something leaves the flag up so the
+      // next pass continues, while the scan that finds nothing takes the
+      // disarm branch and stops the loop (#1510).
       if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
         this._arm_all();
-      return { subscribed, last_id };
+      return { subscribed, last_id, scanned };
     });
   }
 
@@ -2950,6 +2975,9 @@ export class Act<
       pass++
     ) {
       const before = this._correlate.checkpoint;
+      // Force the look: close is asking whether a tail exists, which is
+      // exactly the question the armed flag cannot answer (#1510).
+      this._correlate.arm();
       await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
       if (this._correlate.checkpoint <= before) break;
     }
@@ -8069,6 +8097,17 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /**
+   * Whether a scan might find anything. The drain has carried the same flag
+   * since it was written — a commit raises it, an empty claim lowers it, and
+   * a disarmed drain returns without touching the store. Correlate had no
+   * equivalent, so a settle pass always scanned, including the final pass
+   * whose only job is to confirm nothing changed (#1510).
+   *
+   * Starts armed: the log may already hold events this process has never
+   * correlated, and only a scan can find out.
+   */
+  private _armed = true;
   /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
@@ -8133,6 +8172,15 @@ export class CorrelateCycle<
   /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
+  }
+
+  /**
+   * Signal that a commit (local or remote) may have produced events this
+   * process has not correlated. Cheap and idempotent — the orchestrator calls
+   * it on every commit and every notification.
+   */
+  arm(): void {
+    this._armed = true;
   }
 
   /**
@@ -8252,10 +8300,31 @@ export class CorrelateCycle<
    * at init, but marking it is what makes it claimable without probing the
    * event log, so the scan runs for every app.
    */
-  async correlate(
-    query: Query = { after: -1, limit: 10 }
-  ): Promise<{ subscribed: number; last_id: number; marked: number }> {
+  async correlate(query: Query = { after: -1, limit: 10 }): Promise<{
+    subscribed: number;
+    last_id: number;
+    marked: number;
+    /** False when the pass was disarmed and returned without a store read. */
+    scanned: boolean;
+  }> {
     await this.init();
+
+    // Nothing has happened since the last scan reached the end of the log, so
+    // there is nothing to find (#1510).
+    //
+    // The flag only ever means "a local signal says there may be work" — a
+    // commit through \`do()\`, or a \`notify\` from another process. It is
+    // deliberately NOT a claim that the log is unchanged: a remote writer on a
+    // store with no notify support leaves this process disarmed and stale.
+    // \`start_polling\` exists for exactly that case and arms on every tick, so
+    // the poller keeps its meaning ("I have no signal, go and look anyway").
+    if (!this._armed)
+      return {
+        subscribed: 0,
+        last_id: this._checkpoint,
+        marked: 0,
+        scanned: false,
+      };
 
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -8357,11 +8426,16 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id, marked };
+      return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance
+    // Nothing to subscribe — safe to advance. Disarm only here: this is the
+    // branch where the scan resolved no target at all, which is what "the log
+    // has nothing more for us" looks like. A scan that found something leaves
+    // the flag up, so the next pass continues from the new checkpoint rather
+    // than stopping mid-backlog.
     this._checkpoint = last_id;
-    return { subscribed: 0, last_id, marked: 0 };
+    this._armed = false;
+    return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
   /**
@@ -8379,9 +8453,17 @@ export class CorrelateCycle<
     const limit = query.limit || 100;
     this._timer = setInterval(
       () =>
-        this._run_scoped(() =>
-          this.correlate({ ...query, after: this._checkpoint, limit })
-        )
+        this._run_scoped(() => {
+          // Polling is the discovery path for commits this process never saw —
+          // a remote writer on a store without \`notify\`. Arming each tick is
+          // what keeps that true now that a scan can park itself (#1510).
+          this.arm();
+          return this.correlate({
+            ...query,
+            after: this._checkpoint,
+            limit,
+          });
+        })
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
           })
@@ -17191,7 +17273,7 @@ export type SettleDeps<TEvents extends Schemas> = {
   readonly checkpoint: () => number;
   readonly correlate: (
     query: Query
-  ) => Promise<{ subscribed: number; last_id: number }>;
+  ) => Promise<{ subscribed: number; last_id: number; scanned?: boolean }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
   /**
@@ -17291,16 +17373,18 @@ export class SettleLoop<TEvents extends Schemas> {
         // \`maxPasses\` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const after_before = this._deps.checkpoint();
-          const { subscribed, last_id } = await this._deps.correlate({
+          const { subscribed, last_id, scanned } = await this._deps.correlate({
             ...correlate_query,
             after: after_before,
           });
-          // correlate (subscribe + query) succeeded — the store responded, so
-          // the pass carries a real health signal. It always does since
-          // #1487: correlate scans for every app, including static-only ones
-          // whose correlate used to be a no-op early-return that touched
-          // nothing and could not be allowed to record a success (#1329).
-          this._deps.breaker.passed();
+          // A scan that reached the store and came back is a real health
+          // signal; a disarmed pass that returned without touching it is not.
+          // Recording the latter would re-close an OPEN breaker mid-outage and
+          // let the drain below hammer a store nobody has heard from — the
+          // #1329 bug, which #1487 closed by making correlate always scan and
+          // #1510 reopened by letting it skip. So the question is asked per
+          // pass now, which is more accurate than either static answer.
+          if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           settled_drain = settled_drain
             ? {
@@ -20102,7 +20186,7 @@ export class Act<
         // the scoped store and \`_initialized\` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this.correlate(q),
+        correlate: (q) => this._correlate_scanned(q),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -20669,6 +20753,10 @@ export class Act<
 
   /** Arm every active lane controller (ACT-1103). */
   private _arm_all(): void {
+    // Correlate is armed alongside the drain (#1510): a commit is exactly the
+    // event that might give a scan something to find, and without this the
+    // scan runs on every settle pass whether or not anything happened.
+    this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
@@ -20693,6 +20781,7 @@ export class Act<
       for (const lane of set) to_arm.add(lane);
     }
     if (to_arm.size === 0) return false;
+    this._correlate.arm();
     for (const lane of to_arm) this._drain_controllers.get(lane)?.arm();
     return true;
   }
@@ -20770,12 +20859,27 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
+    const { subscribed, last_id } = await this._correlate_scanned(query);
+    return { subscribed, last_id };
+  }
+
+  /**
+   * \`correlate\` plus whether the pass actually read the store (#1510).
+   *
+   * The settle loop needs that extra bit to decide whether the pass carries a
+   * circuit-breaker health signal, and a disarmed pass carries none. It stays
+   * internal rather than widening the public \`correlate\` return, which is
+   * charter-covered and has no use for it.
+   */
+  private async _correlate_scanned(
+    query: Query
+  ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
     // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
     // checkpoint stays where it was.
-    if (!this._drain) return { subscribed: 0, last_id: -1 };
+    if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
-      const { subscribed, last_id, marked } =
+      const { subscribed, last_id, marked, scanned } =
         await this._correlate.correlate(query);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
@@ -20788,9 +20892,14 @@ export class Act<
       // "nothing to do" to "claimable" without its row being new — and a
       // worker that disarmed on an empty claim moments earlier would sleep
       // through it.
+      //
+      // Arming here also re-arms CORRELATE itself, which is what keeps a
+      // backlog moving: a scan that found something leaves the flag up so the
+      // next pass continues, while the scan that finds nothing takes the
+      // disarm branch and stops the loop (#1510).
       if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
         this._arm_all();
-      return { subscribed, last_id };
+      return { subscribed, last_id, scanned };
     });
   }
 
@@ -21275,6 +21384,9 @@ export class Act<
       pass++
     ) {
       const before = this._correlate.checkpoint;
+      // Force the look: close is asking whether a tail exists, which is
+      // exactly the question the armed flag cannot answer (#1510).
+      this._correlate.arm();
       await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
       if (this._correlate.checkpoint <= before) break;
     }
@@ -26274,6 +26386,17 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /**
+   * Whether a scan might find anything. The drain has carried the same flag
+   * since it was written — a commit raises it, an empty claim lowers it, and
+   * a disarmed drain returns without touching the store. Correlate had no
+   * equivalent, so a settle pass always scanned, including the final pass
+   * whose only job is to confirm nothing changed (#1510).
+   *
+   * Starts armed: the log may already hold events this process has never
+   * correlated, and only a scan can find out.
+   */
+  private _armed = true;
   /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
@@ -26338,6 +26461,15 @@ export class CorrelateCycle<
   /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
+  }
+
+  /**
+   * Signal that a commit (local or remote) may have produced events this
+   * process has not correlated. Cheap and idempotent — the orchestrator calls
+   * it on every commit and every notification.
+   */
+  arm(): void {
+    this._armed = true;
   }
 
   /**
@@ -26457,10 +26589,31 @@ export class CorrelateCycle<
    * at init, but marking it is what makes it claimable without probing the
    * event log, so the scan runs for every app.
    */
-  async correlate(
-    query: Query = { after: -1, limit: 10 }
-  ): Promise<{ subscribed: number; last_id: number; marked: number }> {
+  async correlate(query: Query = { after: -1, limit: 10 }): Promise<{
+    subscribed: number;
+    last_id: number;
+    marked: number;
+    /** False when the pass was disarmed and returned without a store read. */
+    scanned: boolean;
+  }> {
     await this.init();
+
+    // Nothing has happened since the last scan reached the end of the log, so
+    // there is nothing to find (#1510).
+    //
+    // The flag only ever means "a local signal says there may be work" — a
+    // commit through \`do()\`, or a \`notify\` from another process. It is
+    // deliberately NOT a claim that the log is unchanged: a remote writer on a
+    // store with no notify support leaves this process disarmed and stale.
+    // \`start_polling\` exists for exactly that case and arms on every tick, so
+    // the poller keeps its meaning ("I have no signal, go and look anyway").
+    if (!this._armed)
+      return {
+        subscribed: 0,
+        last_id: this._checkpoint,
+        marked: 0,
+        scanned: false,
+      };
 
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -26562,11 +26715,16 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id, marked };
+      return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance
+    // Nothing to subscribe — safe to advance. Disarm only here: this is the
+    // branch where the scan resolved no target at all, which is what "the log
+    // has nothing more for us" looks like. A scan that found something leaves
+    // the flag up, so the next pass continues from the new checkpoint rather
+    // than stopping mid-backlog.
     this._checkpoint = last_id;
-    return { subscribed: 0, last_id, marked: 0 };
+    this._armed = false;
+    return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
   /**
@@ -26584,9 +26742,17 @@ export class CorrelateCycle<
     const limit = query.limit || 100;
     this._timer = setInterval(
       () =>
-        this._run_scoped(() =>
-          this.correlate({ ...query, after: this._checkpoint, limit })
-        )
+        this._run_scoped(() => {
+          // Polling is the discovery path for commits this process never saw —
+          // a remote writer on a store without \`notify\`. Arming each tick is
+          // what keeps that true now that a scan can park itself (#1510).
+          this.arm();
+          return this.correlate({
+            ...query,
+            after: this._checkpoint,
+            limit,
+          });
+        })
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
           })
@@ -35300,7 +35466,7 @@ export type SettleDeps<TEvents extends Schemas> = {
   readonly checkpoint: () => number;
   readonly correlate: (
     query: Query
-  ) => Promise<{ subscribed: number; last_id: number }>;
+  ) => Promise<{ subscribed: number; last_id: number; scanned?: boolean }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
   /**
@@ -35400,16 +35566,18 @@ export class SettleLoop<TEvents extends Schemas> {
         // \`maxPasses\` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const after_before = this._deps.checkpoint();
-          const { subscribed, last_id } = await this._deps.correlate({
+          const { subscribed, last_id, scanned } = await this._deps.correlate({
             ...correlate_query,
             after: after_before,
           });
-          // correlate (subscribe + query) succeeded — the store responded, so
-          // the pass carries a real health signal. It always does since
-          // #1487: correlate scans for every app, including static-only ones
-          // whose correlate used to be a no-op early-return that touched
-          // nothing and could not be allowed to record a success (#1329).
-          this._deps.breaker.passed();
+          // A scan that reached the store and came back is a real health
+          // signal; a disarmed pass that returned without touching it is not.
+          // Recording the latter would re-close an OPEN breaker mid-outage and
+          // let the drain below hammer a store nobody has heard from — the
+          // #1329 bug, which #1487 closed by making correlate always scan and
+          // #1510 reopened by letting it skip. So the question is asked per
+          // pass now, which is more accurate than either static answer.
+          if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           settled_drain = settled_drain
             ? {

@@ -164,7 +164,11 @@ describe("settle breaker success rides a real correlate probe (#1329)", () => {
   /** Runs one pass, resolving whichever way the pass ends. */
   const run_pass = async (
     breaker: CircuitBreaker,
-    correlate: () => Promise<{ subscribed: number; last_id: number }>
+    correlate: () => Promise<{
+      subscribed: number;
+      last_id: number;
+      scanned?: boolean;
+    }>
   ) => {
     let done!: () => void;
     const finished = new Promise<void>((r) => {
@@ -197,8 +201,26 @@ describe("settle breaker success rides a real correlate probe (#1329)", () => {
 
   it("closes the breaker when the scan returns (control)", async () => {
     const breaker = open_breaker();
-    await run_pass(breaker, async () => ({ subscribed: 0, last_id: 5 }));
+    await run_pass(breaker, async () => ({
+      subscribed: 0,
+      last_id: 5,
+      scanned: true,
+    }));
     expect(breaker.state(1000)).toBe("closed");
+  });
+
+  it("leaves the breaker OPEN when correlate was disarmed and read nothing", async () => {
+    // #1510: a disarmed pass returns without touching the store, so it is not
+    // evidence the store is healthy. Recording it would re-close an OPEN
+    // breaker mid-outage and let the drain hammer a store nobody has heard
+    // from — the #1329 bug, reachable again now that correlate can skip.
+    const breaker = open_breaker();
+    await run_pass(breaker, async () => ({
+      subscribed: 0,
+      last_id: 5,
+      scanned: false,
+    }));
+    expect(breaker.state(1000)).toBe("open");
   });
 
   it("leaves the breaker OPEN when the scan fails against a down store", async () => {
