@@ -2984,6 +2984,22 @@ export class Act<
     return this._correlate.checkpoint;
   }
 
+  /**
+   * Drop retired streams from correlate's in-process "already subscribed"
+   * set, so a later scan re-issues \`subscribe()\` for them.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and is still consuming.
+   *
+   * \`truncate\` no longer removes the subscription row (#1527), so this is no
+   * longer repairing damage the close itself did. It still matters, because
+   * the row can disappear later: reclaiming retired subscriptions is an
+   * operator job now, and that \`DELETE\` can land while this process is
+   * running. Forgetting here keeps the in-process view from outliving a row
+   * an operator removed, which is the same silent-no-delivery failure #1398
+   * described — a reaction whose target is named after the stream would never
+   * be re-registered.
+   */
   private _forget_closed_subscriptions(result: CloseResult): void {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
@@ -12762,15 +12778,11 @@ export class InMemoryStore implements Store {
       }
     }
     this._events = this._events.filter((e) => !stream_set.has(e.stream));
-    // A restart target carries a seed snapshot: the stream lives on, so its
-    // subscription row must survive. Deleting it silently stops reactions
-    // whose target is named after the stream — the documented per-aggregate
-    // shape \`.to(e => ({target: e.stream}))\` (#1398).
-    const restarted = new Set(
-      full.filter((t) => t.snapshot !== undefined).map((t) => t.stream)
-    );
+    // Subscriptions are deliberately untouched, for restart *and* retire
+    // targets alike — see the note in truncate's contract. A tombstoned
+    // stream's subscription is inert, and reaping it is maintenance that
+    // \`seed()\` performs (#1527).
     for (const stream of stream_set) {
-      if (!restarted.has(stream)) this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
@@ -14781,9 +14793,26 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
-   * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
+   * 2. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
+   *
+   * **Subscriptions are not touched.** This is purely event-log work, and
+   * that is what lets a store keep its event log and its subscriptions on
+   * different systems: every method belongs cleanly to one half, so a hybrid
+   * routes rather than reimplements (#1527). Removing the subscription row
+   * here was the one step that spanned both, and it forced such a store into
+   * a distributed transaction it could not have.
+   *
+   * Nothing is lost by leaving the row. A retired stream's subscription is
+   * **inert**: the framework refuses commits on a tombstoned stream, so no
+   * scan can raise its work mark, so \`at < correlated_at\` never becomes true
+   * again and {@link claim} never returns it. What the row does keep is the
+   * final watermark of every consumer — a record of how far each got before
+   * the stream was retired, which outlives the events themselves.
+   *
+   * Operators who would rather reclaim the space can delete those rows on
+   * their own schedule; the production checklist carries the statement. It is
+   * housekeeping, not correctness, and deliberately not a framework concern.
    *
    * A **windowed** target (\`before\` set) is a pure prefix delete behind
    * a real snapshot the app wrote — no seed, no tombstone, and the
@@ -21429,6 +21458,22 @@ export class Act<
     return this._correlate.checkpoint;
   }
 
+  /**
+   * Drop retired streams from correlate's in-process "already subscribed"
+   * set, so a later scan re-issues \`subscribe()\` for them.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and is still consuming.
+   *
+   * \`truncate\` no longer removes the subscription row (#1527), so this is no
+   * longer repairing damage the close itself did. It still matters, because
+   * the row can disappear later: reclaiming retired subscriptions is an
+   * operator job now, and that \`DELETE\` can land while this process is
+   * running. Forgetting here keeps the in-process view from outliving a row
+   * an operator removed, which is the same silent-no-delivery failure #1398
+   * described — a reaction whose target is named after the stream would never
+   * be re-registered.
+   */
   private _forget_closed_subscriptions(result: CloseResult): void {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
@@ -30859,15 +30904,11 @@ export class InMemoryStore implements Store {
       }
     }
     this._events = this._events.filter((e) => !stream_set.has(e.stream));
-    // A restart target carries a seed snapshot: the stream lives on, so its
-    // subscription row must survive. Deleting it silently stops reactions
-    // whose target is named after the stream — the documented per-aggregate
-    // shape \`.to(e => ({target: e.stream}))\` (#1398).
-    const restarted = new Set(
-      full.filter((t) => t.snapshot !== undefined).map((t) => t.stream)
-    );
+    // Subscriptions are deliberately untouched, for restart *and* retire
+    // targets alike — see the note in truncate's contract. A tombstoned
+    // stream's subscription is inert, and reaping it is maintenance that
+    // \`seed()\` performs (#1527).
     for (const stream of stream_set) {
-      if (!restarted.has(stream)) this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
@@ -32841,9 +32882,26 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
-   * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
+   * 2. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
+   *
+   * **Subscriptions are not touched.** This is purely event-log work, and
+   * that is what lets a store keep its event log and its subscriptions on
+   * different systems: every method belongs cleanly to one half, so a hybrid
+   * routes rather than reimplements (#1527). Removing the subscription row
+   * here was the one step that spanned both, and it forced such a store into
+   * a distributed transaction it could not have.
+   *
+   * Nothing is lost by leaving the row. A retired stream's subscription is
+   * **inert**: the framework refuses commits on a tombstoned stream, so no
+   * scan can raise its work mark, so \`at < correlated_at\` never becomes true
+   * again and {@link claim} never returns it. What the row does keep is the
+   * final watermark of every consumer — a record of how far each got before
+   * the stream was retired, which outlives the events themselves.
+   *
+   * Operators who would rather reclaim the space can delete those rows on
+   * their own schedule; the production checklist carries the statement. It is
+   * housekeeping, not correctness, and deliberately not a framework concern.
    *
    * A **windowed** target (\`before\` set) is a pure prefix delete behind
    * a real snapshot the app wrote — no seed, no tombstone, and the
@@ -39161,9 +39219,26 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no \`before\`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
-   * 3. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
+   * 2. Inserts a \`__snapshot__\` (when \`snapshot\` is provided) or
    *    \`__tombstone__\` event as the sole event on the stream
+   *
+   * **Subscriptions are not touched.** This is purely event-log work, and
+   * that is what lets a store keep its event log and its subscriptions on
+   * different systems: every method belongs cleanly to one half, so a hybrid
+   * routes rather than reimplements (#1527). Removing the subscription row
+   * here was the one step that spanned both, and it forced such a store into
+   * a distributed transaction it could not have.
+   *
+   * Nothing is lost by leaving the row. A retired stream's subscription is
+   * **inert**: the framework refuses commits on a tombstoned stream, so no
+   * scan can raise its work mark, so \`at < correlated_at\` never becomes true
+   * again and {@link claim} never returns it. What the row does keep is the
+   * final watermark of every consumer — a record of how far each got before
+   * the stream was retired, which outlives the events themselves.
+   *
+   * Operators who would rather reclaim the space can delete those rows on
+   * their own schedule; the production checklist carries the statement. It is
+   * housekeeping, not correctness, and deliberately not a framework concern.
    *
    * A **windowed** target (\`before\` set) is a pure prefix delete behind
    * a real snapshot the app wrote — no seed, no tombstone, and the
@@ -52798,18 +52873,14 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
-      // A restart target carries a seed snapshot: the stream lives on, so
-      // its subscription row must survive. Deleting it silently stops
-      // reactions whose target is named after the stream — the documented
-      // per-aggregate shape \`.to(e => ({target: e.stream}))\` (#1398).
-      const retired = full
-        .filter((t) => t.snapshot === undefined)
-        .map((t) => t.stream);
-      if (retired.length) {
-        await client.query(\`DELETE FROM \${this._fqs} WHERE stream = ANY($1)\`, [
-          retired,
-        ]);
-      }
+      // Subscriptions are deliberately untouched, for restart *and* retire
+      // targets alike. A tombstoned stream's subscription is inert — the
+      // framework refuses new commits on it, so no scan can raise its work
+      // mark and \`at < correlated_at\` never becomes true again. Removing it
+      // here bought nothing and cost a coupling: it is the one step that
+      // spans the event log and the subscription table, which is what forced
+      // a store whose halves live apart into a distributed transaction
+      // (#1527). Reaping the inert rows is maintenance, and \`seed()\` does it.
       for (const { stream, snapshot, meta } of full) {
         const { rowCount } = await client.query(
           \`DELETE FROM \${this._fqt} WHERE stream = $1\`,
@@ -54744,15 +54815,10 @@ export class SqliteStore implements Store {
           sql: "DELETE FROM events WHERE stream = ?",
           args: [stream],
         });
-        // A restart target carries a seed snapshot: the stream lives on, so
-        // its subscription row must survive. Deleting it silently stops
-        // reactions whose target is named after the stream — the documented
-        // per-aggregate shape \`.to(e => ({target: e.stream}))\` (#1398).
-        if (snapshot === undefined)
-          await tx.execute({
-            sql: "DELETE FROM streams WHERE stream = ?",
-            args: [stream],
-          });
+        // Subscriptions are deliberately untouched, for restart *and* retire
+        // targets alike — see the note in truncate's contract. A tombstoned
+        // stream's subscription is inert, and reaping it is maintenance that
+        // \`seed()\` performs (#1527).
 
         const event_name =
           snapshot !== undefined ? "__snapshot__" : "__tombstone__";
@@ -60140,12 +60206,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("truncate", () => {
-      it("keeps the subscription row for a restart target, drops it for a retire (#1398)", async () => {
-        // The subscriptions table is keyed by TARGET name, and the
-        // documented per-aggregate reaction shape \`.to(e => ({target:
-        // e.stream}))\` makes that collide with the event stream name. A
-        // restart keeps the stream alive, so its subscription must survive;
-        // a retire correctly drops it.
+      it("leaves subscriptions untouched for restart and retire alike (#1527)", async () => {
+        // \`truncate\` is purely event-log work. It used to remove the
+        // subscription row for a retire, and that single step was the only
+        // one spanning both the event log and the subscription table — which
+        // forced a store whose halves live on different systems into a
+        // distributed transaction it could not have.
+        //
+        // Leaving the row costs nothing. A tombstoned stream refuses new
+        // commits, so no scan can raise its work mark and \`claim\` never
+        // returns it again (pinned by the next case). What the row keeps is
+        // the consumer's final watermark — a record of how far it got, which
+        // outlives the events. Operators reclaim the space on their own
+        // schedule; see the production checklist.
         const tag = uid();
         const restarted = \`trunc-restart-\${tag}\`;
         const retired = \`trunc-retire-\${tag}\`;
@@ -60173,7 +60246,39 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           limit: 100,
         });
         expect(rows).toContain(restarted);
-        expect(rows).not.toContain(retired);
+        expect(rows).toContain(retired);
+      });
+
+      it("leaves a retired stream's surviving subscription unclaimable (#1527)", async () => {
+        // The property that makes leaving the row safe, and the reason the
+        // framework can stop removing it. If this ever fails, retired streams
+        // start handing work back to the drain.
+        //
+        // The subscription gets its own lane so both claims below can only
+        // ever return this stream — which lets the assertion be "nothing came
+        // back" rather than a search through whatever else the shared store
+        // has pending.
+        const lane = \`inert-lane-\${uid()}\`;
+        const s = \`trunc-inert-\${uid()}\`;
+        const [e] = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.subscribe([{ stream: s, correlated_at: e.id, lane }]);
+
+        // Catch the subscription up, which is the state \`close\` requires
+        // before it will retire a stream at all — a stream with pending
+        // reactions is skipped, never truncated.
+        const leased = await store.claim(100, 0, \`w-\${uid()}\`, 10_000, lane);
+        expect(leased).toHaveLength(1);
+        await store.ack([{ ...leased[0], at: e.id }]);
+
+        await store.truncate([{ stream: s, meta: make_meta({ stream: s }) }]);
+
+        expect(
+          await store.claim(100, 0, \`w-\${uid()}\`, 10_000, lane)
+        ).toHaveLength(0);
       });
 
       it("seeds a tombstone when no snapshot is provided", async () => {

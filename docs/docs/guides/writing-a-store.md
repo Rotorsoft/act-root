@@ -262,7 +262,11 @@ The subtle part is that the **sort comparator and the cursor comparator must be 
 
 `truncate` is the delete verb behind close-the-books, and it carries two contracts in one method, switched per target by the presence of `before`.
 
-A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream, remove the stream's row from the streams/subscriptions table, and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. After the transaction the stream has one row and no subscription state.
+A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. After the transaction the stream holds exactly one event.
+
+**Do not touch the subscriptions table**, for retired and restarted targets alike ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)). `truncate` is event-log work, and keeping it that way is what lets a store hold its event log and its subscriptions on different systems — every method then belongs cleanly to one half, and a hybrid routes instead of reimplementing. Removing the subscription row was the one exception, and it forced such a store into a distributed transaction it had no way to get.
+
+Leaving the row costs nothing. A retired stream's subscription is **inert**: the framework refuses commits on a tombstoned stream, so nothing can raise its work mark, `at < correlated_at` never becomes true again, and `claim` never returns it. What the row keeps is the consumer's final watermark — a record of how far each reaction got before the stream was retired, which outlives the events themselves. Operators who want the space back delete those rows on their own schedule; the [production checklist](./production-checklist) carries the statement.
 
 A **windowed** target (`{ stream, before, max_id? }`, [#1011](https://github.com/Rotorsoft/act-root/issues/1011)) is a pure prefix delete on a stream that stays live. The adapter's job is to find the **closest safe boundary** — the latest `__snapshot__` event with `created < before` and, when `max_id` is supplied, `id <= max_id` — and delete every event with an id below it. The snapshot itself and everything after it survive. The SQL shape on Postgres:
 

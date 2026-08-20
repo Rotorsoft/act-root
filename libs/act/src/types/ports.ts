@@ -952,9 +952,26 @@ export interface Store extends Disposable, EventSource {
    *
    * For each **full** target (no `before`), in a single transaction:
    * 1. Deletes all events for the stream
-   * 2. Removes the stream's entry from the streams table
-   * 3. Inserts a `__snapshot__` (when `snapshot` is provided) or
+   * 2. Inserts a `__snapshot__` (when `snapshot` is provided) or
    *    `__tombstone__` event as the sole event on the stream
+   *
+   * **Subscriptions are not touched.** This is purely event-log work, and
+   * that is what lets a store keep its event log and its subscriptions on
+   * different systems: every method belongs cleanly to one half, so a hybrid
+   * routes rather than reimplements (#1527). Removing the subscription row
+   * here was the one step that spanned both, and it forced such a store into
+   * a distributed transaction it could not have.
+   *
+   * Nothing is lost by leaving the row. A retired stream's subscription is
+   * **inert**: the framework refuses commits on a tombstoned stream, so no
+   * scan can raise its work mark, so `at < correlated_at` never becomes true
+   * again and {@link claim} never returns it. What the row does keep is the
+   * final watermark of every consumer — a record of how far each got before
+   * the stream was retired, which outlives the events themselves.
+   *
+   * Operators who would rather reclaim the space can delete those rows on
+   * their own schedule; the production checklist carries the statement. It is
+   * housekeeping, not correctness, and deliberately not a framework concern.
    *
    * A **windowed** target (`before` set) is a pure prefix delete behind
    * a real snapshot the app wrote — no seed, no tombstone, and the

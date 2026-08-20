@@ -1214,15 +1214,11 @@ export class InMemoryStore implements Store {
       }
     }
     this._events = this._events.filter((e) => !stream_set.has(e.stream));
-    // A restart target carries a seed snapshot: the stream lives on, so its
-    // subscription row must survive. Deleting it silently stops reactions
-    // whose target is named after the stream — the documented per-aggregate
-    // shape `.to(e => ({target: e.stream}))` (#1398).
-    const restarted = new Set(
-      full.filter((t) => t.snapshot !== undefined).map((t) => t.stream)
-    );
+    // Subscriptions are deliberately untouched, for restart *and* retire
+    // targets alike — see the note in truncate's contract. A tombstoned
+    // stream's subscription is inert, and reaping it is maintenance that
+    // `seed()` performs (#1527).
     for (const stream of stream_set) {
-      if (!restarted.has(stream)) this._streams.delete(stream);
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable

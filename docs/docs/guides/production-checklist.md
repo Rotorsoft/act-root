@@ -343,6 +343,37 @@ REINDEX INDEX CONCURRENTLY <table>_streams_claim_ix;
 
 This is the only ongoing maintenance the subscription side asks for, and it is why Act stays on Postgres for subscriptions rather than reaching for a store without this behaviour — a scheduled reindex is a much smaller thing to operate than a second database.
 
+## 14. Retired streams leave their subscriptions behind
+
+Closing a stream for good deletes its events and seeds a tombstone. It does **not** delete the stream's subscription row, and that is deliberate ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)).
+
+Removing it was the only operation that reached across both the event log and the subscription table. That is fine when they share a database and impossible when they do not, so it ruled out running the two halves on separate systems — see the [hybrid store recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/hybrid-store). Dropping the step makes every store operation belong to exactly one half.
+
+**The leftover row is inert, not a leak in waiting.** A tombstoned stream refuses new commits, so nothing can ever mark it as having work again, and no worker will ever pick it up. It is also not purely dead weight: it preserves each consumer's final watermark, a record of how far every reaction got before the stream was retired, which outlives the events it was reading.
+
+**If you want the space back**, delete them on whatever schedule suits you. There is no framework API for this on purpose — it is housekeeping, it never needs to be timely, and it is one statement:
+
+```sql
+DELETE FROM <table>_streams s
+ WHERE EXISTS (SELECT 1 FROM <table> e WHERE e.stream = s.stream)
+   AND NOT EXISTS (
+     SELECT 1 FROM <table> e
+      WHERE e.stream = s.stream AND e.name <> '__tombstone__'
+   );
+```
+
+Read the predicate as "every event this stream has left is a tombstone." It is narrow on purpose, and the three cases it deliberately spares are the ones that would hurt:
+
+| Kind of row | Why it survives |
+|---|---|
+| A **restarted** stream | Holds a `__snapshot__`, not a tombstone. The stream is alive and still consuming. |
+| A stream **guarded by a failed close** | Its real events are still there alongside the guard tombstone, and its reactions may still have work pending. |
+| A **pure reaction target** (`handled-orders`, a projection) | Has no events of its own at all, so the first `EXISTS` never matches. |
+
+Deleting any of those throws away a live watermark, and the next `subscribe` would restart that stream from `-1` — replaying its entire history, which for a webhook target means re-firing every call it ever made.
+
+**Scale before you bother.** One row per permanently-retired stream is the same order as the tombstone event that also stays forever. If you are not closing streams for good in volume, there is nothing here to reclaim.
+
 ## Pre-deploy quick check
 
 Before pushing to production, walk this list mentally:
@@ -359,5 +390,6 @@ Before pushing to production, walk this list mentally:
 - [ ] Lanes sized per latency class (or all reactions sharing one timing budget is genuinely fine)
 - [ ] Disaster-recovery plan is `pg_dump` / file copy — not `app.restore` (which is for content-level migration / compaction, not DR)
 - [ ] Periodic `REINDEX INDEX CONCURRENTLY` on the subscription indexes, if drain volume is high
+- [ ] A plan for retired streams' leftover subscription rows, if you close streams for good in volume (or a deliberate decision to keep them as a record)
 
 Once these are in place, the framework runs itself.

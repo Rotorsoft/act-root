@@ -84,62 +84,24 @@ export const hybridStore = (log: Store, subs: Store): Store => ({
   },
 
   /**
-   * The one operation that genuinely spans both stores, and the only place a
-   * hybrid owes real work rather than delegation.
+   * Purely event-log work, so it delegates like everything else.
    *
-   * A **windowed** target (`before` set) is a pure prefix delete on the event
-   * log and leaves the subscriptions table untouched, so it needs nothing
-   * special. A **full** target deletes the stream's events, seeds a tombstone
-   * or snapshot, *and* removes the subscription row — two systems, no shared
-   * transaction.
+   * This was the one method that used to span both stores. `truncate`
+   * retired a stream by deleting its events, seeding a tombstone, *and*
+   * removing its subscription row — three things the port required to be
+   * atomic, which is impossible across two systems. Every hybrid had to call
+   * the halves in sequence, pick an order, and accept a crash window, and the
+   * wrong order failed silently.
    *
-   * The trick is that `truncate` is *already* the verb that retires a
-   * subscription. Pointing it at the subscription store retires the row there,
-   * exactly as it would if both halves shared a database — the same fan-out
-   * `seed`, `drop` and `dispose` use above. No second verb is needed.
+   * [#1527](https://github.com/Rotorsoft/act-root/issues/1527) removed the
+   * subscription step from `truncate` entirely rather than sequencing it. A
+   * retired stream's subscription is inert — the framework refuses commits on
+   * a tombstoned stream, so nothing can raise its work mark and `claim` never
+   * returns it — so the row can simply stay, keeping the consumer's final
+   * watermark as a record of how far it got. Operators reclaim the space on
+   * their own schedule if they want it.
    *
-   * Only genuinely retired targets are forwarded:
-   *
-   * - **windowed** (`before`) leaves subscriptions alone by contract
-   * - **restart** (`snapshot` set) keeps its subscription, because the stream
-   *   lives on and a reaction targeting it must keep delivering (#1398)
-   * - **skipped** streams are absent from `result` and were never truncated
-   *
-   * The forwarded targets are stripped down to `{ stream }`, which matters:
-   * passing the original target would seed the restart snapshot's *state* into
-   * the subscription store, copying domain data — possibly sensitive — into a
-   * database that has no business holding it. A bare target seeds a tombstone
-   * instead, and its only cost is one inert row in an events table the hybrid
-   * never reads.
-   *
-   * Order matters. The log goes first, because its truncate is the one that
-   * commits the tombstone that stops new events landing on the stream. If the
-   * process dies between the two, the subscription row is orphaned: it points
-   * at a stream whose events are gone, claims nothing (its watermark is at or
-   * above the seed), and is removed by the next close of that stream. The
-   * reverse order would leave a live stream with no subscription, which
-   * silently stops delivery — a worse failure with no self-healing.
-   *
-   * `Act.close` is already resumable after an interrupted truncate
-   * ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is
-   * what makes the crash window recoverable rather than merely rare.
-   *
-   * **Do not reach for `reset` here.** It looks like the subscription-side
-   * verb and is the wrong one: it rewinds the watermark to -1 and leaves the
-   * work mark alone, so `at < correlated_at` turns true and the retired
-   * subscription becomes *claimable again* — the opposite of retiring it.
+   * With that step gone there is nothing left for a hybrid to coordinate.
    */
-  truncate: async (targets) => {
-    const result = await log.truncate(targets);
-    const retired = targets
-      .filter(
-        (t) =>
-          t.before === undefined &&
-          t.snapshot === undefined &&
-          result.has(t.stream)
-      )
-      .map((t) => ({ stream: t.stream }));
-    if (retired.length) await subs.truncate(retired);
-    return result;
-  },
+  truncate: log.truncate.bind(log),
 });
