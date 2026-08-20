@@ -7,6 +7,7 @@ import {
   state,
   store,
   TOMBSTONE_EVENT,
+  ZodEmpty,
 } from "../src/index.js";
 import { run_close_cycle } from "../src/internal/close-cycle.js";
 
@@ -302,6 +303,92 @@ describe("windowed close", () => {
       app.close([{ stream: "w13", before, archive }]),
     ]);
     expect(archived).toBe(1);
+  });
+
+  // #1520 — the prune cap asks each consumer "how far is it safe to prune?",
+  // and a watermark alone stopped answering that once correlate became the
+  // producer of the work mark. A subscription advances only over events that
+  // resolve to it, so a reaction covering a subset of a state's events sits
+  // permanently below the head with nothing pending, and used to cap the
+  // prune at its frozen watermark — which for a retention window meant
+  // pruning almost nothing, every time, silently.
+  describe("prune cap reads pending work, not watermark lag (#1520)", () => {
+    const ledger = state({ WLedger: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ WPosted: ZodEmpty, WShut: ZodEmpty })
+      .patch({
+        WPosted: (_e, s) => ({ n: s.n + 1 }),
+        WShut: (_e, s) => ({ n: s.n }),
+      })
+      .on({ wpost: ZodEmpty })
+      .emit(() => ["WPosted", {}])
+      .on({ wshut: ZodEmpty })
+      .emit(() => ["WShut", {}])
+      .snap((s) => s.patches >= 1)
+      .build();
+
+    /** Only `WPosted` has a reaction, so `WShut` never advances the reader. */
+    const build_ledger = () =>
+      act()
+        .withState(ledger)
+        .on("WPosted")
+        .do(async function onPosted() {})
+        .to((e) => ({ target: `wl-out-${e.stream}`, source: e.stream }))
+        .build();
+
+    it("prunes a stream whose trailing events resolve to no target", async () => {
+      const app = build_ledger();
+      for (let i = 0; i < 3; i++)
+        await app.do("wpost", { stream: "wl1", actor }, {});
+      await app.correlate();
+      await app.drain();
+
+      // A run of events the reaction does not handle: the reader's watermark
+      // freezes below all of them while snapshots keep landing above it.
+      for (let i = 0; i < 8; i++)
+        await app.do("wshut", { stream: "wl1", actor }, {});
+      await app.correlate();
+      await app.drain();
+
+      const before_close = await app.query_array({
+        stream: "wl1",
+        stream_exact: true,
+      });
+      const cutoff = future();
+      const { skipped } = await app.close([{ stream: "wl1", before: cutoff }]);
+      const after = await app.query_array({
+        stream: "wl1",
+        stream_exact: true,
+      });
+
+      expect(skipped).toEqual([]);
+      // Before the fix this pruned a single event — capped at the reader's
+      // frozen watermark — leaving the retention window doing nothing.
+      expect(after.length).toBeLessThan(before_close.length / 2);
+    });
+
+    it("still caps at a consumer that genuinely has unconsumed work", async () => {
+      // The fail-safe property this cap exists for must survive the fix: a
+      // reader with a real backlog still holds the prune back.
+      const app = build_ledger();
+      for (let i = 0; i < 6; i++)
+        await app.do("wpost", { stream: "wl2", actor }, {});
+      // Correlate marks the work but nothing drains it, so the reader lags.
+      await app.correlate();
+
+      const before_close = await app.query_array({
+        stream: "wl2",
+        stream_exact: true,
+      });
+      await app.close([{ stream: "wl2", before: future() }]);
+      const after = await app.query_array({
+        stream: "wl2",
+        stream_exact: true,
+      });
+
+      // Nothing below the lagging reader's watermark may be deleted.
+      expect(after.length).toBe(before_close.length);
+    });
   });
 
   it("prunes purely by date when the app has no reactions", async () => {

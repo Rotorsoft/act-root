@@ -257,11 +257,30 @@ async function run_windowed_closes(
 ): Promise<CloseResult["truncated"]> {
   // 1. Safety probe: min consumer watermark per stream. Skipped entirely
   // when the app has no reactions — nothing can lag.
+  //
+  // The cap asks each consumer "how far is it safe to prune?", and a
+  // watermark alone stopped answering that when correlate became the producer
+  // of the work mark (#1520). A subscription advances only over events that
+  // resolve to it, so a reaction covering a subset of a state's events sits
+  // permanently below the head with nothing pending — and capped the prune at
+  // its frozen watermark, which for a retention window means pruning almost
+  // nothing, every time, with no error and no `skipped` entry to explain it.
+  //
+  // A caught-up consumer is instead capped at the correlate checkpoint. Not
+  // at infinity: events above the checkpoint have not been resolved yet, so a
+  // mark for them may still be coming, and pruning past it could delete work
+  // a consumer is about to be told about. Catching up first makes that bound
+  // as generous as it can honestly be.
+  const checkpoint =
+    deps.reactive_events_size > 0
+      ? await deps.catch_up_correlation(Number.MAX_SAFE_INTEGER)
+      : -1;
   const min_at =
     deps.reactive_events_size > 0
       ? await probe_min_watermarks(
           windowed.map((t) => t.stream),
-          deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
+          deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE,
+          checkpoint
         )
       : new Map<string, number>();
 
@@ -351,7 +370,8 @@ async function windowed_prune_pending(
  */
 async function probe_min_watermarks(
   streams: string[],
-  page_size: number
+  page_size: number,
+  checkpoint: number
 ): Promise<Map<string, number>> {
   const min_at = new Map<string, number>();
   const source_regex = new Map<string, RegExp>();
@@ -373,11 +393,21 @@ async function probe_min_watermarks(
         const source_re = position.source
           ? get_regex(position.source)
           : undefined;
+        // How far this consumer permits a prune. A row with unconsumed work
+        // caps at its watermark, as it always did. A row that has consumed
+        // everything marked for it caps at the correlate checkpoint instead —
+        // its watermark says nothing about safety, only about which event
+        // types it happens to handle. An unmarked row keeps the conservative
+        // watermark cap, matching how it is read everywhere else until every
+        // install has converted.
+        const pending =
+          position.correlated_at === undefined ||
+          position.at < position.correlated_at;
+        const cap = pending ? position.at : Math.max(position.at, checkpoint);
         for (const stream of streams) {
           if (!source_re || source_re.test(stream)) {
             const prev = min_at.get(stream);
-            if (prev === undefined || position.at < prev)
-              min_at.set(stream, position.at);
+            if (prev === undefined || cap < prev) min_at.set(stream, cap);
           }
         }
       },
