@@ -654,3 +654,79 @@ latency. The residual there is the fairness reserve's `NOT IN (SELECT …
 LIMIT)` arm, which materializes the eligible set instead of pushing its limit
 into the index; worth revisiting if a real workload lives at a high pending
 fraction.
+
+## #1510 — correlate carries the drain's armed flag
+
+The drain has always known how to sit still: a commit raises a flag, an empty
+claim lowers it, and a disarmed drain returns without touching the store.
+Correlate had no equivalent, so every settle pass scanned — including the final
+pass whose only job is to confirm nothing changed, and every pass on a system
+where nothing is happening at all.
+
+### What a deployment actually saves
+
+The microbenchmark below says a parked scan is 550× cheaper per call, which is
+true and not the useful number. `scripts/deployment-load.bench.mjs` runs the
+real orchestrator instead: 4 worker Acts sharing one store, each with its own
+settle loop on a 100 ms cadence, against a writer committing 20/s across 500
+aggregates — deliberately unsaturated, because a production system spends most
+of its time between bursts and that is where the cost compounds.
+
+Identical work in both arms: 400 commits, 400 reactions handled, same latency.
+
+| | before | after | delta |
+|---|---|---|---|
+| `query` calls | 136.6/s | 64.2/s | **−53%** |
+| `claim` calls | 66.8/s | 24.0/s | **−64%** |
+| `subscribe` calls | 57.0/s | 14.3/s | **−75%** |
+| **PG tuples returned** | **54,280/s** | **18,251/s** | **−66%** |
+| **PG transactions** | **322/s** | **166/s** | **−49%** |
+| reaction latency p50 / p99 | 47 / 97 ms | 48 / 98 ms | unchanged |
+
+**Half the transactions and a third of the rows read, for the same work at the
+same latency.**
+
+The `claim` drop is a second-order effect worth understanding: the settle loop
+counts a correlate that advanced its cursor as progress and runs another pass.
+A scan that read a window of inert events therefore bought itself an extra
+drain cycle — so the wasted read was also causing wasted claims. Parking the
+scan removes both.
+
+### The microbenchmark, for completeness
+
+`scripts/static-correlate.bench.mjs`, same host, static-only app.
+
+| shape | before | after | delta |
+|---|---|---|---|
+| **idle** — one `correlate()` on a quiet system | 278.3 µs | **0.5 µs** | **550×** |
+| catch-up — 5,000 events already in the log | 1,922 ms | 1,681 ms | −13% |
+| steady — commit one event, catch up, repeat | 7.16 ms | 7.47 ms | +4% (noise) |
+
+The steady-state row is unchanged on purpose: that shape commits every round,
+so it arms every round and there is nothing to skip.
+
+### The flag means "a local signal says there may be work"
+
+It is explicitly **not** a claim that the log is unchanged. A remote writer on a
+store with no `notify` support leaves this process disarmed and stale, so the
+paths that exist to discover exactly that arm themselves:
+
+- **`start_polling`** arms on every tick. Polling is the "I have no signal, go
+  and look anyway" path, and parking the scan would otherwise silently strand
+  every remote write on a store without notify.
+- **The close cycle's catch-up** arms before scanning, because "is there an
+  uncorrelated tail?" is precisely the question the flag cannot answer.
+
+An earlier attempt gated on `after < checkpoint` as a proxy for "the caller is
+deliberately rewinding". That was wrong twice: `after` is `Math.max`'d with the
+checkpoint so the API cannot rewind at all, and the default `after: -1` matched
+the test, so every plain `correlate()` scanned and the flag never engaged.
+
+### Circuit-breaker interaction (#1329)
+
+A pass that skipped the store is not evidence the store is healthy. Recording
+one would re-close an OPEN breaker mid-outage and let the drain hammer a store
+nobody has heard from — the #1329 bug, which #1487 closed by making correlate
+always scan and this change reopens by letting it skip. Correlate now reports
+whether it read anything and the settle loop gates `breaker.passed()` on that,
+which is more accurate than either previous static answer.

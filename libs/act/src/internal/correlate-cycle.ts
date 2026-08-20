@@ -145,6 +145,17 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /**
+   * Whether a scan might find anything. The drain has carried the same flag
+   * since it was written — a commit raises it, an empty claim lowers it, and
+   * a disarmed drain returns without touching the store. Correlate had no
+   * equivalent, so a settle pass always scanned, including the final pass
+   * whose only job is to confirm nothing changed (#1510).
+   *
+   * Starts armed: the log may already hold events this process has never
+   * correlated, and only a scan can find out.
+   */
+  private _armed = true;
   /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
@@ -209,6 +220,15 @@ export class CorrelateCycle<
   /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
+  }
+
+  /**
+   * Signal that a commit (local or remote) may have produced events this
+   * process has not correlated. Cheap and idempotent — the orchestrator calls
+   * it on every commit and every notification.
+   */
+  arm(): void {
+    this._armed = true;
   }
 
   /**
@@ -328,10 +348,31 @@ export class CorrelateCycle<
    * at init, but marking it is what makes it claimable without probing the
    * event log, so the scan runs for every app.
    */
-  async correlate(
-    query: Query = { after: -1, limit: 10 }
-  ): Promise<{ subscribed: number; last_id: number; marked: number }> {
+  async correlate(query: Query = { after: -1, limit: 10 }): Promise<{
+    subscribed: number;
+    last_id: number;
+    marked: number;
+    /** False when the pass was disarmed and returned without a store read. */
+    scanned: boolean;
+  }> {
     await this.init();
+
+    // Nothing has happened since the last scan reached the end of the log, so
+    // there is nothing to find (#1510).
+    //
+    // The flag only ever means "a local signal says there may be work" — a
+    // commit through `do()`, or a `notify` from another process. It is
+    // deliberately NOT a claim that the log is unchanged: a remote writer on a
+    // store with no notify support leaves this process disarmed and stale.
+    // `start_polling` exists for exactly that case and arms on every tick, so
+    // the poller keeps its meaning ("I have no signal, go and look anyway").
+    if (!this._armed)
+      return {
+        subscribed: 0,
+        last_id: this._checkpoint,
+        marked: 0,
+        scanned: false,
+      };
 
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -433,11 +474,16 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id, marked };
+      return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance
+    // Nothing to subscribe — safe to advance. Disarm only here: this is the
+    // branch where the scan resolved no target at all, which is what "the log
+    // has nothing more for us" looks like. A scan that found something leaves
+    // the flag up, so the next pass continues from the new checkpoint rather
+    // than stopping mid-backlog.
     this._checkpoint = last_id;
-    return { subscribed: 0, last_id, marked: 0 };
+    this._armed = false;
+    return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
   /**
@@ -455,9 +501,17 @@ export class CorrelateCycle<
     const limit = query.limit || 100;
     this._timer = setInterval(
       () =>
-        this._run_scoped(() =>
-          this.correlate({ ...query, after: this._checkpoint, limit })
-        )
+        this._run_scoped(() => {
+          // Polling is the discovery path for commits this process never saw —
+          // a remote writer on a store without `notify`. Arming each tick is
+          // what keeps that true now that a scan can park itself (#1510).
+          this.arm();
+          return this.correlate({
+            ...query,
+            after: this._checkpoint,
+            limit,
+          });
+        })
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
           })

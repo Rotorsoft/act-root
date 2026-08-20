@@ -24,6 +24,7 @@ import { PostgresStore } from "../dist/index.js";
 const SCHEMA = "static_correlate_bench";
 const CATCHUP_EVENTS = Number(process.env.EVENTS ?? 5000);
 const STEADY_ROUNDS = Number(process.env.ROUNDS ?? 200);
+const IDLE_ROUNDS = Number(process.env.IDLE_ROUNDS ?? 500);
 const actor = { id: "bench", name: "bench" };
 
 const Counter = state({ Counter: z.object({ n: z.number() }) })
@@ -95,6 +96,15 @@ const main = async () => {
   }
   const steady_ms = Number(process.hrtime.bigint() - t1) / 1e6 / STEADY_ROUNDS;
   const steady_handled = handled.n;
+
+  // --- idle ---------------------------------------------------------------
+  // What a settle pass costs when nothing has happened. Before #1510 every
+  // pass scanned the log regardless; a parked scan should now cost nothing.
+  await catch_up(app);
+  const t2 = process.hrtime.bigint();
+  for (let i = 0; i < IDLE_ROUNDS; i++) await app.correlate();
+  const idle_us = Number(process.hrtime.bigint() - t2) / 1e3 / IDLE_ROUNDS;
+
   await app.shutdown();
   await store.dispose();
 
@@ -107,6 +117,9 @@ const main = async () => {
   );
   console.log(
     `steady   | ${String(STEADY_ROUNDS).padStart(6)} | ${steady_ms.toFixed(2).padStart(6)} ms per commit→catch-up (${steady_handled} reactions)`
+  );
+  console.log(
+    `idle     | ${String(IDLE_ROUNDS).padStart(6)} | ${idle_us.toFixed(1).padStart(6)} µs per correlate on a quiet system`
   );
 };
 

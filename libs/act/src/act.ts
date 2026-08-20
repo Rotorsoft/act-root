@@ -943,7 +943,7 @@ export class Act<
         // the scoped store and `_initialized` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this.correlate(q),
+        correlate: (q) => this._correlate_scanned(q),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -1510,6 +1510,10 @@ export class Act<
 
   /** Arm every active lane controller (ACT-1103). */
   private _arm_all(): void {
+    // Correlate is armed alongside the drain (#1510): a commit is exactly the
+    // event that might give a scan something to find, and without this the
+    // scan runs on every settle pass whether or not anything happened.
+    this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
@@ -1534,6 +1538,7 @@ export class Act<
       for (const lane of set) to_arm.add(lane);
     }
     if (to_arm.size === 0) return false;
+    this._correlate.arm();
     for (const lane of to_arm) this._drain_controllers.get(lane)?.arm();
     return true;
   }
@@ -1611,12 +1616,27 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
+    const { subscribed, last_id } = await this._correlate_scanned(query);
+    return { subscribed, last_id };
+  }
+
+  /**
+   * `correlate` plus whether the pass actually read the store (#1510).
+   *
+   * The settle loop needs that extra bit to decide whether the pass carries a
+   * circuit-breaker health signal, and a disarmed pass carries none. It stays
+   * internal rather than widening the public `correlate` return, which is
+   * charter-covered and has no use for it.
+   */
+  private async _correlate_scanned(
+    query: Query
+  ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
     // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
     // checkpoint stays where it was.
-    if (!this._drain) return { subscribed: 0, last_id: -1 };
+    if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
-      const { subscribed, last_id, marked } =
+      const { subscribed, last_id, marked, scanned } =
         await this._correlate.correlate(query);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
@@ -1629,9 +1649,14 @@ export class Act<
       // "nothing to do" to "claimable" without its row being new — and a
       // worker that disarmed on an empty claim moments earlier would sleep
       // through it.
+      //
+      // Arming here also re-arms CORRELATE itself, which is what keeps a
+      // backlog moving: a scan that found something leaves the flag up so the
+      // next pass continues, while the scan that finds nothing takes the
+      // disarm branch and stops the loop (#1510).
       if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
         this._arm_all();
-      return { subscribed, last_id };
+      return { subscribed, last_id, scanned };
     });
   }
 
@@ -2116,6 +2141,9 @@ export class Act<
       pass++
     ) {
       const before = this._correlate.checkpoint;
+      // Force the look: close is asking whether a tail exists, which is
+      // exactly the question the armed flag cannot answer (#1510).
+      this._correlate.arm();
       await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
       if (this._correlate.checkpoint <= before) break;
     }
