@@ -1142,3 +1142,77 @@ LOG_LEVEL=error MINUTES=360 node libs/act-pg/scripts/bloat-soak.bench.mjs
 
 Results stream to CSV as the run proceeds, so an interrupted run is still
 usable — which is how the table above was produced.
+
+
+## #1524 — are the two remaining correlate caches worth building?
+
+Two caching ideas were planned in #1510's Phase 2 before anything was measured,
+and the measurements moved underneath them. `scripts/correlate-reads.bench.mjs`
+measures the **ceiling** on what each could save, so the decision rests on a
+number rather than on the strength of the argument.
+
+The shape is a deployment: W Act instances sharing one store, each with its own
+correlate checkpoint and settle loop, plus a writer committing throughout. 20
+commits/s, 500 aggregates, 30s.
+
+### Item 3 — skip a mark this worker already sent: **declined**
+
+Several workers correlate the same range and send the same `correlated_at` for
+the same target. The store applies `GREATEST`, so duplicates are harmless, but
+they are still round trips. The ceiling is the share of marks that raise
+nothing:
+
+| workers | marks sent | raised nothing |
+|---|---|---|
+| 1 | 370 | 0 (0.0%) |
+| 4 | 381 | 1 (0.3%) |
+| 8 | 394 | 14 (3.6%) |
+
+**Under 4% even at eight workers, and zero at one.** [#1517](https://github.com/Rotorsoft/act-root/pull/1517)
+already removed the bulk of this by parking idle scans — when the plan was
+written, workers rescanned the same range on every tick; now a worker with no
+signal does not scan at all, so the duplicate marks it would have produced never
+exist. Closed as measured-and-declined: a per-worker dedup would save a handful
+of entries out of several hundred and add a coherence question (a cache that
+believes a mark was sent when the call failed would silently skip work).
+
+### Item 4 — cache the event window: **justified, not yet built**
+
+Events are immutable, so a window of them by id range is valid forever.
+Correlate scans a range of the log; the drain then fetches overlapping ranges of
+the same events in the same process. No benchmark had ever exercised correlate's
+read path, so this had no evidence either way.
+
+| workers | correlate scan | drain fetch | total reads | distinct | re-reads |
+|---|---|---|---|---|---|
+| 1 | 449 calls / 370 events | 741 calls / 370 events | 740 | 370 | 370 (**50.0%**) |
+| 4 | 463 calls / 381 events | 745 calls / 372 events | 753 | 372 | 381 (**50.6%**) |
+| 8 | 472 calls / 394 events | 746 calls / 373 events | 767 | 373 | 394 (**51.4%**) |
+
+**Every event is read exactly twice, and 100% of distinct ids are read by both
+paths.** The result holds at one worker, so it is a genuine per-process property
+rather than an artifact of several workers sharing a process.
+
+The round-trip count is the bigger number than the row count: ~1,190 store calls
+to read 371 events, of which ~740 are the drain's per-stream fetches averaging
+0.5 events each. A cache that could serve those from a window correlate already
+read would remove up to **62% of event-read round trips**.
+
+**This is evidence to build it, not the build.** The safety rule from the
+original plan still governs: serve only a **contiguous prefix known complete**,
+because ids come from a sequence and can become visible slightly out of order
+under concurrency, so anything past the known-complete point must go to the
+store. Where such a cache lives, and how it scopes under `ActOptions.scoped`,
+is a design question this measurement does not answer.
+
+### Reproducing
+
+```bash
+docker compose up -d
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/correlate-reads.bench.mjs
+# WORKERS / SECONDS / COMMITS_PER_SEC / AGGREGATES / CYCLE_MS override the shape
+```
+
+The `subscribe` instrumentation does an extra read to learn what each row
+already held, so this bench reports counts only — never latency.
