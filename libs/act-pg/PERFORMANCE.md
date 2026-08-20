@@ -886,7 +886,9 @@ long-run shape is not measured here.
 
 Only a store without MVCC removes the index churn — it follows from how
 Postgres answers an UPDATE, not from where the table lives. That part still
-holds, and Redis remains the candidate for it.
+holds, but [#1523](https://github.com/Rotorsoft/act-root/issues/1523) closed
+the question of whether it justifies one: it does not. See
+[the soak results](#1523--does-the-churn-settle-or-compound) below.
 
 Co-location does cost the subscription side something this arm could not
 quantify, because it can only compare "with and without event-log writes on the
@@ -1063,3 +1065,80 @@ LOG_LEVEL=error node libs/act-pg/scripts/hybrid-split.bench.mjs
 The run prints a warning naming any cell whose client exceeded 80% of the
 host's cores, so a client-bound measurement announces itself instead of being
 mistaken for a result.
+
+
+## #1523 — does the churn settle, or compound?
+
+Every `ack` rewrites a subscription row. Postgres answers an UPDATE by writing a
+new copy and leaving the old one for autovacuum, so a constantly-updated table
+accumulates dead tuples and its indexes grow. The ten-second cells above cannot
+see where that ends up, because autovacuum barely runs in ten seconds.
+
+The question mattered because it gated a real decision: **is Postgres bad enough
+at this to justify putting subscriptions on a store without MVCC, such as
+Redis?**
+
+`scripts/bloat-soak.bench.mjs` samples a steady multi-process workload once a
+minute — claim/ack percentiles, dead and live tuples, per-window HOT fraction,
+autovacuum count, table and index size, and B-tree leaf density. 20,000
+subscriptions, 4 drain workers, 2 committers, one Postgres on :5431.
+
+| minute | claim p50 | ack p50 | leased/s | dead | hot% | vacuums | table MB | index MB | leaf density |
+|---|---|---|---|---|---|---|---|---|---|
+| 1.5 | 2.13 | 1.80 | 6033 | 140,396 | 39 | 3 | 14.3 | 10.7 | 47.6 |
+| 5.5 | 2.24 | 1.86 | 5699 | 143,162 | 38 | 7 | 14.3 | 16.0 | 53.3 |
+| 8.5 | 2.24 | 1.79 | 5655 | 139,195 | 38 | 10 | 14.3 | 17.1 | 56.6 |
+| 10.5 | 2.28 | 1.77 | 5472 | 144,663 | 37 | 12 | 14.3 | 22.7 | 51.1 |
+
+**Three of the four things that could have degraded do not.**
+
+- **Dead tuples hold flat** — ~140k across the whole run, with autovacuum firing
+  about once a minute. That is the signature of a cleaner keeping pace, not
+  falling behind, and it is the number that would have to climb for the
+  compounding case to be true.
+- **Table size holds flat** at 14.3 MB from minute 1 onward. Space freed by
+  autovacuum is reused rather than the heap extending.
+- **Latency is flat** — claim p50 2.13 → 2.28 ms, ack p50 unchanged.
+
+**The indexes are the one thing that drifts.** 10.7 → 22.7 MB, at roughly half-
+empty leaf pages. That is the HOT fraction showing up as physical growth: only
+~38% of updates avoid index work, because `ack` moves `at`, and `at` is both a
+key column of the claim index and part of its membership predicate.
+
+### The conclusion, and its limits
+
+**Redis is not justified.** The failure mode that motivated it was latency
+degradation under churn, and latency does not degrade — [#1518](https://github.com/Rotorsoft/act-root/pull/1518)
+had already taken claim to ~1.5 ms and improved the HOT fraction on the way. The
+residual index growth is answered by a scheduled `REINDEX INDEX CONCURRENTLY`,
+which is a much smaller thing for an operator to run than a second database.
+That recommendation now lives in the [production checklist](../../docs/docs/guides/production-checklist.md).
+
+Stated plainly, because it bounds the claim: **this is ~11 minutes of data, not
+the multi-hour curve #1523 originally scoped.** The run was cut short
+deliberately once the decision it gated was no longer in doubt — dead tuples and
+table size were flat across a dozen autovacuum cycles, which is the evidence
+that distinguishes "settles" from "compounds", and no additional hours would
+move a decision that was already going one way.
+
+What that leaves genuinely open: whether index growth itself plateaus or
+continues indefinitely. It does not change the recommendation — reindexing is
+the answer either way — but nobody should cite these numbers as proof of a
+long-run steady state. The harness is committed; anyone wanting the six-hour
+curve can run `MINUTES=360` and append it here.
+
+Defaults matter too: this is one host with a fast local disk and stock
+autovacuum settings. A "settles" result means "settles on defaults", not
+"settles everywhere".
+
+### Reproducing
+
+```bash
+docker compose up -d
+pnpm build
+LOG_LEVEL=error MINUTES=360 node libs/act-pg/scripts/bloat-soak.bench.mjs
+# STREAMS / SAMPLE_SEC / WORKERS / COMMITTERS / PORT / OUT override the shape
+```
+
+Results stream to CSV as the run proceeds, so an interrupted run is still
+usable — which is how the table above was produced.

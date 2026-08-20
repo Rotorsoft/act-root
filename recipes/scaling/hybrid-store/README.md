@@ -139,13 +139,19 @@ backup rewinds watermarks and replays. At-least-once already permits that, but
 a webhook target replaying its history is the case where it hurts, and it is
 the same hazard `reset` carries.
 
-**It does not fix index churn.** Only 14–41% of subscription-table updates are
-HOT, because `ack` moves `at`, and `at` is both a key column of the partial
-claim index and part of its membership predicate. That follows from how
-Postgres answers an UPDATE, not from where the table lives — a second instance
-relocates the churn rather than removing it. A store without MVCC would remove
-it; whether that is ever worth building is tracked in
-[#1523](https://github.com/Rotorsoft/act-root/issues/1523).
+**It does not fix index churn.** Only 14–41% of subscription-table updates take
+Postgres's cheap path, because `ack` moves `at`, and `at` is both a key column
+of the claim index and part of the condition deciding which rows belong in it.
+That follows from how Postgres answers an update, not from where the table
+lives — a second instance relocates the churn rather than removing it.
+
+Measured over a sustained run, this is housekeeping rather than a ceiling: dead
+rows hold flat, table size holds flat, and only the indexes drift, at roughly
+half-empty pages. A scheduled `REINDEX INDEX CONCURRENTLY` handles it — see
+[the production checklist](../../../docs/docs/guides/production-checklist.md).
+A store without MVCC would avoid the churn entirely, and
+[#1523](https://github.com/Rotorsoft/act-root/issues/1523) closed on the
+conclusion that it is not worth a second engine to do so.
 
 ## The caveat on the numbers
 
