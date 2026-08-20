@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.34.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.34.1...@rotorsoft/act-tck-v1.34.2) (2026-08-20)
+
+
+### Performance Improvements
+
+* **act-pg:** stop materializing the eligible set in claim (91ms → 1.5ms) ([#1518](https://github.com/Rotorsoft/act-root/issues/1518)) ([16735a9](https://github.com/Rotorsoft/act-root/commit/16735a9d3a18b436323368630308b3c2a4e1f02f)), closes [#1485](https://github.com/Rotorsoft/act-root/issues/1485) [#1488](https://github.com/Rotorsoft/act-root/issues/1488) [#1517](https://github.com/Rotorsoft/act-root/issues/1517) [#1329](https://github.com/Rotorsoft/act-root/issues/1329) [#1519](https://github.com/Rotorsoft/act-root/issues/1519)
+* **act:** let correlate sit still when nothing has happened ([#1517](https://github.com/Rotorsoft/act-root/issues/1517)) ([5e33afd](https://github.com/Rotorsoft/act-root/commit/5e33afd4096444013c5f58b2d7dfb64f30841861)), closes [#1329](https://github.com/Rotorsoft/act-root/issues/1329)
+
 # [@rotorsoft/act-tck-v1.34.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.34.0...@rotorsoft/act-tck-v1.34.1) (2026-08-18)
 
 
