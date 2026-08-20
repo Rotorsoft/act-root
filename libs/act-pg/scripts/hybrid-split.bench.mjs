@@ -1,5 +1,7 @@
 /**
  * #1510 — what splitting the store across two systems actually costs and buys.
+ * #1522 — measured with a multi-process client, so the numbers are results
+ * rather than lower bounds.
  *
  * `subscription-contention.bench.mjs` measured a *proxy* for the split: the
  * same workload with and without concurrent event-log writes. That captures
@@ -14,18 +16,27 @@
  *   split    a hybrid store: event-log methods to :5431, subscription methods
  *            to :5432, a genuinely separate server
  *
- * The hybrid below is also the prototype of the adapter #1489 was deferred in
- * favour of. It is deliberately a few lines: since #1488 every hot method
- * belongs cleanly to one half, so routing is a lookup rather than a
- * reimplementation. The methods that touch both (`seed`, `drop`, `dispose`)
- * fan out; the ones that would need a distributed transaction (`truncate`,
- * `restore`) are not exercised here and are the real work a production hybrid
- * would have to do.
+ * Every worker is a **separate OS process** with its own connection pool. The
+ * first version of this benchmark ran them as async tasks sharing one event
+ * loop and one pool, which is not what a deployment looks like: past a handful
+ * of workers the client itself becomes the bottleneck, and a saturated client
+ * drags every arm toward the same number. That made the split's advantage look
+ * like it narrowed under load when what was actually narrowing was the
+ * benchmark's ability to tell the arms apart. Client CPU is reported per cell
+ * so that condition is visible instead of inferred.
+ *
+ * The parent process only seeds, forks, and aggregates — it issues no load of
+ * its own, so it cannot become the contended resource it is measuring.
  *
  * Run:
  *   docker compose --profile bench up -d postgres-subs
- *   node libs/act-pg/scripts/hybrid-split.bench.mjs
+ *   pnpm build
+ *   LOG_LEVEL=error node libs/act-pg/scripts/hybrid-split.bench.mjs
  */
+import { fork } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { PostgresStore } from "../dist/index.js";
 
@@ -34,45 +45,29 @@ const TABLE = "events";
 const STREAMS = Number(process.env.STREAMS ?? 20_000);
 const SECONDS = Number(process.env.SECONDS ?? 10);
 const WORKER_COUNTS = (process.env.WORKERS ?? "1,4,8").split(",").map(Number);
+/**
+ * How many concurrent committer processes generate the event-log write load.
+ *
+ * This is not a cosmetic knob. A single committer commits serially, so its
+ * throughput is exactly 1/latency, and its latency is dominated by whether its
+ * WAL flush finds company: Postgres amortizes one fsync across all
+ * transactions committing together. On a shared server the committer rides
+ * along on the drain traffic's flushes; alone on a dedicated one it pays every
+ * fsync by itself. With `COMMITTERS=1` that alone-ness reads as "splitting
+ * made commits slower", which is a statement about group commit, not about the
+ * split. Real deployments have many concurrent writers, so the default does
+ * too.
+ */
+const COMMITTERS = Number(process.env.COMMITTERS ?? 4);
 
 const LOG_PORT = 5431;
 const SUBS_PORT = Number(process.env.SUBS_PORT ?? 5432);
 
-/** Methods that belong to the event log; everything else is subscription-side. */
-const LOG_SIDE = new Set([
-  "commit",
-  "query",
-  "query_stats",
-  "scan",
-  "restore",
-  "forget_pii",
-  "notify",
-]);
-/** Methods that must reach both halves. */
-const BOTH = new Set(["seed", "drop", "dispose"]);
-
-/**
- * The hybrid: one `Store` on the outside, two underneath. This is the shape
- * that made splitting the *port* unnecessary — callers never learn there are
- * two systems.
- */
-const hybrid = (log, subs) =>
-  new Proxy(
-    {},
-    {
-      get(_t, prop) {
-        if (BOTH.has(prop))
-          return async (...args) => {
-            const a = await log[prop](...args);
-            await subs[prop](...args);
-            return a;
-          };
-        const target = LOG_SIDE.has(prop) ? log : subs;
-        const value = target[prop];
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }
-  );
+const WORKER = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "hybrid-split-worker.mjs"
+);
+const CORES = os.cpus().length;
 
 const pools = new Map();
 const pool_for = (port) => {
@@ -96,13 +91,6 @@ const pct = (xs, p) => {
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 };
 
-const timed = async (samples, fn) => {
-  const t = process.hrtime.bigint();
-  const out = await fn();
-  samples.push(Number(process.hrtime.bigint() - t) / 1e6);
-  return out;
-};
-
 /**
  * Seed events on the log side and subscriptions on the subscription side.
  * Ids land in randomized order so a watermark sits at a random point in the
@@ -113,7 +101,7 @@ async function seed(log_port, subs_port) {
     port: log_port,
     schema: SCHEMA,
     table: TABLE,
-    max: 24,
+    max: 4,
   });
   const subs =
     subs_port === log_port
@@ -122,7 +110,7 @@ async function seed(log_port, subs_port) {
           port: subs_port,
           schema: SCHEMA,
           table: TABLE,
-          max: 24,
+          max: 4,
         });
   await log.drop();
   await log.seed();
@@ -148,93 +136,101 @@ async function seed(log_port, subs_port) {
      FROM generate_series(0, $1::int - 1) i`,
     [STREAMS]
   );
-  await pool_for(subs_port).query(
-    `VACUUM ANALYZE ${SCHEMA}.${TABLE}_streams`
+  await pool_for(subs_port).query(`VACUUM ANALYZE ${SCHEMA}.${TABLE}_streams`);
+  await log.dispose();
+  if (subs !== log) await subs.dispose();
+}
+
+/**
+ * Fork one child per role and wait for all of them to report.
+ *
+ * Children are started before the deadline is computed against, and every one
+ * gets the same absolute deadline, so they overlap for the full window rather
+ * than staggering by spawn cost.
+ */
+function spawn_all(roles, subs_port) {
+  // Node process startup is ~80ms; give every child the same absolute stop
+  // time far enough out that spawn skew is noise against the window.
+  const deadline = Date.now() + 1_000 + SECONDS * 1000;
+  return Promise.all(
+    roles.map(
+      ({ role, id }) =>
+        new Promise((resolve, reject) => {
+          const child = fork(WORKER, {
+            env: {
+              ...process.env,
+              ROLE: role,
+              WORKER_ID: String(id ?? 0),
+              LOG_PORT: String(LOG_PORT),
+              SUBS_PORT: String(subs_port),
+              SCHEMA,
+              TABLE,
+              STREAMS: String(STREAMS),
+              DEADLINE: String(deadline),
+            },
+            stdio: ["ignore", "inherit", "inherit", "ipc"],
+          });
+          let report;
+          child.on("message", (m) => {
+            report = m;
+          });
+          child.on("error", reject);
+          child.on("exit", (code) =>
+            report
+              ? resolve(report)
+              : reject(new Error(`${role} worker exited ${code} with no report`))
+          );
+        })
+    )
   );
-  return { store: subs === log ? log : hybrid(log, subs), log, subs };
-}
-
-async function drain_worker(s, by, deadline, m) {
-  while (Date.now() < deadline) {
-    const leases = await timed(m.claim, () => s.claim(8, 2, by, 30_000));
-    if (!leases.length) continue;
-    m.leased += leases.length;
-    await timed(m.ack, () => s.ack(leases.map((l) => ({ ...l, at: l.at + 1 }))));
-  }
-}
-
-/** Stands in for correlate's marking write. */
-async function marker(s, deadline, m) {
-  let cursor = 0;
-  while (Date.now() < deadline) {
-    const batch = [];
-    for (let i = 0; i < 200; i++) {
-      const n = (cursor + i) % STREAMS;
-      batch.push({
-        stream: `s${n}`,
-        priority: 0,
-        lane: "default",
-        correlated_at: 3 * STREAMS + cursor + i,
-      });
-    }
-    cursor = (cursor + 200) % STREAMS;
-    await timed(m.subscribe, () => s.subscribe(batch, cursor));
-  }
-}
-
-/** The event-log write load, always on the log side in both arms. */
-async function committer(s, deadline, m) {
-  let n = 0;
-  while (Date.now() < deadline) {
-    await timed(m.commit, () =>
-      s.commit(`hot-${n % 50}`, [{ name: "Opened", data: {} }], {
-        correlation: "c",
-        causation: {},
-      })
-    ).catch(() => {});
-    n++;
-  }
 }
 
 async function run(workers, split) {
-  const { store, log, subs } = await seed(
-    LOG_PORT,
-    split ? SUBS_PORT : LOG_PORT
-  );
-  const m = { claim: [], ack: [], subscribe: [], commit: [], leased: 0 };
-  const deadline = Date.now() + SECONDS * 1000;
-  const tasks = [];
-  for (let w = 0; w < workers; w++)
-    tasks.push(drain_worker(store, `w${w}`, deadline, m));
-  tasks.push(marker(store, deadline, m));
-  tasks.push(committer(store, deadline, m));
-  await Promise.all(tasks);
-  await log.dispose();
-  if (subs !== log) await subs.dispose();
+  const subs_port = split ? SUBS_PORT : LOG_PORT;
+  await seed(LOG_PORT, subs_port);
+
+  const roles = [{ role: "marker" }];
+  for (let c = 0; c < COMMITTERS; c++) roles.push({ role: "committer", id: c });
+  for (let w = 0; w < workers; w++) roles.push({ role: "drain", id: w });
+
+  const reports = await spawn_all(roles, subs_port);
+
+  const all = (key) => reports.flatMap((r) => r[key]);
+  const claim = all("claim");
+  const cpu_ms = reports.reduce((a, r) => a + r.cpu_ms, 0);
+  // The window every rate is denominated in: the widest child window, since
+  // they all stop together and the first to start bounds the overlap.
+  const window = Math.max(...reports.map((r) => r.wall_ms)) / 1000;
+
   return {
     workers,
-    claim_p50: pct(m.claim, 50),
-    claim_p99: pct(m.claim, 99),
-    claims_per_s: m.claim.length / SECONDS,
-    leased_per_s: m.leased / SECONDS,
-    ack_p50: pct(m.ack, 50),
-    sub_p50: pct(m.subscribe, 50),
-    commit_p50: pct(m.commit, 50),
-    commits_per_s: m.commit.length / SECONDS,
+    claim_p50: pct(claim, 50),
+    claim_p99: pct(claim, 99),
+    claims_per_s: claim.length / window,
+    leased_per_s: reports.reduce((a, r) => a + r.leased, 0) / window,
+    ack_p50: pct(all("ack"), 50),
+    sub_p50: pct(all("subscribe"), 50),
+    commit_p50: pct(all("commit"), 50),
+    commits_per_s: all("commit").length / window,
+    // Fraction of the machine the benchmark client consumed. Approaching 1.0
+    // means the client, not Postgres, set the ceiling — and the cell should be
+    // read as a lower bound.
+    client_load: cpu_ms / 1000 / (window * CORES),
   };
 }
 
 const main = async () => {
   console.log(
-    `Hybrid split — ${STREAMS} subscriptions, ${SECONDS}s per cell\n` +
+    `Hybrid split — ${STREAMS} subscriptions, ${SECONDS}s per cell, ` +
+      `multi-process client on ${CORES} cores\n` +
       `  single: events + subscriptions on :${LOG_PORT}\n` +
       `  split:  events on :${LOG_PORT}, subscriptions on :${SUBS_PORT}\n`
   );
   console.log(
-    "  arm    | W | claim p50 | claim p99 | claims/s | leased/s | ack p50 | sub p50 | commit p50 | commits/s"
+    "  arm    | W | claim p50 | claim p99 | claims/s | leased/s | ack p50 | sub p50 | commit p50 | commits/s | client"
   );
   console.log(
-    "  -------|---|-----------|-----------|----------|----------|---------|---------|------------|----------"
+    "  -------|---|-----------|-----------|----------|----------|---------|---------|------------|-----------|-------"
   );
   const results = [];
   for (const w of WORKER_COUNTS) {
@@ -242,7 +238,7 @@ const main = async () => {
       const r = await run(w, split);
       results.push({ split, ...r });
       console.log(
-        `  ${(split ? "split" : "single").padEnd(6)} | ${String(w)} | ${r.claim_p50.toFixed(2).padStart(9)} | ${r.claim_p99.toFixed(2).padStart(9)} | ${r.claims_per_s.toFixed(0).padStart(8)} | ${r.leased_per_s.toFixed(0).padStart(8)} | ${r.ack_p50.toFixed(2).padStart(7)} | ${r.sub_p50.toFixed(2).padStart(7)} | ${r.commit_p50.toFixed(2).padStart(10)} | ${r.commits_per_s.toFixed(0).padStart(9)}`
+        `  ${(split ? "split" : "single").padEnd(6)} | ${String(w)} | ${r.claim_p50.toFixed(2).padStart(9)} | ${r.claim_p99.toFixed(2).padStart(9)} | ${r.claims_per_s.toFixed(0).padStart(8)} | ${r.leased_per_s.toFixed(0).padStart(8)} | ${r.ack_p50.toFixed(2).padStart(7)} | ${r.sub_p50.toFixed(2).padStart(7)} | ${r.commit_p50.toFixed(2).padStart(10)} | ${r.commits_per_s.toFixed(0).padStart(9)} | ${(r.client_load * 100).toFixed(0).padStart(5)}%`
       );
     }
   }
@@ -257,6 +253,12 @@ const main = async () => {
         `commits/s ${(b.commits_per_s / a.commits_per_s).toFixed(2)}x`
     );
   }
+  const hot = results.filter((r) => r.client_load > 0.8);
+  if (hot.length)
+    console.log(
+      `\n  WARNING: ${hot.length} cell(s) ran the client above 80% of ${CORES} cores.\n` +
+        "  Those are lower bounds — rerun with fewer workers or a bigger machine."
+    );
   for (const p of pools.values()) await p.end();
 };
 

@@ -888,14 +888,21 @@ Only a store without MVCC removes the index churn — it follows from how
 Postgres answers an UPDATE, not from where the table lives. That part still
 holds, and Redis remains the candidate for it.
 
-But co-location turned out to matter for a reason this arm could not see; the
-next section measures it.
+Co-location does cost the subscription side something this arm could not
+quantify, because it can only compare "with and without event-log writes on the
+same server", never "on a different server". The next section measures that
+directly: moving subscriptions to their own instance takes 11–15% off claim p50.
 
 ### Caveats, because they bound the conclusions
 
 - The N "workers" are async tasks in one Node process against one pool, not
   separate processes. Real competing consumers add network and per-process
-  pool effects this does not capture.
+  pool effects this does not capture. **This caveat proved load-bearing** —
+  [#1522](https://github.com/Rotorsoft/act-root/issues/1522) rebuilt the
+  hybrid-split benchmark on real processes and one of its headline findings did
+  not survive. The server-side numbers in *this* section (HOT fraction, dead
+  tuples, index growth, vacuum counts) are read from `pg_stat` and are not
+  affected; the latency columns should still be treated as lower bounds.
 - 10–20 second cells are far too short for autovacuum steady state. The
   drift number is a hint, not the long-run answer.
 - `HIT_RATE` seeds the initial pending fraction, but the marker immediately
@@ -936,6 +943,13 @@ a second database, so the WAL and checkpointer are separate too.
 20,000 subscriptions, 10s per cell, a drain worker pool, a marker standing in
 for correlate, and a committer writing events throughout.
 
+> **Superseded — single-process client.** The table immediately below is the
+> original measurement, kept because the claim-side conclusion drawn from it
+> still holds and because the retraction underneath only makes sense next to the
+> numbers it retracts. Its `commit p50` and `commits/s` columns are **client
+> artifacts**; see [#1522](https://github.com/Rotorsoft/act-root/issues/1522)
+> below for the multi-process re-measurement.
+
 | arm | W | claim p50 | claim p99 | leased/s | ack p50 | sub p50 | commit p50 | commits/s |
 |---|---|---|---|---|---|---|---|---|
 | single | 1 | 16.02 ms | 17.74 | 569 | 1.07 | 4.45 | 1.43 ms | 716 |
@@ -957,34 +971,85 @@ the cost that would have killed the idea — does not show up at all. `ack` and
 That is the load-bearing negative result. A hybrid does not have to justify a
 latency penalty, because there isn't one.
 
-### The split roughly doubles commit throughput
+### The commit-throughput claim did not survive a multi-process client (#1522)
 
-**716 → 1455 commits/s at one worker, 704 → 1273 at two**, with commit p50
-halving (1.43 → 0.66 ms). Reproduced across runs.
+The table above once carried a second headline: **the split roughly doubles
+commit throughput**, 716 → 1455 commits/s. That number was an artifact of the
+benchmark client, and it is retracted.
 
-This is the finding the earlier arm missed by asking the question backwards.
-**The contention is asymmetric**: event-log writes do not slow the subscription
-workload, but the subscription workload slows the event log by about 2×. Drain
-traffic is background work; commits are the user-facing write path. Halving
-foreground write throughput to run background work is exactly the problem a
-split exists to fix.
+Every arm ran as async tasks in **one Node process against one connection
+pool**, so the committer competed with every drain worker for pool slots and
+event-loop turns. In the `split` arm the subscription calls moved to a second
+`PostgresStore` with its own pool, which handed the committer a less contended
+*client*. That is what doubled — not the server.
 
-The advantage narrows at 4–8 workers (1.03–1.07×), and the likely reason is the
-benchmark client rather than the servers: everything runs as async tasks in one
-Node process against one pool, so at high concurrency the client saturates and
-compresses every difference toward 1.0. A multi-process client would probably
-widen the gap rather than close it — which is the next measurement, not a
-conclusion to draw now.
+Re-measured with [`hybrid-split-worker.mjs`](./scripts/hybrid-split-worker.mjs)
+giving every worker, marker and committer its own OS process and its own pool,
+plus `COMMITTERS=4` so commit throughput is not capped at 1/latency by a single
+serial writer:
+
+| arm | W | claim p50 | claim p99 | leased/s | ack p50 | sub p50 | commit p50 | commits/s | client |
+|---|---|---|---|---|---|---|---|---|---|
+| single | 1 | 2.09 ms | 3.87 | 2577 | 1.59 | 5.35 | 1.24 ms | 3036 | 6% |
+| **split** | 1 | **1.78 ms** | 3.16 | **3126** | 1.26 | 4.68 | 1.38 ms | 2766 | 6% |
+| single | 4 | 2.47 ms | 4.72 | 5107 | 2.16 | 6.68 | 1.91 ms | 2003 | 9% |
+| **split** | 4 | **2.18 ms** | 3.88 | **6056** | 1.82 | 5.98 | 2.24 ms | 1709 | 10% |
+| single | 8 | 3.03 ms | 6.45 | 5091 | 2.73 | 8.49 | 2.72 ms | 1387 | 12% |
+| **split** | 8 | **2.71 ms** | 5.35 | **5590** | 2.42 | 7.58 | 3.48 ms | 1075 | 12% |
+| single | 16 | 4.31 ms | 10.30 | 3716 | 4.44 | 13.05 | 4.56 ms | 805 | 14% |
+| **split** | 16 | **3.69 ms** | 9.78 | 3245 | 4.73 | 11.49 | 5.80 ms | 630 | 14% |
+
+`client` is the benchmark's own CPU as a fraction of the host's 12 cores. It
+peaks at 14%, so nothing here is client-bound — which is the point of the
+rewrite, and why these numbers are results rather than lower bounds.
+
+**The subscription-side win is real and it got bigger.** Claim p50 is
+**0.85–0.89×** and `leased/s` up to **1.21×** — better than the single-process
+run reported, exactly as predicted. This is the half the benchmark can measure
+honestly, because it is about lock contention on the subscription table rather
+than about hardware.
+
+**The commit-side win is unproven on this hardware, and measures as a loss.**
+commits/s runs 0.77–0.91×, worsening as workers are added. Four hypotheses were
+tested and eliminated:
+
+| hypothesis | test | result |
+|---|---|---|
+| host CPU saturation | `docker stats` through a run | 370–430% of 1200% available — not saturated |
+| benchmark client saturation | per-process `cpuUsage` | ≤14% — not the ceiling |
+| single serial committer | `COMMITTERS=1,2,4,8` | throughput scales 338→666→1095, ratio stays ~0.77× |
+| fsync / group-commit amortization | `synchronous_commit=off` on both | both arms faster, ratio unchanged at 0.66× |
+
+What does explain it is the **single host**. The deficit tracks the *neighbour's*
+load, not anything about the log server:
+
+| drain workers | subs container CPU | commits/s ratio |
+|---|---|---|
+| 0 | idle | **0.93×** |
+| 8 | ~390% | **0.70×** |
+
+On one machine, "splitting" adds no hardware. It relocates the subscription
+work from the log server's own CPU to a sibling container competing for the same
+cores, disk and Docker VM, and adds a second postmaster's overhead on top. The
+busier the subscription side, the more it costs the log server. A real split
+puts the halves on separate hosts, where that term disappears.
+
+So the honest statement is: **this benchmark cannot measure the commit-side
+benefit of a split**, and no version of it on one host can. Claims about
+foreground write throughput need two machines.
 
 ### Caveats
 
-- Single Node process for all arms; client-bound at 8 workers (see above).
-- Two containers on one host — same CPU and disk. A real deployment separates
-  those too, which should favour the split further.
+- Two containers on one host — same CPU, disk and VM. This is now known to
+  *penalize* the split rather than being neutral (see above), so the commit
+  column should be read as a floor.
 - `truncate` and `restore` are not exercised. They are the two operations that
   genuinely span both stores and the real work a production hybrid owes — the
   coupling itself is tracked in
   [#1527](https://github.com/Rotorsoft/act-root/issues/1527).
+- At W=16 the split's `leased/s` falls to 0.87×, the one subscription-side
+  regression in the matrix. Two Postgres instances plus 21 client processes on
+  12 cores is a crowded machine; whether it is real needs separate hosts.
 
 ### Reproducing
 
@@ -992,5 +1057,9 @@ conclusion to draw now.
 docker compose --profile bench up -d postgres-subs
 pnpm build
 LOG_LEVEL=error node libs/act-pg/scripts/hybrid-split.bench.mjs
-# STREAMS / SECONDS / WORKERS / SUBS_PORT override the shape
+# STREAMS / SECONDS / WORKERS / COMMITTERS / SUBS_PORT override the shape
 ```
+
+The run prints a warning naming any cell whose client exceeded 80% of the
+host's cores, so a client-bound measurement announces itself instead of being
+mistaken for a result.

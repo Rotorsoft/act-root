@@ -12,45 +12,55 @@ recipe separates them without changing a line of application code.
 
 ## When to reach for it
 
-**The symptom is commit latency, not drain latency.** That surprised us, and
-it is the whole point of the recipe.
+Measured on two Postgres instances against one shared workload, every worker in
+its own OS process
+([`libs/act-pg/scripts/hybrid-split.bench.mjs`](../../../libs/act-pg/scripts/hybrid-split.bench.mjs),
+20k subscriptions, 4 committers):
 
-Measured on two Postgres instances against one shared workload
-([`libs/act-pg/scripts/hybrid-split.bench.mjs`](../../../libs/act-pg/scripts/hybrid-split.bench.mjs)):
+| split ÷ single | 1 worker | 4 | 8 | 16 |
+|---|---|---|---|---|
+| claim p50 | **0.85×** | **0.88×** | **0.89×** | **0.85×** |
+| leased/s | **1.21×** | **1.19×** | **1.10×** | 0.87× |
+| ack p50 | **0.79×** | **0.84×** | **0.89×** | 1.06× |
 
-| | one database | events and subscriptions apart |
-|---|---|---|
-| commit p50 | 1.43 ms | **0.66 ms** |
-| commits/s | 716 | **1455** |
-| claim p50 | 16.02 ms | 15.73 ms |
-| ack p50 | 1.07 ms | 0.87 ms |
+**The split is free, and then some.** The extra network hop — the cost that
+should have made this a trade-off — never shows up. Claim latency improves
+11–15% and drain throughput up to 21%, because the subscription table stops
+sharing locks, buffers and autovacuum budget with a much larger neighbour.
 
-**The split is free.** Claim latency is 0.96–1.01× across every worker count —
-the extra network hop, which is the cost that should have made this a
-trade-off, does not show up at all.
+**Reach for this when drain contention is your problem**, or when you want the
+subscription store sized, tuned, backed up or failed over differently from the
+log. It is small and its loss costs redelivery; the log's loss is unrecoverable,
+and the two deserve different operational treatment.
 
-**And it roughly doubles commit throughput.** The contention is asymmetric:
-event-log writes do not slow the subscription workload, but the subscription
-workload slows the log. Drain is background work; commits are what your users
-wait on. Halving foreground write throughput to run background work is exactly
-what separating them fixes.
+### What we can't tell you
 
-Reach for this when:
+An earlier version of this page led with a bigger claim: that splitting
+**doubles commit throughput**, because drain traffic was slowing the event log
+by ~2×. That number came from a benchmark whose workers all shared one Node
+process and one connection pool, so moving subscription calls to a second pool
+mostly relieved the *client*. Re-measured with real processes, it does not
+reproduce. It is retracted.
 
-- Commit latency matters and drain traffic is heavy — many subscribed streams,
-  a busy correlate, or several workers.
-- You want the subscription store sized, tuned, backed up or failed over
-  differently from the log. It is small and its loss is survivable; the log's
-  is not.
+What replaces it is an honest gap. On a single machine, commit throughput
+measures **0.77–0.91×** — the split looks like a small loss. That is the test
+rig, not the design: both Postgres instances share one host, so splitting adds
+no hardware, it just moves the subscription work to a sibling competing for the
+same cores and disk. The penalty tracks the neighbour's load exactly (0.93× with
+the subscription side idle, 0.70× with it at 390% CPU), and host CPU, client
+CPU, committer concurrency and fsync amortization were each tested and ruled out
+([details](../../../libs/act-pg/PERFORMANCE.md)).
 
-Do **not** reach for it when:
+**No single-host benchmark can settle the commit question**, so this page no
+longer claims a foreground-write win. If commit latency is what you are trying
+to fix, the split is plausible but unproven — measure it on your own two hosts
+before committing to it. [#1522](https://github.com/Rotorsoft/act-root/issues/1522)
+tracks the two-machine run.
 
-- Claim latency is your complaint. Separation does not help there; it was
-  already flat, and [#1518](https://github.com/Rotorsoft/act-root/pull/1518)
-  took it to ~1.5 ms at 100k subscriptions.
-- You are saturating many workers. The measured advantage narrows to ~1.05× at
-  8 workers, and we cannot yet say whether that is real or the benchmark client
-  saturating — see the caveat below.
+Do **not** reach for it when claim latency alone is your complaint:
+[#1518](https://github.com/Rotorsoft/act-root/pull/1518) already took that to
+~1.5 ms at 100k subscriptions on a single database, and 11% off an already-small
+number rarely justifies a second system.
 
 ## What makes it possible
 
@@ -139,14 +149,15 @@ it; whether that is ever worth building is tracked in
 
 ## The caveat on the numbers
 
-Every arm of the benchmark runs as async tasks in **one Node process against
-one connection pool**. At 8 workers the client is likely the bottleneck, which
-compresses all differences toward 1.0 — and is the most plausible reason the
-split's advantage narrows there. A multi-process client should *widen* the gap
-rather than close it, but that is a hypothesis, not a result. Tracked in
-[#1522](https://github.com/Rotorsoft/act-root/issues/1522).
+Both Postgres instances run on one host, sharing CPU, disk and a Docker VM.
+That is fine for the subscription-side numbers, which are about contention
+inside the database, but it is the wrong shape for anything about commit
+throughput — see [what we can't tell you](#what-we-cant-tell-you) above.
 
-So: strong evidence at low-to-moderate concurrency, unresolved at high.
+At 16 workers the split's `leased/s` drops to 0.87×, the only subscription-side
+regression in the matrix. Two Postgres instances plus 21 client processes on 12
+cores is a crowded machine, and that is the most likely explanation, but it is
+unconfirmed for the same reason.
 
 ## Trying it
 
@@ -156,7 +167,16 @@ pnpm build
 LOG_LEVEL=error node libs/act-pg/scripts/hybrid-split.bench.mjs
 ```
 
-`STREAMS`, `SECONDS`, `WORKERS` and `SUBS_PORT` override the shape.
+`STREAMS`, `SECONDS`, `WORKERS`, `COMMITTERS` and `SUBS_PORT` override the
+shape. Every worker runs as its own OS process, and the run reports how much of
+the host the benchmark client itself consumed — if that approaches 100%, the
+cell measured the client and the output says so.
+
+`COMMITTERS` matters more than it looks: with one committer, commit throughput
+is exactly 1/latency, and a lone writer on a dedicated server pays for every
+WAL flush by itself instead of sharing one with the drain traffic. That reads as
+"the split made commits slower" when it is really a statement about group
+commit. The default is 4.
 
 ## Related
 
