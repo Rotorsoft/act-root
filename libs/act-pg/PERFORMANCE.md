@@ -811,3 +811,184 @@ in watermark order and filters. Lanes partition the set, so each holds fewer
 rows — but a highly selective lane on a large table will walk further than it
 would with a `(lane, at)` index. Not added here: it would be a third index on
 the hottest-written table, and no measured workload needs it yet.
+
+## #1510 — the subscription workload under N workers, and whether a hybrid would help
+
+> **Claim numbers here are superseded.** These cells were measured before
+> [#1518](https://github.com/Rotorsoft/act-root/pull/1518) stopped `claim` from
+> materializing the eligible set: claim p50 at 8 workers went 20.69 ms → 2.52 ms
+> and throughput 333 → 2,186/s. The *findings* below are unaffected — the
+> asymmetric contention, the HOT-update fraction and the index-churn shape are
+> properties of the write path, which #1518 did not touch — but read the claim
+> latencies as the historical baseline they are, not as current behaviour.
+
+RFC 1449's acceptance criterion 3, and the measurement that was supposed to
+justify moving subscriptions to a different system. It argues against it.
+
+`scripts/subscription-contention.bench.mjs`, docker PG :5431 (M3 Pro), 20,000
+subscriptions, 10s per cell. Workers run the real `claim` → `ack` loop; a
+marker task stands in for correlate, re-marking 200 streams per batch
+continuously, which is the write #1487 put on the steady-state path.
+
+Two arms, identical subscription traffic — `isolated` has no event-log writes,
+`shared` runs a concurrent committer, which is production.
+
+| W | arm | claim p50 | claim p99 | claims/s | leased/s | ack p99 | sub p99 | HOT% | idx +MB |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | isolated | 20.01 ms | 26.71 | 44 | 439 | 5.30 | 13.28 | 14% | 1.7 |
+| 1 | shared | 16.63 ms | 20.66 | 55 | 548 | 3.33 | 8.94 | 17% | 1.7 |
+| 2 | isolated | 17.74 ms | 27.39 | 98 | 859 | 4.16 | 12.89 | 21% | 1.8 |
+| 2 | shared | 17.22 ms | 26.21 | 97 | 885 | 3.65 | 8.25 | 22% | 1.7 |
+| 4 | isolated | 17.11 ms | 27.23 | 205 | 1343 | 4.86 | 13.40 | 27% | 1.9 |
+| 4 | shared | 17.53 ms | 24.96 | 204 | 1298 | 4.90 | 12.62 | 26% | 2.0 |
+| 8 | isolated | 20.18 ms | 35.56 | 342 | 1780 | 7.87 | 20.23 | 30% | 2.3 |
+| 8 | shared | 20.69 ms | 42.73 | 333 | 1753 | 8.31 | 23.34 | 30% | 2.3 |
+
+### The event log next to the subscriptions costs the *subscriptions* nothing
+
+`isolated` and `shared` are the same numbers. At 8 workers: 20.18 vs 20.69 ms
+p50, 342 vs 333 claims/s. The only visible difference is claim p99 (35.6 vs
+42.7), which is tail noise at this sample size.
+
+> **This section asked the question in the wrong direction, and the conclusion
+> that followed was wrong.** It measured whether event-log writes slow the
+> subscription workload — they do not — and concluded a split would buy
+> nothing. The reverse turns out to be false: the subscription workload slows
+> the *event log* by about 2×. See the next section, which measures the real
+> split. The contention is asymmetric, and the direction that matters is the
+> one this arm did not test.
+
+### Competing consumers scale
+
+Claim throughput is near-linear to 8 workers (44 → 98 → 205 → 342 per second,
+7.8×). `leased/s` grows sub-linearly (439 → 1780, 4×) because later workers
+`SKIP LOCKED` past a frontier the earlier ones already took — expected, and the
+reason it is a separate column. No contention collapse; p50 is flat across the
+whole range.
+
+### What is real: the index that makes claim fast makes ack expensive
+
+Only **14–38% of updates are HOT**. A heap-only tuple update avoids touching
+indexes, and this workload cannot use one: `ack` advances `at`, `at` is a key
+column of the partial claim index `(lane, priority DESC, at) WHERE blocked =
+false AND at < correlated_at`, and moving `at` also changes that index's
+membership predicate. So the majority of acks write index entries and leave
+dead ones behind — 2–3 MB of index growth per 10-second cell under load.
+
+That is structural rather than a tuning miss. It is the cost side of the trade
+#1485 made: the read got cheap because the write maintains an index.
+
+Within a run the degradation is mild — claim p50 in the last third of a 20s
+run is **1.10–1.12×** the first third, with autovacuum running 0–1 times. The
+long-run shape is not measured here.
+
+### What this means for a hybrid
+
+Only a store without MVCC removes the index churn — it follows from how
+Postgres answers an UPDATE, not from where the table lives. That part still
+holds, and Redis remains the candidate for it.
+
+But co-location turned out to matter for a reason this arm could not see; the
+next section measures it.
+
+### Caveats, because they bound the conclusions
+
+- The N "workers" are async tasks in one Node process against one pool, not
+  separate processes. Real competing consumers add network and per-process
+  pool effects this does not capture.
+- 10–20 second cells are far too short for autovacuum steady state. The
+  drift number is a hint, not the long-run answer.
+- `HIT_RATE` seeds the initial pending fraction, but the marker immediately
+  starts making streams eligible again, so it barely moves the result. That is
+  faithful to production, where correlate marks continuously — but it means
+  this bench does not measure a genuinely idle system.
+
+### Reproducing
+
+```bash
+docker compose up -d
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/subscription-contention.bench.mjs
+# STREAMS / SECONDS / WORKERS / HIT_RATE override the shape
+```
+
+
+## #1510 — the real split, measured: events on one server, subscriptions on another
+
+> **Claim numbers here are superseded.** These cells were measured before
+> [#1518](https://github.com/Rotorsoft/act-root/pull/1518) stopped `claim` from
+> materializing the eligible set: claim p50 at 8 workers went 20.69 ms → 2.52 ms
+> and throughput 333 → 2,186/s. The *findings* below are unaffected — the
+> asymmetric contention, the HOT-update fraction and the index-churn shape are
+> properties of the write path, which #1518 did not touch — but read the claim
+> latencies as the historical baseline they are, not as current behaviour.
+
+The section above compared the subscription workload with and without event-log
+writes *on the same server*. That is a proxy for a split, and it only captures
+the benefit side. A real split also costs something: every `claim` and `ack`
+crosses to a second server, behind its own pool, with no shared transaction.
+
+`scripts/hybrid-split.bench.mjs` measures both arms end to end. `single` is one
+`PostgresStore` on :5431. `split` is a hybrid store routing event-log methods
+to :5431 and subscription methods to :5432 — a genuinely separate instance, not
+a second database, so the WAL and checkpointer are separate too.
+
+20,000 subscriptions, 10s per cell, a drain worker pool, a marker standing in
+for correlate, and a committer writing events throughout.
+
+| arm | W | claim p50 | claim p99 | leased/s | ack p50 | sub p50 | commit p50 | commits/s |
+|---|---|---|---|---|---|---|---|---|
+| single | 1 | 16.02 ms | 17.74 | 569 | 1.07 | 4.45 | 1.43 ms | 716 |
+| **split** | 1 | 15.73 ms | 17.64 | 599 | 0.87 | 3.64 | **0.66 ms** | **1455** |
+| single | 2 | 16.09 ms | 18.78 | 768 | 1.15 | 4.76 | 1.41 ms | 704 |
+| **split** | 2 | 15.73 ms | 17.60 | 789 | 0.94 | 3.75 | **0.74 ms** | **1273** |
+| single | 4 | 16.74 ms | 20.09 | 1262 | 1.80 | 6.10 | 1.59 ms | 571 |
+| **split** | 4 | 16.43 ms | 23.19 | 1342 | 1.57 | 5.12 | 1.56 ms | 610 |
+| single | 8 | 19.79 ms | 28.94 | 1601 | 2.89 | 11.79 | 2.48 ms | 368 |
+| **split** | 8 | 20.03 ms | 29.73 | 1728 | 2.56 | 9.04 | 2.44 ms | 380 |
+
+### The split is free
+
+Claim p50 is **0.96–1.01×** across every worker count. The extra network hop —
+the cost that would have killed the idea — does not show up at all. `ack` and
+`subscribe` are consistently *faster* (0.73–0.89× and ~0.8×), and `leased/s` is
+3–10% higher.
+
+That is the load-bearing negative result. A hybrid does not have to justify a
+latency penalty, because there isn't one.
+
+### The split roughly doubles commit throughput
+
+**716 → 1455 commits/s at one worker, 704 → 1273 at two**, with commit p50
+halving (1.43 → 0.66 ms). Reproduced across runs.
+
+This is the finding the earlier arm missed by asking the question backwards.
+**The contention is asymmetric**: event-log writes do not slow the subscription
+workload, but the subscription workload slows the event log by about 2×. Drain
+traffic is background work; commits are the user-facing write path. Halving
+foreground write throughput to run background work is exactly the problem a
+split exists to fix.
+
+The advantage narrows at 4–8 workers (1.03–1.07×), and the likely reason is the
+benchmark client rather than the servers: everything runs as async tasks in one
+Node process against one pool, so at high concurrency the client saturates and
+compresses every difference toward 1.0. A multi-process client would probably
+widen the gap rather than close it — which is the next measurement, not a
+conclusion to draw now.
+
+### Caveats
+
+- Single Node process for all arms; client-bound at 8 workers (see above).
+- Two containers on one host — same CPU and disk. A real deployment separates
+  those too, which should favour the split further.
+- `truncate` and `restore` are not exercised. They are the two operations that
+  genuinely span both stores and the real work a production hybrid owes.
+
+### Reproducing
+
+```bash
+docker compose --profile bench up -d postgres-subs
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/hybrid-split.bench.mjs
+# STREAMS / SECONDS / WORKERS / SUBS_PORT override the shape
+```
