@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.30.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.29.2...@rotorsoft/act-v1.30.0) (2026-08-21)
+
+
+### Features
+
+* **act:** truncate no longer removes subscriptions ([463cab3](https://github.com/Rotorsoft/act-root/commit/463cab3ed1d60ec932fb5945856121385998cb67))
+
 # [@rotorsoft/act-v1.29.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.29.1...@rotorsoft/act-v1.29.2) (2026-08-20)
 
 
