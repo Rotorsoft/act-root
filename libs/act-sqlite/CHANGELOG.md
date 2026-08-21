@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.18.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.17.0...@rotorsoft/act-sqlite-v1.18.0) (2026-08-21)
+
+
+### Features
+
+* **act:** truncate no longer removes subscriptions ([463cab3](https://github.com/Rotorsoft/act-root/commit/463cab3ed1d60ec932fb5945856121385998cb67))
+
 # [@rotorsoft/act-sqlite-v1.17.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.16.1...@rotorsoft/act-sqlite-v1.17.0) (2026-08-18)
 
 
