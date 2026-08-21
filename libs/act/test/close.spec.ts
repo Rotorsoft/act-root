@@ -799,9 +799,19 @@ describe("close and reaction subscriptions (#1398)", () => {
     const result = await app.close([{ stream: "SS" }]);
     expect([...result.truncated.keys()]).toContain("SS");
 
+    // The subscription row survives the close (#1527): `truncate` is
+    // event-log work only, so it no longer reaches across into the
+    // subscriptions table. Reclaiming these rows is an operator job.
     const rows: string[] = [];
     await store().query_streams((p) => rows.push(p.stream), { limit: 100 });
-    expect(rows).not.toContain("SS");
+    expect(rows).toContain("SS");
+
+    // What matters is that it is inert. A retired stream refuses new commits,
+    // so nothing can raise its work mark and the drain never sees it again —
+    // no further handler invocations past the one before the close.
+    await app.correlate();
+    await app.drain();
+    expect(hits.length).toBe(1);
     await app.shutdown();
   });
 });

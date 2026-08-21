@@ -2150,6 +2150,22 @@ export class Act<
     return this._correlate.checkpoint;
   }
 
+  /**
+   * Drop retired streams from correlate's in-process "already subscribed"
+   * set, so a later scan re-issues `subscribe()` for them.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and is still consuming.
+   *
+   * `truncate` no longer removes the subscription row (#1527), so this is no
+   * longer repairing damage the close itself did. It still matters, because
+   * the row can disappear later: reclaiming retired subscriptions is an
+   * operator job now, and that `DELETE` can land while this process is
+   * running. Forgetting here keeps the in-process view from outliving a row
+   * an operator removed, which is the same silent-no-delivery failure #1398
+   * described — a reaction whose target is named after the stream would never
+   * be re-registered.
+   */
   private _forget_closed_subscriptions(result: CloseResult): void {
     const retired = [...result.truncated.entries()]
       .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)

@@ -84,37 +84,24 @@ export const hybridStore = (log: Store, subs: Store): Store => ({
   },
 
   /**
-   * The one operation that genuinely spans both stores, and the only place a
-   * hybrid owes real work rather than delegation.
+   * Purely event-log work, so it delegates like everything else.
    *
-   * A **windowed** target (`before` set) is a pure prefix delete on the event
-   * log and leaves the subscriptions table untouched, so it needs nothing
-   * special. A **full** target deletes the stream's events, seeds a tombstone
-   * or snapshot, *and* removes the subscription row — two systems, no shared
-   * transaction.
+   * This was the one method that used to span both stores. `truncate`
+   * retired a stream by deleting its events, seeding a tombstone, *and*
+   * removing its subscription row — three things the port required to be
+   * atomic, which is impossible across two systems. Every hybrid had to call
+   * the halves in sequence, pick an order, and accept a crash window, and the
+   * wrong order failed silently.
    *
-   * Order matters. The log goes first, because its truncate is the one that
-   * commits the tombstone that stops new events landing on the stream. If the
-   * process dies between the two, the subscription row is orphaned: it points
-   * at a stream whose events are gone, claims nothing (its watermark is at or
-   * above the seed), and is removed by the next close of that stream. The
-   * reverse order would leave a live stream with no subscription, which
-   * silently stops delivery — a worse failure with no self-healing.
+   * [#1527](https://github.com/Rotorsoft/act-root/issues/1527) removed the
+   * subscription step from `truncate` entirely rather than sequencing it. A
+   * retired stream's subscription is inert — the framework refuses commits on
+   * a tombstoned stream, so nothing can raise its work mark and `claim` never
+   * returns it — so the row can simply stay, keeping the consumer's final
+   * watermark as a record of how far it got. Operators reclaim the space on
+   * their own schedule if they want it.
    *
-   * `Act.close` is already resumable after an interrupted truncate
-   * ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is
-   * what makes the crash window recoverable rather than merely rare.
+   * With that step gone there is nothing left for a hybrid to coordinate.
    */
-  truncate: async (targets) => {
-    const result = await log.truncate(targets);
-    const retired = targets
-      .filter((t) => t.before === undefined && result.has(t.stream))
-      .map((t) => t.stream);
-    // `reset` is the subscription-side verb that exists on the port; a
-    // dedicated adapter would delete the rows outright. Resetting is the
-    // conservative choice — a rewound watermark redelivers, which
-    // at-least-once already permits, whereas a missed delete does not.
-    if (retired.length) await subs.reset(retired);
-    return result;
-  },
+  truncate: log.truncate.bind(log),
 });

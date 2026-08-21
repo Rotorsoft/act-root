@@ -3029,12 +3029,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("truncate", () => {
-      it("keeps the subscription row for a restart target, drops it for a retire (#1398)", async () => {
-        // The subscriptions table is keyed by TARGET name, and the
-        // documented per-aggregate reaction shape `.to(e => ({target:
-        // e.stream}))` makes that collide with the event stream name. A
-        // restart keeps the stream alive, so its subscription must survive;
-        // a retire correctly drops it.
+      it("leaves subscriptions untouched for restart and retire alike (#1527)", async () => {
+        // `truncate` is purely event-log work. It used to remove the
+        // subscription row for a retire, and that single step was the only
+        // one spanning both the event log and the subscription table — which
+        // forced a store whose halves live on different systems into a
+        // distributed transaction it could not have.
+        //
+        // Leaving the row costs nothing. A tombstoned stream refuses new
+        // commits, so no scan can raise its work mark and `claim` never
+        // returns it again (pinned by the next case). What the row keeps is
+        // the consumer's final watermark — a record of how far it got, which
+        // outlives the events. Operators reclaim the space on their own
+        // schedule; see the production checklist.
         const tag = uid();
         const restarted = `trunc-restart-${tag}`;
         const retired = `trunc-retire-${tag}`;
@@ -3062,7 +3069,39 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           limit: 100,
         });
         expect(rows).toContain(restarted);
-        expect(rows).not.toContain(retired);
+        expect(rows).toContain(retired);
+      });
+
+      it("leaves a retired stream's surviving subscription unclaimable (#1527)", async () => {
+        // The property that makes leaving the row safe, and the reason the
+        // framework can stop removing it. If this ever fails, retired streams
+        // start handing work back to the drain.
+        //
+        // The subscription gets its own lane so both claims below can only
+        // ever return this stream — which lets the assertion be "nothing came
+        // back" rather than a search through whatever else the shared store
+        // has pending.
+        const lane = `inert-lane-${uid()}`;
+        const s = `trunc-inert-${uid()}`;
+        const [e] = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.subscribe([{ stream: s, correlated_at: e.id, lane }]);
+
+        // Catch the subscription up, which is the state `close` requires
+        // before it will retire a stream at all — a stream with pending
+        // reactions is skipped, never truncated.
+        const leased = await store.claim(100, 0, `w-${uid()}`, 10_000, lane);
+        expect(leased).toHaveLength(1);
+        await store.ack([{ ...leased[0], at: e.id }]);
+
+        await store.truncate([{ stream: s, meta: make_meta({ stream: s }) }]);
+
+        expect(
+          await store.claim(100, 0, `w-${uid()}`, 10_000, lane)
+        ).toHaveLength(0);
       });
 
       it("seeds a tombstone when no snapshot is provided", async () => {

@@ -2307,18 +2307,14 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
-      // A restart target carries a seed snapshot: the stream lives on, so
-      // its subscription row must survive. Deleting it silently stops
-      // reactions whose target is named after the stream — the documented
-      // per-aggregate shape `.to(e => ({target: e.stream}))` (#1398).
-      const retired = full
-        .filter((t) => t.snapshot === undefined)
-        .map((t) => t.stream);
-      if (retired.length) {
-        await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
-          retired,
-        ]);
-      }
+      // Subscriptions are deliberately untouched, for restart *and* retire
+      // targets alike. A tombstoned stream's subscription is inert — the
+      // framework refuses new commits on it, so no scan can raise its work
+      // mark and `at < correlated_at` never becomes true again. Removing it
+      // here bought nothing and cost a coupling: it is the one step that
+      // spans the event log and the subscription table, which is what forced
+      // a store whose halves live apart into a distributed transaction
+      // (#1527). Reaping the inert rows is maintenance, and `seed()` does it.
       for (const { stream, snapshot, meta } of full) {
         const { rowCount } = await client.query(
           `DELETE FROM ${this._fqt} WHERE stream = $1`,

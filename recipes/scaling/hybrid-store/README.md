@@ -111,25 +111,37 @@ the whole builder API are unaware there are two databases.
 
 ## What you take on
 
-**`truncate` spans both stores, and there is no shared transaction.** It is
-the only place this recipe owes real work. A full close deletes a stream's
-events, seeds a tombstone, *and* removes the subscription row.
+**`truncate` used to span both stores. It no longer does, and that was the
+last thing standing in the way of this recipe.**
 
-The implementation does the log first, deliberately. Its truncate commits the
-tombstone that stops new events landing on the stream, so a crash between the
-two halves leaves an orphaned subscription row — pointing at a stream whose
-events are gone, claiming nothing, and reaped by the next close. The reverse
-order would leave a live stream with no subscription, which silently stops
-delivery: a worse failure, and one that does not heal itself. `Act.close` is
-already resumable after an interrupted truncate
-([#1389](https://github.com/Rotorsoft/act-root/issues/1389)).
+Retiring a stream deleted its events, seeded a tombstone, *and* removed its
+subscription row — three things the port required to happen atomically. Two
+systems have no transaction spanning both, so every hybrid had to call the
+halves in sequence, choose an order, and accept a crash window. The order was
+subtle and the wrong one failed silently.
 
-This is framework work currently pushed into userland — every hybrid adapter
-re-derives the same ordering argument, and getting it backwards fails
-silently. [#1527](https://github.com/Rotorsoft/act-root/issues/1527) tracks
-moving the subscription-retirement step out of `truncate` and into the close
-cycle, which already sequences and resumes phases, so a hybrid could delegate
-`truncate` like everything else.
+[#1527](https://github.com/Rotorsoft/act-root/issues/1527) deleted the problem
+instead of sequencing it: **`truncate` no longer touches subscriptions at all.**
+A retired stream's subscription is inert — the framework refuses commits on a
+tombstoned stream, so nothing can raise its work mark and `claim` never returns
+it again. The row stays, and what it keeps is the consumer's final watermark, a
+record of how far each reaction got before the stream was retired.
+
+So there is nothing left to coordinate:
+
+```ts
+truncate: log.truncate.bind(log),
+```
+
+Every method now belongs to exactly one half, with no exceptions, which is what
+makes the rest of this file pure delegation.
+
+**What you take on instead:** retired streams leave their subscription rows
+behind. They are inert and roughly one per permanently-closed stream — the same
+order as the tombstone event that also stays forever — so this is housekeeping,
+not a leak. Operators who want the space back run one `DELETE` on their own
+schedule; the [production checklist](../../../docs/docs/guides/production-checklist.md)
+carries the statement and the three cases its predicate deliberately spares.
 
 **Two systems to operate.** Backup, monitoring, failover, version skew. The
 honest framing: losing the subscription store costs *redelivery*, not data.

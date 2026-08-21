@@ -262,7 +262,11 @@ The subtle part is that the **sort comparator and the cursor comparator must be 
 
 `truncate` is the delete verb behind close-the-books, and it carries two contracts in one method, switched per target by the presence of `before`.
 
-A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream, remove the stream's row from the streams/subscriptions table, and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. After the transaction the stream has one row and no subscription state.
+A **full** target (`{ stream, snapshot?, meta? }`) is the classic close: in a single transaction, delete every event for the stream and insert exactly one seed event — a `__snapshot__` when `snapshot` is provided (the restart case), a `__tombstone__` otherwise. After the transaction the stream holds exactly one event.
+
+**Do not touch the subscriptions table**, for retired and restarted targets alike ([#1527](https://github.com/Rotorsoft/act-root/issues/1527)). `truncate` is event-log work, and keeping it that way is what lets a store hold its event log and its subscriptions on different systems — every method then belongs cleanly to one half, and a hybrid routes instead of reimplementing. Removing the subscription row was the one exception, and it forced such a store into a distributed transaction it had no way to get.
+
+Leaving the row costs nothing. A retired stream's subscription is **inert**: the framework refuses commits on a tombstoned stream, so nothing can raise its work mark, `at < correlated_at` never becomes true again, and `claim` never returns it. What the row keeps is the consumer's final watermark — a record of how far each reaction got before the stream was retired, which outlives the events themselves. Operators who want the space back delete those rows on their own schedule; the [production checklist](./production-checklist) carries the statement.
 
 A **windowed** target (`{ stream, before, max_id? }`, [#1011](https://github.com/Rotorsoft/act-root/issues/1011)) is a pure prefix delete on a stream that stays live. The adapter's job is to find the **closest safe boundary** — the latest `__snapshot__` event with `created < before` and, when `max_id` is supplied, `id <= max_id` — and delete every event with an id below it. The snapshot itself and everything after it survive. The SQL shape on Postgres:
 
@@ -290,6 +294,38 @@ The contract points adapter authors get wrong first:
 Why the boundary anchors on a real snapshot: the framework's `load()` resets state at each `__snapshot__` on replay, so events below the latest snapshot contribute nothing to any load result — deleting them cannot change what `load()` returns. The `max_id` cap is the consumer-safety half: the orchestrator probes the minimum subscription watermark before calling you, so the boundary never rises past what the laggiest reaction has read.
 
 The TCK pins all of this in the `describe("windowed (before boundary)")` block of `store-tck.ts`: prefix deleted behind the closest safe snapshot, `max_id` cap honored, no-snapshot no-op, subscriptions preserved (explicitly contrasted with the full truncate), mixed full + windowed batches, and the stream staying writable and readable after a prune. Pass that block and windowed closes work on your backend with no further wiring.
+
+## Splitting retirement across two systems
+
+A full `truncate` target does three things atomically: delete the stream's events, seed a final marker, and remove its subscription row. If your event log and your subscriptions live in the **same** database, that is one transaction and there is nothing more to think about.
+
+If they live apart — the shape the [hybrid-store recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/hybrid-store) uses — no transaction spans both, and you have to sequence two calls. Two things to get right.
+
+**Use `truncate` on both halves.** `truncate` is already the verb that retires a subscription, so pointing it at the subscription store retires the row there. There is no separate "remove this subscription" method, and you do not need one:
+
+```ts no-check
+truncate: async (targets) => {
+  const result = await log.truncate(targets);
+  const retired = targets
+    .filter(
+      (t) =>
+        t.before === undefined &&   // windowed targets keep subscriptions
+        t.snapshot === undefined && // restart targets keep subscriptions (#1398)
+        result.has(t.stream)        // absent means skipped, never truncated
+    )
+    .map((t) => ({ stream: t.stream }));
+  if (retired.length) await subs.truncate(retired);
+  return result;
+},
+```
+
+Forward a **bare** `{ stream }` rather than the original target. Passing the original would seed a restart snapshot's state into the subscription store, copying domain data — possibly sensitive — into a database that should only ever hold watermarks.
+
+**Do not use `reset` for this.** It reads like the subscription-side verb and does the opposite of what you want: `reset` rewinds the watermark to -1 and deliberately leaves the work mark untouched, so `at < correlated_at` becomes true and the stream you meant to retire becomes **claimable again**. That is correct behaviour — it is what makes `app.reset(...)` replay a projection — but it is not retirement.
+
+**Truncate the log first.** Its truncate commits the tombstone that stops new events landing on the stream, so a crash between the two calls leaves an orphaned subscription row: it points at a stream whose events are gone, claims nothing, and is reaped by the next close of that stream. The reverse order leaves a live stream with **no** subscription, which silently stops delivery and never heals. `Act.close` is already resumable after an interrupted truncate ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is what makes the window recoverable rather than merely rare.
+
+The store TCK already pins every fact this relies on — restart keeps the row while retire drops it, windowed leaves subscriptions untouched, and `reset` re-arms a caught-up subscription — so a composition built from them inherits those guarantees.
 
 ## Implementing `Store.restore` (optional)
 
