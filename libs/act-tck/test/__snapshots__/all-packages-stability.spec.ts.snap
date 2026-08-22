@@ -10776,7 +10776,7 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
-import { current_reacting_to } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * The reduction pipeline names three distinct things, and each word means
@@ -11398,7 +11398,7 @@ export async function action<
   // Inside a reaction handler the triggering event is ambient, so a
   // handler that dispatches through a captured \`app\` rather than the
   // injected one still threads the chain. An explicit option wins.
-  const reactingTo = options?.reactingTo ?? current_reacting_to();
+  const reactingTo = options?.reactingTo ?? reacting.getStore();
   const correlator = options?.correlator ?? default_correlator;
 
   const validated = validate(action as string, payload, me.actions[action]);
@@ -16264,12 +16264,9 @@ export function make_fold_handler<
  *
  * Ambient triggering-event context for reaction handlers (#1541).
  *
- * \`action()\` resolves \`reactingTo\` from here when the caller didn't pass one,
- * so every dispatch reached from inside a handler threads the correlation
- * chain — whichever \`IAct\` reference made the call.
- *
- * Per-event dispatch only. Batch projection handlers receive no \`IAct\` and
- * span many events, so there is no single triggering event to inherit.
+ * \`build_handle\` installs the event around each handler call; \`action()\`
+ * resolves it as \`reactingTo\` when the caller didn't pass one, so a handler
+ * that dispatches through a captured \`app\` still threads the chain.
  *
  * @internal
  */
@@ -16277,20 +16274,8 @@ export function make_fold_handler<
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Committed, Schemas } from "../types/index.js";
 
-const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
-
-/** Runs \`fn\` with \`event\` installed as the ambient triggering event. @internal */
-export function run_reacting<T>(
-  event: Committed<Schemas, string>,
-  fn: () => Promise<T>
-): Promise<T> {
-  return reacting.run(event, fn);
-}
-
-/** The ambient triggering event, or \`undefined\` outside a handler. @internal */
-export function current_reacting_to(): Committed<Schemas, string> | undefined {
-  return reacting.getStore();
-}
+/** The event currently being reacted to. Internal — not re-exported. */
+export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
 
 // === reaction.ts ===
 /**
@@ -16750,9 +16735,8 @@ export type ShutdownOptions = {
  * Reaction dispatch — what runs inside the drain pipeline once \`run_drain_cycle\`
  * has fetched events for a leased stream. Two shapes:
  *
- * - per-event \`handle\`: walks payloads sequentially with the triggering event
- *   installed as ambient reaction context, so \`action()\` threads
- *   \`reactingTo\` for every dispatch the handler makes
+ * - per-event \`handle\`: walks payloads sequentially, installing the triggering
+ *   event as ambient reaction context so \`action()\` threads \`reactingTo\`
  * - bulk \`handle_batch\`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
@@ -16779,7 +16763,7 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { run_reacting } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -16854,12 +16838,10 @@ function finalize(
 /**
  * Builds the per-event reaction dispatcher passed to \`run_drain_cycle\`.
  *
- * The triggering event is installed as ambient reaction context around each
- * handler call, so \`action()\` resolves it as \`reactingTo\` and keeps the
- * correlation chain by default (#587, #1541). Ambient rather than bound to
- * the \`IAct\` argument: a handler that dispatches through a captured
- * module-level \`app\`, or through a helper several calls deep, inherits the
- * chain the same way. The proxy is therefore a plain bag of bound methods.
+ * The triggering event is installed as ambient context around each handler
+ * call, so \`action()\` resolves it as \`reactingTo\` (#587, #1541). Ambient
+ * rather than bound to the \`IAct\` argument, so a handler that dispatches
+ * through a captured \`app\` inherits the chain too.
  *
  * @internal
  */
@@ -16912,7 +16894,7 @@ export function build_handle<
       const payload = payloads[i];
       const { event, handler } = payload;
       try {
-        await run_reacting(event as Committed<Schemas, string>, () =>
+        await reacting.run(event as Committed<Schemas, string>, () =>
           handler(event, stream, scoped_app)
         );
         if (last_index_of.get(event.id) === i) {
@@ -29279,7 +29261,7 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
-import { current_reacting_to } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * The reduction pipeline names three distinct things, and each word means
@@ -29901,7 +29883,7 @@ export async function action<
   // Inside a reaction handler the triggering event is ambient, so a
   // handler that dispatches through a captured \`app\` rather than the
   // injected one still threads the chain. An explicit option wins.
-  const reactingTo = options?.reactingTo ?? current_reacting_to();
+  const reactingTo = options?.reactingTo ?? reacting.getStore();
   const correlator = options?.correlator ?? default_correlator;
 
   const validated = validate(action as string, payload, me.actions[action]);
@@ -34730,12 +34712,9 @@ export function make_fold_handler<
  *
  * Ambient triggering-event context for reaction handlers (#1541).
  *
- * \`action()\` resolves \`reactingTo\` from here when the caller didn't pass one,
- * so every dispatch reached from inside a handler threads the correlation
- * chain — whichever \`IAct\` reference made the call.
- *
- * Per-event dispatch only. Batch projection handlers receive no \`IAct\` and
- * span many events, so there is no single triggering event to inherit.
+ * \`build_handle\` installs the event around each handler call; \`action()\`
+ * resolves it as \`reactingTo\` when the caller didn't pass one, so a handler
+ * that dispatches through a captured \`app\` still threads the chain.
  *
  * @internal
  */
@@ -34743,20 +34722,8 @@ export function make_fold_handler<
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Committed, Schemas } from "../types/index.js";
 
-const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
-
-/** Runs \`fn\` with \`event\` installed as the ambient triggering event. @internal */
-export function run_reacting<T>(
-  event: Committed<Schemas, string>,
-  fn: () => Promise<T>
-): Promise<T> {
-  return reacting.run(event, fn);
-}
-
-/** The ambient triggering event, or \`undefined\` outside a handler. @internal */
-export function current_reacting_to(): Committed<Schemas, string> | undefined {
-  return reacting.getStore();
-}
+/** The event currently being reacted to. Internal — not re-exported. */
+export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
 
 // === reaction.ts ===
 /**
@@ -35216,9 +35183,8 @@ export type ShutdownOptions = {
  * Reaction dispatch — what runs inside the drain pipeline once \`run_drain_cycle\`
  * has fetched events for a leased stream. Two shapes:
  *
- * - per-event \`handle\`: walks payloads sequentially with the triggering event
- *   installed as ambient reaction context, so \`action()\` threads
- *   \`reactingTo\` for every dispatch the handler makes
+ * - per-event \`handle\`: walks payloads sequentially, installing the triggering
+ *   event as ambient reaction context so \`action()\` threads \`reactingTo\`
  * - bulk \`handle_batch\`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
@@ -35245,7 +35211,7 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { run_reacting } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -35320,12 +35286,10 @@ function finalize(
 /**
  * Builds the per-event reaction dispatcher passed to \`run_drain_cycle\`.
  *
- * The triggering event is installed as ambient reaction context around each
- * handler call, so \`action()\` resolves it as \`reactingTo\` and keeps the
- * correlation chain by default (#587, #1541). Ambient rather than bound to
- * the \`IAct\` argument: a handler that dispatches through a captured
- * module-level \`app\`, or through a helper several calls deep, inherits the
- * chain the same way. The proxy is therefore a plain bag of bound methods.
+ * The triggering event is installed as ambient context around each handler
+ * call, so \`action()\` resolves it as \`reactingTo\` (#587, #1541). Ambient
+ * rather than bound to the \`IAct\` argument, so a handler that dispatches
+ * through a captured \`app\` inherits the chain too.
  *
  * @internal
  */
@@ -35378,7 +35342,7 @@ export function build_handle<
       const payload = payloads[i];
       const { event, handler } = payload;
       try {
-        await run_reacting(event as Committed<Schemas, string>, () =>
+        await reacting.run(event as Committed<Schemas, string>, () =>
           handler(event, stream, scoped_app)
         );
         if (last_index_of.get(event.id) === i) {

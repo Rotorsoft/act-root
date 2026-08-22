@@ -41,7 +41,7 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
-import { current_reacting_to } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * The reduction pipeline names three distinct things, and each word means
@@ -663,7 +663,7 @@ export async function action<
   // Inside a reaction handler the triggering event is ambient, so a
   // handler that dispatches through a captured `app` rather than the
   // injected one still threads the chain. An explicit option wins.
-  const reactingTo = options?.reactingTo ?? current_reacting_to();
+  const reactingTo = options?.reactingTo ?? reacting.getStore();
   const correlator = options?.correlator ?? default_correlator;
 
   const validated = validate(action as string, payload, me.actions[action]);

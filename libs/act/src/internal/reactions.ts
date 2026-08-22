@@ -5,9 +5,8 @@
  * Reaction dispatch — what runs inside the drain pipeline once `run_drain_cycle`
  * has fetched events for a leased stream. Two shapes:
  *
- * - per-event `handle`: walks payloads sequentially with the triggering event
- *   installed as ambient reaction context, so `action()` threads
- *   `reactingTo` for every dispatch the handler makes
+ * - per-event `handle`: walks payloads sequentially, installing the triggering
+ *   event as ambient reaction context so `action()` threads `reactingTo`
  * - bulk `handle_batch`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
@@ -34,7 +33,7 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { run_reacting } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -109,12 +108,10 @@ function finalize(
 /**
  * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.
  *
- * The triggering event is installed as ambient reaction context around each
- * handler call, so `action()` resolves it as `reactingTo` and keeps the
- * correlation chain by default (#587, #1541). Ambient rather than bound to
- * the `IAct` argument: a handler that dispatches through a captured
- * module-level `app`, or through a helper several calls deep, inherits the
- * chain the same way. The proxy is therefore a plain bag of bound methods.
+ * The triggering event is installed as ambient context around each handler
+ * call, so `action()` resolves it as `reactingTo` (#587, #1541). Ambient
+ * rather than bound to the `IAct` argument, so a handler that dispatches
+ * through a captured `app` inherits the chain too.
  *
  * @internal
  */
@@ -167,7 +164,7 @@ export function build_handle<
       const payload = payloads[i];
       const { event, handler } = payload;
       try {
-        await run_reacting(event as Committed<Schemas, string>, () =>
+        await reacting.run(event as Committed<Schemas, string>, () =>
           handler(event, stream, scoped_app)
         );
         if (last_index_of.get(event.id) === i) {
