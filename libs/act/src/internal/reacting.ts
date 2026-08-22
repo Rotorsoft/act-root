@@ -15,6 +15,4 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Committed, Schemas } from "../types/index.js";
 
 /** The event currently being reacted to. Internal — not re-exported. */
-export const reacting = new AsyncLocalStorage<
-  Committed<Schemas, string> | undefined
->();
+export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
