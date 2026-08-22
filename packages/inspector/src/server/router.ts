@@ -15,11 +15,13 @@ import {
   type Schemas,
   type Store,
   type StreamPosition,
+  TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
+import { browseDirectory } from "./discovery/browse.js";
 import {
   PG_PORT_RANGE_END,
   PG_PORT_RANGE_START,
@@ -424,6 +426,66 @@ async function loadAllStreamPositions(): Promise<{
   return { positions, maxEventId };
 }
 
+/**
+ * How many retired subscription rows `drainStatus` names. The count it
+ * reports is exact; this only bounds the sample that rides along with
+ * it, so a store that has retired thousands of streams doesn't send
+ * thousands of names on every poll.
+ */
+const RETIRED_SAMPLE_LIMIT = 50;
+
+/**
+ * Is this stream **retired** — closed for good, with nothing left but
+ * the marker that says so?
+ *
+ * A full close deletes every event on the stream and seeds a single
+ * `__tombstone__` in their place, so "every event this stream has left
+ * is a tombstone" is the test — the same predicate the production
+ * checklist's optional cleanup `DELETE` uses. With head and tail in
+ * hand that reduces to "the head is a tombstone and it is also the
+ * tail."
+ *
+ * Deliberately narrower than the existing `isClosed` (head is a
+ * tombstone), which also covers a stream whose close *failed* after
+ * committing its guard tombstone. That stream still holds its real
+ * events, its reactions may still have work pending, and it is not
+ * retired.
+ */
+function isRetiredStream(
+  head: { name: string; id: number },
+  tail: { id: number } | undefined
+): boolean {
+  return head.name === TOMBSTONE_EVENT && tail?.id === head.id;
+}
+
+/**
+ * Stream names whose subscription row is a leftover record of a retired
+ * stream (#1535).
+ *
+ * Since #1527 a full close leaves the subscription row in place. The row
+ * is inert — a tombstoned stream refuses new commits, so nothing can
+ * raise its work mark and no worker can claim it — but it still shows up
+ * in `query_streams`, where it reads as a live subscription that happens
+ * to be permanently caught up.
+ *
+ * **Cost.** One `query_stats` call for the whole list, not one probe per
+ * row. `tail` is the only opt-in flag, which keeps the call in
+ * `query_stats`' cheap tier: an index-backed head/tail lookup per stream
+ * rather than the full event scan `count`/`names` would force. The
+ * unfiltered `{}` input is deliberate — passing an explicit array of the
+ * subscribed stream names would bind one SQL parameter per stream and
+ * blow past SQLite's variable limit on a store with thousands of
+ * subscriptions.
+ */
+async function loadRetiredStreams(): Promise<Set<string>> {
+  const s = getStore();
+  const stats = await s.query_stats<Schemas>({}, { tail: true });
+  const retired = new Set<string>();
+  for (const [stream, { head, tail }] of stats)
+    if (isRetiredStream(head, tail)) retired.add(stream);
+  return retired;
+}
+
 // --- Discovery ---
 //
 // The inline PG-only block that lived here pre-ACT-1122 has moved to
@@ -447,6 +509,19 @@ export const inspectorRouter = t.router({
    * `kind` so existing frontend payloads (`{ host, portFrom, portTo }`)
    * keep working unchanged.
    */
+  /**
+   * List a directory's subdirectories, for picking a SQLite scan target.
+   *
+   * A read-only query rather than a mutation: it changes nothing, and the
+   * mutation guard exists to stop a hostile page driving state changes.
+   *
+   * Browsing grants nothing new — `discover` has always accepted an arbitrary
+   * path and read it. This only removes the need to know the path in advance.
+   */
+  browse: t.procedure
+    .input(z.object({ path: z.string().optional() }).optional())
+    .query(({ input }) => browseDirectory(input?.path)),
+
   discover: mutationProcedure
     .input(
       z.union([
@@ -756,6 +831,11 @@ export const inspectorRouter = t.router({
             firstEvent: tail ? String(tail.created) : null,
             currentVersion: head.version,
             isClosed,
+            // Retired for good (#1535): the tombstone is the only event
+            // left. Free here — the head and tail this query already
+            // fetches are everything the test needs, so no extra round
+            // trip and no per-row probe.
+            isRetired: isRetiredStream(head, tail),
             // Stream lifecycle affordances (#1174), derived from the head
             // and tail the query already fetched:
             // - restarted: a full close reseeded it — the earliest event
@@ -974,10 +1054,26 @@ export const inspectorRouter = t.router({
     }
   }),
 
-  /** Get drain status: aggregate health + blocked streams + leases + watermark histogram */
+  /**
+   * Get drain status: aggregate health + blocked streams + leases +
+   * watermark histogram.
+   *
+   * **Retired streams are counted apart from everything else** (#1535).
+   * Their subscription rows survive a full close and can never be
+   * claimed again, so folding them into `healthy` / `lagging` — or into
+   * the gap histogram, the priority and lane tallies, the blocked list —
+   * would put finished work in front of an operator scanning for
+   * problems. They come back as their own `retired` count plus a
+   * `retiredStreams` sample, where each row's watermark reads as a
+   * record of how far that consumer got, not as progress it might still
+   * make. `total` therefore counts live subscriptions only, and the four
+   * health buckets still sum to it.
+   */
   drainStatus: t.procedure.query(async () => {
     try {
-      const { positions, maxEventId: rawMax } = await loadAllStreamPositions();
+      const [{ positions, maxEventId: rawMax }, retiredSet] = await Promise.all(
+        [loadAllStreamPositions(), loadRetiredStreams()]
+      );
       const maxEventId = Math.max(0, rawMax);
       const now = new Date();
 
@@ -1012,8 +1108,28 @@ export const inspectorRouter = t.router({
       // normalize to `"default"` so the histogram bucket renders one
       // consistent label.
       const laneCounts = new Map<string, number>();
+      // Leftover rows of streams closed for good. Kept out of every
+      // aggregate above and surfaced on their own — the watermark is a
+      // record of where each consumer stopped, not a backlog.
+      const retiredStreams: Array<{
+        stream: string;
+        source: string | null;
+        at: number;
+        priority: number;
+        lane: string | null;
+      }> = [];
 
       for (const p of positions) {
+        if (retiredSet.has(p.stream)) {
+          retiredStreams.push({
+            stream: p.stream,
+            source: p.source ?? null,
+            at: p.at,
+            priority: p.priority,
+            lane: p.lane ?? null,
+          });
+          continue;
+        }
         // Pending work, not distance to the head (#1521). A subscription's
         // watermark advances only over events that resolve to it, so a
         // reaction handling a subset of a state's events sits permanently
@@ -1082,12 +1198,21 @@ export const inspectorRouter = t.router({
         }
       }
 
+      const retired = retiredStreams.length;
       return {
-        total: positions.length,
+        // Live subscriptions only — retired rows are reported below.
+        total: positions.length - retired,
         healthy,
         blocked,
         leased,
         lagging,
+        retired,
+        // Capped sample, alphabetical. `retired` above is the real
+        // count; an operator deciding whether the leftover rows are
+        // worth reclaiming needs the number, not every name.
+        retiredStreams: retiredStreams
+          .sort((a, b) => a.stream.localeCompare(b.stream))
+          .slice(0, RETIRED_SAMPLE_LIMIT),
         maxEventId,
         blockedStreams: blockedStreams.sort((a, b) => b.gap - a.gap),
         activeLeases,
@@ -1112,6 +1237,8 @@ export const inspectorRouter = t.router({
         blocked: 0,
         leased: 0,
         lagging: 0,
+        retired: 0,
+        retiredStreams: [],
         maxEventId: 0,
         blockedStreams: [],
         activeLeases: [],
