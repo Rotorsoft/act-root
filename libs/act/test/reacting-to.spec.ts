@@ -202,6 +202,167 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
+  it("should auto-inject when the handler dispatches through a captured app (#1541)", async () => {
+    const Source = state({ Source3: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Triggered3: z.object({ val: z.number() }) })
+      .on({ trigger3: z.object({ val: z.number() }) })
+      .emit("Triggered3")
+      .build();
+
+    const Sink = state({ Sink3: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Received3: z.object({ val: z.number() }) })
+      .patch({ Received3: ({ data }) => ({ v: data.val }) })
+      .on({ receive3: z.object({ val: z.number() }) })
+      .emit("Received3")
+      .build();
+
+    // The shape an app takes when `app` is a module export: the handler
+    // closes over the built instance and never touches the injected one.
+    let captured: { do: (...args: any[]) => Promise<unknown> };
+
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Source)
+        .withState(Sink)
+        .on("Triggered3")
+        .do(async function onTriggered3(event) {
+          await captured.do(
+            "receive3",
+            { stream: "sink3-1", actor: { id: "sys", name: "system" } },
+            { val: event.data.val }
+          );
+        })
+        .to(() => ({ target: "sink3-1" }))
+    );
+    captured = app as unknown as typeof captured;
+
+    await app.do("trigger3", { stream: "src3-1", actor }, { val: 42 });
+    await app.correlate();
+    await app.drain();
+
+    const srcEvents = await app.query_array({
+      stream: "src3-1",
+      stream_exact: true,
+    });
+    const sinkEvents = await app.query_array({
+      stream: "sink3-1",
+      stream_exact: true,
+    });
+
+    const triggeredEvent = srcEvents.find((e) => e.name === "Triggered3")!;
+    const receivedEvent = sinkEvents.find((e) => e.name === "Received3")!;
+
+    expect(receivedEvent).toBeDefined();
+    expect(receivedEvent.meta.correlation).toBe(
+      triggeredEvent.meta.correlation
+    );
+    expect(receivedEvent.meta.causation.event).toEqual({
+      id: triggeredEvent.id,
+      name: "Triggered3",
+      stream: "src3-1",
+    });
+
+    await dispose();
+  });
+
+  it("should mint a fresh correlation for dispatches outside any reaction (#1541)", async () => {
+    const Counter = state({ AmbientCounter: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ AmbientCounted: z.object({ n: z.number() }) })
+      .patch({ AmbientCounted: ({ data }, s) => ({ count: s.count + data.n }) })
+      .on({ count: z.object({ n: z.number() }) })
+      .emit("AmbientCounted")
+      .build();
+
+    const { app, dispose } = await sandbox(act().withState(Counter));
+
+    await app.do("count", { stream: "amb-1", actor }, { n: 1 });
+    await app.do("count", { stream: "amb-2", actor }, { n: 1 });
+
+    const first = await app.query_array({
+      stream: "amb-1",
+      stream_exact: true,
+    });
+    const second = await app.query_array({
+      stream: "amb-2",
+      stream_exact: true,
+    });
+
+    // No ambient event outside a handler: each dispatch is its own root.
+    expect(first[0].meta.causation.event).toBeUndefined();
+    expect(second[0].meta.causation.event).toBeUndefined();
+    expect(first[0].meta.correlation).not.toBe(second[0].meta.correlation);
+
+    await dispose();
+  });
+
+  it("should not leak the ambient event across sequential handler runs (#1541)", async () => {
+    const Source = state({ Source4: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Triggered4: z.object({ val: z.number() }) })
+      .on({ trigger4: z.object({ val: z.number() }) })
+      .emit("Triggered4")
+      .build();
+
+    const Sink = state({ Sink4: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Received4: z.object({ val: z.number() }) })
+      .patch({ Received4: ({ data }) => ({ v: data.val }) })
+      .on({ receive4: z.object({ val: z.number() }) })
+      .emit("Received4")
+      .build();
+
+    let captured: { do: (...args: any[]) => Promise<unknown> };
+
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Source)
+        .withState(Sink)
+        .on("Triggered4")
+        .do(async function onTriggered4(event) {
+          await captured.do(
+            "receive4",
+            {
+              stream: `sink4-${event.data.val}`,
+              actor: { id: "sys", name: "system" },
+            },
+            { val: event.data.val }
+          );
+        })
+        .to(() => ({ target: "sink4" }))
+    );
+    captured = app as unknown as typeof captured;
+
+    // Two events on one stream drain as one lease, so both handler runs
+    // happen inside the same dispatch loop — each must see its own event.
+    await app.do("trigger4", { stream: "src4-1", actor }, { val: 1 });
+    await app.do("trigger4", { stream: "src4-1", actor }, { val: 2 });
+    await app.correlate();
+    await app.drain();
+
+    const srcEvents = await app.query_array({
+      stream: "src4-1",
+      stream_exact: true,
+    });
+    for (const val of [1, 2]) {
+      const trigger = srcEvents.find((e) => e.data.val === val)!;
+      const [received] = await app.query_array({
+        stream: `sink4-${val}`,
+        stream_exact: true,
+      });
+      expect(received.meta.correlation).toBe(trigger.meta.correlation);
+      expect(received.meta.causation.event).toEqual({
+        id: trigger.id,
+        name: "Triggered4",
+        stream: "src4-1",
+      });
+    }
+
+    await dispose();
+  });
+
   it("should not affect load, query, and query_array on scoped app", async () => {
     const Counter = state({ ScopedCounter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
