@@ -15,6 +15,7 @@ import type {
   StreamPosition,
   StreamStats,
   SubscribeInput,
+  SubscribeResult,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -460,18 +461,55 @@ export class SqliteStore implements Store {
        SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM events)
        WHERE correlated_at IS NULL`
     );
-    // Correlate checkpoint (#1484). Its own single-row table rather than a
-    // reserved subscription: a subscription row is counted by every
-    // stream-scoped operator surface (prioritize / reset / unblock /
-    // query_streams / blocked_streams) and would inflate those counts.
-    await this.client.execute(`
-      CREATE TABLE IF NOT EXISTS correlated (
-        id INTEGER PRIMARY KEY CHECK (id = 0),
-        at INTEGER NOT NULL DEFAULT -1
-      )
-    `);
+    // Correlate checkpoint (#1484), keyed per correlator (#1532).
+    //
+    // Its own table rather than a reserved subscription: a subscription row is
+    // counted by every stream-scoped operator surface (prioritize / reset /
+    // unblock / query_streams / blocked_streams) and would inflate those
+    // counts.
+    //
+    // Keyed because correlators that look for different things read the log
+    // for different reasons. One row let a worker running partial behaviour
+    // inherit another's position, and would let one hold a lease the other
+    // needs. The empty key is the shared row a caller with no correlator
+    // reads, and the floor a brand-new key inherits.
+    //
+    // SQLite cannot drop a primary key, so migrating the pre-#1532 shape
+    // means rebuilding: copy the single row's checkpoint across as the shared
+    // row, then swap the tables. Guarded on the old `id` column, so a seed
+    // against either shape converges and the checkpoint survives.
+    const correlated_columns = await this.client.execute(
+      "PRAGMA table_info(correlated)"
+    );
+    const legacy = correlated_columns.rows.some((r) => r.name === "id");
+    if (legacy) {
+      await this.client.execute(`
+        CREATE TABLE IF NOT EXISTS correlated_keyed (
+          key TEXT PRIMARY KEY,
+          at INTEGER NOT NULL DEFAULT -1,
+          leased_by TEXT,
+          leased_until INTEGER
+        )
+      `);
+      await this.client.execute(
+        "INSERT OR IGNORE INTO correlated_keyed (key, at) SELECT '', at FROM correlated WHERE id = 0"
+      );
+      await this.client.execute("DROP TABLE correlated");
+      await this.client.execute(
+        "ALTER TABLE correlated_keyed RENAME TO correlated"
+      );
+    } else {
+      await this.client.execute(`
+        CREATE TABLE IF NOT EXISTS correlated (
+          key TEXT PRIMARY KEY,
+          at INTEGER NOT NULL DEFAULT -1,
+          leased_by TEXT,
+          leased_until INTEGER
+        )
+      `);
+    }
     await this.client.execute(
-      "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
+      "INSERT OR IGNORE INTO correlated (key) VALUES ('')"
     );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
@@ -685,7 +723,11 @@ export class SqliteStore implements Store {
   //     plus a UPDATE pass to keep the *max* priority across reactions
   //     targeting the same stream (ACT-102). Operator overrides go
   //     through `prioritize()` instead.
-  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
+  async subscribe(
+    streams: SubscribeInput[],
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ): Promise<SubscribeResult> {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
@@ -748,20 +790,75 @@ export class SqliteStore implements Store {
       );
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). MAX keeps it monotonic.
-      if (correlated_at !== undefined)
+      // With a correlator the position and the lease are per-key (#1532),
+      // both in one conditional upsert: a read then a write would let two
+      // workers that both saw an expired lease believe they hold it, which is
+      // the duplication the lease removes. A key with no row yet seeds from
+      // the shared row, so an upgrade does not re-read history.
+      let correlating: boolean | undefined;
+      if (correlator) {
+        const now = Date.now();
+        const taken = await tx.execute({
+          sql: `INSERT INTO correlated (key, at, leased_by, leased_until)
+                SELECT ?,
+                       MAX(COALESCE(?, -1),
+                           COALESCE((SELECT at FROM correlated WHERE key = ''), -1)),
+                       ?, ?
+                ON CONFLICT (key) DO UPDATE
+                   SET at = MAX(correlated.at, COALESCE(?, -1)),
+                       leased_by = excluded.leased_by,
+                       leased_until = excluded.leased_until
+                 WHERE correlated.leased_until IS NULL
+                    OR correlated.leased_until < ?
+                    OR correlated.leased_by = excluded.leased_by`,
+          args: [
+            correlator.key,
+            correlated_at ?? null,
+            correlator.by,
+            // `millis <= 0` releases outright rather than setting an expiry a
+            // hair in the future, which would still refuse a successor asking
+            // in the same instant.
+            correlator.millis > 0 ? now + correlator.millis : null,
+            correlated_at ?? null,
+            now,
+          ],
+        });
+        correlating = taken.rowsAffected > 0;
+        // Losing the race must still advance the checkpoint this worker
+        // already read past, or its marks and its position disagree.
+        if (!correlating && correlated_at !== undefined)
+          await tx.execute({
+            sql: "UPDATE correlated SET at = MAX(at, ?) WHERE key = ?",
+            args: [correlated_at, correlator.key],
+          });
+        // The shared row tracks how far *any* correlator has read: the floor
+        // a brand-new key inherits, and what a caller reading without a
+        // correlator still sees.
+        if (correlated_at !== undefined)
+          await tx.execute({
+            sql: "UPDATE correlated SET at = MAX(at, ?) WHERE key = ''",
+            args: [correlated_at],
+          });
+      } else if (correlated_at !== undefined)
         await tx.execute({
-          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
+          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE key = ''",
           args: [correlated_at],
         });
       // Watermark and checkpoint together — correlate needs both.
-      const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");
+      const cp = await tx.execute({
+        sql: "SELECT at FROM correlated WHERE key = ?",
+        args: [correlator?.key ?? ""],
+      });
       await tx.commit();
       return {
         subscribed,
         watermark: Number(wm.rows[0].w),
-        // `seed()` always inserts the singleton row, so this read cannot
-        // come back empty — no defensive fallback to leave untested.
+        // `seed()` always inserts the shared row, and a correlator's row is
+        // created by the upsert above — or already existed, which is why the
+        // lease was refused. Either way this read cannot come back empty, so
+        // there is no defensive fallback to leave untested.
         correlated_at: Number(cp.rows[0].at),
+        ...(correlating === undefined ? {} : { correlating }),
       };
     } catch (e) {
       await tx.rollback();

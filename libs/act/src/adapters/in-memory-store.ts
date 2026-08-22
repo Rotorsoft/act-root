@@ -367,6 +367,19 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated_at = -1;
+  /**
+   * Per-correlator checkpoint and lease (#1532), keyed by correlator.
+   *
+   * Keyed rather than singular because correlators that look for different
+   * things read the log for different reasons: sharing one position lets a
+   * partial-behaviour worker inherit another's, and sharing one lease lets
+   * one starve the other. Callers that supply no correlator use
+   * `_correlated_at` instead, which is the pre-#1532 behaviour.
+   */
+  private _correlators = new Map<
+    string,
+    { at: number; by: string; until: number }
+  >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -700,12 +713,58 @@ export class InMemoryStore implements Store {
    * @param streams - Streams to register with optional source + priority.
    * @returns subscribed count and current max watermark.
    */
-  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
+  async subscribe(
+    streams: SubscribeInput[],
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ) {
+    await sleep();
+
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+    //
+    // With a correlator the position and the lease are per-key (#1532); a key
+    // with no row yet inherits the shared value, so an upgrade does not
+    // re-read history.
+    let correlating: boolean | undefined;
+    /** This correlator's position, once known — always set when keyed. */
+    let keyed_at: number | undefined;
+    if (correlator) {
+      const now = Date.now();
+      const held = this._correlators.get(correlator.key);
+      // A key with no row yet inherits the shared position, so a new
+      // correlator does not re-read history.
+      const at = Math.max(held?.at ?? this._correlated_at, correlated_at ?? -1);
+      keyed_at = at;
+      if (!held || held.until < now || held.by === correlator.by) {
+        correlating = true;
+        this._correlators.set(correlator.key, {
+          at,
+          by: correlator.by,
+          // A non-positive `millis` releases outright rather than setting an
+          // expiry a hair in the future: a successor asking inside the same
+          // millisecond would otherwise still be refused.
+          until: correlator.millis > 0 ? now + correlator.millis : 0,
+        });
+      } else {
+        // Refused, which is only possible when a live holder exists — so the
+        // row is here to keep. The position still advances: this caller may
+        // already have scanned, and dropping how far it read would leave its
+        // marks ahead of its recorded position.
+        correlating = false;
+        held.at = at;
+      }
+      // The shared position tracks how far *any* correlator has read: the
+      // floor a brand-new key inherits, and what a caller reading without a
+      // correlator still sees.
+      if (correlated_at !== undefined && correlated_at > this._correlated_at)
+        this._correlated_at = correlated_at;
+    } else if (
+      correlated_at !== undefined &&
+      correlated_at > this._correlated_at
+    )
       this._correlated_at = correlated_at;
-    await sleep();
+
     let subscribed = 0;
     for (const {
       stream,
@@ -730,7 +789,12 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark, correlated_at: this._correlated_at };
+    return {
+      subscribed,
+      watermark,
+      correlated_at: keyed_at ?? this._correlated_at,
+      ...(correlating === undefined ? {} : { correlating }),
+    };
   }
 
   /**

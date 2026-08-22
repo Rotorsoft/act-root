@@ -27,6 +27,7 @@ import type {
   Lease,
   Schemas,
   SubscribeInput,
+  SubscribeResult,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
 
@@ -81,6 +82,7 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
 
 export const subscribe = (
   streams: SubscribeInput[],
-  correlated_at?: number
-): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
-  store().subscribe(streams, correlated_at);
+  correlated_at?: number,
+  correlator?: { key: string; by: string; millis: number }
+): Promise<SubscribeResult> =>
+  store().subscribe(streams, correlated_at, correlator);

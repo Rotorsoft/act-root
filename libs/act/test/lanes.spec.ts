@@ -526,6 +526,49 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(ctrl?._worker).toBeUndefined();
   });
 
+  it("stops rescheduling when stop() lands mid-tick", async () => {
+    // A timer already queued when `stop()` runs will still fire, so the tick
+    // re-checks after draining. Without that check the chain would schedule
+    // itself again and keep draining past shutdown.
+    const app = act().withState(Counter).build();
+    const ctrl = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          {
+            stop: () => void;
+            start: (ms: number) => void;
+            arm: () => void;
+            drain: () => Promise<unknown>;
+            _worker: unknown;
+            _stopped: boolean;
+          }
+        >;
+      }
+    )._drain_controllers.get("default");
+
+    // Stop while the tick is inside `drain()`, which is exactly the race the
+    // post-drain check exists for.
+    let stopped_during_drain = false;
+    const real_drain = ctrl!.drain.bind(ctrl);
+    ctrl!.drain = async () => {
+      if (!stopped_during_drain) {
+        stopped_during_drain = true;
+        ctrl!.stop();
+      }
+      return real_drain();
+    };
+
+    ctrl!.arm();
+    ctrl!.start(1);
+    await new Promise((r) => setTimeout(r, 40));
+
+    expect(stopped_during_drain).toBe(true);
+    // No follow-up timer was scheduled after the drain returned.
+    expect(ctrl!._worker).toBeUndefined();
+    await app.shutdown();
+  });
+
   it("start() is a no-op when the worker is already running", () => {
     const app = act()
       .withState(Counter)
