@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.19.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.18.0...@rotorsoft/act-pg-v1.19.0) (2026-08-22)
+
+
+### Features
+
+* **act:** one worker reads the event log for all of them ([#1537](https://github.com/Rotorsoft/act-root/issues/1537)) ([6cb58f3](https://github.com/Rotorsoft/act-root/commit/6cb58f35dcee98ce1c96053bc73fcb54e111d986))
+
 # [@rotorsoft/act-pg-v1.18.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.17.1...@rotorsoft/act-pg-v1.18.0) (2026-08-21)
 
 
