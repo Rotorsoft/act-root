@@ -8612,15 +8612,24 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      // This call carries the correlator too, so it renews the lease as a
-      // side effect of persisting what the scan found.
+      // Carry the correlator only when this pass is actually leasing, so it
+      // renews as a side effect of persisting what the scan found.
+      //
+      // An explicit \`app.correlate()\` does not lease, and must not pay for
+      // one either: sending a correlator turns a single checkpoint UPDATE
+      // into a keyed upsert plus a second write and a read. The act-sqlite
+      // perf gate caught exactly that as a regression on correlate+drain,
+      // which is the shape an embedded app runs constantly and which never
+      // wanted a lease in the first place.
       const renewed_at = Date.now();
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
         last_id,
-        { key: this._key, by: this._by, millis: this._lease_millis }
+        lease
+          ? { key: this._key, by: this._by, millis: this._lease_millis }
+          : undefined
       );
-      if (correlating !== false)
+      if (lease && correlating !== false)
         this._lease_until = renewed_at + this._lease_millis;
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
@@ -27297,15 +27306,24 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      // This call carries the correlator too, so it renews the lease as a
-      // side effect of persisting what the scan found.
+      // Carry the correlator only when this pass is actually leasing, so it
+      // renews as a side effect of persisting what the scan found.
+      //
+      // An explicit \`app.correlate()\` does not lease, and must not pay for
+      // one either: sending a correlator turns a single checkpoint UPDATE
+      // into a keyed upsert plus a second write and a read. The act-sqlite
+      // perf gate caught exactly that as a regression on correlate+drain,
+      // which is the shape an embedded app runs constantly and which never
+      // wanted a lease in the first place.
       const renewed_at = Date.now();
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
         last_id,
-        { key: this._key, by: this._by, millis: this._lease_millis }
+        lease
+          ? { key: this._key, by: this._by, millis: this._lease_millis }
+          : undefined
       );
-      if (correlating !== false)
+      if (lease && correlating !== false)
         this._lease_until = renewed_at + this._lease_millis;
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
