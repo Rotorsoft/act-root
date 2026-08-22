@@ -20,7 +20,7 @@ The framing the rest of this folder is built around: **default Act plus Postgres
 
 ## What "default Act handles" looks like
 
-Concrete envelope of safe operation, all numbers traced back to the bench scripts in [`libs/act/PERFORMANCE.md`](../libs/act/PERFORMANCE.md) and [`libs/act-pg/PERFORMANCE.md`](../libs/act-pg/PERFORMANCE.md). For the macro view — sustained `app.do` throughput and cold-start/rebuild wall-clock against stores seeded to 1M and 10M events, with a `run.sh` to reproduce on your hardware — see [**the envelope, measured**](PERFORMANCE.md). Run the same scripts on your hardware before quoting them in capacity planning.
+Concrete envelope of safe operation, all numbers traced back to the bench scripts in [`libs/act/PERFORMANCE.md`](../libs/act/PERFORMANCE.md) and [`libs/act-pg/PERFORMANCE.md`](../libs/act-pg/PERFORMANCE.md). For the macro view — sustained `app.do` throughput, cold-start and rebuild wall-clock against stores seeded to 1M and 10M events, and what the reaction pipeline carries as workers are added — see [**the envelope, measured**](PERFORMANCE.md). Run the same scripts on your hardware before quoting them in capacity planning.
 
 | Dimension                                  | Where you stop being CPU-bound                                                                         | Source                                                                            |
 |--------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|
@@ -30,6 +30,10 @@ Concrete envelope of safe operation, all numbers traced back to the bench script
 | Realistic same-stream contention with invariant | ~3,940 commits/sec — about half the synthetic ceiling                                              | `libs/act/PERFORMANCE.md` § Realistic workloads                                   |
 | Single-process reaction latency floor (PG) | p50 ~4 ms idle / ~10 ms at 100 commits/sec, saturates around 200 commits/sec sustained                  | `libs/act/PERFORMANCE.md` § Reaction latency                                      |
 | Cross-process commit→reaction latency (PG) | p50 11 ms via LISTEN/NOTIFY; polling at 50 ms is roughly 3× slower; default 10 s polling is ~1000× off  | `libs/act-pg/PERFORMANCE.md` § ACT-101                                            |
+| Reaction delivery keeping pace (PG, real worker processes) | Handled matches committed exactly at 1, 2 and 4 workers — the writer saturates first, not the pipeline | [`PERFORMANCE.md` § Scenario C](PERFORMANCE.md#scenario-c--reactions)              |
+| Claiming work, competing consumers (PG)    | ~5,100 subscriptions leased/sec at 4 workers; flattens by 8, degrades by 16 — 4–8 workers per store     | [`PERFORMANCE.md` § Scenario C](PERFORMANCE.md#scenario-c--reactions)              |
+| Claim latency vs. number of subscriptions  | ~1.5 ms flat from 1k to 100k subscribed streams (was 180 ms at 100k before #1488)                       | `libs/act-pg/PERFORMANCE.md` § #1448 / #1488                                       |
+| Cost of discovering work, per worker added | Constant since #1532 — one worker reads the log for all of them, where each used to read it in full     | [`PERFORMANCE.md` § Scenario C](PERFORMANCE.md#scenario-c--reactions)              |
 
 Numbers above are macOS 25.4 (Apple Silicon) against the docker PG used by the adapter's own tests (`postgres:17-alpine` on port 5431). Production PG running on commodity Linux with persistent disks lands in the same order of magnitude — expect tail latency to be jumpier under autovacuum and replication, and re-run the scripts before quoting anything in a runbook.
 
