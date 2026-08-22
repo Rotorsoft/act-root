@@ -5,9 +5,9 @@
  * Reaction dispatch — what runs inside the drain pipeline once `run_drain_cycle`
  * has fetched events for a leased stream. Two shapes:
  *
- * - per-event `handle`: walks payloads sequentially, builds a scoped `IAct`
- *   that auto-injects `reactingTo` so handlers don't have to thread it
- *   through manually
+ * - per-event `handle`: walks payloads sequentially with the triggering event
+ *   installed as ambient reaction context, so `action()` threads
+ *   `reactingTo` for every dispatch the handler makes
  * - bulk `handle_batch`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
@@ -21,7 +21,6 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
-  type DoOptions,
   type IAct,
   type Lease,
   type Logger,
@@ -29,7 +28,6 @@ import {
   type ReactionOptions,
   type ReactionPayload,
   type Schemas,
-  type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
@@ -111,10 +109,12 @@ function finalize(
 /**
  * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.
  *
- * The scoped `IAct` proxy auto-injects the triggering event as `reactingTo`
- * when handlers call `do()` without it (#587), keeping the correlation
- * chain by default. The non-do methods are reused across all dispatches —
- * only `do` rebinds per payload because it captures the triggering event.
+ * The triggering event is installed as ambient reaction context around each
+ * handler call, so `action()` resolves it as `reactingTo` and keeps the
+ * correlation chain by default (#587, #1541). Ambient rather than bound to
+ * the `IAct` argument: a handler that dispatches through a captured
+ * module-level `app`, or through a helper several calls deep, inherits the
+ * chain the same way. The proxy is therefore a plain bag of bound methods.
  *
  * @internal
  */
@@ -166,22 +166,7 @@ export function build_handle<
     for (let i = 0; i < payloads.length; i++) {
       const payload = payloads[i];
       const { event, handler } = payload;
-      scoped_app.do = <TKey extends keyof TActions & string>(
-        action: TKey,
-        target: Target<TActor>,
-        action_payload: Readonly<TActions[TKey]>,
-        options?: DoOptions<TEvents>
-      ) =>
-        bound_do(action, target, action_payload, {
-          ...options,
-          reactingTo:
-            options?.reactingTo ?? (event as Committed<Schemas, string>),
-        });
       try {
-        // The ambient install is what makes the injection unconditional:
-        // handlers that close over a module-level `app` instead of using
-        // `scoped_app` still thread the chain, because `action()` falls
-        // back to this context when no `reactingTo` was passed.
         await run_reacting(event as Committed<Schemas, string>, () =>
           handler(event, stream, scoped_app)
         );
