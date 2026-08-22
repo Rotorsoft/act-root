@@ -62,11 +62,15 @@ The cliffs, and the recipe for each:
 
 The question this page could not answer until now: how much *reaction* traffic does the framework carry, and what happens when you add workers?
 
-Reactions move in two stages. **Discovery** reads the event log forward and marks every subscription an event resolves to. **Delivery** claims a marked subscription, fetches its events, runs the handler, and acknowledges. They scale differently and fail differently, so they are measured separately.
+Reactions happen in two stages, and they behave differently enough to measure apart.
 
-### Delivery keeps up
+**Finding the work.** Something has to read new events and note which reactions care about them. **Doing the work.** A worker picks up one of those notes, reads the events, runs your handler, and records that it finished.
 
-End to end through a real app — commit, discover, claim, fetch, handle, ack — with workers as separate OS processes and cross-process wakeups on ([`libs/act-pg/scripts/correlate-workers.bench.mjs`](../libs/act-pg/scripts/correlate-workers.bench.mjs)), 2,000 aggregates, 20 s:
+Finding is cheap and shared. Doing is the part that scales with workers.
+
+### Reactions keep up with writes
+
+The whole path, through a real app: save an event, notice it, pick it up, run the handler, mark it done. Workers are separate processes, so they behave like a real deployment ([`correlate-workers.bench.mjs`](../libs/act-pg/scripts/correlate-workers.bench.mjs)), across 2,000 streams over 20 seconds:
 
 | workers | events committed | events handled | backlog |
 |---|---|---|---|
@@ -74,49 +78,51 @@ End to end through a real app — commit, discover, claim, fetch, handle, ack �
 | 2 | 10,050 | **10,050** | none |
 | 4 | 8,880 | **8,880** | none |
 
-**Handled matches committed exactly at every worker count.** The limit here is the writer — a single process committing sequentially, around 500 events/s — not the reaction pipeline, which never fell behind. Adding workers does not raise this number because there was no backlog for them to work on; it lowers it slightly, since more workers contend for the same rows to do the same amount of work.
+**Every event was handled, at every worker count.** Nothing queued up.
 
-The honest reading: **if your commit rate is in the hundreds per second, reactions are not your constraint.** For the shape where they might be, see the next table.
+What ran out first was the writer — one process saving events one after another, about 500 a second. The reaction side never fell behind it. Adding workers doesn't raise this number, because there was no queue for them to help with; it lowers it slightly, since more workers competing for the same rows do the same total work with more overhead.
 
-### Claiming work scales, and stays flat as subscriptions grow
+**So if you save a few hundred events a second, reactions aren't your limit.** The next table is for when they might be.
 
-The delivery half on its own, driven as hard as the claim/ack loop allows ([`hybrid-split.bench.mjs`](../libs/act-pg/scripts/hybrid-split.bench.mjs)), 20,000 subscriptions:
+### Picking up work scales to about four workers
 
-| workers | claim p50 | subscriptions leased/s |
+The doing half on its own, pushed as hard as it will go ([`hybrid-split.bench.mjs`](../libs/act-pg/scripts/hybrid-split.bench.mjs)), with 20,000 reactions registered:
+
+| workers | time to pick up work (median) | reactions picked up per second |
 |---|---|---|
 | 1 | 2.09 ms | 2,577 |
 | 4 | 2.47 ms | **5,107** |
 | 8 | 3.03 ms | 5,091 |
 | 16 | 4.31 ms | 3,716 |
 
-Throughput roughly doubles from one worker to four and then flattens; past eight, latency climbs while throughput falls, which is competing consumers contending for the same rows. **Four to eight workers per store is the useful range** on this hardware.
+Throughput roughly doubles from one worker to four, then flattens. Past eight it gets *worse*: workers spend more time competing with each other than working. **Four to eight workers per database is the useful range** on this hardware.
 
-Separately, claim latency is **flat in the number of subscriptions** — about 1.5 ms whether the store holds a thousand or a hundred thousand, because `claim` reads eligibility off the subscription row rather than probing the event log ([#1488](https://github.com/Rotorsoft/act-root/issues/1488)). Before that change it was 180 ms at 100k.
+The other half of the picture is that this speed **doesn't change as you add reactions**. Picking up work takes about 1.5 ms whether the system has a thousand registered reactions or a hundred thousand, because a worker checks a small table rather than searching the event history ([#1488](https://github.com/Rotorsoft/act-root/issues/1488)). It used to take 180 ms at a hundred thousand.
 
-### Discovery is now a constant, not a multiple
+### Finding work costs the same no matter how many workers you run
 
-Every worker used to read the whole log for itself. Measured on real processes, that was exactly N reads and N mark-writes per committed event for N workers — the cost of *finding* work grew linearly with the workers doing it. Since [#1532](https://github.com/Rotorsoft/act-root/issues/1532) one worker reads on behalf of the rest:
+Every worker used to read the whole event log for itself. With four workers that meant reading everything four times and writing the same notes four times — the cost of *finding* work grew with the number of workers doing it, which is backwards. Since [#1532](https://github.com/Rotorsoft/act-root/issues/1532), one worker reads on behalf of the rest:
 
-| workers | log reads per event | mark writes per event |
+| workers | times each event is read | times each note is written |
 |---|---|---|
 | 1 | 1.00 | 1.00 |
 | 2 | 1.00 (was 2.00) | 1.00 (was 2.00) |
 | 4 | 1.00 (was 4.00) | 1.00 (was 4.00) |
 | 8 | 1.00 (was 8.00) | 1.00 (was 8.00) |
 
-What this buys is headroom rather than latency: discovery stops consuming database capacity proportional to your worker count, which is what made adding workers quietly expensive.
+This buys headroom, not speed. Adding workers no longer quietly costs extra database capacity just to keep looking.
 
-**The trade:** discovery is no longer fault-tolerant by redundancy. One worker holds a short lease, and if it dies nobody discovers work until that lease expires — seconds, self-healing, and nothing is lost, but reaction latency spikes for that window.
+**What you give up:** finding work is no longer something every worker does independently, so it is no longer immune to one worker dying. One worker holds a short claim on the job; if it dies, nobody looks for new work until that claim lapses — a few seconds, after which another worker takes over on its own. Nothing is lost, but reactions pause for that gap.
 
-### What bounds a subscription-heavy system
+### What actually limits a reaction-heavy system
 
-- **Streams are the unit of parallelism, in reactions as in commits.** Reactions targeting one stream serialize against each other exactly as writes to one aggregate do.
-- **Acknowledgements churn an index.** Only about 38% of subscription updates take Postgres's cheap path, so heavy drain traffic grows the claim index. It is housekeeping rather than a ceiling — dead rows and table size hold flat — and a periodic `REINDEX INDEX CONCURRENTLY` reclaims it ([production checklist](../docs/docs/guides/production-checklist.md)).
-- **Retired streams keep their subscription rows.** One row per permanently closed stream, inert and never claimed, on the same order as the tombstone that also stays forever.
+- **Reactions aimed at the same stream run one at a time**, exactly as writes to the same stream do. If everything funnels through one target, that target is your ceiling — no number of workers changes it.
+- **Marking work done wears an index.** Only about 38% of those updates take the database's cheap path, so heavy reaction traffic makes one index grow. This is housekeeping, not a wall: leftover rows and table size stay flat, and a periodic rebuild reclaims the space ([production checklist](../docs/docs/guides/production-checklist.md)).
+- **Permanently closed streams leave a small row behind**, one each. They are never picked up again, and there are about as many as the closing markers that also stay forever.
 
 ## What is deliberately not here
 
-- **The true reaction ceiling.** Scenario C shows delivery keeping pace with a single sequential writer, not the point where it stops keeping pace. Finding that needs a writer fast enough to build a backlog, which none of these harnesses do. The `leased/s` column is the closest available proxy.
-- **Reaction handler cost.** Every handler in these runs is a no-op. Real handlers do work — HTTP calls, database writes — and that dominates. Measure yours.
+- **Where reactions actually stop keeping up.** Scenario C shows them keeping pace with one writer, not the point where they can't. Finding that needs a writer fast enough to build a queue, which none of these scripts produce. The "picked up per second" column is the closest stand-in.
+- **What your handlers cost.** Every handler in these runs does nothing at all. Real ones make HTTP calls and write to databases, and that will dominate everything on this page. Measure your own.
 - **The 50M tier** — the audience today is small/medium systems; the linear trends above extrapolate, and `run.sh` accepts your own numbers when you need certainty.
 - **Micro-benchmarks** — per-optimization before/after history lives in `libs/act/PERFORMANCE.md` and `libs/act-pg/PERFORMANCE.md`.

@@ -1325,14 +1325,17 @@ rows `claim` locks and churn the partial index measured at ~38% HOT in the
 [bloat soak](#1523--does-the-churn-settle-or-compound), so removing seven of
 every eight removes that multiple of the churn too.
 
-**What it costs, stated plainly.** `subscribe` *calls* go up, because the "may
-I scan?" ping rides that method: 398 → 1,209 at one worker, and 5,670 at eight.
-Those are single-row upserts standing in for full log scans and bulk mark
-writes, so the trade is heavily favourable — but a **single-worker deployment
-pays about three times the `subscribe` round trips and gains nothing**, since
-it always holds the lease. That is the open question the RFC records: gating it
-costs a knob or a heuristic, and the round trip has not been measured to
-matter.
+**What it costs.** A worker that already holds the lease does not ask again
+until it is halfway to expiry, so in the steady state it makes no extra calls
+at all — `subscribe` counts at one worker are 404 for 402 events, the same as
+before the lease existed. Workers that do *not* hold it pay one small upsert
+per pass instead of a full log scan and a batch of mark writes, which is the
+trade the whole change is built on.
+
+That local check was added because the act-sqlite perf gate caught the first
+version as a **1.54× regression** on correlate+drain. Asking the store every
+pass costs a round trip the holder gains nothing from — and the holder is the
+only worker there is in an embedded single-node deployment.
 
 > **Methodology note.** The first run of this comparison showed no improvement
 > at all. The benchmark's instrumenting proxy special-cased `subscribe` and

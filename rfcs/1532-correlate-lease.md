@@ -254,11 +254,15 @@ Flat instead of linear, in reads and writes both, and `handled` still tracks
 commits exactly at every worker count — delivery is untouched, which was the
 requirement.
 
-`subscribe` *call* counts rise, because the "may I scan?" ping rides that
-method: 398 → 1,209 at one worker, 5,670 at eight. Those are single-row upserts
-replacing full log scans and bulk mark writes, so the trade is strongly
-favourable in aggregate, and it is the reason the single-worker question below
-is open rather than academic.
+A worker that already holds the lease does not ask again until it is halfway to
+expiry, so a sole worker makes no extra calls at all: 404 `subscribe` calls for
+402 events, matching the pre-lease count. Workers that do not hold it pay one
+small upsert per pass in place of a full scan and a batch of mark writes.
+
+That local check exists because the act-sqlite perf gate caught the first
+version as a 1.54× regression on correlate+drain — asking every pass costs a
+round trip the holder gains nothing from, and in an embedded single-node
+deployment the holder is the only worker there is.
 
 ## Unresolved
 
@@ -269,7 +273,13 @@ is safe — marks are idempotent and the checkpoint only moves forward — so th
 worst case is the duplication that existed before this RFC. Left as a constant
 rather than a knob until something argues for one.
 
-**Whether a single-worker deployment should pay for it.** With one worker the
-lease is always granted and costs one extra round trip per scan for no benefit.
-Every gate is a knob or a heuristic, so the round trip stands until measured to
-matter.
+**Resolved during implementation:** whether a single-worker deployment should
+pay for this. It no longer does — a holder re-asks only near expiry, so the
+steady-state cost is zero extra calls. The act-sqlite perf gate is what forced
+the question, by failing.
+
+**Still open: what the lease duration should be.** Five seconds is hard-coded.
+It bounds how long discovery pauses after a holder dies, so it wants to be
+small; it is renewed as work is found, so it must outlast a pass. Losing it
+mid-scan is safe — marks only move forward — so being wrong on the short side
+costs the duplication that existed before this RFC.

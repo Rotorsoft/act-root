@@ -8226,6 +8226,22 @@ export class CorrelateCycle<
    */
   private readonly _key: string;
   /**
+   * When this worker's correlation lease runs out, as a local clock reading,
+   * or 0 when it holds none.
+   *
+   * Asking the store on every pass costs a round trip that the holder — which
+   * is the *only* worker in a single-node deployment, and the steady-state
+   * one everywhere else — gains nothing from: it already knows the answer.
+   * The act-sqlite perf gate caught that as a 1.5x regression on
+   * correlate+drain, which is the shape an embedded app runs constantly.
+   *
+   * Believing this while the store disagrees is safe in the one direction it
+   * can fail. A worker that scans without really holding the lease produces
+   * the duplicate scan that existed before the lease, and the marks are
+   * idempotent — so a stale belief costs work, never correctness.
+   */
+  private _lease_until = 0;
+  /**
    * Whether a scan might find anything. The drain has carried the same flag
    * since it was written — a commit raises it, an empty claim lowers it, and
    * a disarmed drain returns without touching the store. Correlate had no
@@ -8492,12 +8508,17 @@ export class CorrelateCycle<
     // redundant, bounded by paging, idempotent, and correct. \`init\` remains
     // the only place the durable checkpoint seeds a local one, where the
     // cold-start back-scan window guards exactly this hazard.
-    if (lease) {
+    // Re-ask only when the lease is running out. Renewing at the halfway mark
+    // leaves a full half-lease of slack for the call itself, so a holder never
+    // lapses by asking too late.
+    const now = Date.now();
+    if (lease && now >= this._lease_until - this._lease_millis / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
         millis: this._lease_millis,
       });
+      this._lease_until = correlating ? now + this._lease_millis : 0;
       // \`undefined\` means the store does not implement leasing, so every
       // worker scans exactly as before.
       if (correlating === false)
@@ -8591,11 +8612,16 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      const { subscribed } = await this._cd.subscribe(streams, last_id, {
-        key: this._key,
-        by: this._by,
-        millis: this._lease_millis,
-      });
+      // This call carries the correlator too, so it renews the lease as a
+      // side effect of persisting what the scan found.
+      const renewed_at = Date.now();
+      const { subscribed, correlating } = await this._cd.subscribe(
+        streams,
+        last_id,
+        { key: this._key, by: this._by, millis: this._lease_millis }
+      );
+      if (correlating !== false)
+        this._lease_until = renewed_at + this._lease_millis;
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
       // was already subscribed reports \`subscribed: 0\`, so arming on that
@@ -8691,6 +8717,7 @@ export class CorrelateCycle<
       // Zero releases outright. A near-zero expiry would still refuse a
       // successor asking in the same instant, which reads as the handback
       // not having happened.
+      this._lease_until = 0;
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
@@ -26884,6 +26911,22 @@ export class CorrelateCycle<
    */
   private readonly _key: string;
   /**
+   * When this worker's correlation lease runs out, as a local clock reading,
+   * or 0 when it holds none.
+   *
+   * Asking the store on every pass costs a round trip that the holder — which
+   * is the *only* worker in a single-node deployment, and the steady-state
+   * one everywhere else — gains nothing from: it already knows the answer.
+   * The act-sqlite perf gate caught that as a 1.5x regression on
+   * correlate+drain, which is the shape an embedded app runs constantly.
+   *
+   * Believing this while the store disagrees is safe in the one direction it
+   * can fail. A worker that scans without really holding the lease produces
+   * the duplicate scan that existed before the lease, and the marks are
+   * idempotent — so a stale belief costs work, never correctness.
+   */
+  private _lease_until = 0;
+  /**
    * Whether a scan might find anything. The drain has carried the same flag
    * since it was written — a commit raises it, an empty claim lowers it, and
    * a disarmed drain returns without touching the store. Correlate had no
@@ -27150,12 +27193,17 @@ export class CorrelateCycle<
     // redundant, bounded by paging, idempotent, and correct. \`init\` remains
     // the only place the durable checkpoint seeds a local one, where the
     // cold-start back-scan window guards exactly this hazard.
-    if (lease) {
+    // Re-ask only when the lease is running out. Renewing at the halfway mark
+    // leaves a full half-lease of slack for the call itself, so a holder never
+    // lapses by asking too late.
+    const now = Date.now();
+    if (lease && now >= this._lease_until - this._lease_millis / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
         millis: this._lease_millis,
       });
+      this._lease_until = correlating ? now + this._lease_millis : 0;
       // \`undefined\` means the store does not implement leasing, so every
       // worker scans exactly as before.
       if (correlating === false)
@@ -27249,11 +27297,16 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      const { subscribed } = await this._cd.subscribe(streams, last_id, {
-        key: this._key,
-        by: this._by,
-        millis: this._lease_millis,
-      });
+      // This call carries the correlator too, so it renews the lease as a
+      // side effect of persisting what the scan found.
+      const renewed_at = Date.now();
+      const { subscribed, correlating } = await this._cd.subscribe(
+        streams,
+        last_id,
+        { key: this._key, by: this._by, millis: this._lease_millis }
+      );
+      if (correlating !== false)
+        this._lease_until = renewed_at + this._lease_millis;
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
       // was already subscribed reports \`subscribed: 0\`, so arming on that
@@ -27349,6 +27402,7 @@ export class CorrelateCycle<
       // Zero releases outright. A near-zero expiry would still refuse a
       // successor asking in the same instant, which reads as the handback
       // not having happened.
+      this._lease_until = 0;
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
