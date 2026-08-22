@@ -1777,7 +1777,7 @@ export class Act<
         // the scoped store and \`_initialized\` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this._correlate_scanned(q),
+        correlate: (q) => this._correlate_scanned(q, true),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -2463,7 +2463,9 @@ export class Act<
    * charter-covered and has no use for it.
    */
   private async _correlate_scanned(
-    query: Query
+    query: Query,
+    /** Honour the correlation lease — settle and the poller only (#1532). */
+    lease = false
   ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
     // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
@@ -2471,7 +2473,7 @@ export class Act<
     if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
       const { subscribed, last_id, marked, scanned } =
-        await this._correlate.correlate(query);
+        await this._correlate.correlate(query, lease);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
       // claim in the window before the subscription lands, and nothing
@@ -2576,6 +2578,14 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    // Hand the correlation lease back rather than making the next worker
+    // wait out its expiry (#1532). Best-effort and deliberately not awaited:
+    // stopping correlations is synchronous by contract, and the fallback is
+    // the expiry that would have applied anyway.
+    // Wrapped in \`_scoped\` because it resolves the store through the port: a
+    // scoped Act would otherwise release against the singleton and leave its
+    // real lease held until expiry.
+    void this._scoped(() => this._correlate.release_correlation());
   }
 
   /**
@@ -8016,8 +8026,10 @@ export class ConsoleLogger implements Logger {
  * @internal
  */
 
+import { createHash, randomUUID } from "node:crypto";
 import { log, store } from "../ports.js";
 import type {
+  EventRegister,
   Query,
   Registry,
   SchemaRegister,
@@ -8046,6 +8058,53 @@ import { LruMap } from "./lru-map.js";
  * @internal
  */
 const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
+ * Default correlation lease duration (#1532).
+ *
+ * Bounds two opposing risks. Too short and a slow scan outruns its own lease,
+ * letting a second worker scan the same range — which is merely the
+ * duplication that exists without a lease at all, so it fails safe. Too long
+ * and a crashed holder stalls discovery for that whole window, because
+ * nothing raises marks while nobody holds the lease and nothing becomes
+ * claimable. Seconds rather than minutes, for that reason.
+ */
+const DEFAULT_CORRELATION_LEASE_MS = 5_000;
+
+/**
+ * A stable identity for "which correlator is this?" (#1532).
+ *
+ * The correlation lease lets one worker scan on behalf of others, which is
+ * only sound when they are interchangeable. Two processes running the same
+ * application are; two different applications sharing one database are not —
+ * leasing across those would let one starve the other, and its reactions
+ * would silently stop.
+ *
+ * The key is every event name this correlator reacts to, each with the names
+ * of the handlers registered for it. Event names alone would do if reacting
+ * to an event implied doing the same thing with it, and it does not: two
+ * applications can both react to \`Placed\` and resolve it to entirely
+ * different targets, so a shared lease would mark one's targets and never the
+ * other's. Handler names cost nothing — the registry already keys reactions
+ * by them — and separate exactly that case.
+ *
+ * Sorted before hashing so identical workers agree regardless of declaration
+ * order. Truncated to 32 hex characters: a collision means two applications
+ * with identical event *and* handler names share a lease, and those are
+ * interchangeable by construction.
+ */
+const registry_key = <TEvents extends Schemas>(
+  events: EventRegister<TEvents>
+): string => {
+  const shape = Object.keys(events)
+    .filter((name) => events[name].reactions.size > 0)
+    .sort()
+    .map((name) => [name, [...events[name].reactions.keys()].sort()]);
+  return createHash("sha256")
+    .update(JSON.stringify(shape))
+    .digest("hex")
+    .slice(0, 32);
+};
 
 /**
  * How many distinct pattern sources keep a compiled \`RegExp\` around. A
@@ -8134,6 +8193,7 @@ export type CorrelateCycleDeps<
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
+  lease_millis?: number;
 };
 
 export class CorrelateCycle<
@@ -8143,6 +8203,19 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /**
+   * This worker's identity for the correlation lease (#1532). A per-instance
+   * UUID, matching the drain's convention, so a renewal is recognised as the
+   * same holder and a restarted process never inherits a stale claim.
+   */
+  private readonly _by = randomUUID();
+  /** How long the correlation lease is taken for. */
+  private readonly _lease_millis: number;
+  /**
+   * Which correlator this is. Computed once from the registry so identical
+   * workers share a lease and unrelated applications never do.
+   */
+  private readonly _key: string;
   /**
    * Whether a scan might find anything. The drain has carried the same flag
    * since it was written — a commit raises it, an empty claim lowers it, and
@@ -8204,7 +8277,10 @@ export class CorrelateCycle<
     on_init,
     on_init_async,
     cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
+    lease_millis = DEFAULT_CORRELATION_LEASE_MS,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
+    this._lease_millis = lease_millis;
+    this._key = registry_key(registry.events);
     this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
@@ -8346,7 +8422,24 @@ export class CorrelateCycle<
    * at init, but marking it is what makes it claimable without probing the
    * event log, so the scan runs for every app.
    */
-  async correlate(query: Query = { after: -1, limit: 10 }): Promise<{
+  async correlate(
+    query: Query = { after: -1, limit: 10 },
+    /**
+     * Whether to honour the correlation lease (#1532).
+     *
+     * True only on the automatic paths — the settle loop and the poller —
+     * where the question is "should *someone* scan?" and one worker doing it
+     * serves all of them.
+     *
+     * An explicit \`app.correlate()\` means "scan now", and silently no-oping
+     * it because a peer holds the lease would be wrong rather than merely
+     * surprising: \`close\` catches up by looping until the checkpoint moves,
+     * so a blocked scan would make it give up and cap its prune at a stale
+     * position — pruning far less than the retention window asked for, with
+     * nothing to explain why.
+     */
+    lease = false
+  ): Promise<{
     subscribed: number;
     last_id: number;
     marked: number;
@@ -8365,6 +8458,29 @@ export class CorrelateCycle<
     // \`start_polling\` exists for exactly that case and arms on every tick, so
     // the poller keeps its meaning ("I have no signal, go and look anyway").
     if (!this._armed)
+      return {
+        subscribed: 0,
+        last_id: this._checkpoint,
+        marked: 0,
+        scanned: false,
+      };
+
+    // Only one worker per registry scans at a time (#1532). Each worker holds
+    // its own in-memory checkpoint, so without this they all wake on the same
+    // commit and each reads the whole range and writes the same marks —
+    // measured at exactly W reads and W mark-writes per committed event for W
+    // workers. Capability-gated: a store without it leaves every worker
+    // scanning, exactly as before.
+    const port = store();
+    if (
+      lease &&
+      port.lease_correlation &&
+      !(await port.lease_correlation(this._key, this._by, this._lease_millis))
+    )
+      // Another worker with the same registry is scanning, so this one need
+      // not. Stay armed: the work still needs doing, and this worker should
+      // look again next pass rather than disarm and wait for an unrelated
+      // commit to wake it.
       return {
         subscribed: 0,
         last_id: this._checkpoint,
@@ -8504,11 +8620,16 @@ export class CorrelateCycle<
           // a remote writer on a store without \`notify\`. Arming each tick is
           // what keeps that true now that a scan can park itself (#1510).
           this.arm();
-          return this.correlate({
-            ...query,
-            after: this._checkpoint,
-            limit,
-          });
+          // The poller is an automatic path, so it honours the lease: one
+          // worker scanning on each tick serves every worker.
+          return this.correlate(
+            {
+              ...query,
+              after: this._checkpoint,
+              limit,
+            },
+            true
+          );
         })
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
@@ -8520,6 +8641,30 @@ export class CorrelateCycle<
   }
 
   /** Stop the periodic correlation worker. Idempotent. */
+  /**
+   * Hand the correlation lease back early.
+   *
+   * There is no release verb on the port, deliberately — expiry is the only
+   * path, which keeps a crash and a clean stop on the same code path. A
+   * holder can still shorten its own lease, because re-acquiring as the same
+   * holder renews, and renewing to a millisecond is a release in all but
+   * name.
+   *
+   * Without this a worker that stops cleanly still blocks discovery for the
+   * rest of its lease — invisible in a long-lived deployment, very visible
+   * anywhere Acts are created and dropped inside one process.
+   *
+   * Best-effort: failing here costs the lease's remaining lifetime, which is
+   * what would have happened had the process died instead.
+   */
+  async release_correlation(): Promise<void> {
+    try {
+      await store().lease_correlation?.(this._key, this._by, 1);
+    } catch (error) {
+      log().error(error);
+    }
+  }
+
   stop_polling(): void {
     if (this._timer) {
       clearInterval(this._timer);
@@ -11931,6 +12076,16 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated_at = -1;
+  /**
+   * Correlation leases (#1532), keyed by correlator identity. Keyed rather
+   * than singular because a lease is only sound between workers that look
+   * for the same things — two different applications sharing this store must
+   * not starve each other.
+   */
+  private _correlation_leases = new Map<
+    string,
+    { by: string; until: number }
+  >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -12253,6 +12408,32 @@ export class InMemoryStore implements Store {
         this._streams.get(p.stream)?.lease({ ...p, by, retry: 0 }, millis)
       )
       .filter((l) => !!l);
+  }
+
+  /**
+   * Takes or renews the correlation lease, returning the checkpoint when held.
+   *
+   * A single process sharing one InMemoryStore is the case this store exists
+   * for, so the lease is nearly always granted. It is implemented anyway so
+   * the contended path has somewhere to run in tests, and so the in-memory
+   * store keeps matching the durable adapters rather than quietly diverging
+   * on a capability.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, \`undefined\` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    await sleep();
+    const now = Date.now();
+    const held = this._correlation_leases.get(key);
+    if (held && held.until >= now && held.by !== by) return false;
+    this._correlation_leases.set(key, { by, until: now + millis });
+    return true;
   }
 
   /**
@@ -14478,6 +14659,66 @@ export interface Store extends Disposable, EventSource {
     millis: number,
     lane?: string
   ) => Promise<Lease[]>;
+
+  /**
+   * Takes (or renews) the correlation lease for \`millis\`.
+   *
+   * **Capability-gated.** Adapters may omit it — correlate calls it through
+   * \`?.\`, and a store without it keeps today's behaviour, where every worker
+   * scans.
+   *
+   * Exists because correlation is duplicated work at every worker count.
+   * Each worker holds its own in-memory scan position, seeded from the
+   * durable checkpoint once at start-up, so N workers wake on the same commit
+   * and each read the whole range and each write the same marks. Measured on
+   * real worker processes, reads and mark-writes per committed event come out
+   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
+   * are idempotent, so this is waste rather than error — but the writes land
+   * on the rows {@link claim} locks and churn the partial index the design
+   * depends on, so the waste scales the wrong way.
+   *
+   * Delivery is unaffected either way: leases already make it exactly-once.
+   * This governs only which worker bothers to look.
+   *
+   * @param key - Which correlator this is. The lease is only sound between
+   *   workers that look for the same things, so this scopes it: identical
+   *   workers share a key and take turns, while two different applications
+   *   sharing one database get separate leases and never starve each other.
+   *   Callers derive it from the registry; the store treats it as opaque.
+   * @param by - Caller identity. Passing the same value renews rather than
+   *   fails, so acquisition and renewal are one call.
+   * @param millis - How long the lease should be held from now.
+   * @returns \`true\` when the caller holds the lease, \`false\` when another
+   *   worker with the same \`key\` does.
+   *
+   * Deliberately does **not** hand back the correlate checkpoint, though an
+   * earlier draft did. A worker's local scan position falls behind while
+   * someone else holds the lease, so syncing from the durable checkpoint
+   * looks like an obvious win — but that checkpoint is shared by every
+   * correlator against this store, including ones with a different \`key\`.
+   * Syncing from it would let one application skip events another had
+   * already scanned, which is a silent delivery failure. Instead a worker
+   * that takes over re-scans from its own position: redundant, bounded by
+   * paging, and idempotent, because marks only ever move forward.
+   *
+   * **Released by expiry only**, with no release verb, so a crash and a
+   * graceful shutdown take the identical path and the recovery path is
+   * exercised constantly rather than only during incidents. The cost is that
+   * a cleanly-stopped worker holds its lease until it expires, which bounds
+   * how long discovery can stall.
+   *
+   * Implementations MUST make acquisition atomic — a read-then-write would
+   * let two workers hold it at once. One conditional \`UPDATE ... RETURNING\`
+   * is the intended shape.
+   *
+   * @see {@link subscribe} for the monotonic checkpoint write, which is
+   *   unchanged and remains safe under concurrent correlators
+   */
+  lease_correlation?: (
+    key: string,
+    by: string,
+    millis: number
+  ) => Promise<boolean>;
 
   /**
    * Registers streams for event processing.
@@ -20251,7 +20492,7 @@ export class Act<
         // the scoped store and \`_initialized\` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this._correlate_scanned(q),
+        correlate: (q) => this._correlate_scanned(q, true),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -20937,7 +21178,9 @@ export class Act<
    * charter-covered and has no use for it.
    */
   private async _correlate_scanned(
-    query: Query
+    query: Query,
+    /** Honour the correlation lease — settle and the poller only (#1532). */
+    lease = false
   ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
     // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
@@ -20945,7 +21188,7 @@ export class Act<
     if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
       const { subscribed, last_id, marked, scanned } =
-        await this._correlate.correlate(query);
+        await this._correlate.correlate(query, lease);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
       // claim in the window before the subscription lands, and nothing
@@ -21050,6 +21293,14 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    // Hand the correlation lease back rather than making the next worker
+    // wait out its expiry (#1532). Best-effort and deliberately not awaited:
+    // stopping correlations is synchronous by contract, and the fallback is
+    // the expiry that would have applied anyway.
+    // Wrapped in \`_scoped\` because it resolves the store through the port: a
+    // scoped Act would otherwise release against the singleton and leave its
+    // real lease held until expiry.
+    void this._scoped(() => this._correlate.release_correlation());
   }
 
   /**
@@ -26370,8 +26621,10 @@ export class ConsoleLogger implements Logger {
  * @internal
  */
 
+import { createHash, randomUUID } from "node:crypto";
 import { log, store } from "../ports.js";
 import type {
+  EventRegister,
   Query,
   Registry,
   SchemaRegister,
@@ -26400,6 +26653,53 @@ import { LruMap } from "./lru-map.js";
  * @internal
  */
 const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+
+/**
+ * Default correlation lease duration (#1532).
+ *
+ * Bounds two opposing risks. Too short and a slow scan outruns its own lease,
+ * letting a second worker scan the same range — which is merely the
+ * duplication that exists without a lease at all, so it fails safe. Too long
+ * and a crashed holder stalls discovery for that whole window, because
+ * nothing raises marks while nobody holds the lease and nothing becomes
+ * claimable. Seconds rather than minutes, for that reason.
+ */
+const DEFAULT_CORRELATION_LEASE_MS = 5_000;
+
+/**
+ * A stable identity for "which correlator is this?" (#1532).
+ *
+ * The correlation lease lets one worker scan on behalf of others, which is
+ * only sound when they are interchangeable. Two processes running the same
+ * application are; two different applications sharing one database are not —
+ * leasing across those would let one starve the other, and its reactions
+ * would silently stop.
+ *
+ * The key is every event name this correlator reacts to, each with the names
+ * of the handlers registered for it. Event names alone would do if reacting
+ * to an event implied doing the same thing with it, and it does not: two
+ * applications can both react to \`Placed\` and resolve it to entirely
+ * different targets, so a shared lease would mark one's targets and never the
+ * other's. Handler names cost nothing — the registry already keys reactions
+ * by them — and separate exactly that case.
+ *
+ * Sorted before hashing so identical workers agree regardless of declaration
+ * order. Truncated to 32 hex characters: a collision means two applications
+ * with identical event *and* handler names share a lease, and those are
+ * interchangeable by construction.
+ */
+const registry_key = <TEvents extends Schemas>(
+  events: EventRegister<TEvents>
+): string => {
+  const shape = Object.keys(events)
+    .filter((name) => events[name].reactions.size > 0)
+    .sort()
+    .map((name) => [name, [...events[name].reactions.keys()].sort()]);
+  return createHash("sha256")
+    .update(JSON.stringify(shape))
+    .digest("hex")
+    .slice(0, 32);
+};
 
 /**
  * How many distinct pattern sources keep a compiled \`RegExp\` around. A
@@ -26488,6 +26788,7 @@ export type CorrelateCycleDeps<
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
+  lease_millis?: number;
 };
 
 export class CorrelateCycle<
@@ -26497,6 +26798,19 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
+  /**
+   * This worker's identity for the correlation lease (#1532). A per-instance
+   * UUID, matching the drain's convention, so a renewal is recognised as the
+   * same holder and a restarted process never inherits a stale claim.
+   */
+  private readonly _by = randomUUID();
+  /** How long the correlation lease is taken for. */
+  private readonly _lease_millis: number;
+  /**
+   * Which correlator this is. Computed once from the registry so identical
+   * workers share a lease and unrelated applications never do.
+   */
+  private readonly _key: string;
   /**
    * Whether a scan might find anything. The drain has carried the same flag
    * since it was written — a commit raises it, an empty claim lowers it, and
@@ -26558,7 +26872,10 @@ export class CorrelateCycle<
     on_init,
     on_init_async,
     cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
+    lease_millis = DEFAULT_CORRELATION_LEASE_MS,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
+    this._lease_millis = lease_millis;
+    this._key = registry_key(registry.events);
     this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._static_targets = static_targets;
@@ -26700,7 +27017,24 @@ export class CorrelateCycle<
    * at init, but marking it is what makes it claimable without probing the
    * event log, so the scan runs for every app.
    */
-  async correlate(query: Query = { after: -1, limit: 10 }): Promise<{
+  async correlate(
+    query: Query = { after: -1, limit: 10 },
+    /**
+     * Whether to honour the correlation lease (#1532).
+     *
+     * True only on the automatic paths — the settle loop and the poller —
+     * where the question is "should *someone* scan?" and one worker doing it
+     * serves all of them.
+     *
+     * An explicit \`app.correlate()\` means "scan now", and silently no-oping
+     * it because a peer holds the lease would be wrong rather than merely
+     * surprising: \`close\` catches up by looping until the checkpoint moves,
+     * so a blocked scan would make it give up and cap its prune at a stale
+     * position — pruning far less than the retention window asked for, with
+     * nothing to explain why.
+     */
+    lease = false
+  ): Promise<{
     subscribed: number;
     last_id: number;
     marked: number;
@@ -26719,6 +27053,29 @@ export class CorrelateCycle<
     // \`start_polling\` exists for exactly that case and arms on every tick, so
     // the poller keeps its meaning ("I have no signal, go and look anyway").
     if (!this._armed)
+      return {
+        subscribed: 0,
+        last_id: this._checkpoint,
+        marked: 0,
+        scanned: false,
+      };
+
+    // Only one worker per registry scans at a time (#1532). Each worker holds
+    // its own in-memory checkpoint, so without this they all wake on the same
+    // commit and each reads the whole range and writes the same marks —
+    // measured at exactly W reads and W mark-writes per committed event for W
+    // workers. Capability-gated: a store without it leaves every worker
+    // scanning, exactly as before.
+    const port = store();
+    if (
+      lease &&
+      port.lease_correlation &&
+      !(await port.lease_correlation(this._key, this._by, this._lease_millis))
+    )
+      // Another worker with the same registry is scanning, so this one need
+      // not. Stay armed: the work still needs doing, and this worker should
+      // look again next pass rather than disarm and wait for an unrelated
+      // commit to wake it.
       return {
         subscribed: 0,
         last_id: this._checkpoint,
@@ -26858,11 +27215,16 @@ export class CorrelateCycle<
           // a remote writer on a store without \`notify\`. Arming each tick is
           // what keeps that true now that a scan can park itself (#1510).
           this.arm();
-          return this.correlate({
-            ...query,
-            after: this._checkpoint,
-            limit,
-          });
+          // The poller is an automatic path, so it honours the lease: one
+          // worker scanning on each tick serves every worker.
+          return this.correlate(
+            {
+              ...query,
+              after: this._checkpoint,
+              limit,
+            },
+            true
+          );
         })
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
@@ -26874,6 +27236,30 @@ export class CorrelateCycle<
   }
 
   /** Stop the periodic correlation worker. Idempotent. */
+  /**
+   * Hand the correlation lease back early.
+   *
+   * There is no release verb on the port, deliberately — expiry is the only
+   * path, which keeps a crash and a clean stop on the same code path. A
+   * holder can still shorten its own lease, because re-acquiring as the same
+   * holder renews, and renewing to a millisecond is a release in all but
+   * name.
+   *
+   * Without this a worker that stops cleanly still blocks discovery for the
+   * rest of its lease — invisible in a long-lived deployment, very visible
+   * anywhere Acts are created and dropped inside one process.
+   *
+   * Best-effort: failing here costs the lease's remaining lifetime, which is
+   * what would have happened had the process died instead.
+   */
+  async release_correlation(): Promise<void> {
+    try {
+      await store().lease_correlation?.(this._key, this._by, 1);
+    } catch (error) {
+      log().error(error);
+    }
+  }
+
   stop_polling(): void {
     if (this._timer) {
       clearInterval(this._timer);
@@ -30057,6 +30443,16 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated_at = -1;
+  /**
+   * Correlation leases (#1532), keyed by correlator identity. Keyed rather
+   * than singular because a lease is only sound between workers that look
+   * for the same things — two different applications sharing this store must
+   * not starve each other.
+   */
+  private _correlation_leases = new Map<
+    string,
+    { by: string; until: number }
+  >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -30379,6 +30775,32 @@ export class InMemoryStore implements Store {
         this._streams.get(p.stream)?.lease({ ...p, by, retry: 0 }, millis)
       )
       .filter((l) => !!l);
+  }
+
+  /**
+   * Takes or renews the correlation lease, returning the checkpoint when held.
+   *
+   * A single process sharing one InMemoryStore is the case this store exists
+   * for, so the lease is nearly always granted. It is implemented anyway so
+   * the contended path has somewhere to run in tests, and so the in-memory
+   * store keeps matching the durable adapters rather than quietly diverging
+   * on a capability.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, \`undefined\` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    await sleep();
+    const now = Date.now();
+    const held = this._correlation_leases.get(key);
+    if (held && held.until >= now && held.by !== by) return false;
+    this._correlation_leases.set(key, { by, until: now + millis });
+    return true;
   }
 
   /**
@@ -32567,6 +32989,66 @@ export interface Store extends Disposable, EventSource {
     millis: number,
     lane?: string
   ) => Promise<Lease[]>;
+
+  /**
+   * Takes (or renews) the correlation lease for \`millis\`.
+   *
+   * **Capability-gated.** Adapters may omit it — correlate calls it through
+   * \`?.\`, and a store without it keeps today's behaviour, where every worker
+   * scans.
+   *
+   * Exists because correlation is duplicated work at every worker count.
+   * Each worker holds its own in-memory scan position, seeded from the
+   * durable checkpoint once at start-up, so N workers wake on the same commit
+   * and each read the whole range and each write the same marks. Measured on
+   * real worker processes, reads and mark-writes per committed event come out
+   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
+   * are idempotent, so this is waste rather than error — but the writes land
+   * on the rows {@link claim} locks and churn the partial index the design
+   * depends on, so the waste scales the wrong way.
+   *
+   * Delivery is unaffected either way: leases already make it exactly-once.
+   * This governs only which worker bothers to look.
+   *
+   * @param key - Which correlator this is. The lease is only sound between
+   *   workers that look for the same things, so this scopes it: identical
+   *   workers share a key and take turns, while two different applications
+   *   sharing one database get separate leases and never starve each other.
+   *   Callers derive it from the registry; the store treats it as opaque.
+   * @param by - Caller identity. Passing the same value renews rather than
+   *   fails, so acquisition and renewal are one call.
+   * @param millis - How long the lease should be held from now.
+   * @returns \`true\` when the caller holds the lease, \`false\` when another
+   *   worker with the same \`key\` does.
+   *
+   * Deliberately does **not** hand back the correlate checkpoint, though an
+   * earlier draft did. A worker's local scan position falls behind while
+   * someone else holds the lease, so syncing from the durable checkpoint
+   * looks like an obvious win — but that checkpoint is shared by every
+   * correlator against this store, including ones with a different \`key\`.
+   * Syncing from it would let one application skip events another had
+   * already scanned, which is a silent delivery failure. Instead a worker
+   * that takes over re-scans from its own position: redundant, bounded by
+   * paging, and idempotent, because marks only ever move forward.
+   *
+   * **Released by expiry only**, with no release verb, so a crash and a
+   * graceful shutdown take the identical path and the recovery path is
+   * exercised constantly rather than only during incidents. The cost is that
+   * a cleanly-stopped worker holds its lease until it expires, which bounds
+   * how long discovery can stall.
+   *
+   * Implementations MUST make acquisition atomic — a read-then-write would
+   * let two workers hold it at once. One conditional \`UPDATE ... RETURNING\`
+   * is the intended shape.
+   *
+   * @see {@link subscribe} for the monotonic checkpoint write, which is
+   *   unchanged and remains safe under concurrent correlators
+   */
+  lease_correlation?: (
+    key: string,
+    by: string,
+    millis: number
+  ) => Promise<boolean>;
 
   /**
    * Registers streams for event processing.
@@ -38904,6 +39386,66 @@ export interface Store extends Disposable, EventSource {
     millis: number,
     lane?: string
   ) => Promise<Lease[]>;
+
+  /**
+   * Takes (or renews) the correlation lease for \`millis\`.
+   *
+   * **Capability-gated.** Adapters may omit it — correlate calls it through
+   * \`?.\`, and a store without it keeps today's behaviour, where every worker
+   * scans.
+   *
+   * Exists because correlation is duplicated work at every worker count.
+   * Each worker holds its own in-memory scan position, seeded from the
+   * durable checkpoint once at start-up, so N workers wake on the same commit
+   * and each read the whole range and each write the same marks. Measured on
+   * real worker processes, reads and mark-writes per committed event come out
+   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
+   * are idempotent, so this is waste rather than error — but the writes land
+   * on the rows {@link claim} locks and churn the partial index the design
+   * depends on, so the waste scales the wrong way.
+   *
+   * Delivery is unaffected either way: leases already make it exactly-once.
+   * This governs only which worker bothers to look.
+   *
+   * @param key - Which correlator this is. The lease is only sound between
+   *   workers that look for the same things, so this scopes it: identical
+   *   workers share a key and take turns, while two different applications
+   *   sharing one database get separate leases and never starve each other.
+   *   Callers derive it from the registry; the store treats it as opaque.
+   * @param by - Caller identity. Passing the same value renews rather than
+   *   fails, so acquisition and renewal are one call.
+   * @param millis - How long the lease should be held from now.
+   * @returns \`true\` when the caller holds the lease, \`false\` when another
+   *   worker with the same \`key\` does.
+   *
+   * Deliberately does **not** hand back the correlate checkpoint, though an
+   * earlier draft did. A worker's local scan position falls behind while
+   * someone else holds the lease, so syncing from the durable checkpoint
+   * looks like an obvious win — but that checkpoint is shared by every
+   * correlator against this store, including ones with a different \`key\`.
+   * Syncing from it would let one application skip events another had
+   * already scanned, which is a silent delivery failure. Instead a worker
+   * that takes over re-scans from its own position: redundant, bounded by
+   * paging, and idempotent, because marks only ever move forward.
+   *
+   * **Released by expiry only**, with no release verb, so a crash and a
+   * graceful shutdown take the identical path and the recovery path is
+   * exercised constantly rather than only during incidents. The cost is that
+   * a cleanly-stopped worker holds its lease until it expires, which bounds
+   * how long discovery can stall.
+   *
+   * Implementations MUST make acquisition atomic — a read-then-write would
+   * let two workers hold it at once. One conditional \`UPDATE ... RETURNING\`
+   * is the intended shape.
+   *
+   * @see {@link subscribe} for the monotonic checkpoint write, which is
+   *   unchanged and remains safe under concurrent correlators
+   */
+  lease_correlation?: (
+    key: string,
+    by: string,
+    millis: number
+  ) => Promise<boolean>;
 
   /**
    * Registers streams for event processing.
@@ -50895,6 +51437,7 @@ export class PostgresStore implements Store {
   private _fqs: string;
   /** Correlate checkpoint table (#1484) — one row, id 0. */
   private _fqc: string;
+  private _fql: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * \`notify()\` LISTEN handler skips payloads where \`by === this._by\`,
@@ -50989,6 +51532,7 @@ export class PostgresStore implements Store {
     this._fqt = \`"\${this.config.schema}"."\${this.config.table}"\`;
     this._fqs = \`"\${this.config.schema}"."\${this.config.table}_streams"\`;
     this._fqc = \`"\${this.config.schema}"."\${this.config.table}_correlated"\`;
+    this._fql = \`"\${this.config.schema}"."\${this.config.table}_correlation_lease"\`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, \`this.notify\` is \`undefined\`, the orchestrator skips
@@ -51197,6 +51741,25 @@ export class PostgresStore implements Store {
       await client.query(
         \`INSERT INTO \${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;\`
       );
+      // Correlation lease (#1532). RFC 1484 created the checkpoint relation
+      // with no lease columns, on the grounds that the monotonic write needs
+      // no coordination — true, and beside the point. The lease does not
+      // protect the write; it decides which worker bothers scanning at all,
+      // because otherwise every worker reads the whole log and writes the
+      // same marks.
+      //
+      // Its own relation rather than columns on the checkpoint, because it is
+      // keyed and the checkpoint is a singleton: a lease is only sound
+      // between workers that look for the same things, so two different
+      // applications sharing this database get separate rows and never starve
+      // each other.
+      await client.query(
+        \`CREATE TABLE IF NOT EXISTS \${this._fql} (
+          key text PRIMARY KEY,
+          leased_by text NOT NULL,
+          leased_until timestamptz NOT NULL
+        ) TABLESPACE pg_default;\`
+      );
 
       // Migration for tables created before priority lanes (ACT-102).
       // \`ADD COLUMN IF NOT EXISTS\` is a no-op when the column is
@@ -51376,7 +51939,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '\${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS \${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS \${this._fqc}, \${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS \${this._fql}, \${this._fqc}, \${this._fqs}';
           IF '\${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "\${this.config.schema}" CASCADE';
           END IF;
@@ -52827,6 +53390,48 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Takes or renews the correlation lease, returning the durable checkpoint
+   * when held.
+   *
+   * One conditional \`UPDATE ... RETURNING\`, never a read-then-write: two
+   * workers reading an expired lease before either writes would both believe
+   * they hold it. The \`leased_by = $1\` arm folds renewal into the same
+   * statement, so a holder extends its own lease and a worker that lost one
+   * to expiry simply re-acquires.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, \`undefined\` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    const client = await this._client("lease_correlation");
+    try {
+      // One upsert, never a read-then-write: two workers that both read an
+      // expired lease before either wrote would both believe they hold it.
+      // The \`leased_by = $2\` arm folds renewal into acquisition, so a holder
+      // extends while it works and a worker that lost its lease to expiry
+      // simply takes it again.
+      const { rowCount } = await client.query(
+        \`INSERT INTO \${this._fql} (key, leased_by, leased_until)
+         VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
+         ON CONFLICT (key) DO UPDATE
+            SET leased_by = EXCLUDED.leased_by,
+                leased_until = EXCLUDED.leased_until
+          WHERE \${this._fql}.leased_until < now()
+             OR \${this._fql}.leased_by = EXCLUDED.leased_by;\`,
+        [key, by, millis]
+      );
+      return (rowCount ?? 0) > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
    * Windowed targets (\`before\` set) prune the prefix below the closest safe
    * \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
@@ -53654,6 +54259,19 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
     );
+    // Correlation lease (#1532). Its own table rather than columns on the
+    // checkpoint, because it is keyed and the checkpoint is a singleton: a
+    // lease is only sound between workers that look for the same things, so
+    // two different applications sharing this database get separate rows and
+    // never starve each other. \`leased_until\` is epoch millis — SQLite has no
+    // timestamp type, and an integer comparison is what acquiring needs.
+    await this.client.execute(\`
+      CREATE TABLE IF NOT EXISTS correlation_lease (
+        key TEXT PRIMARY KEY,
+        leased_by TEXT NOT NULL,
+        leased_until INTEGER NOT NULL
+      )
+    \`);
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
@@ -54743,6 +55361,45 @@ export class SqliteStore implements Store {
       args: [priority, priority, ...filterArgs] as any[],
     });
     return result.rowsAffected;
+  }
+
+  /**
+   * Takes or renews the correlation lease, returning the durable checkpoint
+   * when held.
+   *
+   * A single conditional UPDATE, never a read-then-write: two workers reading
+   * an expired lease before either writes would both believe they hold it.
+   * The \`leased_by = ?\` arm folds renewal into the same statement.
+   *
+   * libSQL does not return rows from UPDATE, so the write reports
+   * \`rowsAffected\` and the checkpoint is read back inside the same write
+   * transaction — which is serialized here, so no other correlator can take
+   * the lease between the two statements.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, \`undefined\` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    // One upsert, never a read-then-write: two workers that both read an
+    // expired lease before either wrote would both believe they hold it. The
+    // \`leased_by = excluded.leased_by\` arm folds renewal into acquisition.
+    const now = Date.now();
+    const taken = await this.client.execute({
+      sql: \`INSERT INTO correlation_lease (key, leased_by, leased_until)
+            VALUES (?, ?, ?)
+            ON CONFLICT (key) DO UPDATE
+               SET leased_by = excluded.leased_by,
+                   leased_until = excluded.leased_until
+             WHERE correlation_lease.leased_until < ?
+                OR correlation_lease.leased_by = excluded.leased_by\`,
+      args: [key, by, now + millis, now],
+    });
+    return taken.rowsAffected > 0;
   }
 
   // --- truncate: transactional delete + seed ---
@@ -57236,6 +57893,17 @@ export type StoreCapabilities = {
    * rollback on mid-iteration throw.
    */
   readonly restore?: boolean;
+  /**
+   * Adapter implements {@link Store.lease_correlation}. When \`true\`, the TCK
+   * runs the correlation-lease suite — exclusive acquisition, renewal by the
+   * same holder, re-acquisition after expiry, and that the checkpoint handed
+   * back matches what \`subscribe\` persisted.
+   *
+   * Optional because a store that omits it simply lets every worker scan,
+   * which is the pre-#1532 behaviour and remains correct: the marks are
+   * idempotent, so the duplication is waste rather than error.
+   */
+  readonly lease_correlation?: boolean;
   /**
    * Adapter supports sensitive-data isolation (#566): accepts the
    * optional \`pii\` field on commit messages, returns it on load
@@ -61237,6 +61905,84 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // so the gating lives inside vitest's skip mechanism instead of an
     // \`if\` branch every consumer would have to disprove (all three
     // in-tree adapters opt in to restore).
+    describe.skipIf(!caps.lease_correlation)(
+      "lease_correlation (capability)",
+      () => {
+        const by = () => \`corr-\${uid()}\`;
+        const key = () => \`key-\${uid()}\`;
+
+        /**
+         * Hand a lease back early.
+         *
+         * There is no release verb — expiry is the only path, deliberately,
+         * so a crash and a clean stop behave identically. A holder can still
+         * shorten its own lease, because re-acquiring as the same holder
+         * renews, and renewing to 1ms releases in all but name. Each case
+         * does this so it cannot strand a lease for the next one.
+         */
+        const release = async (k: string, holder: string) => {
+          await store.lease_correlation!(k, holder, 1);
+          await new Promise((r) => setTimeout(r, 20));
+        };
+
+        it("grants the lease", async () => {
+          const k = key();
+          const holder = by();
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          await release(k, holder);
+        });
+
+        it("refuses a second holder while the lease is live", async () => {
+          const k = key();
+          const holder = by();
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          // The whole point: two workers must not scan the same range at once.
+          expect(await store.lease_correlation!(k, by(), 10_000)).toBe(false);
+          await release(k, holder);
+        });
+
+        it("lets the same holder renew rather than failing", async () => {
+          const k = key();
+          const holder = by();
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          // Acquisition and renewal are one call by design, so a holder can
+          // extend while it works without needing a second verb.
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          await release(k, holder);
+        });
+
+        it("becomes available again once the lease expires", async () => {
+          const k = key();
+          expect(await store.lease_correlation!(k, by(), 1)).toBe(true);
+          await new Promise((r) => setTimeout(r, 30));
+          // Expiry is also the crash-recovery path: a dead holder must not
+          // stall discovery forever.
+          const next = by();
+          expect(await store.lease_correlation!(k, next, 10_000)).toBe(true);
+          await release(k, next);
+        });
+
+        it("keys leases independently, so one correlator cannot starve another", async () => {
+          // The reason the lease is keyed at all. Two different applications
+          // sharing a store are not interchangeable: if one held a global
+          // lease, the other would never scan and its reactions would
+          // silently stop.
+          const a = key();
+          const b = key();
+          const holder_a = by();
+          const holder_b = by();
+          expect(await store.lease_correlation!(a, holder_a, 10_000)).toBe(
+            true
+          );
+          expect(await store.lease_correlation!(b, holder_b, 10_000)).toBe(
+            true
+          );
+          await release(a, holder_a);
+          await release(b, holder_b);
+        });
+      }
+    );
+
     describe.skipIf(!caps.restore)("restore (capability)", () => {
       // Restore wipes the whole store — every test starts from a
       // freshly-dropped + seeded baseline so no test inherits

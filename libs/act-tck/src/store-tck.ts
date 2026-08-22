@@ -60,6 +60,17 @@ export type StoreCapabilities = {
    */
   readonly restore?: boolean;
   /**
+   * Adapter implements {@link Store.lease_correlation}. When `true`, the TCK
+   * runs the correlation-lease suite — exclusive acquisition, renewal by the
+   * same holder, re-acquisition after expiry, and that the checkpoint handed
+   * back matches what `subscribe` persisted.
+   *
+   * Optional because a store that omits it simply lets every worker scan,
+   * which is the pre-#1532 behaviour and remains correct: the marks are
+   * idempotent, so the duplication is waste rather than error.
+   */
+  readonly lease_correlation?: boolean;
+  /**
    * Adapter supports sensitive-data isolation (#566): accepts the
    * optional `pii` field on commit messages, returns it on load
    * outputs, and implements {@link Store.forget_pii}. When `true`,
@@ -4060,6 +4071,84 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // so the gating lives inside vitest's skip mechanism instead of an
     // `if` branch every consumer would have to disprove (all three
     // in-tree adapters opt in to restore).
+    describe.skipIf(!caps.lease_correlation)(
+      "lease_correlation (capability)",
+      () => {
+        const by = () => `corr-${uid()}`;
+        const key = () => `key-${uid()}`;
+
+        /**
+         * Hand a lease back early.
+         *
+         * There is no release verb — expiry is the only path, deliberately,
+         * so a crash and a clean stop behave identically. A holder can still
+         * shorten its own lease, because re-acquiring as the same holder
+         * renews, and renewing to 1ms releases in all but name. Each case
+         * does this so it cannot strand a lease for the next one.
+         */
+        const release = async (k: string, holder: string) => {
+          await store.lease_correlation!(k, holder, 1);
+          await new Promise((r) => setTimeout(r, 20));
+        };
+
+        it("grants the lease", async () => {
+          const k = key();
+          const holder = by();
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          await release(k, holder);
+        });
+
+        it("refuses a second holder while the lease is live", async () => {
+          const k = key();
+          const holder = by();
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          // The whole point: two workers must not scan the same range at once.
+          expect(await store.lease_correlation!(k, by(), 10_000)).toBe(false);
+          await release(k, holder);
+        });
+
+        it("lets the same holder renew rather than failing", async () => {
+          const k = key();
+          const holder = by();
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          // Acquisition and renewal are one call by design, so a holder can
+          // extend while it works without needing a second verb.
+          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
+          await release(k, holder);
+        });
+
+        it("becomes available again once the lease expires", async () => {
+          const k = key();
+          expect(await store.lease_correlation!(k, by(), 1)).toBe(true);
+          await new Promise((r) => setTimeout(r, 30));
+          // Expiry is also the crash-recovery path: a dead holder must not
+          // stall discovery forever.
+          const next = by();
+          expect(await store.lease_correlation!(k, next, 10_000)).toBe(true);
+          await release(k, next);
+        });
+
+        it("keys leases independently, so one correlator cannot starve another", async () => {
+          // The reason the lease is keyed at all. Two different applications
+          // sharing a store are not interchangeable: if one held a global
+          // lease, the other would never scan and its reactions would
+          // silently stop.
+          const a = key();
+          const b = key();
+          const holder_a = by();
+          const holder_b = by();
+          expect(await store.lease_correlation!(a, holder_a, 10_000)).toBe(
+            true
+          );
+          expect(await store.lease_correlation!(b, holder_b, 10_000)).toBe(
+            true
+          );
+          await release(a, holder_a);
+          await release(b, holder_b);
+        });
+      }
+    );
+
     describe.skipIf(!caps.restore)("restore (capability)", () => {
       // Restore wipes the whole store — every test starts from a
       // freshly-dropped + seeded baseline so no test inherits

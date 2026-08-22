@@ -13,6 +13,7 @@ runStoreTck({
   capabilities: {
     notify: true,
     restore: true,
+    lease_correlation: true,
     pii_isolation: true,
     concurrent_claim: true,
     source_matches: true,

@@ -295,6 +295,19 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("lease_correlation", () => {
+    it("reports the lease as not held when rowCount is null (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock — pg types rowCount as number | null
+        makeClient(vi.fn().mockResolvedValue({ rowCount: null }))
+      );
+      // Failing closed matters more here than elsewhere: believing we hold a
+      // lease we do not would put two workers on the same scan, which is the
+      // duplication the lease exists to remove.
+      expect(await store.lease_correlation("k", "w", 1000)).toBe(false);
+    });
+  });
+
   describe("prioritize", () => {
     it("returns 0 when rowCount is undefined (defensive)", async () => {
       vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(

@@ -473,6 +473,19 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
     );
+    // Correlation lease (#1532). Its own table rather than columns on the
+    // checkpoint, because it is keyed and the checkpoint is a singleton: a
+    // lease is only sound between workers that look for the same things, so
+    // two different applications sharing this database get separate rows and
+    // never starve each other. `leased_until` is epoch millis — SQLite has no
+    // timestamp type, and an integer comparison is what acquiring needs.
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS correlation_lease (
+        key TEXT PRIMARY KEY,
+        leased_by TEXT NOT NULL,
+        leased_until INTEGER NOT NULL
+      )
+    `);
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
@@ -1562,6 +1575,45 @@ export class SqliteStore implements Store {
       args: [priority, priority, ...filterArgs] as any[],
     });
     return result.rowsAffected;
+  }
+
+  /**
+   * Takes or renews the correlation lease, returning the durable checkpoint
+   * when held.
+   *
+   * A single conditional UPDATE, never a read-then-write: two workers reading
+   * an expired lease before either writes would both believe they hold it.
+   * The `leased_by = ?` arm folds renewal into the same statement.
+   *
+   * libSQL does not return rows from UPDATE, so the write reports
+   * `rowsAffected` and the checkpoint is read back inside the same write
+   * transaction — which is serialized here, so no other correlator can take
+   * the lease between the two statements.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, `undefined` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    // One upsert, never a read-then-write: two workers that both read an
+    // expired lease before either wrote would both believe they hold it. The
+    // `leased_by = excluded.leased_by` arm folds renewal into acquisition.
+    const now = Date.now();
+    const taken = await this.client.execute({
+      sql: `INSERT INTO correlation_lease (key, leased_by, leased_until)
+            VALUES (?, ?, ?)
+            ON CONFLICT (key) DO UPDATE
+               SET leased_by = excluded.leased_by,
+                   leased_until = excluded.leased_until
+             WHERE correlation_lease.leased_until < ?
+                OR correlation_lease.leased_by = excluded.leased_by`,
+      args: [key, by, now + millis, now],
+    });
+    return taken.rowsAffected > 0;
   }
 
   // --- truncate: transactional delete + seed ---

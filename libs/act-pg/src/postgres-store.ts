@@ -329,6 +329,7 @@ export class PostgresStore implements Store {
   private _fqs: string;
   /** Correlate checkpoint table (#1484) — one row, id 0. */
   private _fqc: string;
+  private _fql: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * `notify()` LISTEN handler skips payloads where `by === this._by`,
@@ -423,6 +424,7 @@ export class PostgresStore implements Store {
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
+    this._fql = `"${this.config.schema}"."${this.config.table}_correlation_lease"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, `this.notify` is `undefined`, the orchestrator skips
@@ -631,6 +633,25 @@ export class PostgresStore implements Store {
       await client.query(
         `INSERT INTO ${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;`
       );
+      // Correlation lease (#1532). RFC 1484 created the checkpoint relation
+      // with no lease columns, on the grounds that the monotonic write needs
+      // no coordination — true, and beside the point. The lease does not
+      // protect the write; it decides which worker bothers scanning at all,
+      // because otherwise every worker reads the whole log and writes the
+      // same marks.
+      //
+      // Its own relation rather than columns on the checkpoint, because it is
+      // keyed and the checkpoint is a singleton: a lease is only sound
+      // between workers that look for the same things, so two different
+      // applications sharing this database get separate rows and never starve
+      // each other.
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS ${this._fql} (
+          key text PRIMARY KEY,
+          leased_by text NOT NULL,
+          leased_until timestamptz NOT NULL
+        ) TABLESPACE pg_default;`
+      );
 
       // Migration for tables created before priority lanes (ACT-102).
       // `ADD COLUMN IF NOT EXISTS` is a no-op when the column is
@@ -810,7 +831,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS ${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS ${this._fqc}, ${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS ${this._fql}, ${this._fqc}, ${this._fqs}';
           IF '${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "${this.config.schema}" CASCADE';
           END IF;
@@ -2258,6 +2279,48 @@ export class PostgresStore implements Store {
     // Don't keep the event loop alive purely for a reconnect attempt —
     // a process that has nothing else to do should still be able to exit.
     this._reconnect_timer.unref?.();
+  }
+
+  /**
+   * Takes or renews the correlation lease, returning the durable checkpoint
+   * when held.
+   *
+   * One conditional `UPDATE ... RETURNING`, never a read-then-write: two
+   * workers reading an expired lease before either writes would both believe
+   * they hold it. The `leased_by = $1` arm folds renewal into the same
+   * statement, so a holder extends its own lease and a worker that lost one
+   * to expiry simply re-acquires.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, `undefined` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    const client = await this._client("lease_correlation");
+    try {
+      // One upsert, never a read-then-write: two workers that both read an
+      // expired lease before either wrote would both believe they hold it.
+      // The `leased_by = $2` arm folds renewal into acquisition, so a holder
+      // extends while it works and a worker that lost its lease to expiry
+      // simply takes it again.
+      const { rowCount } = await client.query(
+        `INSERT INTO ${this._fql} (key, leased_by, leased_until)
+         VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
+         ON CONFLICT (key) DO UPDATE
+            SET leased_by = EXCLUDED.leased_by,
+                leased_until = EXCLUDED.leased_until
+          WHERE ${this._fql}.leased_until < now()
+             OR ${this._fql}.leased_by = EXCLUDED.leased_by;`,
+        [key, by, millis]
+      );
+      return (rowCount ?? 0) > 0;
+    } finally {
+      client.release();
+    }
   }
 
   /**

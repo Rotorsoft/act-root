@@ -9,6 +9,7 @@ runStoreTck({
   default_factory: () => new InMemoryStore(),
   capabilities: {
     restore: true,
+    lease_correlation: true,
     pii_isolation: true,
     concurrent_claim: true,
     source_matches: true,

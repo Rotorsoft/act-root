@@ -1298,7 +1298,31 @@ be served from cache rather than found in the store).
 
 **The measurement RFC 1484 asked for now exists, and it argues for
 single-writer correlation** rather than for caching what the duplication
-produces.
+produces. That is what [RFC 1532](../../rfcs/1532-correlate-lease.md) builds,
+and the after-numbers are below.
+
+### After the correlation lease (#1532)
+
+One worker per registry scans at a time, the rest skip. Same benchmark, same
+shape:
+
+| workers | reads/event before | after | mark writes before | after | delivered |
+|---|---|---|---|---|---|
+| 1 | 1.00 | 1.00 | 398 | 399 | 402 |
+| 2 | 2.00 | **1.00** | 798 | **403** | 403 |
+| 4 | 4.00 | **1.00** | 1600 | **404** | 404 |
+| 8 | 8.00 | **1.00** | 3256 | **405** | 405 |
+
+**Flat instead of linear, in reads and writes both** — eight times less
+scanning and eight times fewer mark writes at eight workers. `handled` still
+tracks `committed` exactly at every worker count, so delivery is untouched;
+`claim` calls still scale with workers, because the drain is unchanged and
+competing consumers are the point.
+
+The write column matters as much as the read column: those writes land on the
+rows `claim` locks and churn the partial index measured at ~38% HOT in the
+[bloat soak](#1523--does-the-churn-settle-or-compound), so removing seven of
+every eight removes that multiple of the churn too.
 
 ### Reproducing
 

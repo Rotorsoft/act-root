@@ -367,6 +367,16 @@ export class InMemoryStore implements Store {
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated_at = -1;
+  /**
+   * Correlation leases (#1532), keyed by correlator identity. Keyed rather
+   * than singular because a lease is only sound between workers that look
+   * for the same things — two different applications sharing this store must
+   * not starve each other.
+   */
+  private _correlation_leases = new Map<
+    string,
+    { by: string; until: number }
+  >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the has-work probe in
@@ -689,6 +699,32 @@ export class InMemoryStore implements Store {
         this._streams.get(p.stream)?.lease({ ...p, by, retry: 0 }, millis)
       )
       .filter((l) => !!l);
+  }
+
+  /**
+   * Takes or renews the correlation lease, returning the checkpoint when held.
+   *
+   * A single process sharing one InMemoryStore is the case this store exists
+   * for, so the lease is nearly always granted. It is implemented anyway so
+   * the contended path has somewhere to run in tests, and so the in-memory
+   * store keeps matching the durable adapters rather than quietly diverging
+   * on a capability.
+   *
+   * @param by - Caller identity; the same value renews rather than fails
+   * @param millis - Lease duration from now
+   * @returns The correlate checkpoint when held, `undefined` otherwise
+   */
+  async lease_correlation(
+    key: string,
+    by: string,
+    millis: number
+  ): Promise<boolean> {
+    await sleep();
+    const now = Date.now();
+    const held = this._correlation_leases.get(key);
+    if (held && held.until >= now && held.by !== by) return false;
+    this._correlation_leases.set(key, { by, until: now + millis });
+    return true;
   }
 
   /**

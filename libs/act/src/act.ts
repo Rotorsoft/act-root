@@ -943,7 +943,7 @@ export class Act<
         // the scoped store and `_initialized` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this._correlate_scanned(q),
+        correlate: (q) => this._correlate_scanned(q, true),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -1629,7 +1629,9 @@ export class Act<
    * charter-covered and has no use for it.
    */
   private async _correlate_scanned(
-    query: Query
+    query: Query,
+    /** Honour the correlation lease — settle and the poller only (#1532). */
+    lease = false
   ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
     // Writer-only instances skip dynamic stream discovery. The
     // {subscribed, last_id} pair returns the no-op result; the
@@ -1637,7 +1639,7 @@ export class Act<
     if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
       const { subscribed, last_id, marked, scanned } =
-        await this._correlate.correlate(query);
+        await this._correlate.correlate(query, lease);
       // Newly-subscribed streams must arm their lane controllers, same
       // as reset/unblock: a lane worker's tick can disarm on an empty
       // claim in the window before the subscription lands, and nothing
@@ -1742,6 +1744,14 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    // Hand the correlation lease back rather than making the next worker
+    // wait out its expiry (#1532). Best-effort and deliberately not awaited:
+    // stopping correlations is synchronous by contract, and the fallback is
+    // the expiry that would have applied anyway.
+    // Wrapped in `_scoped` because it resolves the store through the port: a
+    // scoped Act would otherwise release against the singleton and leave its
+    // real lease held until expiry.
+    void this._scoped(() => this._correlate.release_correlation());
   }
 
   /**

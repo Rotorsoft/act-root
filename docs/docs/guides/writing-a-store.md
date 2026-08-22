@@ -213,6 +213,8 @@ runStoreTck({
 
 When `notify: true`, the TCK runs the cross-instance conformance cases: a listener receives commits from a *sibling* instance created by the same `factory`, never its own commits (the port's self-filtering MUST — "implementations must skip their own commits"), and exactly one notification per commit transaction carrying the full event batch. This requires your `factory` to produce instances that share one backing store (two adapters on the same schema/table is the standing pattern). True cross-*process* plumbing — reconnect discipline, payload caps — still belongs in your adapter's own tests.
 
+`lease_correlation` is another opt-in. Skip it and every worker scans the log for itself, which is correct — the marks are idempotent — but costs one full pass and one set of mark-writes per worker. Implement it and one worker scans on behalf of the rest; see [Serializing correlation](#serializing-correlation-optional).
+
 The `restore` capability is the other opt-in today. Skip it (`capabilities.restore: false` or just omit) and the TCK's restore cases stay parked. Flip it on once you've implemented `Store.restore` — see the next section for the contract.
 
 ## Deferring a stream (`defer` and the `claim` skip)
@@ -326,6 +328,43 @@ Forward a **bare** `{ stream }` rather than the original target. Passing the ori
 **Truncate the log first.** Its truncate commits the tombstone that stops new events landing on the stream, so a crash between the two calls leaves an orphaned subscription row: it points at a stream whose events are gone, claims nothing, and is reaped by the next close of that stream. The reverse order leaves a live stream with **no** subscription, which silently stops delivery and never heals. `Act.close` is already resumable after an interrupted truncate ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is what makes the window recoverable rather than merely rare.
 
 The store TCK already pins every fact this relies on — restart keeps the row while retire drops it, windowed leaves subscriptions untouched, and `reset` re-arms a caught-up subscription — so a composition built from them inherits those guarantees.
+
+## Serializing correlation (optional)
+
+Correlation is how Act discovers which subscriptions have work: it reads the event log forward from a checkpoint and marks every subscription an event resolves to. Every worker does this independently — each keeps its own scan position in memory, seeded from the durable checkpoint once at start-up — so N workers wake on the same commit and each reads the whole range and writes the same marks. Measured on real worker processes, that comes out at exactly N reads and N mark-writes per committed event ([#1532](https://github.com/Rotorsoft/act-root/issues/1532)).
+
+Implementing `lease_correlation` lets one worker do it for all of them:
+
+```ts no-check
+async lease_correlation(
+  key: string,
+  by: string,
+  millis: number
+): Promise<boolean> {
+  const { rowCount } = await this.client.query(
+    `INSERT INTO ${this.lease_table} (key, leased_by, leased_until)
+     VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
+     ON CONFLICT (key) DO UPDATE
+        SET leased_by = EXCLUDED.leased_by,
+            leased_until = EXCLUDED.leased_until
+      WHERE ${this.lease_table}.leased_until < now()
+         OR ${this.lease_table}.leased_by = EXCLUDED.leased_by;`,
+    [key, by, millis]
+  );
+  return (rowCount ?? 0) > 0;
+}
+```
+
+Four rules:
+
+- **Acquire atomically.** One conditional upsert, never a read then a write — two workers that both read an expired lease before either wrote would both believe they hold it, which is exactly the duplication the lease removes.
+- **Renewal is the same call.** Passing the same `by` extends rather than fails, so a holder keeps its lease while it works without needing a second verb.
+- **Expiry is the only release.** There is no release method, deliberately: a crash and a clean stop then take the identical path, so the recovery path is the common path and gets exercised constantly rather than only during incidents.
+- **Treat `key` as opaque, and key on it.** It scopes the lease to workers that look for the same things. A deployment running some workers with a subset of the reactions is the case that matters: those are not interchangeable with the full ones, and sharing a lease would leave one set of targets never marked — a reaction that silently never runs.
+
+**What you are trading.** Without the lease, correlation is fault-tolerant by redundancy: any worker can do it, so losing one costs nothing. With it, discovery stalls for up to the lease duration after a holder dies. Nothing is lost — the marks are durable and the next holder resumes — but reaction latency spikes by up to that window. That is why the duration is seconds rather than minutes.
+
+Opt in with `capabilities: { lease_correlation: true }` and the TCK runs the suite: the lease is granted, refused to a second holder, renewed by the same holder, re-acquirable after expiry, and keyed independently so one correlator cannot starve another.
 
 ## Implementing `Store.restore` (optional)
 
