@@ -64,6 +64,57 @@ export interface Logger extends Disposable {
 // ---------------------------------------------------------------------------
 
 /**
+ * Result of a {@link Store.subscribe} call.
+ *
+ * Named rather than written inline because three places state it — the port,
+ * the drain's helper, and every adapter — and they drifted apart the moment
+ * one of them grew a field.
+ */
+export type SubscribeResult = {
+  subscribed: number;
+  watermark: number;
+  /**
+   * Whether the caller holds the correlation lease and should scan
+   * (#1532).
+   *
+   * `undefined` when no `correlator` was supplied — no lease was requested,
+   * so there is no answer and the caller scans as it always has.
+   *
+   * Acquiring MUST be atomic. A read-then-write lets two workers both see
+   * an expired lease and both believe they hold it, which is precisely the
+   * duplication the lease removes.
+   *
+   * Released by expiry only: a crash and a clean stop then take the same
+   * path, so the recovery path is the common one. A holder can still hand
+   * it back early by renewing with a minimal `millis`.
+   */
+  correlating?: boolean;
+  /**
+   * The correlate checkpoint (#1484): how far `correlate` has **read** the
+   * event log, or `-1` when it has never advanced.
+   *
+   * Distinct from a subscription's `at` (how far a *target* has been
+   * processed) — a run of events resolving to no target moves this and no
+   * watermark. It rides `subscribe`'s existing return and is advanced by
+   * the same call's `correlated_at` argument, so maintaining it costs no
+   * store round trip of its own: `correlate` already calls `subscribe`
+   * with the targets each scan discovered.
+   *
+   * Adapters keep it in their own relation, never as a subscription, so no
+   * stream-scoped surface (`prioritize`, `reset`, `unblock`,
+   * `query_streams`, `blocked_streams`) ever counts it.
+   *
+   * **Keyed per correlator** when a `correlator` is supplied (#1532), and
+   * shared otherwise. Correlators that look for different things read the
+   * log for different reasons, so one inheriting another's position at cold
+   * start could skip events it needed — previously survivable only because
+   * of the back-scan window. A key with no row yet falls back to the shared
+   * value, so an upgrade does not re-read history.
+   */
+  correlated_at: number;
+};
+
+/**
  * Result of a {@link Store.truncate} operation, keyed by stream name.
  * Each entry contains the number of deleted events and the committed
  * seed event (snapshot or tombstone).
@@ -713,49 +764,7 @@ export interface Store extends Disposable, EventSource {
      * does, and why this is additive.
      */
     correlator?: { key: string; by: string; millis: number }
-  ) => Promise<{
-    subscribed: number;
-    watermark: number;
-    /**
-     * Whether the caller holds the correlation lease and should scan
-     * (#1532).
-     *
-     * `undefined` when no `correlator` was supplied — no lease was requested,
-     * so there is no answer and the caller scans as it always has.
-     *
-     * Acquiring MUST be atomic. A read-then-write lets two workers both see
-     * an expired lease and both believe they hold it, which is precisely the
-     * duplication the lease removes.
-     *
-     * Released by expiry only: a crash and a clean stop then take the same
-     * path, so the recovery path is the common one. A holder can still hand
-     * it back early by renewing with a minimal `millis`.
-     */
-    correlating?: boolean;
-    /**
-     * The correlate checkpoint (#1484): how far `correlate` has **read** the
-     * event log, or `-1` when it has never advanced.
-     *
-     * Distinct from a subscription's `at` (how far a *target* has been
-     * processed) — a run of events resolving to no target moves this and no
-     * watermark. It rides `subscribe`'s existing return and is advanced by
-     * the same call's `correlated_at` argument, so maintaining it costs no
-     * store round trip of its own: `correlate` already calls `subscribe`
-     * with the targets each scan discovered.
-     *
-     * Adapters keep it in their own relation, never as a subscription, so no
-     * stream-scoped surface (`prioritize`, `reset`, `unblock`,
-     * `query_streams`, `blocked_streams`) ever counts it.
-     *
-     * **Keyed per correlator** when a `correlator` is supplied (#1532), and
-     * shared otherwise. Correlators that look for different things read the
-     * log for different reasons, so one inheriting another's position at cold
-     * start could skip events it needed — previously survivable only because
-     * of the back-scan window. A key with no row yet falls back to the shared
-     * value, so an upgrade does not re-read history.
-     */
-    correlated_at: number;
-  }>;
+  ) => Promise<SubscribeResult>;
 
   /**
    * Finalizes leased streams **atomically**: acknowledges the ones

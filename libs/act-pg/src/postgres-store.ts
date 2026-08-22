@@ -19,6 +19,7 @@ import type {
   StreamPosition,
   StreamStats,
   SubscribeInput,
+  SubscribeResult,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -1334,12 +1335,7 @@ export class PostgresStore implements Store {
     streams: SubscribeInput[],
     correlated_at?: number,
     correlator?: { key: string; by: string; millis: number }
-  ): Promise<{
-    subscribed: number;
-    watermark: number;
-    correlated_at: number;
-    correlating?: boolean;
-  }> {
+  ): Promise<SubscribeResult> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");

@@ -15,6 +15,7 @@ import type {
   StreamPosition,
   StreamStats,
   SubscribeInput,
+  SubscribeResult,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -726,7 +727,7 @@ export class SqliteStore implements Store {
     streams: SubscribeInput[],
     correlated_at?: number,
     correlator?: { key: string; by: string; millis: number }
-  ) {
+  ): Promise<SubscribeResult> {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no `REGEXP`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
