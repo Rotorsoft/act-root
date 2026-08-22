@@ -21,6 +21,7 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
+import { browseDirectory } from "./discovery/browse.js";
 import {
   PG_PORT_RANGE_END,
   PG_PORT_RANGE_START,
@@ -508,6 +509,19 @@ export const inspectorRouter = t.router({
    * `kind` so existing frontend payloads (`{ host, portFrom, portTo }`)
    * keep working unchanged.
    */
+  /**
+   * List a directory's subdirectories, for picking a SQLite scan target.
+   *
+   * A read-only query rather than a mutation: it changes nothing, and the
+   * mutation guard exists to stop a hostile page driving state changes.
+   *
+   * Browsing grants nothing new — `discover` has always accepted an arbitrary
+   * path and read it. This only removes the need to know the path in advance.
+   */
+  browse: t.procedure
+    .input(z.object({ path: z.string().optional() }).optional())
+    .query(({ input }) => browseDirectory(input?.path)),
+
   discover: mutationProcedure
     .input(
       z.union([

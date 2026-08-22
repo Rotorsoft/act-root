@@ -23,7 +23,7 @@ import path from "node:path";
 import { createClient } from "@libsql/client";
 import type { DiscoveredSqliteStore, SqliteDiscoveryInput } from "./types.js";
 
-const DEFAULT_FILE_PATTERN = /\.(db|sqlite|sqlite3)$/i;
+export const DEFAULT_FILE_PATTERN = /\.(db|sqlite|sqlite3)$/i;
 const REQUIRED_TABLES = ["events", "streams"] as const;
 const REQUIRED_EVENT_COLUMNS = ["stream", "version", "meta"] as const;
 
