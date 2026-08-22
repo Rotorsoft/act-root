@@ -1183,6 +1183,26 @@ Correlate scans a range of the log; the drain then fetches overlapping ranges of
 the same events in the same process. No benchmark had ever exercised correlate's
 read path, so this had no evidence either way.
 
+> **Corrected.** The `drain fetch` column below counted every stream-filtered
+> read as a fetch, which folded in the aggregate loads `do()` performs. Three
+> readers share `query` and have to be told apart by shape: correlate has no
+> stream filter, a drain fetch carries `stream` + `after` + `limit`, an
+> aggregate load carries `stream` alone. Re-measured with that split:
+>
+> | workers | correlate scan | drain fetch | aggregate load |
+> |---|---|---|---|
+> | 1 | 456 calls / 371 events | **371 calls / 371 events, 0 empty** | 372 calls / 0 events |
+> | 4 | 468 calls / 381 events | **372 calls / 372 events, 0 empty** | 372 calls / 0 events |
+>
+> The drain is exactly 1:1 and never fetches an empty window — the "50% of
+> fetches return nothing" the original numbers implied was the loads. Loads
+> come back empty here because the workload commits 372 events across 500
+> aggregates, so every stream is fresh; that is the benchmark's shape, not a
+> framework cost. **The re-read finding stands** — every event is read twice —
+> but removable round trips are ~371 of ~1,199, so **31%, not 62%**. A window
+> cache cannot serve a load: loads replay a whole stream from version 0, and
+> the window holds a recent id range.
+
 | workers | correlate scan | drain fetch | total reads | distinct | re-reads |
 |---|---|---|---|---|---|
 | 1 | 449 calls / 370 events | 741 calls / 370 events | 740 | 370 | 370 (**50.0%**) |
@@ -1216,3 +1236,75 @@ LOG_LEVEL=error node libs/act-pg/scripts/correlate-reads.bench.mjs
 
 The `subscribe` instrumentation does an extra read to learn what each row
 already held, so this bench reports counts only — never latency.
+
+
+## #1532 — correlate under real worker processes: every worker reads everything
+
+Correlate had never been measured with workers as separate processes. Every
+earlier benchmark ran several Acts inside one Node process with `notify` off,
+so only the process doing the committing was ever armed, and only it ever
+scanned. That hid the cost this measures.
+
+`scripts/correlate-workers.bench.mjs` runs W real worker processes against one
+Postgres with `notify: true`, while the parent commits at a fixed rate. The
+workers are pure consumers — every scan they perform is the result of a remote
+commit, which is the deployed shape.
+
+20 commits/s, 500 aggregates, 20s per cell:
+
+| workers | committed | scan events | **reads/event** | subscribe entries | fetched | handled | client |
+|---|---|---|---|---|---|---|---|
+| 1 | 398 | 398 | **1.00** | 398 | 398 | 398 | 0% |
+| 2 | 399 | 798 | **2.00** | 798 | 399 | 399 | 0% |
+| 4 | 400 | 1600 | **4.00** | 1600 | 400 | 400 | 1% |
+| 8 | 407 | 3256 | **8.00** | 3256 | 407 | 407 | 2% |
+
+**Exactly linear in both directions.** Every worker reads every event, and
+every worker writes every mark. `_checkpoint` is per-instance: seeded from the
+durable value once at `init()` and advanced locally from then on, so the shared
+checkpoint is a cold-start floor and nothing more. The marks are idempotent
+(`GREATEST`), so this is waste rather than error — [RFC 1484](../../rfcs/1484-correlate-checkpoint.md)
+made that trade knowingly and deferred single-writer coordination "until a
+measurement argues for it."
+
+**Delivery is unaffected**, which is the reassuring half: `handled` tracks
+`committed` exactly at every worker count, and `fetched` does too. Claim and
+lease do their job — the duplication is entirely in discovery, never in
+delivery.
+
+**The write side is the expensive half.** `subscribe` entries scale identically
+to reads, and those writes land on the rows `claim` locks, churning the partial
+index the design depends on — the same churn measured at only ~38% HOT in the
+[bloat soak](#1523--does-the-churn-settle-or-compound). So W workers multiply
+index churn W-fold, and #1510 already measured the mark write as roughly 1.6 ms
+of the 2.2 ms a one-event settle round costs.
+
+### What this means for the event-window cache
+
+Per committed event at W workers the log is read `W + 1` times: `W` correlate
+scans plus one drain fetch. A window cache removes the fetch:
+
+| workers | reads per event | removed by cache |
+|---|---|---|
+| 1 | 2 | 50% |
+| 4 | 5 | 20% |
+| 8 | 9 | 11% |
+
+So the cache is worth most where load is lightest and fades as you scale, while
+the cost that grows — every worker re-reading and re-marking everything — it
+does not touch at all, and it buys that with a correctness hazard on the
+delivery path (an event that becomes visible after the scan passed its id would
+be served from cache rather than found in the store).
+
+**The measurement RFC 1484 asked for now exists, and it argues for
+single-writer correlation** rather than for caching what the duplication
+produces.
+
+### Reproducing
+
+```bash
+docker compose up -d
+pnpm build
+LOG_LEVEL=error node libs/act-pg/scripts/correlate-workers.bench.mjs
+# WORKERS / SECONDS / COMMITS_PER_SEC / AGGREGATES / CYCLE_MS / PORT override the shape
+```

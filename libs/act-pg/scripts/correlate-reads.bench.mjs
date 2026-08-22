@@ -70,6 +70,15 @@ const m = {
   fetch_calls: 0,
   fetch_events: 0,
   fetch_ids: new Set(),
+  // Fetches that came back with nothing. Since #1488 `claim` only hands out a
+  // stream when `at < correlated_at`, so an empty fetch means the drain was
+  // told there was work and found none — a wasted round trip a cache would
+  // hide rather than fix.
+  fetch_empty: 0,
+  correlate_empty: 0,
+  load_calls: 0,
+  load_events: 0,
+  load_empty: 0,
   // Every event id read by either path, however many times.
   all_reads: 0,
   distinct_ids: new Set(),
@@ -94,25 +103,48 @@ const instrumented = (s) =>
 
       if (prop === "query")
         return (callback, q) => {
+          // Three distinct readers share `query`, and telling them apart is
+          // the whole point — an earlier version of this bench counted every
+          // stream-filtered read as a drain fetch and silently folded the
+          // aggregate loads from `do()` into that column.
+          //   correlate scan  no stream filter
+          //   drain fetch     stream + after + limit (a windowed read)
+          //   aggregate load  stream only, no bounds (replay from 0)
           const is_correlate = q?.stream === undefined;
+          const is_fetch =
+            !is_correlate && q?.after !== undefined && q?.limit !== undefined;
           if (is_correlate) m.correlate_calls++;
-          else m.fetch_calls++;
-          return value.call(
+          else if (is_fetch) m.fetch_calls++;
+          else m.load_calls++;
+          let seen = 0;
+          const done = () => {
+            if (seen === 0) {
+              if (is_correlate) m.correlate_empty++;
+              else if (is_fetch) m.fetch_empty++;
+              else m.load_empty++;
+            }
+          };
+          const out = value.call(
             target,
             (event) => {
+              seen++;
               m.all_reads++;
               m.distinct_ids.add(event.id);
               if (is_correlate) {
                 m.correlate_events++;
                 m.correlate_ids.add(event.id);
-              } else {
+              } else if (is_fetch) {
                 m.fetch_events++;
                 m.fetch_ids.add(event.id);
-              }
+              } else m.load_events++;
               return callback(event);
             },
             q
           );
+          return Promise.resolve(out).then((r) => {
+            done();
+            return r;
+          });
         };
 
       if (prop === "subscribe")
@@ -214,6 +246,12 @@ async function main() {
     `    drain fetch:               ${m.fetch_calls} calls, ${m.fetch_events} events read`
   );
   console.log(
+    `    fetches returning nothing: ${m.fetch_empty} (${pctf(m.fetch_empty, m.fetch_calls)}% of fetches)`
+  );
+  console.log(
+    `    scans returning nothing:   ${m.correlate_empty} (${pctf(m.correlate_empty, m.correlate_calls)}% of scans)`
+  );
+  console.log(
     `    total event reads:         ${m.all_reads} (${m.distinct_ids.size} distinct)`
   );
   console.log(
@@ -221,6 +259,9 @@ async function main() {
   );
   console.log(
     `    read by both paths:        ${overlap} ids (${pctf(overlap, m.distinct_ids.size)}% of distinct)`
+  );
+  console.log(
+    `    aggregate loads:           ${m.load_calls} calls, ${m.load_events} events read (${m.load_empty} empty)`
   );
   console.log("");
   console.log("  item 3 — skip an already-sent mark");
