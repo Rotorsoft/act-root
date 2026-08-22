@@ -5,9 +5,8 @@
  * Reaction dispatch — what runs inside the drain pipeline once `run_drain_cycle`
  * has fetched events for a leased stream. Two shapes:
  *
- * - per-event `handle`: walks payloads sequentially, builds a scoped `IAct`
- *   that auto-injects `reactingTo` so handlers don't have to thread it
- *   through manually
+ * - per-event `handle`: walks payloads sequentially, installing the triggering
+ *   event as ambient reaction context so `action()` threads `reactingTo`
  * - bulk `handle_batch`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
@@ -21,7 +20,6 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
-  type DoOptions,
   type IAct,
   type Lease,
   type Logger,
@@ -29,13 +27,13 @@ import {
   type ReactionOptions,
   type ReactionPayload,
   type Schemas,
-  type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
+import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -110,10 +108,10 @@ function finalize(
 /**
  * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.
  *
- * The scoped `IAct` proxy auto-injects the triggering event as `reactingTo`
- * when handlers call `do()` without it (#587), keeping the correlation
- * chain by default. The non-do methods are reused across all dispatches —
- * only `do` rebinds per payload because it captures the triggering event.
+ * The triggering event is installed as ambient context around each handler
+ * call, so `action()` resolves it as `reactingTo` (#587, #1541). Ambient
+ * rather than bound to the `IAct` argument, so a handler that dispatches
+ * through a captured `app` inherits the chain too.
  *
  * @internal
  */
@@ -165,19 +163,14 @@ export function build_handle<
     for (let i = 0; i < payloads.length; i++) {
       const payload = payloads[i];
       const { event, handler } = payload;
-      scoped_app.do = <TKey extends keyof TActions & string>(
-        action: TKey,
-        target: Target<TActor>,
-        action_payload: Readonly<TActions[TKey]>,
-        options?: DoOptions<TEvents>
-      ) =>
-        bound_do(action, target, action_payload, {
-          ...options,
-          reactingTo:
-            options?.reactingTo ?? (event as Committed<Schemas, string>),
-        });
       try {
-        await handler(event, stream, scoped_app);
+        // Scoped per payload, not hoisted to the lease: the context has to
+        // unwind with the handler so it never reaches the drain cycle, and
+        // work a handler started without awaiting has to resume into its
+        // own event's frame.
+        await reacting.run(event as Committed<Schemas, string>, () =>
+          handler(event, stream, scoped_app)
+        );
         if (last_index_of.get(event.id) === i) {
           at = event.id;
           handled++;
