@@ -329,7 +329,6 @@ export class PostgresStore implements Store {
   private _fqs: string;
   /** Correlate checkpoint table (#1484) — one row, id 0. */
   private _fqc: string;
-  private _fql: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * `notify()` LISTEN handler skips payloads where `by === this._by`,
@@ -424,7 +423,6 @@ export class PostgresStore implements Store {
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
-    this._fql = `"${this.config.schema}"."${this.config.table}_correlation_lease"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, `this.notify` is `undefined`, the orchestrator skips
@@ -617,40 +615,53 @@ export class PostgresStore implements Store {
           correlated_at int
         ) TABLESPACE pg_default;`
       );
-      // Correlate checkpoint (#1484). Its own single-row relation rather
-      // than a reserved subscription: a subscription row is counted by every
-      // stream-scoped operator surface (`prioritize`, `reset`, `unblock`,
-      // `query_streams`, `blocked_streams`) and would inflate the counts
-      // they report. No lease columns: the write is a monotonic `MAX`, so
-      // concurrent correlators converge without holding anything.
+      // Correlate checkpoint (#1484), keyed per correlator (#1532).
+      //
+      // Its own relation rather than a reserved subscription: a subscription
+      // row is counted by every stream-scoped operator surface
+      // (`prioritize`, `reset`, `unblock`, `query_streams`,
+      // `blocked_streams`) and would inflate the counts they report.
+      //
+      // Keyed because correlators that look for different things read the log
+      // for different reasons. One row let a worker running partial behaviour
+      // inherit another's position, and would let one hold a lease the other
+      // needs. The empty key is the shared row a caller with no correlator
+      // reads, and the floor a brand-new key inherits.
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this._fqc} (
-          id int PRIMARY KEY DEFAULT 0,
-          at int NOT NULL DEFAULT -1,
-          CONSTRAINT ${this.config.table}_correlated_singleton CHECK (id = 0)
-        ) TABLESPACE pg_default;`
-      );
-      await client.query(
-        `INSERT INTO ${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;`
-      );
-      // Correlation lease (#1532). RFC 1484 created the checkpoint relation
-      // with no lease columns, on the grounds that the monotonic write needs
-      // no coordination — true, and beside the point. The lease does not
-      // protect the write; it decides which worker bothers scanning at all,
-      // because otherwise every worker reads the whole log and writes the
-      // same marks.
-      //
-      // Its own relation rather than columns on the checkpoint, because it is
-      // keyed and the checkpoint is a singleton: a lease is only sound
-      // between workers that look for the same things, so two different
-      // applications sharing this database get separate rows and never starve
-      // each other.
-      await client.query(
-        `CREATE TABLE IF NOT EXISTS ${this._fql} (
           key text PRIMARY KEY,
-          leased_by text NOT NULL,
-          leased_until timestamptz NOT NULL
+          at int NOT NULL DEFAULT -1,
+          leased_by text,
+          leased_until timestamptz
         ) TABLESPACE pg_default;`
+      );
+      // Migration from the pre-#1532 single-row shape. Every step is guarded,
+      // so a seed against either shape converges on the keyed one and the
+      // existing checkpoint survives as the shared row.
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_schema = '${this.config.schema}'
+               AND table_name = '${this.config.table}_correlated'
+               AND column_name = 'id'
+          ) THEN
+            ALTER TABLE ${this._fqc} ADD COLUMN IF NOT EXISTS key text;
+            ALTER TABLE ${this._fqc} ADD COLUMN IF NOT EXISTS leased_by text;
+            ALTER TABLE ${this._fqc} ADD COLUMN IF NOT EXISTS leased_until timestamptz;
+            UPDATE ${this._fqc} SET key = '' WHERE key IS NULL;
+            ALTER TABLE ${this._fqc}
+              DROP CONSTRAINT IF EXISTS ${this.config.table}_correlated_singleton;
+            ALTER TABLE ${this._fqc}
+              DROP CONSTRAINT IF EXISTS ${this.config.table}_correlated_pkey;
+            ALTER TABLE ${this._fqc} DROP COLUMN IF EXISTS id;
+            ALTER TABLE ${this._fqc} ALTER COLUMN key SET NOT NULL;
+            ALTER TABLE ${this._fqc} ADD PRIMARY KEY (key);
+          END IF;
+        END $$;`);
+      await client.query(
+        `INSERT INTO ${this._fqc} (key) VALUES ('') ON CONFLICT (key) DO NOTHING;`
       );
 
       // Migration for tables created before priority lanes (ACT-102).
@@ -831,7 +842,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS ${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS ${this._fql}, ${this._fqc}, ${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS ${this._fqc}, ${this._fqs}';
           IF '${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "${this.config.schema}" CASCADE';
           END IF;
@@ -1321,8 +1332,14 @@ export class PostgresStore implements Store {
    */
   async subscribe(
     streams: SubscribeInput[],
-    correlated_at?: number
-  ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ): Promise<{
+    subscribed: number;
+    watermark: number;
+    correlated_at: number;
+    correlating?: boolean;
+  }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -1375,9 +1392,62 @@ export class PostgresStore implements Store {
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
-      if (correlated_at !== undefined)
+      //
+      // With a correlator the position and the lease are per-key (#1532), and
+      // both ride this one statement. It is a conditional upsert rather than
+      // a read then a write: two workers that both saw an expired lease
+      // before either wrote would both believe they hold it, which is exactly
+      // the duplication the lease removes. A key with no row yet seeds from
+      // the shared row, so an upgrade does not re-read history.
+      let correlating: boolean | undefined;
+      if (correlator) {
+        const { rowCount } = await client.query(
+          `INSERT INTO ${this._fqc} (key, at, leased_by, leased_until)
+           SELECT $1,
+                  GREATEST(COALESCE($2::int, -1),
+                           COALESCE((SELECT at FROM ${this._fqc} WHERE key = ''), -1)),
+                  $3,
+                  -- A non-positive millis releases outright rather than
+                  -- setting an expiry a hair in the future, which would still
+                  -- refuse a successor asking in the same instant.
+                  CASE WHEN $4::int > 0
+                       THEN now() + ($4::int * interval '1 millisecond')
+                       ELSE NULL END
+           ON CONFLICT (key) DO UPDATE
+              SET at = GREATEST(${this._fqc}.at, COALESCE($2::int, -1)),
+                  leased_by = CASE WHEN $4::int > 0 THEN EXCLUDED.leased_by END,
+                  leased_until = EXCLUDED.leased_until
+            WHERE ${this._fqc}.leased_until IS NULL
+               OR ${this._fqc}.leased_until < now()
+               OR ${this._fqc}.leased_by = EXCLUDED.leased_by`,
+          [
+            correlator.key,
+            correlated_at ?? null,
+            correlator.by,
+            correlator.millis,
+          ]
+        );
+        correlating = (rowCount ?? 0) > 0;
+        // Losing the race must still advance the checkpoint this worker
+        // already read past, or its marks and its position disagree.
+        if (!correlating && correlated_at !== undefined)
+          await client.query(
+            `UPDATE ${this._fqc} SET at = GREATEST(at, $1::int) WHERE key = $2`,
+            [correlated_at, correlator.key]
+          );
+        // The shared row tracks how far *any* correlator has read. It is the
+        // floor a brand-new key inherits — which is the pre-#1532 behaviour,
+        // where one checkpoint was shared and a fresh worker resumed from it
+        // behind the cold-start back-scan window — and it is what a caller
+        // reading without a correlator still sees.
+        if (correlated_at !== undefined)
+          await client.query(
+            `UPDATE ${this._fqc} SET at = GREATEST(at, $1::int) WHERE key = ''`,
+            [correlated_at]
+          );
+      } else if (correlated_at !== undefined)
         await client.query(
-          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::int) WHERE id = 0`,
+          `UPDATE ${this._fqc} SET at = GREATEST(at, $1::int) WHERE key = ''`,
           [correlated_at]
         );
       // Watermark and checkpoint in one round trip — correlate needs both.
@@ -1386,13 +1456,15 @@ export class PostgresStore implements Store {
         correlated_at: string | null;
       }>(
         `SELECT (SELECT COALESCE(MAX(at), -1) FROM ${this._fqs}) AS max,
-                (SELECT at FROM ${this._fqc} WHERE id = 0) AS correlated_at`
+                (SELECT at FROM ${this._fqc} WHERE key = $1) AS correlated_at`,
+        [correlator?.key ?? ""]
       );
       await client.query("COMMIT");
       return {
         subscribed,
         watermark: rows[0]?.max ?? -1,
         correlated_at: Number(rows[0]?.correlated_at ?? -1),
+        ...(correlating === undefined ? {} : { correlating }),
       };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -2279,48 +2351,6 @@ export class PostgresStore implements Store {
     // Don't keep the event loop alive purely for a reconnect attempt —
     // a process that has nothing else to do should still be able to exit.
     this._reconnect_timer.unref?.();
-  }
-
-  /**
-   * Takes or renews the correlation lease, returning the durable checkpoint
-   * when held.
-   *
-   * One conditional `UPDATE ... RETURNING`, never a read-then-write: two
-   * workers reading an expired lease before either writes would both believe
-   * they hold it. The `leased_by = $1` arm folds renewal into the same
-   * statement, so a holder extends its own lease and a worker that lost one
-   * to expiry simply re-acquires.
-   *
-   * @param by - Caller identity; the same value renews rather than fails
-   * @param millis - Lease duration from now
-   * @returns The correlate checkpoint when held, `undefined` otherwise
-   */
-  async lease_correlation(
-    key: string,
-    by: string,
-    millis: number
-  ): Promise<boolean> {
-    const client = await this._client("lease_correlation");
-    try {
-      // One upsert, never a read-then-write: two workers that both read an
-      // expired lease before either wrote would both believe they hold it.
-      // The `leased_by = $2` arm folds renewal into acquisition, so a holder
-      // extends while it works and a worker that lost its lease to expiry
-      // simply takes it again.
-      const { rowCount } = await client.query(
-        `INSERT INTO ${this._fql} (key, leased_by, leased_until)
-         VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
-         ON CONFLICT (key) DO UPDATE
-            SET leased_by = EXCLUDED.leased_by,
-                leased_until = EXCLUDED.leased_until
-          WHERE ${this._fql}.leased_until < now()
-             OR ${this._fql}.leased_by = EXCLUDED.leased_by;`,
-        [key, by, millis]
-      );
-      return (rowCount ?? 0) > 0;
-    } finally {
-      client.release();
-    }
   }
 
   /**

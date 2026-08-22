@@ -1303,6 +1303,67 @@ and the after-numbers are below.
 
 ### After the correlation lease (#1532)
 
+One worker per correlator scans at a time; the rest skip. The lease rides
+`subscribe` — the call correlate already makes — rather than a method of its
+own. Same benchmark, same shape:
+
+| workers | scan events before | after | mark writes before | after | delivered |
+|---|---|---|---|---|---|
+| 1 | 398 | 404 | 398 | 404 | 404 |
+| 2 | 798 | **408** | 798 | **408** | 408 |
+| 4 | 1600 | **409** | 1600 | **409** | 409 |
+| 8 | 3256 | **409** | 3256 | **409** | 409 |
+
+**Flat instead of linear, in reads and writes both** — eight times less
+scanning and eight times fewer mark writes at eight workers. `handled` still
+tracks `committed` exactly at every worker count, so delivery is untouched, and
+`claim` calls still scale with workers because the drain is unchanged and
+competing consumers are the point.
+
+The write column matters as much as the read column: mark writes land on the
+rows `claim` locks and churn the partial index measured at ~38% HOT in the
+[bloat soak](#1523--does-the-churn-settle-or-compound), so removing seven of
+every eight removes that multiple of the churn too.
+
+**What it costs, stated plainly.** `subscribe` *calls* go up, because the "may
+I scan?" ping rides that method: 398 → 1,209 at one worker, and 5,670 at eight.
+Those are single-row upserts standing in for full log scans and bulk mark
+writes, so the trade is heavily favourable — but a **single-worker deployment
+pays about three times the `subscribe` round trips and gains nothing**, since
+it always holds the lease. That is the open question the RFC records: gating it
+costs a knob or a heuristic, and the round trip has not been measured to
+matter.
+
+> **Methodology note.** The first run of this comparison showed no improvement
+> at all. The benchmark's instrumenting proxy special-cased `subscribe` and
+> forwarded only the two arguments it counted, silently dropping the third —
+> the correlator that carries the lease. The framework was working; the harness
+> was hiding it. Proxies in these scripts now forward every argument.
+
+### What this means for the event-window cache
+
+Per committed event at W workers the log is read `W + 1` times: `W` correlate
+scans plus one drain fetch. A window cache removes the fetch:
+
+| workers | reads per event | removed by cache |
+|---|---|---|
+| 1 | 2 | 50% |
+| 4 | 5 | 20% |
+| 8 | 9 | 11% |
+
+So the cache is worth most where load is lightest and fades as you scale, while
+the cost that grows — every worker re-reading and re-marking everything — it
+does not touch at all, and it buys that with a correctness hazard on the
+delivery path (an event that becomes visible after the scan passed its id would
+be served from cache rather than found in the store).
+
+**The measurement RFC 1484 asked for now exists, and it argues for
+single-writer correlation** rather than for caching what the duplication
+produces. That is what [RFC 1532](../../rfcs/1532-correlate-lease.md) builds,
+and the after-numbers are below.
+
+### After the correlation lease (#1532)
+
 One worker per registry scans at a time, the rest skip. Same benchmark, same
 shape:
 

@@ -1822,6 +1822,15 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         this.stop_correlations();
+        // Hand the correlation lease back rather than making the next worker
+        // wait out its expiry (#1532), and *await* it: a fire-and-forget
+        // release can land after the process that replaces this one has
+        // already asked, which reads as the successor being denied.
+        //
+        // Wrapped in \`_scoped\` because it resolves the store through the
+        // port — a scoped Act would otherwise release against the singleton
+        // and leave its real lease held.
+        await this._scoped(() => this._correlate.release_correlation());
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
@@ -8469,24 +8478,40 @@ export class CorrelateCycle<
     // its own in-memory checkpoint, so without this they all wake on the same
     // commit and each reads the whole range and writes the same marks —
     // measured at exactly W reads and W mark-writes per committed event for W
-    // workers. Capability-gated: a store without it leaves every worker
-    // scanning, exactly as before.
-    const port = store();
-    if (
-      lease &&
-      port.lease_correlation &&
-      !(await port.lease_correlation(this._key, this._by, this._lease_millis))
-    )
-      // Another worker with the same registry is scanning, so this one need
-      // not. Stay armed: the work still needs doing, and this worker should
-      // look again next pass rather than disarm and wait for an unrelated
-      // commit to wake it.
-      return {
-        subscribed: 0,
-        last_id: this._checkpoint,
-        marked: 0,
-        scanned: false,
-      };
+    // workers.
+    //
+    // The lease rides \`subscribe\`, the call correlate already makes to
+    // persist its checkpoint, rather than a verb of its own. Asking with no
+    // streams and no advance is a pure "may I scan?".
+    //
+    // The answer's checkpoint is deliberately ignored. Adopting it looks like
+    // free catch-up and is not: the durable position is a floor shared with
+    // every other correlator, so a worker that adopted it would start its
+    // scan past events it had never read and never mark their targets. A
+    // worker that takes over instead re-scans from its own position —
+    // redundant, bounded by paging, idempotent, and correct. \`init\` remains
+    // the only place the durable checkpoint seeds a local one, where the
+    // cold-start back-scan window guards exactly this hazard.
+    if (lease) {
+      const { correlating } = await this._cd.subscribe([], undefined, {
+        key: this._key,
+        by: this._by,
+        millis: this._lease_millis,
+      });
+      // \`undefined\` means the store does not implement leasing, so every
+      // worker scans exactly as before.
+      if (correlating === false)
+        // Another worker with the same registry is scanning, so this one need
+        // not. Stay armed: the work still needs doing, and this worker should
+        // look again next pass rather than disarm and wait for an unrelated
+        // commit to wake it.
+        return {
+          subscribed: 0,
+          last_id: this._checkpoint,
+          marked: 0,
+          scanned: false,
+        };
+    }
 
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -8566,7 +8591,11 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      const { subscribed } = await this._cd.subscribe(streams, last_id);
+      const { subscribed } = await this._cd.subscribe(streams, last_id, {
+        key: this._key,
+        by: this._by,
+        millis: this._lease_millis,
+      });
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
       // was already subscribed reports \`subscribed: 0\`, so arming on that
@@ -8659,7 +8688,14 @@ export class CorrelateCycle<
    */
   async release_correlation(): Promise<void> {
     try {
-      await store().lease_correlation?.(this._key, this._by, 1);
+      // Zero releases outright. A near-zero expiry would still refuse a
+      // successor asking in the same instant, which reads as the handback
+      // not having happened.
+      await this._cd.subscribe([], undefined, {
+        key: this._key,
+        by: this._by,
+        millis: 0,
+      });
     } catch (error) {
       log().error(error);
     }
@@ -10232,9 +10268,14 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
 
 export const subscribe = (
   streams: SubscribeInput[],
-  correlated_at?: number
-): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
-  store().subscribe(streams, correlated_at);
+  correlated_at?: number,
+  correlator?: { key: string; by: string; millis: number }
+): Promise<{
+  subscribed: number;
+  watermark: number;
+  correlated_at: number;
+  correlating?: boolean;
+}> => store().subscribe(streams, correlated_at, correlator);
 
 // === errors.ts ===
 import type {
@@ -12077,14 +12118,17 @@ export class InMemoryStore implements Store {
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated_at = -1;
   /**
-   * Correlation leases (#1532), keyed by correlator identity. Keyed rather
-   * than singular because a lease is only sound between workers that look
-   * for the same things — two different applications sharing this store must
-   * not starve each other.
+   * Per-correlator checkpoint and lease (#1532), keyed by correlator.
+   *
+   * Keyed rather than singular because correlators that look for different
+   * things read the log for different reasons: sharing one position lets a
+   * partial-behaviour worker inherit another's, and sharing one lease lets
+   * one starve the other. Callers that supply no correlator use
+   * \`_correlated_at\` instead, which is the pre-#1532 behaviour.
    */
-  private _correlation_leases = new Map<
+  private _correlators = new Map<
     string,
-    { by: string; until: number }
+    { at: number; by: string; until: number }
   >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
@@ -12411,32 +12455,6 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Takes or renews the correlation lease, returning the checkpoint when held.
-   *
-   * A single process sharing one InMemoryStore is the case this store exists
-   * for, so the lease is nearly always granted. It is implemented anyway so
-   * the contended path has somewhere to run in tests, and so the in-memory
-   * store keeps matching the durable adapters rather than quietly diverging
-   * on a capability.
-   *
-   * @param by - Caller identity; the same value renews rather than fails
-   * @param millis - Lease duration from now
-   * @returns The correlate checkpoint when held, \`undefined\` otherwise
-   */
-  async lease_correlation(
-    key: string,
-    by: string,
-    millis: number
-  ): Promise<boolean> {
-    await sleep();
-    const now = Date.now();
-    const held = this._correlation_leases.get(key);
-    if (held && held.until >= now && held.by !== by) return false;
-    this._correlation_leases.set(key, { by, until: now + millis });
-    return true;
-  }
-
-  /**
    * Registers streams for event processing. When the same stream is
    * resubscribed with a different priority, the **maximum** wins — so
    * the highest-priority registered reaction sets the scheduling lane.
@@ -12445,12 +12463,58 @@ export class InMemoryStore implements Store {
    * @param streams - Streams to register with optional source + priority.
    * @returns subscribed count and current max watermark.
    */
-  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
+  async subscribe(
+    streams: SubscribeInput[],
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ) {
+    await sleep();
+
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+    //
+    // With a correlator the position and the lease are per-key (#1532); a key
+    // with no row yet inherits the shared value, so an upgrade does not
+    // re-read history.
+    let correlating: boolean | undefined;
+    /** This correlator's position, once known — always set when keyed. */
+    let keyed_at: number | undefined;
+    if (correlator) {
+      const now = Date.now();
+      const held = this._correlators.get(correlator.key);
+      // A key with no row yet inherits the shared position, so a new
+      // correlator does not re-read history.
+      const at = Math.max(held?.at ?? this._correlated_at, correlated_at ?? -1);
+      keyed_at = at;
+      if (!held || held.until < now || held.by === correlator.by) {
+        correlating = true;
+        this._correlators.set(correlator.key, {
+          at,
+          by: correlator.by,
+          // A non-positive \`millis\` releases outright rather than setting an
+          // expiry a hair in the future: a successor asking inside the same
+          // millisecond would otherwise still be refused.
+          until: correlator.millis > 0 ? now + correlator.millis : 0,
+        });
+      } else {
+        // Refused, which is only possible when a live holder exists — so the
+        // row is here to keep. The position still advances: this caller may
+        // already have scanned, and dropping how far it read would leave its
+        // marks ahead of its recorded position.
+        correlating = false;
+        held.at = at;
+      }
+      // The shared position tracks how far *any* correlator has read: the
+      // floor a brand-new key inherits, and what a caller reading without a
+      // correlator still sees.
+      if (correlated_at !== undefined && correlated_at > this._correlated_at)
+        this._correlated_at = correlated_at;
+    } else if (
+      correlated_at !== undefined &&
+      correlated_at > this._correlated_at
+    )
       this._correlated_at = correlated_at;
-    await sleep();
+
     let subscribed = 0;
     for (const {
       stream,
@@ -12475,7 +12539,12 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark, correlated_at: this._correlated_at };
+    return {
+      subscribed,
+      watermark,
+      correlated_at: keyed_at ?? this._correlated_at,
+      ...(correlating === undefined ? {} : { correlating }),
+    };
   }
 
   /**
@@ -14661,66 +14730,6 @@ export interface Store extends Disposable, EventSource {
   ) => Promise<Lease[]>;
 
   /**
-   * Takes (or renews) the correlation lease for \`millis\`.
-   *
-   * **Capability-gated.** Adapters may omit it — correlate calls it through
-   * \`?.\`, and a store without it keeps today's behaviour, where every worker
-   * scans.
-   *
-   * Exists because correlation is duplicated work at every worker count.
-   * Each worker holds its own in-memory scan position, seeded from the
-   * durable checkpoint once at start-up, so N workers wake on the same commit
-   * and each read the whole range and each write the same marks. Measured on
-   * real worker processes, reads and mark-writes per committed event come out
-   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
-   * are idempotent, so this is waste rather than error — but the writes land
-   * on the rows {@link claim} locks and churn the partial index the design
-   * depends on, so the waste scales the wrong way.
-   *
-   * Delivery is unaffected either way: leases already make it exactly-once.
-   * This governs only which worker bothers to look.
-   *
-   * @param key - Which correlator this is. The lease is only sound between
-   *   workers that look for the same things, so this scopes it: identical
-   *   workers share a key and take turns, while two different applications
-   *   sharing one database get separate leases and never starve each other.
-   *   Callers derive it from the registry; the store treats it as opaque.
-   * @param by - Caller identity. Passing the same value renews rather than
-   *   fails, so acquisition and renewal are one call.
-   * @param millis - How long the lease should be held from now.
-   * @returns \`true\` when the caller holds the lease, \`false\` when another
-   *   worker with the same \`key\` does.
-   *
-   * Deliberately does **not** hand back the correlate checkpoint, though an
-   * earlier draft did. A worker's local scan position falls behind while
-   * someone else holds the lease, so syncing from the durable checkpoint
-   * looks like an obvious win — but that checkpoint is shared by every
-   * correlator against this store, including ones with a different \`key\`.
-   * Syncing from it would let one application skip events another had
-   * already scanned, which is a silent delivery failure. Instead a worker
-   * that takes over re-scans from its own position: redundant, bounded by
-   * paging, and idempotent, because marks only ever move forward.
-   *
-   * **Released by expiry only**, with no release verb, so a crash and a
-   * graceful shutdown take the identical path and the recovery path is
-   * exercised constantly rather than only during incidents. The cost is that
-   * a cleanly-stopped worker holds its lease until it expires, which bounds
-   * how long discovery can stall.
-   *
-   * Implementations MUST make acquisition atomic — a read-then-write would
-   * let two workers hold it at once. One conditional \`UPDATE ... RETURNING\`
-   * is the intended shape.
-   *
-   * @see {@link subscribe} for the monotonic checkpoint write, which is
-   *   unchanged and remains safe under concurrent correlators
-   */
-  lease_correlation?: (
-    key: string,
-    by: string,
-    millis: number
-  ) => Promise<boolean>;
-
-  /**
    * Registers streams for event processing.
    *
    * Upserts stream entries so they become visible to {@link claim}. Used by
@@ -14763,10 +14772,57 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_at?: number
+    correlated_at?: number,
+    /**
+     * Identifies the calling correlator, and asks for the correlation lease
+     * (#1532).
+     *
+     * Correlation is duplicated work without it: every worker keeps its own
+     * in-memory scan position, so N workers wake on the same commit and each
+     * reads the whole range and writes the same marks — measured at exactly
+     * N reads and N mark-writes per committed event. The marks are
+     * idempotent, so this is waste rather than error, but the writes land on
+     * the rows {@link claim} locks and churn the partial index the design
+     * depends on.
+     *
+     * It rides \`subscribe\` rather than a verb of its own because correlate
+     * already calls this every pass: the lease is a property of the
+     * checkpoint write that already happens.
+     *
+     * - \`key\` scopes the lease to interchangeable correlators. Workers
+     *   running the same application are; a worker deployed with a subset of
+     *   the reactions is not, and must scan for itself or its targets are
+     *   never marked. Callers derive it from the registry; stores treat it
+     *   as opaque, and it also selects which checkpoint row this caller
+     *   reads and advances.
+     * - \`by\` identifies this worker. Passing the same value renews rather
+     *   than fails, so acquiring and extending are one call.
+     * - \`millis\` is how long the lease is held from now.
+     *
+     * Omitted entirely, no lease is taken and the caller reads and advances
+     * the shared legacy checkpoint — which is what every pre-#1532 caller
+     * does, and why this is additive.
+     */
+    correlator?: { key: string; by: string; millis: number }
   ) => Promise<{
     subscribed: number;
     watermark: number;
+    /**
+     * Whether the caller holds the correlation lease and should scan
+     * (#1532).
+     *
+     * \`undefined\` when no \`correlator\` was supplied — no lease was requested,
+     * so there is no answer and the caller scans as it always has.
+     *
+     * Acquiring MUST be atomic. A read-then-write lets two workers both see
+     * an expired lease and both believe they hold it, which is precisely the
+     * duplication the lease removes.
+     *
+     * Released by expiry only: a crash and a clean stop then take the same
+     * path, so the recovery path is the common one. A holder can still hand
+     * it back early by renewing with a minimal \`millis\`.
+     */
+    correlating?: boolean;
     /**
      * The correlate checkpoint (#1484): how far \`correlate\` has **read** the
      * event log, or \`-1\` when it has never advanced.
@@ -14778,9 +14834,16 @@ export interface Store extends Disposable, EventSource {
      * store round trip of its own: \`correlate\` already calls \`subscribe\`
      * with the targets each scan discovered.
      *
-     * Adapters keep it in their own single-row relation, never as a
-     * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
-     * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
+     * Adapters keep it in their own relation, never as a subscription, so no
+     * stream-scoped surface (\`prioritize\`, \`reset\`, \`unblock\`,
+     * \`query_streams\`, \`blocked_streams\`) ever counts it.
+     *
+     * **Keyed per correlator** when a \`correlator\` is supplied (#1532), and
+     * shared otherwise. Correlators that look for different things read the
+     * log for different reasons, so one inheriting another's position at cold
+     * start could skip events it needed — previously survivable only because
+     * of the back-scan window. A key with no row yet falls back to the shared
+     * value, so an upgrade does not re-read history.
      */
     correlated_at: number;
   }>;
@@ -20537,6 +20600,15 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         this.stop_correlations();
+        // Hand the correlation lease back rather than making the next worker
+        // wait out its expiry (#1532), and *await* it: a fire-and-forget
+        // release can land after the process that replaces this one has
+        // already asked, which reads as the successor being denied.
+        //
+        // Wrapped in \`_scoped\` because it resolves the store through the
+        // port — a scoped Act would otherwise release against the singleton
+        // and leave its real lease held.
+        await this._scoped(() => this._correlate.release_correlation());
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
@@ -27064,24 +27136,40 @@ export class CorrelateCycle<
     // its own in-memory checkpoint, so without this they all wake on the same
     // commit and each reads the whole range and writes the same marks —
     // measured at exactly W reads and W mark-writes per committed event for W
-    // workers. Capability-gated: a store without it leaves every worker
-    // scanning, exactly as before.
-    const port = store();
-    if (
-      lease &&
-      port.lease_correlation &&
-      !(await port.lease_correlation(this._key, this._by, this._lease_millis))
-    )
-      // Another worker with the same registry is scanning, so this one need
-      // not. Stay armed: the work still needs doing, and this worker should
-      // look again next pass rather than disarm and wait for an unrelated
-      // commit to wake it.
-      return {
-        subscribed: 0,
-        last_id: this._checkpoint,
-        marked: 0,
-        scanned: false,
-      };
+    // workers.
+    //
+    // The lease rides \`subscribe\`, the call correlate already makes to
+    // persist its checkpoint, rather than a verb of its own. Asking with no
+    // streams and no advance is a pure "may I scan?".
+    //
+    // The answer's checkpoint is deliberately ignored. Adopting it looks like
+    // free catch-up and is not: the durable position is a floor shared with
+    // every other correlator, so a worker that adopted it would start its
+    // scan past events it had never read and never mark their targets. A
+    // worker that takes over instead re-scans from its own position —
+    // redundant, bounded by paging, idempotent, and correct. \`init\` remains
+    // the only place the durable checkpoint seeds a local one, where the
+    // cold-start back-scan window guards exactly this hazard.
+    if (lease) {
+      const { correlating } = await this._cd.subscribe([], undefined, {
+        key: this._key,
+        by: this._by,
+        millis: this._lease_millis,
+      });
+      // \`undefined\` means the store does not implement leasing, so every
+      // worker scans exactly as before.
+      if (correlating === false)
+        // Another worker with the same registry is scanning, so this one need
+        // not. Stay armed: the work still needs doing, and this worker should
+        // look again next pass rather than disarm and wait for an unrelated
+        // commit to wake it.
+        return {
+          subscribed: 0,
+          last_id: this._checkpoint,
+          marked: 0,
+          scanned: false,
+        };
+    }
 
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -27161,7 +27249,11 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      const { subscribed } = await this._cd.subscribe(streams, last_id);
+      const { subscribed } = await this._cd.subscribe(streams, last_id, {
+        key: this._key,
+        by: this._by,
+        millis: this._lease_millis,
+      });
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
       // was already subscribed reports \`subscribed: 0\`, so arming on that
@@ -27254,7 +27346,14 @@ export class CorrelateCycle<
    */
   async release_correlation(): Promise<void> {
     try {
-      await store().lease_correlation?.(this._key, this._by, 1);
+      // Zero releases outright. A near-zero expiry would still refuse a
+      // successor asking in the same instant, which reads as the handback
+      // not having happened.
+      await this._cd.subscribe([], undefined, {
+        key: this._key,
+        by: this._by,
+        millis: 0,
+      });
     } catch (error) {
       log().error(error);
     }
@@ -28599,9 +28698,14 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
 
 export const subscribe = (
   streams: SubscribeInput[],
-  correlated_at?: number
-): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
-  store().subscribe(streams, correlated_at);
+  correlated_at?: number,
+  correlator?: { key: string; by: string; millis: number }
+): Promise<{
+  subscribed: number;
+  watermark: number;
+  correlated_at: number;
+  correlating?: boolean;
+}> => store().subscribe(streams, correlated_at, correlator);
 
 // === errors.ts ===
 import type {
@@ -30444,14 +30548,17 @@ export class InMemoryStore implements Store {
   /** Correlate checkpoint (#1484): how far the log has been READ. */
   private _correlated_at = -1;
   /**
-   * Correlation leases (#1532), keyed by correlator identity. Keyed rather
-   * than singular because a lease is only sound between workers that look
-   * for the same things — two different applications sharing this store must
-   * not starve each other.
+   * Per-correlator checkpoint and lease (#1532), keyed by correlator.
+   *
+   * Keyed rather than singular because correlators that look for different
+   * things read the log for different reasons: sharing one position lets a
+   * partial-behaviour worker inherit another's, and sharing one lease lets
+   * one starve the other. Callers that supply no correlator use
+   * \`_correlated_at\` instead, which is the pre-#1532 behaviour.
    */
-  private _correlation_leases = new Map<
+  private _correlators = new Map<
     string,
-    { by: string; until: number }
+    { at: number; by: string; until: number }
   >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
@@ -30778,32 +30885,6 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Takes or renews the correlation lease, returning the checkpoint when held.
-   *
-   * A single process sharing one InMemoryStore is the case this store exists
-   * for, so the lease is nearly always granted. It is implemented anyway so
-   * the contended path has somewhere to run in tests, and so the in-memory
-   * store keeps matching the durable adapters rather than quietly diverging
-   * on a capability.
-   *
-   * @param by - Caller identity; the same value renews rather than fails
-   * @param millis - Lease duration from now
-   * @returns The correlate checkpoint when held, \`undefined\` otherwise
-   */
-  async lease_correlation(
-    key: string,
-    by: string,
-    millis: number
-  ): Promise<boolean> {
-    await sleep();
-    const now = Date.now();
-    const held = this._correlation_leases.get(key);
-    if (held && held.until >= now && held.by !== by) return false;
-    this._correlation_leases.set(key, { by, until: now + millis });
-    return true;
-  }
-
-  /**
    * Registers streams for event processing. When the same stream is
    * resubscribed with a different priority, the **maximum** wins — so
    * the highest-priority registered reaction sets the scheduling lane.
@@ -30812,12 +30893,58 @@ export class InMemoryStore implements Store {
    * @param streams - Streams to register with optional source + priority.
    * @returns subscribed count and current max watermark.
    */
-  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
+  async subscribe(
+    streams: SubscribeInput[],
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ) {
+    await sleep();
+
     // The correlate checkpoint is written by its own producer, in the call
     // correlate already makes (#1484). Monotonic: a lower value is ignored.
-    if (correlated_at !== undefined && correlated_at > this._correlated_at)
+    //
+    // With a correlator the position and the lease are per-key (#1532); a key
+    // with no row yet inherits the shared value, so an upgrade does not
+    // re-read history.
+    let correlating: boolean | undefined;
+    /** This correlator's position, once known — always set when keyed. */
+    let keyed_at: number | undefined;
+    if (correlator) {
+      const now = Date.now();
+      const held = this._correlators.get(correlator.key);
+      // A key with no row yet inherits the shared position, so a new
+      // correlator does not re-read history.
+      const at = Math.max(held?.at ?? this._correlated_at, correlated_at ?? -1);
+      keyed_at = at;
+      if (!held || held.until < now || held.by === correlator.by) {
+        correlating = true;
+        this._correlators.set(correlator.key, {
+          at,
+          by: correlator.by,
+          // A non-positive \`millis\` releases outright rather than setting an
+          // expiry a hair in the future: a successor asking inside the same
+          // millisecond would otherwise still be refused.
+          until: correlator.millis > 0 ? now + correlator.millis : 0,
+        });
+      } else {
+        // Refused, which is only possible when a live holder exists — so the
+        // row is here to keep. The position still advances: this caller may
+        // already have scanned, and dropping how far it read would leave its
+        // marks ahead of its recorded position.
+        correlating = false;
+        held.at = at;
+      }
+      // The shared position tracks how far *any* correlator has read: the
+      // floor a brand-new key inherits, and what a caller reading without a
+      // correlator still sees.
+      if (correlated_at !== undefined && correlated_at > this._correlated_at)
+        this._correlated_at = correlated_at;
+    } else if (
+      correlated_at !== undefined &&
+      correlated_at > this._correlated_at
+    )
       this._correlated_at = correlated_at;
-    await sleep();
+
     let subscribed = 0;
     for (const {
       stream,
@@ -30842,7 +30969,12 @@ export class InMemoryStore implements Store {
     for (const s of this._streams.values()) {
       if (s.at > watermark) watermark = s.at;
     }
-    return { subscribed, watermark, correlated_at: this._correlated_at };
+    return {
+      subscribed,
+      watermark,
+      correlated_at: keyed_at ?? this._correlated_at,
+      ...(correlating === undefined ? {} : { correlating }),
+    };
   }
 
   /**
@@ -32991,66 +33123,6 @@ export interface Store extends Disposable, EventSource {
   ) => Promise<Lease[]>;
 
   /**
-   * Takes (or renews) the correlation lease for \`millis\`.
-   *
-   * **Capability-gated.** Adapters may omit it — correlate calls it through
-   * \`?.\`, and a store without it keeps today's behaviour, where every worker
-   * scans.
-   *
-   * Exists because correlation is duplicated work at every worker count.
-   * Each worker holds its own in-memory scan position, seeded from the
-   * durable checkpoint once at start-up, so N workers wake on the same commit
-   * and each read the whole range and each write the same marks. Measured on
-   * real worker processes, reads and mark-writes per committed event come out
-   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
-   * are idempotent, so this is waste rather than error — but the writes land
-   * on the rows {@link claim} locks and churn the partial index the design
-   * depends on, so the waste scales the wrong way.
-   *
-   * Delivery is unaffected either way: leases already make it exactly-once.
-   * This governs only which worker bothers to look.
-   *
-   * @param key - Which correlator this is. The lease is only sound between
-   *   workers that look for the same things, so this scopes it: identical
-   *   workers share a key and take turns, while two different applications
-   *   sharing one database get separate leases and never starve each other.
-   *   Callers derive it from the registry; the store treats it as opaque.
-   * @param by - Caller identity. Passing the same value renews rather than
-   *   fails, so acquisition and renewal are one call.
-   * @param millis - How long the lease should be held from now.
-   * @returns \`true\` when the caller holds the lease, \`false\` when another
-   *   worker with the same \`key\` does.
-   *
-   * Deliberately does **not** hand back the correlate checkpoint, though an
-   * earlier draft did. A worker's local scan position falls behind while
-   * someone else holds the lease, so syncing from the durable checkpoint
-   * looks like an obvious win — but that checkpoint is shared by every
-   * correlator against this store, including ones with a different \`key\`.
-   * Syncing from it would let one application skip events another had
-   * already scanned, which is a silent delivery failure. Instead a worker
-   * that takes over re-scans from its own position: redundant, bounded by
-   * paging, and idempotent, because marks only ever move forward.
-   *
-   * **Released by expiry only**, with no release verb, so a crash and a
-   * graceful shutdown take the identical path and the recovery path is
-   * exercised constantly rather than only during incidents. The cost is that
-   * a cleanly-stopped worker holds its lease until it expires, which bounds
-   * how long discovery can stall.
-   *
-   * Implementations MUST make acquisition atomic — a read-then-write would
-   * let two workers hold it at once. One conditional \`UPDATE ... RETURNING\`
-   * is the intended shape.
-   *
-   * @see {@link subscribe} for the monotonic checkpoint write, which is
-   *   unchanged and remains safe under concurrent correlators
-   */
-  lease_correlation?: (
-    key: string,
-    by: string,
-    millis: number
-  ) => Promise<boolean>;
-
-  /**
    * Registers streams for event processing.
    *
    * Upserts stream entries so they become visible to {@link claim}. Used by
@@ -33093,10 +33165,57 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_at?: number
+    correlated_at?: number,
+    /**
+     * Identifies the calling correlator, and asks for the correlation lease
+     * (#1532).
+     *
+     * Correlation is duplicated work without it: every worker keeps its own
+     * in-memory scan position, so N workers wake on the same commit and each
+     * reads the whole range and writes the same marks — measured at exactly
+     * N reads and N mark-writes per committed event. The marks are
+     * idempotent, so this is waste rather than error, but the writes land on
+     * the rows {@link claim} locks and churn the partial index the design
+     * depends on.
+     *
+     * It rides \`subscribe\` rather than a verb of its own because correlate
+     * already calls this every pass: the lease is a property of the
+     * checkpoint write that already happens.
+     *
+     * - \`key\` scopes the lease to interchangeable correlators. Workers
+     *   running the same application are; a worker deployed with a subset of
+     *   the reactions is not, and must scan for itself or its targets are
+     *   never marked. Callers derive it from the registry; stores treat it
+     *   as opaque, and it also selects which checkpoint row this caller
+     *   reads and advances.
+     * - \`by\` identifies this worker. Passing the same value renews rather
+     *   than fails, so acquiring and extending are one call.
+     * - \`millis\` is how long the lease is held from now.
+     *
+     * Omitted entirely, no lease is taken and the caller reads and advances
+     * the shared legacy checkpoint — which is what every pre-#1532 caller
+     * does, and why this is additive.
+     */
+    correlator?: { key: string; by: string; millis: number }
   ) => Promise<{
     subscribed: number;
     watermark: number;
+    /**
+     * Whether the caller holds the correlation lease and should scan
+     * (#1532).
+     *
+     * \`undefined\` when no \`correlator\` was supplied — no lease was requested,
+     * so there is no answer and the caller scans as it always has.
+     *
+     * Acquiring MUST be atomic. A read-then-write lets two workers both see
+     * an expired lease and both believe they hold it, which is precisely the
+     * duplication the lease removes.
+     *
+     * Released by expiry only: a crash and a clean stop then take the same
+     * path, so the recovery path is the common one. A holder can still hand
+     * it back early by renewing with a minimal \`millis\`.
+     */
+    correlating?: boolean;
     /**
      * The correlate checkpoint (#1484): how far \`correlate\` has **read** the
      * event log, or \`-1\` when it has never advanced.
@@ -33108,9 +33227,16 @@ export interface Store extends Disposable, EventSource {
      * store round trip of its own: \`correlate\` already calls \`subscribe\`
      * with the targets each scan discovered.
      *
-     * Adapters keep it in their own single-row relation, never as a
-     * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
-     * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
+     * Adapters keep it in their own relation, never as a subscription, so no
+     * stream-scoped surface (\`prioritize\`, \`reset\`, \`unblock\`,
+     * \`query_streams\`, \`blocked_streams\`) ever counts it.
+     *
+     * **Keyed per correlator** when a \`correlator\` is supplied (#1532), and
+     * shared otherwise. Correlators that look for different things read the
+     * log for different reasons, so one inheriting another's position at cold
+     * start could skip events it needed — previously survivable only because
+     * of the back-scan window. A key with no row yet falls back to the shared
+     * value, so an upgrade does not re-read history.
      */
     correlated_at: number;
   }>;
@@ -39388,66 +39514,6 @@ export interface Store extends Disposable, EventSource {
   ) => Promise<Lease[]>;
 
   /**
-   * Takes (or renews) the correlation lease for \`millis\`.
-   *
-   * **Capability-gated.** Adapters may omit it — correlate calls it through
-   * \`?.\`, and a store without it keeps today's behaviour, where every worker
-   * scans.
-   *
-   * Exists because correlation is duplicated work at every worker count.
-   * Each worker holds its own in-memory scan position, seeded from the
-   * durable checkpoint once at start-up, so N workers wake on the same commit
-   * and each read the whole range and each write the same marks. Measured on
-   * real worker processes, reads and mark-writes per committed event come out
-   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
-   * are idempotent, so this is waste rather than error — but the writes land
-   * on the rows {@link claim} locks and churn the partial index the design
-   * depends on, so the waste scales the wrong way.
-   *
-   * Delivery is unaffected either way: leases already make it exactly-once.
-   * This governs only which worker bothers to look.
-   *
-   * @param key - Which correlator this is. The lease is only sound between
-   *   workers that look for the same things, so this scopes it: identical
-   *   workers share a key and take turns, while two different applications
-   *   sharing one database get separate leases and never starve each other.
-   *   Callers derive it from the registry; the store treats it as opaque.
-   * @param by - Caller identity. Passing the same value renews rather than
-   *   fails, so acquisition and renewal are one call.
-   * @param millis - How long the lease should be held from now.
-   * @returns \`true\` when the caller holds the lease, \`false\` when another
-   *   worker with the same \`key\` does.
-   *
-   * Deliberately does **not** hand back the correlate checkpoint, though an
-   * earlier draft did. A worker's local scan position falls behind while
-   * someone else holds the lease, so syncing from the durable checkpoint
-   * looks like an obvious win — but that checkpoint is shared by every
-   * correlator against this store, including ones with a different \`key\`.
-   * Syncing from it would let one application skip events another had
-   * already scanned, which is a silent delivery failure. Instead a worker
-   * that takes over re-scans from its own position: redundant, bounded by
-   * paging, and idempotent, because marks only ever move forward.
-   *
-   * **Released by expiry only**, with no release verb, so a crash and a
-   * graceful shutdown take the identical path and the recovery path is
-   * exercised constantly rather than only during incidents. The cost is that
-   * a cleanly-stopped worker holds its lease until it expires, which bounds
-   * how long discovery can stall.
-   *
-   * Implementations MUST make acquisition atomic — a read-then-write would
-   * let two workers hold it at once. One conditional \`UPDATE ... RETURNING\`
-   * is the intended shape.
-   *
-   * @see {@link subscribe} for the monotonic checkpoint write, which is
-   *   unchanged and remains safe under concurrent correlators
-   */
-  lease_correlation?: (
-    key: string,
-    by: string,
-    millis: number
-  ) => Promise<boolean>;
-
-  /**
    * Registers streams for event processing.
    *
    * Upserts stream entries so they become visible to {@link claim}. Used by
@@ -39490,10 +39556,57 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_at?: number
+    correlated_at?: number,
+    /**
+     * Identifies the calling correlator, and asks for the correlation lease
+     * (#1532).
+     *
+     * Correlation is duplicated work without it: every worker keeps its own
+     * in-memory scan position, so N workers wake on the same commit and each
+     * reads the whole range and writes the same marks — measured at exactly
+     * N reads and N mark-writes per committed event. The marks are
+     * idempotent, so this is waste rather than error, but the writes land on
+     * the rows {@link claim} locks and churn the partial index the design
+     * depends on.
+     *
+     * It rides \`subscribe\` rather than a verb of its own because correlate
+     * already calls this every pass: the lease is a property of the
+     * checkpoint write that already happens.
+     *
+     * - \`key\` scopes the lease to interchangeable correlators. Workers
+     *   running the same application are; a worker deployed with a subset of
+     *   the reactions is not, and must scan for itself or its targets are
+     *   never marked. Callers derive it from the registry; stores treat it
+     *   as opaque, and it also selects which checkpoint row this caller
+     *   reads and advances.
+     * - \`by\` identifies this worker. Passing the same value renews rather
+     *   than fails, so acquiring and extending are one call.
+     * - \`millis\` is how long the lease is held from now.
+     *
+     * Omitted entirely, no lease is taken and the caller reads and advances
+     * the shared legacy checkpoint — which is what every pre-#1532 caller
+     * does, and why this is additive.
+     */
+    correlator?: { key: string; by: string; millis: number }
   ) => Promise<{
     subscribed: number;
     watermark: number;
+    /**
+     * Whether the caller holds the correlation lease and should scan
+     * (#1532).
+     *
+     * \`undefined\` when no \`correlator\` was supplied — no lease was requested,
+     * so there is no answer and the caller scans as it always has.
+     *
+     * Acquiring MUST be atomic. A read-then-write lets two workers both see
+     * an expired lease and both believe they hold it, which is precisely the
+     * duplication the lease removes.
+     *
+     * Released by expiry only: a crash and a clean stop then take the same
+     * path, so the recovery path is the common one. A holder can still hand
+     * it back early by renewing with a minimal \`millis\`.
+     */
+    correlating?: boolean;
     /**
      * The correlate checkpoint (#1484): how far \`correlate\` has **read** the
      * event log, or \`-1\` when it has never advanced.
@@ -39505,9 +39618,16 @@ export interface Store extends Disposable, EventSource {
      * store round trip of its own: \`correlate\` already calls \`subscribe\`
      * with the targets each scan discovered.
      *
-     * Adapters keep it in their own single-row relation, never as a
-     * subscription, so no stream-scoped surface (\`prioritize\`, \`reset\`,
-     * \`unblock\`, \`query_streams\`, \`blocked_streams\`) ever counts it.
+     * Adapters keep it in their own relation, never as a subscription, so no
+     * stream-scoped surface (\`prioritize\`, \`reset\`, \`unblock\`,
+     * \`query_streams\`, \`blocked_streams\`) ever counts it.
+     *
+     * **Keyed per correlator** when a \`correlator\` is supplied (#1532), and
+     * shared otherwise. Correlators that look for different things read the
+     * log for different reasons, so one inheriting another's position at cold
+     * start could skip events it needed — previously survivable only because
+     * of the back-scan window. A key with no row yet falls back to the shared
+     * value, so an upgrade does not re-read history.
      */
     correlated_at: number;
   }>;
@@ -51437,7 +51557,6 @@ export class PostgresStore implements Store {
   private _fqs: string;
   /** Correlate checkpoint table (#1484) — one row, id 0. */
   private _fqc: string;
-  private _fql: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
    * \`notify()\` LISTEN handler skips payloads where \`by === this._by\`,
@@ -51532,7 +51651,6 @@ export class PostgresStore implements Store {
     this._fqt = \`"\${this.config.schema}"."\${this.config.table}"\`;
     this._fqs = \`"\${this.config.schema}"."\${this.config.table}_streams"\`;
     this._fqc = \`"\${this.config.schema}"."\${this.config.table}_correlated"\`;
-    this._fql = \`"\${this.config.schema}"."\${this.config.table}_correlation_lease"\`;
     this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, \`this.notify\` is \`undefined\`, the orchestrator skips
@@ -51725,40 +51843,53 @@ export class PostgresStore implements Store {
           correlated_at int
         ) TABLESPACE pg_default;\`
       );
-      // Correlate checkpoint (#1484). Its own single-row relation rather
-      // than a reserved subscription: a subscription row is counted by every
-      // stream-scoped operator surface (\`prioritize\`, \`reset\`, \`unblock\`,
-      // \`query_streams\`, \`blocked_streams\`) and would inflate the counts
-      // they report. No lease columns: the write is a monotonic \`MAX\`, so
-      // concurrent correlators converge without holding anything.
+      // Correlate checkpoint (#1484), keyed per correlator (#1532).
+      //
+      // Its own relation rather than a reserved subscription: a subscription
+      // row is counted by every stream-scoped operator surface
+      // (\`prioritize\`, \`reset\`, \`unblock\`, \`query_streams\`,
+      // \`blocked_streams\`) and would inflate the counts they report.
+      //
+      // Keyed because correlators that look for different things read the log
+      // for different reasons. One row let a worker running partial behaviour
+      // inherit another's position, and would let one hold a lease the other
+      // needs. The empty key is the shared row a caller with no correlator
+      // reads, and the floor a brand-new key inherits.
       await client.query(
         \`CREATE TABLE IF NOT EXISTS \${this._fqc} (
-          id int PRIMARY KEY DEFAULT 0,
-          at int NOT NULL DEFAULT -1,
-          CONSTRAINT \${this.config.table}_correlated_singleton CHECK (id = 0)
-        ) TABLESPACE pg_default;\`
-      );
-      await client.query(
-        \`INSERT INTO \${this._fqc} (id) VALUES (0) ON CONFLICT (id) DO NOTHING;\`
-      );
-      // Correlation lease (#1532). RFC 1484 created the checkpoint relation
-      // with no lease columns, on the grounds that the monotonic write needs
-      // no coordination — true, and beside the point. The lease does not
-      // protect the write; it decides which worker bothers scanning at all,
-      // because otherwise every worker reads the whole log and writes the
-      // same marks.
-      //
-      // Its own relation rather than columns on the checkpoint, because it is
-      // keyed and the checkpoint is a singleton: a lease is only sound
-      // between workers that look for the same things, so two different
-      // applications sharing this database get separate rows and never starve
-      // each other.
-      await client.query(
-        \`CREATE TABLE IF NOT EXISTS \${this._fql} (
           key text PRIMARY KEY,
-          leased_by text NOT NULL,
-          leased_until timestamptz NOT NULL
+          at int NOT NULL DEFAULT -1,
+          leased_by text,
+          leased_until timestamptz
         ) TABLESPACE pg_default;\`
+      );
+      // Migration from the pre-#1532 single-row shape. Every step is guarded,
+      // so a seed against either shape converges on the keyed one and the
+      // existing checkpoint survives as the shared row.
+      await client.query(\`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_schema = '\${this.config.schema}'
+               AND table_name = '\${this.config.table}_correlated'
+               AND column_name = 'id'
+          ) THEN
+            ALTER TABLE \${this._fqc} ADD COLUMN IF NOT EXISTS key text;
+            ALTER TABLE \${this._fqc} ADD COLUMN IF NOT EXISTS leased_by text;
+            ALTER TABLE \${this._fqc} ADD COLUMN IF NOT EXISTS leased_until timestamptz;
+            UPDATE \${this._fqc} SET key = '' WHERE key IS NULL;
+            ALTER TABLE \${this._fqc}
+              DROP CONSTRAINT IF EXISTS \${this.config.table}_correlated_singleton;
+            ALTER TABLE \${this._fqc}
+              DROP CONSTRAINT IF EXISTS \${this.config.table}_correlated_pkey;
+            ALTER TABLE \${this._fqc} DROP COLUMN IF EXISTS id;
+            ALTER TABLE \${this._fqc} ALTER COLUMN key SET NOT NULL;
+            ALTER TABLE \${this._fqc} ADD PRIMARY KEY (key);
+          END IF;
+        END $$;\`);
+      await client.query(
+        \`INSERT INTO \${this._fqc} (key) VALUES ('') ON CONFLICT (key) DO NOTHING;\`
       );
 
       // Migration for tables created before priority lanes (ACT-102).
@@ -51939,7 +52070,7 @@ export class PostgresStore implements Store {
           WHERE schema_name = '\${this.config.schema}'
         ) THEN
           EXECUTE 'DROP TABLE IF EXISTS \${this._fqt}';
-          EXECUTE 'DROP TABLE IF EXISTS \${this._fql}, \${this._fqc}, \${this._fqs}';
+          EXECUTE 'DROP TABLE IF EXISTS \${this._fqc}, \${this._fqs}';
           IF '\${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "\${this.config.schema}" CASCADE';
           END IF;
@@ -52429,8 +52560,14 @@ export class PostgresStore implements Store {
    */
   async subscribe(
     streams: SubscribeInput[],
-    correlated_at?: number
-  ): Promise<{ subscribed: number; watermark: number; correlated_at: number }> {
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ): Promise<{
+    subscribed: number;
+    watermark: number;
+    correlated_at: number;
+    correlating?: boolean;
+  }> {
     const client = await this._client("subscribe");
     try {
       await client.query("BEGIN");
@@ -52483,9 +52620,62 @@ export class PostgresStore implements Store {
       }
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). GREATEST keeps it monotonic.
-      if (correlated_at !== undefined)
+      //
+      // With a correlator the position and the lease are per-key (#1532), and
+      // both ride this one statement. It is a conditional upsert rather than
+      // a read then a write: two workers that both saw an expired lease
+      // before either wrote would both believe they hold it, which is exactly
+      // the duplication the lease removes. A key with no row yet seeds from
+      // the shared row, so an upgrade does not re-read history.
+      let correlating: boolean | undefined;
+      if (correlator) {
+        const { rowCount } = await client.query(
+          \`INSERT INTO \${this._fqc} (key, at, leased_by, leased_until)
+           SELECT $1,
+                  GREATEST(COALESCE($2::int, -1),
+                           COALESCE((SELECT at FROM \${this._fqc} WHERE key = ''), -1)),
+                  $3,
+                  -- A non-positive millis releases outright rather than
+                  -- setting an expiry a hair in the future, which would still
+                  -- refuse a successor asking in the same instant.
+                  CASE WHEN $4::int > 0
+                       THEN now() + ($4::int * interval '1 millisecond')
+                       ELSE NULL END
+           ON CONFLICT (key) DO UPDATE
+              SET at = GREATEST(\${this._fqc}.at, COALESCE($2::int, -1)),
+                  leased_by = CASE WHEN $4::int > 0 THEN EXCLUDED.leased_by END,
+                  leased_until = EXCLUDED.leased_until
+            WHERE \${this._fqc}.leased_until IS NULL
+               OR \${this._fqc}.leased_until < now()
+               OR \${this._fqc}.leased_by = EXCLUDED.leased_by\`,
+          [
+            correlator.key,
+            correlated_at ?? null,
+            correlator.by,
+            correlator.millis,
+          ]
+        );
+        correlating = (rowCount ?? 0) > 0;
+        // Losing the race must still advance the checkpoint this worker
+        // already read past, or its marks and its position disagree.
+        if (!correlating && correlated_at !== undefined)
+          await client.query(
+            \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::int) WHERE key = $2\`,
+            [correlated_at, correlator.key]
+          );
+        // The shared row tracks how far *any* correlator has read. It is the
+        // floor a brand-new key inherits — which is the pre-#1532 behaviour,
+        // where one checkpoint was shared and a fresh worker resumed from it
+        // behind the cold-start back-scan window — and it is what a caller
+        // reading without a correlator still sees.
+        if (correlated_at !== undefined)
+          await client.query(
+            \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::int) WHERE key = ''\`,
+            [correlated_at]
+          );
+      } else if (correlated_at !== undefined)
         await client.query(
-          \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::int) WHERE id = 0\`,
+          \`UPDATE \${this._fqc} SET at = GREATEST(at, $1::int) WHERE key = ''\`,
           [correlated_at]
         );
       // Watermark and checkpoint in one round trip — correlate needs both.
@@ -52494,13 +52684,15 @@ export class PostgresStore implements Store {
         correlated_at: string | null;
       }>(
         \`SELECT (SELECT COALESCE(MAX(at), -1) FROM \${this._fqs}) AS max,
-                (SELECT at FROM \${this._fqc} WHERE id = 0) AS correlated_at\`
+                (SELECT at FROM \${this._fqc} WHERE key = $1) AS correlated_at\`,
+        [correlator?.key ?? ""]
       );
       await client.query("COMMIT");
       return {
         subscribed,
         watermark: rows[0]?.max ?? -1,
         correlated_at: Number(rows[0]?.correlated_at ?? -1),
+        ...(correlating === undefined ? {} : { correlating }),
       };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -53390,48 +53582,6 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Takes or renews the correlation lease, returning the durable checkpoint
-   * when held.
-   *
-   * One conditional \`UPDATE ... RETURNING\`, never a read-then-write: two
-   * workers reading an expired lease before either writes would both believe
-   * they hold it. The \`leased_by = $1\` arm folds renewal into the same
-   * statement, so a holder extends its own lease and a worker that lost one
-   * to expiry simply re-acquires.
-   *
-   * @param by - Caller identity; the same value renews rather than fails
-   * @param millis - Lease duration from now
-   * @returns The correlate checkpoint when held, \`undefined\` otherwise
-   */
-  async lease_correlation(
-    key: string,
-    by: string,
-    millis: number
-  ): Promise<boolean> {
-    const client = await this._client("lease_correlation");
-    try {
-      // One upsert, never a read-then-write: two workers that both read an
-      // expired lease before either wrote would both believe they hold it.
-      // The \`leased_by = $2\` arm folds renewal into acquisition, so a holder
-      // extends while it works and a worker that lost its lease to expiry
-      // simply takes it again.
-      const { rowCount } = await client.query(
-        \`INSERT INTO \${this._fql} (key, leased_by, leased_until)
-         VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
-         ON CONFLICT (key) DO UPDATE
-            SET leased_by = EXCLUDED.leased_by,
-                leased_until = EXCLUDED.leased_until
-          WHERE \${this._fql}.leased_until < now()
-             OR \${this._fql}.leased_by = EXCLUDED.leased_by;\`,
-        [key, by, millis]
-      );
-      return (rowCount ?? 0) > 0;
-    } finally {
-      client.release();
-    }
-  }
-
-  /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
    * Windowed targets (\`before\` set) prune the prefix below the closest safe
    * \`__snapshot__\` instead — no seed, subscriptions untouched, no-op when no
@@ -54246,32 +54396,56 @@ export class SqliteStore implements Store {
        SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM events)
        WHERE correlated_at IS NULL\`
     );
-    // Correlate checkpoint (#1484). Its own single-row table rather than a
-    // reserved subscription: a subscription row is counted by every
-    // stream-scoped operator surface (prioritize / reset / unblock /
-    // query_streams / blocked_streams) and would inflate those counts.
-    await this.client.execute(\`
-      CREATE TABLE IF NOT EXISTS correlated (
-        id INTEGER PRIMARY KEY CHECK (id = 0),
-        at INTEGER NOT NULL DEFAULT -1
-      )
-    \`);
-    await this.client.execute(
-      "INSERT OR IGNORE INTO correlated (id) VALUES (0)"
+    // Correlate checkpoint (#1484), keyed per correlator (#1532).
+    //
+    // Its own table rather than a reserved subscription: a subscription row is
+    // counted by every stream-scoped operator surface (prioritize / reset /
+    // unblock / query_streams / blocked_streams) and would inflate those
+    // counts.
+    //
+    // Keyed because correlators that look for different things read the log
+    // for different reasons. One row let a worker running partial behaviour
+    // inherit another's position, and would let one hold a lease the other
+    // needs. The empty key is the shared row a caller with no correlator
+    // reads, and the floor a brand-new key inherits.
+    //
+    // SQLite cannot drop a primary key, so migrating the pre-#1532 shape
+    // means rebuilding: copy the single row's checkpoint across as the shared
+    // row, then swap the tables. Guarded on the old \`id\` column, so a seed
+    // against either shape converges and the checkpoint survives.
+    const correlated_columns = await this.client.execute(
+      "PRAGMA table_info(correlated)"
     );
-    // Correlation lease (#1532). Its own table rather than columns on the
-    // checkpoint, because it is keyed and the checkpoint is a singleton: a
-    // lease is only sound between workers that look for the same things, so
-    // two different applications sharing this database get separate rows and
-    // never starve each other. \`leased_until\` is epoch millis — SQLite has no
-    // timestamp type, and an integer comparison is what acquiring needs.
-    await this.client.execute(\`
-      CREATE TABLE IF NOT EXISTS correlation_lease (
-        key TEXT PRIMARY KEY,
-        leased_by TEXT NOT NULL,
-        leased_until INTEGER NOT NULL
-      )
-    \`);
+    const legacy = correlated_columns.rows.some((r) => r.name === "id");
+    if (legacy) {
+      await this.client.execute(\`
+        CREATE TABLE IF NOT EXISTS correlated_keyed (
+          key TEXT PRIMARY KEY,
+          at INTEGER NOT NULL DEFAULT -1,
+          leased_by TEXT,
+          leased_until INTEGER
+        )
+      \`);
+      await this.client.execute(
+        "INSERT OR IGNORE INTO correlated_keyed (key, at) SELECT '', at FROM correlated WHERE id = 0"
+      );
+      await this.client.execute("DROP TABLE correlated");
+      await this.client.execute(
+        "ALTER TABLE correlated_keyed RENAME TO correlated"
+      );
+    } else {
+      await this.client.execute(\`
+        CREATE TABLE IF NOT EXISTS correlated (
+          key TEXT PRIMARY KEY,
+          at INTEGER NOT NULL DEFAULT -1,
+          leased_by TEXT,
+          leased_until INTEGER
+        )
+      \`);
+    }
+    await this.client.execute(
+      "INSERT OR IGNORE INTO correlated (key) VALUES ('')"
+    );
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
@@ -54484,7 +54658,11 @@ export class SqliteStore implements Store {
   //     plus a UPDATE pass to keep the *max* priority across reactions
   //     targeting the same stream (ACT-102). Operator overrides go
   //     through \`prioritize()\` instead.
-  async subscribe(streams: SubscribeInput[], correlated_at?: number) {
+  async subscribe(
+    streams: SubscribeInput[],
+    correlated_at?: number,
+    correlator?: { key: string; by: string; millis: number }
+  ) {
     // Fail loud at registration for a claim source this adapter cannot
     // match: libsql has no \`REGEXP\`, and the portable GLOB grammar cannot
     // express alternation/grouping. A pattern source outside the portable
@@ -54547,20 +54725,75 @@ export class SqliteStore implements Store {
       );
       // The correlate checkpoint is written by its own producer, in the call
       // correlate already makes (#1484). MAX keeps it monotonic.
-      if (correlated_at !== undefined)
+      // With a correlator the position and the lease are per-key (#1532),
+      // both in one conditional upsert: a read then a write would let two
+      // workers that both saw an expired lease believe they hold it, which is
+      // the duplication the lease removes. A key with no row yet seeds from
+      // the shared row, so an upgrade does not re-read history.
+      let correlating: boolean | undefined;
+      if (correlator) {
+        const now = Date.now();
+        const taken = await tx.execute({
+          sql: \`INSERT INTO correlated (key, at, leased_by, leased_until)
+                SELECT ?,
+                       MAX(COALESCE(?, -1),
+                           COALESCE((SELECT at FROM correlated WHERE key = ''), -1)),
+                       ?, ?
+                ON CONFLICT (key) DO UPDATE
+                   SET at = MAX(correlated.at, COALESCE(?, -1)),
+                       leased_by = excluded.leased_by,
+                       leased_until = excluded.leased_until
+                 WHERE correlated.leased_until IS NULL
+                    OR correlated.leased_until < ?
+                    OR correlated.leased_by = excluded.leased_by\`,
+          args: [
+            correlator.key,
+            correlated_at ?? null,
+            correlator.by,
+            // \`millis <= 0\` releases outright rather than setting an expiry a
+            // hair in the future, which would still refuse a successor asking
+            // in the same instant.
+            correlator.millis > 0 ? now + correlator.millis : null,
+            correlated_at ?? null,
+            now,
+          ],
+        });
+        correlating = taken.rowsAffected > 0;
+        // Losing the race must still advance the checkpoint this worker
+        // already read past, or its marks and its position disagree.
+        if (!correlating && correlated_at !== undefined)
+          await tx.execute({
+            sql: "UPDATE correlated SET at = MAX(at, ?) WHERE key = ?",
+            args: [correlated_at, correlator.key],
+          });
+        // The shared row tracks how far *any* correlator has read: the floor
+        // a brand-new key inherits, and what a caller reading without a
+        // correlator still sees.
+        if (correlated_at !== undefined)
+          await tx.execute({
+            sql: "UPDATE correlated SET at = MAX(at, ?) WHERE key = ''",
+            args: [correlated_at],
+          });
+      } else if (correlated_at !== undefined)
         await tx.execute({
-          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE id = 0",
+          sql: "UPDATE correlated SET at = MAX(at, ?) WHERE key = ''",
           args: [correlated_at],
         });
       // Watermark and checkpoint together — correlate needs both.
-      const cp = await tx.execute("SELECT at FROM correlated WHERE id = 0");
+      const cp = await tx.execute({
+        sql: "SELECT at FROM correlated WHERE key = ?",
+        args: [correlator?.key ?? ""],
+      });
       await tx.commit();
       return {
         subscribed,
         watermark: Number(wm.rows[0].w),
-        // \`seed()\` always inserts the singleton row, so this read cannot
-        // come back empty — no defensive fallback to leave untested.
+        // \`seed()\` always inserts the shared row, and a correlator's row is
+        // created by the upsert above — or already existed, which is why the
+        // lease was refused. Either way this read cannot come back empty, so
+        // there is no defensive fallback to leave untested.
         correlated_at: Number(cp.rows[0].at),
+        ...(correlating === undefined ? {} : { correlating }),
       };
     } catch (e) {
       await tx.rollback();
@@ -55361,45 +55594,6 @@ export class SqliteStore implements Store {
       args: [priority, priority, ...filterArgs] as any[],
     });
     return result.rowsAffected;
-  }
-
-  /**
-   * Takes or renews the correlation lease, returning the durable checkpoint
-   * when held.
-   *
-   * A single conditional UPDATE, never a read-then-write: two workers reading
-   * an expired lease before either writes would both believe they hold it.
-   * The \`leased_by = ?\` arm folds renewal into the same statement.
-   *
-   * libSQL does not return rows from UPDATE, so the write reports
-   * \`rowsAffected\` and the checkpoint is read back inside the same write
-   * transaction — which is serialized here, so no other correlator can take
-   * the lease between the two statements.
-   *
-   * @param by - Caller identity; the same value renews rather than fails
-   * @param millis - Lease duration from now
-   * @returns The correlate checkpoint when held, \`undefined\` otherwise
-   */
-  async lease_correlation(
-    key: string,
-    by: string,
-    millis: number
-  ): Promise<boolean> {
-    // One upsert, never a read-then-write: two workers that both read an
-    // expired lease before either wrote would both believe they hold it. The
-    // \`leased_by = excluded.leased_by\` arm folds renewal into acquisition.
-    const now = Date.now();
-    const taken = await this.client.execute({
-      sql: \`INSERT INTO correlation_lease (key, leased_by, leased_until)
-            VALUES (?, ?, ?)
-            ON CONFLICT (key) DO UPDATE
-               SET leased_by = excluded.leased_by,
-                   leased_until = excluded.leased_until
-             WHERE correlation_lease.leased_until < ?
-                OR correlation_lease.leased_by = excluded.leased_by\`,
-      args: [key, by, now + millis, now],
-    });
-    return taken.rowsAffected > 0;
   }
 
   // --- truncate: transactional delete + seed ---
@@ -57603,6 +57797,18 @@ export type StorePropertyTckOptions = {
   factory: () => Store | Promise<Store>;
   /** fast-check runs per property. Default 100; lower for durable adapters. */
   numRuns?: number;
+  /**
+   * Per-property timeout in milliseconds. Default 5000, matching vitest.
+   *
+   * Every run of a property is a full reset plus a dozen or more round
+   * trips, so against a real database the wall time is dominated by I/O and
+   * by whatever else the machine is doing. Vitest's default is comfortable
+   * in isolation and not under a parallel suite sharing one server, which
+   * showed up as this file intermittently timing out rather than failing an
+   * assertion. Durable adapters should raise it; the in-memory store has no
+   * reason to.
+   */
+  timeoutMs?: number;
 };
 
 const streamArb = fc.constantFrom("s1", "s2", "s3");
@@ -57623,6 +57829,7 @@ const events = (count: number) => Array.from({ length: count }, () => inc(1));
 
 export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
   const numRuns = options.numRuns ?? 100;
+  const timeout = options.timeoutMs ?? 5_000;
 
   describe(\`TCK / Store properties / \${options.name}\`, () => {
     let store: Store;
@@ -57669,7 +57876,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
               expect(e.version).toBe(i);
             });
           }
-        }
+        },
+        timeout
       );
 
       test.prop([fc.array(commitArb, { minLength: 1, maxLength: 20 })], {
@@ -57698,7 +57906,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           ).rejects.toThrow();
           const after = await collect(store, { stream, stream_exact: true });
           expect(after.length).toBe(before.length);
-        }
+        },
+        timeout
       );
     });
 
@@ -57746,7 +57955,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
             }
           }
           expect(totalResolved + pending.length).toBe(totalClaims);
-        }
+        },
+        timeout
       );
 
       test.prop(
@@ -57793,40 +58003,45 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
               watermark1.get(lease.stream) as number
             );
           }
-        }
+        },
+        timeout
       );
 
       test.prop([fc.array(claimStreamArb, { minLength: 1, maxLength: 5 })], {
         numRuns,
-      })("blocked streams cannot be claimed again", async (commits) => {
-        await reset();
-        const streams = [...new Set(commits)];
-        await store.subscribe(streams.map((stream) => ({ stream })));
-        for (const stream of commits) {
+      })(
+        "blocked streams cannot be claimed again",
+        async (commits) => {
+          await reset();
+          const streams = [...new Set(commits)];
+          await store.subscribe(streams.map((stream) => ({ stream })));
+          for (const stream of commits) {
+            await store.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          }
+          await mark_all(store);
+          const claimed = await store.claim(10, 10, "worker", 60_000);
+          await store.block(claimed.map((l) => ({ ...l, error: "test" })));
+          const blockedSet = new Set(claimed.map((l) => l.stream));
+          // A control stream committed *after* the first claim is guaranteed
+          // claimable, so the re-claim is non-empty and the exclusion check
+          // below actually runs — while still proving no blocked stream
+          // reappears.
+          await store.subscribe([{ stream: "ctrl" }]);
           await store.commit<CounterEvents>(
-            stream,
+            "ctrl",
             [inc(1)],
-            make_meta({ stream })
+            make_meta({ stream: "ctrl" })
           );
-        }
-        await mark_all(store);
-        const claimed = await store.claim(10, 10, "worker", 60_000);
-        await store.block(claimed.map((l) => ({ ...l, error: "test" })));
-        const blockedSet = new Set(claimed.map((l) => l.stream));
-        // A control stream committed *after* the first claim is guaranteed
-        // claimable, so the re-claim is non-empty and the exclusion check
-        // below actually runs — while still proving no blocked stream
-        // reappears.
-        await store.subscribe([{ stream: "ctrl" }]);
-        await store.commit<CounterEvents>(
-          "ctrl",
-          [inc(1)],
-          make_meta({ stream: "ctrl" })
-        );
-        await mark_all(store);
-        const reclaim = await store.claim(10, 10, "worker2", 60_000);
-        for (const l of reclaim) expect(blockedSet.has(l.stream)).toBe(false);
-      });
+          await mark_all(store);
+          const reclaim = await store.claim(10, 10, "worker2", 60_000);
+          for (const l of reclaim) expect(blockedSet.has(l.stream)).toBe(false);
+        },
+        timeout
+      );
     });
   });
 };
@@ -57894,14 +58109,14 @@ export type StoreCapabilities = {
    */
   readonly restore?: boolean;
   /**
-   * Adapter implements {@link Store.lease_correlation}. When \`true\`, the TCK
-   * runs the correlation-lease suite — exclusive acquisition, renewal by the
-   * same holder, re-acquisition after expiry, and that the checkpoint handed
-   * back matches what \`subscribe\` persisted.
+   * Adapter honours \`subscribe\`'s optional \`correlator\` argument and answers
+   * \`correlating\` (#1532). When \`true\`, the TCK runs the correlation-lease
+   * suite — exclusive acquisition, renewal by the same holder, re-acquisition
+   * after expiry, per-key independence, and the keyed checkpoint.
    *
-   * Optional because a store that omits it simply lets every worker scan,
-   * which is the pre-#1532 behaviour and remains correct: the marks are
-   * idempotent, so the duplication is waste rather than error.
+   * Optional because a store that ignores the argument simply lets every
+   * worker scan, which is the pre-#1532 behaviour and remains correct: the
+   * marks are idempotent, so the duplication is waste rather than error.
    */
   readonly lease_correlation?: boolean;
   /**
@@ -61906,10 +62121,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // \`if\` branch every consumer would have to disprove (all three
     // in-tree adapters opt in to restore).
     describe.skipIf(!caps.lease_correlation)(
-      "lease_correlation (capability)",
+      "correlation lease via subscribe (capability)",
       () => {
         const by = () => \`corr-\${uid()}\`;
         const key = () => \`key-\${uid()}\`;
+        const take = (k: string, who: string, millis = 10_000) =>
+          store.subscribe([], undefined, { key: k, by: who, millis });
 
         /**
          * Hand a lease back early.
@@ -61917,66 +62134,129 @@ export const runStoreTck = (options: StoreTckOptions): void => {
          * There is no release verb — expiry is the only path, deliberately,
          * so a crash and a clean stop behave identically. A holder can still
          * shorten its own lease, because re-acquiring as the same holder
-         * renews, and renewing to 1ms releases in all but name. Each case
-         * does this so it cannot strand a lease for the next one.
+         * renews and renewing to 1ms releases in all but name.
          */
-        const release = async (k: string, holder: string) => {
-          await store.lease_correlation!(k, holder, 1);
+        const release = async (k: string, who: string) => {
+          await take(k, who, 1);
           await new Promise((r) => setTimeout(r, 20));
         };
 
-        it("grants the lease", async () => {
+        it("grants the lease to the first caller", async () => {
           const k = key();
-          const holder = by();
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          await release(k, holder);
+          const who = by();
+          expect((await take(k, who)).correlating).toBe(true);
+          await release(k, who);
+        });
+
+        it("answers undefined when no correlator is supplied", async () => {
+          // No lease was asked for, so there is no answer — and the caller
+          // scans exactly as every pre-#1532 caller does.
+          expect(await store.subscribe([])).not.toHaveProperty("correlating");
         });
 
         it("refuses a second holder while the lease is live", async () => {
           const k = key();
-          const holder = by();
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          // The whole point: two workers must not scan the same range at once.
-          expect(await store.lease_correlation!(k, by(), 10_000)).toBe(false);
-          await release(k, holder);
+          const who = by();
+          expect((await take(k, who)).correlating).toBe(true);
+          // The whole point: two workers must not scan the same range.
+          expect((await take(k, by())).correlating).toBe(false);
+          await release(k, who);
         });
 
         it("lets the same holder renew rather than failing", async () => {
           const k = key();
-          const holder = by();
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          // Acquisition and renewal are one call by design, so a holder can
-          // extend while it works without needing a second verb.
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          await release(k, holder);
+          const who = by();
+          expect((await take(k, who)).correlating).toBe(true);
+          // Acquiring and extending are one call by design, so a holder keeps
+          // its lease while it works without needing a second verb.
+          expect((await take(k, who)).correlating).toBe(true);
+          await release(k, who);
         });
 
         it("becomes available again once the lease expires", async () => {
           const k = key();
-          expect(await store.lease_correlation!(k, by(), 1)).toBe(true);
+          expect((await take(k, by(), 1)).correlating).toBe(true);
           await new Promise((r) => setTimeout(r, 30));
           // Expiry is also the crash-recovery path: a dead holder must not
           // stall discovery forever.
           const next = by();
-          expect(await store.lease_correlation!(k, next, 10_000)).toBe(true);
+          expect((await take(k, next)).correlating).toBe(true);
           await release(k, next);
         });
 
         it("keys leases independently, so one correlator cannot starve another", async () => {
-          // The reason the lease is keyed at all. Two different applications
-          // sharing a store are not interchangeable: if one held a global
-          // lease, the other would never scan and its reactions would
-          // silently stop.
+          // Correlators that look for different things are not
+          // interchangeable. A worker running a subset of the reactions must
+          // scan for itself, or its targets are never marked and its
+          // reactions silently never run.
           const a = key();
           const b = key();
           const holder_a = by();
           const holder_b = by();
-          expect(await store.lease_correlation!(a, holder_a, 10_000)).toBe(
-            true
-          );
-          expect(await store.lease_correlation!(b, holder_b, 10_000)).toBe(
-            true
-          );
+          expect((await take(a, holder_a)).correlating).toBe(true);
+          expect((await take(b, holder_b)).correlating).toBe(true);
+          await release(a, holder_a);
+          await release(b, holder_b);
+        });
+
+        it("still advances the checkpoint for a caller that loses the lease", async () => {
+          // A worker denied the lease may already have scanned and be
+          // reporting how far it read. Dropping that would leave its marks
+          // ahead of its recorded position, so the next pass would re-scan a
+          // range it had already covered.
+          const k = key();
+          const holder = by();
+          expect((await take(k, holder)).correlating).toBe(true);
+
+          const loser = await store.subscribe([], 7_777, {
+            key: k,
+            by: by(),
+            millis: 10_000,
+          });
+          expect(loser.correlating).toBe(false);
+          expect(loser.correlated_at).toBeGreaterThanOrEqual(7_777);
+
+          await release(k, holder);
+        });
+
+        it("seeds a new key from the shared floor, then lets it diverge", async () => {
+          const a = key();
+          const holder_a = by();
+          const first = await store.subscribe([], 4_100, {
+            key: a,
+            by: holder_a,
+            millis: 10_000,
+          });
+          expect(first.correlated_at).toBeGreaterThanOrEqual(4_100);
+
+          // A key with no row yet inherits how far any correlator has read.
+          // That is the pre-#1532 behaviour — one shared checkpoint, a fresh
+          // worker resuming from it behind the cold-start back-scan — so an
+          // upgrade does not re-read history.
+          const b = key();
+          const holder_b = by();
+          const second = await store.subscribe([], undefined, {
+            key: b,
+            by: holder_b,
+            millis: 10_000,
+          });
+          expect(second.correlated_at).toBeGreaterThanOrEqual(4_100);
+
+          // After that they are independent: one correlator reading further
+          // must not drag another's position forward, or the second would
+          // skip events it never scanned.
+          await store.subscribe([], 9_000, {
+            key: a,
+            by: holder_a,
+            millis: 10_000,
+          });
+          const b_again = await store.subscribe([], undefined, {
+            key: b,
+            by: holder_b,
+            millis: 10_000,
+          });
+          expect(b_again.correlated_at).toBe(second.correlated_at);
+
           await release(a, holder_a);
           await release(b, holder_b);
         });

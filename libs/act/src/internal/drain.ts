@@ -81,6 +81,11 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
 
 export const subscribe = (
   streams: SubscribeInput[],
-  correlated_at?: number
-): Promise<{ subscribed: number; watermark: number; correlated_at: number }> =>
-  store().subscribe(streams, correlated_at);
+  correlated_at?: number,
+  correlator?: { key: string; by: string; millis: number }
+): Promise<{
+  subscribed: number;
+  watermark: number;
+  correlated_at: number;
+  correlating?: boolean;
+}> => store().subscribe(streams, correlated_at, correlator);

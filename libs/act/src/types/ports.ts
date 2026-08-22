@@ -639,66 +639,6 @@ export interface Store extends Disposable, EventSource {
   ) => Promise<Lease[]>;
 
   /**
-   * Takes (or renews) the correlation lease for `millis`.
-   *
-   * **Capability-gated.** Adapters may omit it — correlate calls it through
-   * `?.`, and a store without it keeps today's behaviour, where every worker
-   * scans.
-   *
-   * Exists because correlation is duplicated work at every worker count.
-   * Each worker holds its own in-memory scan position, seeded from the
-   * durable checkpoint once at start-up, so N workers wake on the same commit
-   * and each read the whole range and each write the same marks. Measured on
-   * real worker processes, reads and mark-writes per committed event come out
-   * at exactly 1, 2, 4 and 8 for one, two, four and eight workers. The marks
-   * are idempotent, so this is waste rather than error — but the writes land
-   * on the rows {@link claim} locks and churn the partial index the design
-   * depends on, so the waste scales the wrong way.
-   *
-   * Delivery is unaffected either way: leases already make it exactly-once.
-   * This governs only which worker bothers to look.
-   *
-   * @param key - Which correlator this is. The lease is only sound between
-   *   workers that look for the same things, so this scopes it: identical
-   *   workers share a key and take turns, while two different applications
-   *   sharing one database get separate leases and never starve each other.
-   *   Callers derive it from the registry; the store treats it as opaque.
-   * @param by - Caller identity. Passing the same value renews rather than
-   *   fails, so acquisition and renewal are one call.
-   * @param millis - How long the lease should be held from now.
-   * @returns `true` when the caller holds the lease, `false` when another
-   *   worker with the same `key` does.
-   *
-   * Deliberately does **not** hand back the correlate checkpoint, though an
-   * earlier draft did. A worker's local scan position falls behind while
-   * someone else holds the lease, so syncing from the durable checkpoint
-   * looks like an obvious win — but that checkpoint is shared by every
-   * correlator against this store, including ones with a different `key`.
-   * Syncing from it would let one application skip events another had
-   * already scanned, which is a silent delivery failure. Instead a worker
-   * that takes over re-scans from its own position: redundant, bounded by
-   * paging, and idempotent, because marks only ever move forward.
-   *
-   * **Released by expiry only**, with no release verb, so a crash and a
-   * graceful shutdown take the identical path and the recovery path is
-   * exercised constantly rather than only during incidents. The cost is that
-   * a cleanly-stopped worker holds its lease until it expires, which bounds
-   * how long discovery can stall.
-   *
-   * Implementations MUST make acquisition atomic — a read-then-write would
-   * let two workers hold it at once. One conditional `UPDATE ... RETURNING`
-   * is the intended shape.
-   *
-   * @see {@link subscribe} for the monotonic checkpoint write, which is
-   *   unchanged and remains safe under concurrent correlators
-   */
-  lease_correlation?: (
-    key: string,
-    by: string,
-    millis: number
-  ) => Promise<boolean>;
-
-  /**
    * Registers streams for event processing.
    *
    * Upserts stream entries so they become visible to {@link claim}. Used by
@@ -741,10 +681,57 @@ export interface Store extends Disposable, EventSource {
      * cannot rewind it and re-sending the same value is a no-op. Omitted
      * leaves it untouched.
      */
-    correlated_at?: number
+    correlated_at?: number,
+    /**
+     * Identifies the calling correlator, and asks for the correlation lease
+     * (#1532).
+     *
+     * Correlation is duplicated work without it: every worker keeps its own
+     * in-memory scan position, so N workers wake on the same commit and each
+     * reads the whole range and writes the same marks — measured at exactly
+     * N reads and N mark-writes per committed event. The marks are
+     * idempotent, so this is waste rather than error, but the writes land on
+     * the rows {@link claim} locks and churn the partial index the design
+     * depends on.
+     *
+     * It rides `subscribe` rather than a verb of its own because correlate
+     * already calls this every pass: the lease is a property of the
+     * checkpoint write that already happens.
+     *
+     * - `key` scopes the lease to interchangeable correlators. Workers
+     *   running the same application are; a worker deployed with a subset of
+     *   the reactions is not, and must scan for itself or its targets are
+     *   never marked. Callers derive it from the registry; stores treat it
+     *   as opaque, and it also selects which checkpoint row this caller
+     *   reads and advances.
+     * - `by` identifies this worker. Passing the same value renews rather
+     *   than fails, so acquiring and extending are one call.
+     * - `millis` is how long the lease is held from now.
+     *
+     * Omitted entirely, no lease is taken and the caller reads and advances
+     * the shared legacy checkpoint — which is what every pre-#1532 caller
+     * does, and why this is additive.
+     */
+    correlator?: { key: string; by: string; millis: number }
   ) => Promise<{
     subscribed: number;
     watermark: number;
+    /**
+     * Whether the caller holds the correlation lease and should scan
+     * (#1532).
+     *
+     * `undefined` when no `correlator` was supplied — no lease was requested,
+     * so there is no answer and the caller scans as it always has.
+     *
+     * Acquiring MUST be atomic. A read-then-write lets two workers both see
+     * an expired lease and both believe they hold it, which is precisely the
+     * duplication the lease removes.
+     *
+     * Released by expiry only: a crash and a clean stop then take the same
+     * path, so the recovery path is the common one. A holder can still hand
+     * it back early by renewing with a minimal `millis`.
+     */
+    correlating?: boolean;
     /**
      * The correlate checkpoint (#1484): how far `correlate` has **read** the
      * event log, or `-1` when it has never advanced.
@@ -756,9 +743,16 @@ export interface Store extends Disposable, EventSource {
      * store round trip of its own: `correlate` already calls `subscribe`
      * with the targets each scan discovered.
      *
-     * Adapters keep it in their own single-row relation, never as a
-     * subscription, so no stream-scoped surface (`prioritize`, `reset`,
-     * `unblock`, `query_streams`, `blocked_streams`) ever counts it.
+     * Adapters keep it in their own relation, never as a subscription, so no
+     * stream-scoped surface (`prioritize`, `reset`, `unblock`,
+     * `query_streams`, `blocked_streams`) ever counts it.
+     *
+     * **Keyed per correlator** when a `correlator` is supplied (#1532), and
+     * shared otherwise. Correlators that look for different things read the
+     * log for different reasons, so one inheriting another's position at cold
+     * start could skip events it needed — previously survivable only because
+     * of the back-scan window. A key with no row yet falls back to the shared
+     * value, so an upgrade does not re-read history.
      */
     correlated_at: number;
   }>;

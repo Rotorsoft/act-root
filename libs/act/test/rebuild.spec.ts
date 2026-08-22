@@ -77,6 +77,10 @@ describe("Store.reset", () => {
 
     // All events replayed through the projection
     expect(projected).toEqual([{ by: 1 }, { by: 2 }, { by: 3 }]);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("should unblock blocked streams after reset", async () => {
@@ -111,6 +115,10 @@ describe("Store.reset", () => {
 
     expect(handler).toHaveBeenCalled();
     expect(result.acked.length).toBeGreaterThan(0);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("should replay with batch handler after reset", async () => {
@@ -146,6 +154,10 @@ describe("Store.reset", () => {
 
     expect(batchFn).toHaveBeenCalled();
     expect(singleHandler).not.toHaveBeenCalled();
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("should produce idempotent results on multiple resets", async () => {
@@ -184,6 +196,10 @@ describe("Store.reset", () => {
 
     expect(firstRun).toEqual(secondRun);
     expect(firstRun).toEqual([10, 20]);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("should replay events when drain runs after reset on a settled app", async () => {
@@ -220,6 +236,10 @@ describe("Store.reset", () => {
 
     expect(projected).toEqual([1, 2]);
     expect(result.acked.length).toBe(1);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("should replay events when settle runs after reset on a settled app", async () => {
@@ -259,6 +279,10 @@ describe("Store.reset", () => {
     });
 
     expect(projected).toEqual([7, 8]);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("app.reset returns 0 and skips arming the drain flag for unknown streams", async () => {
@@ -272,6 +296,10 @@ describe("Store.reset", () => {
         }
       )._drain_controllers.get("default")!.armed
     ).toBe(false);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 
   it("app.reset does not arm the drain flag when the app has no reactions", async () => {
@@ -289,5 +317,9 @@ describe("Store.reset", () => {
         }
       )._drain_controllers.get("default")!.armed
     ).toBe(false);
+    // Shut the app down so it hands back its correlation lease (#1532).
+    // Several tests here share a registry, so an abandoned Act would hold
+    // the lease and the next test's correlate would skip its scan.
+    await app.shutdown();
   });
 });

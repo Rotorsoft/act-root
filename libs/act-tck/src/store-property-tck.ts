@@ -57,6 +57,18 @@ export type StorePropertyTckOptions = {
   factory: () => Store | Promise<Store>;
   /** fast-check runs per property. Default 100; lower for durable adapters. */
   numRuns?: number;
+  /**
+   * Per-property timeout in milliseconds. Default 5000, matching vitest.
+   *
+   * Every run of a property is a full reset plus a dozen or more round
+   * trips, so against a real database the wall time is dominated by I/O and
+   * by whatever else the machine is doing. Vitest's default is comfortable
+   * in isolation and not under a parallel suite sharing one server, which
+   * showed up as this file intermittently timing out rather than failing an
+   * assertion. Durable adapters should raise it; the in-memory store has no
+   * reason to.
+   */
+  timeoutMs?: number;
 };
 
 const streamArb = fc.constantFrom("s1", "s2", "s3");
@@ -77,6 +89,7 @@ const events = (count: number) => Array.from({ length: count }, () => inc(1));
 
 export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
   const numRuns = options.numRuns ?? 100;
+  const timeout = options.timeoutMs ?? 5_000;
 
   describe(`TCK / Store properties / ${options.name}`, () => {
     let store: Store;
@@ -123,7 +136,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
               expect(e.version).toBe(i);
             });
           }
-        }
+        },
+        timeout
       );
 
       test.prop([fc.array(commitArb, { minLength: 1, maxLength: 20 })], {
@@ -152,7 +166,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
           ).rejects.toThrow();
           const after = await collect(store, { stream, stream_exact: true });
           expect(after.length).toBe(before.length);
-        }
+        },
+        timeout
       );
     });
 
@@ -200,7 +215,8 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
             }
           }
           expect(totalResolved + pending.length).toBe(totalClaims);
-        }
+        },
+        timeout
       );
 
       test.prop(
@@ -247,40 +263,45 @@ export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
               watermark1.get(lease.stream) as number
             );
           }
-        }
+        },
+        timeout
       );
 
       test.prop([fc.array(claimStreamArb, { minLength: 1, maxLength: 5 })], {
         numRuns,
-      })("blocked streams cannot be claimed again", async (commits) => {
-        await reset();
-        const streams = [...new Set(commits)];
-        await store.subscribe(streams.map((stream) => ({ stream })));
-        for (const stream of commits) {
+      })(
+        "blocked streams cannot be claimed again",
+        async (commits) => {
+          await reset();
+          const streams = [...new Set(commits)];
+          await store.subscribe(streams.map((stream) => ({ stream })));
+          for (const stream of commits) {
+            await store.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          }
+          await mark_all(store);
+          const claimed = await store.claim(10, 10, "worker", 60_000);
+          await store.block(claimed.map((l) => ({ ...l, error: "test" })));
+          const blockedSet = new Set(claimed.map((l) => l.stream));
+          // A control stream committed *after* the first claim is guaranteed
+          // claimable, so the re-claim is non-empty and the exclusion check
+          // below actually runs — while still proving no blocked stream
+          // reappears.
+          await store.subscribe([{ stream: "ctrl" }]);
           await store.commit<CounterEvents>(
-            stream,
+            "ctrl",
             [inc(1)],
-            make_meta({ stream })
+            make_meta({ stream: "ctrl" })
           );
-        }
-        await mark_all(store);
-        const claimed = await store.claim(10, 10, "worker", 60_000);
-        await store.block(claimed.map((l) => ({ ...l, error: "test" })));
-        const blockedSet = new Set(claimed.map((l) => l.stream));
-        // A control stream committed *after* the first claim is guaranteed
-        // claimable, so the re-claim is non-empty and the exclusion check
-        // below actually runs — while still proving no blocked stream
-        // reappears.
-        await store.subscribe([{ stream: "ctrl" }]);
-        await store.commit<CounterEvents>(
-          "ctrl",
-          [inc(1)],
-          make_meta({ stream: "ctrl" })
-        );
-        await mark_all(store);
-        const reclaim = await store.claim(10, 10, "worker2", 60_000);
-        for (const l of reclaim) expect(blockedSet.has(l.stream)).toBe(false);
-      });
+          await mark_all(store);
+          const reclaim = await store.claim(10, 10, "worker2", 60_000);
+          for (const l of reclaim) expect(blockedSet.has(l.stream)).toBe(false);
+        },
+        timeout
+      );
     });
   });
 };

@@ -60,14 +60,14 @@ export type StoreCapabilities = {
    */
   readonly restore?: boolean;
   /**
-   * Adapter implements {@link Store.lease_correlation}. When `true`, the TCK
-   * runs the correlation-lease suite — exclusive acquisition, renewal by the
-   * same holder, re-acquisition after expiry, and that the checkpoint handed
-   * back matches what `subscribe` persisted.
+   * Adapter honours `subscribe`'s optional `correlator` argument and answers
+   * `correlating` (#1532). When `true`, the TCK runs the correlation-lease
+   * suite — exclusive acquisition, renewal by the same holder, re-acquisition
+   * after expiry, per-key independence, and the keyed checkpoint.
    *
-   * Optional because a store that omits it simply lets every worker scan,
-   * which is the pre-#1532 behaviour and remains correct: the marks are
-   * idempotent, so the duplication is waste rather than error.
+   * Optional because a store that ignores the argument simply lets every
+   * worker scan, which is the pre-#1532 behaviour and remains correct: the
+   * marks are idempotent, so the duplication is waste rather than error.
    */
   readonly lease_correlation?: boolean;
   /**
@@ -4072,10 +4072,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // `if` branch every consumer would have to disprove (all three
     // in-tree adapters opt in to restore).
     describe.skipIf(!caps.lease_correlation)(
-      "lease_correlation (capability)",
+      "correlation lease via subscribe (capability)",
       () => {
         const by = () => `corr-${uid()}`;
         const key = () => `key-${uid()}`;
+        const take = (k: string, who: string, millis = 10_000) =>
+          store.subscribe([], undefined, { key: k, by: who, millis });
 
         /**
          * Hand a lease back early.
@@ -4083,66 +4085,129 @@ export const runStoreTck = (options: StoreTckOptions): void => {
          * There is no release verb — expiry is the only path, deliberately,
          * so a crash and a clean stop behave identically. A holder can still
          * shorten its own lease, because re-acquiring as the same holder
-         * renews, and renewing to 1ms releases in all but name. Each case
-         * does this so it cannot strand a lease for the next one.
+         * renews and renewing to 1ms releases in all but name.
          */
-        const release = async (k: string, holder: string) => {
-          await store.lease_correlation!(k, holder, 1);
+        const release = async (k: string, who: string) => {
+          await take(k, who, 1);
           await new Promise((r) => setTimeout(r, 20));
         };
 
-        it("grants the lease", async () => {
+        it("grants the lease to the first caller", async () => {
           const k = key();
-          const holder = by();
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          await release(k, holder);
+          const who = by();
+          expect((await take(k, who)).correlating).toBe(true);
+          await release(k, who);
+        });
+
+        it("answers undefined when no correlator is supplied", async () => {
+          // No lease was asked for, so there is no answer — and the caller
+          // scans exactly as every pre-#1532 caller does.
+          expect(await store.subscribe([])).not.toHaveProperty("correlating");
         });
 
         it("refuses a second holder while the lease is live", async () => {
           const k = key();
-          const holder = by();
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          // The whole point: two workers must not scan the same range at once.
-          expect(await store.lease_correlation!(k, by(), 10_000)).toBe(false);
-          await release(k, holder);
+          const who = by();
+          expect((await take(k, who)).correlating).toBe(true);
+          // The whole point: two workers must not scan the same range.
+          expect((await take(k, by())).correlating).toBe(false);
+          await release(k, who);
         });
 
         it("lets the same holder renew rather than failing", async () => {
           const k = key();
-          const holder = by();
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          // Acquisition and renewal are one call by design, so a holder can
-          // extend while it works without needing a second verb.
-          expect(await store.lease_correlation!(k, holder, 10_000)).toBe(true);
-          await release(k, holder);
+          const who = by();
+          expect((await take(k, who)).correlating).toBe(true);
+          // Acquiring and extending are one call by design, so a holder keeps
+          // its lease while it works without needing a second verb.
+          expect((await take(k, who)).correlating).toBe(true);
+          await release(k, who);
         });
 
         it("becomes available again once the lease expires", async () => {
           const k = key();
-          expect(await store.lease_correlation!(k, by(), 1)).toBe(true);
+          expect((await take(k, by(), 1)).correlating).toBe(true);
           await new Promise((r) => setTimeout(r, 30));
           // Expiry is also the crash-recovery path: a dead holder must not
           // stall discovery forever.
           const next = by();
-          expect(await store.lease_correlation!(k, next, 10_000)).toBe(true);
+          expect((await take(k, next)).correlating).toBe(true);
           await release(k, next);
         });
 
         it("keys leases independently, so one correlator cannot starve another", async () => {
-          // The reason the lease is keyed at all. Two different applications
-          // sharing a store are not interchangeable: if one held a global
-          // lease, the other would never scan and its reactions would
-          // silently stop.
+          // Correlators that look for different things are not
+          // interchangeable. A worker running a subset of the reactions must
+          // scan for itself, or its targets are never marked and its
+          // reactions silently never run.
           const a = key();
           const b = key();
           const holder_a = by();
           const holder_b = by();
-          expect(await store.lease_correlation!(a, holder_a, 10_000)).toBe(
-            true
-          );
-          expect(await store.lease_correlation!(b, holder_b, 10_000)).toBe(
-            true
-          );
+          expect((await take(a, holder_a)).correlating).toBe(true);
+          expect((await take(b, holder_b)).correlating).toBe(true);
+          await release(a, holder_a);
+          await release(b, holder_b);
+        });
+
+        it("still advances the checkpoint for a caller that loses the lease", async () => {
+          // A worker denied the lease may already have scanned and be
+          // reporting how far it read. Dropping that would leave its marks
+          // ahead of its recorded position, so the next pass would re-scan a
+          // range it had already covered.
+          const k = key();
+          const holder = by();
+          expect((await take(k, holder)).correlating).toBe(true);
+
+          const loser = await store.subscribe([], 7_777, {
+            key: k,
+            by: by(),
+            millis: 10_000,
+          });
+          expect(loser.correlating).toBe(false);
+          expect(loser.correlated_at).toBeGreaterThanOrEqual(7_777);
+
+          await release(k, holder);
+        });
+
+        it("seeds a new key from the shared floor, then lets it diverge", async () => {
+          const a = key();
+          const holder_a = by();
+          const first = await store.subscribe([], 4_100, {
+            key: a,
+            by: holder_a,
+            millis: 10_000,
+          });
+          expect(first.correlated_at).toBeGreaterThanOrEqual(4_100);
+
+          // A key with no row yet inherits how far any correlator has read.
+          // That is the pre-#1532 behaviour — one shared checkpoint, a fresh
+          // worker resuming from it behind the cold-start back-scan — so an
+          // upgrade does not re-read history.
+          const b = key();
+          const holder_b = by();
+          const second = await store.subscribe([], undefined, {
+            key: b,
+            by: holder_b,
+            millis: 10_000,
+          });
+          expect(second.correlated_at).toBeGreaterThanOrEqual(4_100);
+
+          // After that they are independent: one correlator reading further
+          // must not drag another's position forward, or the second would
+          // skip events it never scanned.
+          await store.subscribe([], 9_000, {
+            key: a,
+            by: holder_a,
+            millis: 10_000,
+          });
+          const b_again = await store.subscribe([], undefined, {
+            key: b,
+            by: holder_b,
+            millis: 10_000,
+          });
+          expect(b_again.correlated_at).toBe(second.correlated_at);
+
           await release(a, holder_a);
           await release(b, holder_b);
         });

@@ -988,6 +988,15 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         this.stop_correlations();
+        // Hand the correlation lease back rather than making the next worker
+        // wait out its expiry (#1532), and *await* it: a fire-and-forget
+        // release can land after the process that replaces this one has
+        // already asked, which reads as the successor being denied.
+        //
+        // Wrapped in `_scoped` because it resolves the store through the
+        // port — a scoped Act would otherwise release against the singleton
+        // and leave its real lease held.
+        await this._scoped(() => this._correlate.release_correlation());
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();

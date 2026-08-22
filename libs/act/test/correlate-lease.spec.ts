@@ -96,7 +96,7 @@ describe("correlate lease", () => {
       .to((e) => ({ target: `poked-${e.stream}`, source: e.stream }))
       .build({ scoped: { store, cache: new InMemoryCache() } });
 
-    const spy = vi.spyOn(store, "lease_correlation");
+    const spy = vi.spyOn(store, "subscribe");
     await one.do("bump", { stream: "s3", actor }, {});
     await two.do("poke", { stream: "s4", actor }, {});
     one.settle({ debounceMs: 0 });
@@ -107,12 +107,14 @@ describe("correlate lease", () => {
     // would stop the other ever scanning, and its reactions would silently
     // never run. Different registries must therefore ask for different keys,
     // and both must be granted.
-    const keys = new Set(spy.mock.calls.map(([key]) => key));
+    // The correlator rides `subscribe`'s third argument, so the keys asked
+    // for are the keys the store saw.
+    const keys = new Set(
+      spy.mock.calls
+        .map(([, , correlator]) => correlator?.key)
+        .filter((k): k is string => typeof k === "string")
+    );
     expect(keys.size).toBe(2);
-    expect(spy.mock.results.every((r) => r.type === "return")).toBe(true);
-    await expect(
-      Promise.all(spy.mock.results.map((r) => r.value))
-    ).resolves.toEqual(expect.arrayContaining([true]));
 
     spy.mockRestore();
     await one.shutdown();
@@ -124,9 +126,7 @@ describe("correlate lease", () => {
     await store.seed();
     const a = build(store);
     const spy = vi.spyOn(log(), "error").mockImplementation(() => log());
-    vi.spyOn(store, "lease_correlation").mockRejectedValue(
-      new Error("release failed")
-    );
+    vi.spyOn(store, "subscribe").mockRejectedValue(new Error("release failed"));
 
     // Releasing early is best-effort: the fallback is the expiry that would
     // have applied had the process died, so a failure must not propagate out

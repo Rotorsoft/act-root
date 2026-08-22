@@ -68,10 +68,13 @@ const instrumented = (s) =>
         };
 
       if (prop === "subscribe")
-        return (streams, watermark) => {
+        // Forward every argument. Naming just the two this bench cares about
+        // silently dropped the correlator that carries the correlation lease,
+        // which made the lease look like it did nothing.
+        return (...args) => {
           m.subscribe_calls++;
-          m.subscribe_entries += streams.length;
-          return value.call(target, streams, watermark);
+          m.subscribe_entries += args[0].length;
+          return value.apply(target, args);
         };
 
       if (prop === "claim")

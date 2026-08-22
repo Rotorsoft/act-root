@@ -243,16 +243,22 @@ buried.
 
 `scripts/correlate-workers.bench.mjs`, same shape as the motivating run:
 
-| workers | reads/event before | after | mark writes before | after |
+| workers | scan events before | after | mark writes before | after |
 |---|---|---|---|---|
-| 1 | 1.00 | 1.00 | 398 | 399 |
-| 2 | 2.00 | **1.00** | 798 | **403** |
-| 4 | 4.00 | **1.00** | 1600 | **404** |
-| 8 | 8.00 | **1.00** | 3256 | **405** |
+| 1 | 398 | 404 | 398 | 404 |
+| 2 | 798 | **408** | 798 | **408** |
+| 4 | 1600 | **409** | 1600 | **409** |
+| 8 | 3256 | **409** | 3256 | **409** |
 
 Flat instead of linear, in reads and writes both, and `handled` still tracks
 commits exactly at every worker count — delivery is untouched, which was the
 requirement.
+
+`subscribe` *call* counts rise, because the "may I scan?" ping rides that
+method: 398 → 1,209 at one worker, 5,670 at eight. Those are single-row upserts
+replacing full log scans and bulk mark writes, so the trade is strongly
+favourable in aggregate, and it is the reason the single-worker question below
+is open rather than academic.
 
 ## Unresolved
 

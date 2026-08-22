@@ -331,40 +331,47 @@ The store TCK already pins every fact this relies on — restart keeps the row w
 
 ## Serializing correlation (optional)
 
-Correlation is how Act discovers which subscriptions have work: it reads the event log forward from a checkpoint and marks every subscription an event resolves to. Every worker does this independently — each keeps its own scan position in memory, seeded from the durable checkpoint once at start-up — so N workers wake on the same commit and each reads the whole range and writes the same marks. Measured on real worker processes, that comes out at exactly N reads and N mark-writes per committed event ([#1532](https://github.com/Rotorsoft/act-root/issues/1532)).
+Correlation is how Act discovers which subscriptions have work: it reads the event log forward from a checkpoint and marks every subscription an event resolves to. Every worker does this independently — each keeps its own scan position in memory, seeded from the durable checkpoint once at start-up — so N workers wake on the same commit and each reads the whole range and writes the same marks. Measured on real worker processes, that is exactly N reads and N mark-writes per committed event ([#1532](https://github.com/Rotorsoft/act-root/issues/1532)).
 
-Implementing `lease_correlation` lets one worker do it for all of them:
+Honouring `subscribe`'s optional `correlator` argument lets one worker do it for all of them. There is no separate method: correlate already calls `subscribe` every pass, so the lease is a property of the checkpoint write that already happens.
 
 ```ts no-check
-async lease_correlation(
-  key: string,
-  by: string,
-  millis: number
-): Promise<boolean> {
-  const { rowCount } = await this.client.query(
-    `INSERT INTO ${this.lease_table} (key, leased_by, leased_until)
-     VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))
-     ON CONFLICT (key) DO UPDATE
-        SET leased_by = EXCLUDED.leased_by,
-            leased_until = EXCLUDED.leased_until
-      WHERE ${this.lease_table}.leased_until < now()
-         OR ${this.lease_table}.leased_by = EXCLUDED.leased_by;`,
-    [key, by, millis]
-  );
-  return (rowCount ?? 0) > 0;
+async subscribe(streams, correlated_at?, correlator?) {
+  let correlating: boolean | undefined;
+  if (correlator) {
+    const { rowCount } = await this.client.query(
+      `INSERT INTO ${this.checkpoints} (key, at, leased_by, leased_until)
+       SELECT $1,
+              GREATEST(COALESCE($2::int, -1),
+                       COALESCE((SELECT at FROM ${this.checkpoints} WHERE key = ''), -1)),
+              $3,
+              now() + ($4::int * interval '1 millisecond')
+       ON CONFLICT (key) DO UPDATE
+          SET at = GREATEST(${this.checkpoints}.at, COALESCE($2::int, -1)),
+              leased_by = EXCLUDED.leased_by,
+              leased_until = EXCLUDED.leased_until
+        WHERE ${this.checkpoints}.leased_until < now()
+           OR ${this.checkpoints}.leased_by = EXCLUDED.leased_by;`,
+      [correlator.key, correlated_at ?? null, correlator.by, correlator.millis]
+    );
+    correlating = (rowCount ?? 0) > 0;
+  }
+  // ...the usual subscription upserts...
+  return { subscribed, watermark, correlated_at: at, ...(correlating === undefined ? {} : { correlating }) };
 }
 ```
 
-Four rules:
+Five rules:
 
-- **Acquire atomically.** One conditional upsert, never a read then a write — two workers that both read an expired lease before either wrote would both believe they hold it, which is exactly the duplication the lease removes.
-- **Renewal is the same call.** Passing the same `by` extends rather than fails, so a holder keeps its lease while it works without needing a second verb.
-- **Expiry is the only release.** There is no release method, deliberately: a crash and a clean stop then take the identical path, so the recovery path is the common path and gets exercised constantly rather than only during incidents.
-- **Treat `key` as opaque, and key on it.** It scopes the lease to workers that look for the same things. A deployment running some workers with a subset of the reactions is the case that matters: those are not interchangeable with the full ones, and sharing a lease would leave one set of targets never marked — a reaction that silently never runs.
+- **Acquire atomically.** One conditional upsert, never a read then a write — two workers that both read an expired lease before either wrote would both believe they hold it.
+- **Renewal is the same call.** The same `by` extends rather than fails, so a holder keeps its lease while it works.
+- **A non-positive `millis` releases.** Setting an expiry a hair in the future instead would still refuse a successor asking in the same instant, which reads as the handback never happening.
+- **Expiry is the only other release.** A crash and a clean stop then take the identical path, so the recovery path is the common one.
+- **Treat `key` as opaque, and key both the lease and the checkpoint on it.** It scopes the lease to workers that look for the same things — a deployment running some workers with a subset of the reactions is the case that matters, since those are not interchangeable and sharing a lease would leave one set of targets never marked. Keep an empty-key row as the shared floor: a brand-new key seeds from it, so an upgrade does not re-read history, and callers passing no correlator still read it.
 
-**What you are trading.** Without the lease, correlation is fault-tolerant by redundancy: any worker can do it, so losing one costs nothing. With it, discovery stalls for up to the lease duration after a holder dies. Nothing is lost — the marks are durable and the next holder resumes — but reaction latency spikes by up to that window. That is why the duration is seconds rather than minutes.
+**What you are trading.** Without the lease, correlation is fault-tolerant by redundancy: any worker can do it, so losing one costs nothing. With it, discovery stalls for up to the lease duration after a holder dies. Nothing is lost — the marks are durable and the next holder resumes — but reaction latency spikes by up to that window, which is why the duration is seconds rather than minutes.
 
-Opt in with `capabilities: { lease_correlation: true }` and the TCK runs the suite: the lease is granted, refused to a second holder, renewed by the same holder, re-acquirable after expiry, and keyed independently so one correlator cannot starve another.
+Opt in with `capabilities: { lease_correlation: true }` and the TCK runs the suite: granted, refused to a second holder, renewed by the same holder, re-acquirable after expiry, keyed independently, the checkpoint still advancing for a caller that loses the race, and a new key seeding from the shared floor before diverging.
 
 ## Implementing `Store.restore` (optional)
 

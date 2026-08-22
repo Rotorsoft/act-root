@@ -12,6 +12,9 @@ runStorePropertyTck({
   name: "SqliteStore",
   factory: () => new SqliteStore({ url: `file:${DB_PATH}` }),
   numRuns: 30,
+  // Same reasoning as act-pg: each run is a rebuild plus many round trips, and
+  // vitest's 5s default is tight under the full parallel suite.
+  timeoutMs: 30_000,
 });
 
 afterAll(() => {

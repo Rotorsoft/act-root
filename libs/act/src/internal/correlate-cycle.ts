@@ -461,24 +461,40 @@ export class CorrelateCycle<
     // its own in-memory checkpoint, so without this they all wake on the same
     // commit and each reads the whole range and writes the same marks —
     // measured at exactly W reads and W mark-writes per committed event for W
-    // workers. Capability-gated: a store without it leaves every worker
-    // scanning, exactly as before.
-    const port = store();
-    if (
-      lease &&
-      port.lease_correlation &&
-      !(await port.lease_correlation(this._key, this._by, this._lease_millis))
-    )
-      // Another worker with the same registry is scanning, so this one need
-      // not. Stay armed: the work still needs doing, and this worker should
-      // look again next pass rather than disarm and wait for an unrelated
-      // commit to wake it.
-      return {
-        subscribed: 0,
-        last_id: this._checkpoint,
-        marked: 0,
-        scanned: false,
-      };
+    // workers.
+    //
+    // The lease rides `subscribe`, the call correlate already makes to
+    // persist its checkpoint, rather than a verb of its own. Asking with no
+    // streams and no advance is a pure "may I scan?".
+    //
+    // The answer's checkpoint is deliberately ignored. Adopting it looks like
+    // free catch-up and is not: the durable position is a floor shared with
+    // every other correlator, so a worker that adopted it would start its
+    // scan past events it had never read and never mark their targets. A
+    // worker that takes over instead re-scans from its own position —
+    // redundant, bounded by paging, idempotent, and correct. `init` remains
+    // the only place the durable checkpoint seeds a local one, where the
+    // cold-start back-scan window guards exactly this hazard.
+    if (lease) {
+      const { correlating } = await this._cd.subscribe([], undefined, {
+        key: this._key,
+        by: this._by,
+        millis: this._lease_millis,
+      });
+      // `undefined` means the store does not implement leasing, so every
+      // worker scans exactly as before.
+      if (correlating === false)
+        // Another worker with the same registry is scanning, so this one need
+        // not. Stay armed: the work still needs doing, and this worker should
+        // look again next pass rather than disarm and wait for an unrelated
+        // commit to wake it.
+        return {
+          subscribed: 0,
+          last_id: this._checkpoint,
+          marked: 0,
+          scanned: false,
+        };
+    }
 
     // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -558,7 +574,11 @@ export class CorrelateCycle<
       // Persist the read cursor with the targets this scan discovered
       // (#1484). Correlate is the only component that knows how far it has
       // read, and it is already making this call.
-      const { subscribed } = await this._cd.subscribe(streams, last_id);
+      const { subscribed } = await this._cd.subscribe(streams, last_id, {
+        key: this._key,
+        by: this._by,
+        millis: this._lease_millis,
+      });
       // Raising a mark is work becoming claimable, exactly like registering
       // a new target — the orchestrator arms on both (#1488). A target that
       // was already subscribed reports `subscribed: 0`, so arming on that
@@ -651,7 +671,14 @@ export class CorrelateCycle<
    */
   async release_correlation(): Promise<void> {
     try {
-      await store().lease_correlation?.(this._key, this._by, 1);
+      // Zero releases outright. A near-zero expiry would still refuse a
+      // successor asking in the same instant, which reads as the handback
+      // not having happened.
+      await this._cd.subscribe([], undefined, {
+        key: this._key,
+        by: this._by,
+        millis: 0,
+      });
     } catch (error) {
       log().error(error);
     }
