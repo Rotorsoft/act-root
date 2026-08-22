@@ -21,6 +21,13 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
     staleTime: 2_000,
     refetchInterval: 5_000,
   });
+  // Who is looking for new work, and how far behind that has fallen (#1539).
+  // Polled on the same cadence as the audit log — this is a small read of a
+  // tiny table, not a per-stream probe.
+  const correlatorsQuery = trpc.browse_correlators.useQuery(undefined, {
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+  });
   const writeEnabled = writeModeQuery.data?.enabled ?? false;
 
   // Active priority + lane filters. Clicking a badge in the histogram
@@ -245,6 +252,10 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
               Max event ID: {data.maxEventId.toLocaleString()}
             </div>
           </div>
+          <CorrelatorsPanel
+            correlators={correlatorsQuery.data?.correlators ?? []}
+            maxEventId={correlatorsQuery.data?.maxEventId ?? -1}
+          />
           <AuditPanel
             writeEnabled={writeEnabled}
             entries={auditQuery.data?.entries ?? []}
@@ -733,6 +744,103 @@ function Histogram({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Who is looking for new work, and how far behind they are (#1539).
+ *
+ * Before a reaction can run, something has to read new events and note which
+ * reactions care. One worker does that on behalf of the rest, holding a short
+ * claim on the job. If it stops, nothing is noticed until the claim lapses —
+ * bounded and self-healing, but worth being able to see.
+ *
+ * The gap shown is a different thing from every other lag number in this view.
+ * Those are about work already noticed; this is about work nobody has looked
+ * at yet.
+ */
+function CorrelatorsPanel({
+  correlators,
+  maxEventId,
+}: {
+  correlators: Array<{
+    key: string;
+    at: number;
+    leasedBy: string | null;
+    leasedUntil: number | null;
+  }>;
+  maxEventId: number;
+}) {
+  // The empty key is the position a brand-new correlator starts from, not a
+  // worker, so it would read as a permanently idle row.
+  const rows = correlators.filter((c) => c.key !== "");
+  const now = Date.now();
+
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+      <div className="mb-2 text-[10px] uppercase tracking-wider text-zinc-500">
+        Looking for work
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-xs text-zinc-600">
+          Nothing to show — this store keeps it in memory, or predates the
+          change that records it.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {rows.map((c) => {
+            const behind = Math.max(0, maxEventId - c.at);
+            const held = c.leasedUntil !== null && c.leasedUntil > now;
+            const secondsLeft = held
+              ? Math.ceil((c.leasedUntil! - now) / 1000)
+              : 0;
+            return (
+              <div
+                key={c.key}
+                className="rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className="truncate font-mono text-[11px] text-zinc-400"
+                    title={c.key}
+                  >
+                    {c.key.slice(0, 8)}
+                  </span>
+                  {held ? (
+                    <span className="shrink-0 text-[10px] text-emerald-500">
+                      being read · {secondsLeft}s left
+                    </span>
+                  ) : (
+                    // Nobody holds it. Normal for a moment between turns, and
+                    // the thing to notice if it persists while the gap grows.
+                    <span className="shrink-0 text-[10px] text-amber-500">
+                      nobody reading
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-zinc-600">
+                  <span>read up to event {c.at.toLocaleString()}</span>
+                  <span className={behind > 0 ? "text-zinc-400" : ""}>
+                    {behind === 0
+                      ? "caught up"
+                      : `${behind.toLocaleString()} behind`}
+                  </span>
+                </div>
+                {held && c.leasedBy && (
+                  <div
+                    className="mt-0.5 truncate font-mono text-[10px] text-zinc-700"
+                    title={c.leasedBy}
+                  >
+                    {c.leasedBy.slice(0, 8)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

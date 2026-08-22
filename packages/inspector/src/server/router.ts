@@ -21,6 +21,7 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { initTRPC } from "@trpc/server";
 import { z } from "zod";
+import { readCorrelators } from "./correlators.js";
 import { browseDirectory } from "./discovery/browse.js";
 import {
   PG_PORT_RANGE_END,
@@ -521,6 +522,34 @@ export const inspectorRouter = t.router({
   browse: t.procedure
     .input(z.object({ path: z.string().optional() }).optional())
     .query(({ input }) => browseDirectory(input?.path)),
+
+  /**
+   * Who is looking for work, and how far they have got (#1539).
+   *
+   * Pairs each correlator's reading position with the newest event id, so the
+   * gap between them is the honest measure of "work exists but nobody has
+   * noticed yet" — a different thing from every other lag number here, which
+   * are all about work already noticed.
+   *
+   * Empty for an in-memory store, which keeps this in memory with no table
+   * behind it, and for stores predating #1532.
+   */
+  browse_correlators: t.procedure.query(async () => {
+    const config = currentConfig;
+    if (!config || config.adapter === "inmemory")
+      return { correlators: [], maxEventId: -1 };
+
+    const correlators = await readCorrelators(
+      config.adapter === "pg"
+        ? { ...config, adapter: "pg" }
+        : { adapter: "sqlite", file: config.file }
+    );
+    // One cheap read for the log head; `query_streams` already reports it.
+    const { maxEventId } = await getStore().query_streams(() => {}, {
+      limit: 1,
+    });
+    return { correlators, maxEventId };
+  }),
 
   discover: mutationProcedure
     .input(
