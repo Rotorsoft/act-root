@@ -62,8 +62,13 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/* Overview cards */}
-      <div className="grid grid-cols-5 gap-3 border-b border-zinc-800 bg-zinc-925 px-4 py-3">
-        <Card label="Total" value={data.total} color="text-zinc-200" />
+      <div className="grid grid-cols-6 gap-3 border-b border-zinc-800 bg-zinc-925 px-4 py-3">
+        <Card
+          label="Total"
+          value={data.total}
+          color="text-zinc-200"
+          title="Live subscriptions. Retired streams are counted separately."
+        />
         <Card label="Healthy" value={data.healthy} color="text-emerald-400" />
         <Card
           label="Blocked"
@@ -79,6 +84,15 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
           label="Lagging"
           value={data.lagging}
           color={data.lagging > 0 ? "text-yellow-400" : "text-zinc-500"}
+        />
+        {/* Retired streams are finished work, so the card stays muted
+            however many there are — it is a number to act on when
+            reclaiming space, never an alert. */}
+        <Card
+          label="Retired"
+          value={data.retired}
+          color="text-zinc-500"
+          title="Subscription rows left behind by streams closed for good. They can never be claimed again, so they are excluded from every health count above."
         />
       </div>
 
@@ -183,6 +197,38 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
                 onStream={onStream}
               />
             ))
+          )}
+
+          {/* Retired subscriptions (#1535). Last panel on purpose —
+              nothing here is a problem to chase. It answers two
+              questions: what was closed for good, and how far each
+              consumer got before it was. */}
+          {data.retired > 0 && (
+            <>
+              <div className="border-b border-t border-zinc-800 px-4 py-2">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Retired subscriptions
+                  <span className="ml-1.5 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400">
+                    {data.retired}
+                  </span>
+                </span>
+              </div>
+              {data.retiredStreams.map((r) => (
+                <RetiredRow
+                  key={r.stream}
+                  stream={r.stream}
+                  source={r.source}
+                  at={r.at}
+                  lane={r.lane}
+                  onStream={onStream}
+                />
+              ))}
+              {data.retired > data.retiredStreams.length && (
+                <div className="px-4 py-2 text-[10px] text-zinc-600">
+                  and {data.retired - data.retiredStreams.length} more.
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -329,13 +375,18 @@ function Card({
   label,
   value,
   color,
+  title,
 }: {
   label: string;
   value: number;
   color: string;
+  title?: string;
 }) {
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+    <div
+      className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2"
+      title={title}
+    >
       <div className="text-[10px] uppercase tracking-wider text-zinc-500">
         {label}
       </div>
@@ -591,6 +642,60 @@ function LeaseRow({
         }`}
       >
         {expired ? "expired" : `${Math.ceil(remaining / 1000)}s`}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One leftover subscription of a stream closed for good (#1535).
+ *
+ * The watermark reads as a record — "reached #N" — rather than the
+ * `at:` / `gap:` pair the live rows use, because it is the last thing
+ * this consumer ever saw and nothing can move it forward.
+ */
+function RetiredRow({
+  stream,
+  source,
+  at,
+  lane,
+  onStream,
+}: {
+  stream: string;
+  source: string | null;
+  at: number;
+  lane: string | null;
+  onStream?: (s: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 border-b border-zinc-800/50 px-4 py-2 text-xs opacity-60">
+      <span className="min-w-0 flex-1 truncate font-mono text-zinc-400">
+        {stream}
+        {onStream && (
+          <button
+            title="Open in Streams"
+            className="ml-1 text-emerald-400/70 transition hover:text-emerald-300"
+            onClick={() => onStream(stream)}
+          >
+            <Database size={10} className="inline" />
+          </button>
+        )}
+      </span>
+      {source && (
+        <span className="w-20 shrink-0 truncate text-zinc-600" title={source}>
+          ←{source}
+        </span>
+      )}
+      <LaneChip lane={lane} />
+      <span
+        className="w-32 shrink-0 text-right font-mono text-zinc-500"
+        title={
+          at < 0
+            ? "This consumer never read an event before the stream was retired. The watermark is a record — it can never advance again."
+            : `This consumer reached event #${at} before the stream was retired. The watermark is a record — it can never advance again.`
+        }
+      >
+        {at < 0 ? "never read" : `reached #${at}`}
       </span>
     </div>
   );

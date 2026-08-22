@@ -192,5 +192,95 @@ describe("drainStatus", () => {
     expect(status.blocked).toBe(0);
     expect(status.leased).toBe(0);
     expect(status.lagging).toBe(0);
+    expect(status.retired).toBe(0);
+    expect(status.retiredStreams).toEqual([]);
+  });
+
+  // Retired streams (#1535). Since #1527 a full close leaves the
+  // subscription row in place, so the row keeps showing up here — inert,
+  // permanently caught up, and indistinguishable from a live consumer
+  // with nothing to do unless we say so.
+  describe("retired streams", () => {
+    /** Retire `stream` for good: delete its events, seed a tombstone. */
+    const retire = async (stream: string) => {
+      await store.truncate([{ stream }]);
+    };
+
+    it("counts retired rows apart from every health signal", async () => {
+      await seed(store, "gone", "Opened", {}, -1);
+      await seed(store, "live", "Opened", {}, -1);
+      await store.subscribe([
+        { stream: "gone", source: "src", priority: 7, lane: "premium" },
+        { stream: "live", source: "src" },
+      ]);
+      await retire("gone");
+
+      const status = await caller.drainStatus();
+      // One live subscription; the retired one is counted on its own and
+      // the health buckets still sum to `total`.
+      expect(status.total).toBe(1);
+      expect(status.retired).toBe(1);
+      expect(
+        status.healthy + status.lagging + status.blocked + status.leased
+      ).toBe(status.total);
+      // Out of the gap histogram…
+      expect(status.histogram.reduce((acc, b) => acc + b.count, 0)).toBe(1);
+      // …and out of the priority and lane tallies, so a retired stream
+      // parked on a non-default lane doesn't inflate that lane's count.
+      expect(status.priorityCounts.find((p) => p.priority === 7)).toBeFalsy();
+      expect(status.laneCounts.find((l) => l.lane === "premium")).toBeFalsy();
+    });
+
+    it("keeps a retired row out of the blocked list", async () => {
+      // A stream can be blocked and then closed for good. The block is
+      // no longer actionable — nothing can claim the row — so surfacing
+      // it under "blocked" would put a finished stream in front of an
+      // operator scanning for problems.
+      await seed(store, "src-b", "Opened", {}, -1);
+      await store.subscribe([{ stream: "was-blocked", source: "src-b" }]);
+      await seed(store, "was-blocked", "Opened", {}, -1);
+      await mark_all(store);
+      const claimed = await store.claim(10, 10, randomUUID(), 30_000);
+      const mine = claimed.find((l) => l.stream === "was-blocked")!;
+      await store.block([{ ...mine, error: "boom" }]);
+      await retire("was-blocked");
+
+      const status = await caller.drainStatus();
+      expect(status.blocked).toBe(0);
+      expect(status.blockedStreams).toEqual([]);
+      expect(status.retired).toBe(1);
+    });
+
+    it("reports each retired watermark as the record it is", async () => {
+      await seed(store, "src-r", "Opened", {}, -1);
+      await store.subscribe([{ stream: "retired-a", source: "src-r" }]);
+      await seed(store, "retired-a", "Opened", {}, -1);
+      await mark_all(store);
+      const claimed = await store.claim(10, 10, randomUUID(), 30_000);
+      const mine = claimed.find((l) => l.stream === "retired-a")!;
+      await store.ack([{ ...mine, at: 1 }]);
+      await retire("retired-a");
+
+      const status = await caller.drainStatus();
+      expect(status.retiredStreams).toHaveLength(1);
+      expect(status.retiredStreams[0]).toMatchObject({
+        stream: "retired-a",
+        source: "src-r",
+        at: 1,
+      });
+    });
+
+    it("caps the sample of names while keeping the count exact", async () => {
+      const streams = Array.from({ length: 55 }, (_, i) => `bulk-${i}`);
+      for (const stream of streams) await seed(store, stream, "Opened", {}, -1);
+      await store.subscribe(streams.map((stream) => ({ stream })));
+      await store.truncate(streams.map((stream) => ({ stream })));
+
+      const status = await caller.drainStatus();
+      expect(status.retired).toBe(55);
+      expect(status.retiredStreams).toHaveLength(50);
+      // Alphabetical, so the sample is stable between polls.
+      expect(status.retiredStreams[0]!.stream).toBe("bulk-0");
+    });
   });
 });

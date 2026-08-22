@@ -78,6 +78,7 @@ describe("streams", () => {
         expect(row.isRestarted).toBe(false);
         expect(row.isPruned).toBe(false);
         expect(row.closeScheduled).toBe(false);
+        expect(row.isRetired).toBe(false);
       }
     });
 
@@ -89,6 +90,45 @@ describe("streams", () => {
       expect(row.isClosed).toBe(true);
       expect(row.isRestarted).toBe(false);
       expect(row.isPruned).toBe(false);
+    });
+
+    it("flags a stream whose only remaining event is a tombstone as retired (#1535)", async () => {
+      await seedSequence(store, "lc-retired", [
+        { name: "Opened" },
+        { name: "Closed" },
+      ]);
+      await store.truncate([{ stream: "lc-retired" }]);
+      const rows = await caller.streams({ limit: 100 });
+      const row = rows.find((r) => r.stream === "lc-retired")!;
+      expect(row.isRetired).toBe(true);
+      // Retired is a narrowing of closed, not an alternative to it.
+      expect(row.isClosed).toBe(true);
+      expect(row.isRestarted).toBe(false);
+      expect(row.isPruned).toBe(false);
+    });
+
+    it("does not flag a failed close as retired — the real events are still there", async () => {
+      // What a close that committed its guard tombstone and then failed
+      // to truncate leaves behind: a tombstone head over live history.
+      // Closed, but its reactions may still have work pending, so
+      // retiring it would hide a real subscription.
+      await seedSequence(store, "lc-guarded", [
+        { name: "Opened" },
+        { name: "__tombstone__" },
+      ]);
+      const rows = await caller.streams({ limit: 100 });
+      const row = rows.find((r) => r.stream === "lc-guarded")!;
+      expect(row.isClosed).toBe(true);
+      expect(row.isRetired).toBe(false);
+    });
+
+    it("does not flag a restarted stream as retired — its seed is a snapshot", async () => {
+      await seedSequence(store, "lc-reseeded", [{ name: "Opened" }]);
+      await store.truncate([{ stream: "lc-reseeded", snapshot: { n: 1 } }]);
+      const rows = await caller.streams({ limit: 100 });
+      const row = rows.find((r) => r.stream === "lc-reseeded")!;
+      expect(row.isRetired).toBe(false);
+      expect(row.isRestarted).toBe(true);
     });
 
     it("flags a full-close reseed as restarted (version-0 snapshot tail)", async () => {
