@@ -374,6 +374,8 @@ Deleting any of those throws away a live watermark, and the next `subscribe` wou
 
 **Scale before you bother.** One row per permanently-retired stream is the same order as the tombstone event that also stays forever. If you are not closing streams for good in volume, there is nothing here to reclaim.
 
+**The inspector counts them for you.** Its Monitor tab carries a "Retired" card next to the health counts — that number is how many rows the statement above would delete, so the decision to run it is a number rather than a guess. Retired streams are kept out of every health signal there (the lag histogram, the healthy/lagging tallies, the blocked list), and the Streams tab hides them by default behind a filter that can also show only them, for when you are auditing what was closed rather than chasing delivery.
+
 ## Pre-deploy quick check
 
 Before pushing to production, walk this list mentally:

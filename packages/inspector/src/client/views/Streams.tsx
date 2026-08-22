@@ -18,12 +18,38 @@ type StreamRow = {
   isRestarted?: boolean;
   isPruned?: boolean;
   closeScheduled?: boolean;
+  // Retired for good (#1535): the tombstone is the only event left.
+  // Stronger than `isClosed`, which a failed close also satisfies while
+  // the stream's real events are still there.
+  isRetired?: boolean;
   // Joined from streamMeta (#698 slice 2). Null when the stream has no
   // subscription row yet — i.e., no reaction targets it, so it has no
   // priority or lane assignment. Default zero / "default" inferred.
   priority: number;
   lane: string | null;
+  // Subscription watermark, joined from streamMeta. Null when the
+  // stream has no subscription row. On a retired stream this is a
+  // record — the last event its consumer reached before the stream was
+  // closed for good — not a position it can still advance from.
+  at: number | null;
 };
+
+/** How retired streams are treated in the list. Hidden by default. */
+type RetiredMode = "hide" | "show" | "only";
+
+/**
+ * What a retired stream's surviving subscription row records (#1535):
+ * the last event its consumer reached, which can never advance now. `-1`
+ * is the never-consumed watermark; `null` means no subscription row
+ * survived to record anything.
+ */
+function retirementRecord(at: number | null): string {
+  if (at === null)
+    return " No subscription row survives to record where consumption stopped.";
+  if (at < 0)
+    return " Its subscription row survives, and records that no event was ever read from it.";
+  return ` Its subscription row survives as a record: consumption reached event #${at} before retirement.`;
+}
 
 /**
  * Lifecycle chip next to the stream name (#1174). Same visual shape as
@@ -191,6 +217,11 @@ export function Streams({
   // long-lived streams that have gone quiet; this turns that into one
   // click.
   const [staleDays, setStaleDays] = useState(0);
+  // Retired streams (#1535) are finished work: closed for good, nothing
+  // left but a tombstone, and a subscription row that survives as a
+  // record. Hidden by default so they stay out of the way of anyone
+  // debugging delivery; "only" is the audit view of what was closed.
+  const [retiredMode, setRetiredMode] = useState<RetiredMode>("hide");
 
   const streamsQuery = trpc.streams.useQuery(
     { limit: 1000 },
@@ -227,10 +258,14 @@ export function Streams({
   const streams = useMemo<StreamRow[]>(() => {
     const metaByStream = new Map<
       string,
-      { priority: number; lane: string | null }
+      { priority: number; lane: string | null; at: number }
     >();
     for (const m of metaQuery.data ?? [])
-      metaByStream.set(m.stream, { priority: m.priority, lane: m.lane });
+      metaByStream.set(m.stream, {
+        priority: m.priority,
+        lane: m.lane,
+        at: m.at,
+      });
     return (streamsQuery.data ?? []).map((s) => {
       const meta = metaByStream.get(s.stream);
       return {
@@ -240,8 +275,13 @@ export function Streams({
         firstEvent: s.firstEvent,
         currentVersion: s.currentVersion,
         isClosed: s.isClosed,
+        isRestarted: s.isRestarted,
+        isPruned: s.isPruned,
+        closeScheduled: s.closeScheduled,
+        isRetired: s.isRetired,
         priority: meta?.priority ?? 0,
         lane: meta?.lane ?? null,
+        at: meta?.at ?? null,
       };
     });
   }, [streamsQuery.data, metaQuery.data]);
@@ -252,6 +292,9 @@ export function Streams({
     return streams
       .filter(
         (s) => !filter || s.stream.toLowerCase().includes(filter.toLowerCase())
+      )
+      .filter((s) =>
+        retiredMode === "only" ? !!s.isRetired : retiredMode === "show" || !s.isRetired
       )
       .filter((s) => {
         if (!cutoff) return true;
@@ -279,7 +322,12 @@ export function Streams({
             return dir * (a[sortKey] - b[sortKey]);
         }
       });
-  }, [streams, filter, staleDays, sortKey, sortAsc]);
+  }, [streams, filter, staleDays, retiredMode, sortKey, sortAsc]);
+
+  const retiredCount = useMemo(
+    () => streams.filter((s) => s.isRetired).length,
+    [streams]
+  );
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -298,7 +346,7 @@ export function Streams({
       <div className="flex items-center gap-4 border-b border-zinc-800 bg-zinc-925 px-4 py-2">
         <span className="text-xs text-zinc-400">
           <span className="font-medium text-zinc-200">{filtered.length}</span>
-          {staleDays > 0 && (
+          {(staleDays > 0 || retiredMode !== "show") && (
             <span className="text-zinc-500"> / {streams.length}</span>
           )}{" "}
           streams
@@ -324,6 +372,27 @@ export function Streams({
               </option>
             ))}
           </select>
+        </label>
+        <label
+          className="flex items-center gap-1.5 text-[11px] text-zinc-400"
+          title="Streams closed for good — nothing left but a tombstone. Their subscription rows survive as a record of where each consumer stopped."
+        >
+          <span>Retired</span>
+          <select
+            value={retiredMode}
+            onChange={(e) => setRetiredMode(e.target.value as RetiredMode)}
+            className="rounded-md border border-zinc-700 bg-zinc-800 px-1.5 py-1 text-[11px] text-zinc-200 outline-none focus:border-emerald-600"
+          >
+            <option value="hide">hidden</option>
+            <option value="show">shown</option>
+            <option value="only">only</option>
+          </select>
+          <span
+            className="font-mono text-zinc-600"
+            title={`${retiredCount} retired stream${retiredCount === 1 ? "" : "s"} in this store`}
+          >
+            {retiredCount}
+          </span>
         </label>
       </div>
 
@@ -396,7 +465,7 @@ export function Streams({
                 onClick={() =>
                   setSelected(s.stream === selected ? null : s.stream)
                 }
-                className={`flex items-center gap-3 border-b border-zinc-800/50 px-4 py-2 text-left text-xs transition hover:bg-zinc-900/50 ${selected === s.stream ? "bg-zinc-900" : ""}`}
+                className={`flex items-center gap-3 border-b border-zinc-800/50 px-4 py-2 text-left text-xs transition hover:bg-zinc-900/50 ${selected === s.stream ? "bg-zinc-900" : ""} ${s.isRetired ? "opacity-60" : ""}`}
               >
                 <span className="w-14 shrink-0 text-right font-mono text-zinc-500">
                   {s.eventCount}
@@ -444,12 +513,24 @@ export function Streams({
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
                   {s.stream}
-                  {s.isClosed && (
+                  {/* Retired supersedes closed — every retired stream is
+                      closed, and showing both badges would just be noise.
+                      Retirement is finished work, so it reads muted
+                      rather than alarming. */}
+                  {s.isRetired ? (
                     <LifecycleBadge
-                      label="closed"
-                      className="border-red-800 bg-red-900/50 text-red-400"
-                      title="head is a __tombstone__ — the stream no longer accepts actions"
+                      label="retired"
+                      className="border-zinc-700 bg-zinc-800/60 text-zinc-400"
+                      title={`retired — a full close deleted this stream's events and left a __tombstone__.${retirementRecord(s.at)}`}
                     />
+                  ) : (
+                    s.isClosed && (
+                      <LifecycleBadge
+                        label="closed"
+                        className="border-red-800 bg-red-900/50 text-red-400"
+                        title="head is a __tombstone__ — the stream no longer accepts actions"
+                      />
+                    )
                   )}
                   {s.isRestarted && (
                     <LifecycleBadge
@@ -482,6 +563,9 @@ export function Streams({
         {selected && (
           <StreamDetail
             stream={selected}
+            watermark={
+              streams.find((s) => s.stream === selected)?.at ?? null
+            }
             onTrace={onTrace}
             onStream={onStream}
             onClose={() => setSelected(null)}
@@ -509,7 +593,9 @@ export function Streams({
  */
 function StreamStatsHeader({
   stats,
+  watermark,
 }: {
+  watermark: number | null;
   stats: {
     head: { id: number; name: string; version: number; created: string };
     tail: {
@@ -531,11 +617,19 @@ function StreamStatsHeader({
   const restarted =
     stats.tail?.name === "__snapshot__" && stats.tail.version === 0;
   const closed = stats.head.name === "__tombstone__";
+  // Retired (#1535): the tombstone is the only event left, which is what
+  // a full close leaves behind. A close that failed after committing its
+  // guard tombstone is `closed` but not retired — its real events are
+  // still here.
+  const retired = closed && !!sameEvent;
   return (
     <div className="grid grid-cols-2 gap-3 border-b border-zinc-800 bg-zinc-950 px-4 py-3">
       {(pruned || restarted || closed) && (
         <div className="col-span-2 rounded border border-zinc-800 bg-zinc-925 px-2.5 py-1.5 text-[10px] text-zinc-400">
+          {retired &&
+            `Retired — a full close deleted this stream's events and left the __tombstone__ behind.${retirementRecord(watermark)}`}
           {closed &&
+            !retired &&
             "Closed — the head is a __tombstone__; this stream no longer accepts actions. "}
           {pruned &&
             `History pruned — the earliest surviving event is a boundary __snapshot__ at version ${stats.tail!.version} (${new Date(stats.tail!.created).toLocaleString()}). Events before it were archived and deleted by a windowed close; the stream is live.`}
@@ -619,11 +713,18 @@ function EndpointCard({
 
 function StreamDetail({
   stream,
+  watermark,
   onTrace,
   onStream,
   onClose,
 }: {
   stream: string;
+  /**
+   * The stream's subscription watermark, or null when it has no
+   * subscription row. Only read on a retired stream, where it is the
+   * record of where consumption stopped (#1535).
+   */
+  watermark: number | null;
   onTrace?: (id: string) => void;
   onStream?: (stream: string) => void;
   onClose: () => void;
@@ -682,7 +783,7 @@ function StreamDetail({
       </div>
 
       {/* Head + Tail indicators (on-demand stats) */}
-      <StreamStatsHeader stats={statsQuery.data ?? null} />
+      <StreamStatsHeader stats={statsQuery.data ?? null} watermark={watermark} />
 
       {/* Event history */}
       <div className="flex-1">
