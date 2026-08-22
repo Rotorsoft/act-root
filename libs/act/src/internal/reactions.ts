@@ -33,7 +33,7 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { type Reacting, reacting } from "./reacting.js";
+import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -160,17 +160,15 @@ export function build_handle<
       forget: bound_forget,
     };
 
-    // One context entry for the whole lease; `ctx.event` is re-pointed per
-    // payload below. Handlers are awaited in sequence, so the field is stable
-    // for the whole of each handler's run.
-    const ctx: Reacting = {
-      event: payloads[0].event as Committed<Schemas, string>,
-    };
-    return reacting.run(ctx, async () => {
+    // One context entry per lease, re-pointed per payload — a `run` per
+    // payload costs the same allocation N times over. Continuations capture
+    // the frame at schedule time, so work a handler started and did not await
+    // still resumes into its own event's frame.
+    return reacting.run(undefined, async () => {
       for (let i = 0; i < payloads.length; i++) {
         const payload = payloads[i];
         const { event, handler } = payload;
-        ctx.event = event as Committed<Schemas, string>;
+        reacting.enterWith(event as Committed<Schemas, string>);
         try {
           await handler(event, stream, scoped_app);
           if (last_index_of.get(event.id) === i) {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, state } from "../src/index.js";
+import { act, sleep, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
@@ -294,6 +294,76 @@ describe("auto-inject reactingTo (#587)", () => {
     expect(first[0].meta.causation.event).toBeUndefined();
     expect(second[0].meta.causation.event).toBeUndefined();
     expect(first[0].meta.correlation).not.toBe(second[0].meta.correlation);
+
+    await dispose();
+  });
+
+  it("should attribute a dispatch the handler did not await to its own event (#1541)", async () => {
+    const Source = state({ Source5: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Triggered5: z.object({ val: z.number() }) })
+      .on({ trigger5: z.object({ val: z.number() }) })
+      .emit("Triggered5")
+      .build();
+
+    const Sink = state({ Sink5: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Received5: z.object({ val: z.number() }) })
+      .patch({ Received5: ({ data }) => ({ v: data.val }) })
+      .on({ receive5: z.object({ val: z.number() }) })
+      .emit("Received5")
+      .build();
+
+    let captured: { do: (...args: any[]) => Promise<unknown> };
+    const stray: Promise<unknown>[] = [];
+
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Source)
+        .withState(Sink)
+        .on("Triggered5")
+        // Starts the dispatch and returns without awaiting it, so it settles
+        // after the dispatch loop has moved on to the next payload.
+        .do(async function onTriggered5(event) {
+          stray.push(
+            sleep(20).then(() =>
+              captured.do(
+                "receive5",
+                {
+                  stream: `sink5-${event.data.val}`,
+                  actor: { id: "sys", name: "system" },
+                },
+                { val: event.data.val }
+              )
+            )
+          );
+        })
+        .to(() => ({ target: "sink5" }))
+    );
+    captured = app as unknown as typeof captured;
+
+    await app.do("trigger5", { stream: "src5-1", actor }, { val: 1 });
+    await app.do("trigger5", { stream: "src5-1", actor }, { val: 2 });
+    await app.correlate();
+    await app.drain();
+    await Promise.all(stray);
+
+    const srcEvents = await app.query_array({
+      stream: "src5-1",
+      stream_exact: true,
+    });
+    for (const val of [1, 2]) {
+      const trigger = srcEvents.find((e) => e.data.val === val)!;
+      const [received] = await app.query_array({
+        stream: `sink5-${val}`,
+        stream_exact: true,
+      });
+      expect(received.meta.causation.event).toEqual({
+        id: trigger.id,
+        name: "Triggered5",
+        stream: "src5-1",
+      });
+    }
 
     await dispose();
   });
