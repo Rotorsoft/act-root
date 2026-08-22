@@ -33,7 +33,7 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { reacting } from "./reacting.js";
+import { type Reacting, reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -160,61 +160,75 @@ export function build_handle<
       forget: bound_forget,
     };
 
-    for (let i = 0; i < payloads.length; i++) {
-      const payload = payloads[i];
-      const { event, handler } = payload;
-      try {
-        await reacting.run(event as Committed<Schemas, string>, () =>
-          handler(event, stream, scoped_app)
-        );
-        if (last_index_of.get(event.id) === i) {
-          at = event.id;
-          handled++;
-        }
-      } catch (error) {
-        // A defer is not a failure: hold the triggering events pending
-        // (exclude from ack via `defer`), don't bump `retry`, and re-visit
-        // the stream at the carried due-time (#1090). `acked_at` is unused on
-        // the defer path — drain never acks a deferred result.
-        if (error instanceof DeferSignal)
-          return {
+    // One context entry for the whole lease; `ctx.event` is re-pointed per
+    // payload below. Handlers are awaited in sequence, so the field is stable
+    // for the whole of each handler's run.
+    const ctx: Reacting = {
+      event: payloads[0].event as Committed<Schemas, string>,
+    };
+    return reacting.run(ctx, async () => {
+      for (let i = 0; i < payloads.length; i++) {
+        const payload = payloads[i];
+        const { event, handler } = payload;
+        ctx.event = event as Committed<Schemas, string>;
+        try {
+          await handler(event, stream, scoped_app);
+          if (last_index_of.get(event.id) === i) {
+            at = event.id;
+            handled++;
+          }
+        } catch (error) {
+          // A defer is not a failure: hold the triggering events pending
+          // (exclude from ack via `defer`), don't bump `retry`, and re-visit
+          // the stream at the carried due-time (#1090). `acked_at` is unused on
+          // the defer path — drain never acks a deferred result.
+          if (error instanceof DeferSignal)
+            return {
+              lease,
+              handled,
+              acked_at: at,
+              defer: resolve_defer_at<TEvents>(error.when, event),
+            };
+          // A close request advances past the triggering event (so the
+          // requesting reaction isn't counted as in-flight by the close-cycle
+          // guard) and hands the target to the orchestrator's on_close (#1090).
+          if (error instanceof CloseSignal)
+            return {
+              lease,
+              handled: handled + 1,
+              // Advance to the live head the handler evaluated against (when
+              // provided) so the close-cycle guard sees this reaction caught up.
+              acked_at: error.at ?? event.id,
+              // Close the signalled stream (the autoclose reaction's aggregate,
+              // which differs from its synthetic lease stream); a self-closing
+              // user reaction omits it and closes its own lease stream. A
+              // carried `before` makes it a windowed close (prune, not retire).
+              close: {
+                stream: error.stream ?? stream,
+                archive: error.archive,
+                before: error.before,
+              },
+            };
+          return finalize(
             lease,
             handled,
-            acked_at: at,
-            defer: resolve_defer_at<TEvents>(error.when, event),
-          };
-        // A close request advances past the triggering event (so the
-        // requesting reaction isn't counted as in-flight by the close-cycle
-        // guard) and hands the target to the orchestrator's on_close (#1090).
-        if (error instanceof CloseSignal)
-          return {
-            lease,
-            handled: handled + 1,
-            // Advance to the live head the handler evaluated against (when
-            // provided) so the close-cycle guard sees this reaction caught up.
-            acked_at: error.at ?? event.id,
-            // Close the signalled stream (the autoclose reaction's aggregate,
-            // which differs from its synthetic lease stream); a self-closing
-            // user reaction omits it and closes its own lease stream. A
-            // carried `before` makes it a windowed close (prune, not retire).
-            close: {
-              stream: error.stream ?? stream,
-              archive: error.archive,
-              before: error.before,
-            },
-          };
-        return finalize(
-          lease,
-          handled,
-          at,
-          error as Error,
-          payload.options,
-          logger,
-          event.id
-        );
+            at,
+            error as Error,
+            payload.options,
+            logger,
+            event.id
+          );
+        }
       }
-    }
-    return finalize(lease, handled, at, undefined, payloads[0].options, logger);
+      return finalize(
+        lease,
+        handled,
+        at,
+        undefined,
+        payloads[0].options,
+        logger
+      );
+    });
   };
 }
 

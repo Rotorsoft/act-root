@@ -663,7 +663,7 @@ export async function action<
   // Inside a reaction handler the triggering event is ambient, so a
   // handler that dispatches through a captured `app` rather than the
   // injected one still threads the chain. An explicit option wins.
-  const reactingTo = options?.reactingTo ?? reacting.getStore();
+  const reactingTo = options?.reactingTo ?? reacting.getStore()?.event;
   const correlator = options?.correlator ?? default_correlator;
 
   const validated = validate(action as string, payload, me.actions[action]);
