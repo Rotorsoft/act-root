@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, sleep, state } from "../src/index.js";
+import { act, ConcurrencyError, sleep, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
@@ -429,6 +429,71 @@ describe("auto-inject reactingTo (#587)", () => {
         stream: "src4-1",
       });
     }
+
+    await dispose();
+  });
+
+  it("should honor an explicit expectedVersion inside a reaction (#1543)", async () => {
+    const Source = state({ Source6: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Triggered6: z.object({ val: z.number() }) })
+      .on({ trigger6: z.object({ val: z.number() }) })
+      .emit("Triggered6")
+      .build();
+
+    const Sink = state({ Sink6: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ Received6: z.object({ val: z.number() }) })
+      .patch({ Received6: ({ data }) => ({ v: data.val }) })
+      .on({ receive6: z.object({ val: z.number() }) })
+      .emit("Received6")
+      .build();
+
+    let captured: { do: (...args: any[]) => Promise<unknown> };
+    let thrown: unknown = "NOT-THROWN";
+    let unguarded_ok = false;
+
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Source)
+        .withState(Sink)
+        .on("Triggered6")
+        .do(async function onTriggered6() {
+          // A stale explicit guard must still be enforced: the caller asked
+          // for it, and dropping it silently is lost concurrency protection.
+          try {
+            await captured.do(
+              "receive6",
+              {
+                stream: "sink6-1",
+                actor: { id: "sys", name: "system" },
+                expectedVersion: 99,
+              },
+              { val: 1 }
+            );
+          } catch (e) {
+            thrown = e;
+          }
+          // ...while an omitted guard still skips the INFERRED check, so
+          // ordinary catch-up never turns into a spurious retry.
+          await captured.do(
+            "receive6",
+            { stream: "sink6-1", actor: { id: "sys", name: "system" } },
+            { val: 2 }
+          );
+          unguarded_ok = true;
+        })
+        .to(() => ({ target: "sink6-1" }))
+    );
+    captured = app as unknown as typeof captured;
+
+    await app.do("receive6", { stream: "sink6-1", actor }, { val: 0 });
+    await app.do("trigger6", { stream: "src6-1", actor }, { val: 1 });
+    await app.correlate();
+    await app.drain();
+
+    expect(thrown).toBeInstanceOf(ConcurrencyError);
+    expect(unguarded_ok).toBe(true);
 
     await dispose();
   });

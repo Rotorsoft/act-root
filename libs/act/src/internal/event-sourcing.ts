@@ -753,11 +753,15 @@ export async function action<
           stream,
           emitted,
           meta,
-          // Reactions skip optimistic concurrency: they always append against the
+          // Reactions skip the INFERRED guard: they always append against the
           // current head. Stream leasing already serializes concurrent reactions,
           // and forcing version checks here would turn ordinary catch-up into
-          // spurious retries.
-          reactingTo ? undefined : expected
+          // spurious retries. An expectedVersion the caller passed explicitly is
+          // still honored — dropping a guard the caller asked for is silent data
+          // loss, and the reaction context can reach further than the handler
+          // (detached timers, settle cycles) where the caller never intended a
+          // reaction's semantics at all.
+          reactingTo ? expectedVersion : expected
         );
       } catch (error) {
         // Invalidate cache on concurrency errors — cached state is stale.
