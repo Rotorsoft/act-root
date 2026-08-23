@@ -21,7 +21,6 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
-  type IAct,
   type Lease,
   type Logger,
   NonRetryableError,
