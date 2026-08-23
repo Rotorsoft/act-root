@@ -55,9 +55,10 @@ export type ReactionDeps<
   /**
    * Runs `fn` with `event` installed as the triggering-event context, so a
    * dispatch made anywhere inside the handler can resolve it. Injected by the
-   * orchestrator: how that context is carried is not this module's business.
+   * orchestrator, like {@link DrainDeps.run_scoped} — how the context is
+   * carried is not this module's business.
    */
-  readonly with_reaction_context: <T>(
+  readonly run_reacting: <T>(
     event: Committed<Schemas, string>,
     fn: () => Promise<T>
   ) => Promise<T>;
@@ -135,7 +136,7 @@ export function build_handle<
     bound_query,
     bound_query_array,
     bound_forget,
-    with_reaction_context,
+    run_reacting,
   } = deps;
   return async (lease, payloads) => {
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
@@ -177,7 +178,7 @@ export function build_handle<
         // unwind with the handler so it never reaches the drain cycle, and
         // work a handler started without awaiting has to resume into its
         // own event's frame.
-        await with_reaction_context(event as Committed<Schemas, string>, () =>
+        await run_reacting(event as Committed<Schemas, string>, () =>
           handler(event, stream, scoped_app)
         );
         if (last_index_of.get(event.id) === i) {

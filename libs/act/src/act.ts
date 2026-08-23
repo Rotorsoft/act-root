@@ -653,7 +653,7 @@ export class Act<
       logger: this._logger,
       // The orchestrator owns ambient context; `build_handle` only asks for
       // the triggering event to be in scope while the handler runs.
-      with_reaction_context: (event, fn) => reacting.run(event, fn),
+      run_reacting: (event, fn) => reacting.run(event, fn),
       bound_do: this._bound_do,
       bound_load: this._bound_load,
       bound_query: this._bound_query,
