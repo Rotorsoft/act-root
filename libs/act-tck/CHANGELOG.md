@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.1...@rotorsoft/act-tck-v1.36.2) (2026-08-23)
+
+
+### Bug Fixes
+
+* **act:** keep the claim lane filter when onlyLanes narrows to default ([#1548](https://github.com/Rotorsoft/act-root/issues/1548)) ([2e7b07b](https://github.com/Rotorsoft/act-root/commit/2e7b07b454875ff08e3fd2ffa2b43f070859e1ef)), closes [#1545](https://github.com/Rotorsoft/act-root/issues/1545)
+
 # [@rotorsoft/act-tck-v1.36.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.0...@rotorsoft/act-tck-v1.36.1) (2026-08-23)
 
 
