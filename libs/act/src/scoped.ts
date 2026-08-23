@@ -3,20 +3,23 @@
  * @category Internal
  *
  * Ambient execution context — every `AsyncLocalStorage` the framework owns
- * lives here and nowhere else.
+ * lives here, and so does every operation on one. No other module calls
+ * `.run()` or `.getStore()`; they ask for a runner or a reader instead, so
+ * this file is the single place to look at the abstraction.
  *
- * Two contexts, both installed by the orchestrator and read further down:
+ * Two contexts:
  *
- * - {@link scoped} carries the active Act's ports, so `store()` / `cache()`
- *   resolve per-Act rather than per-process (ACT-501).
- * - {@link reacting} carries the event a reaction handler is processing, so
- *   `action()` can thread `reactingTo` for any dispatch made from inside a
- *   handler, whichever `IAct` reference made the call (#1541).
+ * - **ports** — the active Act's store/cache bag, so `store()` / `cache()`
+ *   resolve per-Act rather than per-process (ACT-501). Installed by the
+ *   orchestrator via {@link make_run_scoped}, read by the port singletons
+ *   via {@link current_ports}.
+ * - **reaction** — the event a handler is processing, so a dispatch made
+ *   anywhere inside that handler can thread `reactingTo` whichever `IAct`
+ *   reference made the call (#1541). Installed via {@link run_reacting},
+ *   read at the orchestrator boundary via {@link current_reacting}.
  *
- * Keeping them together keeps ambient state out of `internal/`, whose modules
- * are stateless implementations, and out of `ports.ts`, which is about
- * adapters. A module that needs ambient context imports it from here; nothing
- * here imports back.
+ * Keeping the mechanics here keeps ambient state out of `internal/`, whose
+ * modules are stateless implementations that receive what they need.
  *
  * @internal
  */
@@ -30,8 +33,55 @@ export type Scoped = {
   readonly cache: Cache;
 };
 
-/** AsyncLocalStorage carrying the active Act's ports. */
+/**
+ * AsyncLocalStorage carrying the active Act's ports.
+ *
+ * Exported because `index.ts` star-exports `ports.ts`, which re-exports this
+ * — it is already part of the published surface. Prefer
+ * {@link make_run_scoped} / {@link current_ports} over touching it directly.
+ */
 export const scoped = new AsyncLocalStorage<Scoped>();
 
-/** The event currently being reacted to. Not re-exported from `index.ts`. */
-export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
+/** The event currently being reacted to. Not reachable from `index.ts`. */
+const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
+
+/**
+ * Builds the runner an Act uses to enter its own port scope.
+ *
+ * A scoped Act wraps every entry point so `store()`/`cache()` resolve to its
+ * bag; a singleton Act needs no frame at all, so the runner collapses to
+ * calling `fn` — the non-scoped path pays nothing.
+ *
+ * @internal
+ */
+export function make_run_scoped(
+  bag: Scoped | undefined
+): <T>(fn: () => Promise<T>) => Promise<T> {
+  return bag ? (fn) => scoped.run(bag, fn) : (fn) => fn();
+}
+
+/** The active Act's ports, or `undefined` on the singleton path. @internal */
+export function current_ports(): Scoped | undefined {
+  return scoped.getStore();
+}
+
+/**
+ * Runs `fn` with `event` installed as the triggering-event context.
+ *
+ * Entered per payload rather than per lease: the context has to unwind with
+ * the handler so it never reaches the drain cycle, and work a handler started
+ * without awaiting has to resume into its own event's frame.
+ *
+ * @internal
+ */
+export function run_reacting<T>(
+  event: Committed<Schemas, string>,
+  fn: () => Promise<T>
+): Promise<T> {
+  return reacting.run(event, fn);
+}
+
+/** The event being reacted to, or `undefined` outside a handler. @internal */
+export function current_reacting(): Committed<Schemas, string> | undefined {
+  return reacting.getStore();
+}

@@ -3,7 +3,7 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { scoped } from "./scoped.js";
+import { current_ports } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -185,7 +185,7 @@ const _store = port(function store(adapter?: Store): Store {
 });
 
 export const store = ((adapter?: Store): Store => {
-  return scoped.getStore()?.store ?? _store(adapter);
+  return current_ports()?.store ?? _store(adapter);
 }) as (adapter?: Store) => Store;
 
 /**
@@ -206,7 +206,7 @@ const _cache = port(function cache(adapter?: Cache) {
 });
 
 export const cache = ((adapter?: Cache): Cache => {
-  return scoped.getStore()?.cache ?? _cache(adapter);
+  return current_ports()?.cache ?? _cache(adapter);
 }) as (adapter?: Cache) => Cache;
 
 // ---------------------------------------------------------------------------

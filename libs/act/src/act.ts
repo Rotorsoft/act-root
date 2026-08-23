@@ -36,7 +36,7 @@ import {
   scan,
   walk_streams,
 } from "./internal/index.js";
-import { reacting } from "./scoped.js";
+import { current_reacting, make_run_scoped, run_reacting } from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
@@ -639,9 +639,7 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     validate_only_lanes(options, lanes);
-    this._scoped = options.scoped
-      ? (fn) => scoped.run(options.scoped!, fn)
-      : (fn) => fn();
+    this._scoped = make_run_scoped(options.scoped);
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -653,7 +651,7 @@ export class Act<
       logger: this._logger,
       // The orchestrator owns ambient context; `build_handle` only asks for
       // the triggering event to be in scope while the handler runs.
-      run_reacting: (event, fn) => reacting.run(event, fn),
+      run_reacting,
       bound_do: this._bound_do,
       bound_load: this._bound_load,
       bound_query: this._bound_query,
@@ -1208,7 +1206,7 @@ export class Act<
     // anywhere inside a reaction handler threads the chain whichever `IAct`
     // reference made the call (#1541), while `internal/` stays free of
     // ambient reads. An explicitly-passed `reactingTo` still wins.
-    const reacting_to = options?.reactingTo ?? reacting.getStore();
+    const reacting_to = options?.reactingTo ?? current_reacting();
     const do_options =
       reacting_to === options?.reactingTo
         ? options
