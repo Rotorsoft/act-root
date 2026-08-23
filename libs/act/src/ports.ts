@@ -1,9 +1,9 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./internal/disposers.js";
+import { scoped } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -12,14 +12,11 @@ import type {
   Store,
 } from "./types/index.js";
 
-/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
-export type Scoped = {
-  readonly store: Store;
-  readonly cache: Cache;
-};
-
-/** AsyncLocalStorage carrying the active Act's ports. Internal — not re-exported. */
-export const scoped = new AsyncLocalStorage<Scoped>();
+export type { Scoped } from "./scoped.js";
+// Ambient context lives in `scoped.ts`; re-exported here because
+// `index.ts` star-exports this module and both names are already part of
+// the published surface. Moving the declaration must not move the surface.
+export { scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.

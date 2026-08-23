@@ -17,6 +17,7 @@
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { reacting } from "../scoped.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -41,7 +42,6 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
-import { reacting } from "./reacting.js";
 
 /**
  * The reduction pipeline names three distinct things, and each word means

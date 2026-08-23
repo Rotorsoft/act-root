@@ -16,6 +16,7 @@
  * @internal
  */
 
+import { reacting } from "../scoped.js";
 import {
   type Actor,
   type BatchHandler,
@@ -33,7 +34,6 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger

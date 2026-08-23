@@ -10752,6 +10752,7 @@ export class NonRetryableError extends Error {
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { reacting } from "../scoped.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -10776,7 +10777,6 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
-import { reacting } from "./reacting.js";
 
 /**
  * The reduction pipeline names three distinct things, and each word means
@@ -13805,12 +13805,12 @@ export const _this_ = ({ stream }: { stream: string }) => ({
 });
 
 // === ports.ts ===
-import { AsyncLocalStorage } from "node:async_hooks";
 import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./internal/disposers.js";
+import { scoped } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -13819,14 +13819,11 @@ import type {
   Store,
 } from "./types/index.js";
 
-/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
-export type Scoped = {
-  readonly store: Store;
-  readonly cache: Cache;
-};
-
-/** AsyncLocalStorage carrying the active Act's ports. Internal — not re-exported. */
-export const scoped = new AsyncLocalStorage<Scoped>();
+export type { Scoped } from "./scoped.js";
+// Ambient context lives in \`scoped.ts\`; re-exported here because
+// \`index.ts\` star-exports this module and both names are already part of
+// the published surface. Moving the declaration must not move the surface.
+export { scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -16261,26 +16258,6 @@ export function make_fold_handler<
   return handler;
 }
 
-// === reacting.ts ===
-/**
- * @module reacting
- * @category Internal
- *
- * Ambient triggering-event context for reaction handlers (#1541).
- *
- * \`build_handle\` installs it around each lease; \`action()\` resolves it as
- * \`reactingTo\` when the caller didn't pass one, so a handler that dispatches
- * through a captured \`app\` still threads the chain.
- *
- * @internal
- */
-
-import { AsyncLocalStorage } from "node:async_hooks";
-import type { Committed, Schemas } from "../types/index.js";
-
-/** The event currently being reacted to. Internal — not re-exported. */
-export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
-
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -16750,6 +16727,7 @@ export type ShutdownOptions = {
  * @internal
  */
 
+import { reacting } from "../scoped.js";
 import {
   type Actor,
   type BatchHandler,
@@ -16767,7 +16745,6 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -17335,6 +17312,45 @@ export const QuerySchema = z
     stream_exact: z.boolean().optional(),
   })
   .readonly();
+
+// === scoped.ts ===
+/**
+ * @module scoped
+ * @category Internal
+ *
+ * Ambient execution context — every \`AsyncLocalStorage\` the framework owns
+ * lives here and nowhere else.
+ *
+ * Two contexts, both installed by the orchestrator and read further down:
+ *
+ * - {@link scoped} carries the active Act's ports, so \`store()\` / \`cache()\`
+ *   resolve per-Act rather than per-process (ACT-501).
+ * - {@link reacting} carries the event a reaction handler is processing, so
+ *   \`action()\` can thread \`reactingTo\` for any dispatch made from inside a
+ *   handler, whichever \`IAct\` reference made the call (#1541).
+ *
+ * Keeping them together keeps ambient state out of \`internal/\`, whose modules
+ * are stateless implementations, and out of \`ports.ts\`, which is about
+ * adapters. A module that needs ambient context imports it from here; nothing
+ * here imports back.
+ *
+ * @internal
+ */
+
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Cache, Committed, Schemas, Store } from "./types/index.js";
+
+/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
+export type Scoped = {
+  readonly store: Store;
+  readonly cache: Cache;
+};
+
+/** AsyncLocalStorage carrying the active Act's ports. */
+export const scoped = new AsyncLocalStorage<Scoped>();
+
+/** The event currently being reacted to. Not re-exported from \`index.ts\`. */
+export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
 
 // === sensitive.ts ===
 /**
@@ -29245,6 +29261,7 @@ export class NonRetryableError extends Error {
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { reacting } from "../scoped.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -29269,7 +29286,6 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
-import { reacting } from "./reacting.js";
 
 /**
  * The reduction pipeline names three distinct things, and each word means
@@ -32261,12 +32277,12 @@ export const _this_ = ({ stream }: { stream: string }) => ({
 });
 
 // === ports.ts ===
-import { AsyncLocalStorage } from "node:async_hooks";
 import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./internal/disposers.js";
+import { scoped } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -32275,14 +32291,11 @@ import type {
   Store,
 } from "./types/index.js";
 
-/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
-export type Scoped = {
-  readonly store: Store;
-  readonly cache: Cache;
-};
-
-/** AsyncLocalStorage carrying the active Act's ports. Internal — not re-exported. */
-export const scoped = new AsyncLocalStorage<Scoped>();
+export type { Scoped } from "./scoped.js";
+// Ambient context lives in \`scoped.ts\`; re-exported here because
+// \`index.ts\` star-exports this module and both names are already part of
+// the published surface. Moving the declaration must not move the surface.
+export { scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -34717,26 +34730,6 @@ export function make_fold_handler<
   return handler;
 }
 
-// === reacting.ts ===
-/**
- * @module reacting
- * @category Internal
- *
- * Ambient triggering-event context for reaction handlers (#1541).
- *
- * \`build_handle\` installs it around each lease; \`action()\` resolves it as
- * \`reactingTo\` when the caller didn't pass one, so a handler that dispatches
- * through a captured \`app\` still threads the chain.
- *
- * @internal
- */
-
-import { AsyncLocalStorage } from "node:async_hooks";
-import type { Committed, Schemas } from "../types/index.js";
-
-/** The event currently being reacted to. Internal — not re-exported. */
-export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
-
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -35206,6 +35199,7 @@ export type ShutdownOptions = {
  * @internal
  */
 
+import { reacting } from "../scoped.js";
 import {
   type Actor,
   type BatchHandler,
@@ -35223,7 +35217,6 @@ import { CloseSignal } from "./close-signal.js";
 import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { reacting } from "./reacting.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -35960,6 +35953,45 @@ export const QuerySchema = z
     stream_exact: z.boolean().optional(),
   })
   .readonly();
+
+// === scoped.ts ===
+/**
+ * @module scoped
+ * @category Internal
+ *
+ * Ambient execution context — every \`AsyncLocalStorage\` the framework owns
+ * lives here and nowhere else.
+ *
+ * Two contexts, both installed by the orchestrator and read further down:
+ *
+ * - {@link scoped} carries the active Act's ports, so \`store()\` / \`cache()\`
+ *   resolve per-Act rather than per-process (ACT-501).
+ * - {@link reacting} carries the event a reaction handler is processing, so
+ *   \`action()\` can thread \`reactingTo\` for any dispatch made from inside a
+ *   handler, whichever \`IAct\` reference made the call (#1541).
+ *
+ * Keeping them together keeps ambient state out of \`internal/\`, whose modules
+ * are stateless implementations, and out of \`ports.ts\`, which is about
+ * adapters. A module that needs ambient context imports it from here; nothing
+ * here imports back.
+ *
+ * @internal
+ */
+
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Cache, Committed, Schemas, Store } from "./types/index.js";
+
+/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
+export type Scoped = {
+  readonly store: Store;
+  readonly cache: Cache;
+};
+
+/** AsyncLocalStorage carrying the active Act's ports. */
+export const scoped = new AsyncLocalStorage<Scoped>();
+
+/** The event currently being reacted to. Not re-exported from \`index.ts\`. */
+export const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
 
 // === sensitive.ts ===
 /**
