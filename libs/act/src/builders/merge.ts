@@ -10,8 +10,8 @@
  * @internal
  */
 import { ZodObject, type ZodType } from "zod";
-import type { Projection } from "../builders/projection-builder.js";
 import type { Schema, State } from "../types/index.js";
+import type { Projection } from "./projection-builder.js";
 
 /**
  * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)

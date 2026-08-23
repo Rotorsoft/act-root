@@ -5,11 +5,7 @@
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import {
-  reaction_on,
-  register_lane,
-  register_state,
-} from "../internal/index.js";
+
 import type { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
@@ -21,6 +17,8 @@ import type {
   State,
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
+import { reaction_on, register_lane } from "./builder-utils.js";
+import { register_state } from "./merge.js";
 import type { Projection } from "./projection-builder.js";
 
 /**

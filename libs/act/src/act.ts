@@ -1,11 +1,15 @@
 import EventEmitter from "node:events";
 import {
+  ALL_LANES,
+  classify_registry,
+  type EventLaneSet,
+} from "./builders/build-classify.js";
+import {
   build_handle,
   build_handle_batch,
 } from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
-  ALL_LANES,
   type AuditDeps,
   audit,
   bare_patch,
@@ -15,14 +19,12 @@ import {
   type CircuitBreakerOptions,
   type CircuitState,
   CorrelateCycle,
-  classify_registry,
   close_correlation,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
   type EsOps,
-  type EventLaneSet,
   FOLD_RESET,
   type Handle,
   type HandleBatch,

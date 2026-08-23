@@ -185,6 +185,6 @@ Same operator-driven category as `app.close()` / `app.reset()` / `app.unblock()`
 - `libs/act/src/types/action.ts` — `EventRegister`, `PatchHandlers` — type-level shape that drives this
 - `libs/act/src/types/registry.ts` — `Registry.deprecated_events(state_name)` — closure-backed lookup populated at build time; the only programmatic surface for deprecated names
 - `libs/act/src/internal/event-sourcing.ts` — `load()` — reads `me.patch[e.name]`; missing reducer logs a warning rather than silently corrupting state. The action path is intentionally deprecation-unaware
-- `libs/act/src/internal/merge.ts` — duplicate-event-name guard at slice composition time (one canonical reducer per event)
+- `libs/act/src/builders/merge.ts` — duplicate-event-name guard at slice composition time (one canonical reducer per event)
 - `libs/act/src/internal/event-versions.ts` — `_v<digits>` parser; `deprecated_event_names()` + `current_version_of()` helpers
 - `libs/act/src/builders/act-builder.ts` — `finalize_deprecations()` populates `registry.deprecated_events`, throws on static `.emit("OldName")` targeting a deprecated event, and emits the one-line startup advisory

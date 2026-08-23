@@ -12,8 +12,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
+import { classify_registry } from "../src/builders/build-classify.js";
 import { act, state, ZodEmpty } from "../src/index.js";
-import { classify_registry } from "../src/internal/build-classify.js";
 import { dispose, store } from "../src/ports.js";
 import type { Store } from "../src/types/index.js";
 

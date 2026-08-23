@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { classify_registry } from "../src/builders/build-classify.js";
 import { act, projection, slice, state, ZodEmpty } from "../src/index.js";
-import { classify_registry } from "../src/internal/build-classify.js";
 
 describe("classify_registry", () => {
   const Counter = state({ Counter: z.object({ count: z.number() }) })

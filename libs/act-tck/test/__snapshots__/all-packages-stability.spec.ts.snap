@@ -18,16 +18,11 @@ import {
   IDENTITY_GATE,
   make_fold_handler,
   make_gate,
-  merge_event_register,
-  merge_projection,
   type PatchFn,
   pii_fields,
   pii_split,
   pii_strip,
   type ResettableBatchHandler,
-  reaction_on,
-  register_lane,
-  register_state,
   resolveActConfig,
   resolveAutocloseConfig,
   resolveLaneConfig,
@@ -47,6 +42,12 @@ import type {
   State,
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
+import { reaction_on, register_lane } from "./builder-utils.js";
+import {
+  merge_event_register,
+  merge_projection,
+  register_state,
+} from "./merge.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 
@@ -834,12 +835,16 @@ export function act<
 // === act.ts ===
 import EventEmitter from "node:events";
 import {
+  ALL_LANES,
+  classify_registry,
+  type EventLaneSet,
+} from "./builders/build-classify.js";
+import {
   build_handle,
   build_handle_batch,
 } from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
-  ALL_LANES,
   type AuditDeps,
   audit,
   bare_patch,
@@ -849,14 +854,12 @@ import {
   type CircuitBreakerOptions,
   type CircuitState,
   CorrelateCycle,
-  classify_registry,
   close_correlation,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
   type EsOps,
-  type EventLaneSet,
   FOLD_RESET,
   type Handle,
   type HandleBatch,
@@ -5952,6 +5955,7 @@ export function compute_backoff_delay(
  * @internal
  */
 
+import type { StaticTarget } from "../internal/index.js";
 import type {
   Registry,
   Schema,
@@ -5959,7 +5963,6 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import type { StaticTarget } from "./correlate-cycle.js";
 
 /**
  * Classification result. Returned by {@link classify_registry}; consumed
@@ -6100,7 +6103,7 @@ export function classify_registry<
  *
  * These live in the builders layer (not \`internal/\`) because they reference
  * \`Projection\`, a builders-layer type; the runtime that fills them
- * (\`reaction_on\`, \`register_lane\`) stays in \`internal/builder-utils.ts\`.
+ * (\`reaction_on\`, \`register_lane\`) stays in \`builder-utils.ts\`.
  *
  * \`withState\` and \`withLane\` are intentionally **not** in \`BuilderBase\`: they
  * *widen* the generics (return a different instantiation), which a shared
@@ -6221,6 +6224,12 @@ export interface BuilderBase<
  * @internal
  */
 
+import {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolveReactionConfig,
+} from "../internal/index.js";
 import { DEFAULT_LANE } from "../ports.js";
 import type {
   Committed,
@@ -6232,12 +6241,6 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
-import { resolveReactionConfig } from "./config.js";
-import {
-  assert_defer_when,
-  type DeferSchedule,
-  make_deferred,
-} from "./defer-config.js";
 import { _this_ } from "./merge.js";
 
 /**
@@ -9208,7 +9211,7 @@ export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
  *
  * The control-flow signal a reaction handler throws to *defer* itself
  * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
- * ({@link "reactions".build_handle}) catches it and produces a
+ * ({@link "reaction-builder".build_handle}) catches it and produces a
  * \`HandleResult.defer\` — the triggering events stay pending (watermark not
  * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
  * resolved due-time.
@@ -13259,9 +13262,6 @@ export {
   next_window_open,
 } from "./autoclose-window.js";
 export { compute_backoff_delay } from "./backoff.js";
-export type { EventLaneSet } from "./build-classify.js";
-export { ALL_LANES, classify_registry } from "./build-classify.js";
-export { reaction_on, register_lane } from "./builder-utils.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
@@ -13293,9 +13293,15 @@ export {
   resolveSettleConfig,
   resolveShutdownConfig,
 } from "./config.js";
+export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export { resolve_defer_at } from "./defer-config.js";
+export {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolve_defer_at,
+} from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
@@ -13310,12 +13316,6 @@ export {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
-export {
-  _this_,
-  merge_event_register,
-  merge_projection,
-  register_state,
-} from "./merge.js";
 export {
   FOLD_RESET,
   make_fold_handler,
@@ -13530,8 +13530,8 @@ export class LruSet<T> {
  * @internal
  */
 import { ZodObject, type ZodType } from "zod";
-import type { Projection } from "../builders/projection-builder.js";
 import type { Schema, State } from "../types/index.js";
+import type { Projection } from "./projection-builder.js";
 
 /**
  * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
@@ -15567,11 +15567,7 @@ export interface Cache extends Disposable {
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import {
-  _this_,
-  type FoldConfig,
-  resolveFoldConfig,
-} from "../internal/index.js";
+import { type FoldConfig, resolveFoldConfig } from "../internal/index.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -15584,6 +15580,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
+import { _this_ } from "./merge.js";
 
 /**
  * A self-contained projection grouping read-model update handlers.
@@ -18008,11 +18005,7 @@ export class SettleLoop<TEvents extends Schemas> {
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import {
-  reaction_on,
-  register_lane,
-  register_state,
-} from "../internal/index.js";
+
 import type { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
@@ -18024,6 +18017,8 @@ import type {
   State,
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
+import { reaction_on, register_lane } from "./builder-utils.js";
+import { register_state } from "./merge.js";
 import type { Projection } from "./projection-builder.js";
 
 /**
@@ -19782,12 +19777,16 @@ exports[`@rotorsoft/act — public API stability > stable public surface for ./t
 "// === act.ts ===
 import EventEmitter from "node:events";
 import {
+  ALL_LANES,
+  classify_registry,
+  type EventLaneSet,
+} from "./builders/build-classify.js";
+import {
   build_handle,
   build_handle_batch,
 } from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
-  ALL_LANES,
   type AuditDeps,
   audit,
   bare_patch,
@@ -19797,14 +19796,12 @@ import {
   type CircuitBreakerOptions,
   type CircuitState,
   CorrelateCycle,
-  classify_registry,
   close_correlation,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
   type EsOps,
-  type EventLaneSet,
   FOLD_RESET,
   type Handle,
   type HandleBatch,
@@ -24900,6 +24897,7 @@ export function compute_backoff_delay(
  * @internal
  */
 
+import type { StaticTarget } from "../internal/index.js";
 import type {
   Registry,
   Schema,
@@ -24907,7 +24905,6 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import type { StaticTarget } from "./correlate-cycle.js";
 
 /**
  * Classification result. Returned by {@link classify_registry}; consumed
@@ -25031,127 +25028,6 @@ export function classify_registry<
     reactive_events,
     event_to_state,
     event_to_lanes,
-  };
-}
-
-// === builder-utils.ts ===
-/**
- * @module builder-utils
- * @category Internal
- *
- * Shared builder machinery reused by both \`act-builder.ts\` and
- * \`slice-builder.ts\`. The two builders expose the same reaction-registration
- * and lane-declaration surface and differ only in the concrete builder type
- * they return (\`ActBuilder\` vs \`SliceBuilder\`) and the event register they
- * write into (\`registry.events\` vs the slice's \`events\`). This module owns the
- * one copy of that logic so the builders stay thin delegations.
- *
- * @internal
- */
-
-import { DEFAULT_LANE } from "../ports.js";
-import type {
-  Committed,
-  EventRegister,
-  LaneConfig,
-  Reaction,
-  ReactionHandler,
-  ReactionOptions,
-  ReactionResolver,
-  Schemas,
-} from "../types/index.js";
-import { resolveReactionConfig } from "./config.js";
-import {
-  assert_defer_when,
-  type DeferSchedule,
-  make_deferred,
-} from "./defer-config.js";
-import { _this_ } from "./merge.js";
-
-/**
- * Validate and register a drain lane (ACT-1103): the \`"default"\` name is
- * reserved and each lane name must be unique. Mutates \`lanes\` in place; the
- * caller returns its own builder for chaining.
- *
- * @internal
- */
-export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
-  if (config.name === DEFAULT_LANE)
-    throw new Error(\`Lane "\${DEFAULT_LANE}" is reserved\`);
-  if (lanes.some((l) => l.name === config.name))
-    throw new Error(\`Lane "\${config.name}" was already declared\`);
-  lanes.push(config);
-}
-
-/**
- * Build the \`.on(event)\` step shared by both builders. Registers a reaction
- * (named-function + duplicate guards, fail-fast literal-schedule validation,
- * the default \`_this_\` resolver, and the \`.defer\` handler wrap) into
- * \`events[event].reactions\`, and hands back \`builder\` patched with \`.to(...)\`
- * for in-place resolver routing.
- *
- * The strict, builder-specific type is supplied by each builder's own \`on\`
- * signature ({@link ReactionOn}); the runtime here is builder-agnostic.
- *
- * @internal
- */
-export function reaction_on<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents,
-  TBuilder,
->(event: TKey, events: EventRegister<TEvents>, builder: TBuilder) {
-  const register = (
-    handler: ReactionHandler<TEvents, TKey>,
-    options?: Partial<ReactionOptions>,
-    schedule?: DeferSchedule<Committed<TEvents, TKey>>
-  ) => {
-    if (!handler.name)
-      throw new Error(
-        \`Reaction handler for "\${String(event)}" must be a named function\`
-      );
-    if (events[event].reactions.has(handler.name))
-      throw new Error(
-        \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
-          \`Reaction handlers are keyed by function name; rename one of them.\`
-      );
-    // Fail fast on a bad literal schedule; the function form is checked when it
-    // runs (no event to resolve against at build time).
-    if (schedule && typeof schedule !== "function") assert_defer_when(schedule);
-    const reaction: Reaction<TEvents, TKey> = {
-      handler: schedule ? make_deferred(handler, schedule) : handler,
-      resolver: _this_,
-      // #1269: validate the whole bag at the declaration site so a bad
-      // \`maxRetries\`/\`backoff\`/\`blockOnError\` throws ZodError at build,
-      // not a NaN gate on the first retry.
-      options: resolveReactionConfig({
-        blockOnError: options?.blockOnError ?? true,
-        maxRetries: options?.maxRetries ?? 3,
-        backoff: options?.backoff,
-      }),
-    };
-    // Register once with the default _this_ resolver. If \`.to()\` is chained
-    // next, it patches the same reaction's resolver in place — no second
-    // Map.set() round-trip.
-    events[event].reactions.set(handler.name, reaction);
-    return Object.assign(builder as object, {
-      to(resolver: ReactionResolver<TEvents, TKey> | string) {
-        reaction.resolver =
-          typeof resolver === "string" ? { target: resolver } : resolver;
-        return builder;
-      },
-    });
-  };
-  return {
-    do: (
-      handler: ReactionHandler<TEvents, TKey>,
-      options?: Partial<ReactionOptions>
-    ) => register(handler, options),
-    defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => ({
-      do: (
-        handler: ReactionHandler<TEvents, TKey>,
-        options?: Partial<ReactionOptions>
-      ) => register(handler, options, schedule),
-    }),
   };
 }
 
@@ -27808,7 +27684,7 @@ export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
  *
  * The control-flow signal a reaction handler throws to *defer* itself
  * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
- * ({@link "reactions".build_handle}) catches it and produces a
+ * ({@link "reaction-builder".build_handle}) catches it and produces a
  * \`HandleResult.defer\` — the triggering events stay pending (watermark not
  * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
  * resolved due-time.
@@ -31841,9 +31717,6 @@ export {
   next_window_open,
 } from "./autoclose-window.js";
 export { compute_backoff_delay } from "./backoff.js";
-export type { EventLaneSet } from "./build-classify.js";
-export { ALL_LANES, classify_registry } from "./build-classify.js";
-export { reaction_on, register_lane } from "./builder-utils.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
@@ -31875,9 +31748,15 @@ export {
   resolveSettleConfig,
   resolveShutdownConfig,
 } from "./config.js";
+export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export { resolve_defer_at } from "./defer-config.js";
+export {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolve_defer_at,
+} from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
@@ -31892,12 +31771,6 @@ export {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
-export {
-  _this_,
-  merge_event_register,
-  merge_projection,
-  register_state,
-} from "./merge.js";
 export {
   FOLD_RESET,
   make_fold_handler,
@@ -32079,300 +31952,6 @@ export class LruSet<T> {
     return this._map.size;
   }
 }
-
-// === merge.ts ===
-/**
- * @module merge
- * @category Internal
- *
- * Shared utilities for merging partial states and projections across builders.
- * Lives in \`internal/\` because the symbols are consumed by the builder layer
- * (\`act-builder\`, \`slice-builder\`, \`projection-builder\`) but aren't part of
- * the public package surface.
- *
- * @internal
- */
-import { ZodObject, type ZodType } from "zod";
-import type { Projection } from "../builders/projection-builder.js";
-import type { Schema, State } from "../types/index.js";
-
-/**
- * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
- * to find the base type name, e.g. \`z.string().optional()\` -> \`"ZodString"\`.
- */
-function base_type_name(zodType: ZodType): string {
-  let t: any = zodType;
-  while (typeof t.unwrap === "function") {
-    t = t.unwrap();
-  }
-  return t.constructor.name;
-}
-
-/**
- * Merges two Zod schemas. If both are ZodObject instances, checks for
- * overlapping shape keys with incompatible base types (throws descriptive
- * error), then merges via \`.extend()\`. Falls back to keeping existing
- * schema if either is not a ZodObject.
- */
-function merge_schemas(
-  existing: ZodType,
-  incoming: ZodType,
-  state_name: string
-): ZodType {
-  if (existing instanceof ZodObject && incoming instanceof ZodObject) {
-    const existing_shape = existing.shape as Record<string, ZodType>;
-    const incoming_shape = incoming.shape as Record<string, ZodType>;
-    for (const key of Object.keys(incoming_shape)) {
-      if (key in existing_shape) {
-        const existing_base = base_type_name(existing_shape[key]);
-        const incoming_base = base_type_name(incoming_shape[key]);
-        if (existing_base !== incoming_base) {
-          throw new Error(
-            \`Schema conflict in "\${state_name}": key "\${key}" has type "\${existing_base}" but incoming partial declares "\${incoming_base}"\`
-          );
-        }
-      }
-    }
-    return existing.extend(incoming_shape);
-  }
-  return existing;
-}
-
-/**
- * Merges two init functions by spreading both results together.
- * Each partial only provides its own defaults.
- */
-function merge_inits<TState extends Schema>(
-  existing: () => Readonly<TState>,
-  incoming: () => Readonly<TState>
-): () => Readonly<TState> {
-  return () => ({ ...existing(), ...incoming() });
-}
-
-/**
- * Registers a state into a states map and action/event registries,
- * merging with existing same-name states (partial state support).
- */
-export function register_state(
-  state: State<any, any, any>,
-  states: Map<string, State<any, any, any>>,
-  actions: Record<string, any>,
-  events: Record<string, any>
-): void {
-  const existing = states.get(state.name);
-  if (existing) {
-    merge_into_existing(state, existing, states, actions, events);
-  } else {
-    register_new_state(state, states, actions, events);
-  }
-}
-
-/**
- * Registers a state for the first time. All action/event names must be unique
- * across the registry; collisions throw.
- */
-function register_new_state(
-  state: State<any, any, any>,
-  states: Map<string, State<any, any, any>>,
-  actions: Record<string, any>,
-  events: Record<string, any>
-): void {
-  states.set(state.name, state);
-  for (const name of Object.keys(state.actions)) {
-    if (actions[name]) throw new Error(\`Duplicate action "\${name}"\`);
-    actions[name] = state;
-  }
-  for (const name of Object.keys(state.events)) {
-    if (events[name]) throw new Error(\`Duplicate event "\${name}"\`);
-    events[name] = { schema: state.events[name], reactions: new Map() };
-  }
-}
-
-/**
- * Merges an incoming partial state into an existing same-name state and
- * updates the action/event registries. Splits into four phases:
- *   1. validate no cross-state action/event collisions
- *   2. merge per-event patches (one custom patch per event)
- *   3. build the merged state and replace it in the states map
- *   4. update action→state pointers and register new events
- */
-function merge_into_existing(
-  state: State<any, any, any>,
-  existing: State<any, any, any>,
-  states: Map<string, State<any, any, any>>,
-  actions: Record<string, any>,
-  events: Record<string, any>
-): void {
-  // 1. Validate no cross-state collisions for actions/events
-  for (const name of Object.keys(state.actions)) {
-    // Same schema reference means the same partial re-registered via another slice
-    if (existing.actions[name] === state.actions[name]) continue;
-    if (actions[name]) throw new Error(\`Duplicate action "\${name}"\`);
-  }
-  for (const name of Object.keys(state.events)) {
-    // Same schema reference means the same partial re-registered via another slice
-    if (existing.events[name] === state.events[name]) continue;
-    // Same event name registered in a same-name state partial with a
-    // different Zod schema reference — silent contract drift that the
-    // type system can't catch (structurally compatible shapes flow
-    // through TS even when refinements/enums/literals disagree).
-    // Reference identity is the rule: cross-slice event schemas must
-    // come from a single shared instance.
-    if (existing.events[name]) {
-      throw new Error(
-        \`Event "\${name}" in state "\${state.name}" is declared with different Zod schemas across slices. \` +
-          \`Cross-slice event schemas must reference the same instance — \` +
-          \`extract a shared schema (e.g. \\\`export const \${name} = z.object({ ... })\\\` in a shared module) \` +
-          \`and import it in every slice that declares it.\`
-      );
-    }
-    if (events[name]) throw new Error(\`Duplicate event "\${name}"\`);
-  }
-
-  // 2. Merge patches with custom-vs-passthrough resolution
-  const merged_patch = merge_patches(existing.patch, state.patch, state.name);
-
-  // 3. Build merged state
-  const merged = {
-    ...existing,
-    state: merge_schemas(existing.state, state.state, state.name),
-    init: merge_inits(existing.init, state.init),
-    events: { ...existing.events, ...state.events },
-    actions: { ...existing.actions, ...state.actions },
-    patch: merged_patch,
-    on: { ...existing.on, ...state.on },
-    given: { ...existing.given, ...state.given },
-    snap:
-      state.snap && existing.snap && state.snap !== existing.snap
-        ? (() => {
-            throw new Error(
-              \`Duplicate snap strategy for state "\${state.name}"\`
-            );
-          })()
-        : state.snap || existing.snap,
-  };
-  states.set(state.name, merged);
-
-  // 4. Update action→state pointers; register events not yet seen
-  for (const name of Object.keys(merged.actions)) {
-    actions[name] = merged;
-  }
-  for (const name of Object.keys(state.events)) {
-    if (events[name]) continue; // already registered, preserve reactions
-    events[name] = { schema: state.events[name], reactions: new Map() };
-  }
-}
-
-/**
- * Merges two patch maps. Only one custom (non-passthrough) patch per event is
- * allowed; passthroughs always yield to custom reducers, and re-registering
- * the same custom patch (same reference, e.g. across slices) is a no-op.
- */
-function merge_patches(
-  existing: Record<string, any>,
-  incoming: Record<string, any>,
-  state_name: string
-): Record<string, any> {
-  const merged = { ...existing };
-  for (const name of Object.keys(incoming)) {
-    const existing_p = existing[name];
-    const incoming_p = incoming[name];
-    if (!existing_p) {
-      merged[name] = incoming_p;
-      continue;
-    }
-    const existing_is_default = existing_p._passthrough;
-    const incoming_is_default = incoming_p._passthrough;
-    if (
-      !existing_is_default &&
-      !incoming_is_default &&
-      existing_p !== incoming_p
-    ) {
-      throw new Error(
-        \`Duplicate custom patch for event "\${name}" in state "\${state_name}"\`
-      );
-    }
-    // Keep whichever is custom; if both passthrough or existing custom, keep existing
-    if (existing_is_default && !incoming_is_default) {
-      merged[name] = incoming_p;
-    }
-  }
-  return merged;
-}
-
-/**
- * Merges reactions from one event register into another. The target is
- * assumed to already contain entries for every event name in the source
- * (e.g., act-builder's \`.withSlice()\` registers the slice's states first,
- * which seeds the target events). Reactions are keyed by \`handler.name\`;
- * two distinct handlers sharing a name on the same event throw rather than
- * silently overwriting (ACT-979). Re-merging the identical reaction object
- * is idempotent — mirrors {@link register_batch_handler}.
- */
-export function merge_event_register(
-  target: Record<string, { reactions: Map<string, unknown> }>,
-  source: Record<string, { reactions: Map<string, unknown> }>
-): void {
-  for (const [event_name, source_reg] of Object.entries(source)) {
-    const target_reg = target[event_name];
-    if (!target_reg) continue;
-    for (const [name, reaction] of source_reg.reactions) {
-      const existing = target_reg.reactions.get(name);
-      if (existing !== undefined && existing !== reaction)
-        throw new Error(
-          \`Duplicate reaction "\${name}" for event "\${event_name}". \` +
-            \`Reaction handlers are keyed by function name; rename one of them.\`
-        );
-      target_reg.reactions.set(name, reaction);
-    }
-  }
-}
-
-/**
- * Merges a projection's event schemas and reactions into an event registry,
- * deduplicating reaction names by appending "_p" on collision.
- */
-export function merge_projection(
-  proj: Projection<any>,
-  events: Record<string, any>
-): void {
-  for (const event_name of Object.keys(proj.events)) {
-    const proj_register = proj.events[event_name];
-    const existing = events[event_name];
-    if (!existing) {
-      events[event_name] = {
-        schema: proj_register.schema,
-        reactions: new Map(proj_register.reactions),
-      };
-    } else {
-      for (const [name, reaction] of proj_register.reactions) {
-        // The \`_p\` rename resolves a NAME collision between two genuinely
-        // different handlers. Registering the SAME reaction object again is
-        // not a collision — it is the same projection reached along two
-        // paths (exported from a module and embedded by two slices, or a
-        // \`.withProjection(p)\` written twice) — and renaming it registered a
-        // second copy under \`name_p\`, so the handler ran twice per event,
-        // forever, frozen into the registry at build (#1439).
-        //
-        // Not the at-least-once redelivery contract: a structural duplicate,
-        // deterministic on every event, with no signal anywhere. Both
-        // siblings already guard on identity — \`merge_event_register\` throws
-        // on a different handler under the same name, \`register_batch_handler\`
-        // likewise — this one only lacked the check.
-        if ([...existing.reactions.values()].includes(reaction)) continue;
-        let key = name;
-        while (existing.reactions.has(key)) key = \`\${key}_p\`;
-        existing.reactions.set(key, reaction);
-      }
-    }
-  }
-}
-
-// Resolves the event stream as source and target (default)
-export const _this_ = ({ stream }: { stream: string }) => ({
-  source: stream,
-  target: stream,
-});
 
 // === ports.ts ===
 import { ConsoleLogger } from "./adapters/console-logger.js";
@@ -34116,483 +33695,6 @@ export interface Cache extends Disposable {
   ): Promise<void>;
   invalidate(stream: string): Promise<void>;
   clear(): Promise<void>;
-}
-
-// === projection-builder.ts ===
-/**
- * @module projection-builder
- * @category Builders
- *
- * Fluent builder for composing projection handlers — read-model updaters
- * that react to events and update external state (databases, caches, etc.).
- *
- * Projections differ from slices: they don't contain states, don't dispatch
- * actions, and are pure side-effect handlers routed to a named stream.
- */
-import type { ZodType } from "zod";
-import {
-  _this_,
-  type FoldConfig,
-  resolveFoldConfig,
-} from "../internal/index.js";
-import type {
-  BatchHandler,
-  CacheEntry,
-  Committed,
-  EventRegister,
-  FoldOptions,
-  Reaction,
-  ReactionResolver,
-  Schema,
-  Schemas,
-  State,
-} from "../types/index.js";
-
-/**
- * A self-contained projection grouping read-model update handlers.
- * Projections are composed into an Act orchestrator via \`act().withProjection(projection)\`.
- *
- * @template TEvents - Event schemas handled by this projection
- */
-export type Projection<TEvents extends Schemas> = {
-  readonly _tag: "Projection";
-  readonly events: EventRegister<TEvents>;
-  readonly target?: string;
-  readonly batchHandler?: BatchHandler<TEvents>;
-  /**
-   * State-fold spec from \`.of()\`. The builder only records intent — the
-   * orchestrator resolves the REGISTRY-MERGED full state at
-   * \`act().build()\` and synthesizes the batch handler there, so the
-   * fold always covers every reducer of the state, including partials
-   * merged by slices the projection never saw.
-   * @internal
-   */
-  readonly fold?: {
-    readonly name: string;
-    readonly flush: (rows: ReadonlyArray<CacheEntry<any>>) => Promise<void>;
-    readonly config: FoldConfig;
-  };
-};
-
-/**
- * The \`.of()\` continuation: state projections flush the cache layer
- * outward — the rows ARE the streams' {@link CacheEntry} values, one
- * per dirty stream per flush round. Must be an idempotent upsert keyed
- * on \`stream\` (guard with \`event_id\` for order safety when a rebuild
- * races a live worker).
- */
-type FoldFlush<TState extends Schema, TE extends Schemas> = {
-  flush: (
-    handler: (rows: ReadonlyArray<CacheEntry<TState>>) => Promise<void>
-  ) => {
-    build: () => Projection<TE>;
-  };
-};
-
-/**
- * \`.of()\` accepts the partials of ONE state (same name, enforced at the
- * type level via \`TName\`) purely for typing and event registration —
- * the fold itself always runs on the registry-merged full state,
- * resolved at \`act().build()\`. Passing every partial is required: the
- * orchestrator validates completeness at build and throws on missing
- * events.
- */
-type OfSignatures = {
-  <
-    TS1 extends Schema,
-    TE1 extends Schemas,
-    TA1 extends Schemas,
-    TN extends string,
-  >(
-    s1: State<TS1, TE1, TA1, TN>,
-    options?: FoldOptions
-  ): FoldFlush<TS1, TE1>;
-  <
-    TS1 extends Schema,
-    TE1 extends Schemas,
-    TA1 extends Schemas,
-    TS2 extends Schema,
-    TE2 extends Schemas,
-    TA2 extends Schemas,
-    TN extends string,
-  >(
-    s1: State<TS1, TE1, TA1, TN>,
-    s2: State<TS2, TE2, TA2, TN>,
-    options?: FoldOptions
-  ): FoldFlush<TS1 & TS2, TE1 & TE2>;
-  <
-    TS1 extends Schema,
-    TE1 extends Schemas,
-    TA1 extends Schemas,
-    TS2 extends Schema,
-    TE2 extends Schemas,
-    TA2 extends Schemas,
-    TS3 extends Schema,
-    TE3 extends Schemas,
-    TA3 extends Schemas,
-    TN extends string,
-  >(
-    s1: State<TS1, TE1, TA1, TN>,
-    s2: State<TS2, TE2, TA2, TN>,
-    s3: State<TS3, TE3, TA3, TN>,
-    options?: FoldOptions
-  ): FoldFlush<TS1 & TS2 & TS3, TE1 & TE2 & TE3>;
-  <
-    TS1 extends Schema,
-    TE1 extends Schemas,
-    TA1 extends Schemas,
-    TS2 extends Schema,
-    TE2 extends Schemas,
-    TA2 extends Schemas,
-    TS3 extends Schema,
-    TE3 extends Schemas,
-    TA3 extends Schemas,
-    TS4 extends Schema,
-    TE4 extends Schemas,
-    TA4 extends Schemas,
-    TN extends string,
-  >(
-    s1: State<TS1, TE1, TA1, TN>,
-    s2: State<TS2, TE2, TA2, TN>,
-    s3: State<TS3, TE3, TA3, TN>,
-    s4: State<TS4, TE4, TA4, TN>,
-    options?: FoldOptions
-  ): FoldFlush<TS1 & TS2 & TS3 & TS4, TE1 & TE2 & TE3 & TE4>;
-};
-
-/** Helper: a single-key record mapping an event name to its Zod schema. */
-type EventEntry<TKey extends string = string, TData extends Schema = Schema> = {
-  [P in TKey]: ZodType<TData>;
-};
-
-/** Infer the handler-result type after registering one event. */
-type DoResult<
-  TEvents extends Schemas,
-  TKey extends string,
-  TData extends Schema,
-  TTarget extends string | undefined = undefined,
-> = ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget, true> & {
-  to: (
-    resolver: ReactionResolver<TEvents & { [P in TKey]: TData }, TKey> | string
-  ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget, true>;
-};
-
-/**
- * Fluent builder interface for composing projections.
- *
- * When a static target is provided via \`projection("target")\`, the builder
- * exposes a \`.batch()\` method for registering a batch handler that processes
- * all events in a single call.
- *
- * @template TEvents - Event schemas
- * @template TTarget - Static target string or undefined
- */
-export type ProjectionBuilder<
-  TEvents extends Schemas,
-  TTarget extends string | undefined = undefined,
-  THasHandlers extends boolean = false,
-> = {
-  /**
-   * Begins defining a projection handler for a specific event.
-   *
-   * Pass a \`{ EventName: schema }\` record — use shorthand \`{ EventName }\`
-   * when the variable name matches the event name. The key becomes the
-   * event name, the value the Zod schema.
-   */
-  on: <TKey extends string, TData extends Schema>(
-    entry: EventEntry<TKey, TData>
-  ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents & { [P in TKey]: TData }, TKey>,
-        stream: string
-      ) => Promise<void>
-    ) => DoResult<TEvents, TKey, TData, TTarget>;
-  };
-  /**
-   * Builds and returns the Projection data structure.
-   */
-  build: () => Projection<TEvents>;
-  /**
-   * The registered event schemas and their reaction maps.
-   */
-  readonly events: EventRegister<TEvents>;
-} & (TTarget extends string
-  ? {
-      /**
-       * Registers a batch handler that processes all events in a single call.
-       *
-       * Only available on projections with a static target (\`projection("target")\`).
-       * The handler receives a discriminated union of all declared events,
-       * enabling bulk DB operations in a single transaction.
-       *
-       * When defined, the batch handler is always called — even for a single event.
-       * Individual \`.do()\` handlers serve as fallback for projections without \`.batch()\`.
-       */
-      batch: (handler: BatchHandler<TEvents>) => {
-        build: () => Projection<TEvents>;
-      };
-    } & (THasHandlers extends false
-      ? {
-          /**
-           * Declares a state projection: fold every event of the given
-           * state through its own reducers and flush one row per stream —
-           * the queryable list of the aggregates themselves.
-           *
-           * The state is the filter: the projection consumes exactly the
-           * state's event register, so in a multi-state app only that
-           * state's streams are folded — and every event of a folded
-           * stream reaches the reducer. Write amplification tracks the
-           * distinct stream count, not the event count; \`app.reset\`
-           * rebuilds in O(streams) upserts.
-           *
-           * The fluent chain enforces the shape: \`.of()\` is only offered
-           * before any \`.on()\` handler, and narrows to \`.flush()\` +
-           * \`.build()\` — a projection either folds a state or declares
-           * handlers, never both.
-           */
-          of: OfSignatures;
-        }
-      : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-        {})
-  : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-    {});
-
-/* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
-
-/**
- * Creates a new projection builder for composing read-model update handlers.
- *
- * Projections enable separation of read-model concerns from command handling.
- * Each \`.on({ Event }).do(handler)\` call registers a handler that updates
- * a projection (database table, cache, etc.) in response to events.
- *
- * Pass a target stream name to \`projection("target")\` so every handler
- * inherits that resolver automatically. Omit it and use per-handler
- * \`.to()\` when handlers route to different streams.
- *
- * @param target - Optional default target stream for all handlers
- *
- * @example Default target (all handlers routed to "tickets")
- * \`\`\`typescript
- * const TicketProjection = projection("tickets")
- *   .on({ TicketOpened })
- *     .do(async ({ stream, data }) => {
- *       await db.insert(tickets).values({ id: stream, ...data });
- *     })
- *   .on({ TicketClosed })
- *     .do(async ({ stream, data }) => {
- *       await db.update(tickets).set(data).where(eq(tickets.id, stream));
- *     })
- *   .build();
- * \`\`\`
- *
- * @example Per-handler routing
- * \`\`\`typescript
- * const MultiProjection = projection()
- *   .on({ OrderPlaced })
- *     .do(async (event) => { ... })
- *     .to("orders")
- *   .on({ PaymentReceived })
- *     .do(async (event) => { ... })
- *     .to("payments")
- *   .build();
- * \`\`\`
- *
- * @see {@link ProjectionBuilder} for builder methods
- * @see {@link Projection} for the output type
- */
-/**
- * @internal Build the core builder object (shared between overloads). One
- * mutable \`events\` register threaded through every fluent call; .on()
- * mutates and returns the same builder cast to its widened generic.
- */
-function _projection<
-  TEvents extends Schemas,
-  TTarget extends string | undefined,
->(target: TTarget): ProjectionBuilder<TEvents, TTarget> {
-  const events = {} as EventRegister<TEvents>;
-  const default_resolver: { target: string } | undefined =
-    typeof target === "string" ? { target } : undefined;
-
-  // Mutable runtime bag — typed loosely; the public projection() return
-  // type narrows back to the user-facing \`ProjectionBuilder<TEvents, TTarget>\`.
-
-  const base: any = {
-    on: <TKey extends string, TData extends Schema>(
-      entry: EventEntry<TKey, TData>
-    ) => {
-      const keys = Object.keys(entry);
-      if (keys.length !== 1) throw new Error(".on() requires exactly one key");
-      const event = keys[0] as TKey;
-      const schema = entry[event];
-
-      // Register the event schema if not already present
-      if (!(event in events)) {
-        (events as Record<string, unknown>)[event] = {
-          schema,
-          reactions: new Map(),
-        };
-      }
-
-      return {
-        do: (
-          handler: (
-            event: Committed<TEvents & { [P in TKey]: TData }, TKey>,
-            stream: string
-          ) => Promise<void>
-        ) => {
-          const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
-            handler,
-            resolver: default_resolver ?? _this_,
-            options: {
-              blockOnError: true,
-              maxRetries: 3,
-            },
-          };
-          const register = (events as Record<string, any>)[event];
-          if (!handler.name)
-            throw new Error(
-              \`Projection handler for "\${event}" must be a named function\`
-            );
-          if (register.reactions.has(handler.name))
-            throw new Error(
-              \`Duplicate projection handler "\${handler.name}" for event "\${event}". \` +
-                \`Projection handlers are keyed by function name; rename one of them.\`
-            );
-          register.reactions.set(handler.name, reaction);
-
-          // Same builder, widened generic — no recursive call.
-          const widened = base as unknown as ProjectionBuilder<
-            TEvents & { [P in TKey]: TData },
-            TTarget
-          >;
-          return Object.assign(widened, {
-            to(
-              resolver:
-                | ReactionResolver<TEvents & { [P in TKey]: TData }, TKey>
-                | string
-            ) {
-              // Patch the same reaction in place — no second Map.set().
-              reaction.resolver =
-                typeof resolver === "string" ? { target: resolver } : resolver;
-              return widened;
-            },
-          });
-        },
-      };
-    },
-    build: () => ({
-      _tag: "Projection" as const,
-      events,
-      ...(target !== undefined && { target }),
-    }),
-    events,
-  };
-
-  // Add .batch() and .of() only for static-target projections
-  if (typeof target === "string") {
-    return Object.assign(base, {
-      batch: (handler: BatchHandler<TEvents>) => ({
-        build: () => ({
-          _tag: "Projection" as const,
-          events,
-          target,
-          batchHandler: handler,
-        }),
-      }),
-      of: (...args: unknown[]) => {
-        if (Object.keys(events).length > 0)
-          throw new Error(
-            \`Projection "\${target}" mixes .of() with .on() handlers — a projection either folds a state or declares handlers, never both\`
-          );
-        // Trailing options bag is the only non-State argument.
-        const is_state = (a: unknown): a is State<Schema, Schemas, Schemas> =>
-          !!a &&
-          typeof (a as State<Schema, Schemas, Schemas>).init === "function";
-        const partials = args.filter(is_state);
-        const options = (args.find((a) => !is_state(a)) ?? {}) as FoldOptions;
-        if (partials.length === 0)
-          throw new Error(\`Projection "\${target}" .of() requires a state\`);
-        const name = partials[0].name;
-        for (const partial of partials)
-          if (partial.name !== name)
-            throw new Error(
-              \`Projection "\${target}" .of() partials must share one state name — got "\${name}" and "\${partial.name}"\`
-            );
-        // Misconfiguration surfaces here, at startup — not on first drain.
-        const config = resolveFoldConfig(options);
-        // The partials' own schema instances register the events, so the
-        // same-name declarations in slices pass the identity check in
-        // merge_event_register. The named no-op reaction routes fetches
-        // to this target; dispatch always goes through the batch handler
-        // the orchestrator synthesizes from the registry-merged state.
-        const fold_events = {} as EventRegister<Schemas>;
-        for (const partial of partials)
-          for (const [event_name, schema] of Object.entries(partial.events)) {
-            if (event_name in fold_events) continue;
-            const noop = {
-              [\`\${target}_fold\`]: async () => {},
-            }[\`\${target}_fold\`] as (
-              event: Committed<Schemas, string>,
-              stream: string
-            ) => Promise<void>;
-            (fold_events as Record<string, unknown>)[event_name] = {
-              schema,
-              reactions: new Map([
-                [
-                  \`\${target}_fold\`,
-                  {
-                    handler: noop,
-                    resolver: { target },
-                    options: { blockOnError: true, maxRetries: 3 },
-                  },
-                ],
-              ]),
-            };
-          }
-        return {
-          flush: (
-            handler: (rows: ReadonlyArray<CacheEntry<Schema>>) => Promise<void>
-          ) => ({
-            build: () => ({
-              _tag: "Projection" as const,
-              events: fold_events,
-              target,
-              fold: { name, flush: handler, config },
-            }),
-          }),
-        };
-      },
-    }) as ProjectionBuilder<TEvents, TTarget>;
-  }
-
-  return base as ProjectionBuilder<TEvents, TTarget>;
-}
-
-/**
- * Creates a new projection builder with a static target stream.
- *
- * All handlers inherit the target resolver automatically. Enables \`.batch()\`
- * for bulk event processing in a single transaction.
- *
- * @param target - Static target stream for all handlers
- */
-export function projection<TEvents extends Schemas = {}>(
-  target: string
-): ProjectionBuilder<TEvents, string>;
-/**
- * Creates a new projection builder without a default target.
- *
- * Use per-handler \`.to()\` to route events to different streams.
- */
-export function projection<TEvents extends Schemas = {}>(
-  target?: undefined
-): ProjectionBuilder<TEvents, undefined>;
-export function projection<TEvents extends Schemas = {}>(
-  target?: string
-): ProjectionBuilder<TEvents, string | undefined> {
-  return _projection<TEvents, string | undefined>(target);
 }
 
 // === projection-fold.ts ===
