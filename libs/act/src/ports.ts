@@ -2,7 +2,7 @@ import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
-import { register_disposer, run_disposers } from "./internal/disposers.js";
+import { register_disposer, run_disposers } from "./disposers.js";
 import { scoped } from "./scoped.js";
 import type {
   Cache,
@@ -214,7 +214,7 @@ export const cache = ((adapter?: Cache): Cache => {
 // ---------------------------------------------------------------------------
 
 /**
- * Registered cleanup functions live in `internal/disposers.ts`, which holds
+ * Registered cleanup functions live in `disposers.ts`, which holds
  * lifetime-bound entries weakly so registering never pins its target for the
  * process lifetime (#1441). The public surface here is unchanged.
  */

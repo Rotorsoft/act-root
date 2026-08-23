@@ -4315,6 +4315,154 @@ export interface IAct<
 
 // === audit.ts ===
 /**
+ * @module act/types/audit
+ *
+ * Operator-driven store audit (#723).
+ *
+ * The \`app.audit(...)\` method walks the connected store and yields
+ * per-category findings — each tagged with the remediation it
+ * suggests. Same operator-driven category as \`app.close()\`,
+ * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
+ * framework; the operator decides when to run it and what to do
+ * with the findings.
+ *
+ * Categories are independent — operators can request a subset
+ * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
+ * omitting the category list.
+ *
+ * Findings are yielded as an \`AsyncIterable\` so callers can break
+ * out early, pipe into Slack alerts, save to disk, etc. without
+ * loading the entire report in memory.
+ */
+
+import type { Query } from "./action.js";
+
+/**
+ * Audit category names. Each maps to a distinct family of findings
+ * and a distinct remediation. See {@link AuditFinding} for the
+ * shapes each category emits.
+ */
+export type AuditCategory =
+  | "schema"
+  | "close-candidate"
+  | "restart-candidate"
+  | "deprecated-load"
+  | "reaction-health"
+  | "snapshot-drift"
+  | "routing-health"
+  | "correlation-gaps"
+  | "clock-anomalies";
+
+/**
+ * Tunable thresholds for categories whose findings depend on a
+ * cutoff. Sensible defaults are documented per field; operators
+ * can override per call.
+ */
+export type AuditThresholds = {
+  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
+  idle_days?: number;
+  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
+  restart_min?: number;
+  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
+  stuck_minutes?: number;
+  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
+  near_block?: number;
+  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
+  deprecated_min?: number;
+  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
+  drift_min?: number;
+  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
+  terminal_events?: string[];
+};
+
+/**
+ * Audit options. Most categories run unconditionally over the
+ * store; \`query\` narrows the scan window (e.g., "only audit events
+ * committed since yesterday" for an incremental cron).
+ */
+export type AuditOptions = {
+  /**
+   * Query filter applied to event-table scans. Mirrors
+   * {@link Query} (stream / source / created_before / created_after /
+   * before / etc.). When omitted, the audit scans the whole table.
+   */
+  query?: Query;
+  /** Pagination size for event scans. Default 500. */
+  page_size?: number;
+  /** Per-category thresholds; see {@link AuditThresholds}. */
+  thresholds?: AuditThresholds;
+};
+
+/**
+ * Discriminated union of audit findings. Each shape carries enough
+ * context for the operator to act on the finding directly —
+ * stream name, event id, suggested remediation hints.
+ */
+export type AuditFinding =
+  | {
+      category: "schema";
+      stream: string;
+      event_id: number;
+      name: string;
+      reason: "unknown_event_name" | "schema_validation_failed";
+      zod_error?: unknown;
+    }
+  | {
+      category: "close-candidate";
+      stream: string;
+      last_event_at: string;
+      reason: "terminal" | "idle";
+      idle_days?: number;
+      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
+      restart_supported: boolean;
+    }
+  | {
+      category: "restart-candidate";
+      stream: string;
+      count: number;
+      snaps: number;
+    }
+  | {
+      category: "deprecated-load";
+      name: string;
+      current_version: string;
+      total: number;
+      top_streams: Array<{ stream: string; count: number }>;
+    }
+  | {
+      category: "reaction-health";
+      stream: string;
+      status: "blocked" | "near-block" | "stuck-backoff";
+      retry: number;
+      reason: string;
+    }
+  | {
+      category: "snapshot-drift";
+      stream: string;
+      events_since_snap: number;
+      snap_at?: number;
+    }
+  | {
+      category: "routing-health";
+      stream: string;
+      reason: "unknown-lane" | "unrouted";
+      lane?: string;
+    }
+  | {
+      category: "correlation-gaps";
+      stream: string;
+      event_id: number;
+      reason: "orphan-parent" | "missing-correlation";
+    }
+  | {
+      category: "clock-anomalies";
+      stream: string;
+      event_id: number;
+      reason: "future-created" | "out-of-order";
+    };
+
+// === audit.ts ===
+/**
  * @module audit
  * @category Internal
  *
@@ -5064,154 +5212,6 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
 };
-
-// === audit.ts ===
-/**
- * @module act/types/audit
- *
- * Operator-driven store audit (#723).
- *
- * The \`app.audit(...)\` method walks the connected store and yields
- * per-category findings — each tagged with the remediation it
- * suggests. Same operator-driven category as \`app.close()\`,
- * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
- * framework; the operator decides when to run it and what to do
- * with the findings.
- *
- * Categories are independent — operators can request a subset
- * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
- * omitting the category list.
- *
- * Findings are yielded as an \`AsyncIterable\` so callers can break
- * out early, pipe into Slack alerts, save to disk, etc. without
- * loading the entire report in memory.
- */
-
-import type { Query } from "./action.js";
-
-/**
- * Audit category names. Each maps to a distinct family of findings
- * and a distinct remediation. See {@link AuditFinding} for the
- * shapes each category emits.
- */
-export type AuditCategory =
-  | "schema"
-  | "close-candidate"
-  | "restart-candidate"
-  | "deprecated-load"
-  | "reaction-health"
-  | "snapshot-drift"
-  | "routing-health"
-  | "correlation-gaps"
-  | "clock-anomalies";
-
-/**
- * Tunable thresholds for categories whose findings depend on a
- * cutoff. Sensible defaults are documented per field; operators
- * can override per call.
- */
-export type AuditThresholds = {
-  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
-  idle_days?: number;
-  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
-  restart_min?: number;
-  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
-  stuck_minutes?: number;
-  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
-  near_block?: number;
-  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
-  deprecated_min?: number;
-  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
-  drift_min?: number;
-  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
-  terminal_events?: string[];
-};
-
-/**
- * Audit options. Most categories run unconditionally over the
- * store; \`query\` narrows the scan window (e.g., "only audit events
- * committed since yesterday" for an incremental cron).
- */
-export type AuditOptions = {
-  /**
-   * Query filter applied to event-table scans. Mirrors
-   * {@link Query} (stream / source / created_before / created_after /
-   * before / etc.). When omitted, the audit scans the whole table.
-   */
-  query?: Query;
-  /** Pagination size for event scans. Default 500. */
-  page_size?: number;
-  /** Per-category thresholds; see {@link AuditThresholds}. */
-  thresholds?: AuditThresholds;
-};
-
-/**
- * Discriminated union of audit findings. Each shape carries enough
- * context for the operator to act on the finding directly —
- * stream name, event id, suggested remediation hints.
- */
-export type AuditFinding =
-  | {
-      category: "schema";
-      stream: string;
-      event_id: number;
-      name: string;
-      reason: "unknown_event_name" | "schema_validation_failed";
-      zod_error?: unknown;
-    }
-  | {
-      category: "close-candidate";
-      stream: string;
-      last_event_at: string;
-      reason: "terminal" | "idle";
-      idle_days?: number;
-      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
-      restart_supported: boolean;
-    }
-  | {
-      category: "restart-candidate";
-      stream: string;
-      count: number;
-      snaps: number;
-    }
-  | {
-      category: "deprecated-load";
-      name: string;
-      current_version: string;
-      total: number;
-      top_streams: Array<{ stream: string; count: number }>;
-    }
-  | {
-      category: "reaction-health";
-      stream: string;
-      status: "blocked" | "near-block" | "stuck-backoff";
-      retry: number;
-      reason: string;
-    }
-  | {
-      category: "snapshot-drift";
-      stream: string;
-      events_since_snap: number;
-      snap_at?: number;
-    }
-  | {
-      category: "routing-health";
-      stream: string;
-      reason: "unknown-lane" | "unrouted";
-      lane?: string;
-    }
-  | {
-      category: "correlation-gaps";
-      stream: string;
-      event_id: number;
-      reason: "orphan-parent" | "missing-correlation";
-    }
-  | {
-      category: "clock-anomalies";
-      stream: string;
-      event_id: number;
-      reason: "future-created" | "out-of-order";
-    };
 
 // === autoclose-policy.ts ===
 /**
@@ -9385,7 +9385,7 @@ export class DeferTimer {
 }
 
 // === disposers.ts ===
-import type { Disposer } from "../types/index.js";
+import type { Disposer } from "./types/index.js";
 
 /**
  * The shape {@link register_weak_disposer} needs from a \`WeakRef\`. Declared
@@ -13229,6 +13229,12 @@ export * from "./utils.js";
  * @internal
  */
 
+export {
+  type RefLike,
+  register_disposer,
+  register_weak_disposer,
+  run_disposers,
+} from "../disposers.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,
@@ -13284,12 +13290,6 @@ export {
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
-export {
-  type RefLike,
-  register_disposer,
-  register_weak_disposer,
-  run_disposers,
-} from "./disposers.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -13803,328 +13803,6 @@ export const _this_ = ({ stream }: { stream: string }) => ({
   source: stream,
   target: stream,
 });
-
-// === ports.ts ===
-import { ConsoleLogger } from "./adapters/console-logger.js";
-import { InMemoryCache } from "./adapters/in-memory-cache.js";
-import { InMemoryStore } from "./adapters/in-memory-store.js";
-import { config } from "./config.js";
-import { register_disposer, run_disposers } from "./internal/disposers.js";
-import { scoped } from "./scoped.js";
-import type {
-  Cache,
-  Disposable,
-  Disposer,
-  Logger,
-  Store,
-} from "./types/index.js";
-
-export type { Scoped } from "./scoped.js";
-// Ambient context lives in \`scoped.ts\`; re-exported here because
-// \`index.ts\` star-exports this module and both names are already part of
-// the published surface. Moving the declaration must not move the surface.
-export { scoped } from "./scoped.js";
-
-/**
- * Port/adapter infrastructure for the Act framework.
- *
- * All infrastructure concerns (logging, storage, caching) are managed as
- * singleton adapters injected via port functions. Each port follows the same
- * pattern: first call wins with a sensible default, optional adapter injection.
- *
- * - \`log()\` — structured logging (default: ConsoleLogger)
- * - \`store()\` — event persistence (default: InMemoryStore)
- * - \`cache()\` — state checkpoints (default: InMemoryCache)
- * - \`dispose()\` — register cleanup functions for graceful shutdown
- *
- * @module ports
- */
-
-/**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
- */
-export const ExitCodes = ["ERROR", "EXIT"] as const;
-
-/**
- * Type for allowed exit codes.
- *
- * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
- * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
- */
-export type ExitCode = (typeof ExitCodes)[number];
-
-// ---------------------------------------------------------------------------
-// Port factory
-// ---------------------------------------------------------------------------
-
-/**
- * Factory function that creates or returns the injected adapter.
- * @internal
- */
-type Injector<Port extends Disposable> = (adapter?: Port) => Port;
-
-/** Singleton adapter registry, keyed by injector function name. */
-const adapters = new Map<string, Disposable>();
-
-/**
- * Creates a singleton port with optional adapter injection.
- *
- * The first call initializes the adapter (using the provided adapter or the
- * injector's default). Subsequent calls return the cached singleton. Adapters
- * are disposed in reverse registration order during {@link disposeAndExit}.
- *
- * @param injector - Named function that creates the default adapter
- * @returns Port function: call with no args to get the singleton, or pass an
- *          adapter on the first call to override the default
- *
- * @example
- * \`\`\`typescript
- * const store = port(function store(adapter?: Store) {
- *   return adapter || new InMemoryStore();
- * });
- * const s = store(); // InMemoryStore
- * \`\`\`
- */
-export function port<Port extends Disposable>(injector: Injector<Port>) {
-  return (adapter?: Port): Port => {
-    if (!adapters.has(injector.name)) {
-      const injected = injector(adapter);
-      adapters.set(injector.name, injected);
-      // log() is now in adapters (or this IS the log port we just registered),
-      // so the recursive call resolves immediately. Routing through the logger
-      // means level gating (e.g. silenced in tests at fatal) takes effect.
-      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
-    }
-    return adapters.get(injector.name) as Port;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Ports: log, store, cache
-// ---------------------------------------------------------------------------
-
-/**
- * Gets or injects the singleton logger.
- *
- * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
- * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
- * output in development — zero external dependencies.
- *
- * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
- * your application.
- *
- * @param adapter - Optional logger implementation to inject
- * @returns The singleton logger instance
- *
- * @example Default console logger
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * const logger = log();
- * logger.info("Application started");
- * \`\`\`
- *
- * @example Injecting pino
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * import { PinoLogger } from "@rotorsoft/act-pino";
- * log(new PinoLogger({ level: "debug", pretty: true }));
- * \`\`\`
- *
- * @see {@link Logger} for the interface contract
- * @see {@link ConsoleLogger} for the default implementation
- */
-export const log = port(function log(adapter?: Logger) {
-  const cfg = config();
-  return (
-    adapter ||
-    new ConsoleLogger({
-      level: cfg.logLevel,
-      pretty: cfg.env !== "production",
-    })
-  );
-});
-
-/**
- * Gets or injects the singleton event store.
- *
- * By default, Act uses an {@link InMemoryStore} suitable for development and
- * testing. For production, inject a persistent store like \`PostgresStore\` from
- * \`@rotorsoft/act-pg\` before building your application.
- *
- * **Important:** Store injection must happen before creating any Act instances.
- * Once set, the store cannot be changed without restarting the application.
- *
- * @param adapter - Optional store implementation to inject
- * @returns The singleton store instance
- *
- * @example Default in-memory store
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * const s = store();
- * \`\`\`
- *
- * @example Injecting PostgreSQL
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * import { PostgresStore } from "@rotorsoft/act-pg";
- *
- * store(new PostgresStore({
- *   host: "localhost",
- *   port: 5432,
- *   database: "myapp",
- *   user: "postgres",
- *   password: "secret",
- * }));
- * \`\`\`
- *
- * @see {@link Store} for the interface contract
- * @see {@link InMemoryStore} for the default implementation
- */
-// ALS check lives outside \`port()\` — its cache fires only once, so the
-// per-call branch on a scoped Act has to be in the public wrapper.
-const _store = port(function store(adapter?: Store): Store {
-  return adapter ?? new InMemoryStore();
-});
-
-export const store = ((adapter?: Store): Store => {
-  return scoped.getStore()?.store ?? _store(adapter);
-}) as (adapter?: Store) => Store;
-
-/**
- * Gets or injects the singleton cache.
- *
- * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
- * distributed deployments, inject a Redis-backed cache before building your
- * application.
- *
- * @param adapter - Optional cache implementation to inject
- * @returns The singleton cache instance
- *
- * @see {@link Cache} for the interface contract
- * @see {@link InMemoryCache} for the default implementation
- */
-const _cache = port(function cache(adapter?: Cache) {
-  return adapter ?? new InMemoryCache();
-});
-
-export const cache = ((adapter?: Cache): Cache => {
-  return scoped.getStore()?.cache ?? _cache(adapter);
-}) as (adapter?: Cache) => Cache;
-
-// ---------------------------------------------------------------------------
-// Disposal
-// ---------------------------------------------------------------------------
-
-/**
- * Registered cleanup functions live in \`internal/disposers.ts\`, which holds
- * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime (#1441). The public surface here is unchanged.
- */
-
-/**
- * Disposes all registered adapters and disposers, then exits the process.
- *
- * Execution order:
- * 1. Custom disposers (registered via {@link dispose}) — in reverse order
- * 2. Port adapters (log, store, cache) — in reverse registration order
- * 3. Adapter registry is cleared
- * 4. Process exits (skipped in test environment)
- *
- * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
- * transient failures (e.g. an uncaught promise in a non-critical path).
- *
- * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
- *               \`"ERROR"\` for abnormal termination (exit 1)
- */
-export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
-  if (code === "ERROR" && config().env === "production") {
-    // Surface the swallow so incident triage can see it. Without this
-    // log the framework looks unresponsive after an uncaught exception
-    // in prod — exactly when operators most need a breadcrumb.
-    log().warn(
-      "disposeAndExit('ERROR') ignored in production — process kept alive"
-    );
-    return;
-  }
-
-  // Run sequentially in reverse registration order so a disposer can rely on
-  // later-registered disposers (and adapters on later-registered adapters)
-  // having already finished — Promise.all would race them.
-  await run_disposers();
-  for (const adapter of [...adapters.values()].reverse()) {
-    await adapter.dispose();
-    log().info(\`[act] - \${adapter.constructor.name}\`);
-  }
-  adapters.clear();
-  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
-}
-
-/**
- * Registers a cleanup function for graceful shutdown.
- *
- * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
- * and unhandled rejections. They execute in reverse registration order before
- * port adapters are disposed.
- *
- * @param disposer - Async function to call during cleanup. Omit to get a
- *                   reference to {@link disposeAndExit} without registering.
- * @returns Function to manually trigger disposal and exit
- *
- * @example
- * \`\`\`typescript
- * import { dispose } from "@rotorsoft/act";
- *
- * const db = connectDatabase();
- * dispose(async () => await db.close());
- *
- * // In tests
- * afterAll(async () => await dispose()());
- * \`\`\`
- *
- * @see {@link disposeAndExit} for the full shutdown sequence
- */
-export function dispose(
-  disposer?: Disposer
-): (code?: ExitCode) => Promise<void> {
-  disposer && register_disposer(disposer);
-  return disposeAndExit;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Event name used internally for snapshot events in the event store.
- * Snapshot events store a full state checkpoint, enabling efficient cold-start
- * recovery without replaying the entire event stream.
- */
-export const SNAP_EVENT = "__snapshot__";
-
-/**
- * Event name used internally for tombstone events in the event store.
- * A tombstone marks a stream as permanently closed — no further writes
- * are permitted until the stream is explicitly restarted via \`close()\`.
- *
- * @see {@link Act.close} for the close-the-books API
- */
-export const TOMBSTONE_EVENT = "__tombstone__";
-
-/**
- * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise (ACT-1103). Acts that don't call
- * \`.withLane(...)\` see only this lane, and behavior is identical to
- * pre-1103 single-controller drain.
- *
- * Persisted on \`streams.lane\` and threaded as the strict-typed default in
- * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- */
-export const DEFAULT_LANE = "default";
 
 // === ports.ts ===
 /**
@@ -15547,6 +15225,328 @@ export interface Cache extends Disposable {
   invalidate(stream: string): Promise<void>;
   clear(): Promise<void>;
 }
+
+// === ports.ts ===
+import { ConsoleLogger } from "./adapters/console-logger.js";
+import { InMemoryCache } from "./adapters/in-memory-cache.js";
+import { InMemoryStore } from "./adapters/in-memory-store.js";
+import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./disposers.js";
+import { scoped } from "./scoped.js";
+import type {
+  Cache,
+  Disposable,
+  Disposer,
+  Logger,
+  Store,
+} from "./types/index.js";
+
+export type { Scoped } from "./scoped.js";
+// Ambient context lives in \`scoped.ts\`; re-exported here because
+// \`index.ts\` star-exports this module and both names are already part of
+// the published surface. Moving the declaration must not move the surface.
+export { scoped } from "./scoped.js";
+
+/**
+ * Port/adapter infrastructure for the Act framework.
+ *
+ * All infrastructure concerns (logging, storage, caching) are managed as
+ * singleton adapters injected via port functions. Each port follows the same
+ * pattern: first call wins with a sensible default, optional adapter injection.
+ *
+ * - \`log()\` — structured logging (default: ConsoleLogger)
+ * - \`store()\` — event persistence (default: InMemoryStore)
+ * - \`cache()\` — state checkpoints (default: InMemoryCache)
+ * - \`dispose()\` — register cleanup functions for graceful shutdown
+ *
+ * @module ports
+ */
+
+/**
+ * List of exit codes for process termination. Consumed by signal handlers
+ * and {@link disposeAndExit}; not part of the user-facing surface.
+ *
+ * @internal
+ */
+export const ExitCodes = ["ERROR", "EXIT"] as const;
+
+/**
+ * Type for allowed exit codes.
+ *
+ * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
+ * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
+ *
+ * @internal
+ */
+export type ExitCode = (typeof ExitCodes)[number];
+
+// ---------------------------------------------------------------------------
+// Port factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory function that creates or returns the injected adapter.
+ * @internal
+ */
+type Injector<Port extends Disposable> = (adapter?: Port) => Port;
+
+/** Singleton adapter registry, keyed by injector function name. */
+const adapters = new Map<string, Disposable>();
+
+/**
+ * Creates a singleton port with optional adapter injection.
+ *
+ * The first call initializes the adapter (using the provided adapter or the
+ * injector's default). Subsequent calls return the cached singleton. Adapters
+ * are disposed in reverse registration order during {@link disposeAndExit}.
+ *
+ * @param injector - Named function that creates the default adapter
+ * @returns Port function: call with no args to get the singleton, or pass an
+ *          adapter on the first call to override the default
+ *
+ * @example
+ * \`\`\`typescript
+ * const store = port(function store(adapter?: Store) {
+ *   return adapter || new InMemoryStore();
+ * });
+ * const s = store(); // InMemoryStore
+ * \`\`\`
+ */
+export function port<Port extends Disposable>(injector: Injector<Port>) {
+  return (adapter?: Port): Port => {
+    if (!adapters.has(injector.name)) {
+      const injected = injector(adapter);
+      adapters.set(injector.name, injected);
+      // log() is now in adapters (or this IS the log port we just registered),
+      // so the recursive call resolves immediately. Routing through the logger
+      // means level gating (e.g. silenced in tests at fatal) takes effect.
+      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
+    }
+    return adapters.get(injector.name) as Port;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ports: log, store, cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Gets or injects the singleton logger.
+ *
+ * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
+ * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
+ * output in development — zero external dependencies.
+ *
+ * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
+ * your application.
+ *
+ * @param adapter - Optional logger implementation to inject
+ * @returns The singleton logger instance
+ *
+ * @example Default console logger
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * const logger = log();
+ * logger.info("Application started");
+ * \`\`\`
+ *
+ * @example Injecting pino
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * import { PinoLogger } from "@rotorsoft/act-pino";
+ * log(new PinoLogger({ level: "debug", pretty: true }));
+ * \`\`\`
+ *
+ * @see {@link Logger} for the interface contract
+ * @see {@link ConsoleLogger} for the default implementation
+ */
+export const log = port(function log(adapter?: Logger) {
+  const cfg = config();
+  return (
+    adapter ||
+    new ConsoleLogger({
+      level: cfg.logLevel,
+      pretty: cfg.env !== "production",
+    })
+  );
+});
+
+/**
+ * Gets or injects the singleton event store.
+ *
+ * By default, Act uses an {@link InMemoryStore} suitable for development and
+ * testing. For production, inject a persistent store like \`PostgresStore\` from
+ * \`@rotorsoft/act-pg\` before building your application.
+ *
+ * **Important:** Store injection must happen before creating any Act instances.
+ * Once set, the store cannot be changed without restarting the application.
+ *
+ * @param adapter - Optional store implementation to inject
+ * @returns The singleton store instance
+ *
+ * @example Default in-memory store
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * const s = store();
+ * \`\`\`
+ *
+ * @example Injecting PostgreSQL
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * store(new PostgresStore({
+ *   host: "localhost",
+ *   port: 5432,
+ *   database: "myapp",
+ *   user: "postgres",
+ *   password: "secret",
+ * }));
+ * \`\`\`
+ *
+ * @see {@link Store} for the interface contract
+ * @see {@link InMemoryStore} for the default implementation
+ */
+// ALS check lives outside \`port()\` — its cache fires only once, so the
+// per-call branch on a scoped Act has to be in the public wrapper.
+const _store = port(function store(adapter?: Store): Store {
+  return adapter ?? new InMemoryStore();
+});
+
+export const store = ((adapter?: Store): Store => {
+  return scoped.getStore()?.store ?? _store(adapter);
+}) as (adapter?: Store) => Store;
+
+/**
+ * Gets or injects the singleton cache.
+ *
+ * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
+ * distributed deployments, inject a Redis-backed cache before building your
+ * application.
+ *
+ * @param adapter - Optional cache implementation to inject
+ * @returns The singleton cache instance
+ *
+ * @see {@link Cache} for the interface contract
+ * @see {@link InMemoryCache} for the default implementation
+ */
+const _cache = port(function cache(adapter?: Cache) {
+  return adapter ?? new InMemoryCache();
+});
+
+export const cache = ((adapter?: Cache): Cache => {
+  return scoped.getStore()?.cache ?? _cache(adapter);
+}) as (adapter?: Cache) => Cache;
+
+// ---------------------------------------------------------------------------
+// Disposal
+// ---------------------------------------------------------------------------
+
+/**
+ * Registered cleanup functions live in \`disposers.ts\`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
+
+/**
+ * Disposes all registered adapters and disposers, then exits the process.
+ *
+ * Execution order:
+ * 1. Custom disposers (registered via {@link dispose}) — in reverse order
+ * 2. Port adapters (log, store, cache) — in reverse registration order
+ * 3. Adapter registry is cleared
+ * 4. Process exits (skipped in test environment)
+ *
+ * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
+ * transient failures (e.g. an uncaught promise in a non-critical path).
+ *
+ * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
+ *               \`"ERROR"\` for abnormal termination (exit 1)
+ */
+export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
+  if (code === "ERROR" && config().env === "production") {
+    // Surface the swallow so incident triage can see it. Without this
+    // log the framework looks unresponsive after an uncaught exception
+    // in prod — exactly when operators most need a breadcrumb.
+    log().warn(
+      "disposeAndExit('ERROR') ignored in production — process kept alive"
+    );
+    return;
+  }
+
+  // Run sequentially in reverse registration order so a disposer can rely on
+  // later-registered disposers (and adapters on later-registered adapters)
+  // having already finished — Promise.all would race them.
+  await run_disposers();
+  for (const adapter of [...adapters.values()].reverse()) {
+    await adapter.dispose();
+    log().info(\`[act] - \${adapter.constructor.name}\`);
+  }
+  adapters.clear();
+  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
+}
+
+/**
+ * Registers a cleanup function for graceful shutdown.
+ *
+ * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
+ * and unhandled rejections. They execute in reverse registration order before
+ * port adapters are disposed.
+ *
+ * @param disposer - Async function to call during cleanup. Omit to get a
+ *                   reference to {@link disposeAndExit} without registering.
+ * @returns Function to manually trigger disposal and exit
+ *
+ * @example
+ * \`\`\`typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const db = connectDatabase();
+ * dispose(async () => await db.close());
+ *
+ * // In tests
+ * afterAll(async () => await dispose()());
+ * \`\`\`
+ *
+ * @see {@link disposeAndExit} for the full shutdown sequence
+ */
+export function dispose(
+  disposer?: Disposer
+): (code?: ExitCode) => Promise<void> {
+  disposer && register_disposer(disposer);
+  return disposeAndExit;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via \`close()\`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
+/**
+ * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
+ * declaration says otherwise (ACT-1103). Acts that don't call
+ * \`.withLane(...)\` see only this lane, and behavior is identical to
+ * pre-1103 single-controller drain.
+ *
+ * Persisted on \`streams.lane\` and threaded as the strict-typed default in
+ * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
+ */
+export const DEFAULT_LANE = "default";
 
 // === projection-builder.ts ===
 /**
@@ -23172,6 +23172,154 @@ export interface IAct<
 
 // === audit.ts ===
 /**
+ * @module act/types/audit
+ *
+ * Operator-driven store audit (#723).
+ *
+ * The \`app.audit(...)\` method walks the connected store and yields
+ * per-category findings — each tagged with the remediation it
+ * suggests. Same operator-driven category as \`app.close()\`,
+ * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
+ * framework; the operator decides when to run it and what to do
+ * with the findings.
+ *
+ * Categories are independent — operators can request a subset
+ * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
+ * omitting the category list.
+ *
+ * Findings are yielded as an \`AsyncIterable\` so callers can break
+ * out early, pipe into Slack alerts, save to disk, etc. without
+ * loading the entire report in memory.
+ */
+
+import type { Query } from "./action.js";
+
+/**
+ * Audit category names. Each maps to a distinct family of findings
+ * and a distinct remediation. See {@link AuditFinding} for the
+ * shapes each category emits.
+ */
+export type AuditCategory =
+  | "schema"
+  | "close-candidate"
+  | "restart-candidate"
+  | "deprecated-load"
+  | "reaction-health"
+  | "snapshot-drift"
+  | "routing-health"
+  | "correlation-gaps"
+  | "clock-anomalies";
+
+/**
+ * Tunable thresholds for categories whose findings depend on a
+ * cutoff. Sensible defaults are documented per field; operators
+ * can override per call.
+ */
+export type AuditThresholds = {
+  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
+  idle_days?: number;
+  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
+  restart_min?: number;
+  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
+  stuck_minutes?: number;
+  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
+  near_block?: number;
+  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
+  deprecated_min?: number;
+  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
+  drift_min?: number;
+  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
+  terminal_events?: string[];
+};
+
+/**
+ * Audit options. Most categories run unconditionally over the
+ * store; \`query\` narrows the scan window (e.g., "only audit events
+ * committed since yesterday" for an incremental cron).
+ */
+export type AuditOptions = {
+  /**
+   * Query filter applied to event-table scans. Mirrors
+   * {@link Query} (stream / source / created_before / created_after /
+   * before / etc.). When omitted, the audit scans the whole table.
+   */
+  query?: Query;
+  /** Pagination size for event scans. Default 500. */
+  page_size?: number;
+  /** Per-category thresholds; see {@link AuditThresholds}. */
+  thresholds?: AuditThresholds;
+};
+
+/**
+ * Discriminated union of audit findings. Each shape carries enough
+ * context for the operator to act on the finding directly —
+ * stream name, event id, suggested remediation hints.
+ */
+export type AuditFinding =
+  | {
+      category: "schema";
+      stream: string;
+      event_id: number;
+      name: string;
+      reason: "unknown_event_name" | "schema_validation_failed";
+      zod_error?: unknown;
+    }
+  | {
+      category: "close-candidate";
+      stream: string;
+      last_event_at: string;
+      reason: "terminal" | "idle";
+      idle_days?: number;
+      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
+      restart_supported: boolean;
+    }
+  | {
+      category: "restart-candidate";
+      stream: string;
+      count: number;
+      snaps: number;
+    }
+  | {
+      category: "deprecated-load";
+      name: string;
+      current_version: string;
+      total: number;
+      top_streams: Array<{ stream: string; count: number }>;
+    }
+  | {
+      category: "reaction-health";
+      stream: string;
+      status: "blocked" | "near-block" | "stuck-backoff";
+      retry: number;
+      reason: string;
+    }
+  | {
+      category: "snapshot-drift";
+      stream: string;
+      events_since_snap: number;
+      snap_at?: number;
+    }
+  | {
+      category: "routing-health";
+      stream: string;
+      reason: "unknown-lane" | "unrouted";
+      lane?: string;
+    }
+  | {
+      category: "correlation-gaps";
+      stream: string;
+      event_id: number;
+      reason: "orphan-parent" | "missing-correlation";
+    }
+  | {
+      category: "clock-anomalies";
+      stream: string;
+      event_id: number;
+      reason: "future-created" | "out-of-order";
+    };
+
+// === audit.ts ===
+/**
  * @module audit
  * @category Internal
  *
@@ -23921,154 +24069,6 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
 };
-
-// === audit.ts ===
-/**
- * @module act/types/audit
- *
- * Operator-driven store audit (#723).
- *
- * The \`app.audit(...)\` method walks the connected store and yields
- * per-category findings — each tagged with the remediation it
- * suggests. Same operator-driven category as \`app.close()\`,
- * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
- * framework; the operator decides when to run it and what to do
- * with the findings.
- *
- * Categories are independent — operators can request a subset
- * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
- * omitting the category list.
- *
- * Findings are yielded as an \`AsyncIterable\` so callers can break
- * out early, pipe into Slack alerts, save to disk, etc. without
- * loading the entire report in memory.
- */
-
-import type { Query } from "./action.js";
-
-/**
- * Audit category names. Each maps to a distinct family of findings
- * and a distinct remediation. See {@link AuditFinding} for the
- * shapes each category emits.
- */
-export type AuditCategory =
-  | "schema"
-  | "close-candidate"
-  | "restart-candidate"
-  | "deprecated-load"
-  | "reaction-health"
-  | "snapshot-drift"
-  | "routing-health"
-  | "correlation-gaps"
-  | "clock-anomalies";
-
-/**
- * Tunable thresholds for categories whose findings depend on a
- * cutoff. Sensible defaults are documented per field; operators
- * can override per call.
- */
-export type AuditThresholds = {
-  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
-  idle_days?: number;
-  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
-  restart_min?: number;
-  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
-  stuck_minutes?: number;
-  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
-  near_block?: number;
-  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
-  deprecated_min?: number;
-  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
-  drift_min?: number;
-  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
-  terminal_events?: string[];
-};
-
-/**
- * Audit options. Most categories run unconditionally over the
- * store; \`query\` narrows the scan window (e.g., "only audit events
- * committed since yesterday" for an incremental cron).
- */
-export type AuditOptions = {
-  /**
-   * Query filter applied to event-table scans. Mirrors
-   * {@link Query} (stream / source / created_before / created_after /
-   * before / etc.). When omitted, the audit scans the whole table.
-   */
-  query?: Query;
-  /** Pagination size for event scans. Default 500. */
-  page_size?: number;
-  /** Per-category thresholds; see {@link AuditThresholds}. */
-  thresholds?: AuditThresholds;
-};
-
-/**
- * Discriminated union of audit findings. Each shape carries enough
- * context for the operator to act on the finding directly —
- * stream name, event id, suggested remediation hints.
- */
-export type AuditFinding =
-  | {
-      category: "schema";
-      stream: string;
-      event_id: number;
-      name: string;
-      reason: "unknown_event_name" | "schema_validation_failed";
-      zod_error?: unknown;
-    }
-  | {
-      category: "close-candidate";
-      stream: string;
-      last_event_at: string;
-      reason: "terminal" | "idle";
-      idle_days?: number;
-      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
-      restart_supported: boolean;
-    }
-  | {
-      category: "restart-candidate";
-      stream: string;
-      count: number;
-      snaps: number;
-    }
-  | {
-      category: "deprecated-load";
-      name: string;
-      current_version: string;
-      total: number;
-      top_streams: Array<{ stream: string; count: number }>;
-    }
-  | {
-      category: "reaction-health";
-      stream: string;
-      status: "blocked" | "near-block" | "stuck-backoff";
-      retry: number;
-      reason: string;
-    }
-  | {
-      category: "snapshot-drift";
-      stream: string;
-      events_since_snap: number;
-      snap_at?: number;
-    }
-  | {
-      category: "routing-health";
-      stream: string;
-      reason: "unknown-lane" | "unrouted";
-      lane?: string;
-    }
-  | {
-      category: "correlation-gaps";
-      stream: string;
-      event_id: number;
-      reason: "orphan-parent" | "missing-correlation";
-    }
-  | {
-      category: "clock-anomalies";
-      stream: string;
-      event_id: number;
-      reason: "future-created" | "out-of-order";
-    };
 
 // === autoclose-policy.ts ===
 /**
@@ -27894,7 +27894,7 @@ export class DeferTimer {
 }
 
 // === disposers.ts ===
-import type { Disposer } from "../types/index.js";
+import type { Disposer } from "./types/index.js";
 
 /**
  * The shape {@link register_weak_disposer} needs from a \`WeakRef\`. Declared
@@ -31720,6 +31720,12 @@ export * from "./sandbox.js";
  * @internal
  */
 
+export {
+  type RefLike,
+  register_disposer,
+  register_weak_disposer,
+  run_disposers,
+} from "../disposers.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,
@@ -31775,12 +31781,6 @@ export {
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
 export { DeferSignal } from "./defer-signal.js";
-export {
-  type RefLike,
-  register_disposer,
-  register_weak_disposer,
-  run_disposers,
-} from "./disposers.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -32275,328 +32275,6 @@ export const _this_ = ({ stream }: { stream: string }) => ({
   source: stream,
   target: stream,
 });
-
-// === ports.ts ===
-import { ConsoleLogger } from "./adapters/console-logger.js";
-import { InMemoryCache } from "./adapters/in-memory-cache.js";
-import { InMemoryStore } from "./adapters/in-memory-store.js";
-import { config } from "./config.js";
-import { register_disposer, run_disposers } from "./internal/disposers.js";
-import { scoped } from "./scoped.js";
-import type {
-  Cache,
-  Disposable,
-  Disposer,
-  Logger,
-  Store,
-} from "./types/index.js";
-
-export type { Scoped } from "./scoped.js";
-// Ambient context lives in \`scoped.ts\`; re-exported here because
-// \`index.ts\` star-exports this module and both names are already part of
-// the published surface. Moving the declaration must not move the surface.
-export { scoped } from "./scoped.js";
-
-/**
- * Port/adapter infrastructure for the Act framework.
- *
- * All infrastructure concerns (logging, storage, caching) are managed as
- * singleton adapters injected via port functions. Each port follows the same
- * pattern: first call wins with a sensible default, optional adapter injection.
- *
- * - \`log()\` — structured logging (default: ConsoleLogger)
- * - \`store()\` — event persistence (default: InMemoryStore)
- * - \`cache()\` — state checkpoints (default: InMemoryCache)
- * - \`dispose()\` — register cleanup functions for graceful shutdown
- *
- * @module ports
- */
-
-/**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
- */
-export const ExitCodes = ["ERROR", "EXIT"] as const;
-
-/**
- * Type for allowed exit codes.
- *
- * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
- * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
- */
-export type ExitCode = (typeof ExitCodes)[number];
-
-// ---------------------------------------------------------------------------
-// Port factory
-// ---------------------------------------------------------------------------
-
-/**
- * Factory function that creates or returns the injected adapter.
- * @internal
- */
-type Injector<Port extends Disposable> = (adapter?: Port) => Port;
-
-/** Singleton adapter registry, keyed by injector function name. */
-const adapters = new Map<string, Disposable>();
-
-/**
- * Creates a singleton port with optional adapter injection.
- *
- * The first call initializes the adapter (using the provided adapter or the
- * injector's default). Subsequent calls return the cached singleton. Adapters
- * are disposed in reverse registration order during {@link disposeAndExit}.
- *
- * @param injector - Named function that creates the default adapter
- * @returns Port function: call with no args to get the singleton, or pass an
- *          adapter on the first call to override the default
- *
- * @example
- * \`\`\`typescript
- * const store = port(function store(adapter?: Store) {
- *   return adapter || new InMemoryStore();
- * });
- * const s = store(); // InMemoryStore
- * \`\`\`
- */
-export function port<Port extends Disposable>(injector: Injector<Port>) {
-  return (adapter?: Port): Port => {
-    if (!adapters.has(injector.name)) {
-      const injected = injector(adapter);
-      adapters.set(injector.name, injected);
-      // log() is now in adapters (or this IS the log port we just registered),
-      // so the recursive call resolves immediately. Routing through the logger
-      // means level gating (e.g. silenced in tests at fatal) takes effect.
-      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
-    }
-    return adapters.get(injector.name) as Port;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Ports: log, store, cache
-// ---------------------------------------------------------------------------
-
-/**
- * Gets or injects the singleton logger.
- *
- * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
- * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
- * output in development — zero external dependencies.
- *
- * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
- * your application.
- *
- * @param adapter - Optional logger implementation to inject
- * @returns The singleton logger instance
- *
- * @example Default console logger
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * const logger = log();
- * logger.info("Application started");
- * \`\`\`
- *
- * @example Injecting pino
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * import { PinoLogger } from "@rotorsoft/act-pino";
- * log(new PinoLogger({ level: "debug", pretty: true }));
- * \`\`\`
- *
- * @see {@link Logger} for the interface contract
- * @see {@link ConsoleLogger} for the default implementation
- */
-export const log = port(function log(adapter?: Logger) {
-  const cfg = config();
-  return (
-    adapter ||
-    new ConsoleLogger({
-      level: cfg.logLevel,
-      pretty: cfg.env !== "production",
-    })
-  );
-});
-
-/**
- * Gets or injects the singleton event store.
- *
- * By default, Act uses an {@link InMemoryStore} suitable for development and
- * testing. For production, inject a persistent store like \`PostgresStore\` from
- * \`@rotorsoft/act-pg\` before building your application.
- *
- * **Important:** Store injection must happen before creating any Act instances.
- * Once set, the store cannot be changed without restarting the application.
- *
- * @param adapter - Optional store implementation to inject
- * @returns The singleton store instance
- *
- * @example Default in-memory store
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * const s = store();
- * \`\`\`
- *
- * @example Injecting PostgreSQL
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * import { PostgresStore } from "@rotorsoft/act-pg";
- *
- * store(new PostgresStore({
- *   host: "localhost",
- *   port: 5432,
- *   database: "myapp",
- *   user: "postgres",
- *   password: "secret",
- * }));
- * \`\`\`
- *
- * @see {@link Store} for the interface contract
- * @see {@link InMemoryStore} for the default implementation
- */
-// ALS check lives outside \`port()\` — its cache fires only once, so the
-// per-call branch on a scoped Act has to be in the public wrapper.
-const _store = port(function store(adapter?: Store): Store {
-  return adapter ?? new InMemoryStore();
-});
-
-export const store = ((adapter?: Store): Store => {
-  return scoped.getStore()?.store ?? _store(adapter);
-}) as (adapter?: Store) => Store;
-
-/**
- * Gets or injects the singleton cache.
- *
- * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
- * distributed deployments, inject a Redis-backed cache before building your
- * application.
- *
- * @param adapter - Optional cache implementation to inject
- * @returns The singleton cache instance
- *
- * @see {@link Cache} for the interface contract
- * @see {@link InMemoryCache} for the default implementation
- */
-const _cache = port(function cache(adapter?: Cache) {
-  return adapter ?? new InMemoryCache();
-});
-
-export const cache = ((adapter?: Cache): Cache => {
-  return scoped.getStore()?.cache ?? _cache(adapter);
-}) as (adapter?: Cache) => Cache;
-
-// ---------------------------------------------------------------------------
-// Disposal
-// ---------------------------------------------------------------------------
-
-/**
- * Registered cleanup functions live in \`internal/disposers.ts\`, which holds
- * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime (#1441). The public surface here is unchanged.
- */
-
-/**
- * Disposes all registered adapters and disposers, then exits the process.
- *
- * Execution order:
- * 1. Custom disposers (registered via {@link dispose}) — in reverse order
- * 2. Port adapters (log, store, cache) — in reverse registration order
- * 3. Adapter registry is cleared
- * 4. Process exits (skipped in test environment)
- *
- * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
- * transient failures (e.g. an uncaught promise in a non-critical path).
- *
- * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
- *               \`"ERROR"\` for abnormal termination (exit 1)
- */
-export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
-  if (code === "ERROR" && config().env === "production") {
-    // Surface the swallow so incident triage can see it. Without this
-    // log the framework looks unresponsive after an uncaught exception
-    // in prod — exactly when operators most need a breadcrumb.
-    log().warn(
-      "disposeAndExit('ERROR') ignored in production — process kept alive"
-    );
-    return;
-  }
-
-  // Run sequentially in reverse registration order so a disposer can rely on
-  // later-registered disposers (and adapters on later-registered adapters)
-  // having already finished — Promise.all would race them.
-  await run_disposers();
-  for (const adapter of [...adapters.values()].reverse()) {
-    await adapter.dispose();
-    log().info(\`[act] - \${adapter.constructor.name}\`);
-  }
-  adapters.clear();
-  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
-}
-
-/**
- * Registers a cleanup function for graceful shutdown.
- *
- * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
- * and unhandled rejections. They execute in reverse registration order before
- * port adapters are disposed.
- *
- * @param disposer - Async function to call during cleanup. Omit to get a
- *                   reference to {@link disposeAndExit} without registering.
- * @returns Function to manually trigger disposal and exit
- *
- * @example
- * \`\`\`typescript
- * import { dispose } from "@rotorsoft/act";
- *
- * const db = connectDatabase();
- * dispose(async () => await db.close());
- *
- * // In tests
- * afterAll(async () => await dispose()());
- * \`\`\`
- *
- * @see {@link disposeAndExit} for the full shutdown sequence
- */
-export function dispose(
-  disposer?: Disposer
-): (code?: ExitCode) => Promise<void> {
-  disposer && register_disposer(disposer);
-  return disposeAndExit;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Event name used internally for snapshot events in the event store.
- * Snapshot events store a full state checkpoint, enabling efficient cold-start
- * recovery without replaying the entire event stream.
- */
-export const SNAP_EVENT = "__snapshot__";
-
-/**
- * Event name used internally for tombstone events in the event store.
- * A tombstone marks a stream as permanently closed — no further writes
- * are permitted until the stream is explicitly restarted via \`close()\`.
- *
- * @see {@link Act.close} for the close-the-books API
- */
-export const TOMBSTONE_EVENT = "__tombstone__";
-
-/**
- * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise (ACT-1103). Acts that don't call
- * \`.withLane(...)\` see only this lane, and behavior is identical to
- * pre-1103 single-controller drain.
- *
- * Persisted on \`streams.lane\` and threaded as the strict-typed default in
- * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- */
-export const DEFAULT_LANE = "default";
 
 // === ports.ts ===
 /**
@@ -34019,6 +33697,328 @@ export interface Cache extends Disposable {
   invalidate(stream: string): Promise<void>;
   clear(): Promise<void>;
 }
+
+// === ports.ts ===
+import { ConsoleLogger } from "./adapters/console-logger.js";
+import { InMemoryCache } from "./adapters/in-memory-cache.js";
+import { InMemoryStore } from "./adapters/in-memory-store.js";
+import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./disposers.js";
+import { scoped } from "./scoped.js";
+import type {
+  Cache,
+  Disposable,
+  Disposer,
+  Logger,
+  Store,
+} from "./types/index.js";
+
+export type { Scoped } from "./scoped.js";
+// Ambient context lives in \`scoped.ts\`; re-exported here because
+// \`index.ts\` star-exports this module and both names are already part of
+// the published surface. Moving the declaration must not move the surface.
+export { scoped } from "./scoped.js";
+
+/**
+ * Port/adapter infrastructure for the Act framework.
+ *
+ * All infrastructure concerns (logging, storage, caching) are managed as
+ * singleton adapters injected via port functions. Each port follows the same
+ * pattern: first call wins with a sensible default, optional adapter injection.
+ *
+ * - \`log()\` — structured logging (default: ConsoleLogger)
+ * - \`store()\` — event persistence (default: InMemoryStore)
+ * - \`cache()\` — state checkpoints (default: InMemoryCache)
+ * - \`dispose()\` — register cleanup functions for graceful shutdown
+ *
+ * @module ports
+ */
+
+/**
+ * List of exit codes for process termination. Consumed by signal handlers
+ * and {@link disposeAndExit}; not part of the user-facing surface.
+ *
+ * @internal
+ */
+export const ExitCodes = ["ERROR", "EXIT"] as const;
+
+/**
+ * Type for allowed exit codes.
+ *
+ * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
+ * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
+ *
+ * @internal
+ */
+export type ExitCode = (typeof ExitCodes)[number];
+
+// ---------------------------------------------------------------------------
+// Port factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory function that creates or returns the injected adapter.
+ * @internal
+ */
+type Injector<Port extends Disposable> = (adapter?: Port) => Port;
+
+/** Singleton adapter registry, keyed by injector function name. */
+const adapters = new Map<string, Disposable>();
+
+/**
+ * Creates a singleton port with optional adapter injection.
+ *
+ * The first call initializes the adapter (using the provided adapter or the
+ * injector's default). Subsequent calls return the cached singleton. Adapters
+ * are disposed in reverse registration order during {@link disposeAndExit}.
+ *
+ * @param injector - Named function that creates the default adapter
+ * @returns Port function: call with no args to get the singleton, or pass an
+ *          adapter on the first call to override the default
+ *
+ * @example
+ * \`\`\`typescript
+ * const store = port(function store(adapter?: Store) {
+ *   return adapter || new InMemoryStore();
+ * });
+ * const s = store(); // InMemoryStore
+ * \`\`\`
+ */
+export function port<Port extends Disposable>(injector: Injector<Port>) {
+  return (adapter?: Port): Port => {
+    if (!adapters.has(injector.name)) {
+      const injected = injector(adapter);
+      adapters.set(injector.name, injected);
+      // log() is now in adapters (or this IS the log port we just registered),
+      // so the recursive call resolves immediately. Routing through the logger
+      // means level gating (e.g. silenced in tests at fatal) takes effect.
+      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
+    }
+    return adapters.get(injector.name) as Port;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ports: log, store, cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Gets or injects the singleton logger.
+ *
+ * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
+ * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
+ * output in development — zero external dependencies.
+ *
+ * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
+ * your application.
+ *
+ * @param adapter - Optional logger implementation to inject
+ * @returns The singleton logger instance
+ *
+ * @example Default console logger
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * const logger = log();
+ * logger.info("Application started");
+ * \`\`\`
+ *
+ * @example Injecting pino
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * import { PinoLogger } from "@rotorsoft/act-pino";
+ * log(new PinoLogger({ level: "debug", pretty: true }));
+ * \`\`\`
+ *
+ * @see {@link Logger} for the interface contract
+ * @see {@link ConsoleLogger} for the default implementation
+ */
+export const log = port(function log(adapter?: Logger) {
+  const cfg = config();
+  return (
+    adapter ||
+    new ConsoleLogger({
+      level: cfg.logLevel,
+      pretty: cfg.env !== "production",
+    })
+  );
+});
+
+/**
+ * Gets or injects the singleton event store.
+ *
+ * By default, Act uses an {@link InMemoryStore} suitable for development and
+ * testing. For production, inject a persistent store like \`PostgresStore\` from
+ * \`@rotorsoft/act-pg\` before building your application.
+ *
+ * **Important:** Store injection must happen before creating any Act instances.
+ * Once set, the store cannot be changed without restarting the application.
+ *
+ * @param adapter - Optional store implementation to inject
+ * @returns The singleton store instance
+ *
+ * @example Default in-memory store
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * const s = store();
+ * \`\`\`
+ *
+ * @example Injecting PostgreSQL
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * store(new PostgresStore({
+ *   host: "localhost",
+ *   port: 5432,
+ *   database: "myapp",
+ *   user: "postgres",
+ *   password: "secret",
+ * }));
+ * \`\`\`
+ *
+ * @see {@link Store} for the interface contract
+ * @see {@link InMemoryStore} for the default implementation
+ */
+// ALS check lives outside \`port()\` — its cache fires only once, so the
+// per-call branch on a scoped Act has to be in the public wrapper.
+const _store = port(function store(adapter?: Store): Store {
+  return adapter ?? new InMemoryStore();
+});
+
+export const store = ((adapter?: Store): Store => {
+  return scoped.getStore()?.store ?? _store(adapter);
+}) as (adapter?: Store) => Store;
+
+/**
+ * Gets or injects the singleton cache.
+ *
+ * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
+ * distributed deployments, inject a Redis-backed cache before building your
+ * application.
+ *
+ * @param adapter - Optional cache implementation to inject
+ * @returns The singleton cache instance
+ *
+ * @see {@link Cache} for the interface contract
+ * @see {@link InMemoryCache} for the default implementation
+ */
+const _cache = port(function cache(adapter?: Cache) {
+  return adapter ?? new InMemoryCache();
+});
+
+export const cache = ((adapter?: Cache): Cache => {
+  return scoped.getStore()?.cache ?? _cache(adapter);
+}) as (adapter?: Cache) => Cache;
+
+// ---------------------------------------------------------------------------
+// Disposal
+// ---------------------------------------------------------------------------
+
+/**
+ * Registered cleanup functions live in \`disposers.ts\`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
+
+/**
+ * Disposes all registered adapters and disposers, then exits the process.
+ *
+ * Execution order:
+ * 1. Custom disposers (registered via {@link dispose}) — in reverse order
+ * 2. Port adapters (log, store, cache) — in reverse registration order
+ * 3. Adapter registry is cleared
+ * 4. Process exits (skipped in test environment)
+ *
+ * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
+ * transient failures (e.g. an uncaught promise in a non-critical path).
+ *
+ * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
+ *               \`"ERROR"\` for abnormal termination (exit 1)
+ */
+export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
+  if (code === "ERROR" && config().env === "production") {
+    // Surface the swallow so incident triage can see it. Without this
+    // log the framework looks unresponsive after an uncaught exception
+    // in prod — exactly when operators most need a breadcrumb.
+    log().warn(
+      "disposeAndExit('ERROR') ignored in production — process kept alive"
+    );
+    return;
+  }
+
+  // Run sequentially in reverse registration order so a disposer can rely on
+  // later-registered disposers (and adapters on later-registered adapters)
+  // having already finished — Promise.all would race them.
+  await run_disposers();
+  for (const adapter of [...adapters.values()].reverse()) {
+    await adapter.dispose();
+    log().info(\`[act] - \${adapter.constructor.name}\`);
+  }
+  adapters.clear();
+  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
+}
+
+/**
+ * Registers a cleanup function for graceful shutdown.
+ *
+ * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
+ * and unhandled rejections. They execute in reverse registration order before
+ * port adapters are disposed.
+ *
+ * @param disposer - Async function to call during cleanup. Omit to get a
+ *                   reference to {@link disposeAndExit} without registering.
+ * @returns Function to manually trigger disposal and exit
+ *
+ * @example
+ * \`\`\`typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const db = connectDatabase();
+ * dispose(async () => await db.close());
+ *
+ * // In tests
+ * afterAll(async () => await dispose()());
+ * \`\`\`
+ *
+ * @see {@link disposeAndExit} for the full shutdown sequence
+ */
+export function dispose(
+  disposer?: Disposer
+): (code?: ExitCode) => Promise<void> {
+  disposer && register_disposer(disposer);
+  return disposeAndExit;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via \`close()\`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
+/**
+ * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
+ * declaration says otherwise (ACT-1103). Acts that don't call
+ * \`.withLane(...)\` see only this lane, and behavior is identical to
+ * pre-1103 single-controller drain.
+ *
+ * Persisted on \`streams.lane\` and threaded as the strict-typed default in
+ * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
+ */
+export const DEFAULT_LANE = "default";
 
 // === projection-builder.ts ===
 /**

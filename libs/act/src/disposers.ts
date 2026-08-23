@@ -1,4 +1,4 @@
-import type { Disposer } from "../types/index.js";
+import type { Disposer } from "./types/index.js";
 
 /**
  * The shape {@link register_weak_disposer} needs from a `WeakRef`. Declared
