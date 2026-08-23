@@ -180,3 +180,51 @@ the ordering is not the problem and something else on that path scales;
 finding it is tracked in [#1510](https://github.com/Rotorsoft/act-root/issues/1510)
 rather than guessed at here. The measured win stands either way, and the
 adapter's ceiling moved by an order of magnitude.
+
+## Drain baseline re-recorded (2026-08-23)
+
+The `drain: correlate+drain 50 events` baseline moved from **3.684 ms to
+5.645 ms**. This is a real slowdown, not measurement drift, and re-recording
+it absorbs a known regression — so the number and the reasoning are on the
+record rather than quietly refreshed.
+
+**What was measured.** The gate had been failing unrelated PRs, which looked
+like CI noise. It was not. Running the identical bench script (unchanged
+since the baseline was seeded) on one machine, with no CI involved:
+
+| code from | drain p50 (3 runs) | median |
+|---|---|---|
+| 5a942c82c — baseline seeded 2026-06-28 | 1.130 / 1.213 / 1.129 | **1.13 ms** |
+| 7ddf1dd96 — before the work-mark series | 1.343 / 1.342 / 1.406 | **1.34 ms** |
+| master 2026-08-23 | 1.778 / 1.746 / 1.815 | **1.78 ms** |
+
+A **1.57×** local slowdown, matching the 1.53× CI ratio (3.684 → 5.645)
+closely enough to rule out the runner. Local numbers run ~3× faster than CI
+throughout, which is why the baseline has to be a CI measurement — the value
+here is taken from the master run of
+[32609551236](https://github.com/Rotorsoft/act-root/actions/runs/32609551236).
+
+**Where it came from.** Roughly a fifth of the slowdown predates the
+subscription-work-mark series and the rest arrived during it (#1493, #1496,
+#1497, #1511, #1517, #1537). There is no single commit to revert: each change
+added a few percent, stayed under the 1.5× allowance, and passed. Two months
+of that crossed the line.
+
+**Why absorbing it is defensible.** This scenario drains 50 events across a
+handful of streams, which is the shape where the work-mark rework costs and
+never pays. The same rework made `claim` 17–18× faster from 1k to 50k
+subscribed streams (table above), and flat rather than linear on act-pg. The
+gate currently measures only the half that got worse.
+
+**Follow-ups this exposes**, tracked rather than fixed here:
+
+1. Add a many-streams drain scenario, so the gate sees both halves of that
+   trade instead of only the cost.
+2. Re-record baselines per release. A fixed baseline plus a 1.5× tolerance
+   measures cumulative drift since the baseline was seeded, not the
+   regression a given PR introduces — which is how a 57% slowdown accrued
+   with every individual PR passing.
+3. The absolute cost at small scale is worth a look on its own
+   ([#1510](https://github.com/Rotorsoft/act-root/issues/1510) already tracks
+   the related "cost still grows with subscribed streams" question on this
+   adapter).
