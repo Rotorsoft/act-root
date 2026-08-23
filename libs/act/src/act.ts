@@ -41,14 +41,7 @@ import { current_reacting, make_run_scoped, run_reacting } from "./scoped.js";
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import {
-  cache,
-  log,
-  type Scoped,
-  scoped,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
 import type {
   Actor,
   AsOf,

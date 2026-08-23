@@ -875,14 +875,7 @@ import { current_reacting, make_run_scoped, run_reacting } from "./scoped.js";
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import {
-  cache,
-  log,
-  type Scoped,
-  scoped,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -15246,11 +15239,11 @@ import type {
   Store,
 } from "./types/index.js";
 
+// \`Scoped\` is the type of the public \`ActOptions.scoped\` bag, so it stays
+// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
+// it was only ever reachable because \`index.ts\` star-exports this module,
+// and its own doc-comment already declared it internal.
 export type { Scoped } from "./scoped.js";
-// Ambient context lives in \`scoped.ts\`; re-exported here because
-// \`index.ts\` star-exports this module and both names are already part of
-// the published surface. Moving the declaration must not move the surface.
-export { scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -17367,9 +17360,10 @@ export type Scoped = {
 /**
  * AsyncLocalStorage carrying the active Act's ports.
  *
- * Exported because \`index.ts\` star-exports \`ports.ts\`, which re-exports this
- * — it is already part of the published surface. Prefer
- * {@link make_run_scoped} / {@link current_ports} over touching it directly.
+ * Exported for in-repo tooling that measures the context itself (the
+ * scope-overhead bench). NOT public: \`ports.ts\` no longer re-exports it and
+ * \`index.ts\` reaches this module only for the \`Scoped\` type, so it is not
+ * importable from the package. Everything else uses the helpers below.
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 
@@ -19797,14 +19791,7 @@ import { current_reacting, make_run_scoped, run_reacting } from "./scoped.js";
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import {
-  cache,
-  log,
-  type Scoped,
-  scoped,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -33783,11 +33770,11 @@ import type {
   Store,
 } from "./types/index.js";
 
+// \`Scoped\` is the type of the public \`ActOptions.scoped\` bag, so it stays
+// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
+// it was only ever reachable because \`index.ts\` star-exports this module,
+// and its own doc-comment already declared it internal.
 export type { Scoped } from "./scoped.js";
-// Ambient context lives in \`scoped.ts\`; re-exported here because
-// \`index.ts\` star-exports this module and both names are already part of
-// the published surface. Moving the declaration must not move the surface.
-export { scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -36073,9 +36060,10 @@ export type Scoped = {
 /**
  * AsyncLocalStorage carrying the active Act's ports.
  *
- * Exported because \`index.ts\` star-exports \`ports.ts\`, which re-exports this
- * — it is already part of the published surface. Prefer
- * {@link make_run_scoped} / {@link current_ports} over touching it directly.
+ * Exported for in-repo tooling that measures the context itself (the
+ * scope-overhead bench). NOT public: \`ports.ts\` no longer re-exports it and
+ * \`index.ts\` reaches this module only for the \`Scoped\` type, so it is not
+ * importable from the package. Everything else uses the helpers below.
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 

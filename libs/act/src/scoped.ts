@@ -36,9 +36,10 @@ export type Scoped = {
 /**
  * AsyncLocalStorage carrying the active Act's ports.
  *
- * Exported because `index.ts` star-exports `ports.ts`, which re-exports this
- * — it is already part of the published surface. Prefer
- * {@link make_run_scoped} / {@link current_ports} over touching it directly.
+ * Exported for in-repo tooling that measures the context itself (the
+ * scope-overhead bench). NOT public: `ports.ts` no longer re-exports it and
+ * `index.ts` reaches this module only for the `Scoped` type, so it is not
+ * importable from the package. Everything else uses the helpers below.
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 

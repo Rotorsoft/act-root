@@ -12,11 +12,11 @@ import type {
   Store,
 } from "./types/index.js";
 
+// `Scoped` is the type of the public `ActOptions.scoped` bag, so it stays
+// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
+// it was only ever reachable because `index.ts` star-exports this module,
+// and its own doc-comment already declared it internal.
 export type { Scoped } from "./scoped.js";
-// Ambient context lives in `scoped.ts`; re-exported here because
-// `index.ts` star-exports this module and both names are already part of
-// the published surface. Moving the declaration must not move the surface.
-export { scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
