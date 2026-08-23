@@ -833,6 +833,10 @@ export function act<
 
 // === act.ts ===
 import EventEmitter from "node:events";
+import {
+  build_handle,
+  build_handle_batch,
+} from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
   ALL_LANES,
@@ -841,8 +845,6 @@ import {
   bare_patch,
   build_drain,
   build_es,
-  build_handle,
-  build_handle_batch,
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
@@ -4325,154 +4327,6 @@ export interface IAct<
 
 // === audit.ts ===
 /**
- * @module act/types/audit
- *
- * Operator-driven store audit (#723).
- *
- * The \`app.audit(...)\` method walks the connected store and yields
- * per-category findings — each tagged with the remediation it
- * suggests. Same operator-driven category as \`app.close()\`,
- * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
- * framework; the operator decides when to run it and what to do
- * with the findings.
- *
- * Categories are independent — operators can request a subset
- * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
- * omitting the category list.
- *
- * Findings are yielded as an \`AsyncIterable\` so callers can break
- * out early, pipe into Slack alerts, save to disk, etc. without
- * loading the entire report in memory.
- */
-
-import type { Query } from "./action.js";
-
-/**
- * Audit category names. Each maps to a distinct family of findings
- * and a distinct remediation. See {@link AuditFinding} for the
- * shapes each category emits.
- */
-export type AuditCategory =
-  | "schema"
-  | "close-candidate"
-  | "restart-candidate"
-  | "deprecated-load"
-  | "reaction-health"
-  | "snapshot-drift"
-  | "routing-health"
-  | "correlation-gaps"
-  | "clock-anomalies";
-
-/**
- * Tunable thresholds for categories whose findings depend on a
- * cutoff. Sensible defaults are documented per field; operators
- * can override per call.
- */
-export type AuditThresholds = {
-  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
-  idle_days?: number;
-  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
-  restart_min?: number;
-  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
-  stuck_minutes?: number;
-  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
-  near_block?: number;
-  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
-  deprecated_min?: number;
-  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
-  drift_min?: number;
-  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
-  terminal_events?: string[];
-};
-
-/**
- * Audit options. Most categories run unconditionally over the
- * store; \`query\` narrows the scan window (e.g., "only audit events
- * committed since yesterday" for an incremental cron).
- */
-export type AuditOptions = {
-  /**
-   * Query filter applied to event-table scans. Mirrors
-   * {@link Query} (stream / source / created_before / created_after /
-   * before / etc.). When omitted, the audit scans the whole table.
-   */
-  query?: Query;
-  /** Pagination size for event scans. Default 500. */
-  page_size?: number;
-  /** Per-category thresholds; see {@link AuditThresholds}. */
-  thresholds?: AuditThresholds;
-};
-
-/**
- * Discriminated union of audit findings. Each shape carries enough
- * context for the operator to act on the finding directly —
- * stream name, event id, suggested remediation hints.
- */
-export type AuditFinding =
-  | {
-      category: "schema";
-      stream: string;
-      event_id: number;
-      name: string;
-      reason: "unknown_event_name" | "schema_validation_failed";
-      zod_error?: unknown;
-    }
-  | {
-      category: "close-candidate";
-      stream: string;
-      last_event_at: string;
-      reason: "terminal" | "idle";
-      idle_days?: number;
-      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
-      restart_supported: boolean;
-    }
-  | {
-      category: "restart-candidate";
-      stream: string;
-      count: number;
-      snaps: number;
-    }
-  | {
-      category: "deprecated-load";
-      name: string;
-      current_version: string;
-      total: number;
-      top_streams: Array<{ stream: string; count: number }>;
-    }
-  | {
-      category: "reaction-health";
-      stream: string;
-      status: "blocked" | "near-block" | "stuck-backoff";
-      retry: number;
-      reason: string;
-    }
-  | {
-      category: "snapshot-drift";
-      stream: string;
-      events_since_snap: number;
-      snap_at?: number;
-    }
-  | {
-      category: "routing-health";
-      stream: string;
-      reason: "unknown-lane" | "unrouted";
-      lane?: string;
-    }
-  | {
-      category: "correlation-gaps";
-      stream: string;
-      event_id: number;
-      reason: "orphan-parent" | "missing-correlation";
-    }
-  | {
-      category: "clock-anomalies";
-      stream: string;
-      event_id: number;
-      reason: "future-created" | "out-of-order";
-    };
-
-// === audit.ts ===
-/**
  * @module audit
  * @category Internal
  *
@@ -5222,6 +5076,154 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
 };
+
+// === audit.ts ===
+/**
+ * @module act/types/audit
+ *
+ * Operator-driven store audit (#723).
+ *
+ * The \`app.audit(...)\` method walks the connected store and yields
+ * per-category findings — each tagged with the remediation it
+ * suggests. Same operator-driven category as \`app.close()\`,
+ * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
+ * framework; the operator decides when to run it and what to do
+ * with the findings.
+ *
+ * Categories are independent — operators can request a subset
+ * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
+ * omitting the category list.
+ *
+ * Findings are yielded as an \`AsyncIterable\` so callers can break
+ * out early, pipe into Slack alerts, save to disk, etc. without
+ * loading the entire report in memory.
+ */
+
+import type { Query } from "./action.js";
+
+/**
+ * Audit category names. Each maps to a distinct family of findings
+ * and a distinct remediation. See {@link AuditFinding} for the
+ * shapes each category emits.
+ */
+export type AuditCategory =
+  | "schema"
+  | "close-candidate"
+  | "restart-candidate"
+  | "deprecated-load"
+  | "reaction-health"
+  | "snapshot-drift"
+  | "routing-health"
+  | "correlation-gaps"
+  | "clock-anomalies";
+
+/**
+ * Tunable thresholds for categories whose findings depend on a
+ * cutoff. Sensible defaults are documented per field; operators
+ * can override per call.
+ */
+export type AuditThresholds = {
+  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
+  idle_days?: number;
+  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
+  restart_min?: number;
+  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
+  stuck_minutes?: number;
+  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
+  near_block?: number;
+  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
+  deprecated_min?: number;
+  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
+  drift_min?: number;
+  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
+  terminal_events?: string[];
+};
+
+/**
+ * Audit options. Most categories run unconditionally over the
+ * store; \`query\` narrows the scan window (e.g., "only audit events
+ * committed since yesterday" for an incremental cron).
+ */
+export type AuditOptions = {
+  /**
+   * Query filter applied to event-table scans. Mirrors
+   * {@link Query} (stream / source / created_before / created_after /
+   * before / etc.). When omitted, the audit scans the whole table.
+   */
+  query?: Query;
+  /** Pagination size for event scans. Default 500. */
+  page_size?: number;
+  /** Per-category thresholds; see {@link AuditThresholds}. */
+  thresholds?: AuditThresholds;
+};
+
+/**
+ * Discriminated union of audit findings. Each shape carries enough
+ * context for the operator to act on the finding directly —
+ * stream name, event id, suggested remediation hints.
+ */
+export type AuditFinding =
+  | {
+      category: "schema";
+      stream: string;
+      event_id: number;
+      name: string;
+      reason: "unknown_event_name" | "schema_validation_failed";
+      zod_error?: unknown;
+    }
+  | {
+      category: "close-candidate";
+      stream: string;
+      last_event_at: string;
+      reason: "terminal" | "idle";
+      idle_days?: number;
+      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
+      restart_supported: boolean;
+    }
+  | {
+      category: "restart-candidate";
+      stream: string;
+      count: number;
+      snaps: number;
+    }
+  | {
+      category: "deprecated-load";
+      name: string;
+      current_version: string;
+      total: number;
+      top_streams: Array<{ stream: string; count: number }>;
+    }
+  | {
+      category: "reaction-health";
+      stream: string;
+      status: "blocked" | "near-block" | "stuck-backoff";
+      retry: number;
+      reason: string;
+    }
+  | {
+      category: "snapshot-drift";
+      stream: string;
+      events_since_snap: number;
+      snap_at?: number;
+    }
+  | {
+      category: "routing-health";
+      stream: string;
+      reason: "unknown-lane" | "unrouted";
+      lane?: string;
+    }
+  | {
+      category: "correlation-gaps";
+      stream: string;
+      event_id: number;
+      reason: "orphan-parent" | "missing-correlation";
+    }
+  | {
+      category: "clock-anomalies";
+      stream: string;
+      event_id: number;
+      reason: "future-created" | "out-of-order";
+    };
 
 // === autoclose-policy.ts ===
 /**
@@ -13220,6 +13222,123 @@ export * from "./utils.js";
 
 // === index.ts ===
 /**
+ * @module internal
+ * @category Internal
+ *
+ * Barrel for framework-internal modules. These exports are not part of the
+ * public package API and may change between minors. Anything reachable from
+ * \`@rotorsoft/act\`'s top-level barrel (\`src/index.ts\`) is the public surface;
+ * what lives here is implementation detail used by \`Act\`, the builders, and
+ * the orchestrator's pipelines.
+ *
+ * Only symbols actually consumed *via this barrel* from outside \`internal/\`
+ * are re-exported here. Modules within \`internal/\` import each other
+ * directly by file path; production code in \`adapters/\` and tests that
+ * need bare ops (e.g., \`action\`, \`load\`, \`LruMap\`) likewise import from
+ * the specific source file.
+ *
+ * @internal
+ */
+
+export { type AuditDeps, audit } from "./audit.js";
+export {
+  type AutoclosePolicy,
+  compile_autoclose_policy,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
+} from "./autoclose-policy.js";
+export {
+  AUTOCLOSE_TARGET_PREFIX,
+  synthesize_autoclose_reactions,
+} from "./autoclose-reaction.js";
+export {
+  hour_in_zone,
+  in_autoclose_window,
+  next_window_open,
+} from "./autoclose-window.js";
+export { compute_backoff_delay } from "./backoff.js";
+export type { EventLaneSet } from "./build-classify.js";
+export { ALL_LANES, classify_registry } from "./build-classify.js";
+export { reaction_on, register_lane } from "./builder-utils.js";
+export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
+export { run_close_cycle } from "./close-cycle.js";
+export { CloseSignal } from "./close-signal.js";
+// Every builder-facing config bag (schemas + resolvers + defaults) lives in
+// one place — see ./config.js.
+export {
+  type ActionConfig,
+  type AutocloseConfig,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  type FoldConfig,
+  MAX_SHUTDOWN_GRACE_MS,
+  type ReactionConfig,
+  resolveActConfig,
+  resolveActionConfig,
+  resolveAutocloseConfig,
+  resolveBackoffConfig,
+  resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveFoldConfig,
+  resolveLaneConfig,
+  resolveReactionConfig,
+  resolveSettleConfig,
+  resolveShutdownConfig,
+} from "./config.js";
+export { CorrelateCycle } from "./correlate-cycle.js";
+export { close_correlation, default_correlator } from "./correlator.js";
+export { resolve_defer_at } from "./defer-config.js";
+export { DeferSignal } from "./defer-signal.js";
+export type { DrainOps } from "./drain.js";
+export {
+  DrainController,
+  type Handle,
+  type HandleBatch,
+  type HandleResult,
+} from "./drain-cycle.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
+export {
+  current_version_of,
+  deprecated_event_names,
+} from "./event-versions.js";
+export {
+  _this_,
+  merge_event_register,
+  merge_projection,
+  register_state,
+} from "./merge.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
+export {
+  _registry,
+  type EventGate,
+  IDENTITY_GATE,
+  make_gate,
+  pii_fields,
+  pii_gate,
+  pii_split,
+  pii_strip,
+  REDACTED,
+  SHREDDED,
+} from "./sensitive.js";
+export { SettleLoop } from "./settle.js";
+export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { walk_streams } from "./walk-streams.js";
+
+// === index.ts ===
+/**
  * @packageDocumentation
  * @module act/types
  * Barrel file for Act Framework core types.
@@ -13274,121 +13393,6 @@ export const LogLevels = [
  * Type representing a valid log level string.
  */
 export type LogLevel = (typeof LogLevels)[number];
-
-// === index.ts ===
-/**
- * @module internal
- * @category Internal
- *
- * Barrel for framework-internal modules. These exports are not part of the
- * public package API and may change between minors. Anything reachable from
- * \`@rotorsoft/act\`'s top-level barrel (\`src/index.ts\`) is the public surface;
- * what lives here is implementation detail used by \`Act\`, the builders, and
- * the orchestrator's pipelines.
- *
- * Only symbols actually consumed *via this barrel* from outside \`internal/\`
- * are re-exported here. Modules within \`internal/\` import each other
- * directly by file path; production code in \`adapters/\` and tests that
- * need bare ops (e.g., \`action\`, \`load\`, \`LruMap\`) likewise import from
- * the specific source file.
- *
- * @internal
- */
-
-export { type AuditDeps, audit } from "./audit.js";
-export {
-  type AutoclosePolicy,
-  compile_autoclose_policy,
-  days_after,
-  days_before_now,
-  policy_keep_days,
-  policy_min_after_days,
-} from "./autoclose-policy.js";
-export {
-  AUTOCLOSE_TARGET_PREFIX,
-  synthesize_autoclose_reactions,
-} from "./autoclose-reaction.js";
-export {
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-window.js";
-export type { EventLaneSet } from "./build-classify.js";
-export { ALL_LANES, classify_registry } from "./build-classify.js";
-export { reaction_on, register_lane } from "./builder-utils.js";
-export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
-export { run_close_cycle } from "./close-cycle.js";
-export { CloseSignal } from "./close-signal.js";
-// Every builder-facing config bag (schemas + resolvers + defaults) lives in
-// one place — see ./config.js.
-export {
-  type ActionConfig,
-  type AutocloseConfig,
-  type CircuitBreakerConfig,
-  type CircuitBreakerOptions,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  DEFAULT_FOLD_FLUSH_EVERY,
-  DEFAULT_MAX_CACHED_STATES,
-  DEFAULT_SHUTDOWN_GRACE_MS,
-  type FoldConfig,
-  MAX_SHUTDOWN_GRACE_MS,
-  type ReactionConfig,
-  resolveActConfig,
-  resolveActionConfig,
-  resolveAutocloseConfig,
-  resolveBackoffConfig,
-  resolveCircuitBreakerConfig,
-  resolveDrainConfig,
-  resolveFoldConfig,
-  resolveLaneConfig,
-  resolveReactionConfig,
-  resolveSettleConfig,
-  resolveShutdownConfig,
-} from "./config.js";
-export { CorrelateCycle } from "./correlate-cycle.js";
-export { close_correlation, default_correlator } from "./correlator.js";
-export { DeferSignal } from "./defer-signal.js";
-export type { DrainOps } from "./drain.js";
-export {
-  DrainController,
-  type Handle,
-  type HandleBatch,
-} from "./drain-cycle.js";
-export type { EsOps, PatchFn } from "./event-sourcing.js";
-export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
-export {
-  current_version_of,
-  deprecated_event_names,
-} from "./event-versions.js";
-export {
-  _this_,
-  merge_event_register,
-  merge_projection,
-  register_state,
-} from "./merge.js";
-export {
-  FOLD_RESET,
-  make_fold_handler,
-  type ResettableBatchHandler,
-} from "./projection-fold.js";
-export { build_handle, build_handle_batch } from "./reactions.js";
-export {
-  _registry,
-  type EventGate,
-  IDENTITY_GATE,
-  make_gate,
-  pii_fields,
-  pii_gate,
-  pii_split,
-  pii_strip,
-  REDACTED,
-  SHREDDED,
-} from "./sensitive.js";
-export { SettleLoop } from "./settle.js";
-export { build_drain, build_es, trace_cycle } from "./tracing.js";
-export { walk_streams } from "./walk-streams.js";
 
 // === index.ts ===
 export { ConsoleLogger } from "./console-logger.js";
@@ -13806,6 +13810,328 @@ export const _this_ = ({ stream }: { stream: string }) => ({
   source: stream,
   target: stream,
 });
+
+// === ports.ts ===
+import { ConsoleLogger } from "./adapters/console-logger.js";
+import { InMemoryCache } from "./adapters/in-memory-cache.js";
+import { InMemoryStore } from "./adapters/in-memory-store.js";
+import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./disposers.js";
+import { current_ports } from "./scoped.js";
+import type {
+  Cache,
+  Disposable,
+  Disposer,
+  Logger,
+  Store,
+} from "./types/index.js";
+
+// \`Scoped\` is the type of the public \`ActOptions.scoped\` bag, so it stays
+// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
+// it was only ever reachable because \`index.ts\` star-exports this module,
+// and its own doc-comment already declared it internal.
+export type { Scoped } from "./scoped.js";
+
+/**
+ * Port/adapter infrastructure for the Act framework.
+ *
+ * All infrastructure concerns (logging, storage, caching) are managed as
+ * singleton adapters injected via port functions. Each port follows the same
+ * pattern: first call wins with a sensible default, optional adapter injection.
+ *
+ * - \`log()\` — structured logging (default: ConsoleLogger)
+ * - \`store()\` — event persistence (default: InMemoryStore)
+ * - \`cache()\` — state checkpoints (default: InMemoryCache)
+ * - \`dispose()\` — register cleanup functions for graceful shutdown
+ *
+ * @module ports
+ */
+
+/**
+ * List of exit codes for process termination. Consumed by signal handlers
+ * and {@link disposeAndExit}; not part of the user-facing surface.
+ *
+ * @internal
+ */
+export const ExitCodes = ["ERROR", "EXIT"] as const;
+
+/**
+ * Type for allowed exit codes.
+ *
+ * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
+ * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
+ *
+ * @internal
+ */
+export type ExitCode = (typeof ExitCodes)[number];
+
+// ---------------------------------------------------------------------------
+// Port factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory function that creates or returns the injected adapter.
+ * @internal
+ */
+type Injector<Port extends Disposable> = (adapter?: Port) => Port;
+
+/** Singleton adapter registry, keyed by injector function name. */
+const adapters = new Map<string, Disposable>();
+
+/**
+ * Creates a singleton port with optional adapter injection.
+ *
+ * The first call initializes the adapter (using the provided adapter or the
+ * injector's default). Subsequent calls return the cached singleton. Adapters
+ * are disposed in reverse registration order during {@link disposeAndExit}.
+ *
+ * @param injector - Named function that creates the default adapter
+ * @returns Port function: call with no args to get the singleton, or pass an
+ *          adapter on the first call to override the default
+ *
+ * @example
+ * \`\`\`typescript
+ * const store = port(function store(adapter?: Store) {
+ *   return adapter || new InMemoryStore();
+ * });
+ * const s = store(); // InMemoryStore
+ * \`\`\`
+ */
+export function port<Port extends Disposable>(injector: Injector<Port>) {
+  return (adapter?: Port): Port => {
+    if (!adapters.has(injector.name)) {
+      const injected = injector(adapter);
+      adapters.set(injector.name, injected);
+      // log() is now in adapters (or this IS the log port we just registered),
+      // so the recursive call resolves immediately. Routing through the logger
+      // means level gating (e.g. silenced in tests at fatal) takes effect.
+      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
+    }
+    return adapters.get(injector.name) as Port;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ports: log, store, cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Gets or injects the singleton logger.
+ *
+ * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
+ * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
+ * output in development — zero external dependencies.
+ *
+ * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
+ * your application.
+ *
+ * @param adapter - Optional logger implementation to inject
+ * @returns The singleton logger instance
+ *
+ * @example Default console logger
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * const logger = log();
+ * logger.info("Application started");
+ * \`\`\`
+ *
+ * @example Injecting pino
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * import { PinoLogger } from "@rotorsoft/act-pino";
+ * log(new PinoLogger({ level: "debug", pretty: true }));
+ * \`\`\`
+ *
+ * @see {@link Logger} for the interface contract
+ * @see {@link ConsoleLogger} for the default implementation
+ */
+export const log = port(function log(adapter?: Logger) {
+  const cfg = config();
+  return (
+    adapter ||
+    new ConsoleLogger({
+      level: cfg.logLevel,
+      pretty: cfg.env !== "production",
+    })
+  );
+});
+
+/**
+ * Gets or injects the singleton event store.
+ *
+ * By default, Act uses an {@link InMemoryStore} suitable for development and
+ * testing. For production, inject a persistent store like \`PostgresStore\` from
+ * \`@rotorsoft/act-pg\` before building your application.
+ *
+ * **Important:** Store injection must happen before creating any Act instances.
+ * Once set, the store cannot be changed without restarting the application.
+ *
+ * @param adapter - Optional store implementation to inject
+ * @returns The singleton store instance
+ *
+ * @example Default in-memory store
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * const s = store();
+ * \`\`\`
+ *
+ * @example Injecting PostgreSQL
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * store(new PostgresStore({
+ *   host: "localhost",
+ *   port: 5432,
+ *   database: "myapp",
+ *   user: "postgres",
+ *   password: "secret",
+ * }));
+ * \`\`\`
+ *
+ * @see {@link Store} for the interface contract
+ * @see {@link InMemoryStore} for the default implementation
+ */
+// ALS check lives outside \`port()\` — its cache fires only once, so the
+// per-call branch on a scoped Act has to be in the public wrapper.
+const _store = port(function store(adapter?: Store): Store {
+  return adapter ?? new InMemoryStore();
+});
+
+export const store = ((adapter?: Store): Store => {
+  return current_ports()?.store ?? _store(adapter);
+}) as (adapter?: Store) => Store;
+
+/**
+ * Gets or injects the singleton cache.
+ *
+ * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
+ * distributed deployments, inject a Redis-backed cache before building your
+ * application.
+ *
+ * @param adapter - Optional cache implementation to inject
+ * @returns The singleton cache instance
+ *
+ * @see {@link Cache} for the interface contract
+ * @see {@link InMemoryCache} for the default implementation
+ */
+const _cache = port(function cache(adapter?: Cache) {
+  return adapter ?? new InMemoryCache();
+});
+
+export const cache = ((adapter?: Cache): Cache => {
+  return current_ports()?.cache ?? _cache(adapter);
+}) as (adapter?: Cache) => Cache;
+
+// ---------------------------------------------------------------------------
+// Disposal
+// ---------------------------------------------------------------------------
+
+/**
+ * Registered cleanup functions live in \`disposers.ts\`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
+
+/**
+ * Disposes all registered adapters and disposers, then exits the process.
+ *
+ * Execution order:
+ * 1. Custom disposers (registered via {@link dispose}) — in reverse order
+ * 2. Port adapters (log, store, cache) — in reverse registration order
+ * 3. Adapter registry is cleared
+ * 4. Process exits (skipped in test environment)
+ *
+ * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
+ * transient failures (e.g. an uncaught promise in a non-critical path).
+ *
+ * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
+ *               \`"ERROR"\` for abnormal termination (exit 1)
+ */
+export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
+  if (code === "ERROR" && config().env === "production") {
+    // Surface the swallow so incident triage can see it. Without this
+    // log the framework looks unresponsive after an uncaught exception
+    // in prod — exactly when operators most need a breadcrumb.
+    log().warn(
+      "disposeAndExit('ERROR') ignored in production — process kept alive"
+    );
+    return;
+  }
+
+  // Run sequentially in reverse registration order so a disposer can rely on
+  // later-registered disposers (and adapters on later-registered adapters)
+  // having already finished — Promise.all would race them.
+  await run_disposers();
+  for (const adapter of [...adapters.values()].reverse()) {
+    await adapter.dispose();
+    log().info(\`[act] - \${adapter.constructor.name}\`);
+  }
+  adapters.clear();
+  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
+}
+
+/**
+ * Registers a cleanup function for graceful shutdown.
+ *
+ * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
+ * and unhandled rejections. They execute in reverse registration order before
+ * port adapters are disposed.
+ *
+ * @param disposer - Async function to call during cleanup. Omit to get a
+ *                   reference to {@link disposeAndExit} without registering.
+ * @returns Function to manually trigger disposal and exit
+ *
+ * @example
+ * \`\`\`typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const db = connectDatabase();
+ * dispose(async () => await db.close());
+ *
+ * // In tests
+ * afterAll(async () => await dispose()());
+ * \`\`\`
+ *
+ * @see {@link disposeAndExit} for the full shutdown sequence
+ */
+export function dispose(
+  disposer?: Disposer
+): (code?: ExitCode) => Promise<void> {
+  disposer && register_disposer(disposer);
+  return disposeAndExit;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via \`close()\`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
+/**
+ * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
+ * declaration says otherwise (ACT-1103). Acts that don't call
+ * \`.withLane(...)\` see only this lane, and behavior is identical to
+ * pre-1103 single-controller drain.
+ *
+ * Persisted on \`streams.lane\` and threaded as the strict-typed default in
+ * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
+ */
+export const DEFAULT_LANE = "default";
 
 // === ports.ts ===
 /**
@@ -15229,328 +15555,6 @@ export interface Cache extends Disposable {
   clear(): Promise<void>;
 }
 
-// === ports.ts ===
-import { ConsoleLogger } from "./adapters/console-logger.js";
-import { InMemoryCache } from "./adapters/in-memory-cache.js";
-import { InMemoryStore } from "./adapters/in-memory-store.js";
-import { config } from "./config.js";
-import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports } from "./scoped.js";
-import type {
-  Cache,
-  Disposable,
-  Disposer,
-  Logger,
-  Store,
-} from "./types/index.js";
-
-// \`Scoped\` is the type of the public \`ActOptions.scoped\` bag, so it stays
-// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
-// it was only ever reachable because \`index.ts\` star-exports this module,
-// and its own doc-comment already declared it internal.
-export type { Scoped } from "./scoped.js";
-
-/**
- * Port/adapter infrastructure for the Act framework.
- *
- * All infrastructure concerns (logging, storage, caching) are managed as
- * singleton adapters injected via port functions. Each port follows the same
- * pattern: first call wins with a sensible default, optional adapter injection.
- *
- * - \`log()\` — structured logging (default: ConsoleLogger)
- * - \`store()\` — event persistence (default: InMemoryStore)
- * - \`cache()\` — state checkpoints (default: InMemoryCache)
- * - \`dispose()\` — register cleanup functions for graceful shutdown
- *
- * @module ports
- */
-
-/**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
- */
-export const ExitCodes = ["ERROR", "EXIT"] as const;
-
-/**
- * Type for allowed exit codes.
- *
- * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
- * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
- */
-export type ExitCode = (typeof ExitCodes)[number];
-
-// ---------------------------------------------------------------------------
-// Port factory
-// ---------------------------------------------------------------------------
-
-/**
- * Factory function that creates or returns the injected adapter.
- * @internal
- */
-type Injector<Port extends Disposable> = (adapter?: Port) => Port;
-
-/** Singleton adapter registry, keyed by injector function name. */
-const adapters = new Map<string, Disposable>();
-
-/**
- * Creates a singleton port with optional adapter injection.
- *
- * The first call initializes the adapter (using the provided adapter or the
- * injector's default). Subsequent calls return the cached singleton. Adapters
- * are disposed in reverse registration order during {@link disposeAndExit}.
- *
- * @param injector - Named function that creates the default adapter
- * @returns Port function: call with no args to get the singleton, or pass an
- *          adapter on the first call to override the default
- *
- * @example
- * \`\`\`typescript
- * const store = port(function store(adapter?: Store) {
- *   return adapter || new InMemoryStore();
- * });
- * const s = store(); // InMemoryStore
- * \`\`\`
- */
-export function port<Port extends Disposable>(injector: Injector<Port>) {
-  return (adapter?: Port): Port => {
-    if (!adapters.has(injector.name)) {
-      const injected = injector(adapter);
-      adapters.set(injector.name, injected);
-      // log() is now in adapters (or this IS the log port we just registered),
-      // so the recursive call resolves immediately. Routing through the logger
-      // means level gating (e.g. silenced in tests at fatal) takes effect.
-      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
-    }
-    return adapters.get(injector.name) as Port;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Ports: log, store, cache
-// ---------------------------------------------------------------------------
-
-/**
- * Gets or injects the singleton logger.
- *
- * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
- * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
- * output in development — zero external dependencies.
- *
- * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
- * your application.
- *
- * @param adapter - Optional logger implementation to inject
- * @returns The singleton logger instance
- *
- * @example Default console logger
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * const logger = log();
- * logger.info("Application started");
- * \`\`\`
- *
- * @example Injecting pino
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * import { PinoLogger } from "@rotorsoft/act-pino";
- * log(new PinoLogger({ level: "debug", pretty: true }));
- * \`\`\`
- *
- * @see {@link Logger} for the interface contract
- * @see {@link ConsoleLogger} for the default implementation
- */
-export const log = port(function log(adapter?: Logger) {
-  const cfg = config();
-  return (
-    adapter ||
-    new ConsoleLogger({
-      level: cfg.logLevel,
-      pretty: cfg.env !== "production",
-    })
-  );
-});
-
-/**
- * Gets or injects the singleton event store.
- *
- * By default, Act uses an {@link InMemoryStore} suitable for development and
- * testing. For production, inject a persistent store like \`PostgresStore\` from
- * \`@rotorsoft/act-pg\` before building your application.
- *
- * **Important:** Store injection must happen before creating any Act instances.
- * Once set, the store cannot be changed without restarting the application.
- *
- * @param adapter - Optional store implementation to inject
- * @returns The singleton store instance
- *
- * @example Default in-memory store
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * const s = store();
- * \`\`\`
- *
- * @example Injecting PostgreSQL
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * import { PostgresStore } from "@rotorsoft/act-pg";
- *
- * store(new PostgresStore({
- *   host: "localhost",
- *   port: 5432,
- *   database: "myapp",
- *   user: "postgres",
- *   password: "secret",
- * }));
- * \`\`\`
- *
- * @see {@link Store} for the interface contract
- * @see {@link InMemoryStore} for the default implementation
- */
-// ALS check lives outside \`port()\` — its cache fires only once, so the
-// per-call branch on a scoped Act has to be in the public wrapper.
-const _store = port(function store(adapter?: Store): Store {
-  return adapter ?? new InMemoryStore();
-});
-
-export const store = ((adapter?: Store): Store => {
-  return current_ports()?.store ?? _store(adapter);
-}) as (adapter?: Store) => Store;
-
-/**
- * Gets or injects the singleton cache.
- *
- * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
- * distributed deployments, inject a Redis-backed cache before building your
- * application.
- *
- * @param adapter - Optional cache implementation to inject
- * @returns The singleton cache instance
- *
- * @see {@link Cache} for the interface contract
- * @see {@link InMemoryCache} for the default implementation
- */
-const _cache = port(function cache(adapter?: Cache) {
-  return adapter ?? new InMemoryCache();
-});
-
-export const cache = ((adapter?: Cache): Cache => {
-  return current_ports()?.cache ?? _cache(adapter);
-}) as (adapter?: Cache) => Cache;
-
-// ---------------------------------------------------------------------------
-// Disposal
-// ---------------------------------------------------------------------------
-
-/**
- * Registered cleanup functions live in \`disposers.ts\`, which holds
- * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime (#1441). The public surface here is unchanged.
- */
-
-/**
- * Disposes all registered adapters and disposers, then exits the process.
- *
- * Execution order:
- * 1. Custom disposers (registered via {@link dispose}) — in reverse order
- * 2. Port adapters (log, store, cache) — in reverse registration order
- * 3. Adapter registry is cleared
- * 4. Process exits (skipped in test environment)
- *
- * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
- * transient failures (e.g. an uncaught promise in a non-critical path).
- *
- * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
- *               \`"ERROR"\` for abnormal termination (exit 1)
- */
-export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
-  if (code === "ERROR" && config().env === "production") {
-    // Surface the swallow so incident triage can see it. Without this
-    // log the framework looks unresponsive after an uncaught exception
-    // in prod — exactly when operators most need a breadcrumb.
-    log().warn(
-      "disposeAndExit('ERROR') ignored in production — process kept alive"
-    );
-    return;
-  }
-
-  // Run sequentially in reverse registration order so a disposer can rely on
-  // later-registered disposers (and adapters on later-registered adapters)
-  // having already finished — Promise.all would race them.
-  await run_disposers();
-  for (const adapter of [...adapters.values()].reverse()) {
-    await adapter.dispose();
-    log().info(\`[act] - \${adapter.constructor.name}\`);
-  }
-  adapters.clear();
-  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
-}
-
-/**
- * Registers a cleanup function for graceful shutdown.
- *
- * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
- * and unhandled rejections. They execute in reverse registration order before
- * port adapters are disposed.
- *
- * @param disposer - Async function to call during cleanup. Omit to get a
- *                   reference to {@link disposeAndExit} without registering.
- * @returns Function to manually trigger disposal and exit
- *
- * @example
- * \`\`\`typescript
- * import { dispose } from "@rotorsoft/act";
- *
- * const db = connectDatabase();
- * dispose(async () => await db.close());
- *
- * // In tests
- * afterAll(async () => await dispose()());
- * \`\`\`
- *
- * @see {@link disposeAndExit} for the full shutdown sequence
- */
-export function dispose(
-  disposer?: Disposer
-): (code?: ExitCode) => Promise<void> {
-  disposer && register_disposer(disposer);
-  return disposeAndExit;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Event name used internally for snapshot events in the event store.
- * Snapshot events store a full state checkpoint, enabling efficient cold-start
- * recovery without replaying the entire event stream.
- */
-export const SNAP_EVENT = "__snapshot__";
-
-/**
- * Event name used internally for tombstone events in the event store.
- * A tombstone marks a stream as permanently closed — no further writes
- * are permitted until the stream is explicitly restarted via \`close()\`.
- *
- * @see {@link Act.close} for the close-the-books API
- */
-export const TOMBSTONE_EVENT = "__tombstone__";
-
-/**
- * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise (ACT-1103). Acts that don't call
- * \`.withLane(...)\` see only this lane, and behavior is identical to
- * pre-1103 single-controller drain.
- *
- * Persisted on \`streams.lane\` and threaded as the strict-typed default in
- * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- */
-export const DEFAULT_LANE = "default";
-
 // === projection-builder.ts ===
 /**
  * @module projection-builder
@@ -16261,6 +16265,260 @@ export function make_fold_handler<
   return handler;
 }
 
+// === reaction-builder.ts ===
+/**
+ * @module reaction-builder
+ * @category Internal
+ *
+ * Reaction dispatch — what runs inside the drain pipeline once \`run_drain_cycle\`
+ * has fetched events for a leased stream. Two shapes:
+ *
+ * - per-event \`handle\`: walks payloads sequentially, running each handler
+ *   inside the reaction scope so \`action()\` threads \`reactingTo\`
+ * - bulk \`handle_batch\`: hands every event for a static-target projection to
+ *   a single batch callback, enabling one-transaction replays
+ *
+ * Both share \`_finalize\`, which collapses the retry-vs-block decision and
+ * the "report error only when nothing was handled" rule.
+ *
+ * @internal
+ */
+
+import {
+  CloseSignal,
+  compute_backoff_delay,
+  DeferSignal,
+  type Handle,
+  type HandleBatch,
+  type HandleResult,
+  resolve_defer_at,
+} from "../internal/index.js";
+
+import type { ReactionScope } from "../scoped.js";
+import {
+  type Actor,
+  type BatchHandler,
+  type Committed,
+  type Lease,
+  type Logger,
+  NonRetryableError,
+  type ReactionOptions,
+  type ReactionPayload,
+  type Schemas,
+} from "../types/index.js";
+
+/**
+ * What the dispatcher needs from the orchestrator: a logger for retry and
+ * error breadcrumbs, and the scope a handler runs inside.
+ *
+ * @internal
+ */
+export type ReactionDeps<
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+> = {
+  readonly logger: Logger;
+  /**
+   * What a handler runs inside — its \`IAct\` facade and its triggering-event
+   * context — assembled by the orchestrator. How either half works is not
+   * this module's business; it receives the scope whole and calls it.
+   */
+  readonly reaction_scope: ReactionScope<TEvents, TActions, TActor>;
+};
+
+/**
+ * Shared finalization: log the error and decide retry vs. block. The
+ * error string is *always* surfaced on the failure path — drain-cycle
+ * uses \`handled > 0\` (not \`error\` presence) to decide whether to ack
+ * the partial progress, so the message can travel for trace + blocked
+ * record without affecting the ack/skip choice.
+ */
+function finalize(
+  lease: Lease,
+  handled: number,
+  at: number,
+  error: Error | undefined,
+  options: ReactionOptions,
+  logger: Logger,
+  failed_at?: number
+): HandleResult {
+  if (!error) return { lease, handled, acked_at: at };
+  logger.error(error);
+  // A \`NonRetryableError\` from the handler short-circuits the retry
+  // budget — block on first attempt when the operator has opted in via
+  // \`blockOnError\`. When \`blockOnError\` is false, the operator has
+  // explicitly chosen "retry forever," so we don't override that.
+  const non_retryable = error instanceof NonRetryableError;
+  const block =
+    options.blockOnError &&
+    (non_retryable || lease.retry >= options.maxRetries);
+  if (block)
+    logger.error(
+      non_retryable
+        ? \`Blocking \${lease.stream} on non-retryable error.\`
+        : \`Blocking \${lease.stream} after \${lease.retry} retries.\`
+    );
+  // Backoff applies only on retry paths — successful handles and terminal
+  // blocks never defer. \`lease.retry\` here is the just-failed attempt's
+  // counter, so the delay paces the *next* attempt.
+  const next_attempt_at =
+    !block && options.backoff
+      ? Date.now() + compute_backoff_delay(lease.retry, options.backoff)
+      : undefined;
+  return {
+    lease,
+    handled,
+    acked_at: at,
+    error: error.message,
+    block,
+    next_attempt_at,
+    failed_at,
+  };
+}
+
+/**
+ * Builds the per-event reaction dispatcher passed to \`run_drain_cycle\`.
+ *
+ * The triggering event is installed as ambient context around each handler
+ * call, so \`action()\` resolves it as \`reactingTo\` (#587, #1541). Ambient
+ * rather than bound to the \`IAct\` argument, so a handler that dispatches
+ * through a captured \`app\` inherits the chain too.
+ *
+ * @internal
+ */
+export function build_handle<
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+>(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
+  const { logger, reaction_scope } = deps;
+  return async (lease, payloads) => {
+    if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
+
+    const stream = lease.stream;
+    // One event fans out to one payload per matching reaction, and the
+    // watermark may only advance past an event once EVERY reaction on it
+    // has handled it — acking mid-group would silently drop the remaining
+    // reactions on redelivery (#1179). Track the last payload index per
+    // event id (payloads arrive in event order) so \`at\` advances exactly
+    // when a group completes; \`handled\` counts completed events, not
+    // payloads, so a mid-group failure with no completed events is a
+    // no-progress result (no ack, retry counter advances toward
+    // \`blockOnError\` instead of resetting on every partial pass).
+    const last_index_of = new Map<number, number>();
+    for (let i = 0; i < payloads.length; i++)
+      last_index_of.set(payloads[i].event.id, i);
+    let at = lease.at;
+    let handled = 0;
+
+    if (lease.retry > 0)
+      logger.warn(
+        \`Retrying \${stream}@\${payloads.at(0)!.event.id} (\${lease.retry}).\`
+      );
+
+    for (let i = 0; i < payloads.length; i++) {
+      const payload = payloads[i];
+      const { event, handler } = payload;
+      try {
+        // Scoped per payload, not hoisted to the lease: the context has to
+        // unwind with the handler so it never reaches the drain cycle, and
+        // work a handler started without awaiting has to resume into its
+        // own event's frame.
+        await reaction_scope.run(event as Committed<Schemas, string>, () =>
+          handler(event, stream, reaction_scope.app)
+        );
+        if (last_index_of.get(event.id) === i) {
+          at = event.id;
+          handled++;
+        }
+      } catch (error) {
+        // A defer is not a failure: hold the triggering events pending
+        // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
+        // the stream at the carried due-time (#1090). \`acked_at\` is unused on
+        // the defer path — drain never acks a deferred result.
+        if (error instanceof DeferSignal)
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(error.when, event),
+          };
+        // A close request advances past the triggering event (so the
+        // requesting reaction isn't counted as in-flight by the close-cycle
+        // guard) and hands the target to the orchestrator's on_close (#1090).
+        if (error instanceof CloseSignal)
+          return {
+            lease,
+            handled: handled + 1,
+            // Advance to the live head the handler evaluated against (when
+            // provided) so the close-cycle guard sees this reaction caught up.
+            acked_at: error.at ?? event.id,
+            // Close the signalled stream (the autoclose reaction's aggregate,
+            // which differs from its synthetic lease stream); a self-closing
+            // user reaction omits it and closes its own lease stream. A
+            // carried \`before\` makes it a windowed close (prune, not retire).
+            close: {
+              stream: error.stream ?? stream,
+              archive: error.archive,
+              before: error.before,
+            },
+          };
+        return finalize(
+          lease,
+          handled,
+          at,
+          error as Error,
+          payload.options,
+          logger,
+          event.id
+        );
+      }
+    }
+    return finalize(lease, handled, at, undefined, payloads[0].options, logger);
+  };
+}
+
+/**
+ * Builds the bulk reaction dispatcher passed to \`run_drain_cycle\`. All events
+ * for a static-target projection are handed to a single callback so the
+ * projection can do one transaction per drain (catch-up replays especially).
+ *
+ * @internal
+ */
+export function build_handle_batch<TEvents extends Schemas>(
+  logger: Logger
+): HandleBatch<TEvents> {
+  return async (
+    lease: Lease,
+    payloads: ReactionPayload<TEvents>[],
+    batchHandler: BatchHandler<TEvents>
+  ) => {
+    const stream = lease.stream;
+    const events = payloads.map(
+      (p) => p.event as Committed<TEvents, keyof TEvents & string>
+    );
+    const options = payloads[0].options;
+
+    if (lease.retry > 0)
+      logger.warn(\`Retrying batch \${stream}@\${events[0].id} (\${lease.retry}).\`);
+
+    try {
+      await batchHandler(events, stream);
+      return finalize(
+        lease,
+        events.length,
+        events.at(-1)!.id,
+        undefined,
+        options,
+        logger
+      );
+    } catch (error) {
+      return finalize(lease, 0, lease.at, error as Error, options, logger);
+    }
+  };
+}
+
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -16710,255 +16968,6 @@ export type SettleOptions = DrainOptions & {
 export type ShutdownOptions = {
   readonly graceMs?: number;
 };
-
-// === reactions.ts ===
-/**
- * @module reactions
- * @category Internal
- *
- * Reaction dispatch — what runs inside the drain pipeline once \`run_drain_cycle\`
- * has fetched events for a leased stream. Two shapes:
- *
- * - per-event \`handle\`: walks payloads sequentially, running each handler
- *   inside the reaction scope so \`action()\` threads \`reactingTo\`
- * - bulk \`handle_batch\`: hands every event for a static-target projection to
- *   a single batch callback, enabling one-transaction replays
- *
- * Both share \`_finalize\`, which collapses the retry-vs-block decision and
- * the "report error only when nothing was handled" rule.
- *
- * @internal
- */
-
-import type { ReactionScope } from "../scoped.js";
-import {
-  type Actor,
-  type BatchHandler,
-  type Committed,
-  type Lease,
-  type Logger,
-  NonRetryableError,
-  type ReactionOptions,
-  type ReactionPayload,
-  type Schemas,
-} from "../types/index.js";
-import { compute_backoff_delay } from "./backoff.js";
-import { CloseSignal } from "./close-signal.js";
-import { resolve_defer_at } from "./defer-config.js";
-import { DeferSignal } from "./defer-signal.js";
-import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-
-/**
- * What the dispatcher needs from the orchestrator: a logger for retry and
- * error breadcrumbs, and the scope a handler runs inside.
- *
- * @internal
- */
-export type ReactionDeps<
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor = Actor,
-> = {
-  readonly logger: Logger;
-  /**
-   * What a handler runs inside — its \`IAct\` facade and its triggering-event
-   * context — assembled by the orchestrator. How either half works is not
-   * this module's business; it receives the scope whole and calls it.
-   */
-  readonly reaction_scope: ReactionScope<TEvents, TActions, TActor>;
-};
-
-/**
- * Shared finalization: log the error and decide retry vs. block. The
- * error string is *always* surfaced on the failure path — drain-cycle
- * uses \`handled > 0\` (not \`error\` presence) to decide whether to ack
- * the partial progress, so the message can travel for trace + blocked
- * record without affecting the ack/skip choice.
- */
-function finalize(
-  lease: Lease,
-  handled: number,
-  at: number,
-  error: Error | undefined,
-  options: ReactionOptions,
-  logger: Logger,
-  failed_at?: number
-): HandleResult {
-  if (!error) return { lease, handled, acked_at: at };
-  logger.error(error);
-  // A \`NonRetryableError\` from the handler short-circuits the retry
-  // budget — block on first attempt when the operator has opted in via
-  // \`blockOnError\`. When \`blockOnError\` is false, the operator has
-  // explicitly chosen "retry forever," so we don't override that.
-  const non_retryable = error instanceof NonRetryableError;
-  const block =
-    options.blockOnError &&
-    (non_retryable || lease.retry >= options.maxRetries);
-  if (block)
-    logger.error(
-      non_retryable
-        ? \`Blocking \${lease.stream} on non-retryable error.\`
-        : \`Blocking \${lease.stream} after \${lease.retry} retries.\`
-    );
-  // Backoff applies only on retry paths — successful handles and terminal
-  // blocks never defer. \`lease.retry\` here is the just-failed attempt's
-  // counter, so the delay paces the *next* attempt.
-  const next_attempt_at =
-    !block && options.backoff
-      ? Date.now() + compute_backoff_delay(lease.retry, options.backoff)
-      : undefined;
-  return {
-    lease,
-    handled,
-    acked_at: at,
-    error: error.message,
-    block,
-    next_attempt_at,
-    failed_at,
-  };
-}
-
-/**
- * Builds the per-event reaction dispatcher passed to \`run_drain_cycle\`.
- *
- * The triggering event is installed as ambient context around each handler
- * call, so \`action()\` resolves it as \`reactingTo\` (#587, #1541). Ambient
- * rather than bound to the \`IAct\` argument, so a handler that dispatches
- * through a captured \`app\` inherits the chain too.
- *
- * @internal
- */
-export function build_handle<
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor = Actor,
->(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
-  const { logger, reaction_scope } = deps;
-  return async (lease, payloads) => {
-    if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
-
-    const stream = lease.stream;
-    // One event fans out to one payload per matching reaction, and the
-    // watermark may only advance past an event once EVERY reaction on it
-    // has handled it — acking mid-group would silently drop the remaining
-    // reactions on redelivery (#1179). Track the last payload index per
-    // event id (payloads arrive in event order) so \`at\` advances exactly
-    // when a group completes; \`handled\` counts completed events, not
-    // payloads, so a mid-group failure with no completed events is a
-    // no-progress result (no ack, retry counter advances toward
-    // \`blockOnError\` instead of resetting on every partial pass).
-    const last_index_of = new Map<number, number>();
-    for (let i = 0; i < payloads.length; i++)
-      last_index_of.set(payloads[i].event.id, i);
-    let at = lease.at;
-    let handled = 0;
-
-    if (lease.retry > 0)
-      logger.warn(
-        \`Retrying \${stream}@\${payloads.at(0)!.event.id} (\${lease.retry}).\`
-      );
-
-    for (let i = 0; i < payloads.length; i++) {
-      const payload = payloads[i];
-      const { event, handler } = payload;
-      try {
-        // Scoped per payload, not hoisted to the lease: the context has to
-        // unwind with the handler so it never reaches the drain cycle, and
-        // work a handler started without awaiting has to resume into its
-        // own event's frame.
-        await reaction_scope.run(event as Committed<Schemas, string>, () =>
-          handler(event, stream, reaction_scope.app)
-        );
-        if (last_index_of.get(event.id) === i) {
-          at = event.id;
-          handled++;
-        }
-      } catch (error) {
-        // A defer is not a failure: hold the triggering events pending
-        // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
-        // the stream at the carried due-time (#1090). \`acked_at\` is unused on
-        // the defer path — drain never acks a deferred result.
-        if (error instanceof DeferSignal)
-          return {
-            lease,
-            handled,
-            acked_at: at,
-            defer: resolve_defer_at<TEvents>(error.when, event),
-          };
-        // A close request advances past the triggering event (so the
-        // requesting reaction isn't counted as in-flight by the close-cycle
-        // guard) and hands the target to the orchestrator's on_close (#1090).
-        if (error instanceof CloseSignal)
-          return {
-            lease,
-            handled: handled + 1,
-            // Advance to the live head the handler evaluated against (when
-            // provided) so the close-cycle guard sees this reaction caught up.
-            acked_at: error.at ?? event.id,
-            // Close the signalled stream (the autoclose reaction's aggregate,
-            // which differs from its synthetic lease stream); a self-closing
-            // user reaction omits it and closes its own lease stream. A
-            // carried \`before\` makes it a windowed close (prune, not retire).
-            close: {
-              stream: error.stream ?? stream,
-              archive: error.archive,
-              before: error.before,
-            },
-          };
-        return finalize(
-          lease,
-          handled,
-          at,
-          error as Error,
-          payload.options,
-          logger,
-          event.id
-        );
-      }
-    }
-    return finalize(lease, handled, at, undefined, payloads[0].options, logger);
-  };
-}
-
-/**
- * Builds the bulk reaction dispatcher passed to \`run_drain_cycle\`. All events
- * for a static-target projection are handed to a single callback so the
- * projection can do one transaction per drain (catch-up replays especially).
- *
- * @internal
- */
-export function build_handle_batch<TEvents extends Schemas>(
-  logger: Logger
-): HandleBatch<TEvents> {
-  return async (
-    lease: Lease,
-    payloads: ReactionPayload<TEvents>[],
-    batchHandler: BatchHandler<TEvents>
-  ) => {
-    const stream = lease.stream;
-    const events = payloads.map(
-      (p) => p.event as Committed<TEvents, keyof TEvents & string>
-    );
-    const options = payloads[0].options;
-
-    if (lease.retry > 0)
-      logger.warn(\`Retrying batch \${stream}@\${events[0].id} (\${lease.retry}).\`);
-
-    try {
-      await batchHandler(events, stream);
-      return finalize(
-        lease,
-        events.length,
-        events.at(-1)!.id,
-        undefined,
-        options,
-        logger
-      );
-    } catch (error) {
-      return finalize(lease, 0, lease.at, error as Error, options, logger);
-    }
-  };
-}
 
 // === registry.ts ===
 import type { ZodType, z } from "zod";
@@ -19772,6 +19781,10 @@ export async function walk_streams(
 exports[`@rotorsoft/act — public API stability > stable public surface for ./test 1`] = `
 "// === act.ts ===
 import EventEmitter from "node:events";
+import {
+  build_handle,
+  build_handle_batch,
+} from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
   ALL_LANES,
@@ -19780,8 +19793,6 @@ import {
   bare_patch,
   build_drain,
   build_es,
-  build_handle,
-  build_handle_batch,
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
@@ -23264,154 +23275,6 @@ export interface IAct<
 
 // === audit.ts ===
 /**
- * @module act/types/audit
- *
- * Operator-driven store audit (#723).
- *
- * The \`app.audit(...)\` method walks the connected store and yields
- * per-category findings — each tagged with the remediation it
- * suggests. Same operator-driven category as \`app.close()\`,
- * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
- * framework; the operator decides when to run it and what to do
- * with the findings.
- *
- * Categories are independent — operators can request a subset
- * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
- * omitting the category list.
- *
- * Findings are yielded as an \`AsyncIterable\` so callers can break
- * out early, pipe into Slack alerts, save to disk, etc. without
- * loading the entire report in memory.
- */
-
-import type { Query } from "./action.js";
-
-/**
- * Audit category names. Each maps to a distinct family of findings
- * and a distinct remediation. See {@link AuditFinding} for the
- * shapes each category emits.
- */
-export type AuditCategory =
-  | "schema"
-  | "close-candidate"
-  | "restart-candidate"
-  | "deprecated-load"
-  | "reaction-health"
-  | "snapshot-drift"
-  | "routing-health"
-  | "correlation-gaps"
-  | "clock-anomalies";
-
-/**
- * Tunable thresholds for categories whose findings depend on a
- * cutoff. Sensible defaults are documented per field; operators
- * can override per call.
- */
-export type AuditThresholds = {
-  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
-  idle_days?: number;
-  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
-  restart_min?: number;
-  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
-  stuck_minutes?: number;
-  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
-  near_block?: number;
-  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
-  deprecated_min?: number;
-  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
-  drift_min?: number;
-  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
-  terminal_events?: string[];
-};
-
-/**
- * Audit options. Most categories run unconditionally over the
- * store; \`query\` narrows the scan window (e.g., "only audit events
- * committed since yesterday" for an incremental cron).
- */
-export type AuditOptions = {
-  /**
-   * Query filter applied to event-table scans. Mirrors
-   * {@link Query} (stream / source / created_before / created_after /
-   * before / etc.). When omitted, the audit scans the whole table.
-   */
-  query?: Query;
-  /** Pagination size for event scans. Default 500. */
-  page_size?: number;
-  /** Per-category thresholds; see {@link AuditThresholds}. */
-  thresholds?: AuditThresholds;
-};
-
-/**
- * Discriminated union of audit findings. Each shape carries enough
- * context for the operator to act on the finding directly —
- * stream name, event id, suggested remediation hints.
- */
-export type AuditFinding =
-  | {
-      category: "schema";
-      stream: string;
-      event_id: number;
-      name: string;
-      reason: "unknown_event_name" | "schema_validation_failed";
-      zod_error?: unknown;
-    }
-  | {
-      category: "close-candidate";
-      stream: string;
-      last_event_at: string;
-      reason: "terminal" | "idle";
-      idle_days?: number;
-      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
-      restart_supported: boolean;
-    }
-  | {
-      category: "restart-candidate";
-      stream: string;
-      count: number;
-      snaps: number;
-    }
-  | {
-      category: "deprecated-load";
-      name: string;
-      current_version: string;
-      total: number;
-      top_streams: Array<{ stream: string; count: number }>;
-    }
-  | {
-      category: "reaction-health";
-      stream: string;
-      status: "blocked" | "near-block" | "stuck-backoff";
-      retry: number;
-      reason: string;
-    }
-  | {
-      category: "snapshot-drift";
-      stream: string;
-      events_since_snap: number;
-      snap_at?: number;
-    }
-  | {
-      category: "routing-health";
-      stream: string;
-      reason: "unknown-lane" | "unrouted";
-      lane?: string;
-    }
-  | {
-      category: "correlation-gaps";
-      stream: string;
-      event_id: number;
-      reason: "orphan-parent" | "missing-correlation";
-    }
-  | {
-      category: "clock-anomalies";
-      stream: string;
-      event_id: number;
-      reason: "future-created" | "out-of-order";
-    };
-
-// === audit.ts ===
-/**
  * @module audit
  * @category Internal
  *
@@ -24161,6 +24024,154 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
 };
+
+// === audit.ts ===
+/**
+ * @module act/types/audit
+ *
+ * Operator-driven store audit (#723).
+ *
+ * The \`app.audit(...)\` method walks the connected store and yields
+ * per-category findings — each tagged with the remediation it
+ * suggests. Same operator-driven category as \`app.close()\`,
+ * \`app.reset()\`, \`app.unblock()\`: never auto-invoked by the
+ * framework; the operator decides when to run it and what to do
+ * with the findings.
+ *
+ * Categories are independent — operators can request a subset
+ * (\`app.audit(["schema", "deprecated-load"])\`) or run everything by
+ * omitting the category list.
+ *
+ * Findings are yielded as an \`AsyncIterable\` so callers can break
+ * out early, pipe into Slack alerts, save to disk, etc. without
+ * loading the entire report in memory.
+ */
+
+import type { Query } from "./action.js";
+
+/**
+ * Audit category names. Each maps to a distinct family of findings
+ * and a distinct remediation. See {@link AuditFinding} for the
+ * shapes each category emits.
+ */
+export type AuditCategory =
+  | "schema"
+  | "close-candidate"
+  | "restart-candidate"
+  | "deprecated-load"
+  | "reaction-health"
+  | "snapshot-drift"
+  | "routing-health"
+  | "correlation-gaps"
+  | "clock-anomalies";
+
+/**
+ * Tunable thresholds for categories whose findings depend on a
+ * cutoff. Sensible defaults are documented per field; operators
+ * can override per call.
+ */
+export type AuditThresholds = {
+  /** \`close-candidate\` (idle): days since head event committed. Default 90. */
+  idle_days?: number;
+  /** \`restart-candidate\`: minimum event count to consider close-with-restart. Default 10_000. */
+  restart_min?: number;
+  /** \`reaction-health\` (stuck-backoff): minutes since lease started. Default 30. */
+  stuck_minutes?: number;
+  /** \`reaction-health\` (near-block): retry count at which a stream is "about to block." Default 3. */
+  near_block?: number;
+  /** \`deprecated-load\`: minimum fraction-of-total to surface. Default 0.10. */
+  deprecated_min?: number;
+  /** \`snapshot-drift\`: minimum events since last snapshot to flag. Default 500. */
+  drift_min?: number;
+  /** \`close-candidate\` (terminal): event names the operator considers terminal. */
+  terminal_events?: string[];
+};
+
+/**
+ * Audit options. Most categories run unconditionally over the
+ * store; \`query\` narrows the scan window (e.g., "only audit events
+ * committed since yesterday" for an incremental cron).
+ */
+export type AuditOptions = {
+  /**
+   * Query filter applied to event-table scans. Mirrors
+   * {@link Query} (stream / source / created_before / created_after /
+   * before / etc.). When omitted, the audit scans the whole table.
+   */
+  query?: Query;
+  /** Pagination size for event scans. Default 500. */
+  page_size?: number;
+  /** Per-category thresholds; see {@link AuditThresholds}. */
+  thresholds?: AuditThresholds;
+};
+
+/**
+ * Discriminated union of audit findings. Each shape carries enough
+ * context for the operator to act on the finding directly —
+ * stream name, event id, suggested remediation hints.
+ */
+export type AuditFinding =
+  | {
+      category: "schema";
+      stream: string;
+      event_id: number;
+      name: string;
+      reason: "unknown_event_name" | "schema_validation_failed";
+      zod_error?: unknown;
+    }
+  | {
+      category: "close-candidate";
+      stream: string;
+      last_event_at: string;
+      reason: "terminal" | "idle";
+      idle_days?: number;
+      /** True when the state has a snapshot patch (\`close({restart: true})\` would work). */
+      restart_supported: boolean;
+    }
+  | {
+      category: "restart-candidate";
+      stream: string;
+      count: number;
+      snaps: number;
+    }
+  | {
+      category: "deprecated-load";
+      name: string;
+      current_version: string;
+      total: number;
+      top_streams: Array<{ stream: string; count: number }>;
+    }
+  | {
+      category: "reaction-health";
+      stream: string;
+      status: "blocked" | "near-block" | "stuck-backoff";
+      retry: number;
+      reason: string;
+    }
+  | {
+      category: "snapshot-drift";
+      stream: string;
+      events_since_snap: number;
+      snap_at?: number;
+    }
+  | {
+      category: "routing-health";
+      stream: string;
+      reason: "unknown-lane" | "unrouted";
+      lane?: string;
+    }
+  | {
+      category: "correlation-gaps";
+      stream: string;
+      event_id: number;
+      reason: "orphan-parent" | "missing-correlation";
+    }
+  | {
+      category: "clock-anomalies";
+      stream: string;
+      event_id: number;
+      reason: "future-created" | "out-of-order";
+    };
 
 // === autoclose-policy.ts ===
 /**
@@ -31793,6 +31804,123 @@ export * from "./sandbox.js";
 
 // === index.ts ===
 /**
+ * @module internal
+ * @category Internal
+ *
+ * Barrel for framework-internal modules. These exports are not part of the
+ * public package API and may change between minors. Anything reachable from
+ * \`@rotorsoft/act\`'s top-level barrel (\`src/index.ts\`) is the public surface;
+ * what lives here is implementation detail used by \`Act\`, the builders, and
+ * the orchestrator's pipelines.
+ *
+ * Only symbols actually consumed *via this barrel* from outside \`internal/\`
+ * are re-exported here. Modules within \`internal/\` import each other
+ * directly by file path; production code in \`adapters/\` and tests that
+ * need bare ops (e.g., \`action\`, \`load\`, \`LruMap\`) likewise import from
+ * the specific source file.
+ *
+ * @internal
+ */
+
+export { type AuditDeps, audit } from "./audit.js";
+export {
+  type AutoclosePolicy,
+  compile_autoclose_policy,
+  days_after,
+  days_before_now,
+  policy_keep_days,
+  policy_min_after_days,
+} from "./autoclose-policy.js";
+export {
+  AUTOCLOSE_TARGET_PREFIX,
+  synthesize_autoclose_reactions,
+} from "./autoclose-reaction.js";
+export {
+  hour_in_zone,
+  in_autoclose_window,
+  next_window_open,
+} from "./autoclose-window.js";
+export { compute_backoff_delay } from "./backoff.js";
+export type { EventLaneSet } from "./build-classify.js";
+export { ALL_LANES, classify_registry } from "./build-classify.js";
+export { reaction_on, register_lane } from "./builder-utils.js";
+export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
+export { run_close_cycle } from "./close-cycle.js";
+export { CloseSignal } from "./close-signal.js";
+// Every builder-facing config bag (schemas + resolvers + defaults) lives in
+// one place — see ./config.js.
+export {
+  type ActionConfig,
+  type AutocloseConfig,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  type FoldConfig,
+  MAX_SHUTDOWN_GRACE_MS,
+  type ReactionConfig,
+  resolveActConfig,
+  resolveActionConfig,
+  resolveAutocloseConfig,
+  resolveBackoffConfig,
+  resolveCircuitBreakerConfig,
+  resolveDrainConfig,
+  resolveFoldConfig,
+  resolveLaneConfig,
+  resolveReactionConfig,
+  resolveSettleConfig,
+  resolveShutdownConfig,
+} from "./config.js";
+export { CorrelateCycle } from "./correlate-cycle.js";
+export { close_correlation, default_correlator } from "./correlator.js";
+export { resolve_defer_at } from "./defer-config.js";
+export { DeferSignal } from "./defer-signal.js";
+export type { DrainOps } from "./drain.js";
+export {
+  DrainController,
+  type Handle,
+  type HandleBatch,
+  type HandleResult,
+} from "./drain-cycle.js";
+export type { EsOps, PatchFn } from "./event-sourcing.js";
+export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
+export {
+  current_version_of,
+  deprecated_event_names,
+} from "./event-versions.js";
+export {
+  _this_,
+  merge_event_register,
+  merge_projection,
+  register_state,
+} from "./merge.js";
+export {
+  FOLD_RESET,
+  make_fold_handler,
+  type ResettableBatchHandler,
+} from "./projection-fold.js";
+export {
+  _registry,
+  type EventGate,
+  IDENTITY_GATE,
+  make_gate,
+  pii_fields,
+  pii_gate,
+  pii_split,
+  pii_strip,
+  REDACTED,
+  SHREDDED,
+} from "./sensitive.js";
+export { SettleLoop } from "./settle.js";
+export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { walk_streams } from "./walk-streams.js";
+
+// === index.ts ===
+/**
  * @packageDocumentation
  * @module act/types
  * Barrel file for Act Framework core types.
@@ -31847,121 +31975,6 @@ export const LogLevels = [
  * Type representing a valid log level string.
  */
 export type LogLevel = (typeof LogLevels)[number];
-
-// === index.ts ===
-/**
- * @module internal
- * @category Internal
- *
- * Barrel for framework-internal modules. These exports are not part of the
- * public package API and may change between minors. Anything reachable from
- * \`@rotorsoft/act\`'s top-level barrel (\`src/index.ts\`) is the public surface;
- * what lives here is implementation detail used by \`Act\`, the builders, and
- * the orchestrator's pipelines.
- *
- * Only symbols actually consumed *via this barrel* from outside \`internal/\`
- * are re-exported here. Modules within \`internal/\` import each other
- * directly by file path; production code in \`adapters/\` and tests that
- * need bare ops (e.g., \`action\`, \`load\`, \`LruMap\`) likewise import from
- * the specific source file.
- *
- * @internal
- */
-
-export { type AuditDeps, audit } from "./audit.js";
-export {
-  type AutoclosePolicy,
-  compile_autoclose_policy,
-  days_after,
-  days_before_now,
-  policy_keep_days,
-  policy_min_after_days,
-} from "./autoclose-policy.js";
-export {
-  AUTOCLOSE_TARGET_PREFIX,
-  synthesize_autoclose_reactions,
-} from "./autoclose-reaction.js";
-export {
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-window.js";
-export type { EventLaneSet } from "./build-classify.js";
-export { ALL_LANES, classify_registry } from "./build-classify.js";
-export { reaction_on, register_lane } from "./builder-utils.js";
-export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
-export { run_close_cycle } from "./close-cycle.js";
-export { CloseSignal } from "./close-signal.js";
-// Every builder-facing config bag (schemas + resolvers + defaults) lives in
-// one place — see ./config.js.
-export {
-  type ActionConfig,
-  type AutocloseConfig,
-  type CircuitBreakerConfig,
-  type CircuitBreakerOptions,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  DEFAULT_FOLD_FLUSH_EVERY,
-  DEFAULT_MAX_CACHED_STATES,
-  DEFAULT_SHUTDOWN_GRACE_MS,
-  type FoldConfig,
-  MAX_SHUTDOWN_GRACE_MS,
-  type ReactionConfig,
-  resolveActConfig,
-  resolveActionConfig,
-  resolveAutocloseConfig,
-  resolveBackoffConfig,
-  resolveCircuitBreakerConfig,
-  resolveDrainConfig,
-  resolveFoldConfig,
-  resolveLaneConfig,
-  resolveReactionConfig,
-  resolveSettleConfig,
-  resolveShutdownConfig,
-} from "./config.js";
-export { CorrelateCycle } from "./correlate-cycle.js";
-export { close_correlation, default_correlator } from "./correlator.js";
-export { DeferSignal } from "./defer-signal.js";
-export type { DrainOps } from "./drain.js";
-export {
-  DrainController,
-  type Handle,
-  type HandleBatch,
-} from "./drain-cycle.js";
-export type { EsOps, PatchFn } from "./event-sourcing.js";
-export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
-export {
-  current_version_of,
-  deprecated_event_names,
-} from "./event-versions.js";
-export {
-  _this_,
-  merge_event_register,
-  merge_projection,
-  register_state,
-} from "./merge.js";
-export {
-  FOLD_RESET,
-  make_fold_handler,
-  type ResettableBatchHandler,
-} from "./projection-fold.js";
-export { build_handle, build_handle_batch } from "./reactions.js";
-export {
-  _registry,
-  type EventGate,
-  IDENTITY_GATE,
-  make_gate,
-  pii_fields,
-  pii_gate,
-  pii_split,
-  pii_strip,
-  REDACTED,
-  SHREDDED,
-} from "./sensitive.js";
-export { SettleLoop } from "./settle.js";
-export { build_drain, build_es, trace_cycle } from "./tracing.js";
-export { walk_streams } from "./walk-streams.js";
 
 // === lru-map.ts ===
 /**
@@ -32360,6 +32373,328 @@ export const _this_ = ({ stream }: { stream: string }) => ({
   source: stream,
   target: stream,
 });
+
+// === ports.ts ===
+import { ConsoleLogger } from "./adapters/console-logger.js";
+import { InMemoryCache } from "./adapters/in-memory-cache.js";
+import { InMemoryStore } from "./adapters/in-memory-store.js";
+import { config } from "./config.js";
+import { register_disposer, run_disposers } from "./disposers.js";
+import { current_ports } from "./scoped.js";
+import type {
+  Cache,
+  Disposable,
+  Disposer,
+  Logger,
+  Store,
+} from "./types/index.js";
+
+// \`Scoped\` is the type of the public \`ActOptions.scoped\` bag, so it stays
+// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
+// it was only ever reachable because \`index.ts\` star-exports this module,
+// and its own doc-comment already declared it internal.
+export type { Scoped } from "./scoped.js";
+
+/**
+ * Port/adapter infrastructure for the Act framework.
+ *
+ * All infrastructure concerns (logging, storage, caching) are managed as
+ * singleton adapters injected via port functions. Each port follows the same
+ * pattern: first call wins with a sensible default, optional adapter injection.
+ *
+ * - \`log()\` — structured logging (default: ConsoleLogger)
+ * - \`store()\` — event persistence (default: InMemoryStore)
+ * - \`cache()\` — state checkpoints (default: InMemoryCache)
+ * - \`dispose()\` — register cleanup functions for graceful shutdown
+ *
+ * @module ports
+ */
+
+/**
+ * List of exit codes for process termination. Consumed by signal handlers
+ * and {@link disposeAndExit}; not part of the user-facing surface.
+ *
+ * @internal
+ */
+export const ExitCodes = ["ERROR", "EXIT"] as const;
+
+/**
+ * Type for allowed exit codes.
+ *
+ * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
+ * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
+ *
+ * @internal
+ */
+export type ExitCode = (typeof ExitCodes)[number];
+
+// ---------------------------------------------------------------------------
+// Port factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory function that creates or returns the injected adapter.
+ * @internal
+ */
+type Injector<Port extends Disposable> = (adapter?: Port) => Port;
+
+/** Singleton adapter registry, keyed by injector function name. */
+const adapters = new Map<string, Disposable>();
+
+/**
+ * Creates a singleton port with optional adapter injection.
+ *
+ * The first call initializes the adapter (using the provided adapter or the
+ * injector's default). Subsequent calls return the cached singleton. Adapters
+ * are disposed in reverse registration order during {@link disposeAndExit}.
+ *
+ * @param injector - Named function that creates the default adapter
+ * @returns Port function: call with no args to get the singleton, or pass an
+ *          adapter on the first call to override the default
+ *
+ * @example
+ * \`\`\`typescript
+ * const store = port(function store(adapter?: Store) {
+ *   return adapter || new InMemoryStore();
+ * });
+ * const s = store(); // InMemoryStore
+ * \`\`\`
+ */
+export function port<Port extends Disposable>(injector: Injector<Port>) {
+  return (adapter?: Port): Port => {
+    if (!adapters.has(injector.name)) {
+      const injected = injector(adapter);
+      adapters.set(injector.name, injected);
+      // log() is now in adapters (or this IS the log port we just registered),
+      // so the recursive call resolves immediately. Routing through the logger
+      // means level gating (e.g. silenced in tests at fatal) takes effect.
+      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
+    }
+    return adapters.get(injector.name) as Port;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ports: log, store, cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Gets or injects the singleton logger.
+ *
+ * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
+ * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
+ * output in development — zero external dependencies.
+ *
+ * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
+ * your application.
+ *
+ * @param adapter - Optional logger implementation to inject
+ * @returns The singleton logger instance
+ *
+ * @example Default console logger
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * const logger = log();
+ * logger.info("Application started");
+ * \`\`\`
+ *
+ * @example Injecting pino
+ * \`\`\`typescript
+ * import { log } from "@rotorsoft/act";
+ * import { PinoLogger } from "@rotorsoft/act-pino";
+ * log(new PinoLogger({ level: "debug", pretty: true }));
+ * \`\`\`
+ *
+ * @see {@link Logger} for the interface contract
+ * @see {@link ConsoleLogger} for the default implementation
+ */
+export const log = port(function log(adapter?: Logger) {
+  const cfg = config();
+  return (
+    adapter ||
+    new ConsoleLogger({
+      level: cfg.logLevel,
+      pretty: cfg.env !== "production",
+    })
+  );
+});
+
+/**
+ * Gets or injects the singleton event store.
+ *
+ * By default, Act uses an {@link InMemoryStore} suitable for development and
+ * testing. For production, inject a persistent store like \`PostgresStore\` from
+ * \`@rotorsoft/act-pg\` before building your application.
+ *
+ * **Important:** Store injection must happen before creating any Act instances.
+ * Once set, the store cannot be changed without restarting the application.
+ *
+ * @param adapter - Optional store implementation to inject
+ * @returns The singleton store instance
+ *
+ * @example Default in-memory store
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * const s = store();
+ * \`\`\`
+ *
+ * @example Injecting PostgreSQL
+ * \`\`\`typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * store(new PostgresStore({
+ *   host: "localhost",
+ *   port: 5432,
+ *   database: "myapp",
+ *   user: "postgres",
+ *   password: "secret",
+ * }));
+ * \`\`\`
+ *
+ * @see {@link Store} for the interface contract
+ * @see {@link InMemoryStore} for the default implementation
+ */
+// ALS check lives outside \`port()\` — its cache fires only once, so the
+// per-call branch on a scoped Act has to be in the public wrapper.
+const _store = port(function store(adapter?: Store): Store {
+  return adapter ?? new InMemoryStore();
+});
+
+export const store = ((adapter?: Store): Store => {
+  return current_ports()?.store ?? _store(adapter);
+}) as (adapter?: Store) => Store;
+
+/**
+ * Gets or injects the singleton cache.
+ *
+ * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
+ * distributed deployments, inject a Redis-backed cache before building your
+ * application.
+ *
+ * @param adapter - Optional cache implementation to inject
+ * @returns The singleton cache instance
+ *
+ * @see {@link Cache} for the interface contract
+ * @see {@link InMemoryCache} for the default implementation
+ */
+const _cache = port(function cache(adapter?: Cache) {
+  return adapter ?? new InMemoryCache();
+});
+
+export const cache = ((adapter?: Cache): Cache => {
+  return current_ports()?.cache ?? _cache(adapter);
+}) as (adapter?: Cache) => Cache;
+
+// ---------------------------------------------------------------------------
+// Disposal
+// ---------------------------------------------------------------------------
+
+/**
+ * Registered cleanup functions live in \`disposers.ts\`, which holds
+ * lifetime-bound entries weakly so registering never pins its target for the
+ * process lifetime (#1441). The public surface here is unchanged.
+ */
+
+/**
+ * Disposes all registered adapters and disposers, then exits the process.
+ *
+ * Execution order:
+ * 1. Custom disposers (registered via {@link dispose}) — in reverse order
+ * 2. Port adapters (log, store, cache) — in reverse registration order
+ * 3. Adapter registry is cleared
+ * 4. Process exits (skipped in test environment)
+ *
+ * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
+ * transient failures (e.g. an uncaught promise in a non-critical path).
+ *
+ * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
+ *               \`"ERROR"\` for abnormal termination (exit 1)
+ */
+export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
+  if (code === "ERROR" && config().env === "production") {
+    // Surface the swallow so incident triage can see it. Without this
+    // log the framework looks unresponsive after an uncaught exception
+    // in prod — exactly when operators most need a breadcrumb.
+    log().warn(
+      "disposeAndExit('ERROR') ignored in production — process kept alive"
+    );
+    return;
+  }
+
+  // Run sequentially in reverse registration order so a disposer can rely on
+  // later-registered disposers (and adapters on later-registered adapters)
+  // having already finished — Promise.all would race them.
+  await run_disposers();
+  for (const adapter of [...adapters.values()].reverse()) {
+    await adapter.dispose();
+    log().info(\`[act] - \${adapter.constructor.name}\`);
+  }
+  adapters.clear();
+  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
+}
+
+/**
+ * Registers a cleanup function for graceful shutdown.
+ *
+ * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
+ * and unhandled rejections. They execute in reverse registration order before
+ * port adapters are disposed.
+ *
+ * @param disposer - Async function to call during cleanup. Omit to get a
+ *                   reference to {@link disposeAndExit} without registering.
+ * @returns Function to manually trigger disposal and exit
+ *
+ * @example
+ * \`\`\`typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const db = connectDatabase();
+ * dispose(async () => await db.close());
+ *
+ * // In tests
+ * afterAll(async () => await dispose()());
+ * \`\`\`
+ *
+ * @see {@link disposeAndExit} for the full shutdown sequence
+ */
+export function dispose(
+  disposer?: Disposer
+): (code?: ExitCode) => Promise<void> {
+  disposer && register_disposer(disposer);
+  return disposeAndExit;
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via \`close()\`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
+/**
+ * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
+ * declaration says otherwise (ACT-1103). Acts that don't call
+ * \`.withLane(...)\` see only this lane, and behavior is identical to
+ * pre-1103 single-controller drain.
+ *
+ * Persisted on \`streams.lane\` and threaded as the strict-typed default in
+ * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
+ */
+export const DEFAULT_LANE = "default";
 
 // === ports.ts ===
 /**
@@ -33783,328 +34118,6 @@ export interface Cache extends Disposable {
   clear(): Promise<void>;
 }
 
-// === ports.ts ===
-import { ConsoleLogger } from "./adapters/console-logger.js";
-import { InMemoryCache } from "./adapters/in-memory-cache.js";
-import { InMemoryStore } from "./adapters/in-memory-store.js";
-import { config } from "./config.js";
-import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports } from "./scoped.js";
-import type {
-  Cache,
-  Disposable,
-  Disposer,
-  Logger,
-  Store,
-} from "./types/index.js";
-
-// \`Scoped\` is the type of the public \`ActOptions.scoped\` bag, so it stays
-// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
-// it was only ever reachable because \`index.ts\` star-exports this module,
-// and its own doc-comment already declared it internal.
-export type { Scoped } from "./scoped.js";
-
-/**
- * Port/adapter infrastructure for the Act framework.
- *
- * All infrastructure concerns (logging, storage, caching) are managed as
- * singleton adapters injected via port functions. Each port follows the same
- * pattern: first call wins with a sensible default, optional adapter injection.
- *
- * - \`log()\` — structured logging (default: ConsoleLogger)
- * - \`store()\` — event persistence (default: InMemoryStore)
- * - \`cache()\` — state checkpoints (default: InMemoryCache)
- * - \`dispose()\` — register cleanup functions for graceful shutdown
- *
- * @module ports
- */
-
-/**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
- */
-export const ExitCodes = ["ERROR", "EXIT"] as const;
-
-/**
- * Type for allowed exit codes.
- *
- * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
- * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
- */
-export type ExitCode = (typeof ExitCodes)[number];
-
-// ---------------------------------------------------------------------------
-// Port factory
-// ---------------------------------------------------------------------------
-
-/**
- * Factory function that creates or returns the injected adapter.
- * @internal
- */
-type Injector<Port extends Disposable> = (adapter?: Port) => Port;
-
-/** Singleton adapter registry, keyed by injector function name. */
-const adapters = new Map<string, Disposable>();
-
-/**
- * Creates a singleton port with optional adapter injection.
- *
- * The first call initializes the adapter (using the provided adapter or the
- * injector's default). Subsequent calls return the cached singleton. Adapters
- * are disposed in reverse registration order during {@link disposeAndExit}.
- *
- * @param injector - Named function that creates the default adapter
- * @returns Port function: call with no args to get the singleton, or pass an
- *          adapter on the first call to override the default
- *
- * @example
- * \`\`\`typescript
- * const store = port(function store(adapter?: Store) {
- *   return adapter || new InMemoryStore();
- * });
- * const s = store(); // InMemoryStore
- * \`\`\`
- */
-export function port<Port extends Disposable>(injector: Injector<Port>) {
-  return (adapter?: Port): Port => {
-    if (!adapters.has(injector.name)) {
-      const injected = injector(adapter);
-      adapters.set(injector.name, injected);
-      // log() is now in adapters (or this IS the log port we just registered),
-      // so the recursive call resolves immediately. Routing through the logger
-      // means level gating (e.g. silenced in tests at fatal) takes effect.
-      log().info(\`[act] + \${injector.name}:\${injected.constructor.name}\`);
-    }
-    return adapters.get(injector.name) as Port;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Ports: log, store, cache
-// ---------------------------------------------------------------------------
-
-/**
- * Gets or injects the singleton logger.
- *
- * By default, Act uses a built-in {@link ConsoleLogger} that emits JSON lines
- * in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized
- * output in development — zero external dependencies.
- *
- * For pino, inject a \`PinoLogger\` from \`@rotorsoft/act-pino\` before building
- * your application.
- *
- * @param adapter - Optional logger implementation to inject
- * @returns The singleton logger instance
- *
- * @example Default console logger
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * const logger = log();
- * logger.info("Application started");
- * \`\`\`
- *
- * @example Injecting pino
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * import { PinoLogger } from "@rotorsoft/act-pino";
- * log(new PinoLogger({ level: "debug", pretty: true }));
- * \`\`\`
- *
- * @see {@link Logger} for the interface contract
- * @see {@link ConsoleLogger} for the default implementation
- */
-export const log = port(function log(adapter?: Logger) {
-  const cfg = config();
-  return (
-    adapter ||
-    new ConsoleLogger({
-      level: cfg.logLevel,
-      pretty: cfg.env !== "production",
-    })
-  );
-});
-
-/**
- * Gets or injects the singleton event store.
- *
- * By default, Act uses an {@link InMemoryStore} suitable for development and
- * testing. For production, inject a persistent store like \`PostgresStore\` from
- * \`@rotorsoft/act-pg\` before building your application.
- *
- * **Important:** Store injection must happen before creating any Act instances.
- * Once set, the store cannot be changed without restarting the application.
- *
- * @param adapter - Optional store implementation to inject
- * @returns The singleton store instance
- *
- * @example Default in-memory store
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * const s = store();
- * \`\`\`
- *
- * @example Injecting PostgreSQL
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * import { PostgresStore } from "@rotorsoft/act-pg";
- *
- * store(new PostgresStore({
- *   host: "localhost",
- *   port: 5432,
- *   database: "myapp",
- *   user: "postgres",
- *   password: "secret",
- * }));
- * \`\`\`
- *
- * @see {@link Store} for the interface contract
- * @see {@link InMemoryStore} for the default implementation
- */
-// ALS check lives outside \`port()\` — its cache fires only once, so the
-// per-call branch on a scoped Act has to be in the public wrapper.
-const _store = port(function store(adapter?: Store): Store {
-  return adapter ?? new InMemoryStore();
-});
-
-export const store = ((adapter?: Store): Store => {
-  return current_ports()?.store ?? _store(adapter);
-}) as (adapter?: Store) => Store;
-
-/**
- * Gets or injects the singleton cache.
- *
- * By default, Act uses an {@link InMemoryCache} (LRU, maxSize 1000). For
- * distributed deployments, inject a Redis-backed cache before building your
- * application.
- *
- * @param adapter - Optional cache implementation to inject
- * @returns The singleton cache instance
- *
- * @see {@link Cache} for the interface contract
- * @see {@link InMemoryCache} for the default implementation
- */
-const _cache = port(function cache(adapter?: Cache) {
-  return adapter ?? new InMemoryCache();
-});
-
-export const cache = ((adapter?: Cache): Cache => {
-  return current_ports()?.cache ?? _cache(adapter);
-}) as (adapter?: Cache) => Cache;
-
-// ---------------------------------------------------------------------------
-// Disposal
-// ---------------------------------------------------------------------------
-
-/**
- * Registered cleanup functions live in \`disposers.ts\`, which holds
- * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime (#1441). The public surface here is unchanged.
- */
-
-/**
- * Disposes all registered adapters and disposers, then exits the process.
- *
- * Execution order:
- * 1. Custom disposers (registered via {@link dispose}) — in reverse order
- * 2. Port adapters (log, store, cache) — in reverse registration order
- * 3. Adapter registry is cleared
- * 4. Process exits (skipped in test environment)
- *
- * In production, \`"ERROR"\` exits are silently ignored to avoid crashing on
- * transient failures (e.g. an uncaught promise in a non-critical path).
- *
- * @param code - Exit code: \`"EXIT"\` for clean shutdown (exit 0),
- *               \`"ERROR"\` for abnormal termination (exit 1)
- */
-export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
-  if (code === "ERROR" && config().env === "production") {
-    // Surface the swallow so incident triage can see it. Without this
-    // log the framework looks unresponsive after an uncaught exception
-    // in prod — exactly when operators most need a breadcrumb.
-    log().warn(
-      "disposeAndExit('ERROR') ignored in production — process kept alive"
-    );
-    return;
-  }
-
-  // Run sequentially in reverse registration order so a disposer can rely on
-  // later-registered disposers (and adapters on later-registered adapters)
-  // having already finished — Promise.all would race them.
-  await run_disposers();
-  for (const adapter of [...adapters.values()].reverse()) {
-    await adapter.dispose();
-    log().info(\`[act] - \${adapter.constructor.name}\`);
-  }
-  adapters.clear();
-  config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
-}
-
-/**
- * Registers a cleanup function for graceful shutdown.
- *
- * Disposers are called automatically on SIGINT, SIGTERM, uncaught exceptions,
- * and unhandled rejections. They execute in reverse registration order before
- * port adapters are disposed.
- *
- * @param disposer - Async function to call during cleanup. Omit to get a
- *                   reference to {@link disposeAndExit} without registering.
- * @returns Function to manually trigger disposal and exit
- *
- * @example
- * \`\`\`typescript
- * import { dispose } from "@rotorsoft/act";
- *
- * const db = connectDatabase();
- * dispose(async () => await db.close());
- *
- * // In tests
- * afterAll(async () => await dispose()());
- * \`\`\`
- *
- * @see {@link disposeAndExit} for the full shutdown sequence
- */
-export function dispose(
-  disposer?: Disposer
-): (code?: ExitCode) => Promise<void> {
-  disposer && register_disposer(disposer);
-  return disposeAndExit;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Event name used internally for snapshot events in the event store.
- * Snapshot events store a full state checkpoint, enabling efficient cold-start
- * recovery without replaying the entire event stream.
- */
-export const SNAP_EVENT = "__snapshot__";
-
-/**
- * Event name used internally for tombstone events in the event store.
- * A tombstone marks a stream as permanently closed — no further writes
- * are permitted until the stream is explicitly restarted via \`close()\`.
- *
- * @see {@link Act.close} for the close-the-books API
- */
-export const TOMBSTONE_EVENT = "__tombstone__";
-
-/**
- * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise (ACT-1103). Acts that don't call
- * \`.withLane(...)\` see only this lane, and behavior is identical to
- * pre-1103 single-controller drain.
- *
- * Persisted on \`streams.lane\` and threaded as the strict-typed default in
- * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- */
-export const DEFAULT_LANE = "default";
-
 // === projection-builder.ts ===
 /**
  * @module projection-builder
@@ -34815,6 +34828,260 @@ export function make_fold_handler<
   return handler;
 }
 
+// === reaction-builder.ts ===
+/**
+ * @module reaction-builder
+ * @category Internal
+ *
+ * Reaction dispatch — what runs inside the drain pipeline once \`run_drain_cycle\`
+ * has fetched events for a leased stream. Two shapes:
+ *
+ * - per-event \`handle\`: walks payloads sequentially, running each handler
+ *   inside the reaction scope so \`action()\` threads \`reactingTo\`
+ * - bulk \`handle_batch\`: hands every event for a static-target projection to
+ *   a single batch callback, enabling one-transaction replays
+ *
+ * Both share \`_finalize\`, which collapses the retry-vs-block decision and
+ * the "report error only when nothing was handled" rule.
+ *
+ * @internal
+ */
+
+import {
+  CloseSignal,
+  compute_backoff_delay,
+  DeferSignal,
+  type Handle,
+  type HandleBatch,
+  type HandleResult,
+  resolve_defer_at,
+} from "../internal/index.js";
+
+import type { ReactionScope } from "../scoped.js";
+import {
+  type Actor,
+  type BatchHandler,
+  type Committed,
+  type Lease,
+  type Logger,
+  NonRetryableError,
+  type ReactionOptions,
+  type ReactionPayload,
+  type Schemas,
+} from "../types/index.js";
+
+/**
+ * What the dispatcher needs from the orchestrator: a logger for retry and
+ * error breadcrumbs, and the scope a handler runs inside.
+ *
+ * @internal
+ */
+export type ReactionDeps<
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+> = {
+  readonly logger: Logger;
+  /**
+   * What a handler runs inside — its \`IAct\` facade and its triggering-event
+   * context — assembled by the orchestrator. How either half works is not
+   * this module's business; it receives the scope whole and calls it.
+   */
+  readonly reaction_scope: ReactionScope<TEvents, TActions, TActor>;
+};
+
+/**
+ * Shared finalization: log the error and decide retry vs. block. The
+ * error string is *always* surfaced on the failure path — drain-cycle
+ * uses \`handled > 0\` (not \`error\` presence) to decide whether to ack
+ * the partial progress, so the message can travel for trace + blocked
+ * record without affecting the ack/skip choice.
+ */
+function finalize(
+  lease: Lease,
+  handled: number,
+  at: number,
+  error: Error | undefined,
+  options: ReactionOptions,
+  logger: Logger,
+  failed_at?: number
+): HandleResult {
+  if (!error) return { lease, handled, acked_at: at };
+  logger.error(error);
+  // A \`NonRetryableError\` from the handler short-circuits the retry
+  // budget — block on first attempt when the operator has opted in via
+  // \`blockOnError\`. When \`blockOnError\` is false, the operator has
+  // explicitly chosen "retry forever," so we don't override that.
+  const non_retryable = error instanceof NonRetryableError;
+  const block =
+    options.blockOnError &&
+    (non_retryable || lease.retry >= options.maxRetries);
+  if (block)
+    logger.error(
+      non_retryable
+        ? \`Blocking \${lease.stream} on non-retryable error.\`
+        : \`Blocking \${lease.stream} after \${lease.retry} retries.\`
+    );
+  // Backoff applies only on retry paths — successful handles and terminal
+  // blocks never defer. \`lease.retry\` here is the just-failed attempt's
+  // counter, so the delay paces the *next* attempt.
+  const next_attempt_at =
+    !block && options.backoff
+      ? Date.now() + compute_backoff_delay(lease.retry, options.backoff)
+      : undefined;
+  return {
+    lease,
+    handled,
+    acked_at: at,
+    error: error.message,
+    block,
+    next_attempt_at,
+    failed_at,
+  };
+}
+
+/**
+ * Builds the per-event reaction dispatcher passed to \`run_drain_cycle\`.
+ *
+ * The triggering event is installed as ambient context around each handler
+ * call, so \`action()\` resolves it as \`reactingTo\` (#587, #1541). Ambient
+ * rather than bound to the \`IAct\` argument, so a handler that dispatches
+ * through a captured \`app\` inherits the chain too.
+ *
+ * @internal
+ */
+export function build_handle<
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+>(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
+  const { logger, reaction_scope } = deps;
+  return async (lease, payloads) => {
+    if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
+
+    const stream = lease.stream;
+    // One event fans out to one payload per matching reaction, and the
+    // watermark may only advance past an event once EVERY reaction on it
+    // has handled it — acking mid-group would silently drop the remaining
+    // reactions on redelivery (#1179). Track the last payload index per
+    // event id (payloads arrive in event order) so \`at\` advances exactly
+    // when a group completes; \`handled\` counts completed events, not
+    // payloads, so a mid-group failure with no completed events is a
+    // no-progress result (no ack, retry counter advances toward
+    // \`blockOnError\` instead of resetting on every partial pass).
+    const last_index_of = new Map<number, number>();
+    for (let i = 0; i < payloads.length; i++)
+      last_index_of.set(payloads[i].event.id, i);
+    let at = lease.at;
+    let handled = 0;
+
+    if (lease.retry > 0)
+      logger.warn(
+        \`Retrying \${stream}@\${payloads.at(0)!.event.id} (\${lease.retry}).\`
+      );
+
+    for (let i = 0; i < payloads.length; i++) {
+      const payload = payloads[i];
+      const { event, handler } = payload;
+      try {
+        // Scoped per payload, not hoisted to the lease: the context has to
+        // unwind with the handler so it never reaches the drain cycle, and
+        // work a handler started without awaiting has to resume into its
+        // own event's frame.
+        await reaction_scope.run(event as Committed<Schemas, string>, () =>
+          handler(event, stream, reaction_scope.app)
+        );
+        if (last_index_of.get(event.id) === i) {
+          at = event.id;
+          handled++;
+        }
+      } catch (error) {
+        // A defer is not a failure: hold the triggering events pending
+        // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
+        // the stream at the carried due-time (#1090). \`acked_at\` is unused on
+        // the defer path — drain never acks a deferred result.
+        if (error instanceof DeferSignal)
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(error.when, event),
+          };
+        // A close request advances past the triggering event (so the
+        // requesting reaction isn't counted as in-flight by the close-cycle
+        // guard) and hands the target to the orchestrator's on_close (#1090).
+        if (error instanceof CloseSignal)
+          return {
+            lease,
+            handled: handled + 1,
+            // Advance to the live head the handler evaluated against (when
+            // provided) so the close-cycle guard sees this reaction caught up.
+            acked_at: error.at ?? event.id,
+            // Close the signalled stream (the autoclose reaction's aggregate,
+            // which differs from its synthetic lease stream); a self-closing
+            // user reaction omits it and closes its own lease stream. A
+            // carried \`before\` makes it a windowed close (prune, not retire).
+            close: {
+              stream: error.stream ?? stream,
+              archive: error.archive,
+              before: error.before,
+            },
+          };
+        return finalize(
+          lease,
+          handled,
+          at,
+          error as Error,
+          payload.options,
+          logger,
+          event.id
+        );
+      }
+    }
+    return finalize(lease, handled, at, undefined, payloads[0].options, logger);
+  };
+}
+
+/**
+ * Builds the bulk reaction dispatcher passed to \`run_drain_cycle\`. All events
+ * for a static-target projection are handed to a single callback so the
+ * projection can do one transaction per drain (catch-up replays especially).
+ *
+ * @internal
+ */
+export function build_handle_batch<TEvents extends Schemas>(
+  logger: Logger
+): HandleBatch<TEvents> {
+  return async (
+    lease: Lease,
+    payloads: ReactionPayload<TEvents>[],
+    batchHandler: BatchHandler<TEvents>
+  ) => {
+    const stream = lease.stream;
+    const events = payloads.map(
+      (p) => p.event as Committed<TEvents, keyof TEvents & string>
+    );
+    const options = payloads[0].options;
+
+    if (lease.retry > 0)
+      logger.warn(\`Retrying batch \${stream}@\${events[0].id} (\${lease.retry}).\`);
+
+    try {
+      await batchHandler(events, stream);
+      return finalize(
+        lease,
+        events.length,
+        events.at(-1)!.id,
+        undefined,
+        options,
+        logger
+      );
+    } catch (error) {
+      return finalize(lease, 0, lease.at, error as Error, options, logger);
+    }
+  };
+}
+
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -35264,255 +35531,6 @@ export type SettleOptions = DrainOptions & {
 export type ShutdownOptions = {
   readonly graceMs?: number;
 };
-
-// === reactions.ts ===
-/**
- * @module reactions
- * @category Internal
- *
- * Reaction dispatch — what runs inside the drain pipeline once \`run_drain_cycle\`
- * has fetched events for a leased stream. Two shapes:
- *
- * - per-event \`handle\`: walks payloads sequentially, running each handler
- *   inside the reaction scope so \`action()\` threads \`reactingTo\`
- * - bulk \`handle_batch\`: hands every event for a static-target projection to
- *   a single batch callback, enabling one-transaction replays
- *
- * Both share \`_finalize\`, which collapses the retry-vs-block decision and
- * the "report error only when nothing was handled" rule.
- *
- * @internal
- */
-
-import type { ReactionScope } from "../scoped.js";
-import {
-  type Actor,
-  type BatchHandler,
-  type Committed,
-  type Lease,
-  type Logger,
-  NonRetryableError,
-  type ReactionOptions,
-  type ReactionPayload,
-  type Schemas,
-} from "../types/index.js";
-import { compute_backoff_delay } from "./backoff.js";
-import { CloseSignal } from "./close-signal.js";
-import { resolve_defer_at } from "./defer-config.js";
-import { DeferSignal } from "./defer-signal.js";
-import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-
-/**
- * What the dispatcher needs from the orchestrator: a logger for retry and
- * error breadcrumbs, and the scope a handler runs inside.
- *
- * @internal
- */
-export type ReactionDeps<
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor = Actor,
-> = {
-  readonly logger: Logger;
-  /**
-   * What a handler runs inside — its \`IAct\` facade and its triggering-event
-   * context — assembled by the orchestrator. How either half works is not
-   * this module's business; it receives the scope whole and calls it.
-   */
-  readonly reaction_scope: ReactionScope<TEvents, TActions, TActor>;
-};
-
-/**
- * Shared finalization: log the error and decide retry vs. block. The
- * error string is *always* surfaced on the failure path — drain-cycle
- * uses \`handled > 0\` (not \`error\` presence) to decide whether to ack
- * the partial progress, so the message can travel for trace + blocked
- * record without affecting the ack/skip choice.
- */
-function finalize(
-  lease: Lease,
-  handled: number,
-  at: number,
-  error: Error | undefined,
-  options: ReactionOptions,
-  logger: Logger,
-  failed_at?: number
-): HandleResult {
-  if (!error) return { lease, handled, acked_at: at };
-  logger.error(error);
-  // A \`NonRetryableError\` from the handler short-circuits the retry
-  // budget — block on first attempt when the operator has opted in via
-  // \`blockOnError\`. When \`blockOnError\` is false, the operator has
-  // explicitly chosen "retry forever," so we don't override that.
-  const non_retryable = error instanceof NonRetryableError;
-  const block =
-    options.blockOnError &&
-    (non_retryable || lease.retry >= options.maxRetries);
-  if (block)
-    logger.error(
-      non_retryable
-        ? \`Blocking \${lease.stream} on non-retryable error.\`
-        : \`Blocking \${lease.stream} after \${lease.retry} retries.\`
-    );
-  // Backoff applies only on retry paths — successful handles and terminal
-  // blocks never defer. \`lease.retry\` here is the just-failed attempt's
-  // counter, so the delay paces the *next* attempt.
-  const next_attempt_at =
-    !block && options.backoff
-      ? Date.now() + compute_backoff_delay(lease.retry, options.backoff)
-      : undefined;
-  return {
-    lease,
-    handled,
-    acked_at: at,
-    error: error.message,
-    block,
-    next_attempt_at,
-    failed_at,
-  };
-}
-
-/**
- * Builds the per-event reaction dispatcher passed to \`run_drain_cycle\`.
- *
- * The triggering event is installed as ambient context around each handler
- * call, so \`action()\` resolves it as \`reactingTo\` (#587, #1541). Ambient
- * rather than bound to the \`IAct\` argument, so a handler that dispatches
- * through a captured \`app\` inherits the chain too.
- *
- * @internal
- */
-export function build_handle<
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor = Actor,
->(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
-  const { logger, reaction_scope } = deps;
-  return async (lease, payloads) => {
-    if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
-
-    const stream = lease.stream;
-    // One event fans out to one payload per matching reaction, and the
-    // watermark may only advance past an event once EVERY reaction on it
-    // has handled it — acking mid-group would silently drop the remaining
-    // reactions on redelivery (#1179). Track the last payload index per
-    // event id (payloads arrive in event order) so \`at\` advances exactly
-    // when a group completes; \`handled\` counts completed events, not
-    // payloads, so a mid-group failure with no completed events is a
-    // no-progress result (no ack, retry counter advances toward
-    // \`blockOnError\` instead of resetting on every partial pass).
-    const last_index_of = new Map<number, number>();
-    for (let i = 0; i < payloads.length; i++)
-      last_index_of.set(payloads[i].event.id, i);
-    let at = lease.at;
-    let handled = 0;
-
-    if (lease.retry > 0)
-      logger.warn(
-        \`Retrying \${stream}@\${payloads.at(0)!.event.id} (\${lease.retry}).\`
-      );
-
-    for (let i = 0; i < payloads.length; i++) {
-      const payload = payloads[i];
-      const { event, handler } = payload;
-      try {
-        // Scoped per payload, not hoisted to the lease: the context has to
-        // unwind with the handler so it never reaches the drain cycle, and
-        // work a handler started without awaiting has to resume into its
-        // own event's frame.
-        await reaction_scope.run(event as Committed<Schemas, string>, () =>
-          handler(event, stream, reaction_scope.app)
-        );
-        if (last_index_of.get(event.id) === i) {
-          at = event.id;
-          handled++;
-        }
-      } catch (error) {
-        // A defer is not a failure: hold the triggering events pending
-        // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
-        // the stream at the carried due-time (#1090). \`acked_at\` is unused on
-        // the defer path — drain never acks a deferred result.
-        if (error instanceof DeferSignal)
-          return {
-            lease,
-            handled,
-            acked_at: at,
-            defer: resolve_defer_at<TEvents>(error.when, event),
-          };
-        // A close request advances past the triggering event (so the
-        // requesting reaction isn't counted as in-flight by the close-cycle
-        // guard) and hands the target to the orchestrator's on_close (#1090).
-        if (error instanceof CloseSignal)
-          return {
-            lease,
-            handled: handled + 1,
-            // Advance to the live head the handler evaluated against (when
-            // provided) so the close-cycle guard sees this reaction caught up.
-            acked_at: error.at ?? event.id,
-            // Close the signalled stream (the autoclose reaction's aggregate,
-            // which differs from its synthetic lease stream); a self-closing
-            // user reaction omits it and closes its own lease stream. A
-            // carried \`before\` makes it a windowed close (prune, not retire).
-            close: {
-              stream: error.stream ?? stream,
-              archive: error.archive,
-              before: error.before,
-            },
-          };
-        return finalize(
-          lease,
-          handled,
-          at,
-          error as Error,
-          payload.options,
-          logger,
-          event.id
-        );
-      }
-    }
-    return finalize(lease, handled, at, undefined, payloads[0].options, logger);
-  };
-}
-
-/**
- * Builds the bulk reaction dispatcher passed to \`run_drain_cycle\`. All events
- * for a static-target projection are handed to a single callback so the
- * projection can do one transaction per drain (catch-up replays especially).
- *
- * @internal
- */
-export function build_handle_batch<TEvents extends Schemas>(
-  logger: Logger
-): HandleBatch<TEvents> {
-  return async (
-    lease: Lease,
-    payloads: ReactionPayload<TEvents>[],
-    batchHandler: BatchHandler<TEvents>
-  ) => {
-    const stream = lease.stream;
-    const events = payloads.map(
-      (p) => p.event as Committed<TEvents, keyof TEvents & string>
-    );
-    const options = payloads[0].options;
-
-    if (lease.retry > 0)
-      logger.warn(\`Retrying batch \${stream}@\${events[0].id} (\${lease.retry}).\`);
-
-    try {
-      await batchHandler(events, stream);
-      return finalize(
-        lease,
-        events.length,
-        events.at(-1)!.id,
-        undefined,
-        options,
-        logger
-      );
-    } catch (error) {
-      return finalize(lease, 0, lease.at, error as Error, options, logger);
-    }
-  };
-}
 
 // === registry.ts ===
 import type { ZodType, z } from "zod";

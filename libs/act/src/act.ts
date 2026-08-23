@@ -1,4 +1,8 @@
 import EventEmitter from "node:events";
+import {
+  build_handle,
+  build_handle_batch,
+} from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
   ALL_LANES,
@@ -7,8 +11,6 @@ import {
   bare_patch,
   build_drain,
   build_es,
-  build_handle,
-  build_handle_batch,
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,

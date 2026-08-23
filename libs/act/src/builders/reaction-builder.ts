@@ -1,5 +1,5 @@
 /**
- * @module reactions
+ * @module reaction-builder
  * @category Internal
  *
  * Reaction dispatch — what runs inside the drain pipeline once `run_drain_cycle`
@@ -16,6 +16,16 @@
  * @internal
  */
 
+import {
+  CloseSignal,
+  compute_backoff_delay,
+  DeferSignal,
+  type Handle,
+  type HandleBatch,
+  type HandleResult,
+  resolve_defer_at,
+} from "../internal/index.js";
+
 import type { ReactionScope } from "../scoped.js";
 import {
   type Actor,
@@ -28,11 +38,6 @@ import {
   type ReactionPayload,
   type Schemas,
 } from "../types/index.js";
-import { compute_backoff_delay } from "./backoff.js";
-import { CloseSignal } from "./close-signal.js";
-import { resolve_defer_at } from "./defer-config.js";
-import { DeferSignal } from "./defer-signal.js";
-import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
  * What the dispatcher needs from the orchestrator: a logger for retry and
