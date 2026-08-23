@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.0...@rotorsoft/act-v1.31.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* **act:** honor an explicit expectedVersion inside a reaction ([#1544](https://github.com/Rotorsoft/act-root/issues/1544)) ([ad8ec6e](https://github.com/Rotorsoft/act-root/commit/ad8ec6e9fe3b860c801cd22131cf4897ad83832c)), closes [#1541](https://github.com/Rotorsoft/act-root/issues/1541) [#1543](https://github.com/Rotorsoft/act-root/issues/1543)
+
 # [@rotorsoft/act-v1.31.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.30.0...@rotorsoft/act-v1.31.0) (2026-08-22)
 
 
