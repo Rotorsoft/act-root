@@ -178,6 +178,19 @@ function PriorityCell({
   );
 }
 
+/**
+ * Milliseconds since the epoch for one of the ISO-8601 timestamps the
+ * `streams` query serves, or 0 when the stream has none. Sorting and
+ * the staleness filter both read timestamps as instants — never as
+ * strings, which is how the "Last" column once ended up ordered by
+ * weekday name (#1546).
+ */
+function timestamp(iso: string | null): number {
+  if (!iso) return 0;
+  const ts = new Date(iso).getTime();
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
 function relativeTime(iso: string | null): string {
   if (!iso) return "—";
   const ts = new Date(iso).getTime();
@@ -266,7 +279,7 @@ export function Streams({
         lane: m.lane,
         at: m.at,
       });
-    return (streamsQuery.data ?? []).map((s) => {
+    return (streamsQuery.data?.streams ?? []).map((s) => {
       const meta = metaByStream.get(s.stream);
       return {
         stream: s.stream,
@@ -285,6 +298,13 @@ export function Streams({
       };
     });
   }, [streamsQuery.data, metaQuery.data]);
+
+  // The server caps the page at `limit` after sorting by event count
+  // descending, so what falls off the end is the *quietest* streams —
+  // the ones an operator hunting a stalled stream came here for. Say so
+  // in the header; "not in the list" must never read as "doesn't exist".
+  const totalStreams = streamsQuery.data?.total ?? 0;
+  const truncated = totalStreams > streams.length;
 
   const filtered = useMemo(() => {
     const cutoff =
@@ -306,10 +326,14 @@ export function Streams({
         switch (sortKey) {
           case "stream":
             return dir * a.stream.localeCompare(b.stream);
+          // Timestamps sort as instants, the same reading the staleness
+          // filter above gives them. The wire format is ISO-8601, so a
+          // lexical compare would agree — parsing keeps the two readings
+          // of the same field from drifting apart again.
           case "lastEvent":
-            return dir * (a.lastEvent ?? "").localeCompare(b.lastEvent ?? "");
+            return dir * (timestamp(a.lastEvent) - timestamp(b.lastEvent));
           case "firstEvent":
-            return dir * (a.firstEvent ?? "").localeCompare(b.firstEvent ?? "");
+            return dir * (timestamp(a.firstEvent) - timestamp(b.firstEvent));
           case "lane": {
             // Default ("default" / null) sorts last so non-default lanes
             // surface first when ascending. Use the visible label for
@@ -351,6 +375,14 @@ export function Streams({
           )}{" "}
           streams
         </span>
+        {truncated && (
+          <span
+            className="rounded border border-amber-800 bg-amber-900/40 px-1.5 py-0.5 text-[10px] text-amber-400"
+            title={`This store has ${totalStreams} streams; the server returned the ${streams.length} busiest. The quietest ones are not in this list — filtering here won't bring them back.`}
+          >
+            showing {streams.length} of {totalStreams}
+          </span>
+        )}
         <input
           type="text"
           value={filter}
@@ -497,7 +529,11 @@ export function Streams({
                 </span>
                 <span
                   className="w-20 shrink-0 whitespace-nowrap text-right text-zinc-500"
-                  title={s.firstEvent ?? undefined}
+                  title={
+                    s.firstEvent
+                      ? new Date(s.firstEvent).toLocaleString()
+                      : undefined
+                  }
                 >
                   {relativeTime(s.firstEvent)}
                 </span>

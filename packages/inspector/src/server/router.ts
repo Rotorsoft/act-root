@@ -819,6 +819,13 @@ export const inspectorRouter = t.router({
    * event-name → count map, surfaced as `nameCounts` for future UI uses
    * (schema-evolution view, drill-through to legacy-event filters).
    * Sorting + limit stay client-side (the DB returns all matched streams).
+   *
+   * Returns `{ streams, total }` rather than a bare array (#1546). The
+   * page is ordered by event count descending, so the rows the cap
+   * discards are the *least* active streams — the population an
+   * operator hunting a quiet or stalled stream is looking for. `total`
+   * is the untruncated stream count, which lets the view say the list
+   * was cut instead of letting "absent" read as "does not exist".
    */
   streams: t.procedure
     .input(
@@ -845,19 +852,26 @@ export const inspectorRouter = t.router({
           .filter((p) => p.stream.startsWith("__autoclose__:"))
           .map((p) => p.stream.slice("__autoclose__:".length))
       );
-      return [...stats.entries()]
+      const rows = [...stats.entries()]
         .map(([stream, { head, tail, count, names }]) => {
           const isClosed = head.name === "__tombstone__";
           const tailIsSnapshot = tail?.name === "__snapshot__";
           return {
             stream,
             eventCount: count ?? 0,
-            lastEvent: String(head.created),
+            // ISO-8601, not `String(date)` (#1546). The Streams view
+            // sorts its Age / Last columns on these strings, and
+            // `Date.prototype.toString()` leads with the weekday
+            // abbreviation — a lexical sort over it orders Fri, Mon,
+            // Sat, … instead of chronologically. ISO sorts lexically in
+            // chronological order, parses everywhere, and keeps the
+            // wire format free of the server's locale and timezone.
+            lastEvent: head.created.toISOString(),
             // Earliest event id + created (ACT-639 tail opt-in). Lets the
             // Streams view render an "age" column and filter for stale
             // streams that haven't committed in N days. `tail` is always
             // present in this response because the query requested it.
-            firstEvent: tail ? String(tail.created) : null,
+            firstEvent: tail ? tail.created.toISOString() : null,
             currentVersion: head.version,
             isClosed,
             // Retired for good (#1535): the tombstone is the only event
@@ -878,8 +892,11 @@ export const inspectorRouter = t.router({
             nameCounts: names ?? {},
           };
         })
-        .sort((a, b) => b.eventCount - a.eventCount)
-        .slice(0, input?.limit ?? 100);
+        .sort((a, b) => b.eventCount - a.eventCount);
+      return {
+        streams: rows.slice(0, input?.limit ?? 100),
+        total: rows.length,
+      };
     }),
 
   /**

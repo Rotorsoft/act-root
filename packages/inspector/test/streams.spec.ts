@@ -7,7 +7,7 @@
  * `_v<n>` classification path is exercised.
  */
 import type { InMemoryStore } from "@rotorsoft/act";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveStore, inspectorRouter } from "../src/server/router.js";
 import { seed, seedSequence } from "./helpers.js";
 
@@ -45,7 +45,7 @@ async function seedFixture() {
 describe("streams", () => {
   it("returns per-stream aggregates sorted by event count desc", async () => {
     await seedFixture();
-    const rows = await caller.streams({ limit: 100 });
+    const { streams: rows } = await caller.streams({ limit: 100 });
     expect(rows).toHaveLength(2);
     expect(rows[0]!.stream).toBe("stream-a");
     expect(rows[0]!.eventCount).toBe(4);
@@ -57,14 +57,85 @@ describe("streams", () => {
     expect(rows[0]!.firstEvent).toBeTypeOf("string");
   });
 
-  it("returns an empty array for a fresh store", async () => {
-    expect(await caller.streams()).toEqual([]);
+  it("returns an empty page for a fresh store", async () => {
+    expect(await caller.streams()).toEqual({ streams: [], total: 0 });
   });
 
   it("honors `limit`", async () => {
     await seedFixture();
-    const rows = await caller.streams({ limit: 1 });
+    const { streams: rows } = await caller.streams({ limit: 1 });
     expect(rows).toHaveLength(1);
+  });
+
+  // The page is sorted by event count descending, so the rows the cap
+  // discards are the *least* active streams — exactly the population an
+  // operator hunting a quiet or stalled stream is looking for. Without
+  // an untruncated count the view cannot say the list was cut, and
+  // "absent from the list" reads as "does not exist".
+  it("reports the untruncated stream count alongside a capped page", async () => {
+    await seedSequence(store, "busy-1", [
+      { name: "Opened" },
+      { name: "Opened" },
+      { name: "Opened" },
+    ]);
+    await seedSequence(store, "busy-2", [
+      { name: "Opened" },
+      { name: "Opened" },
+    ]);
+    await seed(store, "quiet-one", "Opened");
+    const page = await caller.streams({ limit: 2 });
+    expect(page.streams.map((s) => s.stream)).toEqual(["busy-1", "busy-2"]);
+    expect(page.total).toBe(3);
+  });
+
+  it("reports a total equal to the page size when nothing was cut", async () => {
+    await seedFixture();
+    const page = await caller.streams({ limit: 100 });
+    expect(page.streams).toHaveLength(2);
+    expect(page.total).toBe(2);
+  });
+
+  // The Streams view sorts its Age / Last columns lexically on these
+  // strings. `Date.prototype.toString()` starts with the weekday
+  // abbreviation, so a lexical sort would order Fri, Mon, Sat, Sun,
+  // Thu, Tue, Wed instead of chronologically. ISO-8601 is the wire
+  // format: it sorts lexically in chronological order, parses
+  // everywhere, and doesn't depend on the server's locale or timezone.
+  describe("timestamp wire format", () => {
+    async function seedOnDates() {
+      // Fake `Date` only — faking the timer functions too would stall
+      // the store's own async plumbing and hang the commit.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        for (const [stream, when] of [
+          ["a-thu", "2026-08-20T12:00:00.000Z"],
+          ["b-mon", "2026-08-24T12:00:00.000Z"],
+          ["c-fri", "2026-08-28T12:00:00.000Z"],
+        ] as const) {
+          vi.setSystemTime(new Date(when));
+          await seed(store, stream, "Opened");
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it("sorts chronologically when `lastEvent` is compared lexically", async () => {
+      await seedOnDates();
+      const { streams } = await caller.streams();
+      const lexical = [...streams]
+        .sort((a, b) => a.lastEvent.localeCompare(b.lastEvent))
+        .map((s) => s.stream);
+      expect(lexical).toEqual(["a-thu", "b-mon", "c-fri"]);
+    });
+
+    it("emits ISO-8601 for `lastEvent` and `firstEvent`", async () => {
+      await seedOnDates();
+      const { streams } = await caller.streams();
+      const row = streams.find((s) => s.stream === "a-thu")!;
+      expect(row.lastEvent).toBe("2026-08-20T12:00:00.000Z");
+      expect(row.firstEvent).toBe("2026-08-20T12:00:00.000Z");
+    });
   });
 
   // Stream lifecycle affordances (#1174): closed / restarted / pruned /
@@ -72,7 +143,7 @@ describe("streams", () => {
   describe("lifecycle flags", () => {
     it("plain streams report every flag false", async () => {
       await seedFixture();
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       for (const row of rows) {
         expect(row.isClosed).toBe(false);
         expect(row.isRestarted).toBe(false);
@@ -85,7 +156,7 @@ describe("streams", () => {
     it("flags a tombstoned stream as closed", async () => {
       await seedSequence(store, "lc-closed", [{ name: "Opened" }]);
       await store.truncate([{ stream: "lc-closed" }]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-closed")!;
       expect(row.isClosed).toBe(true);
       expect(row.isRestarted).toBe(false);
@@ -98,7 +169,7 @@ describe("streams", () => {
         { name: "Closed" },
       ]);
       await store.truncate([{ stream: "lc-retired" }]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-retired")!;
       expect(row.isRetired).toBe(true);
       // Retired is a narrowing of closed, not an alternative to it.
@@ -116,7 +187,7 @@ describe("streams", () => {
         { name: "Opened" },
         { name: "__tombstone__" },
       ]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-guarded")!;
       expect(row.isClosed).toBe(true);
       expect(row.isRetired).toBe(false);
@@ -125,7 +196,7 @@ describe("streams", () => {
     it("does not flag a restarted stream as retired — its seed is a snapshot", async () => {
       await seedSequence(store, "lc-reseeded", [{ name: "Opened" }]);
       await store.truncate([{ stream: "lc-reseeded", snapshot: { n: 1 } }]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-reseeded")!;
       expect(row.isRetired).toBe(false);
       expect(row.isRestarted).toBe(true);
@@ -140,7 +211,7 @@ describe("streams", () => {
         { stream: "lc-restarted", snapshot: { count: 2 } },
       ]);
       await seed(store, "lc-restarted", "Opened", {}, 0);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-restarted")!;
       expect(row.isRestarted).toBe(true);
       expect(row.isPruned).toBe(false);
@@ -157,7 +228,7 @@ describe("streams", () => {
       await store.truncate([
         { stream: "lc-pruned", before: new Date(Date.now() + 60_000) },
       ]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-pruned")!;
       expect(row.isPruned).toBe(true);
       expect(row.isRestarted).toBe(false);
@@ -175,7 +246,7 @@ describe("streams", () => {
       await store.subscribe([
         { stream: "__autoclose__:lc-scheduled", source: "lc-scheduled" },
       ]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-scheduled")!;
       expect(row.closeScheduled).toBe(true);
     });
@@ -186,7 +257,7 @@ describe("streams", () => {
         { stream: "__autoclose__:lc-done", source: "lc-done" },
       ]);
       await store.truncate([{ stream: "lc-done" }]);
-      const rows = await caller.streams({ limit: 100 });
+      const { streams: rows } = await caller.streams({ limit: 100 });
       const row = rows.find((r) => r.stream === "lc-done")!;
       expect(row.isClosed).toBe(true);
       expect(row.closeScheduled).toBe(false);
