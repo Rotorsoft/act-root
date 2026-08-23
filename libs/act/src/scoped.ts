@@ -25,7 +25,14 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Cache, Committed, Schemas, Store } from "./types/index.js";
+import type {
+  Actor,
+  Cache,
+  Committed,
+  IAct,
+  Schemas,
+  Store,
+} from "./types/index.js";
 
 /** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
 export type Scoped = {
@@ -85,4 +92,41 @@ export function run_reacting<T>(
 /** The event being reacted to, or `undefined` outside a handler. @internal */
 export function current_reacting(): Committed<Schemas, string> | undefined {
   return reacting.getStore();
+}
+
+/**
+ * Everything a reaction handler runs inside: the `IAct` facade it is handed
+ * as its third argument, and the triggering-event context that every dispatch
+ * made within it resolves — including one through a captured `app`.
+ *
+ * Built here rather than in the dispatcher so the dispatcher never has to
+ * know how either half works; it receives this whole and calls it.
+ *
+ * @internal
+ */
+export type ReactionScope<
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+> = {
+  readonly app: IAct<TEvents, TActions, TActor>;
+  readonly run: <T>(
+    event: Committed<Schemas, string>,
+    fn: () => Promise<T>
+  ) => Promise<T>;
+};
+
+/**
+ * Assembles the reaction scope from the orchestrator's bound `IAct` methods.
+ *
+ * @internal
+ */
+export function make_reaction_scope<
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+>(
+  app: IAct<TEvents, TActions, TActor>
+): ReactionScope<TEvents, TActions, TActor> {
+  return { app, run: run_reacting };
 }

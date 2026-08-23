@@ -36,7 +36,11 @@ import {
   scan,
   walk_streams,
 } from "./internal/index.js";
-import { current_reacting, make_run_scoped, run_reacting } from "./scoped.js";
+import {
+  current_reacting,
+  make_reaction_scope,
+  make_run_scoped,
+} from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
@@ -644,12 +648,13 @@ export class Act<
       logger: this._logger,
       // The orchestrator owns ambient context; `build_handle` only asks for
       // the triggering event to be in scope while the handler runs.
-      run_reacting,
-      bound_do: this._bound_do,
-      bound_load: this._bound_load,
-      bound_query: this._bound_query,
-      bound_query_array: this._bound_query_array,
-      bound_forget: this._bound_forget,
+      reaction_scope: make_reaction_scope({
+        do: this._bound_do,
+        load: this._bound_load,
+        query: this._bound_query,
+        query_array: this._bound_query_array,
+        forget: this._bound_forget,
+      }),
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 

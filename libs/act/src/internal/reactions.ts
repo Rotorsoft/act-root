@@ -5,8 +5,8 @@
  * Reaction dispatch — what runs inside the drain pipeline once `run_drain_cycle`
  * has fetched events for a leased stream. Two shapes:
  *
- * - per-event `handle`: walks payloads sequentially, installing the triggering
- *   event as ambient reaction context so `action()` threads `reactingTo`
+ * - per-event `handle`: walks payloads sequentially, running each handler
+ *   inside the reaction scope so `action()` threads `reactingTo`
  * - bulk `handle_batch`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
@@ -16,6 +16,7 @@
  * @internal
  */
 
+import type { ReactionScope } from "../scoped.js";
 import {
   type Actor,
   type BatchHandler,
@@ -35,9 +36,8 @@ import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
- * Dependencies a reaction handler needs from the orchestrator: the logger
- * for retry/error breadcrumbs, plus the bound `IAct` methods that the scoped
- * proxy hands to user reaction code.
+ * What the dispatcher needs from the orchestrator: a logger for retry and
+ * error breadcrumbs, and the scope a handler runs inside.
  *
  * @internal
  */
@@ -47,21 +47,12 @@ export type ReactionDeps<
   TActor extends Actor = Actor,
 > = {
   readonly logger: Logger;
-  readonly bound_do: IAct<TEvents, TActions, TActor>["do"];
-  readonly bound_load: IAct<TEvents, TActions, TActor>["load"];
-  readonly bound_query: IAct<TEvents, TActions, TActor>["query"];
-  readonly bound_query_array: IAct<TEvents, TActions, TActor>["query_array"];
-  readonly bound_forget: IAct<TEvents, TActions, TActor>["forget"];
   /**
-   * Runs `fn` with `event` installed as the triggering-event context, so a
-   * dispatch made anywhere inside the handler can resolve it. Injected by the
-   * orchestrator, like {@link DrainDeps.run_scoped} — how the context is
-   * carried is not this module's business.
+   * What a handler runs inside — its `IAct` facade and its triggering-event
+   * context — assembled by the orchestrator. How either half works is not
+   * this module's business; it receives the scope whole and calls it.
    */
-  readonly run_reacting: <T>(
-    event: Committed<Schemas, string>,
-    fn: () => Promise<T>
-  ) => Promise<T>;
+  readonly reaction_scope: ReactionScope<TEvents, TActions, TActor>;
 };
 
 /**
@@ -129,15 +120,7 @@ export function build_handle<
   TActions extends Schemas,
   TActor extends Actor = Actor,
 >(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
-  const {
-    logger,
-    bound_do,
-    bound_load,
-    bound_query,
-    bound_query_array,
-    bound_forget,
-    run_reacting,
-  } = deps;
+  const { logger, reaction_scope } = deps;
   return async (lease, payloads) => {
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
 
@@ -162,14 +145,6 @@ export function build_handle<
         `Retrying ${stream}@${payloads.at(0)!.event.id} (${lease.retry}).`
       );
 
-    const scoped_app: IAct<TEvents, TActions, TActor> = {
-      do: bound_do,
-      load: bound_load,
-      query: bound_query,
-      query_array: bound_query_array,
-      forget: bound_forget,
-    };
-
     for (let i = 0; i < payloads.length; i++) {
       const payload = payloads[i];
       const { event, handler } = payload;
@@ -178,8 +153,8 @@ export function build_handle<
         // unwind with the handler so it never reaches the drain cycle, and
         // work a handler started without awaiting has to resume into its
         // own event's frame.
-        await run_reacting(event as Committed<Schemas, string>, () =>
-          handler(event, stream, scoped_app)
+        await reaction_scope.run(event as Committed<Schemas, string>, () =>
+          handler(event, stream, reaction_scope.app)
         );
         if (last_index_of.get(event.id) === i) {
           at = event.id;
