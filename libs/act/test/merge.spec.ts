@@ -1,4 +1,4 @@
-import { merge_event_register } from "../src/internal/merge.js";
+import { merge_event_register } from "../src/builders/merge.js";
 
 describe("merge_event_register", () => {
   it("merges reactions from source into target for matching event names", () => {

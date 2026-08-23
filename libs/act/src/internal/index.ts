@@ -35,9 +35,7 @@ export {
   in_autoclose_window,
   next_window_open,
 } from "./autoclose-window.js";
-export type { EventLaneSet } from "./build-classify.js";
-export { ALL_LANES, classify_registry } from "./build-classify.js";
-export { reaction_on, register_lane } from "./builder-utils.js";
+export { compute_backoff_delay } from "./backoff.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
@@ -69,20 +67,22 @@ export {
   resolveSettleConfig,
   resolveShutdownConfig,
 } from "./config.js";
+export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export { DeferSignal } from "./defer-signal.js";
 export {
-  type RefLike,
-  register_disposer,
-  register_weak_disposer,
-  run_disposers,
-} from "./disposers.js";
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolve_defer_at,
+} from "./defer-config.js";
+export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
   type Handle,
   type HandleBatch,
+  type HandleResult,
 } from "./drain-cycle.js";
 export type { EsOps, PatchFn } from "./event-sourcing.js";
 export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
@@ -91,17 +91,10 @@ export {
   deprecated_event_names,
 } from "./event-versions.js";
 export {
-  _this_,
-  merge_event_register,
-  merge_projection,
-  register_state,
-} from "./merge.js";
-export {
   FOLD_RESET,
   make_fold_handler,
   type ResettableBatchHandler,
 } from "./projection-fold.js";
-export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
   type EventGate,

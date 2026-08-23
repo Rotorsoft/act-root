@@ -11,7 +11,7 @@
  *       trips (event-sourcing.ts `action()` → `void snap(last)`).
  *   (b) batched projection replay — a static-target projection with
  *       `.batch(fn)` receives every claimed event in ONE call, not one
- *       call per event (reactions.ts `build_handle_batch`).
+ *       call per event (reaction-builder.ts `build_handle_batch`).
  *   (c) cache `after: cached.event_id` — a cache-warm load queries the
  *       store with `after` set and replays zero pre-cache rows
  *       (event-sourcing.ts `load()` query options).

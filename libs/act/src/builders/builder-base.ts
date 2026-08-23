@@ -11,7 +11,7 @@
  *
  * These live in the builders layer (not `internal/`) because they reference
  * `Projection`, a builders-layer type; the runtime that fills them
- * (`reaction_on`, `register_lane`) stays in `internal/builder-utils.ts`.
+ * (`reaction_on`, `register_lane`) stays in `builder-utils.ts`.
  *
  * `withState` and `withLane` are intentionally **not** in `BuilderBase`: they
  * *widen* the generics (return a different instantiation), which a shared

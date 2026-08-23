@@ -15,7 +15,7 @@ import {
   register_disposer,
   register_weak_disposer,
   run_disposers,
-} from "../src/internal/disposers.js";
+} from "../src/disposers.js";
 
 /** A `WeakRef` whose target can be released on command. */
 const fake_ref = <T extends object>(target: T) => {

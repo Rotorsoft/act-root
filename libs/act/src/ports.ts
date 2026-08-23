@@ -1,9 +1,9 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
-import { register_disposer, run_disposers } from "./internal/disposers.js";
+import { register_disposer, run_disposers } from "./disposers.js";
+import { current_ports } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -12,14 +12,11 @@ import type {
   Store,
 } from "./types/index.js";
 
-/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
-export type Scoped = {
-  readonly store: Store;
-  readonly cache: Cache;
-};
-
-/** AsyncLocalStorage carrying the active Act's ports. Internal — not re-exported. */
-export const scoped = new AsyncLocalStorage<Scoped>();
+// `Scoped` is the type of the public `ActOptions.scoped` bag, so it stays
+// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
+// it was only ever reachable because `index.ts` star-exports this module,
+// and its own doc-comment already declared it internal.
+export type { Scoped } from "./scoped.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -188,7 +185,7 @@ const _store = port(function store(adapter?: Store): Store {
 });
 
 export const store = ((adapter?: Store): Store => {
-  return scoped.getStore()?.store ?? _store(adapter);
+  return current_ports()?.store ?? _store(adapter);
 }) as (adapter?: Store) => Store;
 
 /**
@@ -209,7 +206,7 @@ const _cache = port(function cache(adapter?: Cache) {
 });
 
 export const cache = ((adapter?: Cache): Cache => {
-  return scoped.getStore()?.cache ?? _cache(adapter);
+  return current_ports()?.cache ?? _cache(adapter);
 }) as (adapter?: Cache) => Cache;
 
 // ---------------------------------------------------------------------------
@@ -217,7 +214,7 @@ export const cache = ((adapter?: Cache): Cache => {
 // ---------------------------------------------------------------------------
 
 /**
- * Registered cleanup functions live in `internal/disposers.ts`, which holds
+ * Registered cleanup functions live in `disposers.ts`, which holds
  * lifetime-bound entries weakly so registering never pins its target for the
  * process lifetime (#1441). The public surface here is unchanged.
  */

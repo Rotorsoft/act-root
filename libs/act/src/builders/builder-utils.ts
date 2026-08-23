@@ -12,6 +12,12 @@
  * @internal
  */
 
+import {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolveReactionConfig,
+} from "../internal/index.js";
 import { DEFAULT_LANE } from "../ports.js";
 import type {
   Committed,
@@ -23,12 +29,6 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
-import { resolveReactionConfig } from "./config.js";
-import {
-  assert_defer_when,
-  type DeferSchedule,
-  make_deferred,
-} from "./defer-config.js";
 import { _this_ } from "./merge.js";
 
 /**

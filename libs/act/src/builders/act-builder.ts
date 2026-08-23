@@ -14,16 +14,11 @@ import {
   IDENTITY_GATE,
   make_fold_handler,
   make_gate,
-  merge_event_register,
-  merge_projection,
   type PatchFn,
   pii_fields,
   pii_split,
   pii_strip,
   type ResettableBatchHandler,
-  reaction_on,
-  register_lane,
-  register_state,
   resolveActConfig,
   resolveAutocloseConfig,
   resolveLaneConfig,
@@ -43,6 +38,12 @@ import type {
   State,
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
+import { reaction_on, register_lane } from "./builder-utils.js";
+import {
+  merge_event_register,
+  merge_projection,
+  register_state,
+} from "./merge.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 

@@ -18,6 +18,7 @@
  * @internal
  */
 
+import type { StaticTarget } from "../internal/index.js";
 import type {
   Registry,
   Schema,
@@ -25,7 +26,6 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import type { StaticTarget } from "./correlate-cycle.js";
 
 /**
  * Classification result. Returned by {@link classify_registry}; consumed

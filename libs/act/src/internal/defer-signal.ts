@@ -4,7 +4,7 @@
  *
  * The control-flow signal a reaction handler throws to *defer* itself
  * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
- * ({@link "reactions".build_handle}) catches it and produces a
+ * ({@link "reaction-builder".build_handle}) catches it and produces a
  * `HandleResult.defer` — the triggering events stay pending (watermark not
  * advanced), `retry` is not bumped, and the drain re-visits the stream at the
  * resolved due-time.

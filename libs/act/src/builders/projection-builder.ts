@@ -9,11 +9,7 @@
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import {
-  _this_,
-  type FoldConfig,
-  resolveFoldConfig,
-} from "../internal/index.js";
+import { type FoldConfig, resolveFoldConfig } from "../internal/index.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -26,6 +22,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
+import { _this_ } from "./merge.js";
 
 /**
  * A self-contained projection grouping read-model update handlers.

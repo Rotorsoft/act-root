@@ -1,32 +1,36 @@
 import EventEmitter from "node:events";
 import {
   ALL_LANES,
+  classify_registry,
+  type EventLaneSet,
+} from "./builders/build-classify.js";
+import {
+  build_handle,
+  build_handle_batch,
+} from "./builders/reaction-builder.js";
+import { register_weak_disposer } from "./disposers.js";
+import {
   type AuditDeps,
   audit,
   bare_patch,
   build_drain,
   build_es,
-  build_handle,
-  build_handle_batch,
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
   CorrelateCycle,
-  classify_registry,
   close_correlation,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
   type EsOps,
-  type EventLaneSet,
   FOLD_RESET,
   type Handle,
   type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   type ResettableBatchHandler,
-  register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -36,18 +40,16 @@ import {
   scan,
   walk_streams,
 } from "./internal/index.js";
+import {
+  current_reacting,
+  make_reaction_scope,
+  make_run_scoped,
+} from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import {
-  cache,
-  log,
-  type Scoped,
-  scoped,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -638,9 +640,7 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     validate_only_lanes(options, lanes);
-    this._scoped = options.scoped
-      ? (fn) => scoped.run(options.scoped!, fn)
-      : (fn) => fn();
+    this._scoped = make_run_scoped(options.scoped);
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -650,11 +650,15 @@ export class Act<
     // their original handler reference. So the dispatcher is PII-unaware.
     this._handle = build_handle<TEvents, TActions, TActor>({
       logger: this._logger,
-      bound_do: this._bound_do,
-      bound_load: this._bound_load,
-      bound_query: this._bound_query,
-      bound_query_array: this._bound_query_array,
-      bound_forget: this._bound_forget,
+      // The orchestrator owns ambient context; `build_handle` only asks for
+      // the triggering event to be in scope while the handler runs.
+      reaction_scope: make_reaction_scope({
+        do: this._bound_do,
+        load: this._bound_load,
+        query: this._bound_query,
+        query_array: this._bound_query_array,
+        forget: this._bound_forget,
+      }),
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
@@ -1203,13 +1207,23 @@ export class Act<
     payload: Readonly<TActions[TKey]>,
     options?: DoOptions<TEvents>
   ) {
+    // Resolve the ambient reaction context HERE, at the orchestrator
+    // boundary, and hand `action()` an explicit value — a dispatch made
+    // anywhere inside a reaction handler threads the chain whichever `IAct`
+    // reference made the call (#1541), while `internal/` stays free of
+    // ambient reads. An explicitly-passed `reactingTo` still wins.
+    const reacting_to = options?.reactingTo ?? current_reacting();
+    const do_options =
+      reacting_to === options?.reactingTo
+        ? options
+        : { ...options, reactingTo: reacting_to };
     return this._scoped(async () => {
       const snapshots = await this._es.action(
         this.registry.actions[action],
         action,
         target,
         payload,
-        options
+        do_options
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions

@@ -25,7 +25,8 @@ import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act } from "../src/builders/act-builder.js";
 import { state } from "../src/builders/state-builder.js";
-import { cache, scoped, store } from "../src/ports.js";
+import { cache, store } from "../src/ports.js";
+import { scoped } from "../src/scoped.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
