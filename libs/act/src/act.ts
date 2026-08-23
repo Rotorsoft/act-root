@@ -726,9 +726,9 @@ export class Act<
    * One DrainController per active lane. The implicit "default" lane is
    * always present unless onlyLanes excludes it. Each controller filters
    * its claim() by its lane name; the legacy single-controller path is the
-   * active set === { "default" } case with `lane: undefined` deps so
-   * claim() doesn't filter (preserves the single-lane SQL planner shape
-   * for apps that never call withLane).
+   * no-lane-declared case with `lane: undefined` deps so claim() doesn't
+   * filter (preserves the single-lane SQL planner shape for apps that never
+   * call withLane).
    */
   private _build_drain_controllers(
     options: ActOptions,
@@ -742,8 +742,12 @@ export class Act<
     const active_lanes = only_set
       ? all_lanes.filter((n) => only_set.has(n))
       : all_lanes;
-    const single_default_lane =
-      active_lanes.length === 1 && active_lanes[0] === "default";
+    // Keyed on the DECLARED universe, not the active slice: a worker
+    // narrowed to `onlyLanes: ["default"]` still shares the store with
+    // peers draining other lanes, and `claim`'s lane argument is an
+    // optional filter — dropping it there would claim every lane's
+    // streams (#1545).
+    const single_default_lane = lanes.length === 0;
     const controllers = new Map<
       string,
       DrainController<TEvents, TActions, TSchemaReg>

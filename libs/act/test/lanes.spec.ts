@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { z } from "zod";
 import { act, dispose, log, slice, state, ZodEmpty } from "../src/index.js";
+import { sandbox } from "../src/test/sandbox.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
@@ -782,5 +783,113 @@ describe("lanes (ACT-1103, slice 1)", () => {
     releaseSlow();
     const result = await draining;
     expect(result.acked.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // #1545 — the single-lane collapse (`lane: undefined` on the controller,
+  // so `claim` applies NO lane filter) used to key on the ACTIVE lane set.
+  // A worker deployed with `onlyLanes: ["default"]` against an app that
+  // declares lanes produced active === ["default"], dropped the filter, and
+  // claimed every other lane's streams — running their handlers on the
+  // wrong (default) lease budget while the worker that owns the lane found
+  // nothing to do. The collapse now applies only when no lane was declared.
+  describe("onlyLanes keeps the claim lane filter (#1545)", () => {
+    const TwoTicks = state({ TwoTicks: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ SlowTick: ZodEmpty, DefaultTick: ZodEmpty })
+      .patch({
+        SlowTick: (_, s) => ({ count: s.count + 1 }),
+        DefaultTick: (_, s) => ({ count: s.count + 1 }),
+      })
+      .on({ slowTick: ZodEmpty })
+      .emit(() => ["SlowTick", {}])
+      .on({ defaultTick: ZodEmpty })
+      .emit(() => ["DefaultTick", {}])
+      .build();
+
+    const make_worker = () => {
+      const ran = { slow: 0, def: 0 };
+      const builder = act()
+        .withState(TwoTicks)
+        .withLane({ name: "slow", leaseMillis: 30_000 })
+        .on("SlowTick")
+        .do(async function slowHandler() {
+          ran.slow++;
+        })
+        .to({ target: "slow-out", lane: "slow" })
+        .on("DefaultTick")
+        .do(async function defaultHandler() {
+          ran.def++;
+        })
+        .to("default-out");
+      return { builder, ran };
+    };
+
+    it("a default-only worker never claims the slow lane's streams", async () => {
+      const { builder, ran } = make_worker();
+      const { app, dispose } = await sandbox(builder, {
+        actOptions: { onlyLanes: ["default"] },
+      });
+      const actor = { id: "a", name: "a" };
+      await app.do("slowTick", { stream: "src", actor }, {});
+      await app.do("defaultTick", { stream: "src", actor }, {});
+      await app.correlate();
+      const result = await app.drain();
+
+      expect(ran).toEqual({ slow: 0, def: 1 });
+      expect(result.acked.map((l) => l.stream)).toEqual(["default-out"]);
+      await dispose();
+    });
+
+    it("a slow-only worker never claims the default lane's streams", async () => {
+      const { builder, ran } = make_worker();
+      const { app, dispose } = await sandbox(builder, {
+        actOptions: { onlyLanes: ["slow"] },
+      });
+      const actor = { id: "a", name: "a" };
+      await app.do("slowTick", { stream: "src", actor }, {});
+      await app.do("defaultTick", { stream: "src", actor }, {});
+      await app.correlate();
+      const result = await app.drain();
+
+      expect(ran).toEqual({ slow: 1, def: 0 });
+      expect(result.acked.map((l) => l.stream)).toEqual(["slow-out"]);
+      await dispose();
+    });
+
+    it("a lane's streams are only claimed by the controller carrying its lease budget", async () => {
+      // The aggravating half of #1545: `defaults` is looked up by lane
+      // name and "default" can never carry a LaneConfig (declaring it is
+      // rejected as reserved), so the default-lane controller runs on the
+      // fallback budget. When it also claimed the slow lane's streams, a
+      // handler sized for the declared 30s budget ran under a 10s lease.
+      // The default controller now carries `lane: "default"`, so claim
+      // filters and the slow lane's streams reach only the controller that
+      // carries their budget.
+      type LaneController = {
+        lane: string | undefined;
+        lease_millis: number | undefined;
+      };
+      const read_controllers = (app: unknown) =>
+        (app as { _drain_controllers: Map<string, LaneController> })
+          ._drain_controllers;
+
+      const def_worker = await sandbox(make_worker().builder, {
+        actOptions: { onlyLanes: ["default"] },
+      });
+      const def_ctrls = read_controllers(def_worker.app);
+      expect([...def_ctrls.keys()]).toEqual(["default"]);
+      expect(def_ctrls.get("default")?.lane).toBe("default");
+      expect(def_ctrls.get("default")?.lease_millis).toBeUndefined();
+      await def_worker.dispose();
+
+      const slow_worker = await sandbox(make_worker().builder, {
+        actOptions: { onlyLanes: ["slow"] },
+      });
+      const slow_ctrls = read_controllers(slow_worker.app);
+      expect([...slow_ctrls.keys()]).toEqual(["slow"]);
+      expect(slow_ctrls.get("slow")?.lane).toBe("slow");
+      expect(slow_ctrls.get("slow")?.lease_millis).toBe(30_000);
+      await slow_worker.dispose();
+    });
   });
 });
