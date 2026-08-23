@@ -17,7 +17,6 @@
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import { reacting } from "../scoped.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -660,10 +659,10 @@ export async function action<
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
-  // Inside a reaction handler the triggering event is ambient, so a
-  // handler that dispatches through a captured `app` rather than the
-  // injected one still threads the chain. An explicit option wins.
-  const reactingTo = options?.reactingTo ?? reacting.getStore();
+  // Resolved by the caller. `Act.do` supplies the ambient reaction context
+  // when a handler dispatched without naming one; nothing is read from
+  // outside this call.
+  const reactingTo = options?.reactingTo;
   const correlator = options?.correlator ?? default_correlator;
 
   const validated = validate(action as string, payload, me.actions[action]);

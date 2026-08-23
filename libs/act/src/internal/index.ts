@@ -17,12 +17,6 @@
  * @internal
  */
 
-export {
-  type RefLike,
-  register_disposer,
-  register_weak_disposer,
-  run_disposers,
-} from "../disposers.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,

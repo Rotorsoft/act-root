@@ -1,4 +1,5 @@
 import EventEmitter from "node:events";
+import { register_weak_disposer } from "./disposers.js";
 import {
   ALL_LANES,
   type AuditDeps,
@@ -26,7 +27,6 @@ import {
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   type ResettableBatchHandler,
-  register_weak_disposer,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -36,6 +36,7 @@ import {
   scan,
   walk_streams,
 } from "./internal/index.js";
+import { reacting } from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
@@ -650,6 +651,9 @@ export class Act<
     // their original handler reference. So the dispatcher is PII-unaware.
     this._handle = build_handle<TEvents, TActions, TActor>({
       logger: this._logger,
+      // The orchestrator owns ambient context; `build_handle` only asks for
+      // the triggering event to be in scope while the handler runs.
+      with_reaction_context: (event, fn) => reacting.run(event, fn),
       bound_do: this._bound_do,
       bound_load: this._bound_load,
       bound_query: this._bound_query,
@@ -1199,13 +1203,23 @@ export class Act<
     payload: Readonly<TActions[TKey]>,
     options?: DoOptions<TEvents>
   ) {
+    // Resolve the ambient reaction context HERE, at the orchestrator
+    // boundary, and hand `action()` an explicit value — a dispatch made
+    // anywhere inside a reaction handler threads the chain whichever `IAct`
+    // reference made the call (#1541), while `internal/` stays free of
+    // ambient reads. An explicitly-passed `reactingTo` still wins.
+    const reacting_to = options?.reactingTo ?? reacting.getStore();
+    const do_options =
+      reacting_to === options?.reactingTo
+        ? options
+        : { ...options, reactingTo: reacting_to };
     return this._scoped(async () => {
       const snapshots = await this._es.action(
         this.registry.actions[action],
         action,
         target,
         payload,
-        options
+        do_options
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions

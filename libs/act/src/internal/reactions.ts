@@ -16,7 +16,6 @@
  * @internal
  */
 
-import { reacting } from "../scoped.js";
 import {
   type Actor,
   type BatchHandler,
@@ -53,6 +52,15 @@ export type ReactionDeps<
   readonly bound_query: IAct<TEvents, TActions, TActor>["query"];
   readonly bound_query_array: IAct<TEvents, TActions, TActor>["query_array"];
   readonly bound_forget: IAct<TEvents, TActions, TActor>["forget"];
+  /**
+   * Runs `fn` with `event` installed as the triggering-event context, so a
+   * dispatch made anywhere inside the handler can resolve it. Injected by the
+   * orchestrator: how that context is carried is not this module's business.
+   */
+  readonly with_reaction_context: <T>(
+    event: Committed<Schemas, string>,
+    fn: () => Promise<T>
+  ) => Promise<T>;
 };
 
 /**
@@ -127,6 +135,7 @@ export function build_handle<
     bound_query,
     bound_query_array,
     bound_forget,
+    with_reaction_context,
   } = deps;
   return async (lease, payloads) => {
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
@@ -168,7 +177,7 @@ export function build_handle<
         // unwind with the handler so it never reaches the drain cycle, and
         // work a handler started without awaiting has to resume into its
         // own event's frame.
-        await reacting.run(event as Committed<Schemas, string>, () =>
+        await with_reaction_context(event as Committed<Schemas, string>, () =>
           handler(event, stream, scoped_app)
         );
         if (last_index_of.get(event.id) === i) {
