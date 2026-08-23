@@ -28,10 +28,10 @@
     {
       "name": "drain: correlate+drain 50 events",
       "samples": 50,
-      "p50_ms": 3.6843,
-      "p95_ms": 5.3046,
-      "mean_ms": 3.9358,
-      "ops_per_sec": 254,
+      "p50_ms": 5.645,
+      "p95_ms": 8.1276,
+      "mean_ms": 6.0303,
+      "ops_per_sec": 165,
       "effective_per_sec": 12700
     },
     {
