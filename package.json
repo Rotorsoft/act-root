@@ -62,7 +62,7 @@
     "@rotorsoft/act-pg": "workspace:^"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.8",
+    "@biomejs/biome": "^2.5.9",
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
     "@fast-check/vitest": "^0.4.1",
@@ -79,9 +79,9 @@
     "@types/chance": "^1.1.8",
     "@types/minimist": "^1.2.5",
     "@types/node": "^25.9.5",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "chance": "^1.1.13",
-    "concurrently": "^10.0.4",
+    "concurrently": "^10.0.5",
     "fast-check": "^4.9.0",
     "lint-staged": "^17.3.0",
     "semantic-release": "^25.0.9",
@@ -91,8 +91,8 @@
     "tsup": "^8.5.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
