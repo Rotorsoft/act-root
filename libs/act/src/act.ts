@@ -892,6 +892,14 @@ export class Act<
       cd: this._cd,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      // Every lane a controller can exist for, so correlate can reroute a
+      // dynamic resolution that names one that doesn't (#1564). Declared,
+      // not active: `onlyLanes` shrinks this process's controllers, but a
+      // lane another process claims is still a valid destination.
+      declared_lanes: new Set<string>([
+        "default",
+        ...this._lanes.map((l) => l.name),
+      ]),
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },

@@ -35,6 +35,7 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
+import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
 /**
@@ -168,6 +169,22 @@ function budget_exhausted<TEvents extends Schemas>(
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
 
+/** Report a misrouted resolution once per offending declaration. */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  report_once(
+    seen,
+    `${stream}|${handler}|${event}`,
+    `Reaction "${handler}" on "${event}" resolved to target "${stream}", which a projection already serves. ` +
+      "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+      "Skipping it. The equivalent static `.to({ target })` is rejected at build; a dynamic resolver's target is only knowable here."
+  );
+}
+
 /**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
@@ -181,31 +198,6 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
-/**
- * Report a misrouted resolution once per offending declaration.
- *
- * `seen` belongs to the calling controller and is passed in: `internal/` holds
- * no module state, so a resolver firing for every matching event still reports
- * once without this module remembering anything between calls.
- */
-function warn_misrouted(
-  seen: Set<string>,
-  stream: string,
-  handler: string,
-  event: string
-): void {
-  const key = `${stream}|${handler}|${event}`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(
-    new Error(
-      `Reaction "${handler}" on "${event}" resolved to target "${stream}", which a projection already serves. ` +
-        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
-        "Skipping it. The equivalent static `.to({ target })` is rejected at build; a dynamic resolver's target is only knowable here."
-    )
-  );
-}
-
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,

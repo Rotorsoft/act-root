@@ -31,6 +31,7 @@ import type {
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
+import { report_once } from "./report-once.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -181,12 +182,71 @@ export type CorrelateCycleDeps<
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
   max_subscribed_streams: number;
+  /**
+   * Every lane a controller exists for — `"default"` plus each
+   * `.withLane({name})`. Injected rather than derived: `internal/` receives
+   * what it needs. A resolution naming anything outside this set has no
+   * claimant, so correlate reroutes it here (#1564).
+   */
+  declared_lanes: ReadonlySet<string>;
   run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
   lease_millis?: number;
 };
+
+/**
+ * A dynamic resolution named a lane no controller claims (#1564).
+ *
+ * Reroutes to `"default"` rather than skipping: the target is legitimate and
+ * only its lane is wrong, so stranding the stream at watermark `-1` — where
+ * no health surface can see it — loses work that the operator never asked to
+ * lose. `"default"` is where the reaction would have run had the lane been
+ * omitted, which makes this the smallest correction that keeps it running.
+ */
+function report_undeclared_lane(
+  seen: Set<string>,
+  target: string,
+  lane: string,
+  declared: ReadonlySet<string>
+): void {
+  report_once(
+    seen,
+    `lane|${target}|${lane}`,
+    `Reaction resolved target "${target}" onto undeclared lane "${lane}". ` +
+      `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
+      'No controller claims it, so the stream would never drain — running it on "default" instead. ' +
+      "The equivalent static `.to({ lane })` is rejected at build; a dynamic resolver's lane is only knowable here."
+  );
+}
+
+/**
+ * Two resolutions disagreed on one target's lane (#1567).
+ *
+ * Reported, not corrected. The lane a target already carries is the one its
+ * in-flight leases were taken under, so re-laning it mid-run would move a
+ * stream out from under a worker holding it; re-laning is restart-driven by
+ * design. What the operator loses meanwhile is lane discipline — the losing
+ * reaction runs inside the winner's `leaseMillis` and `streamLimit` — and
+ * under `onlyLanes` sharding, a process provisioned for the losing lane never
+ * runs it at all.
+ */
+function report_lane_conflict(
+  seen: Set<string>,
+  target: string,
+  kept: string,
+  dropped: string
+): void {
+  report_once(
+    seen,
+    `conflict|${target}|${kept}|${dropped}`,
+    `Stream "${target}" has conflicting lane assignments ("${kept}" vs "${dropped}") from two dynamic resolutions at equal priority. ` +
+      `Keeping "${kept}", the lane it was first discovered on — re-laning a live stream would move it out from under a worker holding its lease. ` +
+      `The reaction resolving "${dropped}" runs inside the "${kept}" lane's budget, and a process restricted to "${dropped}" via onlyLanes never runs it. ` +
+      "The equivalent static declaration is rejected at build; align the resolvers, or split the target."
+  );
+}
 
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -275,12 +335,21 @@ export class CorrelateCycle<
    * public option) so tests can shrink it; defaults otherwise.
    */
   private readonly _cold_start_back_scan: number;
+  /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
+  private readonly _declared_lanes: ReadonlySet<string>;
+  /**
+   * Offending declarations already reported, so a resolver firing for every
+   * matching event reports once. Owned by the instance rather than the
+   * module: `internal/` holds no module-level state.
+   */
+  private readonly _reported = new Set<string>();
 
   constructor({
     registry,
     static_targets,
     cd,
     max_subscribed_streams,
+    declared_lanes,
     run_scoped,
     on_init,
     on_init_async,
@@ -291,6 +360,7 @@ export class CorrelateCycle<
     this._key = registry_key(registry.events);
     this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
+    this._declared_lanes = declared_lanes;
     this._static_targets = static_targets;
     this._cd = cd;
     this._on_init = on_init;
@@ -533,6 +603,19 @@ export class CorrelateCycle<
                 ? reaction.resolver(event)
                 : reaction.resolver;
             if (!resolved) continue;
+            // A lane no controller claims has no claimant, so the stream
+            // would sit at watermark -1 forever. Reroute to "default" and
+            // say so (#1564) — the build-time guard sees only static lanes.
+            let lane = resolved.lane;
+            if (lane !== undefined && !this._declared_lanes.has(lane)) {
+              report_undeclared_lane(
+                this._reported,
+                resolved.target,
+                lane,
+                this._declared_lanes
+              );
+              lane = undefined;
+            }
             // Raise priority/lane only when this resolution beats what the
             // target was last subscribed at, so the store's `GREATEST` upsert
             // runs — the documented runtime `max()` invariant, which the
@@ -545,7 +628,7 @@ export class CorrelateCycle<
             const priority = resolved.priority ?? 0;
             const upgraded = !recorded || priority > recorded.floor;
             const carried = upgraded
-              ? { priority, lane: resolved.lane }
+              ? { priority, lane }
               : { priority: recorded.priority, lane: recorded.lane };
             const entry = correlated.get(resolved.target) || {
               source: resolved.source,
@@ -554,6 +637,22 @@ export class CorrelateCycle<
               upgraded,
               correlated_at: undefined,
             };
+            // Two resolutions wanting different lanes for one target, with
+            // neither outranking the other, is what the build-time guard
+            // rejects for static declarations (#1567). Priority still decides
+            // below; this only reports the tie the operator can't otherwise
+            // see. Compare against what this target already carries, whether
+            // that came from an earlier reaction in this scan or a past one.
+            const held = correlated.has(resolved.target)
+              ? entry.lane
+              : recorded?.lane;
+            if (
+              held !== undefined &&
+              lane !== undefined &&
+              held !== lane &&
+              priority === entry.priority
+            )
+              report_lane_conflict(this._reported, resolved.target, held, lane);
             // Multiple reactions targeting the same stream within a
             // single correlate scan — keep the max priority, and carry the
             // winning reaction's lane so the highest-priority reaction sets

@@ -289,6 +289,11 @@ act()
   .build();
 ```
 
+A **dynamic** `.to(fn)` resolver is a function until an event arrives, so the build-time scan has nothing to inspect. Correlate applies the same rules where the answer finally exists:
+
+- Two dynamic resolutions disagreeing on one target's lane at equal priority keep the lane the target was first discovered on, and log an error naming both. The lane isn't corrected mid-run — a live stream's lane is the one its in-flight leases were taken under, and re-laning is restart-driven. Until you align the resolvers, the losing reaction runs inside the winner's `leaseMillis` and `streamLimit`, and a process restricted to the losing lane via `onlyLanes` never runs it at all.
+- A resolution naming an **undeclared** lane is rerouted to `default` and logged. No controller claims an undeclared lane, so the stream would otherwise sit at watermark `-1` forever, invisible to `blocked_streams()` and every other health surface. Note that `TLanes` already rejects an undeclared lane at compile time for both resolver forms, so this backstop only fires when the types are bypassed — JavaScript callers, a cast, or a helper whose return type widens `lane` to `string`.
+
 ### `onlyLanes` — process-per-lane deployment
 
 `ActOptions.onlyLanes` restricts which lanes' controllers boot in this process. With `onlyLanes: ["webhooks"]`, only the webhook controller runs; other declared lanes are silent. Workers in different processes coordinate via the store's `SKIP LOCKED` semantics, so the same image can be deployed as one-process-per-lane without code changes.

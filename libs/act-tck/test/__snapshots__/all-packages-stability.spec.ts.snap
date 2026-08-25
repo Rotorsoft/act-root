@@ -1602,6 +1602,14 @@ export class Act<
       cd: this._cd,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      // Every lane a controller can exist for, so correlate can reroute a
+      // dynamic resolution that names one that doesn't (#1564). Declared,
+      // not active: \`onlyLanes\` shrinks this process's controllers, but a
+      // lane another process claims is still a valid destination.
+      declared_lanes: new Set<string>([
+        "default",
+        ...this._lanes.map((l) => l.name),
+      ]),
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
@@ -7941,6 +7949,7 @@ import type {
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
+import { report_once } from "./report-once.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -8091,12 +8100,71 @@ export type CorrelateCycleDeps<
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
   max_subscribed_streams: number;
+  /**
+   * Every lane a controller exists for — \`"default"\` plus each
+   * \`.withLane({name})\`. Injected rather than derived: \`internal/\` receives
+   * what it needs. A resolution naming anything outside this set has no
+   * claimant, so correlate reroutes it here (#1564).
+   */
+  declared_lanes: ReadonlySet<string>;
   run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
   lease_millis?: number;
 };
+
+/**
+ * A dynamic resolution named a lane no controller claims (#1564).
+ *
+ * Reroutes to \`"default"\` rather than skipping: the target is legitimate and
+ * only its lane is wrong, so stranding the stream at watermark \`-1\` — where
+ * no health surface can see it — loses work that the operator never asked to
+ * lose. \`"default"\` is where the reaction would have run had the lane been
+ * omitted, which makes this the smallest correction that keeps it running.
+ */
+function report_undeclared_lane(
+  seen: Set<string>,
+  target: string,
+  lane: string,
+  declared: ReadonlySet<string>
+): void {
+  report_once(
+    seen,
+    \`lane|\${target}|\${lane}\`,
+    \`Reaction resolved target "\${target}" onto undeclared lane "\${lane}". \` +
+      \`Declared lanes: \${[...declared].map((l) => \`"\${l}"\`).join(", ")}. \` +
+      'No controller claims it, so the stream would never drain — running it on "default" instead. ' +
+      "The equivalent static \`.to({ lane })\` is rejected at build; a dynamic resolver's lane is only knowable here."
+  );
+}
+
+/**
+ * Two resolutions disagreed on one target's lane (#1567).
+ *
+ * Reported, not corrected. The lane a target already carries is the one its
+ * in-flight leases were taken under, so re-laning it mid-run would move a
+ * stream out from under a worker holding it; re-laning is restart-driven by
+ * design. What the operator loses meanwhile is lane discipline — the losing
+ * reaction runs inside the winner's \`leaseMillis\` and \`streamLimit\` — and
+ * under \`onlyLanes\` sharding, a process provisioned for the losing lane never
+ * runs it at all.
+ */
+function report_lane_conflict(
+  seen: Set<string>,
+  target: string,
+  kept: string,
+  dropped: string
+): void {
+  report_once(
+    seen,
+    \`conflict|\${target}|\${kept}|\${dropped}\`,
+    \`Stream "\${target}" has conflicting lane assignments ("\${kept}" vs "\${dropped}") from two dynamic resolutions at equal priority. \` +
+      \`Keeping "\${kept}", the lane it was first discovered on — re-laning a live stream would move it out from under a worker holding its lease. \` +
+      \`The reaction resolving "\${dropped}" runs inside the "\${kept}" lane's budget, and a process restricted to "\${dropped}" via onlyLanes never runs it. \` +
+      "The equivalent static declaration is rejected at build; align the resolvers, or split the target."
+  );
+}
 
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -8185,12 +8253,21 @@ export class CorrelateCycle<
    * public option) so tests can shrink it; defaults otherwise.
    */
   private readonly _cold_start_back_scan: number;
+  /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
+  private readonly _declared_lanes: ReadonlySet<string>;
+  /**
+   * Offending declarations already reported, so a resolver firing for every
+   * matching event reports once. Owned by the instance rather than the
+   * module: \`internal/\` holds no module-level state.
+   */
+  private readonly _reported = new Set<string>();
 
   constructor({
     registry,
     static_targets,
     cd,
     max_subscribed_streams,
+    declared_lanes,
     run_scoped,
     on_init,
     on_init_async,
@@ -8201,6 +8278,7 @@ export class CorrelateCycle<
     this._key = registry_key(registry.events);
     this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
+    this._declared_lanes = declared_lanes;
     this._static_targets = static_targets;
     this._cd = cd;
     this._on_init = on_init;
@@ -8443,6 +8521,19 @@ export class CorrelateCycle<
                 ? reaction.resolver(event)
                 : reaction.resolver;
             if (!resolved) continue;
+            // A lane no controller claims has no claimant, so the stream
+            // would sit at watermark -1 forever. Reroute to "default" and
+            // say so (#1564) — the build-time guard sees only static lanes.
+            let lane = resolved.lane;
+            if (lane !== undefined && !this._declared_lanes.has(lane)) {
+              report_undeclared_lane(
+                this._reported,
+                resolved.target,
+                lane,
+                this._declared_lanes
+              );
+              lane = undefined;
+            }
             // Raise priority/lane only when this resolution beats what the
             // target was last subscribed at, so the store's \`GREATEST\` upsert
             // runs — the documented runtime \`max()\` invariant, which the
@@ -8455,7 +8546,7 @@ export class CorrelateCycle<
             const priority = resolved.priority ?? 0;
             const upgraded = !recorded || priority > recorded.floor;
             const carried = upgraded
-              ? { priority, lane: resolved.lane }
+              ? { priority, lane }
               : { priority: recorded.priority, lane: recorded.lane };
             const entry = correlated.get(resolved.target) || {
               source: resolved.source,
@@ -8464,6 +8555,22 @@ export class CorrelateCycle<
               upgraded,
               correlated_at: undefined,
             };
+            // Two resolutions wanting different lanes for one target, with
+            // neither outranking the other, is what the build-time guard
+            // rejects for static declarations (#1567). Priority still decides
+            // below; this only reports the tie the operator can't otherwise
+            // see. Compare against what this target already carries, whether
+            // that came from an earlier reaction in this scan or a past one.
+            const held = correlated.has(resolved.target)
+              ? entry.lane
+              : recorded?.lane;
+            if (
+              held !== undefined &&
+              lane !== undefined &&
+              held !== lane &&
+              priority === entry.priority
+            )
+              report_lane_conflict(this._reported, resolved.target, held, lane);
             // Multiple reactions targeting the same stream within a
             // single correlate scan — keep the max priority, and carry the
             // winning reaction's lane so the highest-priority reaction sets
@@ -9398,6 +9505,7 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
+import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
 /**
@@ -9531,6 +9639,22 @@ function budget_exhausted<TEvents extends Schemas>(
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
 
+/** Report a misrouted resolution once per offending declaration. */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  report_once(
+    seen,
+    \`\${stream}|\${handler}|\${event}\`,
+    \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
+      "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+      "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
+  );
+}
+
 /**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
@@ -9544,31 +9668,6 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
-/**
- * Report a misrouted resolution once per offending declaration.
- *
- * \`seen\` belongs to the calling controller and is passed in: \`internal/\` holds
- * no module state, so a resolver firing for every matching event still reports
- * once without this module remembering anything between calls.
- */
-function warn_misrouted(
-  seen: Set<string>,
-  stream: string,
-  handler: string,
-  event: string
-): void {
-  const key = \`\${stream}|\${handler}|\${event}\`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(
-    new Error(
-      \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
-        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
-        "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
-    )
-  );
-}
-
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -17428,6 +17527,57 @@ export type CommittedOf<E, K extends keyof E> = E[K] extends z.ZodType
     } & CommittedMeta
   : never;
 
+// === report-once.ts ===
+/**
+ * @module report-once
+ * @category Internal
+ *
+ * One-shot reporting for a misdeclaration that a build-time guard could not
+ * catch.
+ *
+ * The guards in \`build_events\` and \`build-classify\` can only inspect a static
+ * \`.to({...})\` — a \`.to(fn)\` target, lane and priority are a function until an
+ * event arrives. The pipelines that resolve them (correlate for lane and
+ * target, drain for the payload) are therefore where the same rules have to be
+ * applied, and where the operator has to be told.
+ *
+ * Reporting there has one hazard the build-time guards don't: a resolver fires
+ * for *every* matching event, so a naive log turns one bad declaration into a
+ * line per event on a busy stream. Reporting once per offending declaration is
+ * what makes the message readable.
+ *
+ * Never throws. A throw inside correlate pins the checkpoint for the whole app
+ * (#1420); inside drain it reaches the circuit breaker as a store failure and
+ * stalls every stream.
+ *
+ * @internal
+ */
+
+import { log } from "../ports.js";
+
+/**
+ * Report \`message\` the first time \`key\` is seen, and never again.
+ *
+ * \`seen\` belongs to the calling pipeline and is passed in, so a resolver
+ * firing for every matching event still reports once without this module
+ * remembering anything between calls — \`internal/\` holds no module state.
+ *
+ * @param seen - The caller's set of already-reported keys. Mutated.
+ * @param key - Identifies the offending declaration, not the occurrence.
+ * @param message - Wrapped in an \`Error\` so the logger renders a stack.
+ *
+ * @internal
+ */
+export function report_once(
+  seen: Set<string>,
+  key: string,
+  message: string
+): void {
+  if (seen.has(key)) return;
+  seen.add(key);
+  log().error(new Error(message));
+}
+
 // === schemas.ts ===
 import { type ZodObject, type ZodRawShape, z } from "zod";
 // Deep-path import (vs \`../internal/index.js\`) is deliberate — \`_registry\` is
@@ -20962,6 +21112,14 @@ export class Act<
       cd: this._cd,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      // Every lane a controller can exist for, so correlate can reroute a
+      // dynamic resolution that names one that doesn't (#1564). Declared,
+      // not active: \`onlyLanes\` shrinks this process's controllers, but a
+      // lane another process claims is still a valid destination.
+      declared_lanes: new Set<string>([
+        "default",
+        ...this._lanes.map((l) => l.name),
+      ]),
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
@@ -27060,6 +27218,7 @@ import type {
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
+import { report_once } from "./report-once.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -27210,12 +27369,71 @@ export type CorrelateCycleDeps<
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
   max_subscribed_streams: number;
+  /**
+   * Every lane a controller exists for — \`"default"\` plus each
+   * \`.withLane({name})\`. Injected rather than derived: \`internal/\` receives
+   * what it needs. A resolution naming anything outside this set has no
+   * claimant, so correlate reroutes it here (#1564).
+   */
+  declared_lanes: ReadonlySet<string>;
   run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
   lease_millis?: number;
 };
+
+/**
+ * A dynamic resolution named a lane no controller claims (#1564).
+ *
+ * Reroutes to \`"default"\` rather than skipping: the target is legitimate and
+ * only its lane is wrong, so stranding the stream at watermark \`-1\` — where
+ * no health surface can see it — loses work that the operator never asked to
+ * lose. \`"default"\` is where the reaction would have run had the lane been
+ * omitted, which makes this the smallest correction that keeps it running.
+ */
+function report_undeclared_lane(
+  seen: Set<string>,
+  target: string,
+  lane: string,
+  declared: ReadonlySet<string>
+): void {
+  report_once(
+    seen,
+    \`lane|\${target}|\${lane}\`,
+    \`Reaction resolved target "\${target}" onto undeclared lane "\${lane}". \` +
+      \`Declared lanes: \${[...declared].map((l) => \`"\${l}"\`).join(", ")}. \` +
+      'No controller claims it, so the stream would never drain — running it on "default" instead. ' +
+      "The equivalent static \`.to({ lane })\` is rejected at build; a dynamic resolver's lane is only knowable here."
+  );
+}
+
+/**
+ * Two resolutions disagreed on one target's lane (#1567).
+ *
+ * Reported, not corrected. The lane a target already carries is the one its
+ * in-flight leases were taken under, so re-laning it mid-run would move a
+ * stream out from under a worker holding it; re-laning is restart-driven by
+ * design. What the operator loses meanwhile is lane discipline — the losing
+ * reaction runs inside the winner's \`leaseMillis\` and \`streamLimit\` — and
+ * under \`onlyLanes\` sharding, a process provisioned for the losing lane never
+ * runs it at all.
+ */
+function report_lane_conflict(
+  seen: Set<string>,
+  target: string,
+  kept: string,
+  dropped: string
+): void {
+  report_once(
+    seen,
+    \`conflict|\${target}|\${kept}|\${dropped}\`,
+    \`Stream "\${target}" has conflicting lane assignments ("\${kept}" vs "\${dropped}") from two dynamic resolutions at equal priority. \` +
+      \`Keeping "\${kept}", the lane it was first discovered on — re-laning a live stream would move it out from under a worker holding its lease. \` +
+      \`The reaction resolving "\${dropped}" runs inside the "\${kept}" lane's budget, and a process restricted to "\${dropped}" via onlyLanes never runs it. \` +
+      "The equivalent static declaration is rejected at build; align the resolvers, or split the target."
+  );
+}
 
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -27304,12 +27522,21 @@ export class CorrelateCycle<
    * public option) so tests can shrink it; defaults otherwise.
    */
   private readonly _cold_start_back_scan: number;
+  /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
+  private readonly _declared_lanes: ReadonlySet<string>;
+  /**
+   * Offending declarations already reported, so a resolver firing for every
+   * matching event reports once. Owned by the instance rather than the
+   * module: \`internal/\` holds no module-level state.
+   */
+  private readonly _reported = new Set<string>();
 
   constructor({
     registry,
     static_targets,
     cd,
     max_subscribed_streams,
+    declared_lanes,
     run_scoped,
     on_init,
     on_init_async,
@@ -27320,6 +27547,7 @@ export class CorrelateCycle<
     this._key = registry_key(registry.events);
     this._subscribed = new LruMap(max_subscribed_streams);
     this._registry = registry;
+    this._declared_lanes = declared_lanes;
     this._static_targets = static_targets;
     this._cd = cd;
     this._on_init = on_init;
@@ -27562,6 +27790,19 @@ export class CorrelateCycle<
                 ? reaction.resolver(event)
                 : reaction.resolver;
             if (!resolved) continue;
+            // A lane no controller claims has no claimant, so the stream
+            // would sit at watermark -1 forever. Reroute to "default" and
+            // say so (#1564) — the build-time guard sees only static lanes.
+            let lane = resolved.lane;
+            if (lane !== undefined && !this._declared_lanes.has(lane)) {
+              report_undeclared_lane(
+                this._reported,
+                resolved.target,
+                lane,
+                this._declared_lanes
+              );
+              lane = undefined;
+            }
             // Raise priority/lane only when this resolution beats what the
             // target was last subscribed at, so the store's \`GREATEST\` upsert
             // runs — the documented runtime \`max()\` invariant, which the
@@ -27574,7 +27815,7 @@ export class CorrelateCycle<
             const priority = resolved.priority ?? 0;
             const upgraded = !recorded || priority > recorded.floor;
             const carried = upgraded
-              ? { priority, lane: resolved.lane }
+              ? { priority, lane }
               : { priority: recorded.priority, lane: recorded.lane };
             const entry = correlated.get(resolved.target) || {
               source: resolved.source,
@@ -27583,6 +27824,22 @@ export class CorrelateCycle<
               upgraded,
               correlated_at: undefined,
             };
+            // Two resolutions wanting different lanes for one target, with
+            // neither outranking the other, is what the build-time guard
+            // rejects for static declarations (#1567). Priority still decides
+            // below; this only reports the tie the operator can't otherwise
+            // see. Compare against what this target already carries, whether
+            // that came from an earlier reaction in this scan or a past one.
+            const held = correlated.has(resolved.target)
+              ? entry.lane
+              : recorded?.lane;
+            if (
+              held !== undefined &&
+              lane !== undefined &&
+              held !== lane &&
+              priority === entry.priority
+            )
+              report_lane_conflict(this._reported, resolved.target, held, lane);
             // Multiple reactions targeting the same stream within a
             // single correlate scan — keep the max priority, and carry the
             // winning reaction's lane so the highest-priority reaction sets
@@ -28290,6 +28547,7 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
+import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
 /**
@@ -28423,6 +28681,22 @@ function budget_exhausted<TEvents extends Schemas>(
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
 
+/** Report a misrouted resolution once per offending declaration. */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  report_once(
+    seen,
+    \`\${stream}|\${handler}|\${event}\`,
+    \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
+      "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+      "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
+  );
+}
+
 /**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
@@ -28436,31 +28710,6 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
-/**
- * Report a misrouted resolution once per offending declaration.
- *
- * \`seen\` belongs to the calling controller and is passed in: \`internal/\` holds
- * no module state, so a resolver firing for every matching event still reports
- * once without this module remembering anything between calls.
- */
-function warn_misrouted(
-  seen: Set<string>,
-  stream: string,
-  handler: string,
-  event: string
-): void {
-  const key = \`\${stream}|\${handler}|\${event}\`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(
-    new Error(
-      \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
-        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
-        "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
-    )
-  );
-}
-
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -35163,6 +35412,57 @@ export type CommittedOf<E, K extends keyof E> = E[K] extends z.ZodType
       readonly data: z.infer<E[K]>;
     } & CommittedMeta
   : never;
+
+// === report-once.ts ===
+/**
+ * @module report-once
+ * @category Internal
+ *
+ * One-shot reporting for a misdeclaration that a build-time guard could not
+ * catch.
+ *
+ * The guards in \`build_events\` and \`build-classify\` can only inspect a static
+ * \`.to({...})\` — a \`.to(fn)\` target, lane and priority are a function until an
+ * event arrives. The pipelines that resolve them (correlate for lane and
+ * target, drain for the payload) are therefore where the same rules have to be
+ * applied, and where the operator has to be told.
+ *
+ * Reporting there has one hazard the build-time guards don't: a resolver fires
+ * for *every* matching event, so a naive log turns one bad declaration into a
+ * line per event on a busy stream. Reporting once per offending declaration is
+ * what makes the message readable.
+ *
+ * Never throws. A throw inside correlate pins the checkpoint for the whole app
+ * (#1420); inside drain it reaches the circuit breaker as a store failure and
+ * stalls every stream.
+ *
+ * @internal
+ */
+
+import { log } from "../ports.js";
+
+/**
+ * Report \`message\` the first time \`key\` is seen, and never again.
+ *
+ * \`seen\` belongs to the calling pipeline and is passed in, so a resolver
+ * firing for every matching event still reports once without this module
+ * remembering anything between calls — \`internal/\` holds no module state.
+ *
+ * @param seen - The caller's set of already-reported keys. Mutated.
+ * @param key - Identifies the offending declaration, not the occurrence.
+ * @param message - Wrapped in an \`Error\` so the logger renders a stack.
+ *
+ * @internal
+ */
+export function report_once(
+  seen: Set<string>,
+  key: string,
+  message: string
+): void {
+  if (seen.has(key)) return;
+  seen.add(key);
+  log().error(new Error(message));
+}
 
 // === sandbox.ts ===
 import { test } from "vitest";
