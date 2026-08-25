@@ -298,7 +298,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should attribute a dispatch the handler did not await to its own event (#1541)", async () => {
+  it("should NOT treat work the handler did not await as a reaction (#1562)", async () => {
     const Source = state({ Source5: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ Triggered5: z.object({ val: z.number() }) })
@@ -323,7 +323,7 @@ describe("auto-inject reactingTo (#587)", () => {
         .withState(Sink)
         .on("Triggered5")
         // Starts the dispatch and returns without awaiting it, so it settles
-        // after the dispatch loop has moved on to the next payload.
+        // long after the handler — and the reaction — is finished.
         .do(async function onTriggered5(event) {
           stray.push(
             sleep(20).then(() =>
@@ -352,17 +352,18 @@ describe("auto-inject reactingTo (#587)", () => {
       stream: "src5-1",
       stream_exact: true,
     });
+    // The commits land, but as originating actions: a timer armed inside a
+    // handler is not "caused by" whichever event happened to arm it, and it
+    // must not inherit that reaction's skipped concurrency guard either.
     for (const val of [1, 2]) {
       const trigger = srcEvents.find((e) => e.data.val === val)!;
       const [received] = await app.query_array({
         stream: `sink5-${val}`,
         stream_exact: true,
       });
-      expect(received.meta.causation.event).toEqual({
-        id: trigger.id,
-        name: "Triggered5",
-        stream: "src5-1",
-      });
+      expect(received).toBeDefined();
+      expect(received.meta.causation.event).toBeUndefined();
+      expect(received.meta.correlation).not.toBe(trigger.meta.correlation);
     }
 
     await dispose();
@@ -494,6 +495,100 @@ describe("auto-inject reactingTo (#587)", () => {
 
     expect(thrown).toBeInstanceOf(ConcurrencyError);
     expect(unguarded_ok).toBe(true);
+
+    await dispose();
+  });
+
+  it("should restore the inferred guard for work that outlived the handler (#1562)", async () => {
+    const Ledger = state({ Ledger6: z.object({ balance: z.number() }) })
+      .init(() => ({ balance: 100 }))
+      .emits({ Withdrawn6: z.object({ balance: z.number() }) })
+      .patch({ Withdrawn6: ({ data }) => ({ balance: data.balance }) })
+      .on({ withdraw6: z.object({ amount: z.number() }) })
+      .emit((a, snap) => [
+        "Withdrawn6",
+        { balance: snap.state.balance - a.amount },
+      ])
+      .build();
+
+    const Trigger = state({ Trigger6: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Fired6: z.object({ n: z.number() }) })
+      .patch({ Fired6: ({ data }) => ({ n: data.n }) })
+      .on({ fire6: z.object({ n: z.number() }) })
+      .emit("Fired6")
+      .build();
+
+    let captured: { do: (...args: any[]) => Promise<unknown> };
+    const stray: Promise<unknown>[] = [];
+    const guards: Array<{ from: string; expected: unknown }> = [];
+    let from = "ordinary";
+    let in_handler: unknown = "NOT-SEEN";
+
+    const { app, store, dispose } = await sandbox(
+      act()
+        .withState(Ledger)
+        .withState(Trigger)
+        .on("Fired6")
+        .do(async function armDetached() {
+          // A dispatch made while the handler is still running IS a
+          // reaction: it must keep skipping the inferred guard.
+          from = "live";
+          await captured.do(
+            "withdraw6",
+            { stream: "L6", actor: { id: "sys", name: "system" } },
+            { amount: 1 }
+          );
+          in_handler = guards.at(-1)?.expected;
+
+          // ...and work the handler starts without awaiting is NOT, however
+          // long its frame survives.
+          stray.push(
+            sleep(20).then(async () => {
+              from = "detached";
+              await captured.do(
+                "withdraw6",
+                { stream: "L6", actor: { id: "sys", name: "system" } },
+                { amount: 1 }
+              );
+            })
+          );
+        })
+        .to({ target: "t6" })
+    );
+    captured = app as unknown as typeof captured;
+
+    // Seed the stream: a brand-new stream is legitimately unguarded
+    // (`snapshot.version < 0`), which would mask the difference.
+    await app.do("withdraw6", { stream: "L6", actor }, { amount: 1 });
+
+    const commit = store.commit.bind(store);
+    (store as unknown as { commit: unknown }).commit = (
+      stream: string,
+      msgs: never,
+      meta: never,
+      expected?: number
+    ) => {
+      if (stream === "L6") guards.push({ from, expected });
+      return commit(stream, msgs, meta, expected);
+    };
+
+    from = "ordinary";
+    await app.do("withdraw6", { stream: "L6", actor }, { amount: 1 });
+    await app.do("fire6", { stream: "T6", actor }, { n: 1 });
+    await app.correlate();
+    await app.drain();
+    await Promise.all(stray);
+    await sleep(20);
+
+    const guard_of = (f: string) => guards.find((g) => g.from === f)?.expected;
+
+    // An ordinary dispatch carries the inferred guard.
+    expect(guard_of("ordinary")).toBe(0);
+    // A live reaction deliberately does not.
+    expect(in_handler).toBeUndefined();
+    // Detached work keeps the chain but is guarded like any other dispatch.
+    expect(guard_of("detached")).not.toBeUndefined();
 
     await dispose();
   });

@@ -2047,7 +2047,17 @@ export class Act<
     // anywhere inside a reaction handler threads the chain whichever \`IAct\`
     // reference made the call (#1541), while \`internal/\` stays free of
     // ambient reads. An explicitly-passed \`reactingTo\` still wins.
-    const reacting_to = options?.reactingTo ?? current_reacting();
+    // The reaction context applies while the handler runs, and not after.
+    //
+    // A handler's own dispatches inherit the triggering event whichever
+    // \`IAct\` reference makes them (#1541). Work the handler merely started —
+    // a debounce timer, a memoised connection, an un-awaited \`settle()\` —
+    // keeps the frame long after the handler is gone, and is not a reaction:
+    // it does not inherit the event, so it neither carries that causation nor
+    // skips the concurrency guard (#1562).
+    const ctx = current_reacting();
+    const reacting_to =
+      options?.reactingTo ?? (ctx?.live === true ? ctx.event : undefined);
     const do_options =
       reacting_to === options?.reactingTo
         ? options
@@ -17363,8 +17373,24 @@ export type Scoped = {
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 
-/** The event currently being reacted to. Not reachable from \`index.ts\`. */
-const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
+/**
+ * The reaction a dispatch is running inside.
+ *
+ * \`live\` is the whole point. An \`AsyncLocalStorage\` frame captured by work a
+ * handler started and did not await — a debounce timer, a memoised
+ * connection, an un-awaited \`settle()\` — outlives the handler and can never
+ * be unbound. The *frame* cannot be reclaimed, but the *value inside it*
+ * can: the handler flips \`live\` to false as it settles, so later dispatches
+ * through that frame still read the event (the causation chain is real) while
+ * no longer claiming to be a reaction in progress (#1562).
+ */
+type Reacting = {
+  readonly event: Committed<Schemas, string>;
+  live: boolean;
+};
+
+/** The reaction currently running. Not reachable from \`index.ts\`. */
+const reacting = new AsyncLocalStorage<Reacting>();
 
 /**
  * Builds the runner an Act uses to enter its own port scope.
@@ -17399,11 +17425,29 @@ export function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {
-  return reacting.run(event, fn);
+  const ctx: Reacting = { event, live: true };
+  return reacting.run(ctx, async () => {
+    try {
+      return await fn();
+    } finally {
+      // Everything the handler leaves running keeps this frame, and from
+      // here on reads it as a finished reaction.
+      ctx.live = false;
+    }
+  });
 }
 
-/** The event being reacted to, or \`undefined\` outside a handler. @internal */
-export function current_reacting(): Committed<Schemas, string> | undefined {
+/**
+ * The reaction a dispatch is running inside, or \`undefined\` outside one.
+ *
+ * \`live: false\` means the handler has settled and this is detached work that
+ * merely inherited the frame.
+ *
+ * @internal
+ */
+export function current_reacting():
+  | { readonly event: Committed<Schemas, string>; readonly live: boolean }
+  | undefined {
   return reacting.getStore();
 }
 
@@ -20993,7 +21037,17 @@ export class Act<
     // anywhere inside a reaction handler threads the chain whichever \`IAct\`
     // reference made the call (#1541), while \`internal/\` stays free of
     // ambient reads. An explicitly-passed \`reactingTo\` still wins.
-    const reacting_to = options?.reactingTo ?? current_reacting();
+    // The reaction context applies while the handler runs, and not after.
+    //
+    // A handler's own dispatches inherit the triggering event whichever
+    // \`IAct\` reference makes them (#1541). Work the handler merely started —
+    // a debounce timer, a memoised connection, an un-awaited \`settle()\` —
+    // keeps the frame long after the handler is gone, and is not a reaction:
+    // it does not inherit the event, so it neither carries that causation nor
+    // skips the concurrency guard (#1562).
+    const ctx = current_reacting();
+    const reacting_to =
+      options?.reactingTo ?? (ctx?.live === true ? ctx.event : undefined);
     const do_options =
       reacting_to === options?.reactingTo
         ? options
@@ -35204,8 +35258,24 @@ export type Scoped = {
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 
-/** The event currently being reacted to. Not reachable from \`index.ts\`. */
-const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
+/**
+ * The reaction a dispatch is running inside.
+ *
+ * \`live\` is the whole point. An \`AsyncLocalStorage\` frame captured by work a
+ * handler started and did not await — a debounce timer, a memoised
+ * connection, an un-awaited \`settle()\` — outlives the handler and can never
+ * be unbound. The *frame* cannot be reclaimed, but the *value inside it*
+ * can: the handler flips \`live\` to false as it settles, so later dispatches
+ * through that frame still read the event (the causation chain is real) while
+ * no longer claiming to be a reaction in progress (#1562).
+ */
+type Reacting = {
+  readonly event: Committed<Schemas, string>;
+  live: boolean;
+};
+
+/** The reaction currently running. Not reachable from \`index.ts\`. */
+const reacting = new AsyncLocalStorage<Reacting>();
 
 /**
  * Builds the runner an Act uses to enter its own port scope.
@@ -35240,11 +35310,29 @@ export function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {
-  return reacting.run(event, fn);
+  const ctx: Reacting = { event, live: true };
+  return reacting.run(ctx, async () => {
+    try {
+      return await fn();
+    } finally {
+      // Everything the handler leaves running keeps this frame, and from
+      // here on reads it as a finished reaction.
+      ctx.live = false;
+    }
+  });
 }
 
-/** The event being reacted to, or \`undefined\` outside a handler. @internal */
-export function current_reacting(): Committed<Schemas, string> | undefined {
+/**
+ * The reaction a dispatch is running inside, or \`undefined\` outside one.
+ *
+ * \`live: false\` means the handler has settled and this is detached work that
+ * merely inherited the frame.
+ *
+ * @internal
+ */
+export function current_reacting():
+  | { readonly event: Committed<Schemas, string>; readonly live: boolean }
+  | undefined {
   return reacting.getStore();
 }
 

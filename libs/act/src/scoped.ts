@@ -50,8 +50,24 @@ export type Scoped = {
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 
-/** The event currently being reacted to. Not reachable from `index.ts`. */
-const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
+/**
+ * The reaction a dispatch is running inside.
+ *
+ * `live` is the whole point. An `AsyncLocalStorage` frame captured by work a
+ * handler started and did not await — a debounce timer, a memoised
+ * connection, an un-awaited `settle()` — outlives the handler and can never
+ * be unbound. The *frame* cannot be reclaimed, but the *value inside it* can:
+ * the handler flips `live` to false as it settles, so a dispatch arriving
+ * through that frame afterwards is recognised as ordinary work rather than a
+ * reaction still in progress (#1562).
+ */
+type Reacting = {
+  readonly event: Committed<Schemas, string>;
+  live: boolean;
+};
+
+/** The reaction currently running. Not reachable from `index.ts`. */
+const reacting = new AsyncLocalStorage<Reacting>();
 
 /**
  * Builds the runner an Act uses to enter its own port scope.
@@ -86,11 +102,29 @@ export function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {
-  return reacting.run(event, fn);
+  const ctx: Reacting = { event, live: true };
+  return reacting.run(ctx, async () => {
+    try {
+      return await fn();
+    } finally {
+      // Everything the handler leaves running keeps this frame, and from
+      // here on reads it as a finished reaction.
+      ctx.live = false;
+    }
+  });
 }
 
-/** The event being reacted to, or `undefined` outside a handler. @internal */
-export function current_reacting(): Committed<Schemas, string> | undefined {
+/**
+ * The reaction a dispatch is running inside, or `undefined` outside one.
+ *
+ * `live: false` means the handler has settled and this is detached work that
+ * merely inherited the frame.
+ *
+ * @internal
+ */
+export function current_reacting():
+  | { readonly event: Committed<Schemas, string>; readonly live: boolean }
+  | undefined {
   return reacting.getStore();
 }
 
