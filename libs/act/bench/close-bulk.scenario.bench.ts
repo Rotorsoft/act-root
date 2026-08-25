@@ -107,5 +107,3 @@ describe("close-cycle bulk-scan benchmark", () => {
     }, 10_000); // wall-time budget. // Per-stream loop at N=1000 is slow — give the test a generous
   }
 });
-
-// ci-validation probe — removed before merge
