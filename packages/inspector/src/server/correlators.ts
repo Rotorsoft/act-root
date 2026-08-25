@@ -42,16 +42,45 @@ export type CorrelatorsConfig =
       readonly password: string;
       readonly schema: string;
       readonly table: string;
+      /**
+       * TLS, on the same terms the store connects with (#1554). Without
+       * these the reader could never reach a Postgres that requires TLS —
+       * RDS, Neon, Supabase — while the store connected fine, leaving the
+       * panel permanently dark on exactly the deployments where its
+       * "nothing to record here" message is most likely to be believed.
+       */
+      readonly ssl?: boolean;
+      readonly sslInsecure?: boolean;
     }
   | { readonly adapter: "sqlite"; readonly file: string };
 
 /**
+ * Is this failure the benign one — no such table, or the older shape?
+ *
+ * An in-memory store keeps this in memory with no table behind it, and a
+ * store that predates [#1532] has the older single-row shape. Those two are
+ * worth nothing more than an empty panel. A refused connection, a
+ * permission error or a wrong schema are not, and used to arrive at the
+ * operator wearing the same clothes (#1554).
+ *
+ * Postgres says so by error code — undefined table, undefined column, or a
+ * schema that isn't there; SQLite says so in the message.
+ */
+const MISSING_RELATION_CODES = new Set(["42P01", "42703", "3F000"]);
+function is_missing_relation(error: unknown): boolean {
+  // `Object(error)` so a thrown non-object still lands somewhere with no
+  // `code`, and the message test below decides.
+  const code = (Object(error) as { code?: unknown }).code;
+  if (typeof code === "string" && MISSING_RELATION_CODES.has(code)) return true;
+  return /no such (table|column)/i.test(String(error));
+}
+
+/**
  * Read every correlator the connected store knows about.
  *
- * Returns an empty list rather than throwing when there is nothing to read —
- * an in-memory store keeps this in memory with no table behind it, and a
- * store that predates [#1532] has the older single-row shape. Neither is an
- * error worth interrupting the page for; both simply have nothing to show.
+ * Returns an empty list when the table simply isn't there — see
+ * {@link is_missing_relation}. Every other failure is raised, so the panel
+ * can say it couldn't read rather than naming a cause nothing verified.
  */
 export async function readCorrelators(
   config: CorrelatorsConfig
@@ -69,6 +98,10 @@ async function read_pg(
     user: config.user,
     password: config.password,
     connectionTimeoutMillis: 3_000,
+    // Mapped here rather than shared with the router's `resolveSslConfig`
+    // on purpose: that one warns about the verification opt-out, and this
+    // client is rebuilt on every poll of the panel.
+    ...(config.ssl ? { ssl: { rejectUnauthorized: !config.sslInsecure } } : {}),
   });
   try {
     await client.connect();
@@ -88,9 +121,9 @@ async function read_pg(
       leasedBy: r.leased_by,
       leasedUntil: r.leased_until ? r.leased_until.getTime() : null,
     }));
-  } catch {
-    // Missing table, older single-row shape, or an unreachable server.
-    return [];
+  } catch (error) {
+    if (is_missing_relation(error)) return [];
+    throw error;
   } finally {
     await client.end().catch(() => {});
   }
@@ -110,8 +143,9 @@ async function read_sqlite(
       leasedBy: r.leased_by === null ? null : String(r.leased_by),
       leasedUntil: r.leased_until === null ? null : Number(r.leased_until),
     }));
-  } catch {
-    return [];
+  } catch (error) {
+    if (is_missing_relation(error)) return [];
+    throw error;
   } finally {
     client.close();
   }

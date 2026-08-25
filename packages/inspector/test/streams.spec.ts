@@ -342,6 +342,26 @@ describe("streamsForEvent", () => {
     expect(result.totalEventsOfName).toBe(0);
   });
 
+  it("fails the read rather than substituting default lane + priority (#1566)", async () => {
+    await seedFixture();
+    // Control: the join answers with the subscription's real priority.
+    const control = await caller.streamsForEvent({ name: "Opened" });
+    expect(control.streams.find((s) => s.stream === "stream-a")!.priority).toBe(
+      5
+    );
+    // `priority: 0` / `lane: null` are what a stream genuinely on the
+    // defaults reports, so a failed positions read must not be able to
+    // produce them — an operator triaging why a high-priority stream is
+    // starving would be shown p=0 for a stream that is p=5.
+    vi.spyOn(store, "query_streams").mockRejectedValue(
+      new Error("positions read failed")
+    );
+    await expect(caller.streamsForEvent({ name: "Opened" })).rejects.toThrow(
+      "positions read failed"
+    );
+    vi.restoreAllMocks();
+  });
+
   it("gracefully handles missing subscription positions", async () => {
     // Commit without subscribing — streamsForEvent must still report
     // the stream, with priority defaulting to 0.

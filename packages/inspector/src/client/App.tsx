@@ -44,7 +44,9 @@ export default function App() {
   const [showConnect, setShowConnect] = useState(true);
   const [connectionName, setConnectionName] = useState("");
   const [connectionKey, setConnectionKey] = useState(0);
-  const [blockedCount, setBlockedCount] = useState(0);
+  // `null` once the Monitor reports it could not read the drain status
+  // (#1552) — the badge shows "?" rather than an all-clear zero.
+  const [blockedCount, setBlockedCount] = useState<number | null>(0);
   const [pollInterval, setPollInterval] = useState(0);
 
   // Global live polling — invalidate all queries on interval

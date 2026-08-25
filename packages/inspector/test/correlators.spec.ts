@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createClient } from "@libsql/client";
@@ -52,12 +52,26 @@ describe("readCorrelators", () => {
     expect(await readCorrelators({ adapter: "sqlite", file })).toEqual([]);
   });
 
-  it("returns nothing rather than throwing when the server is unreachable", async () => {
-    expect(
-      await readCorrelators({
+  it("surfaces an unreadable sqlite file rather than an empty panel", async () => {
+    // Not a database at all. "Nothing to show" would state a cause — an
+    // in-memory store, an older shape — that nothing here checked.
+    const file = await db();
+    await writeFile(file, "this is not a sqlite database");
+    await expect(readCorrelators({ adapter: "sqlite", file })).rejects.toThrow(
+      /not a database/i
+    );
+  });
+
+  it("surfaces an unreachable server instead of naming a benign cause (#1554)", async () => {
+    // An empty list is rendered as "this store keeps it in memory, or
+    // predates the change that records it" — a specific cause, stated
+    // with confidence and never verified. An outage is not that, so it
+    // has to reach the caller.
+    await expect(
+      readCorrelators({
         adapter: "pg",
         host: "127.0.0.1",
-        // Nothing listens here; the read must degrade, not take the page down.
+        // Nothing listens here.
         port: 59_999,
         database: "postgres",
         user: "postgres",
@@ -65,6 +79,6 @@ describe("readCorrelators", () => {
         schema: "public",
         table: "events",
       })
-    ).toEqual([]);
+    ).rejects.toThrow();
   });
 });
