@@ -242,11 +242,21 @@ export async function run_drain_cycle<
       if (!register) return [];
       return [...register.reactions.values()]
         .filter((reaction) => {
-          const resolved =
-            typeof reaction.resolver === "function"
-              ? reaction.resolver(event)
-              : reaction.resolver;
-          return resolved && resolved.target === stream;
+          const resolver = reaction.resolver;
+          const dynamic = typeof resolver === "function";
+          const resolved = dynamic ? resolver(event) : resolver;
+          if (!resolved || resolved.target !== stream) return false;
+          // A stream a projection serves is served by that projection alone:
+          // every payload here goes to its batch handler, so a reaction
+          // resolving onto it would never run AND would hand the projection
+          // an aggregate it knows nothing about (#1563).
+          //
+          // `dynamic` is an exact discriminator, not a heuristic: a STATIC
+          // reaction onto a projection's target is rejected at build, and a
+          // projection's own consumption is synthesized static. So a dynamic
+          // resolution landing here is by definition the misrouting the build
+          // guard could not see, because the target was a function until now.
+          return !(dynamic && batch_handlers.has(stream));
         })
         .map((reaction) => ({ ...reaction, event }));
     });
