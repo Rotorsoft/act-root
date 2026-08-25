@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.19.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.0...@rotorsoft/act-pg-v1.19.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **act:** let the schema decide which fields are dates ([#1570](https://github.com/Rotorsoft/act-root/issues/1570)) ([dca2166](https://github.com/Rotorsoft/act-root/commit/dca2166ad756b39dbb5b6287057fc67c5222a5e6)), closes [#1556](https://github.com/Rotorsoft/act-root/issues/1556)
+
 # [@rotorsoft/act-pg-v1.19.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.18.0...@rotorsoft/act-pg-v1.19.0) (2026-08-22)
 
 
