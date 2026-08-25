@@ -25,7 +25,7 @@ import {
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
-import { DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
+import { type DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
@@ -39,6 +39,7 @@ import type {
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
 import { reaction_on, register_lane } from "./builder-utils.js";
+import { build_events } from "./event-builder.js";
 import {
   merge_event_register,
   merge_projection,
@@ -70,34 +71,6 @@ function register_batch_handler(
     );
   }
   batch_handlers.set(proj.target, proj.batchHandler);
-}
-
-/**
- * Runtime backstop for slice-declared lane references — rejects
- * static `.to({lane})` entries that aren't in the declared set.
- * Inline reactions are caught at compile time; this only fires for
- * slices built against older type definitions.
- */
-function validate_lane_references(
-  registry: Registry<any, any, any>,
-  lanes: ReadonlyArray<LaneConfig>
-): void {
-  const declared = new Set<string>([DEFAULT_LANE, ...lanes.map((l) => l.name)]);
-  for (const [event_name, def] of Object.entries(registry.events)) {
-    const entry = def as { reactions: Map<string, Reaction<any, any>> };
-    for (const [handlerName, reaction] of entry.reactions) {
-      const resolver = reaction.resolver;
-      if (typeof resolver === "function") continue;
-      const lane = (resolver as { lane?: string }).lane;
-      if (lane && !declared.has(lane)) {
-        throw new Error(
-          `Reaction "${handlerName}" on "${event_name}" targets undeclared lane "${lane}". ` +
-            `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
-            `Add \`.withLane({ name: "${lane}", ... })\` to act() or correct the .to() declaration.`
-        );
-      }
-    }
-  }
 }
 
 /**
@@ -677,95 +650,19 @@ export function act<
           //
           // A projection's OWN reactions legitimately target it, so they are
           // excluded by object identity — the same test `merge_projection`
-          // uses to tell a re-registration from a collision.
-          for (const register of Object.values(registry.events)) {
-            for (const reaction of register.reactions.values()) {
-              if (typeof reaction.resolver === "function") continue;
-              const target = reaction.resolver.target;
-              const claimed =
-                batch_handlers.has(target) ||
-                fold_specs.some((f) => f.target === target);
-              if (claimed && !projection_reactions.has(reaction))
-                throw new Error(
-                  `Reaction on target "${target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run`
-                );
-            }
-          }
+          // One walk over the registered events: validate every static
+          // reaction, resolve each schema once, and compose the per-surface
+          // readers from it. See `event-builder.ts`.
+          const built = build_events(registry, lanes, {
+            batch_handlers,
+            fold_targets: new Set(fold_specs.map((f) => f.target)),
+            projection_reactions,
+          });
+          for (const [name, tags] of built.tags) _tags.set(name, tags);
+          for (const [name, gate] of built.query_readers) _qg.set(name, gate);
+          for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
-          validate_lane_references(registry, lanes);
-          // Precompute the sensitive-field lookup. Iterates each registered
-          // event's Zod schema exactly once at build; later commit/load paths
-          // hit the cache in O(1). Events with no sensitive fields don't get
-          // Build the sensitive-data wiring in three passes (#855):
-          //
-          // - events pass: resolve each event's schema ONCE into `_tags` —
-          //   its sensitive fields and its read parser — and compose the
-          //   per-surface readers from it; while we're already walking
-          //   events, wrap their reaction handlers so `build_handle` stays
-          //   PII-unaware.
-          // - states pass: snapshot the disclosure predicates into `_dp`,
-          //   reject `.snap()` on sensitive-bearing states, and build the
-          //   per-state step delegates the orchestrator calls (`me.view`,
-          //   `me.message`, wrapped `me.patch[name]`).
-          // - batch_handlers pass: wrap each batch handler so the batch
-          //   dispatcher stays PII-unaware.
-          //
-          // The orchestrator calls three step delegates per event:
-          //   - `me.message(validated)` — produces the commit-bound shape
-          //     (`{name, data, pii?}`) from a validated emit.
-          //   - `me.patch[event_name](event, state)` — the reducer that
-          //     derives the next state from the committed event.
-          //   - `me.view(event, actor)` — produces the caller-visible form
-          //     (snapshot.event).
-          //
-          // For PII-free states (the common case) `view` and `message` are
-          // bound to identity in `state-builder.ts` and `patch` is the
-          // user-declared reducer; the orchestrator's hot path is identical
-          // to the pre-#855 code at runtime. For PII-aware states (≥1
-          // `sensitive(...)` event), each delegate is rebound to fold the
-          // gate / split / merge into the step itself.
-          for (const [event_name, reg] of Object.entries(
-            registry.events as Record<
-              string,
-              {
-                schema: import("zod").ZodType;
-                reactions: Map<string, { handler: any }>;
-              }
-            >
-          )) {
-            // One pass over the declared schema resolves both facts: which
-            // fields are sensitive, and which are dates. Walking twice for two
-            // answers would be the same work done twice.
-            // One pass over the declared schema resolves both facts a reader
-            // is built from: which fields are sensitive, and how to type the
-            // payload. Walking twice for two answers would be the same work
-            // done twice.
-            const tags = event_tags(reg.schema);
-            _tags.set(event_name, tags);
 
-            // The actor-less read surfaces (`query`/`query_array`) resolve a
-            // reader by name; an event needing neither typing nor redaction
-            // never lands here and falls back to the shared IDENTITY_GATE —
-            // zero per-event cost.
-            const query_reader = make_event_reader(tags, "redact", null);
-            if (query_reader) _qg.set(event_name, query_reader);
-
-            // Handlers never see PII by framework rule, and shouldn't observe
-            // the keys structurally either — so `strip`, not `redact`.
-            const handler_reader = make_event_reader(tags, "strip");
-            if (handler_reader) {
-              _hr.set(event_name, handler_reader);
-              for (const [name, reaction] of reg.reactions) {
-                const inner = reaction.handler;
-                const wrapped = (event: any, stream: string, app: any) =>
-                  inner(handler_reader(event), stream, app);
-                // Preserve handler.name — build_handle asserts on named functions.
-                Object.defineProperty(wrapped, "name", { value: inner.name });
-                reaction.handler = wrapped;
-                reg.reactions.set(name, reaction as never);
-              }
-            }
-          }
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
             if (state.autoclose) _ac.set(state.name, state.autoclose);
