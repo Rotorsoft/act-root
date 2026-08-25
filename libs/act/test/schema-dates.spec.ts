@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { event_tags } from "../src/builders/event-builder.js";
 import { act, projection, sleep, state } from "../src/index.js";
-import { event_tags } from "../src/internal/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**

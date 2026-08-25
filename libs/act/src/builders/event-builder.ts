@@ -2,19 +2,23 @@
  * @module event-builder
  * @category Internal
  *
- * Everything `act().build()` derives from the registered events, in one place
- * and one walk.
+ * Everything `act().build()` derives from the registered events.
  *
- * Two kinds of work happen per event, and both were previously spread across
- * `act-builder` as separate passes over the same structure:
+ * This is the build-time half of the event lifecycle. `internal/sensitive.ts`
+ * owns the other two halves — the `sensitive(...)` marker itself, and the
+ * runtime transforms (`pii_gate`, `pii_strip`, `pii_split`) that a reader is
+ * composed from. Nothing here runs per event at runtime; everything here runs
+ * once, at build, and hands the orchestrator a prebuilt function.
+ *
+ * Three things are derived, all in ONE walk over the registered events:
  *
  * - **validation** — a reaction may not target a lane nobody declared, nor a
- *   target a projection already serves. Both walk events → reactions and both
- *   skip dynamic resolvers, because a `.to(fn)` target is unknowable until an
- *   event arrives.
- * - **wiring** — resolve each event's schema once into its {@link EventTags},
- *   compose the per-surface readers from it, and wrap reaction handlers so the
- *   dispatcher stays PII-unaware.
+ *   target a projection already serves. Both checks skip dynamic resolvers,
+ *   because a `.to(fn)` target is unknowable until an event arrives.
+ * - **resolution** — each event's schema is read once into {@link EventTags}:
+ *   which fields are sensitive, and how to type the stored payload.
+ * - **composition** — the per-surface readers, each a single {@link EventGate}
+ *   that types the payload and applies disclosure in one call.
  *
  * Deliberately NOT here: deprecation. `Foo` is deprecated only because
  * `Foo_v2` exists beside it, so it is derived from event *names across a whole
@@ -25,14 +29,160 @@
  * @internal
  */
 
+import { z } from "zod";
 import {
   type EventGate,
-  type EventTags,
-  event_tags,
-  make_event_reader,
+  IDENTITY_GATE,
+  is_pii,
+  make_gate,
+  pii_strip,
 } from "../internal/index.js";
 import { DEFAULT_LANE } from "../ports.js";
-import type { LaneConfig, Registry } from "../types/index.js";
+import type { Actor, LaneConfig, Registry } from "../types/index.js";
+
+/** What one pass over an event's schema resolves. @internal */
+export type EventTags = {
+  /** Keys marked `sensitive(...)`, top level (and across union variants). */
+  readonly sensitive: readonly string[];
+  /**
+   * Types a stored payload against the declaration, or `undefined` when the
+   * schema declares no dates.
+   */
+  readonly parse: ((data: unknown) => unknown) | undefined;
+};
+
+/** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
+  (schema as { def?: Record<string, unknown> }).def;
+
+/**
+ * Rebuild a schema for reading: dates coerce from their stored string, and
+ * objects keep keys they don't declare.
+ *
+ * A construct this doesn't recognise is returned untouched, so an unfamiliar
+ * schema still parses — it just won't coerce dates buried inside one. That
+ * fallthrough is what keeps this small: it describes the shapes worth
+ * rebuilding, not every shape that exists.
+ */
+function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
+  const def = def_of(schema);
+  if (!def) return schema;
+  switch (def.type) {
+    case "date":
+      found.date = true;
+      return z.coerce.date();
+    case "object": {
+      const shape = def.shape as Record<string, z.ZodType> | undefined;
+      if (!shape) return schema;
+      const next: Record<string, z.ZodType> = {};
+      for (const [key, inner] of Object.entries(shape))
+        next[key] = to_read_schema(inner, found) as z.ZodType;
+      return z.looseObject(next);
+    }
+    case "array":
+      return z.array(to_read_schema(def.element, found) as z.ZodType);
+    case "record":
+      return z.record(
+        z.string(),
+        to_read_schema(def.valueType, found) as z.ZodType
+      );
+    case "union":
+      return z.union(
+        (def.options as unknown[]).map(
+          (o) => to_read_schema(o, found) as z.ZodType
+        ) as never
+      );
+    case "optional":
+      return (to_read_schema(def.innerType, found) as z.ZodType).optional();
+    case "nullable":
+      return (to_read_schema(def.innerType, found) as z.ZodType).nullable();
+    default:
+      return schema;
+  }
+}
+
+/**
+ * Resolve an event's schema in a single pass.
+ *
+ * Sensitive markers are read at the top level only — the documented carve-out
+ * (`sensitive.ts`), since the write path splits whole top-level keys. A union
+ * event has no top-level shape, so its variants are walked and unioned: a key
+ * sensitive in any variant must be split, because the stored payload could be
+ * that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ *
+ * @internal
+ */
+export function event_tags(schema: z.ZodType): EventTags {
+  const sensitive: string[] = [];
+
+  const collect = (node: unknown): void => {
+    const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
+    if (shape) {
+      for (const key of Object.keys(shape))
+        if (is_pii(shape[key])) sensitive.push(key);
+      return;
+    }
+    const options = (node as { options?: unknown }).options;
+    if (Array.isArray(options)) for (const option of options) collect(option);
+  };
+  collect(schema);
+
+  const found = { date: false };
+  const read_schema = to_read_schema(schema, found);
+  return {
+    sensitive: [...new Set(sensitive)],
+    parse: found.date
+      ? (data: unknown) => (read_schema as z.ZodType).parse(data)
+      : undefined,
+  };
+}
+
+/**
+ * What the reader should do about sensitive fields.
+ *
+ * - `redact` — substitute `[REDACTED]` unless `disclose` authorizes the actor,
+ *   and drop the `pii` sidecar. The read surfaces (`query`, `query_array`,
+ *   `load`).
+ * - `strip` — remove the keys entirely. Reaction and projection handlers,
+ *   which never see PII by framework rule, and shouldn't structurally observe
+ *   the keys either.
+ *
+ * @internal
+ */
+export type Disclosure = "redact" | "strip";
+
+/**
+ * Compose one event's typing and disclosure into a single gate.
+ *
+ * Returns `undefined` when the event needs neither, so the caller can fall
+ * back to the shared {@link IDENTITY_GATE} and the common path allocates
+ * nothing.
+ *
+ * @internal
+ */
+export function make_event_reader(
+  tags: EventTags,
+  disclosure: Disclosure,
+  predicate: ((event: never, actor: Actor) => boolean) | null = null
+): EventGate | undefined {
+  const { sensitive, parse } = tags;
+  if (!parse && sensitive.length === 0) return undefined;
+
+  const gate: EventGate =
+    sensitive.length === 0
+      ? IDENTITY_GATE
+      : disclosure === "strip"
+        ? (((event) => pii_strip(event as never, sensitive)) as EventGate)
+        : make_gate(sensitive, predicate as never);
+
+  if (!parse) return gate;
+
+  // Type before disclosing: the gate copies, so parsing afterwards would
+  // leave the consumer's value a string.
+  return ((event, actor) =>
+    gate({ ...event, data: parse(event.data) } as never, actor)) as EventGate;
+}
 
 /** What the events pass resolves, keyed by event name. @internal */
 export type BuiltEvents = {

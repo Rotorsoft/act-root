@@ -10,11 +10,8 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
-  type EventTags,
-  event_tags,
   FOLD_RESET,
   IDENTITY_GATE,
-  make_event_reader,
   make_fold_handler,
   type PatchFn,
   pii_split,
@@ -39,7 +36,12 @@ import type {
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
 import { reaction_on, register_lane } from "./builder-utils.js";
-import { build_events } from "./event-builder.js";
+import {
+  build_events,
+  type EventTags,
+  event_tags,
+  make_event_reader,
+} from "./event-builder.js";
 import {
   merge_event_register,
   merge_projection,
