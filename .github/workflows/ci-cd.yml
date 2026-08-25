@@ -286,12 +286,55 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Coveralls upload is best-effort. Outages have blocked merges on
+      # master before — we'd rather lose a coverage badge than lose a
+      # release. `continue-on-error: true` lets the rest of the pipeline
+      # advance regardless of coveralls availability.
+      - uses: coverallsapp/github-action@v2
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Scenario benchmarks run in their own job rather than inline in `ci`
+  # (#1551). They were the single longest step on the critical path — longer
+  # than the whole test suite — and share nothing with the rest of `ci`, so
+  # running them alongside it rather than after cuts the wall time by their
+  # full duration. They keep gating releases: `cd` waits on this job.
+  #
+  # The scenario benches exercise the real Postgres adapter (per the
+  # benchmarking rule in CLAUDE.md), so this job needs the same service `ci`
+  # has.
+  bench:
+    needs: changes
+    if: needs.changes.outputs.perf-changed == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.2
+          cache: "pnpm"
+      - run: pnpm install
       # Scenario benchmarks (Shape C). Each one has a built-in
       # regression assertion, so a real perf regression breaks the
       # build. The captured stdout ends up in the workflow's step
       # summary so reviewers see the numbers without scrolling logs.
       - name: bench:scenarios
-        if: needs.changes.outputs.perf-changed == 'true'
         env:
           # vitest/node emit ANSI color codes even when stdout is piped,
           # which renders as `␛[32m'…'␛[39m` garbage inside the markdown
@@ -303,9 +346,7 @@ jobs:
           set -o pipefail
           pnpm bench:scenarios 2>&1 | tee bench-scenarios.log
       - name: Append scenario bench results to step summary
-        if: |
-          always() &&
-          needs.changes.outputs.perf-changed == 'true'
+        if: always()
         run: |
           {
             echo "## Scenario benchmark results"
@@ -330,15 +371,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Coveralls upload is best-effort. Outages have blocked merges on
-      # master before — we'd rather lose a coverage badge than lose a
-      # release. `continue-on-error: true` lets the rest of the pipeline
-      # advance regardless of coveralls availability.
-      - uses: coverallsapp/github-action@v2
-        continue-on-error: true
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
   cd:
     # Run on master when at least one lib directory changed, regardless of
     # whether CI ran. `ci` skips on pure docs/CHANGELOG updates inside libs
@@ -350,8 +382,9 @@ jobs:
       always() &&
       github.ref == 'refs/heads/master' &&
       needs.changes.outputs.libs != '[]' &&
-      (needs.ci.result == 'success' || needs.ci.result == 'skipped')
-    needs: [changes, ci]
+      (needs.ci.result == 'success' || needs.ci.result == 'skipped') &&
+      (needs.bench.result == 'success' || needs.bench.result == 'skipped')
+    needs: [changes, ci, bench]
     runs-on: ubuntu-latest
     # Job-level permissions REPLACE the workflow-level block, so the existing
     # grants are restated here alongside the new one. `id-token: write` lets
