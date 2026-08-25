@@ -298,7 +298,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should attribute a dispatch the handler did not await to its own event (#1541)", async () => {
+  it("should NOT treat work the handler did not await as a reaction (#1562)", async () => {
     const Source = state({ Source5: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ Triggered5: z.object({ val: z.number() }) })
@@ -323,7 +323,7 @@ describe("auto-inject reactingTo (#587)", () => {
         .withState(Sink)
         .on("Triggered5")
         // Starts the dispatch and returns without awaiting it, so it settles
-        // after the dispatch loop has moved on to the next payload.
+        // long after the handler — and the reaction — is finished.
         .do(async function onTriggered5(event) {
           stray.push(
             sleep(20).then(() =>
@@ -352,17 +352,18 @@ describe("auto-inject reactingTo (#587)", () => {
       stream: "src5-1",
       stream_exact: true,
     });
+    // The commits land, but as originating actions: a timer armed inside a
+    // handler is not "caused by" whichever event happened to arm it, and it
+    // must not inherit that reaction's skipped concurrency guard either.
     for (const val of [1, 2]) {
       const trigger = srcEvents.find((e) => e.data.val === val)!;
       const [received] = await app.query_array({
         stream: `sink5-${val}`,
         stream_exact: true,
       });
-      expect(received.meta.causation.event).toEqual({
-        id: trigger.id,
-        name: "Triggered5",
-        stream: "src5-1",
-      });
+      expect(received).toBeDefined();
+      expect(received.meta.causation.event).toBeUndefined();
+      expect(received.meta.correlation).not.toBe(trigger.meta.correlation);
     }
 
     await dispose();
@@ -494,6 +495,66 @@ describe("auto-inject reactingTo (#587)", () => {
 
     expect(thrown).toBeInstanceOf(ConcurrencyError);
     expect(unguarded_ok).toBe(true);
+
+    await dispose();
+  });
+
+  it("should restore the inferred guard for work that outlived the handler (#1562)", async () => {
+    const Ledger = state({ Ledger6: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Spent6: z.object({}), Fired6: z.object({}) })
+      .patch({ Spent6: (_e, s) => ({ n: s.n + 1 }), Fired6: (_e, s) => s })
+      .on({ spend6: z.object({}) })
+      .emit("Spent6")
+      .on({ fire6: z.object({}) })
+      .emit("Fired6")
+      .build();
+
+    const sys = { id: "sys", name: "system" };
+    const guards: Array<number | undefined> = [];
+    let outlived!: Promise<unknown>;
+    let captured: { do: (...args: any[]) => Promise<unknown> };
+
+    const { app, store, dispose } = await sandbox(
+      act()
+        .withState(Ledger)
+        .on("Fired6")
+        .do(async function handler() {
+          // Dispatched by the handler itself: a reaction, so the inferred
+          // guard is skipped.
+          await captured.do("spend6", { stream: "L6", actor: sys }, {});
+          // Started by the handler and left running: lands on a later tick,
+          // after the reaction is over, so it is ordinary work.
+          outlived = sleep(0).then(() =>
+            captured.do("spend6", { stream: "L6", actor: sys }, {})
+          );
+        })
+        .to({ target: "t6" })
+    );
+    captured = app as unknown as typeof captured;
+
+    // Seed the stream first — a brand-new stream is legitimately unguarded
+    // (`snapshot.version < 0`), which would hide the difference.
+    await app.do("spend6", { stream: "L6", actor }, {});
+
+    const commit = store.commit.bind(store);
+    (store as unknown as { commit: unknown }).commit = (
+      stream: string,
+      msgs: never,
+      meta: never,
+      expected?: number
+    ) => {
+      if (stream === "L6") guards.push(expected);
+      return commit(stream, msgs, meta, expected);
+    };
+
+    await app.do("fire6", { stream: "F6", actor }, {});
+    await app.correlate();
+    await app.drain();
+    await outlived;
+
+    // In order: the handler's own dispatch, then the one that outlived it.
+    expect(guards).toEqual([undefined, 1]);
 
     await dispose();
   });

@@ -54,14 +54,20 @@ If two callers race on the same stream, only one wins. The loser sees `Concurren
 
 ### Reactions skip optimistic concurrency by design
 
-Inside `action()`, when `reactingTo` is provided (i.e., the action was triggered by a reaction handler), `expectedVersion` is *not* enforced:
+Inside `action()`, when `reactingTo` is resolved (i.e., the action was triggered by a reaction handler), the **inferred** guard is not enforced:
 
 ```ts no-check
 // internal/event-sourcing.ts, action()
-reactingTo ? undefined : expected
+reactingTo ? expectedVersion : expected
 ```
 
-The reasoning: reactions are inherently asynchronous catch-up. By the time a reaction processes event N, the stream has likely advanced past N. Forcing an `expectedVersion` check would convert ordinary catch-up into spurious retries. Stream leasing already serializes concurrent reactions on the same stream, so the version race doesn't matter.
+The reasoning: reactions are inherently asynchronous catch-up. By the time a reaction processes event N, the stream has likely advanced past N. Forcing a version check would convert ordinary catch-up into spurious retries. Stream leasing already serializes concurrent reactions on the same stream, so the version race doesn't matter.
+
+Two boundaries keep that from becoming a licence to write unguarded.
+
+**An `expectedVersion` the caller passed explicitly is still honored.** Only the version *inferred* from the loaded snapshot is skipped — dropping a guard someone asked for by name is silent data loss ([#1543](https://github.com/Rotorsoft/act-root/issues/1543)).
+
+**The reaction context applies while the handler runs, and not after.** `reactingTo` also resolves from the ambient context, so it covers every dispatch a handler makes and not only those routed through the injected `app` ([#1541](https://github.com/Rotorsoft/act-root/issues/1541)). But work a handler merely *starts* — a debounce timer, a memoised connection, an un-awaited `settle()` — keeps that async frame long after the handler returns, and is not a reaction. It does not inherit the triggering event, so it neither carries that causation nor skips the guard. Without the boundary, an ordinary read-modify-write dispatched from a batching flush commits unguarded and silently loses an update ([#1562](https://github.com/Rotorsoft/act-root/issues/1562)).
 
 ## Stream leasing — the reader's exclusivity primitive
 

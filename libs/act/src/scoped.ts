@@ -50,8 +50,20 @@ export type Scoped = {
  */
 export const scoped = new AsyncLocalStorage<Scoped>();
 
-/** The event currently being reacted to. Not reachable from `index.ts`. */
-const reacting = new AsyncLocalStorage<Committed<Schemas, string>>();
+/**
+ * The reaction currently running, as a box the handler can empty.
+ *
+ * A frame captured by work the handler started and did not await outlives the
+ * handler and can never be unbound. The *frame* is unreclaimable, but the
+ * *box inside it* is not: clearing `event` as the handler settles turns every
+ * later read through that frame into "no reaction", without anyone having to
+ * ask a second question (#1562).
+ *
+ * Not reachable from `index.ts`.
+ */
+type Reacting = { event: Committed<Schemas, string> | undefined };
+
+const reacting = new AsyncLocalStorage<Reacting>();
 
 /**
  * Builds the runner an Act uses to enter its own port scope.
@@ -86,12 +98,25 @@ export function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {
-  return reacting.run(event, fn);
+  const box: Reacting = { event };
+  return reacting.run(box, async () => {
+    try {
+      return await fn();
+    } finally {
+      // Anything still running keeps this frame; from here it reads empty.
+      box.event = undefined;
+    }
+  });
 }
 
-/** The event being reacted to, or `undefined` outside a handler. @internal */
+/**
+ * The event being reacted to, or `undefined` outside a running handler —
+ * including inside work that outlived one.
+ *
+ * @internal
+ */
 export function current_reacting(): Committed<Schemas, string> | undefined {
-  return reacting.getStore();
+  return reacting.getStore()?.event;
 }
 
 /**
