@@ -86,7 +86,9 @@ export async function probeSqliteFile(
  * Scan a directory for Act SQLite files.
  *
  * Returns one row per file that passes the schema probe. Empty result
- * on missing / unreadable directory or no matching files.
+ * on missing / unreadable directory or no matching files — a scan that
+ * ran and found nothing. An unusable *pattern* is different: the scan
+ * never ran, so it throws rather than reporting an empty directory.
  */
 export async function discoverSqlite(
   input: SqliteDiscoveryInput
@@ -96,10 +98,14 @@ export async function discoverSqlite(
   let pattern: RegExp;
   try {
     pattern = glob ? new RegExp(glob) : DEFAULT_FILE_PATTERN;
-  } catch {
-    // Invalid user-supplied regex — bail with an empty result rather
-    // than throwing into the tRPC error wrapper.
-    return [];
+  } catch (error) {
+    // The scan never ran, so an empty result would be a claim about a
+    // directory nobody looked in. The operator wrote the pattern and can
+    // fix it, once told.
+    throw new Error(
+      `Invalid file pattern ${JSON.stringify(glob)}: ${String(error)}`,
+      { cause: error }
+    );
   }
 
   let entries: string[];

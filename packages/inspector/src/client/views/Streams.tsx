@@ -383,6 +383,18 @@ export function Streams({
             showing {streams.length} of {totalStreams}
           </span>
         )}
+        {/* The subscription join failed (#1552). Pri / Lane / At are read
+            from it, and their defaults — p=0, default lane, no watermark —
+            are legitimate values, so the columns must be called out as
+            unread rather than left to read as facts. */}
+        {metaQuery.isError && (
+          <span
+            className="rounded border border-amber-800 bg-amber-900/40 px-1.5 py-0.5 text-[10px] text-amber-400"
+            title={`Couldn't read the streams table: ${metaQuery.error.message}. The Pri, Lane and At columns below are unknown, not defaults.`}
+          >
+            subscription data unavailable
+          </span>
+        )}
         <input
           type="text"
           value={filter}

@@ -153,10 +153,13 @@ describe("discoverSqlite", () => {
     expect(expandTilde("")).toBe("");
   });
 
-  it("returns [] when given an invalid regex glob", async () => {
+  it("rejects an invalid regex glob rather than reporting an empty directory", async () => {
+    // Unbalanced bracket — `new RegExp(...)` throws. The scan never ran,
+    // so "no Act stores here" would be a claim about a directory nobody
+    // looked in; the operator can fix the pattern once told about it.
     await buildActSqlite(path.join(dir, "store.db"));
-    // Unbalanced bracket — `new RegExp(...)` throws.
-    const result = await discoverSqlite({ dir, glob: "[" });
-    expect(result).toEqual([]);
+    await expect(discoverSqlite({ dir, glob: "[" })).rejects.toThrow(
+      /file pattern/i
+    );
   });
 });

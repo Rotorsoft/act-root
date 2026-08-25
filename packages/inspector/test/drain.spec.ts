@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import type { InMemoryStore } from "@rotorsoft/act";
 import type { Store } from "@rotorsoft/act/types";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveStore, inspectorRouter } from "../src/server/router.js";
 import { seed } from "./helpers.js";
 
@@ -57,6 +57,10 @@ beforeEach(async () => {
   await caller.disconnect();
   await caller.connect({ adapter: "inmemory" });
   store = getActiveStore() as InMemoryStore;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 async function fixture() {
@@ -117,6 +121,55 @@ describe("streamMeta", () => {
 
   it("returns [] when there are no subscriptions", async () => {
     expect(await caller.streamMeta()).toEqual([]);
+  });
+});
+
+/**
+ * A failure is never data (#1552).
+ *
+ * Both of these read surfaces used to end in a bare catch that answered
+ * with a healthy-looking value — a zeroed dashboard, an empty list — so a
+ * store fault, or simply not being connected, read as "everything is
+ * fine". Nothing is protected by swallowing here: the caller is a
+ * read-only query and the client renders an error perfectly well.
+ */
+describe("faults reach the caller", () => {
+  it("refuses drainStatus while disconnected, like every sibling read", async () => {
+    await caller.disconnect();
+    await expect(caller.drainStatus()).rejects.toThrow(
+      "Not connected to a store"
+    );
+  });
+
+  it("refuses streamMeta while disconnected", async () => {
+    await caller.disconnect();
+    await expect(caller.streamMeta()).rejects.toThrow(
+      "Not connected to a store"
+    );
+  });
+
+  it("surfaces a store fault instead of reporting nothing blocked", async () => {
+    await fixture();
+    // Control: the same fixture, read from a healthy store.
+    expect((await caller.drainStatus()).blocked).toBe(1);
+
+    const fault = vi
+      .spyOn(store, "query_stats")
+      .mockRejectedValue(new Error("store fault"));
+    await expect(caller.drainStatus()).rejects.toThrow("store fault");
+
+    // The data was never gone — only that one call path failed.
+    fault.mockRestore();
+    expect((await caller.drainStatus()).blocked).toBe(1);
+  });
+
+  it("surfaces a store fault from streamMeta", async () => {
+    await fixture();
+    expect((await caller.streamMeta()).length).toBeGreaterThan(0);
+    vi.spyOn(store, "query_streams").mockRejectedValue(
+      new Error("streams read failed")
+    );
+    await expect(caller.streamMeta()).rejects.toThrow("streams read failed");
   });
 });
 
@@ -231,24 +284,56 @@ describe("drainStatus", () => {
       expect(status.laneCounts.find((l) => l.lane === "premium")).toBeFalsy();
     });
 
-    it("keeps a retired row out of the blocked list", async () => {
-      // A stream can be blocked and then closed for good. The block is
-      // no longer actionable — nothing can claim the row — so surfacing
-      // it under "blocked" would put a finished stream in front of an
-      // operator scanning for problems.
-      await seed(store, "src-b", "Opened", {}, -1);
-      await store.subscribe([{ stream: "was-blocked", source: "src-b" }]);
-      await seed(store, "was-blocked", "Opened", {}, -1);
+    it("never files a subscription with pending work as retired (#1553)", async () => {
+      // Two namespaces, one string. A reaction targeting `order-1` and
+      // reading from `src` blocks on a poison event; separately, the
+      // *aggregate* stream `order-1` is closed for good. Matching the
+      // subscription's target against the retired event streams by name
+      // alone dropped this row out of `blocked`, `blockedStreams`,
+      // `total`, the histogram and the tallies at once.
+      //
+      // The rule that holds: a row counts as retired only when it also
+      // has nothing pending — `at >= correlated_at`, the store's own
+      // claim predicate, and the property the framework relies on when
+      // it calls a retired stream's subscription inert.
+      await seed(store, "src", "Opened", {}, -1);
+      await seed(store, "order-1", "Opened", {}, -1);
+      await retire("order-1");
+      await store.subscribe([{ stream: "order-1", source: "src" }]);
       await mark_all(store);
       const claimed = await store.claim(10, 10, randomUUID(), 30_000);
-      const mine = claimed.find((l) => l.stream === "was-blocked")!;
-      await store.block([{ ...mine, error: "boom" }]);
-      await retire("was-blocked");
+      const mine = claimed.find((l) => l.stream === "order-1")!;
+      await store.block([{ ...mine, error: "poison" }]);
 
       const status = await caller.drainStatus();
-      expect(status.blocked).toBe(0);
-      expect(status.blockedStreams).toEqual([]);
+      expect(status.blocked).toBe(1);
+      expect(status.total).toBe(1);
+      expect(status.retired).toBe(0);
+      expect(status.blockedStreams[0]).toMatchObject({
+        stream: "order-1",
+        error: "poison",
+      });
+      // Ground truth, straight from the store.
+      const rows: boolean[] = [];
+      await store.query_streams((p) => rows.push(p.blocked));
+      expect(rows.filter(Boolean)).toHaveLength(1);
+    });
+
+    it("still retires the per-aggregate saga it was written for", async () => {
+      // The half that was always right: target == source, the stream is
+      // closed for good, and the consumer has nothing left to do. The
+      // extra "nothing pending" conjunct must not disturb this.
+      await seed(store, "saga-1", "Opened", {}, -1);
+      await store.subscribe([{ stream: "saga-1", source: "saga-1" }]);
+      await mark_all(store);
+      const claimed = await store.claim(10, 10, randomUUID(), 30_000);
+      const mine = claimed.find((l) => l.stream === "saga-1")!;
+      await store.ack([{ ...mine, at: 0 }]);
+      await retire("saga-1");
+
+      const status = await caller.drainStatus();
       expect(status.retired).toBe(1);
+      expect(status.total).toBe(0);
     });
 
     it("reports each retired watermark as the record it is", async () => {

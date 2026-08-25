@@ -240,6 +240,20 @@ type PgConfig = {
   password: string;
   schema: string;
   table: string;
+  /**
+   * TLS settings the store connected with (#1554). Held here because
+   * everything else that talks to the same server — the correlators
+   * reader, which opens its own client against the framework's
+   * `*_correlated` table — has to connect the same way. Dropping them
+   * after handing them to the store left that reader unable to reach any
+   * managed Postgres, while the panel it feeds claimed the store simply
+   * had nothing to record.
+   *
+   * Optional: transfer endpoints construct a `PgConfig` from per-call
+   * credentials that carry no TLS fields of their own.
+   */
+  ssl?: boolean;
+  sslInsecure?: boolean;
 };
 
 type SqliteConfig = {
@@ -460,6 +474,21 @@ function isRetiredStream(
 }
 
 /**
+ * Does this subscription still have work waiting for it?
+ *
+ * The store's own claim predicate — `at < correlated_at` — with the same
+ * reading of an unmarked row the adapters use: no mark, nothing claimable,
+ * so nothing pending. It is the one property that decides whether a
+ * consumer is finished, and the property a retired stream's subscription
+ * is documented to have permanently settled (`Store.truncate`: "no scan
+ * can raise its work mark, so `at < correlated_at` never becomes true
+ * again").
+ */
+function has_pending_work(p: StreamPosition): boolean {
+  return p.correlated_at !== undefined && p.at < p.correlated_at;
+}
+
+/**
  * Stream names whose subscription row is a leftover record of a retired
  * stream (#1535).
  *
@@ -672,7 +701,9 @@ export const inspectorRouter = t.router({
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
-        currentConfig = { adapter: "pg", ...pgConfig };
+        // TLS rides along (#1554) — the correlators reader opens its own
+        // client from this config and has to reach the same server.
+        currentConfig = { adapter: "pg", ...pgConfig, ssl, sslInsecure };
         return {
           ok: true as const,
           config: { adapter, ...pgConfig, ssl, sslInsecure, password: "***" },
@@ -1032,6 +1063,13 @@ export const inspectorRouter = t.router({
    * with `loadAllStreamPositions` (streams table) so each row carries
    * the lane + priority operators care about when deciding what to
    * close.
+   *
+   * Both halves of the join are load-bearing (#1566). A failed positions
+   * read used to degrade to an empty list, and every row then reported
+   * the *defaults* — `priority: 0`, `lane: null` — which read exactly
+   * like a stream genuinely on the default lane. The lane and priority
+   * are the columns this view exists to answer on, so the read fails as
+   * a whole rather than answering them wrongly.
    */
   streamsForEvent: t.procedure
     .input(z.object({ name: z.string().min(1) }))
@@ -1039,7 +1077,7 @@ export const inspectorRouter = t.router({
       const s = getStore();
       const [stats, { positions }] = await Promise.all([
         s.query_stats<Schemas>({}, { count: true, names: true }),
-        loadAllStreamPositions().catch(() => ({ positions: [] })),
+        loadAllStreamPositions(),
       ]);
       const metaByStream = new Map(
         positions.map((p) => [
@@ -1076,28 +1114,30 @@ export const inspectorRouter = t.router({
       };
     }),
 
-  /** Get stream processing metadata from the streams table */
+  /**
+   * Get stream processing metadata from the streams table.
+   *
+   * Reads fail loudly (#1552). An empty list is what a store with no
+   * subscriptions returns, so a swallowed fault — or simply not being
+   * connected — was indistinguishable from "nothing is subscribed here".
+   */
   streamMeta: t.procedure.query(async () => {
-    try {
-      const { positions } = await loadAllStreamPositions();
-      return positions.map((p) => ({
-        stream: p.stream,
-        source: p.source ?? null,
-        at: p.at,
-        retry: p.retry,
-        blocked: p.blocked,
-        error: p.error || null,
-        priority: p.priority,
-        // ACT-1103: drain lane the stream is bound to. `undefined`
-        // (the implicit "default" lane) surfaces as null for the UI;
-        // the Streams view dims it so non-default lanes pop.
-        lane: p.lane ?? null,
-        leased_by: p.leased_by ?? null,
-        leased_until: p.leased_until?.toISOString() ?? null,
-      }));
-    } catch {
-      return [];
-    }
+    const { positions } = await loadAllStreamPositions();
+    return positions.map((p) => ({
+      stream: p.stream,
+      source: p.source ?? null,
+      at: p.at,
+      retry: p.retry,
+      blocked: p.blocked,
+      error: p.error || null,
+      priority: p.priority,
+      // ACT-1103: drain lane the stream is bound to. `undefined`
+      // (the implicit "default" lane) surfaces as null for the UI;
+      // the Streams view dims it so non-default lanes pop.
+      lane: p.lane ?? null,
+      leased_by: p.leased_by ?? null,
+      leased_until: p.leased_until?.toISOString() ?? null,
+    }));
   }),
 
   /**
@@ -1114,186 +1154,181 @@ export const inspectorRouter = t.router({
    * record of how far that consumer got, not as progress it might still
    * make. `total` therefore counts live subscriptions only, and the four
    * health buckets still sum to it.
+   *
+   * **A row is retired only if it is also finished** (#1553). The retired
+   * set is built from *event-stream* names and tested against
+   * *subscription-target* names — two namespaces sharing one string
+   * domain, and the documented per-aggregate shape
+   * `.to(e => ({target: e.stream}))` makes them collide by construction.
+   * Requiring {@link has_pending_work} to be false keys the decision on
+   * the property that actually matters: whether that consumer still has
+   * something to do. A blocked subscription always does, so a live block
+   * can no longer disappear behind an unrelated retired stream that
+   * happens to share its name.
+   *
+   * **Faults are not answers** (#1552). The whole read fails rather than
+   * returning a zeroed snapshot — an all-clear on the framework's primary
+   * "what is stuck right now?" surface is exactly the wrong thing to show
+   * during the kind of incident that causes store faults.
    */
   drainStatus: t.procedure.query(async () => {
-    try {
-      const [{ positions, maxEventId: rawMax }, retiredSet] = await Promise.all(
-        [loadAllStreamPositions(), loadRetiredStreams()]
-      );
-      const maxEventId = Math.max(0, rawMax);
-      const now = new Date();
+    const [{ positions, maxEventId: rawMax }, retiredSet] = await Promise.all([
+      loadAllStreamPositions(),
+      loadRetiredStreams(),
+    ]);
+    const maxEventId = Math.max(0, rawMax);
+    const now = new Date();
 
-      // Aggregates
-      let healthy = 0;
-      let blocked = 0;
-      let leased = 0;
-      let lagging = 0;
-      const blockedStreams: Array<{
-        stream: string;
-        source: string | null;
-        error: string | null;
-        retry: number;
-        at: number;
-        gap: number;
-        priority: number;
-        lane: string | null;
-      }> = [];
-      const activeLeases: Array<{
-        stream: string;
-        source: string | null;
-        leased_by: string;
-        leased_until: string;
-        priority: number;
-        lane: string | null;
-      }> = [];
-      const gaps: number[] = [];
-      // Streams per priority lane — operators want a quick read of
-      // "how many things are at priority > 0 right now."
-      const priorityCounts = new Map<number, number>();
-      // Streams per drain lane (ACT-1103). `undefined`/`"default"`
-      // normalize to `"default"` so the histogram bucket renders one
-      // consistent label.
-      const laneCounts = new Map<string, number>();
-      // Leftover rows of streams closed for good. Kept out of every
-      // aggregate above and surfaced on their own — the watermark is a
-      // record of where each consumer stopped, not a backlog.
-      const retiredStreams: Array<{
-        stream: string;
-        source: string | null;
-        at: number;
-        priority: number;
-        lane: string | null;
-      }> = [];
+    // Aggregates
+    let healthy = 0;
+    let blocked = 0;
+    let leased = 0;
+    let lagging = 0;
+    const blockedStreams: Array<{
+      stream: string;
+      source: string | null;
+      error: string | null;
+      retry: number;
+      at: number;
+      gap: number;
+      priority: number;
+      lane: string | null;
+    }> = [];
+    const activeLeases: Array<{
+      stream: string;
+      source: string | null;
+      leased_by: string;
+      leased_until: string;
+      priority: number;
+      lane: string | null;
+    }> = [];
+    const gaps: number[] = [];
+    // Streams per priority lane — operators want a quick read of
+    // "how many things are at priority > 0 right now."
+    const priorityCounts = new Map<number, number>();
+    // Streams per drain lane (ACT-1103). `undefined`/`"default"`
+    // normalize to `"default"` so the histogram bucket renders one
+    // consistent label.
+    const laneCounts = new Map<string, number>();
+    // Leftover rows of streams closed for good. Kept out of every
+    // aggregate above and surfaced on their own — the watermark is a
+    // record of where each consumer stopped, not a backlog.
+    const retiredStreams: Array<{
+      stream: string;
+      source: string | null;
+      at: number;
+      priority: number;
+      lane: string | null;
+    }> = [];
 
-      for (const p of positions) {
-        if (retiredSet.has(p.stream)) {
-          retiredStreams.push({
-            stream: p.stream,
-            source: p.source ?? null,
-            at: p.at,
-            priority: p.priority,
-            lane: p.lane ?? null,
-          });
-          continue;
-        }
-        // Pending work, not distance to the head (#1521). A subscription's
-        // watermark advances only over events that resolve to it, so a
-        // reaction handling a subset of a state's events sits permanently
-        // below the head with nothing to do — and showed here as a large gap,
-        // counted as `lagging`, sorted to the top of the blocked view. The
-        // mark is what says whether work is actually waiting.
-        //
-        // An unmarked row has no mark to read (an install that predates the
-        // column, before `seed()` has marked it), so it keeps the head
-        // distance: an upper bound, and the same number this always showed.
-        const gap =
-          p.correlated_at !== undefined
-            ? Math.max(0, p.correlated_at - p.at)
-            : Math.max(0, maxEventId - p.at);
-        gaps.push(gap);
-        priorityCounts.set(
-          p.priority,
-          (priorityCounts.get(p.priority) ?? 0) + 1
-        );
-        const laneKey = p.lane ?? "default";
-        laneCounts.set(laneKey, (laneCounts.get(laneKey) ?? 0) + 1);
-
-        if (p.blocked) {
-          blocked++;
-          blockedStreams.push({
-            stream: p.stream,
-            source: p.source ?? null,
-            error: p.error || null,
-            retry: p.retry,
-            at: p.at,
-            gap,
-            priority: p.priority,
-            lane: p.lane ?? null,
-          });
-        } else if (p.leased_by && p.leased_until && p.leased_until > now) {
-          leased++;
-          activeLeases.push({
-            stream: p.stream,
-            source: p.source ?? null,
-            leased_by: p.leased_by,
-            leased_until: p.leased_until.toISOString(),
-            priority: p.priority,
-            lane: p.lane ?? null,
-          });
-        } else if (gap > 10) {
-          lagging++;
-        } else {
-          healthy++;
-        }
+    for (const p of positions) {
+      if (retiredSet.has(p.stream) && !has_pending_work(p)) {
+        retiredStreams.push({
+          stream: p.stream,
+          source: p.source ?? null,
+          at: p.at,
+          priority: p.priority,
+          lane: p.lane ?? null,
+        });
+        continue;
       }
+      // Pending work, not distance to the head (#1521). A subscription's
+      // watermark advances only over events that resolve to it, so a
+      // reaction handling a subset of a state's events sits permanently
+      // below the head with nothing to do — and showed here as a large gap,
+      // counted as `lagging`, sorted to the top of the blocked view. The
+      // mark is what says whether work is actually waiting.
+      //
+      // An unmarked row has no mark to read (an install that predates the
+      // column, before `seed()` has marked it), so it keeps the head
+      // distance: an upper bound, and the same number this always showed.
+      const gap =
+        p.correlated_at !== undefined
+          ? Math.max(0, p.correlated_at - p.at)
+          : Math.max(0, maxEventId - p.at);
+      gaps.push(gap);
+      priorityCounts.set(p.priority, (priorityCounts.get(p.priority) ?? 0) + 1);
+      const laneKey = p.lane ?? "default";
+      laneCounts.set(laneKey, (laneCounts.get(laneKey) ?? 0) + 1);
 
-      // Watermark histogram
-      const buckets = [
-        { label: "0", min: 0, max: 0, count: 0 },
-        { label: "1-10", min: 1, max: 10, count: 0 },
-        { label: "11-50", min: 11, max: 50, count: 0 },
-        { label: "51-100", min: 51, max: 100, count: 0 },
-        { label: "100+", min: 101, max: Infinity, count: 0 },
-      ];
-      for (const gap of gaps) {
-        for (const b of buckets) {
-          if (gap >= b.min && gap <= b.max) {
-            b.count++;
-            break;
-          }
-        }
+      if (p.blocked) {
+        blocked++;
+        blockedStreams.push({
+          stream: p.stream,
+          source: p.source ?? null,
+          error: p.error || null,
+          retry: p.retry,
+          at: p.at,
+          gap,
+          priority: p.priority,
+          lane: p.lane ?? null,
+        });
+      } else if (p.leased_by && p.leased_until && p.leased_until > now) {
+        leased++;
+        activeLeases.push({
+          stream: p.stream,
+          source: p.source ?? null,
+          leased_by: p.leased_by,
+          leased_until: p.leased_until.toISOString(),
+          priority: p.priority,
+          lane: p.lane ?? null,
+        });
+      } else if (gap > 10) {
+        lagging++;
+      } else {
+        healthy++;
       }
-
-      const retired = retiredStreams.length;
-      return {
-        // Live subscriptions only — retired rows are reported below.
-        total: positions.length - retired,
-        healthy,
-        blocked,
-        leased,
-        lagging,
-        retired,
-        // Capped sample, alphabetical. `retired` above is the real
-        // count; an operator deciding whether the leftover rows are
-        // worth reclaiming needs the number, not every name.
-        retiredStreams: retiredStreams
-          .sort((a, b) => a.stream.localeCompare(b.stream))
-          .slice(0, RETIRED_SAMPLE_LIMIT),
-        maxEventId,
-        blockedStreams: blockedStreams.sort((a, b) => b.gap - a.gap),
-        activeLeases,
-        histogram: buckets,
-        // Sorted highest-priority first so a UI can spot non-default
-        // lanes at a glance.
-        priorityCounts: [...priorityCounts.entries()]
-          .sort((a, b) => b[0] - a[0])
-          .map(([priority, count]) => ({ priority, count })),
-        // Sorted by count desc so the busiest lane is the first chip.
-        // Default lane sorts naturally alongside others — operators can
-        // see "30 streams on writes, 5 on default" at a glance.
-        laneCounts: [...laneCounts.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([lane, count]) => ({ lane, count })),
-        timestamp: new Date().toISOString(),
-      };
-    } catch {
-      return {
-        total: 0,
-        healthy: 0,
-        blocked: 0,
-        leased: 0,
-        lagging: 0,
-        retired: 0,
-        retiredStreams: [],
-        maxEventId: 0,
-        blockedStreams: [],
-        activeLeases: [],
-        histogram: [],
-        priorityCounts: [],
-        laneCounts: [],
-        timestamp: new Date().toISOString(),
-      };
     }
+
+    // Watermark histogram
+    const buckets = [
+      { label: "0", min: 0, max: 0, count: 0 },
+      { label: "1-10", min: 1, max: 10, count: 0 },
+      { label: "11-50", min: 11, max: 50, count: 0 },
+      { label: "51-100", min: 51, max: 100, count: 0 },
+      { label: "100+", min: 101, max: Infinity, count: 0 },
+    ];
+    for (const gap of gaps) {
+      for (const b of buckets) {
+        if (gap >= b.min && gap <= b.max) {
+          b.count++;
+          break;
+        }
+      }
+    }
+
+    const retired = retiredStreams.length;
+    return {
+      // Live subscriptions only — retired rows are reported below.
+      total: positions.length - retired,
+      healthy,
+      blocked,
+      leased,
+      lagging,
+      retired,
+      // Capped sample, alphabetical. `retired` above is the real
+      // count; an operator deciding whether the leftover rows are
+      // worth reclaiming needs the number, not every name.
+      retiredStreams: retiredStreams
+        .sort((a, b) => a.stream.localeCompare(b.stream))
+        .slice(0, RETIRED_SAMPLE_LIMIT),
+      maxEventId,
+      blockedStreams: blockedStreams.sort((a, b) => b.gap - a.gap),
+      activeLeases,
+      histogram: buckets,
+      // Sorted highest-priority first so a UI can spot non-default
+      // lanes at a glance.
+      priorityCounts: [...priorityCounts.entries()]
+        .sort((a, b) => b[0] - a[0])
+        .map(([priority, count]) => ({ priority, count })),
+      // Sorted by count desc so the busiest lane is the first chip.
+      // Default lane sorts naturally alongside others — operators can
+      // see "30 streams on writes, 5 on default" at a glance.
+      laneCounts: [...laneCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([lane, count]) => ({ lane, count })),
+      timestamp: new Date().toISOString(),
+    };
   }),
 
   /**

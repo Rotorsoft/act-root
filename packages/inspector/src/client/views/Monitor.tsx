@@ -1,10 +1,16 @@
 import { Database } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ReadFailed } from "../components/ReadFailed.js";
 import { trpc } from "../trpc.js";
 
 type MonitorProps = {
   onStream?: (stream: string) => void;
-  onBlockedCount?: (count: number) => void;
+  /**
+   * Blocked-stream count for the tab badge. `null` means the count could
+   * not be read (#1552) — the badge says so rather than reporting zero,
+   * which is what a healthy system looks like.
+   */
+  onBlockedCount?: (count: number | null) => void;
 };
 
 export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
@@ -40,10 +46,13 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
 
   const data = statusQuery.data;
 
-  // Report blocked count for tab badge
+  // Report blocked count for tab badge. A failed read reports "unknown"
+  // rather than zero (#1552); while it is merely loading, the badge keeps
+  // whatever it last knew.
   useEffect(() => {
-    onBlockedCount?.(data?.blocked ?? 0);
-  }, [data?.blocked, onBlockedCount]);
+    if (statusQuery.isError) onBlockedCount?.(null);
+    else if (data) onBlockedCount?.(data.blocked);
+  }, [statusQuery.isError, data, onBlockedCount]);
 
   const matches = (row: { priority: number; lane: string | null }) =>
     (priorityFilter === null || row.priority === priorityFilter) &&
@@ -57,6 +66,18 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
     () => (data?.activeLeases ?? []).filter(matches),
     [data?.activeLeases, priorityFilter, laneFilter]
   );
+
+  // A failed read is not an idle system (#1552). Say what happened, and
+  // offer the retry — never a page of zeros with a fresh timestamp on it.
+  if (statusQuery.isError) {
+    return (
+      <ReadFailed
+        title="Couldn't read drain status"
+        detail={statusQuery.error.message}
+        onRetry={() => void statusQuery.refetch()}
+      />
+    );
+  }
 
   if (!data) {
     return (
@@ -255,6 +276,9 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
           <CorrelatorsPanel
             correlators={correlatorsQuery.data?.correlators ?? []}
             maxEventId={correlatorsQuery.data?.maxEventId ?? -1}
+            unreadable={
+              correlatorsQuery.isError ? correlatorsQuery.error.message : null
+            }
           />
           <AuditPanel
             writeEnabled={writeEnabled}
@@ -763,6 +787,7 @@ function Histogram({
 function CorrelatorsPanel({
   correlators,
   maxEventId,
+  unreadable,
 }: {
   correlators: Array<{
     key: string;
@@ -771,6 +796,12 @@ function CorrelatorsPanel({
     leasedUntil: number | null;
   }>;
   maxEventId: number;
+  /**
+   * Why the read failed, when it did (#1554). The empty state below names
+   * a specific, benign cause — it may only be shown when the read
+   * succeeded and there was genuinely nothing there.
+   */
+  unreadable: string | null;
 }) {
   // The empty key is the position a brand-new correlator starts from, not a
   // worker, so it would read as a permanently idle row.
@@ -783,7 +814,16 @@ function CorrelatorsPanel({
         Looking for work
       </div>
 
-      {rows.length === 0 ? (
+      {unreadable ? (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-amber-300">
+            Couldn't read the correlators table.
+          </p>
+          <pre className="whitespace-pre-wrap font-mono text-[10px] text-zinc-600">
+            {unreadable}
+          </pre>
+        </div>
+      ) : rows.length === 0 ? (
         <p className="text-xs text-zinc-600">
           Nothing to show — this store keeps it in memory, or predates the
           change that records it.

@@ -33,7 +33,12 @@ const tabs: TabDef[] = [
 type TabNavProps = {
   active: Tab;
   onChange: (tab: Tab) => void;
-  blockedCount?: number;
+  /**
+   * Blocked streams right now. `null` means unknown — the read failed
+   * (#1552) — and renders as a muted "?" instead of no badge at all,
+   * which would read as "nothing is blocked".
+   */
+  blockedCount?: number | null;
 };
 
 export function TabNav({ active, onChange, blockedCount }: TabNavProps) {
@@ -51,6 +56,14 @@ export function TabNav({ active, onChange, blockedCount }: TabNavProps) {
         >
           {tab.icon}
           {tab.label}
+          {tab.id === "monitor" && blockedCount === null && (
+            <span
+              className="ml-0.5 rounded-full bg-zinc-700 px-1.5 py-0.5 text-[9px] font-bold leading-none text-zinc-200"
+              title="Blocked count unknown — the drain status could not be read"
+            >
+              ?
+            </span>
+          )}
           {tab.id === "monitor" && blockedCount != null && blockedCount > 0 && (
             <span className="ml-0.5 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-bold leading-none text-white">
               {blockedCount}

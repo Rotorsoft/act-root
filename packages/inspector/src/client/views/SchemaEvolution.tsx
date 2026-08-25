@@ -1,5 +1,6 @@
 import { ArrowRight, Check, Copy, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ReadFailed } from "../components/ReadFailed.js";
 import { trpc } from "../trpc.js";
 
 type EventRow = {
@@ -370,9 +371,11 @@ function StreamsForEventModal({
           <div>
             <h3 className="font-mono text-sm text-zinc-200">{eventName}</h3>
             <p className="mt-0.5 text-[11px] text-zinc-500">
-              {rows.length === 0
-                ? "No streams hold this event."
-                : `${rows.length} streams hold ${totalOfName.toLocaleString()} ${eventName} events`}
+              {query.isError
+                ? "Couldn't read this event's streams."
+                : rows.length === 0
+                  ? "No streams hold this event."
+                  : `${rows.length} streams hold ${totalOfName.toLocaleString()} ${eventName} events`}
             </p>
           </div>
           <button
@@ -408,7 +411,16 @@ function StreamsForEventModal({
             </span>
             <span className="w-24 shrink-0 text-right">Total events</span>
           </div>
-          {query.isLoading ? (
+          {query.isError ? (
+            // The lane + priority columns come from a second read, and a
+            // failed one used to fill them with defaults (#1566). "No
+            // streams hold this event" would be the same lie in list form.
+            <ReadFailed
+              title="Couldn't read the streams holding this event"
+              detail={query.error.message}
+              onRetry={() => void query.refetch()}
+            />
+          ) : query.isLoading ? (
             <div className="flex h-48 items-center justify-center text-sm text-zinc-600">
               Loading streams…
             </div>
