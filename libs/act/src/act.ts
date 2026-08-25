@@ -1212,17 +1212,7 @@ export class Act<
     // anywhere inside a reaction handler threads the chain whichever `IAct`
     // reference made the call (#1541), while `internal/` stays free of
     // ambient reads. An explicitly-passed `reactingTo` still wins.
-    // The reaction context applies while the handler runs, and not after.
-    //
-    // A handler's own dispatches inherit the triggering event whichever
-    // `IAct` reference makes them (#1541). Work the handler merely started —
-    // a debounce timer, a memoised connection, an un-awaited `settle()` —
-    // keeps the frame long after the handler is gone, and is not a reaction:
-    // it does not inherit the event, so it neither carries that causation nor
-    // skips the concurrency guard (#1562).
-    const ctx = current_reacting();
-    const reacting_to =
-      options?.reactingTo ?? (ctx?.live === true ? ctx.event : undefined);
+    const reacting_to = options?.reactingTo ?? current_reacting();
     const do_options =
       reacting_to === options?.reactingTo
         ? options
