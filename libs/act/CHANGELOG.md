@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.7...@rotorsoft/act-v1.31.8) (2026-08-25)
+
+
+### Bug Fixes
+
+* **act:** apply the lane guards to dynamic resolutions ([#1575](https://github.com/Rotorsoft/act-root/issues/1575)) ([f3d5781](https://github.com/Rotorsoft/act-root/commit/f3d578139993cbe92b39dc11c4d4142d03bef6de)), closes [#1420](https://github.com/Rotorsoft/act-root/issues/1420) [#1564](https://github.com/Rotorsoft/act-root/issues/1564) [#1567](https://github.com/Rotorsoft/act-root/issues/1567)
+
 # [@rotorsoft/act-v1.31.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.6...@rotorsoft/act-v1.31.7) (2026-08-25)
 
 
