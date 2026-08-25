@@ -17379,10 +17379,10 @@ export const scoped = new AsyncLocalStorage<Scoped>();
  * \`live\` is the whole point. An \`AsyncLocalStorage\` frame captured by work a
  * handler started and did not await — a debounce timer, a memoised
  * connection, an un-awaited \`settle()\` — outlives the handler and can never
- * be unbound. The *frame* cannot be reclaimed, but the *value inside it*
- * can: the handler flips \`live\` to false as it settles, so later dispatches
- * through that frame still read the event (the causation chain is real) while
- * no longer claiming to be a reaction in progress (#1562).
+ * be unbound. The *frame* cannot be reclaimed, but the *value inside it* can:
+ * the handler flips \`live\` to false as it settles, so a dispatch arriving
+ * through that frame afterwards is recognised as ordinary work rather than a
+ * reaction still in progress (#1562).
  */
 type Reacting = {
   readonly event: Committed<Schemas, string>;
@@ -35264,10 +35264,10 @@ export const scoped = new AsyncLocalStorage<Scoped>();
  * \`live\` is the whole point. An \`AsyncLocalStorage\` frame captured by work a
  * handler started and did not await — a debounce timer, a memoised
  * connection, an un-awaited \`settle()\` — outlives the handler and can never
- * be unbound. The *frame* cannot be reclaimed, but the *value inside it*
- * can: the handler flips \`live\` to false as it settles, so later dispatches
- * through that frame still read the event (the causation chain is real) while
- * no longer claiming to be a reaction in progress (#1562).
+ * be unbound. The *frame* cannot be reclaimed, but the *value inside it* can:
+ * the handler flips \`live\` to false as it settles, so a dispatch arriving
+ * through that frame afterwards is recognised as ordinary work rather than a
+ * reaction still in progress (#1562).
  */
 type Reacting = {
   readonly event: Committed<Schemas, string>;

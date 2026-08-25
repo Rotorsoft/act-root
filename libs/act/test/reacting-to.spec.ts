@@ -500,67 +500,42 @@ describe("auto-inject reactingTo (#587)", () => {
   });
 
   it("should restore the inferred guard for work that outlived the handler (#1562)", async () => {
-    const Ledger = state({ Ledger6: z.object({ balance: z.number() }) })
-      .init(() => ({ balance: 100 }))
-      .emits({ Withdrawn6: z.object({ balance: z.number() }) })
-      .patch({ Withdrawn6: ({ data }) => ({ balance: data.balance }) })
-      .on({ withdraw6: z.object({ amount: z.number() }) })
-      .emit((a, snap) => [
-        "Withdrawn6",
-        { balance: snap.state.balance - a.amount },
-      ])
-      .build();
-
-    const Trigger = state({ Trigger6: z.object({ n: z.number() }) })
+    const Ledger = state({ Ledger6: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
-      .emits({ Fired6: z.object({ n: z.number() }) })
-      .patch({ Fired6: ({ data }) => ({ n: data.n }) })
-      .on({ fire6: z.object({ n: z.number() }) })
+      .emits({ Spent6: z.object({}), Fired6: z.object({}) })
+      .patch({ Spent6: (_e, s) => ({ n: s.n + 1 }), Fired6: (_e, s) => s })
+      .on({ spend6: z.object({}) })
+      .emit("Spent6")
+      .on({ fire6: z.object({}) })
       .emit("Fired6")
       .build();
 
+    const sys = { id: "sys", name: "system" };
+    const guards: Array<number | undefined> = [];
+    let outlived!: Promise<unknown>;
     let captured: { do: (...args: any[]) => Promise<unknown> };
-    const stray: Promise<unknown>[] = [];
-    const guards: Array<{ from: string; expected: unknown }> = [];
-    let from = "ordinary";
-    let in_handler: unknown = "NOT-SEEN";
 
     const { app, store, dispose } = await sandbox(
       act()
         .withState(Ledger)
-        .withState(Trigger)
         .on("Fired6")
-        .do(async function armDetached() {
-          // A dispatch made while the handler is still running IS a
-          // reaction: it must keep skipping the inferred guard.
-          from = "live";
-          await captured.do(
-            "withdraw6",
-            { stream: "L6", actor: { id: "sys", name: "system" } },
-            { amount: 1 }
-          );
-          in_handler = guards.at(-1)?.expected;
-
-          // ...and work the handler starts without awaiting is NOT, however
-          // long its frame survives.
-          stray.push(
-            sleep(20).then(async () => {
-              from = "detached";
-              await captured.do(
-                "withdraw6",
-                { stream: "L6", actor: { id: "sys", name: "system" } },
-                { amount: 1 }
-              );
-            })
+        .do(async function handler() {
+          // Dispatched by the handler itself: a reaction, so the inferred
+          // guard is skipped.
+          await captured.do("spend6", { stream: "L6", actor: sys }, {});
+          // Started by the handler and left running: lands on a later tick,
+          // after the reaction is over, so it is ordinary work.
+          outlived = sleep(0).then(() =>
+            captured.do("spend6", { stream: "L6", actor: sys }, {})
           );
         })
         .to({ target: "t6" })
     );
     captured = app as unknown as typeof captured;
 
-    // Seed the stream: a brand-new stream is legitimately unguarded
-    // (`snapshot.version < 0`), which would mask the difference.
-    await app.do("withdraw6", { stream: "L6", actor }, { amount: 1 });
+    // Seed the stream first — a brand-new stream is legitimately unguarded
+    // (`snapshot.version < 0`), which would hide the difference.
+    await app.do("spend6", { stream: "L6", actor }, {});
 
     const commit = store.commit.bind(store);
     (store as unknown as { commit: unknown }).commit = (
@@ -569,26 +544,17 @@ describe("auto-inject reactingTo (#587)", () => {
       meta: never,
       expected?: number
     ) => {
-      if (stream === "L6") guards.push({ from, expected });
+      if (stream === "L6") guards.push(expected);
       return commit(stream, msgs, meta, expected);
     };
 
-    from = "ordinary";
-    await app.do("withdraw6", { stream: "L6", actor }, { amount: 1 });
-    await app.do("fire6", { stream: "T6", actor }, { n: 1 });
+    await app.do("fire6", { stream: "F6", actor }, {});
     await app.correlate();
     await app.drain();
-    await Promise.all(stray);
-    await sleep(20);
+    await outlived;
 
-    const guard_of = (f: string) => guards.find((g) => g.from === f)?.expected;
-
-    // An ordinary dispatch carries the inferred guard.
-    expect(guard_of("ordinary")).toBe(0);
-    // A live reaction deliberately does not.
-    expect(in_handler).toBeUndefined();
-    // Detached work keeps the chain but is guarded like any other dispatch.
-    expect(guard_of("detached")).not.toBeUndefined();
+    // In order: the handler's own dispatch, then the one that outlived it.
+    expect(guards).toEqual([undefined, 1]);
 
     await dispose();
   });
