@@ -31,6 +31,7 @@ import type {
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
+import { report_once } from "./report-once.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -194,17 +195,6 @@ export type CorrelateCycleDeps<
   cold_start_back_scan?: number;
   lease_millis?: number;
 };
-
-/**
- * Report an offending declaration once. `seen` belongs to the calling
- * correlator and is passed in, so a resolver firing for every matching event
- * reports once without this module remembering anything between calls.
- */
-function report_once(seen: Set<string>, key: string, message: string): void {
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(new Error(message));
-}
 
 /**
  * A dynamic resolution named a lane no controller claims (#1564).

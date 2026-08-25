@@ -7949,6 +7949,7 @@ import type {
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
+import { report_once } from "./report-once.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -8112,17 +8113,6 @@ export type CorrelateCycleDeps<
   cold_start_back_scan?: number;
   lease_millis?: number;
 };
-
-/**
- * Report an offending declaration once. \`seen\` belongs to the calling
- * correlator and is passed in, so a resolver firing for every matching event
- * reports once without this module remembering anything between calls.
- */
-function report_once(seen: Set<string>, key: string, message: string): void {
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(new Error(message));
-}
 
 /**
  * A dynamic resolution named a lane no controller claims (#1564).
@@ -9515,6 +9505,7 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
+import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
 /**
@@ -9648,6 +9639,22 @@ function budget_exhausted<TEvents extends Schemas>(
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
 
+/** Report a misrouted resolution once per offending declaration. */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  report_once(
+    seen,
+    \`\${stream}|\${handler}|\${event}\`,
+    \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
+      "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+      "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
+  );
+}
+
 /**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
@@ -9661,31 +9668,6 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
-/**
- * Report a misrouted resolution once per offending declaration.
- *
- * \`seen\` belongs to the calling controller and is passed in: \`internal/\` holds
- * no module state, so a resolver firing for every matching event still reports
- * once without this module remembering anything between calls.
- */
-function warn_misrouted(
-  seen: Set<string>,
-  stream: string,
-  handler: string,
-  event: string
-): void {
-  const key = \`\${stream}|\${handler}|\${event}\`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(
-    new Error(
-      \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
-        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
-        "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
-    )
-  );
-}
-
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -17544,6 +17526,57 @@ export type CommittedOf<E, K extends keyof E> = E[K] extends z.ZodType
       readonly data: z.infer<E[K]>;
     } & CommittedMeta
   : never;
+
+// === report-once.ts ===
+/**
+ * @module report-once
+ * @category Internal
+ *
+ * One-shot reporting for a misdeclaration that a build-time guard could not
+ * catch.
+ *
+ * The guards in \`build_events\` and \`build-classify\` can only inspect a static
+ * \`.to({...})\` — a \`.to(fn)\` target, lane and priority are a function until an
+ * event arrives. The pipelines that resolve them (correlate for lane and
+ * target, drain for the payload) are therefore where the same rules have to be
+ * applied, and where the operator has to be told.
+ *
+ * Reporting there has one hazard the build-time guards don't: a resolver fires
+ * for *every* matching event, so a naive log turns one bad declaration into a
+ * line per event on a busy stream. Reporting once per offending declaration is
+ * what makes the message readable.
+ *
+ * Never throws. A throw inside correlate pins the checkpoint for the whole app
+ * (#1420); inside drain it reaches the circuit breaker as a store failure and
+ * stalls every stream.
+ *
+ * @internal
+ */
+
+import { log } from "../ports.js";
+
+/**
+ * Report \`message\` the first time \`key\` is seen, and never again.
+ *
+ * \`seen\` belongs to the calling pipeline and is passed in, so a resolver
+ * firing for every matching event still reports once without this module
+ * remembering anything between calls — \`internal/\` holds no module state.
+ *
+ * @param seen - The caller's set of already-reported keys. Mutated.
+ * @param key - Identifies the offending declaration, not the occurrence.
+ * @param message - Wrapped in an \`Error\` so the logger renders a stack.
+ *
+ * @internal
+ */
+export function report_once(
+  seen: Set<string>,
+  key: string,
+  message: string
+): void {
+  if (seen.has(key)) return;
+  seen.add(key);
+  log().error(new Error(message));
+}
 
 // === schemas.ts ===
 import { type ZodObject, type ZodRawShape, z } from "zod";
@@ -27185,6 +27218,7 @@ import type {
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
+import { report_once } from "./report-once.js";
 
 /**
  * Cold-start back-scan window (ACT-1207). On init the correlate cursor
@@ -27348,17 +27382,6 @@ export type CorrelateCycleDeps<
   cold_start_back_scan?: number;
   lease_millis?: number;
 };
-
-/**
- * Report an offending declaration once. \`seen\` belongs to the calling
- * correlator and is passed in, so a resolver firing for every matching event
- * reports once without this module remembering anything between calls.
- */
-function report_once(seen: Set<string>, key: string, message: string): void {
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(new Error(message));
-}
 
 /**
  * A dynamic resolution named a lane no controller claims (#1564).
@@ -28524,6 +28547,7 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
+import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
 /**
@@ -28657,6 +28681,22 @@ function budget_exhausted<TEvents extends Schemas>(
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
 
+/** Report a misrouted resolution once per offending declaration. */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  report_once(
+    seen,
+    \`\${stream}|\${handler}|\${event}\`,
+    \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
+      "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+      "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
+  );
+}
+
 /**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
@@ -28670,31 +28710,6 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
-/**
- * Report a misrouted resolution once per offending declaration.
- *
- * \`seen\` belongs to the calling controller and is passed in: \`internal/\` holds
- * no module state, so a resolver firing for every matching event still reports
- * once without this module remembering anything between calls.
- */
-function warn_misrouted(
-  seen: Set<string>,
-  stream: string,
-  handler: string,
-  event: string
-): void {
-  const key = \`\${stream}|\${handler}|\${event}\`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  log().error(
-    new Error(
-      \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
-        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
-        "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
-    )
-  );
-}
-
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -35397,6 +35412,57 @@ export type CommittedOf<E, K extends keyof E> = E[K] extends z.ZodType
       readonly data: z.infer<E[K]>;
     } & CommittedMeta
   : never;
+
+// === report-once.ts ===
+/**
+ * @module report-once
+ * @category Internal
+ *
+ * One-shot reporting for a misdeclaration that a build-time guard could not
+ * catch.
+ *
+ * The guards in \`build_events\` and \`build-classify\` can only inspect a static
+ * \`.to({...})\` — a \`.to(fn)\` target, lane and priority are a function until an
+ * event arrives. The pipelines that resolve them (correlate for lane and
+ * target, drain for the payload) are therefore where the same rules have to be
+ * applied, and where the operator has to be told.
+ *
+ * Reporting there has one hazard the build-time guards don't: a resolver fires
+ * for *every* matching event, so a naive log turns one bad declaration into a
+ * line per event on a busy stream. Reporting once per offending declaration is
+ * what makes the message readable.
+ *
+ * Never throws. A throw inside correlate pins the checkpoint for the whole app
+ * (#1420); inside drain it reaches the circuit breaker as a store failure and
+ * stalls every stream.
+ *
+ * @internal
+ */
+
+import { log } from "../ports.js";
+
+/**
+ * Report \`message\` the first time \`key\` is seen, and never again.
+ *
+ * \`seen\` belongs to the calling pipeline and is passed in, so a resolver
+ * firing for every matching event still reports once without this module
+ * remembering anything between calls — \`internal/\` holds no module state.
+ *
+ * @param seen - The caller's set of already-reported keys. Mutated.
+ * @param key - Identifies the offending declaration, not the occurrence.
+ * @param message - Wrapped in an \`Error\` so the logger renders a stack.
+ *
+ * @internal
+ */
+export function report_once(
+  seen: Set<string>,
+  key: string,
+  message: string
+): void {
+  if (seen.has(key)) return;
+  seen.add(key);
+  log().error(new Error(message));
+}
 
 // === sandbox.ts ===
 import { test } from "vitest";
