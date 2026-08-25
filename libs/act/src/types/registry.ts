@@ -67,8 +67,10 @@ export type SchemaRegister<TSchemaReg> = {
  * @property sensitive_fields - Lookup of `sensitive(...)`-marked fields per
  *   event name. Derived once at build time. Returns the empty array for
  *   unknown events.
- * @property query_gate - Prebuilt per-event read gate for the actor-less read
- *   surfaces (`query` / `query_array`). Every event resolves to a gate: a
+ * @property query_gate - Prebuilt per-event reader for the actor-less read
+ *   surfaces (`query` / `query_array`). Types the payload from its declared
+ *   schema (a `z.date()` comes back a `Date` from the string JSON forced it
+ *   into, #1556) and applies the disclosure gate, in one call. Every event resolves to a gate: a
  *   non-sensitive event returns the shared identity gate (the event is handed
  *   back untouched, zero allocation); a sensitive event returns a redactor
  *   built once at build time that closes over the field list and applies
@@ -76,13 +78,6 @@ export type SchemaRegister<TSchemaReg> = {
  *   forgotten) while dropping the isolated `pii` sidecar. The gate is prebuilt
  *   so the read path never recomputes the sensitive-field lookup per event —
  *   only the sensitive events pay any cost.
- * @property read_event - Prebuilt per-event read parser, derived once at build
- *   time from the declared schema. Types a stored payload — chiefly turning a
- *   `z.date()` back into a `Date` from the string JSON forced it into — using
- *   Zod itself, so arrays, records and unions are handled by the same engine
- *   that validates on write. Returns `undefined` for an event whose schema
- *   declares no dates, which is the overwhelming majority, so the read path
- *   skips the step and pays nothing.
  * @property disclosure_predicate - Lookup of the `.discloses(predicate)`
  *   declaration per state name. Returns `null` when no predicate was set
  *   (framework default-deny).
@@ -109,9 +104,6 @@ export type Registry<
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (event_name: string) => readonly string[];
-  readonly read_event: (
-    event_name: string
-  ) => ((data: unknown) => unknown) | undefined;
   readonly query_gate: (
     event_name: string
   ) => (

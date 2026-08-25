@@ -10,9 +10,11 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
+  type EventTags,
   event_tags,
   FOLD_RESET,
   IDENTITY_GATE,
+  make_event_reader,
   make_fold_handler,
   make_gate,
   type PatchFn,
@@ -329,10 +331,13 @@ export function act<
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
-  // Prebuilt read parsers, one per event whose schema declares a `z.date()`.
-  // Events without dates are absent → `read_event` returns undefined and the
-  // read path skips the step entirely.
-  const _rd = new Map<string, (data: unknown) => unknown>();
+  // One pass over each event's schema, kept so the per-surface readers below
+  // (query, per-state view, handler strip) can be composed from it without
+  // walking again.
+  const _tags = new Map<string, EventTags>();
+  // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
+  // when the event needs neither.
+  const _hr = new Map<string, EventGate>();
   // Prebuilt default-deny read gates, one per sensitive event. Non-sensitive
   // events are absent → `query_gate` falls back to the shared IDENTITY_GATE.
   const _qg = new Map<string, EventGate>();
@@ -348,7 +353,6 @@ export function act<
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
-    read_event: (event_name) => _rd.get(event_name),
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
@@ -402,13 +406,10 @@ export function act<
    */
   const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
     const wrapped = async (events: readonly any[], stream: string) => {
-      const stripped = events.map((raw) => {
-        const read = _rd.get(raw.name as string);
-        const e = read ? { ...raw, data: read(raw.data) } : raw;
-        const f = _sf.get(e.name as string);
-        return f ? pii_strip(e, f) : e;
-      });
-      return original(stripped as never, stream);
+      // The same prebuilt reader the per-event handlers get: typed payload,
+      // sensitive keys removed. Absent → the event passes through untouched.
+      const read = events.map((e) => _hr.get(e.name as string)?.(e) ?? e);
+      return original(read as never, stream);
     };
     // Carry the fold's cache-reset handle through the wrapper (#1466). The
     // orchestrator only ever sees what this map holds, so a handle left on
@@ -737,41 +738,36 @@ export function act<
             // One pass over the declared schema resolves both facts: which
             // fields are sensitive, and which are dates. Walking twice for two
             // answers would be the same work done twice.
-            const { sensitive: fields, read } = event_tags(reg.schema);
+            // One pass over the declared schema resolves both facts a reader
+            // is built from: which fields are sensitive, and how to type the
+            // payload. Walking twice for two answers would be the same work
+            // done twice.
+            const tags = event_tags(reg.schema);
+            _tags.set(event_name, tags);
+            const fields = tags.sensitive;
+            if (fields.length > 0) _sf.set(event_name, fields);
 
-            if (read) {
-              _rd.set(event_name, read);
-              // Reactions read the payload directly, so they need the same
-              // schema-driven typing the fold and the query surfaces get.
-              // Independent of sensitivity — most date-bearing events carry
-              // no PII at all.
+            // The actor-less read surfaces (`query`/`query_array`) resolve a
+            // reader by name; an event needing neither typing nor redaction
+            // never lands here and falls back to the shared IDENTITY_GATE —
+            // zero per-event cost.
+            const query_reader = make_event_reader(tags, "redact", null);
+            if (query_reader) _qg.set(event_name, query_reader);
+
+            // Handlers never see PII by framework rule, and shouldn't observe
+            // the keys structurally either — so `strip`, not `redact`.
+            const handler_reader = make_event_reader(tags, "strip");
+            if (handler_reader) {
+              _hr.set(event_name, handler_reader);
               for (const [name, reaction] of reg.reactions) {
                 const inner = reaction.handler;
-                const typed = (event: any, stream: string, app: any) =>
-                  inner({ ...event, data: read(event.data) }, stream, app);
+                const wrapped = (event: any, stream: string, app: any) =>
+                  inner(handler_reader(event), stream, app);
                 // Preserve handler.name — build_handle asserts on named functions.
-                Object.defineProperty(typed, "name", { value: inner.name });
-                reaction.handler = typed;
+                Object.defineProperty(wrapped, "name", { value: inner.name });
+                reaction.handler = wrapped;
                 reg.reactions.set(name, reaction as never);
               }
-            }
-
-            if (fields.length === 0) continue;
-            _sf.set(event_name, fields);
-            // Prebuild the default-deny read gate once, capturing `fields`.
-            // The actor-less read surfaces (`query`/`query_array`) resolve it
-            // by name; non-sensitive events never reach here, so they fall
-            // back to the shared IDENTITY_GATE — zero per-event cost.
-            _qg.set(event_name, make_gate(fields, null));
-            // Strip PII from the event payload before reactions see it.
-            for (const [name, reaction] of reg.reactions) {
-              const inner = reaction.handler;
-              const wrapped = (event: any, stream: string, app: any) =>
-                inner(pii_strip(event, fields), stream, app);
-              // Preserve handler.name — build_handle asserts on named functions.
-              Object.defineProperty(wrapped, "name", { value: inner.name });
-              reaction.handler = wrapped;
-              reg.reactions.set(name, reaction as never);
             }
           }
           for (const state of states.values()) {
@@ -796,23 +792,10 @@ export function act<
                   "Remove .snap() or remove sensitive(...) markers."
               );
             }
-            const disclose = state.disclose ?? null;
             state.pii_aware = true;
-            // Prebuild one actor-aware read gate per sensitive event, capturing
-            // this state's disclosure predicate — the same `make_gate`
-            // primitive the query path uses (predicate-less there). A pii-aware
-            // state can still declare non-sensitive events; those aren't in
-            // `view_gates`, so `state.view` falls back to the shared
-            // IDENTITY_GATE — no per-event field lookup, no `?? []` allocation.
-            const view_gates = new Map<string, EventGate>();
-            for (const [event_name, fields] of fields_by_event) {
-              view_gates.set(event_name, make_gate(fields, disclose));
-            }
-            state.view = (event, actor) =>
-              (view_gates.get(event.name as string) ?? IDENTITY_GATE)(
-                event,
-                actor
-              );
+            // `state.view` is composed once, below, for every state — a
+            // sensitive state's disclosure predicate is one input to that
+            // reader rather than a second gate layered here.
             state.message = (validated) => {
               const fields = fields_by_event.get(validated.name as string);
               return fields ? pii_split(validated, fields) : validated;
@@ -825,28 +808,31 @@ export function act<
           // A `__snapshot__` carries folded STATE, not event data, so its
           // dates come from the state schema. Without that a restart from a
           // snapshot would lose every `z.date()` the state holds.
+          // Per-state readers: the same composition, with this state's
+          // disclosure predicate. A `__snapshot__` carries folded STATE, not
+          // event data, so its typing comes from the state schema — without
+          // that a restart from a snapshot loses every `z.date()` in state.
           for (const state of states.values()) {
-            const readers = new Map<string, (data: unknown) => unknown>();
+            const readers = new Map<string, EventGate>();
             for (const event_name of Object.keys(state.events)) {
-              const read = _rd.get(event_name);
-              if (read) readers.set(event_name, read);
+              const tags = _tags.get(event_name);
+              const reader =
+                tags &&
+                make_event_reader(tags, "redact", state.disclose ?? null);
+              if (reader) readers.set(event_name, reader);
             }
-            // A `__snapshot__` carries folded STATE, not event data, so its
-            // dates come from the state schema. Without this a restart from a
-            // snapshot would lose every `z.date()` the state holds.
-            const snap = event_tags(state.state as never).read;
+            const snap = make_event_reader(
+              event_tags(state.state as never),
+              "redact",
+              null
+            );
             if (snap) readers.set(SNAP_EVENT, snap);
             if (readers.size === 0) continue;
-            const inner = state.view;
-            state.view = (event, actor) => {
-              const read = readers.get(event.name as string);
-              // Type before the gate: the gate copies, so parsing after it
-              // would leave the folded value a string.
-              return inner(
-                read ? ({ ...event, data: read(event.data) } as never) : event,
+            state.view = (event, actor) =>
+              (readers.get(event.name as string) ?? IDENTITY_GATE)(
+                event,
                 actor
               );
-            };
           }
           for (const [target, original] of batch_handlers) {
             batch_handlers.set(target, pii_wrap(original) as never);
