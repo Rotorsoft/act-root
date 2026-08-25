@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.6...@rotorsoft/act-tck-v1.36.7) (2026-08-25)
+
+
+### Bug Fixes
+
+* **act:** stop a dynamic resolution from hijacking a projection's target ([#1571](https://github.com/Rotorsoft/act-root/issues/1571)) ([0f53541](https://github.com/Rotorsoft/act-root/commit/0f53541db8988c389c415c930cdee006937250ca)), closes [#1563](https://github.com/Rotorsoft/act-root/issues/1563) [#1563](https://github.com/Rotorsoft/act-root/issues/1563)
+
 # [@rotorsoft/act-tck-v1.36.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.5...@rotorsoft/act-tck-v1.36.6) (2026-08-25)
 
 
