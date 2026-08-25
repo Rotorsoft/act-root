@@ -418,8 +418,8 @@ importers:
         specifier: ^10.0.0
         version: 10.0.0(@stryker-mutator/core@10.0.0(@types/node@25.9.5))(vitest@4.1.11)
       '@types/pg':
-        specifier: ^8.21.0
-        version: 8.21.0
+        specifier: ^8.23.1
+        version: 8.23.1
 
   libs/act-pino:
     dependencies:
@@ -615,8 +615,8 @@ importers:
         specifier: ^3.0.4
         version: 3.0.4
       '@types/pg':
-        specifier: ^8.21.0
-        version: 8.21.0
+        specifier: ^8.23.1
+        version: 8.23.1
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
@@ -707,7 +707,7 @@ importers:
         version: 11.18.0(typescript@7.0.2)
       drizzle-orm:
         specifier: ^0.45.2
-        version: 0.45.2(@libsql/client@0.17.4)(@opentelemetry/api@1.9.1)(@types/pg@8.21.0)(pg@8.23.0)
+        version: 0.45.2(@libsql/client@0.17.4)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -741,8 +741,8 @@ importers:
         specifier: ^5.0.6
         version: 5.0.6
       '@types/pg':
-        specifier: ^8.21.0
-        version: 8.21.0
+        specifier: ^8.23.1
+        version: 8.23.1
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
@@ -4354,8 +4354,8 @@ packages:
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
 
-  '@types/pg@8.21.0':
-    resolution: {integrity: sha512-AYdtudzabjLZgVgRZmAnU8bAnVUXzuJX2IYHeSIiIHm68olD+LgQYCGWdtcNYnP0uq9c4S4NibVG3Ni7VbKW7Q==}
+  '@types/pg@8.23.1':
+    resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
   '@types/prismjs@1.26.6':
     resolution: {integrity: sha512-vqlvI7qlMvcCBbVe0AKAb4f97//Hy0EBTaiW8AalRnG/xAN5zOiWWyrNqNXeq8+KAuvRewjCVY1+IPxk4RdNYw==}
@@ -7826,9 +7826,6 @@ packages:
     resolution: {integrity: sha512-gKtPkFdQPU3DksooVLi9LsjZxrsBUZIpa+7aVx+LV5pNh0KzP4Zleud2po+ConrxbuXGBJ6Hfer6hdgpIBpBaw==}
     peerDependencies:
       pg: '>=8.0'
-
-  pg-protocol@1.15.0:
-    resolution: {integrity: sha512-cq9sECI5s0+uPUXjbz8ioyPJni6RzsRib0US67i5IoTZKw8fNeYlVE7u8F4dG7vEJJtc5wdD1K189lCCUwqWTQ==}
 
   pg-protocol@1.16.0:
     resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
@@ -14289,10 +14286,10 @@ snapshots:
 
   '@types/normalize-package-data@2.4.4': {}
 
-  '@types/pg@8.21.0':
+  '@types/pg@8.23.1':
     dependencies:
       '@types/node': 25.9.5
-      pg-protocol: 1.15.0
+      pg-protocol: 1.16.0
       pg-types: 2.2.0
 
   '@types/prismjs@1.26.6': {}
@@ -15610,11 +15607,11 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.23.11
 
-  drizzle-orm@0.45.2(@libsql/client@0.17.4)(@opentelemetry/api@1.9.1)(@types/pg@8.21.0)(pg@8.23.0):
+  drizzle-orm@0.45.2(@libsql/client@0.17.4)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0):
     optionalDependencies:
       '@libsql/client': 0.17.4
       '@opentelemetry/api': 1.9.1
-      '@types/pg': 8.21.0
+      '@types/pg': 8.23.1
       pg: 8.23.0
 
   dunder-proto@1.0.1:
@@ -17991,8 +17988,6 @@ snapshots:
   pg-pool@3.14.0(pg@8.23.0):
     dependencies:
       pg: 8.23.0
-
-  pg-protocol@1.15.0: {}
 
   pg-protocol@1.16.0: {}
 
