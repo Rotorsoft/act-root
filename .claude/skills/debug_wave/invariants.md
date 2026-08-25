@@ -304,3 +304,32 @@ race; only expiry touches the clock) and it runs on InMemory and Postgres
 alike. When a finding is about concurrency, the test has to contain the
 concurrency — a mock of the losing side's return value is a restatement of
 the hypothesis, not evidence for it.
+
+## Wave 19 follow-up: the dynamic-resolver guard family (#1563, #1564, #1567)
+
+Three findings, one root cause: **a build-time guard structurally cannot see a
+`.to(fn)` resolution.** The target, lane, and priority are a function until an
+event arrives, so every `classify`/`build_events` check exempts dynamic
+resolvers with a `continue`. That exemption is correct — the information does
+not exist yet — which means the fix never belongs in the guard. It belongs
+where the answer first exists: correlate (lane, target) or drain (payload).
+
+Two rules for a future hunter working this seam:
+
+- **Log and continue, never throw.** A throw inside correlate pins the
+  checkpoint for the whole app (#1420); inside drain it reaches the circuit
+  breaker as a store failure and stalls every stream. "The static form throws,
+  so the dynamic form should throw" is the wrong inference.
+- **Check the type layer before rating severity.** `TLanes` already rejects an
+  undeclared lane at *compile* time for the static and dynamic forms alike, so
+  #1564's runtime hole is reachable only by bypassing types — JavaScript
+  callers, a cast, or a helper whose return type widens `lane` to `string`. The
+  hunter's repro used a cast and did not say so, which read as higher severity
+  than the defect carries. A finding that requires a cast to reproduce must
+  state that plainly.
+
+**Correct by design, do not re-flag:** a lane disagreement between two dynamic
+resolutions is *reported* but not corrected. The lane a live stream carries is
+the one its in-flight leases were taken under, so re-laning mid-run would move
+a stream out from under a worker holding it. Re-laning is restart-driven; that
+is the documented contract, not an oversight.
