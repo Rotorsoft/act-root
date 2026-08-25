@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.5...@rotorsoft/act-tck-v1.36.6) (2026-08-25)
+
+
+### Bug Fixes
+
+* **act:** let the schema decide which fields are dates ([#1570](https://github.com/Rotorsoft/act-root/issues/1570)) ([dca2166](https://github.com/Rotorsoft/act-root/commit/dca2166ad756b39dbb5b6287057fc67c5222a5e6)), closes [#1556](https://github.com/Rotorsoft/act-root/issues/1556)
+
 # [@rotorsoft/act-tck-v1.36.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.4...@rotorsoft/act-tck-v1.36.5) (2026-08-25)
 
 
