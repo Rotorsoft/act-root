@@ -86,12 +86,7 @@ export {
 } from "./drain-cycle.js";
 export type { EsOps, PatchFn } from "./event-sourcing.js";
 export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
-export {
-  type DatePath,
-  type EventTags,
-  event_tags,
-  make_date_reviver,
-} from "./event-tags.js";
+export { type EventTags, event_tags } from "./event-tags.js";
 export {
   current_version_of,
   deprecated_event_names,

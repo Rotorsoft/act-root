@@ -76,12 +76,13 @@ export type SchemaRegister<TSchemaReg> = {
  *   forgotten) while dropping the isolated `pii` sidecar. The gate is prebuilt
  *   so the read path never recomputes the sensitive-field lookup per event —
  *   only the sensitive events pay any cost.
- * @property revive_dates - Prebuilt per-event date revival, derived once at
- *   build time from the declared `z.date()` paths. Returns `undefined` for an
- *   event whose schema declares no dates — the overwhelming majority — so the
- *   read path skips the field entirely and pays nothing. JSON has no date
- *   type, and an adapter cannot know which strings were dates; the schema
- *   does, so it decides.
+ * @property read_event - Prebuilt per-event read parser, derived once at build
+ *   time from the declared schema. Types a stored payload — chiefly turning a
+ *   `z.date()` back into a `Date` from the string JSON forced it into — using
+ *   Zod itself, so arrays, records and unions are handled by the same engine
+ *   that validates on write. Returns `undefined` for an event whose schema
+ *   declares no dates, which is the overwhelming majority, so the read path
+ *   skips the step and pays nothing.
  * @property disclosure_predicate - Lookup of the `.discloses(predicate)`
  *   declaration per state name. Returns `null` when no predicate was set
  *   (framework default-deny).
@@ -108,9 +109,9 @@ export type Registry<
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (event_name: string) => readonly string[];
-  readonly revive_dates: (
+  readonly read_event: (
     event_name: string
-  ) => ((data: Schema) => void) | undefined;
+  ) => ((data: unknown) => unknown) | undefined;
   readonly query_gate: (
     event_name: string
   ) => (

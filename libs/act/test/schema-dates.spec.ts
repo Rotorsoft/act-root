@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { act, projection, sleep, state } from "../src/index.js";
-import { event_tags, make_date_reviver } from "../src/internal/index.js";
+import { event_tags } from "../src/internal/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
@@ -54,47 +54,108 @@ const payload = {
 };
 
 describe("schema-driven date revival (#1556)", () => {
-  it("resolves sensitive fields and date paths in one pass", () => {
+  it("resolves sensitive fields and a read parser in one pass", () => {
     const tags = event_tags(
       z.object({
         at: z.date(),
         label: z.string(),
         nested: z.object({ born: z.date() }),
-        maybe: z.date().optional(),
+        list: z.array(z.object({ when: z.date() })),
+        rec: z.record(z.string(), z.date()),
       })
     );
-    expect(tags.dates).toEqual([["at"], ["nested", "born"], ["maybe"]]);
     expect(tags.sensitive).toEqual([]);
-  });
+    expect(tags.read).toBeTypeOf("function");
 
-  it("builds no reviver when a schema declares no dates", () => {
-    expect(
-      make_date_reviver(event_tags(z.object({ a: z.string() })).dates)
-    ).toBeUndefined();
-  });
-
-  it("converts a stored string, at any depth", () => {
-    // What a durable adapter hands back: JSON has no date type, so the
-    // value arrives as its ISO form and the declared path types it.
-    const revive = make_date_reviver([["at"], ["meta", "born"]])!;
-    const data: Record<string, any> = {
+    // Zod does the work, so nesting, arrays and records all type correctly —
+    // the shapes a hand-rolled path walk would have had to re-implement.
+    const out = tags.read!({
       at: "2026-01-01T00:00:00.000Z",
-      meta: { born: "1990-02-03T00:00:00.000Z" },
-    };
-    revive(data);
-    expect(data.at).toBeInstanceOf(Date);
-    expect((data.at as Date).toISOString()).toBe("2026-01-01T00:00:00.000Z");
-    expect(data.meta.born).toBeInstanceOf(Date);
+      label: "2026-06-06T00:00:00.000Z",
+      nested: { born: "1990-02-03T00:00:00.000Z" },
+      list: [{ when: "2020-01-01T00:00:00.000Z" }],
+      rec: { k: "2021-01-01T00:00:00.000Z" },
+    }) as Record<string, any>;
+    expect(kind(out.at)).toBe("Date");
+    expect(kind(out.nested.born)).toBe("Date");
+    expect(kind(out.list[0].when)).toBe("Date");
+    expect(kind(out.rec.k)).toBe("Date");
+    // Declared a string — an ISO-looking value must survive as one.
+    expect(kind(out.label)).toBe("string");
   });
 
-  it("leaves an absent or already-typed value alone", () => {
-    // InMemory holds references, so the value can already be a `Date`; and a
-    // path the payload doesn't carry must not throw.
-    const revive = make_date_reviver([["at"], ["missing", "deep"]])!;
-    const already = new Date("2020-01-01");
-    const data: Record<string, unknown> = { at: already };
-    revive(data);
-    expect(data.at).toBe(already); // untouched, not re-wrapped
+  it("builds no reader when a schema declares no dates", () => {
+    expect(event_tags(z.object({ a: z.string() })).read).toBeUndefined();
+  });
+
+  it("keeps keys the schema does not declare", () => {
+    // Event stores hold payloads written against older schemas. A strict Zod
+    // object would silently drop them; losing committed data on read would be
+    // worse than the mistyping this fixes.
+    const read = event_tags(z.object({ at: z.date() })).read!;
+    const out = read({
+      at: "2026-01-01T00:00:00.000Z",
+      legacy: "written before this field was removed",
+    }) as Record<string, unknown>;
+    expect(out.legacy).toBe("written before this field was removed");
+  });
+
+  it("types dates through unions, optionals and nullables", () => {
+    const read = event_tags(
+      z.object({
+        maybe: z.date().optional(),
+        orNull: z.date().nullable(),
+        either: z.union([
+          z.object({ on: z.date() }),
+          z.object({ n: z.number() }),
+        ]),
+      })
+    ).read!;
+    const out = read({
+      maybe: "2026-01-01T00:00:00.000Z",
+      orNull: null,
+      either: { on: "2020-01-01T00:00:00.000Z" },
+    }) as Record<string, any>;
+    expect(kind(out.maybe)).toBe("Date");
+    expect(out.orNull).toBeNull();
+    expect(kind(out.either.on)).toBe("Date");
+  });
+
+  it("passes through a construct it does not rebuild", () => {
+    // The fallthrough is what keeps the transform small: an unfamiliar schema
+    // still parses, it just doesn't coerce dates buried inside one.
+    const tags = event_tags(
+      z.object({ at: z.date(), blob: z.map(z.string(), z.string()) })
+    );
+    const m = new Map([["k", "v"]]);
+    const out = tags.read!({
+      at: "2026-01-01T00:00:00.000Z",
+      blob: m,
+    }) as Record<string, any>;
+    expect(kind(out.at)).toBe("Date");
+    expect(out.blob).toEqual(m);
+  });
+
+  it("returns a non-zod node untouched rather than throwing", () => {
+    // Guards the recursion: a malformed or foreign node reached through a
+    // child slot must pass through, not crash the build.
+    const foreign = { not: "a zod schema" } as unknown as z.ZodType;
+    expect(event_tags(foreign).read).toBeUndefined();
+    expect(event_tags(foreign).sensitive).toEqual([]);
+
+    // An object def with no shape takes the same path.
+    const shapeless = {
+      _zod: { def: { type: "object" } },
+    } as unknown as z.ZodType;
+    expect(event_tags(shapeless).read).toBeUndefined();
+  });
+
+  it("leaves an already-typed value alone", () => {
+    // InMemory holds references, so the value can already be a `Date`.
+    const read = event_tags(z.object({ at: z.date() })).read!;
+    const already = new Date("2020-01-01T00:00:00.000Z");
+    const out = read({ at: already }) as { at: Date };
+    expect(out.at.getTime()).toBe(already.getTime());
   });
 
   it("types a folded state by its declaration, warm and cold", async () => {

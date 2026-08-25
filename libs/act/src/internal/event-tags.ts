@@ -9,36 +9,43 @@
  *
  * - **sensitive fields** — the keys marked with `sensitive(...)`, which the
  *   write path splits into the `pii` sidecar and the read gates redact.
- * - **date paths** — the keys declared `z.date()`. JSON has no date type, so a
- *   `Date` leaves as a string and something must turn it back. An adapter can
- *   only guess from string shape, which revives any ISO-8601-looking string
- *   including one a schema declared `z.string()`. The schema is the authority
- *   and the framework holds it, so the paths are resolved here and the read
- *   path converts exactly those.
+ * - **a read parser** — how to type a stored payload. JSON has no date type,
+ *   so a `Date` leaves as a string. An adapter cannot know which strings were
+ *   dates and used to guess from shape, reviving anything ISO-8601-looking
+ *   including fields declared `z.string()`. The schema is the authority, so
+ *   the parser is derived from the declaration.
  *
- * Both are derived once at `act().build()`. Walking the shape twice for two
- * answers would be the same work done twice.
+ * The parser is Zod's own. Rather than hand-rolling a traversal that would
+ * have to re-implement arrays, records, unions and every construct Zod grows,
+ * the declared schema is transformed once at build time — `z.date()` becomes
+ * coercing, objects become loose — and `parse` does the work. Anything Zod can
+ * describe, this types correctly, and it stays correct as Zod evolves.
  *
- * Only `z.date()` needs reviving. Framework metadata carries no dates —
+ * Objects are made **loose** deliberately: a strict Zod object strips keys it
+ * does not declare, and an event store can hold payloads carrying fields a
+ * current schema no longer mentions. Silently dropping them on read would be
+ * worse than the mistyping this fixes.
+ *
+ * Only `z.date()` needs any of this. Framework metadata carries no dates —
  * `EventMetaSchema` is a correlation string plus causation names and ids — and
  * `created` is a real column each adapter parses directly.
  *
  * @internal
  */
 
-import type { z } from "zod";
-import type { Schema } from "../types/index.js";
+import { z } from "zod";
 import { is_pii } from "./sensitive.js";
-
-/** A `Date` path inside an event payload, as the segments to walk. */
-export type DatePath = readonly string[];
 
 /** What one pass over an event schema resolves. @internal */
 export type EventTags = {
   /** Keys marked `sensitive(...)`, top level (and across union variants). */
   readonly sensitive: readonly string[];
-  /** Paths declared `z.date()`. */
-  readonly dates: readonly DatePath[];
+  /**
+   * Types a stored payload against the declaration, or `undefined` when the
+   * schema declares no dates — the overwhelming majority, so the read path
+   * skips the step and pays nothing.
+   */
+  readonly read: ((data: unknown) => unknown) | undefined;
 };
 
 /** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
@@ -46,98 +53,86 @@ const def_of = (schema: unknown): Record<string, unknown> | undefined =>
   (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
   (schema as { def?: Record<string, unknown> }).def;
 
-/** Unwrap the wrappers that don't change the declared type. */
-const unwrap = (schema: unknown): unknown => {
-  let s = schema;
-  for (;;) {
-    const def = def_of(s);
-    const t = def?.type;
-    if (
-      t === "optional" ||
-      t === "nullable" ||
-      t === "default" ||
-      t === "readonly"
-    )
-      s = def?.innerType;
-    else return s;
+/**
+ * Rebuild a schema for reading: dates coerce from their stored string, and
+ * objects keep keys they don't declare.
+ *
+ * A construct this doesn't recognise is returned untouched, so an unfamiliar
+ * schema still parses — it just won't coerce dates buried inside one. That
+ * fallthrough is what keeps this small: it describes the shapes worth
+ * rebuilding, not every shape that exists.
+ */
+function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
+  const def = def_of(schema);
+  if (!def) return schema;
+  switch (def.type) {
+    case "date":
+      found.date = true;
+      return z.coerce.date();
+    case "object": {
+      const shape = def.shape as Record<string, z.ZodType> | undefined;
+      if (!shape) return schema;
+      const next: Record<string, z.ZodType> = {};
+      for (const [key, inner] of Object.entries(shape))
+        next[key] = to_read_schema(inner, found) as z.ZodType;
+      // Loose: an event store can hold keys the current schema doesn't
+      // declare, and dropping them on read would lose committed data.
+      return z.looseObject(next);
+    }
+    case "array":
+      return z.array(to_read_schema(def.element, found) as z.ZodType);
+    case "record":
+      return z.record(
+        z.string(),
+        to_read_schema(def.valueType, found) as z.ZodType
+      );
+    case "union":
+      return z.union(
+        (def.options as unknown[]).map(
+          (o) => to_read_schema(o, found) as z.ZodType
+        ) as never
+      );
+    case "optional":
+      return (to_read_schema(def.innerType, found) as z.ZodType).optional();
+    case "nullable":
+      return (to_read_schema(def.innerType, found) as z.ZodType).nullable();
+    default:
+      return schema;
   }
-};
+}
 
 /**
  * Resolve an event's schema in a single pass.
  *
  * Sensitive markers are read at the top level only — the documented carve-out
- * (`sensitive.ts`), since the write path splits whole top-level keys. Date
- * paths descend nested objects, because a `Date` is reconstructed in place
- * wherever it sits. Arrays and records are deliberately not descended: their
- * element paths are not statically enumerable, so a date inside one keeps the
- * value the adapter produced rather than paying a per-element walk on every
- * read.
- *
- * A union event has no top-level shape. Its variants are walked and unioned —
- * a key sensitive in any variant must be split, because the stored payload
- * could be that variant (#1417), and the same reasoning applies to dates.
+ * (`sensitive.ts`), since the write path splits whole top-level keys. A union
+ * event has no top-level shape, so its variants are walked and unioned: a key
+ * sensitive in any variant must be split, because the stored payload could be
+ * that variant (#1417).
  *
  * @internal
  */
 export function event_tags(schema: z.ZodType): EventTags {
   const sensitive: string[] = [];
-  const dates: DatePath[] = [];
 
-  const walk = (node: unknown, prefix: DatePath, top: boolean): void => {
-    const inner = unwrap(node);
-    const def = def_of(inner);
-    if (!def) return;
-
-    if (def.type === "date") {
-      dates.push(prefix);
+  const collect = (node: unknown): void => {
+    const def = def_of(node);
+    const shape = def?.shape as Record<string, z.ZodType> | undefined;
+    if (shape) {
+      for (const key of Object.keys(shape))
+        if (is_pii(shape[key])) sensitive.push(key);
       return;
     }
-
-    const shape = def.shape as Record<string, z.ZodType> | undefined;
-    if (shape && typeof shape === "object") {
-      for (const key of Object.keys(shape)) {
-        // Sensitivity is a top-level property; `is_pii` does its own
-        // unwrapping, so it reads the declared field, not the unwrapped node.
-        if (top && is_pii(shape[key])) sensitive.push(key);
-        walk(shape[key], [...prefix, key], false);
-      }
-      return;
-    }
-
-    const options = (inner as { options?: unknown }).options;
-    if (Array.isArray(options))
-      for (const option of options) walk(option, prefix, top);
+    const options = (node as { options?: unknown }).options;
+    if (Array.isArray(options)) for (const option of options) collect(option);
   };
+  collect(schema);
 
-  walk(schema, [], true);
-  return { sensitive: [...new Set(sensitive)], dates };
-}
+  const found = { date: false };
+  const read_schema = to_read_schema(schema, found);
+  const read = found.date
+    ? (data: unknown) => (read_schema as z.ZodType).parse(data)
+    : undefined;
 
-/**
- * Build the reviver for one event's date paths, or `undefined` when it has
- * none — the overwhelming majority, so the read path skips the step and pays
- * nothing. Mirrors how `registry.query_gate` treats a non-sensitive event.
- *
- * The returned function mutates the payload it is handed. Callers own freshly
- * parsed store rows, never a cached object.
- *
- * @internal
- */
-export function make_date_reviver(
-  dates: readonly DatePath[]
-): ((data: Schema) => void) | undefined {
-  if (dates.length === 0) return undefined;
-  return (data: Schema) => {
-    for (const path of dates) {
-      let target = data as Record<string, unknown>;
-      for (let i = 0; i < path.length - 1 && target; i++)
-        target = target[path[i]] as Record<string, unknown>;
-      const key = path[path.length - 1];
-      // Only a string needs converting: a `Date` already survived (InMemory
-      // stores by reference), and null/undefined are the schema's business.
-      if (target && typeof target[key] === "string")
-        target[key] = new Date(target[key] as string);
-    }
-  };
+  return { sensitive: [...new Set(sensitive)], read };
 }
