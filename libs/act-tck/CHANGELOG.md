@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.4...@rotorsoft/act-tck-v1.36.5) (2026-08-25)
+
+
+### Bug Fixes
+
+* **act:** stop treating work that outlived a handler as a reaction ([#1568](https://github.com/Rotorsoft/act-root/issues/1568)) ([bff17a2](https://github.com/Rotorsoft/act-root/commit/bff17a230371a4a181f42c077a31ae5c6e8b3bc3)), closes [#1541](https://github.com/Rotorsoft/act-root/issues/1541) [#1543](https://github.com/Rotorsoft/act-root/issues/1543) [#1543](https://github.com/Rotorsoft/act-root/issues/1543) [#1562](https://github.com/Rotorsoft/act-root/issues/1562) [#1562](https://github.com/Rotorsoft/act-root/issues/1562)
+
 # [@rotorsoft/act-tck-v1.36.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.3...@rotorsoft/act-tck-v1.36.4) (2026-08-24)
 
 
