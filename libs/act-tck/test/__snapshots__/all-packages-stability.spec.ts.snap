@@ -20,11 +20,8 @@ import {
   IDENTITY_GATE,
   make_event_reader,
   make_fold_handler,
-  make_gate,
   type PatchFn,
-  pii_fields,
   pii_split,
-  pii_strip,
   type ResettableBatchHandler,
   resolveActConfig,
   resolveAutocloseConfig,
@@ -334,10 +331,10 @@ export function act<
   // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
-  const _sf = new Map<string, readonly string[]>();
-  // One pass over each event's schema, kept so the per-surface readers below
-  // (query, per-state view, handler strip) can be composed from it without
-  // walking again.
+  // One pass over each event's schema, and the single source for everything
+  // derived from it: the sensitive-field list the write path splits on, and
+  // the per-surface readers (query, per-state view, handler strip) composed
+  // below. Nothing walks a schema twice.
   const _tags = new Map<string, EventTags>();
   // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
   // when the event needs neither.
@@ -356,7 +353,7 @@ export function act<
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-    sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
+    sensitive_fields: (event_name) => _tags.get(event_name)?.sensitive ?? [],
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
@@ -405,7 +402,7 @@ export function act<
   /**
    * Wraps a batch handler so the batch dispatcher stays PII-unaware —
    * sensitive keys are stripped from every event before the handler
-   * sees it. \`_sf\` is read lazily at dispatch time, by when the
+   * sees it. the reader is resolved lazily at dispatch time, by when the
    * events pass has populated it.
    */
   const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
@@ -454,7 +451,7 @@ export function act<
             spec.config,
             patch_fn,
             // Head loads strip sensitive keys like the warm path (#1320).
-            (event_name) => _sf.get(event_name) ?? []
+            registry.sensitive_fields
           )
         ) as never
       );
@@ -705,10 +702,11 @@ export function act<
           // hit the cache in O(1). Events with no sensitive fields don't get
           // Build the sensitive-data wiring in three passes (#855):
           //
-          // - events pass: precompute the sensitive-field lookup \`_sf\` from
-          //   each event's Zod schema; while we're already walking events,
-          //   wrap their registered reaction handlers so \`build_handle\`
-          //   stays PII-unaware.
+          // - events pass: resolve each event's schema ONCE into \`_tags\` —
+          //   its sensitive fields and its read parser — and compose the
+          //   per-surface readers from it; while we're already walking
+          //   events, wrap their reaction handlers so \`build_handle\` stays
+          //   PII-unaware.
           // - states pass: snapshot the disclosure predicates into \`_dp\`,
           //   reject \`.snap()\` on sensitive-bearing states, and build the
           //   per-state step delegates the orchestrator calls (\`me.view\`,
@@ -748,8 +746,6 @@ export function act<
             // done twice.
             const tags = event_tags(reg.schema);
             _tags.set(event_name, tags);
-            const fields = tags.sensitive;
-            if (fields.length > 0) _sf.set(event_name, fields);
 
             // The actor-less read surfaces (\`query\`/\`query_array\`) resolve a
             // reader by name; an event needing neither typing nor redaction
@@ -780,8 +776,8 @@ export function act<
             if (state.archive) _aa.set(state.name, state.archive);
             const fields_by_event = new Map<string, readonly string[]>();
             for (const event_name of Object.keys(state.events)) {
-              const fields = _sf.get(event_name);
-              if (fields) fields_by_event.set(event_name, fields);
+              const fields = _tags.get(event_name)?.sensitive;
+              if (fields?.length) fields_by_event.set(event_name, fields);
             }
             if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
             // Snapshots write derived state into \`__snapshot__.data\`, which
