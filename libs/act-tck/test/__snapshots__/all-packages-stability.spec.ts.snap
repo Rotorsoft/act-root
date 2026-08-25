@@ -9544,6 +9544,31 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
+/**
+ * Report a misrouted resolution once per offending declaration.
+ *
+ * \`seen\` belongs to the calling controller and is passed in: \`internal/\` holds
+ * no module state, so a resolver firing for every matching event still reports
+ * once without this module remembering anything between calls.
+ */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  const key = \`\${stream}|\${handler}|\${event}\`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  log().error(
+    new Error(
+      \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
+        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+        "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
+    )
+  );
+}
+
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -9552,6 +9577,7 @@ export async function run_drain_cycle<
   ops: DrainOps<TEvents>,
   registry: Registry<TSchemaReg, TEvents, TActions>,
   batch_handlers: Map<string, BatchHandler<TEvents>>,
+  misrouted: Set<string>,
   handle: Handle<TEvents>,
   handle_batch: HandleBatch<TEvents>,
   lagging: number,
@@ -9605,11 +9631,38 @@ export async function run_drain_cycle<
       if (!register) return [];
       return [...register.reactions.values()]
         .filter((reaction) => {
-          const resolved =
-            typeof reaction.resolver === "function"
-              ? reaction.resolver(event)
-              : reaction.resolver;
-          return resolved && resolved.target === stream;
+          const resolver = reaction.resolver;
+          const dynamic = typeof resolver === "function";
+          const resolved = dynamic ? resolver(event) : resolver;
+          if (!resolved || resolved.target !== stream) return false;
+          // A stream a projection serves is served by that projection alone:
+          // every payload here goes to its batch handler, so a reaction
+          // resolving onto it would never run AND would hand the projection
+          // an aggregate it knows nothing about (#1563).
+          //
+          // \`dynamic\` is an exact discriminator, not a heuristic: a STATIC
+          // reaction onto a projection's target is rejected at build, and a
+          // projection's own consumption is synthesized static. So a dynamic
+          // resolution landing here is by definition the misrouting the build
+          // guard could not see, because the target was a function until now.
+          if (!dynamic || !batch_handlers.has(stream)) return true;
+          // Say so. The build guard REFUSES this configuration, and dropping
+          // its dynamic twin without a word would leave an operator with a
+          // reaction that silently never runs — the half of #1563 that has no
+          // error, no retry and nothing in \`blocked_streams()\`.
+          //
+          // A throw is not available here: \`:693\` hands anything thrown to
+          // the circuit breaker as a store failure, so a config error that
+          // never resolves itself would stall the whole drain on a cooldown
+          // loop. Once per distinct misrouting, because a resolver returning
+          // a bad target does so for every matching event.
+          warn_misrouted(
+            misrouted,
+            stream,
+            reaction.handler.name,
+            String(event.name)
+          );
+          return false;
         })
         .map((reaction) => ({ ...reaction, event }));
     });
@@ -9815,6 +9868,12 @@ export class DrainController<
   });
   /** Worker timer (ACT-1103). Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Misroutings this controller has reported (#1563). A resolver returning a
+   * projection's target does so for every matching event; one line per event
+   * would bury the signal it exists to raise.
+   */
+  private readonly _misrouted = new Set<string>();
   private _stopped = false;
   /**
    * Resolves when the cycle currently in flight finishes; \`undefined\` when
@@ -9961,6 +10020,7 @@ export class DrainController<
         this._deps.ops,
         this._deps.registry,
         this._deps.batch_handlers,
+        this._misrouted,
         this._deps.handle,
         this._deps.handle_batch,
         lagging,
@@ -28376,6 +28436,31 @@ function budget_exhausted<TEvents extends Schemas>(
  *
  * @internal
  */
+/**
+ * Report a misrouted resolution once per offending declaration.
+ *
+ * \`seen\` belongs to the calling controller and is passed in: \`internal/\` holds
+ * no module state, so a resolver firing for every matching event still reports
+ * once without this module remembering anything between calls.
+ */
+function warn_misrouted(
+  seen: Set<string>,
+  stream: string,
+  handler: string,
+  event: string
+): void {
+  const key = \`\${stream}|\${handler}|\${event}\`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  log().error(
+    new Error(
+      \`Reaction "\${handler}" on "\${event}" resolved to target "\${stream}", which a projection already serves. \` +
+        "A target is served by one batch handler or one state projection, so this reaction can never run — and delivering to it would hand the projection an aggregate from another stream. " +
+        "Skipping it. The equivalent static \`.to({ target })\` is rejected at build; a dynamic resolver's target is only knowable here."
+    )
+  );
+}
+
 export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -28384,6 +28469,7 @@ export async function run_drain_cycle<
   ops: DrainOps<TEvents>,
   registry: Registry<TSchemaReg, TEvents, TActions>,
   batch_handlers: Map<string, BatchHandler<TEvents>>,
+  misrouted: Set<string>,
   handle: Handle<TEvents>,
   handle_batch: HandleBatch<TEvents>,
   lagging: number,
@@ -28437,11 +28523,38 @@ export async function run_drain_cycle<
       if (!register) return [];
       return [...register.reactions.values()]
         .filter((reaction) => {
-          const resolved =
-            typeof reaction.resolver === "function"
-              ? reaction.resolver(event)
-              : reaction.resolver;
-          return resolved && resolved.target === stream;
+          const resolver = reaction.resolver;
+          const dynamic = typeof resolver === "function";
+          const resolved = dynamic ? resolver(event) : resolver;
+          if (!resolved || resolved.target !== stream) return false;
+          // A stream a projection serves is served by that projection alone:
+          // every payload here goes to its batch handler, so a reaction
+          // resolving onto it would never run AND would hand the projection
+          // an aggregate it knows nothing about (#1563).
+          //
+          // \`dynamic\` is an exact discriminator, not a heuristic: a STATIC
+          // reaction onto a projection's target is rejected at build, and a
+          // projection's own consumption is synthesized static. So a dynamic
+          // resolution landing here is by definition the misrouting the build
+          // guard could not see, because the target was a function until now.
+          if (!dynamic || !batch_handlers.has(stream)) return true;
+          // Say so. The build guard REFUSES this configuration, and dropping
+          // its dynamic twin without a word would leave an operator with a
+          // reaction that silently never runs — the half of #1563 that has no
+          // error, no retry and nothing in \`blocked_streams()\`.
+          //
+          // A throw is not available here: \`:693\` hands anything thrown to
+          // the circuit breaker as a store failure, so a config error that
+          // never resolves itself would stall the whole drain on a cooldown
+          // loop. Once per distinct misrouting, because a resolver returning
+          // a bad target does so for every matching event.
+          warn_misrouted(
+            misrouted,
+            stream,
+            reaction.handler.name,
+            String(event.name)
+          );
+          return false;
         })
         .map((reaction) => ({ ...reaction, event }));
     });
@@ -28647,6 +28760,12 @@ export class DrainController<
   });
   /** Worker timer (ACT-1103). Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Misroutings this controller has reported (#1563). A resolver returning a
+   * projection's target does so for every matching event; one line per event
+   * would bury the signal it exists to raise.
+   */
+  private readonly _misrouted = new Set<string>();
   private _stopped = false;
   /**
    * Resolves when the cycle currently in flight finishes; \`undefined\` when
@@ -28793,6 +28912,7 @@ export class DrainController<
         this._deps.ops,
         this._deps.registry,
         this._deps.batch_handlers,
+        this._misrouted,
         this._deps.handle,
         this._deps.handle_batch,
         lagging,
