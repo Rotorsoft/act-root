@@ -37,7 +37,7 @@ import {
   make_gate,
   pii_strip,
 } from "../internal/index.js";
-import { DEFAULT_LANE } from "../ports.js";
+import { DEFAULT_LANE, SNAP_EVENT } from "../ports.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
 
 /** What one pass over an event's schema resolves. @internal */
@@ -184,13 +184,21 @@ export function make_event_reader(
     gate({ ...event, data: parse(event.data) } as never, actor)) as EventGate;
 }
 
-/** What the events pass resolves, keyed by event name. @internal */
+/**
+ * Exactly what the registry serves, keyed by event name — no intermediates.
+ *
+ * The per-state `view` is installed directly on each state rather than
+ * returned: it is event-derived wiring like the rest, and handing it back for
+ * the caller to install would put the composition back where it came from.
+ *
+ * @internal
+ */
 export type BuiltEvents = {
-  /** One resolution of each event's schema — the source for everything below. */
-  readonly tags: Map<string, EventTags>;
-  /** Reader for the actor-less read surfaces (`query` / `query_array`). */
+  /** Backs `registry.sensitive_fields`. */
+  readonly sensitive: Map<string, readonly string[]>;
+  /** Backs `registry.query_gate` — the actor-less read surfaces. */
   readonly query_readers: Map<string, EventGate>;
-  /** Reader for handlers — sensitive keys removed, payload typed. */
+  /** Readers for handlers — sensitive keys removed, payload typed. */
   readonly handler_readers: Map<string, EventGate>;
 };
 
@@ -220,6 +228,7 @@ type EventEntry = {
  */
 export function build_events(
   registry: Registry<any, any, any>,
+  states: ReadonlyMap<string, any>,
   lanes: ReadonlyArray<LaneConfig>,
   owners: TargetOwners
 ): BuiltEvents {
@@ -227,6 +236,7 @@ export function build_events(
   const lane_errors: string[] = [];
 
   const tags = new Map<string, EventTags>();
+  const sensitive = new Map<string, readonly string[]>();
   const query_readers = new Map<string, EventGate>();
   const handler_readers = new Map<string, EventGate>();
 
@@ -259,6 +269,7 @@ export function build_events(
     // built from: which fields are sensitive, and how to type the payload.
     const event = event_tags(def.schema);
     tags.set(event_name, event);
+    if (event.sensitive.length > 0) sensitive.set(event_name, event.sensitive);
 
     // An event needing neither typing nor redaction produces no reader and
     // falls back to the shared IDENTITY_GATE — zero per-event cost.
@@ -283,5 +294,25 @@ export function build_events(
   }
 
   if (lane_errors.length > 0) throw new Error(lane_errors[0]);
-  return { tags, query_readers, handler_readers };
+
+  // Per-state views: the same composition, with this state's disclosure
+  // predicate as an input. A `__snapshot__` carries folded STATE rather than
+  // event data, so its typing comes from the state schema — without that a
+  // restart from a snapshot loses every `z.date()` the state holds.
+  for (const state of states.values()) {
+    const readers = new Map<string, EventGate>();
+    for (const event_name of Object.keys(state.events)) {
+      const event = tags.get(event_name);
+      const reader =
+        event && make_event_reader(event, "redact", state.disclose ?? null);
+      if (reader) readers.set(event_name, reader);
+    }
+    const snap = make_event_reader(event_tags(state.state), "redact", null);
+    if (snap) readers.set(SNAP_EVENT, snap);
+    if (readers.size === 0) continue;
+    state.view = (event: { name: string }, actor: Actor) =>
+      (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
+  }
+
+  return { sensitive, query_readers, handler_readers };
 }

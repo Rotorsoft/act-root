@@ -36,12 +36,7 @@ import type {
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
 import { reaction_on, register_lane } from "./builder-utils.js";
-import {
-  build_events,
-  type EventTags,
-  event_tags,
-  make_event_reader,
-} from "./event-builder.js";
+import { build_events } from "./event-builder.js";
 import {
   merge_event_register,
   merge_projection,
@@ -306,7 +301,7 @@ export function act<
   // derived from it: the sensitive-field list the write path splits on, and
   // the per-surface readers (query, per-state view, handler strip) composed
   // below. Nothing walks a schema twice.
-  const _et = new Map<string, EventTags>();
+  const _sf = new Map<string, readonly string[]>();
   // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
   // when the event needs neither.
   const _hr = new Map<string, EventGate>();
@@ -324,7 +319,7 @@ export function act<
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-    sensitive_fields: (event_name) => _et.get(event_name)?.sensitive ?? [],
+    sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
@@ -655,12 +650,12 @@ export function act<
           // One walk over the registered events: validate every static
           // reaction, resolve each schema once, and compose the per-surface
           // readers from it. See `event-builder.ts`.
-          const built = build_events(registry, lanes, {
+          const built = build_events(registry, states, lanes, {
             batch_handlers,
             fold_targets: new Set(fold_specs.map((f) => f.target)),
             projection_reactions,
           });
-          for (const [name, tags] of built.tags) _et.set(name, tags);
+          for (const [name, fields] of built.sensitive) _sf.set(name, fields);
           for (const [name, gate] of built.query_readers) _qg.set(name, gate);
           for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
@@ -671,8 +666,8 @@ export function act<
             if (state.archive) _aa.set(state.name, state.archive);
             const fields_by_event = new Map<string, readonly string[]>();
             for (const event_name of Object.keys(state.events)) {
-              const fields = _et.get(event_name)?.sensitive;
-              if (fields?.length) fields_by_event.set(event_name, fields);
+              const fields = _sf.get(event_name);
+              if (fields) fields_by_event.set(event_name, fields);
             }
             if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
             // Snapshots write derived state into `__snapshot__.data`, which
@@ -703,32 +698,6 @@ export function act<
           // A `__snapshot__` carries folded STATE, not event data, so its
           // dates come from the state schema. Without that a restart from a
           // snapshot would lose every `z.date()` the state holds.
-          // Per-state readers: the same composition, with this state's
-          // disclosure predicate. A `__snapshot__` carries folded STATE, not
-          // event data, so its typing comes from the state schema — without
-          // that a restart from a snapshot loses every `z.date()` in state.
-          for (const state of states.values()) {
-            const readers = new Map<string, EventGate>();
-            for (const event_name of Object.keys(state.events)) {
-              const tags = _et.get(event_name);
-              const reader =
-                tags &&
-                make_event_reader(tags, "redact", state.disclose ?? null);
-              if (reader) readers.set(event_name, reader);
-            }
-            const snap = make_event_reader(
-              event_tags(state.state as never),
-              "redact",
-              null
-            );
-            if (snap) readers.set(SNAP_EVENT, snap);
-            if (readers.size === 0) continue;
-            state.view = (event, actor) =>
-              (readers.get(event.name as string) ?? IDENTITY_GATE)(
-                event,
-                actor
-              );
-          }
           for (const [target, original] of batch_handlers) {
             batch_handlers.set(target, pii_wrap(original) as never);
           }
