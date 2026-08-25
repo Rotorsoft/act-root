@@ -16,6 +16,10 @@ import { join } from "node:path";
  * - `internal/` holds stateless implementations. They RECEIVE what they need
  *   (see `ReactionDeps.reaction_scope`, `DrainDeps.run_scoped`); they never
  *   reach for ambient state.
+ * - PII is one module's business. `internal/sensitive.ts` owns the marker and
+ *   the transforms; `builders/event-builder.ts` is the only place that
+ *   composes them. Nothing else imports a `pii_*` helper, and the internal
+ *   barrel does not re-export one.
  * - `scoped.ts` owns every `AsyncLocalStorage` and every operation on one.
  * - Ambient mechanisms are not public API.
  */
@@ -131,5 +135,47 @@ describe("architecture: ambient mechanisms are not public API", () => {
     const ports = code_of(readFileSync(join(SRC, "ports.ts"), "utf8"));
     expect(ports).not.toMatch(/export \{[^}]*\bscoped\b[^}]*\}/);
     expect(ports).toMatch(/export type \{ Scoped \}/);
+  });
+});
+
+describe("architecture: PII stays inside the modules that own it", () => {
+  const SENSITIVE = join(SRC, "internal", "sensitive.ts");
+  const OWNER = join(SRC, "builders", "event-builder.ts");
+
+  it("is composed in exactly one place", () => {
+    // `sensitive.ts` declares the marker and the transforms;
+    // `event-builder.ts` composes them into readers at build. A third module
+    // reaching for `pii_split` / `pii_strip` / `pii_gate` / `make_gate` means
+    // the composition has leaked back out to a caller — which is how it was
+    // spread across act-builder before (#1556).
+    const offenders = ts_files(SRC)
+      .filter((p) => p !== SENSITIVE && p !== OWNER)
+      .map((path) => ({
+        name: path.slice(SRC.length),
+        text: readFileSync(path, "utf8"),
+      }))
+      .filter(({ text }) =>
+        /\b(pii_split|pii_gate|make_gate)\s*\(/.test(code_of(text))
+      )
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("is not re-exported through the internal barrel", () => {
+    // Deep-importing `internal/sensitive.js` is the documented exception, so
+    // the barrel carrying `pii_*` only widens the surface that can reach it.
+    const barrel = code_of(readFileSync(join(INTERNAL, "index.ts"), "utf8"));
+    expect(barrel).not.toMatch(/\bpii_(split|gate|strip|fields)\b/);
+  });
+
+  it("publishes only what another package genuinely needs", () => {
+    // `pii_fields` IS public: act-http's OpenAPI emitter marks request-body
+    // properties `writeOnly` with it (auto-generated-api.md). The transforms
+    // are not — publishing them would invite a caller to redact by hand.
+    const schemas = code_of(
+      readFileSync(join(SRC, "types", "schemas.ts"), "utf8")
+    );
+    expect(schemas).toMatch(/export \{ pii_fields,/);
+    expect(schemas).not.toMatch(/\bpii_(split|gate|strip)\b/);
   });
 });

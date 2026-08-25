@@ -27,7 +27,7 @@ describe("sqlite Date round-trip parity (#1198)", () => {
     }
   });
 
-  it("returns a payload Date as a Date instance", async () => {
+  it("round-trips a payload Date losslessly as its ISO form", async () => {
     const when = new Date("2026-07-11T12:34:56.000Z");
     await store.commit(
       "dr-stream",
@@ -40,8 +40,8 @@ describe("sqlite Date round-trip parity (#1198)", () => {
       { stream: "dr-stream", stream_exact: true }
     );
     expect(got).toHaveLength(1);
-    expect(got[0].when).toBeInstanceOf(Date);
-    expect((got[0].when as Date).getTime()).toBe(when.getTime());
+    expect(typeof got[0].when).toBe("string");
+    expect(new Date(got[0].when as string).getTime()).toBe(when.getTime());
     // A non-ISO string stays a string.
     expect(got[0].label).toBe("not-a-date");
   });

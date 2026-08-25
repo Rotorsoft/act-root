@@ -97,7 +97,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;

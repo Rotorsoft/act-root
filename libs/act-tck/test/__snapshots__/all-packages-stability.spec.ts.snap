@@ -17,11 +17,7 @@ import {
   FOLD_RESET,
   IDENTITY_GATE,
   make_fold_handler,
-  make_gate,
   type PatchFn,
-  pii_fields,
-  pii_split,
-  pii_strip,
   type ResettableBatchHandler,
   resolveActConfig,
   resolveAutocloseConfig,
@@ -29,7 +25,7 @@ import {
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
-import { DEFAULT_LANE, log } from "../ports.js";
+import { type DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
@@ -43,6 +39,7 @@ import type {
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
 import { reaction_on, register_lane } from "./builder-utils.js";
+import { build_events } from "./event-builder.js";
 import {
   merge_event_register,
   merge_projection,
@@ -74,34 +71,6 @@ function register_batch_handler(
     );
   }
   batch_handlers.set(proj.target, proj.batchHandler);
-}
-
-/**
- * Runtime backstop for slice-declared lane references — rejects
- * static \`.to({lane})\` entries that aren't in the declared set.
- * Inline reactions are caught at compile time; this only fires for
- * slices built against older type definitions.
- */
-function validate_lane_references(
-  registry: Registry<any, any, any>,
-  lanes: ReadonlyArray<LaneConfig>
-): void {
-  const declared = new Set<string>([DEFAULT_LANE, ...lanes.map((l) => l.name)]);
-  for (const [event_name, def] of Object.entries(registry.events)) {
-    const entry = def as { reactions: Map<string, Reaction<any, any>> };
-    for (const [handlerName, reaction] of entry.reactions) {
-      const resolver = reaction.resolver;
-      if (typeof resolver === "function") continue;
-      const lane = (resolver as { lane?: string }).lane;
-      if (lane && !declared.has(lane)) {
-        throw new Error(
-          \`Reaction "\${handlerName}" on "\${event_name}" targets undeclared lane "\${lane}". \` +
-            \`Declared lanes: \${[...declared].map((l) => \`"\${l}"\`).join(", ")}. \` +
-            \`Add \\\`.withLane({ name: "\${lane}", ... })\\\` to act() or correct the .to() declaration.\`
-        );
-      }
-    }
-  }
 }
 
 /**
@@ -331,7 +300,14 @@ export function act<
   // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
+  // One pass over each event's schema, and the single source for everything
+  // derived from it: the sensitive-field list the write path splits on, and
+  // the per-surface readers (query, per-state view, handler strip) composed
+  // below. Nothing walks a schema twice.
   const _sf = new Map<string, readonly string[]>();
+  // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
+  // when the event needs neither.
+  const _hr = new Map<string, EventGate>();
   // Prebuilt default-deny read gates, one per sensitive event. Non-sensitive
   // events are absent → \`query_gate\` falls back to the shared IDENTITY_GATE.
   const _qg = new Map<string, EventGate>();
@@ -393,18 +369,17 @@ export function act<
   let _built = false;
 
   /**
-   * Wraps a batch handler so the batch dispatcher stays PII-unaware —
-   * sensitive keys are stripped from every event before the handler
-   * sees it. \`_sf\` is read lazily at dispatch time, by when the
-   * events pass has populated it.
+   * Wraps a batch handler so it receives events in handler form — payload
+   * typed from the declared schema, sensitive keys removed — the same reader
+   * \`event-builder\` gives per-event handlers. Resolved lazily at dispatch, by
+   * when the events pass has populated it.
    */
-  const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
+  const read_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
     const wrapped = async (events: readonly any[], stream: string) => {
-      const stripped = events.map((e) => {
-        const f = _sf.get(e.name as string);
-        return f ? pii_strip(e, f) : e;
-      });
-      return original(stripped as never, stream);
+      // The same prebuilt reader the per-event handlers get: typed payload,
+      // sensitive keys removed. Absent → the event passes through untouched.
+      const read = events.map((e) => _hr.get(e.name as string)?.(e) ?? e);
+      return original(read as never, stream);
     };
     // Carry the fold's cache-reset handle through the wrapper (#1466). The
     // orchestrator only ever sees what this map holds, so a handle left on
@@ -438,14 +413,14 @@ export function act<
     for (const spec of fold_specs) {
       handlers.set(
         spec.target,
-        pii_wrap(
+        read_wrap(
           make_fold_handler(
             spec.merged,
             spec.flush,
             spec.config,
             patch_fn,
             // Head loads strip sensitive keys like the warm path (#1320).
-            (event_name) => _sf.get(event_name) ?? []
+            registry.sensitive_fields
           )
         ) as never
       );
@@ -675,126 +650,26 @@ export function act<
           //
           // A projection's OWN reactions legitimately target it, so they are
           // excluded by object identity — the same test \`merge_projection\`
-          // uses to tell a re-registration from a collision.
-          for (const register of Object.values(registry.events)) {
-            for (const reaction of register.reactions.values()) {
-              if (typeof reaction.resolver === "function") continue;
-              const target = reaction.resolver.target;
-              const claimed =
-                batch_handlers.has(target) ||
-                fold_specs.some((f) => f.target === target);
-              if (claimed && !projection_reactions.has(reaction))
-                throw new Error(
-                  \`Reaction on target "\${target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run\`
-                );
-            }
-          }
+          // One walk over the registered events: validate every static
+          // reaction, resolve each schema once, and compose the per-surface
+          // readers from it. See \`event-builder.ts\`.
+          const built = build_events(registry, states, lanes, {
+            batch_handlers,
+            fold_targets: new Set(fold_specs.map((f) => f.target)),
+            projection_reactions,
+          });
+          for (const [name, fields] of built.sensitive) _sf.set(name, fields);
+          for (const [name, gate] of built.query_readers) _qg.set(name, gate);
+          for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
-          validate_lane_references(registry, lanes);
-          // Precompute the sensitive-field lookup. Iterates each registered
-          // event's Zod schema exactly once at build; later commit/load paths
-          // hit the cache in O(1). Events with no sensitive fields don't get
-          // Build the sensitive-data wiring in three passes (#855):
-          //
-          // - events pass: precompute the sensitive-field lookup \`_sf\` from
-          //   each event's Zod schema; while we're already walking events,
-          //   wrap their registered reaction handlers so \`build_handle\`
-          //   stays PII-unaware.
-          // - states pass: snapshot the disclosure predicates into \`_dp\`,
-          //   reject \`.snap()\` on sensitive-bearing states, and build the
-          //   per-state step delegates the orchestrator calls (\`me.view\`,
-          //   \`me.message\`, wrapped \`me.patch[name]\`).
-          // - batch_handlers pass: wrap each batch handler so the batch
-          //   dispatcher stays PII-unaware.
-          //
-          // The orchestrator calls three step delegates per event:
-          //   - \`me.message(validated)\` — produces the commit-bound shape
-          //     (\`{name, data, pii?}\`) from a validated emit.
-          //   - \`me.patch[event_name](event, state)\` — the reducer that
-          //     derives the next state from the committed event.
-          //   - \`me.view(event, actor)\` — produces the caller-visible form
-          //     (snapshot.event).
-          //
-          // For PII-free states (the common case) \`view\` and \`message\` are
-          // bound to identity in \`state-builder.ts\` and \`patch\` is the
-          // user-declared reducer; the orchestrator's hot path is identical
-          // to the pre-#855 code at runtime. For PII-aware states (≥1
-          // \`sensitive(...)\` event), each delegate is rebound to fold the
-          // gate / split / merge into the step itself.
-          for (const [event_name, reg] of Object.entries(
-            registry.events as Record<
-              string,
-              {
-                schema: import("zod").ZodType;
-                reactions: Map<string, { handler: any }>;
-              }
-            >
-          )) {
-            const fields = pii_fields(reg.schema);
-            if (fields.length === 0) continue;
-            _sf.set(event_name, fields);
-            // Prebuild the default-deny read gate once, capturing \`fields\`.
-            // The actor-less read surfaces (\`query\`/\`query_array\`) resolve it
-            // by name; non-sensitive events never reach here, so they fall
-            // back to the shared IDENTITY_GATE — zero per-event cost.
-            _qg.set(event_name, make_gate(fields, null));
-            // Strip PII from the event payload before reactions see it.
-            for (const [name, reaction] of reg.reactions) {
-              const inner = reaction.handler;
-              const wrapped = (event: any, stream: string, app: any) =>
-                inner(pii_strip(event, fields), stream, app);
-              // Preserve handler.name — build_handle asserts on named functions.
-              Object.defineProperty(wrapped, "name", { value: inner.name });
-              reaction.handler = wrapped;
-              reg.reactions.set(name, reaction as never);
-            }
-          }
+
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
             if (state.autoclose) _ac.set(state.name, state.autoclose);
             if (state.archive) _aa.set(state.name, state.archive);
-            const fields_by_event = new Map<string, readonly string[]>();
-            for (const event_name of Object.keys(state.events)) {
-              const fields = _sf.get(event_name);
-              if (fields) fields_by_event.set(event_name, fields);
-            }
-            if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
-            // Snapshots write derived state into \`__snapshot__.data\`, which
-            // \`forget_pii\` cannot reach. Reject the combination at build so
-            // the misconfiguration surfaces in dev/CI, not as a silent leak
-            // past the GDPR boundary months later.
-            if (state.snap) {
-              const offending = [...fields_by_event.keys()];
-              throw new Error(
-                \`State "\${state.name}" cannot snapshot — events {\${offending.join(", ")}} carry sensitive fields. \` +
-                  "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
-                  "Remove .snap() or remove sensitive(...) markers."
-              );
-            }
-            const disclose = state.disclose ?? null;
-            state.pii_aware = true;
-            // Prebuild one actor-aware read gate per sensitive event, capturing
-            // this state's disclosure predicate — the same \`make_gate\`
-            // primitive the query path uses (predicate-less there). A pii-aware
-            // state can still declare non-sensitive events; those aren't in
-            // \`view_gates\`, so \`state.view\` falls back to the shared
-            // IDENTITY_GATE — no per-event field lookup, no \`?? []\` allocation.
-            const view_gates = new Map<string, EventGate>();
-            for (const [event_name, fields] of fields_by_event) {
-              view_gates.set(event_name, make_gate(fields, disclose));
-            }
-            state.view = (event, actor) =>
-              (view_gates.get(event.name as string) ?? IDENTITY_GATE)(
-                event,
-                actor
-              );
-            state.message = (validated) => {
-              const fields = fields_by_event.get(validated.name as string);
-              return fields ? pii_split(validated, fields) : validated;
-            };
           }
           for (const [target, original] of batch_handlers) {
-            batch_handlers.set(target, pii_wrap(original) as never);
+            batch_handlers.set(target, read_wrap(original) as never);
           }
           // Synthesize the autoclose reactions last, once the registry is
           // fully merged — their dynamic resolvers must be present before
@@ -2278,10 +2153,9 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>(
-        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
-        query
-      );
+      await store().query<TEvents>((e) => {
+        events.push(this.registry.query_gate(e.name as string)(e));
+      }, query);
       return events;
     });
   }
@@ -8865,7 +8739,6 @@ import type {
   Query,
   Schemas,
 } from "./types/action.js";
-import { dateReviver } from "./utils.js";
 
 /**
  * Construct a {@link CsvFile} from either a filesystem path (for
@@ -8935,11 +8808,11 @@ export class CsvFile implements EventSource, EventSink {
         // payload must not depend on whether it came back through a store or
         // through a CSV restore (#1399). The \`created\` column below has
         // always been parsed explicitly; the JSON columns were missed.
-        data: JSON.parse(fields[2]!, dateReviver),
+        data: JSON.parse(fields[2]!),
         stream: fields[3]!,
         version: Number.parseInt(fields[4]!, 10),
         created: new Date(fields[5]!),
-        meta: JSON.parse(fields[6]!, dateReviver),
+        meta: JSON.parse(fields[6]!),
       };
       await Promise.resolve(callback(event));
       count++;
@@ -10749,6 +10622,357 @@ export class NonRetryableError extends Error {
     this.name = Errors.NonRetryableError;
     this.cause = options?.cause;
   }
+}
+
+// === event-builder.ts ===
+/**
+ * @module event-builder
+ * @category Internal
+ *
+ * Everything \`act().build()\` derives from the registered events.
+ *
+ * This is the build-time half of the event lifecycle. \`internal/sensitive.ts\`
+ * owns the other two halves — the \`sensitive(...)\` marker itself, and the
+ * runtime transforms (\`pii_gate\`, \`pii_strip\`, \`pii_split\`) that a reader is
+ * composed from. Nothing here runs per event at runtime; everything here runs
+ * once, at build, and hands the orchestrator a prebuilt function.
+ *
+ * Three things are derived, all in ONE walk over the registered events:
+ *
+ * - **validation** — a reaction may not target a lane nobody declared, nor a
+ *   target a projection already serves. Both checks skip dynamic resolvers,
+ *   because a \`.to(fn)\` target is unknowable until an event arrives.
+ * - **resolution** — each event's schema is read once into {@link EventTags}:
+ *   which fields are sensitive, and how to type the stored payload.
+ * - **composition** — the per-surface readers, each a single {@link EventGate}
+ *   that types the payload and applies disclosure in one call.
+ *
+ * Deliberately NOT here: deprecation. \`Foo\` is deprecated only because
+ * \`Foo_v2\` exists beside it, so it is derived from event *names across a whole
+ * state* rather than from one event's schema — and it governs *emitting* (a
+ * static \`.emit()\` throws at build), not reading. Replay of a deprecated event
+ * stays silent by design.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import {
+  type EventGate,
+  IDENTITY_GATE,
+  is_pii,
+  make_gate,
+  pii_split,
+  pii_strip,
+} from "../internal/sensitive.js";
+import { DEFAULT_LANE, SNAP_EVENT } from "../ports.js";
+import type { Actor, LaneConfig, Registry } from "../types/index.js";
+
+/** What one pass over an event's schema resolves. @internal */
+export type EventTags = {
+  /** Keys marked \`sensitive(...)\`, top level (and across union variants). */
+  readonly sensitive: readonly string[];
+  /**
+   * Types a stored payload against the declaration, or \`undefined\` when the
+   * schema declares no dates.
+   */
+  readonly parse: ((data: unknown) => unknown) | undefined;
+};
+
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
+  (schema as { def?: Record<string, unknown> }).def;
+
+/**
+ * Rebuild a schema for reading: dates coerce from their stored string, and
+ * objects keep keys they don't declare.
+ *
+ * A construct this doesn't recognise is returned untouched, so an unfamiliar
+ * schema still parses — it just won't coerce dates buried inside one. That
+ * fallthrough is what keeps this small: it describes the shapes worth
+ * rebuilding, not every shape that exists.
+ */
+function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
+  const def = def_of(schema);
+  if (!def) return schema;
+  switch (def.type) {
+    case "date":
+      found.date = true;
+      return z.coerce.date();
+    case "object": {
+      const shape = def.shape as Record<string, z.ZodType> | undefined;
+      if (!shape) return schema;
+      const next: Record<string, z.ZodType> = {};
+      for (const [key, inner] of Object.entries(shape))
+        next[key] = to_read_schema(inner, found) as z.ZodType;
+      return z.looseObject(next);
+    }
+    case "array":
+      return z.array(to_read_schema(def.element, found) as z.ZodType);
+    case "record":
+      return z.record(
+        z.string(),
+        to_read_schema(def.valueType, found) as z.ZodType
+      );
+    case "union":
+      return z.union(
+        (def.options as unknown[]).map(
+          (o) => to_read_schema(o, found) as z.ZodType
+        ) as never
+      );
+    case "optional":
+      return (to_read_schema(def.innerType, found) as z.ZodType).optional();
+    case "nullable":
+      return (to_read_schema(def.innerType, found) as z.ZodType).nullable();
+    default:
+      return schema;
+  }
+}
+
+/**
+ * Resolve an event's schema in a single pass.
+ *
+ * Sensitive markers are read at the top level only — the documented carve-out
+ * (\`sensitive.ts\`), since the write path splits whole top-level keys. A union
+ * event has no top-level shape, so its variants are walked and unioned: a key
+ * sensitive in any variant must be split, because the stored payload could be
+ * that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ *
+ * @internal
+ */
+export function event_tags(schema: z.ZodType): EventTags {
+  const sensitive: string[] = [];
+
+  const collect = (node: unknown): void => {
+    const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
+    if (shape) {
+      for (const key of Object.keys(shape))
+        if (is_pii(shape[key])) sensitive.push(key);
+      return;
+    }
+    const options = (node as { options?: unknown }).options;
+    if (Array.isArray(options)) for (const option of options) collect(option);
+  };
+  collect(schema);
+
+  const found = { date: false };
+  const read_schema = to_read_schema(schema, found);
+  return {
+    sensitive: [...new Set(sensitive)],
+    parse: found.date
+      ? (data: unknown) => (read_schema as z.ZodType).parse(data)
+      : undefined,
+  };
+}
+
+/**
+ * What the reader should do about sensitive fields.
+ *
+ * - \`redact\` — substitute \`[REDACTED]\` unless \`disclose\` authorizes the actor,
+ *   and drop the \`pii\` sidecar. The read surfaces (\`query\`, \`query_array\`,
+ *   \`load\`).
+ * - \`strip\` — remove the keys entirely. Reaction and projection handlers,
+ *   which never see PII by framework rule, and shouldn't structurally observe
+ *   the keys either.
+ *
+ * @internal
+ */
+export type Disclosure = "redact" | "strip";
+
+/**
+ * Compose one event's typing and disclosure into a single gate.
+ *
+ * Returns \`undefined\` when the event needs neither, so the caller can fall
+ * back to the shared {@link IDENTITY_GATE} and the common path allocates
+ * nothing.
+ *
+ * @internal
+ */
+export function make_event_reader(
+  tags: EventTags,
+  disclosure: Disclosure,
+  predicate: ((event: never, actor: Actor) => boolean) | null = null
+): EventGate | undefined {
+  const { sensitive, parse } = tags;
+  if (!parse && sensitive.length === 0) return undefined;
+
+  const gate: EventGate =
+    sensitive.length === 0
+      ? IDENTITY_GATE
+      : disclosure === "strip"
+        ? (((event) => pii_strip(event as never, sensitive)) as EventGate)
+        : make_gate(sensitive, predicate as never);
+
+  if (!parse) return gate;
+
+  // Type before disclosing: the gate copies, so parsing afterwards would
+  // leave the consumer's value a string.
+  return ((event, actor) =>
+    gate({ ...event, data: parse(event.data) } as never, actor)) as EventGate;
+}
+
+/**
+ * Exactly what the registry serves, keyed by event name — no intermediates.
+ *
+ * The per-state \`view\` is installed directly on each state rather than
+ * returned: it is event-derived wiring like the rest, and handing it back for
+ * the caller to install would put the composition back where it came from.
+ *
+ * @internal
+ */
+export type BuiltEvents = {
+  /** Backs \`registry.sensitive_fields\`. */
+  readonly sensitive: Map<string, readonly string[]>;
+  /** Backs \`registry.query_gate\` — the actor-less read surfaces. */
+  readonly query_readers: Map<string, EventGate>;
+  /** Readers for handlers — sensitive keys removed, payload typed. */
+  readonly handler_readers: Map<string, EventGate>;
+};
+
+/** What validation needs to know about the projections already registered. */
+export type TargetOwners = {
+  readonly batch_handlers: ReadonlyMap<string, unknown>;
+  readonly fold_targets: ReadonlySet<string>;
+  /** A projection's own reactions legitimately target it — excluded by identity. */
+  readonly projection_reactions: ReadonlySet<unknown>;
+};
+
+type EventEntry = {
+  schema: import("zod").ZodType;
+  reactions: Map<string, { handler: any; resolver: unknown }>;
+};
+
+/**
+ * Validate every static reaction and wire every event, in a single walk.
+ *
+ * Ownership conflicts throw as they are found; lane violations are collected
+ * and thrown afterwards. That ordering is deliberate — it preserves the
+ * precedence the two separate passes had, where the ownership guard ran to
+ * completion before lane references were checked, so a config violating both
+ * reports the same error it always did.
+ *
+ * @internal
+ */
+export function build_events(
+  registry: Registry<any, any, any>,
+  states: ReadonlyMap<string, any>,
+  lanes: ReadonlyArray<LaneConfig>,
+  owners: TargetOwners
+): BuiltEvents {
+  const declared = new Set<string>([DEFAULT_LANE, ...lanes.map((l) => l.name)]);
+  const lane_errors: string[] = [];
+
+  const tags = new Map<string, EventTags>();
+  const sensitive = new Map<string, readonly string[]>();
+  const query_readers = new Map<string, EventGate>();
+  const handler_readers = new Map<string, EventGate>();
+
+  for (const [event_name, def] of Object.entries(
+    registry.events as Record<string, EventEntry>
+  )) {
+    for (const [handler_name, reaction] of def.reactions) {
+      // A build-time guard can only see a static target: a \`.to(fn)\` target
+      // is unknowable until an event arrives.
+      if (typeof reaction.resolver === "function") continue;
+      const resolver = reaction.resolver as { target: string; lane?: string };
+
+      const claimed =
+        owners.batch_handlers.has(resolver.target) ||
+        owners.fold_targets.has(resolver.target);
+      if (claimed && !owners.projection_reactions.has(reaction))
+        throw new Error(
+          \`Reaction on target "\${resolver.target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run\`
+        );
+
+      if (resolver.lane && !declared.has(resolver.lane))
+        lane_errors.push(
+          \`Reaction "\${handler_name}" on "\${event_name}" targets undeclared lane "\${resolver.lane}". \` +
+            \`Declared lanes: \${[...declared].map((l) => \`"\${l}"\`).join(", ")}. \` +
+            \`Add \\\`.withLane({ name: "\${resolver.lane}", ... })\\\` to act() or correct the .to() declaration.\`
+        );
+    }
+
+    // One resolution of the declared schema yields both facts a reader is
+    // built from: which fields are sensitive, and how to type the payload.
+    const event = event_tags(def.schema);
+    tags.set(event_name, event);
+    if (event.sensitive.length > 0) sensitive.set(event_name, event.sensitive);
+
+    // An event needing neither typing nor redaction produces no reader and
+    // falls back to the shared IDENTITY_GATE — zero per-event cost.
+    const query_reader = make_event_reader(event, "redact", null);
+    if (query_reader) query_readers.set(event_name, query_reader);
+
+    // Handlers never see PII by framework rule, and shouldn't observe the
+    // keys structurally either — so \`strip\`, not \`redact\`.
+    const handler_reader = make_event_reader(event, "strip");
+    if (handler_reader) {
+      handler_readers.set(event_name, handler_reader);
+      for (const [name, reaction] of def.reactions) {
+        const inner = reaction.handler;
+        const wrapped = (evt: any, stream: string, app: any) =>
+          inner(handler_reader(evt), stream, app);
+        // Preserve handler.name — build_handle asserts on named functions.
+        Object.defineProperty(wrapped, "name", { value: inner.name });
+        reaction.handler = wrapped;
+        def.reactions.set(name, reaction as never);
+      }
+    }
+  }
+
+  if (lane_errors.length > 0) throw new Error(lane_errors[0]);
+
+  // Per-state wiring, all of it derived from the same event resolution: the
+  // read view, the write split, and the guard that refuses to combine the two
+  // things that cannot coexist.
+  for (const state of states.values()) {
+    const state_fields = new Map<string, readonly string[]>();
+    for (const event_name of Object.keys(state.events)) {
+      const fields = sensitive.get(event_name);
+      if (fields) state_fields.set(event_name, fields);
+    }
+
+    if (state_fields.size > 0) {
+      // Snapshots write derived state into \`__snapshot__.data\`, which
+      // \`forget_pii\` cannot reach. Reject the combination at build so the
+      // misconfiguration surfaces in dev/CI, not as a silent leak past the
+      // GDPR boundary months later.
+      if (state.snap)
+        throw new Error(
+          \`State "\${state.name}" cannot snapshot — events {\${[...state_fields.keys()].join(", ")}} carry sensitive fields. \` +
+            "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
+            "Remove .snap() or remove sensitive(...) markers."
+        );
+      state.pii_aware = true;
+      // The write half: split declared fields into the \`pii\` sidecar on the
+      // way to \`Store.commit\`.
+      state.message = (validated: { name: string }) => {
+        const fields = state_fields.get(validated.name);
+        return fields ? pii_split(validated as never, fields) : validated;
+      };
+    }
+
+    // The read half. A state's disclosure predicate is an input to the
+    // reader, not a second gate layered over it. A \`__snapshot__\` carries
+    // folded STATE rather than event data, so its typing comes from the state
+    // schema — without that a restart from a snapshot loses every \`z.date()\`
+    // the state holds.
+    const readers = new Map<string, EventGate>();
+    for (const event_name of Object.keys(state.events)) {
+      const event = tags.get(event_name);
+      const reader =
+        event && make_event_reader(event, "redact", state.disclose ?? null);
+      if (reader) readers.set(event_name, reader);
+    }
+    const snap = make_event_reader(event_tags(state.state), "redact", null);
+    if (snap) readers.set(SNAP_EVENT, snap);
+    if (readers.size === 0) continue;
+    state.view = (event: { name: string }, actor: Actor) =>
+      (readers.get(event.name) ?? IDENTITY_GATE)(event as never, actor);
+  }
+
+  return { sensitive, query_readers, handler_readers };
 }
 
 // === event-sourcing.ts ===
@@ -13329,11 +13553,8 @@ export {
   _registry,
   type EventGate,
   IDENTITY_GATE,
+  is_pii,
   make_gate,
-  pii_fields,
-  pii_gate,
-  pii_split,
-  pii_strip,
   REDACTED,
   SHREDDED,
 } from "./sensitive.js";
@@ -17040,8 +17261,10 @@ export type SchemaRegister<TSchemaReg> = {
  * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
  *   event name. Derived once at build time. Returns the empty array for
  *   unknown events.
- * @property query_gate - Prebuilt per-event read gate for the actor-less read
- *   surfaces (\`query\` / \`query_array\`). Every event resolves to a gate: a
+ * @property query_gate - Prebuilt per-event reader for the actor-less read
+ *   surfaces (\`query\` / \`query_array\`). Types the payload from its declared
+ *   schema (a \`z.date()\` comes back a \`Date\` from the string JSON forced it
+ *   into, #1556) and applies the disclosure gate, in one call. Every event resolves to a gate: a
  *   non-sensitive event returns the shared identity gate (the event is handed
  *   back untouched, zero allocation); a sensitive event returns a redactor
  *   built once at build time that closes over the field list and applies
@@ -17173,7 +17396,6 @@ export const ZodEmpty = z.record(z.string(), z.never());
  *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
  *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
  *   irrecoverable).
- * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
  *   top-level field names marked via {@link sensitive}. A pure,
  *   read-only helper that inspects the out-of-band sensitive registry (a
  *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
@@ -17569,7 +17791,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -19716,35 +19938,17 @@ const ISO_8601 =
   /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
 
 /**
- * \`JSON.parse\` reviver that turns ISO-8601 strings back into \`Date\`s.
+ * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
  *
- * JSON has no date type, so a \`Date\` committed into an event's \`data\`,
- * \`meta\`, or \`pii\` serializes to a string. Reading it back as a string
- * would silently break reducers that call \`.getTime()\` — and would do so
- * on some adapters and not others. Every adapter therefore revives dates
- * on read, and this is the single definition they share, so the behavior
- * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ * **The framework no longer uses this.** Dates are resolved from the declared
+ * \`z.date()\` paths at build time and converted on read, so a field declared
+ * \`z.string()\` keeps its string even when the value looks like a timestamp
+ * ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)). Adapters
+ * return what they stored; typing is the orchestrator's job.
  *
- * Adapters must apply it to **every** JSON column they read, including
- * decrypted \`pii\` payloads — a value's runtime type must not depend on
- * which column it sits in or whether encryption is enabled
- * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
- * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
- * adapters need it to pass the store TCK's Date round-trip cases.
+ * Kept exported for host applications that parse Act JSON themselves and want
+ * the old shape-based behaviour. New code should let the schema decide.
  *
- * The trade-off is deliberate: a string that happens to look like a
- * timestamp is revived into a \`Date\`. That is the price of dates surviving
- * a JSON round trip at all, and it is applied uniformly.
- *
- * @param _key - Unused; present to satisfy the \`JSON.parse\` reviver shape.
- * @param value - The parsed value.
- * @returns A \`Date\` when \`value\` is an ISO-8601 string, otherwise \`value\`.
- *
- * @example
- * \`\`\`typescript
- * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
- * // → { at: Date }
- * \`\`\`
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
@@ -21249,10 +21453,9 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>(
-        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
-        query
-      );
+      await store().query<TEvents>((e) => {
+        events.push(this.registry.query_gate(e.name as string)(e));
+      }, query);
       return events;
     });
   }
@@ -31813,11 +32016,8 @@ export {
   _registry,
   type EventGate,
   IDENTITY_GATE,
+  is_pii,
   make_gate,
-  pii_fields,
-  pii_gate,
-  pii_split,
-  pii_strip,
   REDACTED,
   SHREDDED,
 } from "./sensitive.js";
@@ -34737,8 +34937,10 @@ export type SchemaRegister<TSchemaReg> = {
  * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
  *   event name. Derived once at build time. Returns the empty array for
  *   unknown events.
- * @property query_gate - Prebuilt per-event read gate for the actor-less read
- *   surfaces (\`query\` / \`query_array\`). Every event resolves to a gate: a
+ * @property query_gate - Prebuilt per-event reader for the actor-less read
+ *   surfaces (\`query\` / \`query_array\`). Types the payload from its declared
+ *   schema (a \`z.date()\` comes back a \`Date\` from the string JSON forced it
+ *   into, #1556) and applies the disclosure gate, in one call. Every event resolves to a gate: a
  *   non-sensitive event returns the shared identity gate (the event is handed
  *   back untouched, zero allocation); a sensitive event returns a redactor
  *   built once at build time that closes over the field list and applies
@@ -35039,7 +35241,6 @@ export const ZodEmpty = z.record(z.string(), z.never());
  *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
  *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
  *   irrecoverable).
- * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
  *   top-level field names marked via {@link sensitive}. A pure,
  *   read-only helper that inspects the out-of-band sensitive registry (a
  *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
@@ -35435,7 +35636,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -36441,35 +36642,17 @@ const ISO_8601 =
   /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
 
 /**
- * \`JSON.parse\` reviver that turns ISO-8601 strings back into \`Date\`s.
+ * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
  *
- * JSON has no date type, so a \`Date\` committed into an event's \`data\`,
- * \`meta\`, or \`pii\` serializes to a string. Reading it back as a string
- * would silently break reducers that call \`.getTime()\` — and would do so
- * on some adapters and not others. Every adapter therefore revives dates
- * on read, and this is the single definition they share, so the behavior
- * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ * **The framework no longer uses this.** Dates are resolved from the declared
+ * \`z.date()\` paths at build time and converted on read, so a field declared
+ * \`z.string()\` keeps its string even when the value looks like a timestamp
+ * ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)). Adapters
+ * return what they stored; typing is the orchestrator's job.
  *
- * Adapters must apply it to **every** JSON column they read, including
- * decrypted \`pii\` payloads — a value's runtime type must not depend on
- * which column it sits in or whether encryption is enabled
- * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
- * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
- * adapters need it to pass the store TCK's Date round-trip cases.
+ * Kept exported for host applications that parse Act JSON themselves and want
+ * the old shape-based behaviour. New code should let the schema decide.
  *
- * The trade-off is deliberate: a string that happens to look like a
- * timestamp is revived into a \`Date\`. That is the price of dates surviving
- * a JSON round trip at all, and it is applied uniformly.
- *
- * @param _key - Unused; present to satisfy the \`JSON.parse\` reviver shape.
- * @param value - The parsed value.
- * @returns A \`Date\` when \`value\` is an ISO-8601 string, otherwise \`value\`.
- *
- * @example
- * \`\`\`typescript
- * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
- * // → { at: Date }
- * \`\`\`
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
@@ -40314,8 +40497,10 @@ export type SchemaRegister<TSchemaReg> = {
  * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
  *   event name. Derived once at build time. Returns the empty array for
  *   unknown events.
- * @property query_gate - Prebuilt per-event read gate for the actor-less read
- *   surfaces (\`query\` / \`query_array\`). Every event resolves to a gate: a
+ * @property query_gate - Prebuilt per-event reader for the actor-less read
+ *   surfaces (\`query\` / \`query_array\`). Types the payload from its declared
+ *   schema (a \`z.date()\` comes back a \`Date\` from the string JSON forced it
+ *   into, #1556) and applies the disclosure gate, in one call. Every event resolves to a gate: a
  *   non-sensitive event returns the shared identity gate (the event is handed
  *   back untouched, zero allocation); a sensitive event returns a redactor
  *   built once at build time that closes over the field list and applies
@@ -40447,7 +40632,6 @@ export const ZodEmpty = z.record(z.string(), z.never());
  *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
  *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
  *   irrecoverable).
- * - \`pii_fields(schema)\` — introspect a Zod object schema and return the
  *   top-level field names marked via {@link sensitive}. A pure,
  *   read-only helper that inspects the out-of-band sensitive registry (a
  *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
@@ -40684,7 +40868,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -50760,7 +50944,6 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  dateReviver,
   log,
   SNAP_EVENT,
   StoreError,
@@ -50792,7 +50975,7 @@ const JSONB_OID = types.builtins.JSONB;
 const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
   getTypeParser: ((oid: number, format?: unknown) =>
     oid === JSONB_OID
-      ? (val: string) => JSON.parse(val, dateReviver)
+      ? (val: string) => JSON.parse(val)
       : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
           oid,
           format
@@ -51699,11 +51882,7 @@ export class PostgresStore implements Store {
       // the driver are mutable in-flight before they cross back to
       // the framework.
       if (this._resolve_pii_key && typeof row.pii === "string") {
-        const decrypted = await decrypt(
-          row.pii,
-          this._resolve_pii_key,
-          dateReviver
-        );
+        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
         (row as { pii: unknown }).pii = decrypted;
       }
       await Promise.resolve(callback(row));
@@ -51855,11 +52034,7 @@ export class PostgresStore implements Store {
         if (this._resolve_pii_key) {
           for (const row of rows) {
             if (typeof row.pii === "string") {
-              const decrypted = await decrypt(
-                row.pii,
-                this._resolve_pii_key,
-                dateReviver
-              );
+              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
               (row as { pii: unknown }).pii = decrypted;
             }
           }
@@ -53460,7 +53635,6 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  dateReviver,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -53586,7 +53760,7 @@ const resolve_url = (url: unknown): string => {
  * for cross-adapter payload parity (#1198).
  * @internal
  */
-const parse_json = (raw: string): unknown => JSON.parse(raw, dateReviver);
+const parse_json = (raw: string): unknown => JSON.parse(raw);
 
 /**
  * SQLite extended result code for a UNIQUE constraint violation
@@ -53775,15 +53949,14 @@ export class SqliteStore implements Store {
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
     // Revive dates like \`data\`/\`meta\` do (#1198/#1365). Base64 ciphertext
-    // never matches the ISO-8601 pattern, so the encrypted branch below is
-    // unaffected by the reviver here — it gets its own on the plaintext.
+    // Dates are resolved from the declared schema by the framework, so the
+    // store returns exactly what it stored — plaintext or decrypted alike.
     const parsed = parse_json(raw as string);
     if (this._resolve_pii_key && typeof parsed === "string") {
-      return (await decrypt(
-        parsed,
-        this._resolve_pii_key,
-        dateReviver
-      )) as Record<string, unknown>;
+      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
+        string,
+        unknown
+      >;
     }
     return parsed as Record<string, unknown>;
   }
@@ -62396,11 +62569,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
-      it("revives a Date in pii like data/meta (#1365/#1370)", async () => {
-        // A Date must come back a Date wherever it sits, and whether or
-        // not the adapter encrypts the pii column — encryption is an
-        // at-rest concern, not a payload-type change. The same Date in
-        // \`data\` is the in-row control.
+      it("round-trips a Date losslessly in pii, like data/meta (#1365/#1370/#1556)", async () => {
+        // A store persists bytes; it does not type them. JSON has no date
+        // type, so a \`Date\` is stored as its ISO form and read back as that
+        // same string — identically in \`data\` and \`pii\`, and whether or not
+        // the adapter encrypts the pii column, since encryption is an
+        // at-rest concern and not a payload-type change.
+        //
+        // Turning that string back into a \`Date\` is the framework's job,
+        // driven by the \`z.date()\` the schema declares (#1556): an adapter
+        // cannot know which strings were dates, and guessing from shape
+        // revived any ISO-looking string — including fields declared
+        // \`z.string()\`. The same Date in \`data\` is the in-row control.
         const s = \`pii-date-\${uid()}\`;
         const when = new Date("2024-03-01T10:20:30.000Z");
         await store.commit<CounterEvents>(
@@ -62425,9 +62605,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen).toHaveLength(1);
         const at = (seen[0].data as unknown as { at: unknown }).at;
         const born = (seen[0].pii as { born: unknown }).born;
-        expect(at).toBeInstanceOf(Date);
-        expect(born).toBeInstanceOf(Date);
-        expect((born as Date).toISOString()).toBe(when.toISOString());
+        // The contract is LOSSLESS RECOVERY, not a particular runtime type.
+        // A store that serializes (Postgres, SQLite) hands back the ISO form;
+        // one that holds references (InMemory) hands back the \`Date\` itself.
+        // Both are correct at this layer — an adapter cannot know which
+        // strings were dates, so typing them is the framework's job, driven
+        // by the declared \`z.date()\` (#1556). What every adapter owes is that
+        // no precision is lost, identically in \`data\` and \`pii\`.
+        const recovered = (v: unknown) =>
+          v instanceof Date ? v.getTime() : new Date(v as string).getTime();
+        expect(recovered(at)).toBe(when.getTime());
+        expect(recovered(born)).toBe(when.getTime());
+        // ...and that both columns are treated the same way, whichever it is.
+        expect(typeof at).toBe(typeof born);
       });
 
       it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {

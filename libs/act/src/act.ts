@@ -1443,10 +1443,9 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>(
-        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
-        query
-      );
+      await store().query<TEvents>((e) => {
+        events.push(this.registry.query_gate(e.name as string)(e));
+      }, query);
       return events;
     });
   }

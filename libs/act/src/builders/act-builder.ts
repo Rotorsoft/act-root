@@ -13,11 +13,7 @@ import {
   FOLD_RESET,
   IDENTITY_GATE,
   make_fold_handler,
-  make_gate,
   type PatchFn,
-  pii_fields,
-  pii_split,
-  pii_strip,
   type ResettableBatchHandler,
   resolveActConfig,
   resolveAutocloseConfig,
@@ -25,7 +21,7 @@ import {
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
-import { DEFAULT_LANE, log } from "../ports.js";
+import { type DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
@@ -39,6 +35,7 @@ import type {
 } from "../types/index.js";
 import type { BuilderBase } from "./builder-base.js";
 import { reaction_on, register_lane } from "./builder-utils.js";
+import { build_events } from "./event-builder.js";
 import {
   merge_event_register,
   merge_projection,
@@ -70,34 +67,6 @@ function register_batch_handler(
     );
   }
   batch_handlers.set(proj.target, proj.batchHandler);
-}
-
-/**
- * Runtime backstop for slice-declared lane references — rejects
- * static `.to({lane})` entries that aren't in the declared set.
- * Inline reactions are caught at compile time; this only fires for
- * slices built against older type definitions.
- */
-function validate_lane_references(
-  registry: Registry<any, any, any>,
-  lanes: ReadonlyArray<LaneConfig>
-): void {
-  const declared = new Set<string>([DEFAULT_LANE, ...lanes.map((l) => l.name)]);
-  for (const [event_name, def] of Object.entries(registry.events)) {
-    const entry = def as { reactions: Map<string, Reaction<any, any>> };
-    for (const [handlerName, reaction] of entry.reactions) {
-      const resolver = reaction.resolver;
-      if (typeof resolver === "function") continue;
-      const lane = (resolver as { lane?: string }).lane;
-      if (lane && !declared.has(lane)) {
-        throw new Error(
-          `Reaction "${handlerName}" on "${event_name}" targets undeclared lane "${lane}". ` +
-            `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
-            `Add \`.withLane({ name: "${lane}", ... })\` to act() or correct the .to() declaration.`
-        );
-      }
-    }
-  }
 }
 
 /**
@@ -327,7 +296,14 @@ export function act<
   // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
+  // One pass over each event's schema, and the single source for everything
+  // derived from it: the sensitive-field list the write path splits on, and
+  // the per-surface readers (query, per-state view, handler strip) composed
+  // below. Nothing walks a schema twice.
   const _sf = new Map<string, readonly string[]>();
+  // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
+  // when the event needs neither.
+  const _hr = new Map<string, EventGate>();
   // Prebuilt default-deny read gates, one per sensitive event. Non-sensitive
   // events are absent → `query_gate` falls back to the shared IDENTITY_GATE.
   const _qg = new Map<string, EventGate>();
@@ -389,18 +365,17 @@ export function act<
   let _built = false;
 
   /**
-   * Wraps a batch handler so the batch dispatcher stays PII-unaware —
-   * sensitive keys are stripped from every event before the handler
-   * sees it. `_sf` is read lazily at dispatch time, by when the
-   * events pass has populated it.
+   * Wraps a batch handler so it receives events in handler form — payload
+   * typed from the declared schema, sensitive keys removed — the same reader
+   * `event-builder` gives per-event handlers. Resolved lazily at dispatch, by
+   * when the events pass has populated it.
    */
-  const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
+  const read_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
     const wrapped = async (events: readonly any[], stream: string) => {
-      const stripped = events.map((e) => {
-        const f = _sf.get(e.name as string);
-        return f ? pii_strip(e, f) : e;
-      });
-      return original(stripped as never, stream);
+      // The same prebuilt reader the per-event handlers get: typed payload,
+      // sensitive keys removed. Absent → the event passes through untouched.
+      const read = events.map((e) => _hr.get(e.name as string)?.(e) ?? e);
+      return original(read as never, stream);
     };
     // Carry the fold's cache-reset handle through the wrapper (#1466). The
     // orchestrator only ever sees what this map holds, so a handle left on
@@ -434,14 +409,14 @@ export function act<
     for (const spec of fold_specs) {
       handlers.set(
         spec.target,
-        pii_wrap(
+        read_wrap(
           make_fold_handler(
             spec.merged,
             spec.flush,
             spec.config,
             patch_fn,
             // Head loads strip sensitive keys like the warm path (#1320).
-            (event_name) => _sf.get(event_name) ?? []
+            registry.sensitive_fields
           )
         ) as never
       );
@@ -671,126 +646,26 @@ export function act<
           //
           // A projection's OWN reactions legitimately target it, so they are
           // excluded by object identity — the same test `merge_projection`
-          // uses to tell a re-registration from a collision.
-          for (const register of Object.values(registry.events)) {
-            for (const reaction of register.reactions.values()) {
-              if (typeof reaction.resolver === "function") continue;
-              const target = reaction.resolver.target;
-              const claimed =
-                batch_handlers.has(target) ||
-                fold_specs.some((f) => f.target === target);
-              if (claimed && !projection_reactions.has(reaction))
-                throw new Error(
-                  `Reaction on target "${target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run`
-                );
-            }
-          }
+          // One walk over the registered events: validate every static
+          // reaction, resolve each schema once, and compose the per-surface
+          // readers from it. See `event-builder.ts`.
+          const built = build_events(registry, states, lanes, {
+            batch_handlers,
+            fold_targets: new Set(fold_specs.map((f) => f.target)),
+            projection_reactions,
+          });
+          for (const [name, fields] of built.sensitive) _sf.set(name, fields);
+          for (const [name, gate] of built.query_readers) _qg.set(name, gate);
+          for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
-          validate_lane_references(registry, lanes);
-          // Precompute the sensitive-field lookup. Iterates each registered
-          // event's Zod schema exactly once at build; later commit/load paths
-          // hit the cache in O(1). Events with no sensitive fields don't get
-          // Build the sensitive-data wiring in three passes (#855):
-          //
-          // - events pass: precompute the sensitive-field lookup `_sf` from
-          //   each event's Zod schema; while we're already walking events,
-          //   wrap their registered reaction handlers so `build_handle`
-          //   stays PII-unaware.
-          // - states pass: snapshot the disclosure predicates into `_dp`,
-          //   reject `.snap()` on sensitive-bearing states, and build the
-          //   per-state step delegates the orchestrator calls (`me.view`,
-          //   `me.message`, wrapped `me.patch[name]`).
-          // - batch_handlers pass: wrap each batch handler so the batch
-          //   dispatcher stays PII-unaware.
-          //
-          // The orchestrator calls three step delegates per event:
-          //   - `me.message(validated)` — produces the commit-bound shape
-          //     (`{name, data, pii?}`) from a validated emit.
-          //   - `me.patch[event_name](event, state)` — the reducer that
-          //     derives the next state from the committed event.
-          //   - `me.view(event, actor)` — produces the caller-visible form
-          //     (snapshot.event).
-          //
-          // For PII-free states (the common case) `view` and `message` are
-          // bound to identity in `state-builder.ts` and `patch` is the
-          // user-declared reducer; the orchestrator's hot path is identical
-          // to the pre-#855 code at runtime. For PII-aware states (≥1
-          // `sensitive(...)` event), each delegate is rebound to fold the
-          // gate / split / merge into the step itself.
-          for (const [event_name, reg] of Object.entries(
-            registry.events as Record<
-              string,
-              {
-                schema: import("zod").ZodType;
-                reactions: Map<string, { handler: any }>;
-              }
-            >
-          )) {
-            const fields = pii_fields(reg.schema);
-            if (fields.length === 0) continue;
-            _sf.set(event_name, fields);
-            // Prebuild the default-deny read gate once, capturing `fields`.
-            // The actor-less read surfaces (`query`/`query_array`) resolve it
-            // by name; non-sensitive events never reach here, so they fall
-            // back to the shared IDENTITY_GATE — zero per-event cost.
-            _qg.set(event_name, make_gate(fields, null));
-            // Strip PII from the event payload before reactions see it.
-            for (const [name, reaction] of reg.reactions) {
-              const inner = reaction.handler;
-              const wrapped = (event: any, stream: string, app: any) =>
-                inner(pii_strip(event, fields), stream, app);
-              // Preserve handler.name — build_handle asserts on named functions.
-              Object.defineProperty(wrapped, "name", { value: inner.name });
-              reaction.handler = wrapped;
-              reg.reactions.set(name, reaction as never);
-            }
-          }
+
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
             if (state.autoclose) _ac.set(state.name, state.autoclose);
             if (state.archive) _aa.set(state.name, state.archive);
-            const fields_by_event = new Map<string, readonly string[]>();
-            for (const event_name of Object.keys(state.events)) {
-              const fields = _sf.get(event_name);
-              if (fields) fields_by_event.set(event_name, fields);
-            }
-            if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
-            // Snapshots write derived state into `__snapshot__.data`, which
-            // `forget_pii` cannot reach. Reject the combination at build so
-            // the misconfiguration surfaces in dev/CI, not as a silent leak
-            // past the GDPR boundary months later.
-            if (state.snap) {
-              const offending = [...fields_by_event.keys()];
-              throw new Error(
-                `State "${state.name}" cannot snapshot — events {${offending.join(", ")}} carry sensitive fields. ` +
-                  "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
-                  "Remove .snap() or remove sensitive(...) markers."
-              );
-            }
-            const disclose = state.disclose ?? null;
-            state.pii_aware = true;
-            // Prebuild one actor-aware read gate per sensitive event, capturing
-            // this state's disclosure predicate — the same `make_gate`
-            // primitive the query path uses (predicate-less there). A pii-aware
-            // state can still declare non-sensitive events; those aren't in
-            // `view_gates`, so `state.view` falls back to the shared
-            // IDENTITY_GATE — no per-event field lookup, no `?? []` allocation.
-            const view_gates = new Map<string, EventGate>();
-            for (const [event_name, fields] of fields_by_event) {
-              view_gates.set(event_name, make_gate(fields, disclose));
-            }
-            state.view = (event, actor) =>
-              (view_gates.get(event.name as string) ?? IDENTITY_GATE)(
-                event,
-                actor
-              );
-            state.message = (validated) => {
-              const fields = fields_by_event.get(validated.name as string);
-              return fields ? pii_split(validated, fields) : validated;
-            };
           }
           for (const [target, original] of batch_handlers) {
-            batch_handlers.set(target, pii_wrap(original) as never);
+            batch_handlers.set(target, read_wrap(original) as never);
           }
           // Synthesize the autoclose reactions last, once the registry is
           // fully merged — their dynamic resolvers must be present before

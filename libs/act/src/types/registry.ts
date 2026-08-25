@@ -67,8 +67,10 @@ export type SchemaRegister<TSchemaReg> = {
  * @property sensitive_fields - Lookup of `sensitive(...)`-marked fields per
  *   event name. Derived once at build time. Returns the empty array for
  *   unknown events.
- * @property query_gate - Prebuilt per-event read gate for the actor-less read
- *   surfaces (`query` / `query_array`). Every event resolves to a gate: a
+ * @property query_gate - Prebuilt per-event reader for the actor-less read
+ *   surfaces (`query` / `query_array`). Types the payload from its declared
+ *   schema (a `z.date()` comes back a `Date` from the string JSON forced it
+ *   into, #1556) and applies the disclosure gate, in one call. Every event resolves to a gate: a
  *   non-sensitive event returns the shared identity gate (the event is handed
  *   back untouched, zero allocation); a sensitive event returns a redactor
  *   built once at build time that closes over the field list and applies

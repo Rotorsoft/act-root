@@ -25,7 +25,6 @@ export const ZodEmpty = z.record(z.string(), z.never());
  *   (`.discloses(predicate)` returned `false` or none was declared —
  *   recoverable) or the underlying PII was wiped (`Store.forget_pii` —
  *   irrecoverable).
- * - `pii_fields(schema)` — introspect a Zod object schema and return the
  *   top-level field names marked via {@link sensitive}. A pure,
  *   read-only helper that inspects the out-of-band sensitive registry (a
  *   process-global `WeakMap`) `sensitive()` populates, otherwise

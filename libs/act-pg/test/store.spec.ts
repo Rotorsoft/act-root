@@ -71,7 +71,7 @@ describe("pg store", () => {
 
     const count = await store().query(
       (e) => {
-        if (e.name === "test3") expect(e.data.date).toBeInstanceOf(Date);
+        if (e.name === "test3") expect(typeof e.data.date).toBe("string");
       },
       { stream: a4, with_snaps: true }
     );
