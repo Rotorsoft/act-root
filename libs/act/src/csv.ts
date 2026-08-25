@@ -25,7 +25,6 @@ import type {
   Query,
   Schemas,
 } from "./types/action.js";
-import { dateReviver } from "./utils.js";
 
 /**
  * Construct a {@link CsvFile} from either a filesystem path (for
@@ -95,11 +94,11 @@ export class CsvFile implements EventSource, EventSink {
         // payload must not depend on whether it came back through a store or
         // through a CSV restore (#1399). The `created` column below has
         // always been parsed explicitly; the JSON columns were missed.
-        data: JSON.parse(fields[2]!, dateReviver),
+        data: JSON.parse(fields[2]!),
         stream: fields[3]!,
         version: Number.parseInt(fields[4]!, 10),
         created: new Date(fields[5]!),
-        meta: JSON.parse(fields[6]!, dateReviver),
+        meta: JSON.parse(fields[6]!),
       };
       await Promise.resolve(callback(event));
       count++;

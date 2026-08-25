@@ -23,7 +23,6 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  dateReviver,
   log,
   SNAP_EVENT,
   StoreError,
@@ -55,7 +54,7 @@ const JSONB_OID = types.builtins.JSONB;
 const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
   getTypeParser: ((oid: number, format?: unknown) =>
     oid === JSONB_OID
-      ? (val: string) => JSON.parse(val, dateReviver)
+      ? (val: string) => JSON.parse(val)
       : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
           oid,
           format
@@ -962,11 +961,7 @@ export class PostgresStore implements Store {
       // the driver are mutable in-flight before they cross back to
       // the framework.
       if (this._resolve_pii_key && typeof row.pii === "string") {
-        const decrypted = await decrypt(
-          row.pii,
-          this._resolve_pii_key,
-          dateReviver
-        );
+        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
         (row as { pii: unknown }).pii = decrypted;
       }
       await Promise.resolve(callback(row));
@@ -1118,11 +1113,7 @@ export class PostgresStore implements Store {
         if (this._resolve_pii_key) {
           for (const row of rows) {
             if (typeof row.pii === "string") {
-              const decrypted = await decrypt(
-                row.pii,
-                this._resolve_pii_key,
-                dateReviver
-              );
+              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
               (row as { pii: unknown }).pii = decrypted;
             }
           }

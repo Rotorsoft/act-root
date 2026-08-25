@@ -1403,6 +1403,9 @@ export class Act<
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
       const count = await store().query<TEvents>((e) => {
+        // The schema, not the string's shape, says which fields are dates
+        // (#1556). Revive before the gate, which copies.
+        this.registry.revive_dates(e.name as string)?.(e.data);
         const gated = this.registry.query_gate(e.name as string)(e);
         if (!first) first = gated;
         last = gated;
@@ -1443,10 +1446,10 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>(
-        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
-        query
-      );
+      await store().query<TEvents>((e) => {
+        this.registry.revive_dates(e.name as string)?.(e.data);
+        events.push(this.registry.query_gate(e.name as string)(e));
+      }, query);
       return events;
     });
   }

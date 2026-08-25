@@ -14,8 +14,10 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
+  event_tags,
   FOLD_RESET,
   IDENTITY_GATE,
+  make_date_reviver,
   make_fold_handler,
   make_gate,
   type PatchFn,
@@ -29,7 +31,7 @@ import {
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
-import { DEFAULT_LANE, log } from "../ports.js";
+import { DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
@@ -332,6 +334,10 @@ export function act<
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
+  // Prebuilt date revivers, one per event whose schema declares a \`z.date()\`.
+  // Events without dates are absent → \`revive_dates\` returns undefined and the
+  // read path skips the step entirely.
+  const _rd = new Map<string, (data: Schema) => void>();
   // Prebuilt default-deny read gates, one per sensitive event. Non-sensitive
   // events are absent → \`query_gate\` falls back to the shared IDENTITY_GATE.
   const _qg = new Map<string, EventGate>();
@@ -347,6 +353,7 @@ export function act<
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
+    revive_dates: (event_name) => _rd.get(event_name),
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
@@ -401,6 +408,7 @@ export function act<
   const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
     const wrapped = async (events: readonly any[], stream: string) => {
       const stripped = events.map((e) => {
+        _rd.get(e.name as string)?.(e.data);
         const f = _sf.get(e.name as string);
         return f ? pii_strip(e, f) : e;
       });
@@ -730,7 +738,31 @@ export function act<
               }
             >
           )) {
-            const fields = pii_fields(reg.schema);
+            // One pass over the declared schema resolves both facts: which
+            // fields are sensitive, and which are dates. Walking twice for two
+            // answers would be the same work done twice.
+            const { sensitive: fields, dates } = event_tags(reg.schema);
+
+            const revive = make_date_reviver(dates);
+            if (revive) {
+              _rd.set(event_name, revive);
+              // Reactions read the payload directly, so they need the same
+              // schema-driven typing the fold and the query surfaces get.
+              // Independent of sensitivity — most date-bearing events carry
+              // no PII at all.
+              for (const [name, reaction] of reg.reactions) {
+                const inner = reaction.handler;
+                const typed = (event: any, stream: string, app: any) => {
+                  revive(event.data);
+                  return inner(event, stream, app);
+                };
+                // Preserve handler.name — build_handle asserts on named functions.
+                Object.defineProperty(typed, "name", { value: inner.name });
+                reaction.handler = typed;
+                reg.reactions.set(name, reaction as never);
+              }
+            }
+
             if (fields.length === 0) continue;
             _sf.set(event_name, fields);
             // Prebuild the default-deny read gate once, capturing \`fields\`.
@@ -791,6 +823,32 @@ export function act<
             state.message = (validated) => {
               const fields = fields_by_event.get(validated.name as string);
               return fields ? pii_split(validated, fields) : validated;
+            };
+          }
+          // Date revival composes onto whatever \`view\` already is — the PII
+          // gate for a sensitive state, identity otherwise. Every state gets
+          // it, because dates and sensitivity are unrelated declarations.
+          //
+          // A \`__snapshot__\` carries folded STATE, not event data, so its
+          // dates come from the state schema. Without that a restart from a
+          // snapshot would lose every \`z.date()\` the state holds.
+          for (const state of states.values()) {
+            const revivers = new Map<string, (data: Schema) => void>();
+            for (const event_name of Object.keys(state.events)) {
+              const revive = _rd.get(event_name);
+              if (revive) revivers.set(event_name, revive);
+            }
+            const snap_revive = make_date_reviver(
+              event_tags(state.state as never).dates
+            );
+            if (snap_revive) revivers.set(SNAP_EVENT, snap_revive);
+            if (revivers.size === 0) continue;
+            const inner = state.view;
+            state.view = (event, actor) => {
+              // Revive before the gate: the gate copies, so converting after
+              // it would leave the folded value a string.
+              revivers.get(event.name as string)?.(event.data as Schema);
+              return inner(event, actor);
             };
           }
           for (const [target, original] of batch_handlers) {
@@ -2238,6 +2296,9 @@ export class Act<
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
       const count = await store().query<TEvents>((e) => {
+        // The schema, not the string's shape, says which fields are dates
+        // (#1556). Revive before the gate, which copies.
+        this.registry.revive_dates(e.name as string)?.(e.data);
         const gated = this.registry.query_gate(e.name as string)(e);
         if (!first) first = gated;
         last = gated;
@@ -2278,10 +2339,10 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>(
-        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
-        query
-      );
+      await store().query<TEvents>((e) => {
+        this.registry.revive_dates(e.name as string)?.(e.data);
+        events.push(this.registry.query_gate(e.name as string)(e));
+      }, query);
       return events;
     });
   }
@@ -8865,7 +8926,6 @@ import type {
   Query,
   Schemas,
 } from "./types/action.js";
-import { dateReviver } from "./utils.js";
 
 /**
  * Construct a {@link CsvFile} from either a filesystem path (for
@@ -8935,11 +8995,11 @@ export class CsvFile implements EventSource, EventSink {
         // payload must not depend on whether it came back through a store or
         // through a CSV restore (#1399). The \`created\` column below has
         // always been parsed explicitly; the JSON columns were missed.
-        data: JSON.parse(fields[2]!, dateReviver),
+        data: JSON.parse(fields[2]!),
         stream: fields[3]!,
         version: Number.parseInt(fields[4]!, 10),
         created: new Date(fields[5]!),
-        meta: JSON.parse(fields[6]!, dateReviver),
+        meta: JSON.parse(fields[6]!),
       };
       await Promise.resolve(callback(event));
       count++;
@@ -11632,6 +11692,151 @@ export async function action<
   }
 }
 
+// === event-tags.ts ===
+/**
+ * @module event-tags
+ * @category Internal
+ *
+ * One pass over an event's declared schema, yielding everything the framework
+ * needs to know about that event's shape.
+ *
+ * Two facts come out of the same traversal:
+ *
+ * - **sensitive fields** — the keys marked with \`sensitive(...)\`, which the
+ *   write path splits into the \`pii\` sidecar and the read gates redact.
+ * - **date paths** — the keys declared \`z.date()\`. JSON has no date type, so a
+ *   \`Date\` leaves as a string and something must turn it back. An adapter can
+ *   only guess from string shape, which revives any ISO-8601-looking string
+ *   including one a schema declared \`z.string()\`. The schema is the authority
+ *   and the framework holds it, so the paths are resolved here and the read
+ *   path converts exactly those.
+ *
+ * Both are derived once at \`act().build()\`. Walking the shape twice for two
+ * answers would be the same work done twice.
+ *
+ * Only \`z.date()\` needs reviving. Framework metadata carries no dates —
+ * \`EventMetaSchema\` is a correlation string plus causation names and ids — and
+ * \`created\` is a real column each adapter parses directly.
+ *
+ * @internal
+ */
+
+import type { z } from "zod";
+import type { Schema } from "../types/index.js";
+import { is_pii } from "./sensitive.js";
+
+/** A \`Date\` path inside an event payload, as the segments to walk. */
+export type DatePath = readonly string[];
+
+/** What one pass over an event schema resolves. @internal */
+export type EventTags = {
+  /** Keys marked \`sensitive(...)\`, top level (and across union variants). */
+  readonly sensitive: readonly string[];
+  /** Paths declared \`z.date()\`. */
+  readonly dates: readonly DatePath[];
+};
+
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
+  (schema as { def?: Record<string, unknown> }).def;
+
+/** Unwrap the wrappers that don't change the declared type. */
+const unwrap = (schema: unknown): unknown => {
+  let s = schema;
+  for (;;) {
+    const def = def_of(s);
+    const t = def?.type;
+    if (
+      t === "optional" ||
+      t === "nullable" ||
+      t === "default" ||
+      t === "readonly"
+    )
+      s = def?.innerType;
+    else return s;
+  }
+};
+
+/**
+ * Resolve an event's schema in a single pass.
+ *
+ * Sensitive markers are read at the top level only — the documented carve-out
+ * (\`sensitive.ts\`), since the write path splits whole top-level keys. Date
+ * paths descend nested objects, because a \`Date\` is reconstructed in place
+ * wherever it sits. Arrays and records are deliberately not descended: their
+ * element paths are not statically enumerable, so a date inside one keeps the
+ * value the adapter produced rather than paying a per-element walk on every
+ * read.
+ *
+ * A union event has no top-level shape. Its variants are walked and unioned —
+ * a key sensitive in any variant must be split, because the stored payload
+ * could be that variant (#1417), and the same reasoning applies to dates.
+ *
+ * @internal
+ */
+export function event_tags(schema: z.ZodType): EventTags {
+  const sensitive: string[] = [];
+  const dates: DatePath[] = [];
+
+  const walk = (node: unknown, prefix: DatePath, top: boolean): void => {
+    const inner = unwrap(node);
+    const def = def_of(inner);
+    if (!def) return;
+
+    if (def.type === "date") {
+      dates.push(prefix);
+      return;
+    }
+
+    const shape = def.shape as Record<string, z.ZodType> | undefined;
+    if (shape && typeof shape === "object") {
+      for (const key of Object.keys(shape)) {
+        // Sensitivity is a top-level property; \`is_pii\` does its own
+        // unwrapping, so it reads the declared field, not the unwrapped node.
+        if (top && is_pii(shape[key])) sensitive.push(key);
+        walk(shape[key], [...prefix, key], false);
+      }
+      return;
+    }
+
+    const options = (inner as { options?: unknown }).options;
+    if (Array.isArray(options))
+      for (const option of options) walk(option, prefix, top);
+  };
+
+  walk(schema, [], true);
+  return { sensitive: [...new Set(sensitive)], dates };
+}
+
+/**
+ * Build the reviver for one event's date paths, or \`undefined\` when it has
+ * none — the overwhelming majority, so the read path skips the step and pays
+ * nothing. Mirrors how \`registry.query_gate\` treats a non-sensitive event.
+ *
+ * The returned function mutates the payload it is handed. Callers own freshly
+ * parsed store rows, never a cached object.
+ *
+ * @internal
+ */
+export function make_date_reviver(
+  dates: readonly DatePath[]
+): ((data: Schema) => void) | undefined {
+  if (dates.length === 0) return undefined;
+  return (data: Schema) => {
+    for (const path of dates) {
+      let target = data as Record<string, unknown>;
+      for (let i = 0; i < path.length - 1 && target; i++)
+        target = target[path[i]] as Record<string, unknown>;
+      const key = path[path.length - 1];
+      // Only a string needs converting: a \`Date\` already survived (InMemory
+      // stores by reference), and null/undefined are the schema's business.
+      if (target && typeof target[key] === "string")
+        target[key] = new Date(target[key] as string);
+    }
+  };
+}
+
 // === event-versions.ts ===
 /**
  * @module event-versions
@@ -13316,6 +13521,12 @@ export {
 } from "./drain-cycle.js";
 export type { EsOps, PatchFn } from "./event-sourcing.js";
 export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
+export {
+  type DatePath,
+  type EventTags,
+  event_tags,
+  make_date_reviver,
+} from "./event-tags.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -17049,6 +17260,12 @@ export type SchemaRegister<TSchemaReg> = {
  *   forgotten) while dropping the isolated \`pii\` sidecar. The gate is prebuilt
  *   so the read path never recomputes the sensitive-field lookup per event —
  *   only the sensitive events pay any cost.
+ * @property revive_dates - Prebuilt per-event date revival, derived once at
+ *   build time from the declared \`z.date()\` paths. Returns \`undefined\` for an
+ *   event whose schema declares no dates — the overwhelming majority — so the
+ *   read path skips the field entirely and pays nothing. JSON has no date
+ *   type, and an adapter cannot know which strings were dates; the schema
+ *   does, so it decides.
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
@@ -17075,6 +17292,9 @@ export type Registry<
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (event_name: string) => readonly string[];
+  readonly revive_dates: (
+    event_name: string
+  ) => ((data: Schema) => void) | undefined;
   readonly query_gate: (
     event_name: string
   ) => (
@@ -17569,7 +17789,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -19716,35 +19936,17 @@ const ISO_8601 =
   /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
 
 /**
- * \`JSON.parse\` reviver that turns ISO-8601 strings back into \`Date\`s.
+ * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
  *
- * JSON has no date type, so a \`Date\` committed into an event's \`data\`,
- * \`meta\`, or \`pii\` serializes to a string. Reading it back as a string
- * would silently break reducers that call \`.getTime()\` — and would do so
- * on some adapters and not others. Every adapter therefore revives dates
- * on read, and this is the single definition they share, so the behavior
- * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ * **The framework no longer uses this.** Dates are resolved from the declared
+ * \`z.date()\` paths at build time and converted on read, so a field declared
+ * \`z.string()\` keeps its string even when the value looks like a timestamp
+ * ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)). Adapters
+ * return what they stored; typing is the orchestrator's job.
  *
- * Adapters must apply it to **every** JSON column they read, including
- * decrypted \`pii\` payloads — a value's runtime type must not depend on
- * which column it sits in or whether encryption is enabled
- * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
- * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
- * adapters need it to pass the store TCK's Date round-trip cases.
+ * Kept exported for host applications that parse Act JSON themselves and want
+ * the old shape-based behaviour. New code should let the schema decide.
  *
- * The trade-off is deliberate: a string that happens to look like a
- * timestamp is revived into a \`Date\`. That is the price of dates surviving
- * a JSON round trip at all, and it is applied uniformly.
- *
- * @param _key - Unused; present to satisfy the \`JSON.parse\` reviver shape.
- * @param value - The parsed value.
- * @returns A \`Date\` when \`value\` is an ISO-8601 string, otherwise \`value\`.
- *
- * @example
- * \`\`\`typescript
- * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
- * // → { at: Date }
- * \`\`\`
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
@@ -21209,6 +21411,9 @@ export class Act<
       let first: Committed<TEvents, keyof TEvents> | undefined;
       let last: Committed<TEvents, keyof TEvents> | undefined;
       const count = await store().query<TEvents>((e) => {
+        // The schema, not the string's shape, says which fields are dates
+        // (#1556). Revive before the gate, which copies.
+        this.registry.revive_dates(e.name as string)?.(e.data);
         const gated = this.registry.query_gate(e.name as string)(e);
         if (!first) first = gated;
         last = gated;
@@ -21249,10 +21454,10 @@ export class Act<
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     return this._scoped(async () => {
       const events: Committed<TEvents, keyof TEvents>[] = [];
-      await store().query<TEvents>(
-        (e) => events.push(this.registry.query_gate(e.name as string)(e)),
-        query
-      );
+      await store().query<TEvents>((e) => {
+        this.registry.revive_dates(e.name as string)?.(e.data);
+        events.push(this.registry.query_gate(e.name as string)(e));
+      }, query);
       return events;
     });
   }
@@ -30134,6 +30339,151 @@ export async function action<
   }
 }
 
+// === event-tags.ts ===
+/**
+ * @module event-tags
+ * @category Internal
+ *
+ * One pass over an event's declared schema, yielding everything the framework
+ * needs to know about that event's shape.
+ *
+ * Two facts come out of the same traversal:
+ *
+ * - **sensitive fields** — the keys marked with \`sensitive(...)\`, which the
+ *   write path splits into the \`pii\` sidecar and the read gates redact.
+ * - **date paths** — the keys declared \`z.date()\`. JSON has no date type, so a
+ *   \`Date\` leaves as a string and something must turn it back. An adapter can
+ *   only guess from string shape, which revives any ISO-8601-looking string
+ *   including one a schema declared \`z.string()\`. The schema is the authority
+ *   and the framework holds it, so the paths are resolved here and the read
+ *   path converts exactly those.
+ *
+ * Both are derived once at \`act().build()\`. Walking the shape twice for two
+ * answers would be the same work done twice.
+ *
+ * Only \`z.date()\` needs reviving. Framework metadata carries no dates —
+ * \`EventMetaSchema\` is a correlation string plus causation names and ids — and
+ * \`created\` is a real column each adapter parses directly.
+ *
+ * @internal
+ */
+
+import type { z } from "zod";
+import type { Schema } from "../types/index.js";
+import { is_pii } from "./sensitive.js";
+
+/** A \`Date\` path inside an event payload, as the segments to walk. */
+export type DatePath = readonly string[];
+
+/** What one pass over an event schema resolves. @internal */
+export type EventTags = {
+  /** Keys marked \`sensitive(...)\`, top level (and across union variants). */
+  readonly sensitive: readonly string[];
+  /** Paths declared \`z.date()\`. */
+  readonly dates: readonly DatePath[];
+};
+
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
+  (schema as { def?: Record<string, unknown> }).def;
+
+/** Unwrap the wrappers that don't change the declared type. */
+const unwrap = (schema: unknown): unknown => {
+  let s = schema;
+  for (;;) {
+    const def = def_of(s);
+    const t = def?.type;
+    if (
+      t === "optional" ||
+      t === "nullable" ||
+      t === "default" ||
+      t === "readonly"
+    )
+      s = def?.innerType;
+    else return s;
+  }
+};
+
+/**
+ * Resolve an event's schema in a single pass.
+ *
+ * Sensitive markers are read at the top level only — the documented carve-out
+ * (\`sensitive.ts\`), since the write path splits whole top-level keys. Date
+ * paths descend nested objects, because a \`Date\` is reconstructed in place
+ * wherever it sits. Arrays and records are deliberately not descended: their
+ * element paths are not statically enumerable, so a date inside one keeps the
+ * value the adapter produced rather than paying a per-element walk on every
+ * read.
+ *
+ * A union event has no top-level shape. Its variants are walked and unioned —
+ * a key sensitive in any variant must be split, because the stored payload
+ * could be that variant (#1417), and the same reasoning applies to dates.
+ *
+ * @internal
+ */
+export function event_tags(schema: z.ZodType): EventTags {
+  const sensitive: string[] = [];
+  const dates: DatePath[] = [];
+
+  const walk = (node: unknown, prefix: DatePath, top: boolean): void => {
+    const inner = unwrap(node);
+    const def = def_of(inner);
+    if (!def) return;
+
+    if (def.type === "date") {
+      dates.push(prefix);
+      return;
+    }
+
+    const shape = def.shape as Record<string, z.ZodType> | undefined;
+    if (shape && typeof shape === "object") {
+      for (const key of Object.keys(shape)) {
+        // Sensitivity is a top-level property; \`is_pii\` does its own
+        // unwrapping, so it reads the declared field, not the unwrapped node.
+        if (top && is_pii(shape[key])) sensitive.push(key);
+        walk(shape[key], [...prefix, key], false);
+      }
+      return;
+    }
+
+    const options = (inner as { options?: unknown }).options;
+    if (Array.isArray(options))
+      for (const option of options) walk(option, prefix, top);
+  };
+
+  walk(schema, [], true);
+  return { sensitive: [...new Set(sensitive)], dates };
+}
+
+/**
+ * Build the reviver for one event's date paths, or \`undefined\` when it has
+ * none — the overwhelming majority, so the read path skips the step and pays
+ * nothing. Mirrors how \`registry.query_gate\` treats a non-sensitive event.
+ *
+ * The returned function mutates the payload it is handed. Callers own freshly
+ * parsed store rows, never a cached object.
+ *
+ * @internal
+ */
+export function make_date_reviver(
+  dates: readonly DatePath[]
+): ((data: Schema) => void) | undefined {
+  if (dates.length === 0) return undefined;
+  return (data: Schema) => {
+    for (const path of dates) {
+      let target = data as Record<string, unknown>;
+      for (let i = 0; i < path.length - 1 && target; i++)
+        target = target[path[i]] as Record<string, unknown>;
+      const key = path[path.length - 1];
+      // Only a string needs converting: a \`Date\` already survived (InMemory
+      // stores by reference), and null/undefined are the schema's business.
+      if (target && typeof target[key] === "string")
+        target[key] = new Date(target[key] as string);
+    }
+  };
+}
+
 // === event-versions.ts ===
 /**
  * @module event-versions
@@ -31800,6 +32150,12 @@ export {
 } from "./drain-cycle.js";
 export type { EsOps, PatchFn } from "./event-sourcing.js";
 export { bare_patch, scan, validating_patch } from "./event-sourcing.js";
+export {
+  type DatePath,
+  type EventTags,
+  event_tags,
+  make_date_reviver,
+} from "./event-tags.js";
 export {
   current_version_of,
   deprecated_event_names,
@@ -34746,6 +35102,12 @@ export type SchemaRegister<TSchemaReg> = {
  *   forgotten) while dropping the isolated \`pii\` sidecar. The gate is prebuilt
  *   so the read path never recomputes the sensitive-field lookup per event —
  *   only the sensitive events pay any cost.
+ * @property revive_dates - Prebuilt per-event date revival, derived once at
+ *   build time from the declared \`z.date()\` paths. Returns \`undefined\` for an
+ *   event whose schema declares no dates — the overwhelming majority — so the
+ *   read path skips the field entirely and pays nothing. JSON has no date
+ *   type, and an adapter cannot know which strings were dates; the schema
+ *   does, so it decides.
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
@@ -34772,6 +35134,9 @@ export type Registry<
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (event_name: string) => readonly string[];
+  readonly revive_dates: (
+    event_name: string
+  ) => ((data: Schema) => void) | undefined;
   readonly query_gate: (
     event_name: string
   ) => (
@@ -35435,7 +35800,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -36441,35 +36806,17 @@ const ISO_8601 =
   /^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(\\.\\d+)?(Z|[+-][0-2][0-9]:[0-5][0-9])?$/;
 
 /**
- * \`JSON.parse\` reviver that turns ISO-8601 strings back into \`Date\`s.
+ * Revive ISO-8601-shaped strings into \`Date\`s during \`JSON.parse\`.
  *
- * JSON has no date type, so a \`Date\` committed into an event's \`data\`,
- * \`meta\`, or \`pii\` serializes to a string. Reading it back as a string
- * would silently break reducers that call \`.getTime()\` — and would do so
- * on some adapters and not others. Every adapter therefore revives dates
- * on read, and this is the single definition they share, so the behavior
- * can't drift between them ([#1198](https://github.com/Rotorsoft/act-root/issues/1198)).
+ * **The framework no longer uses this.** Dates are resolved from the declared
+ * \`z.date()\` paths at build time and converted on read, so a field declared
+ * \`z.string()\` keeps its string even when the value looks like a timestamp
+ * ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)). Adapters
+ * return what they stored; typing is the orchestrator's job.
  *
- * Adapters must apply it to **every** JSON column they read, including
- * decrypted \`pii\` payloads — a value's runtime type must not depend on
- * which column it sits in or whether encryption is enabled
- * ([#1365](https://github.com/Rotorsoft/act-root/issues/1365),
- * [#1370](https://github.com/Rotorsoft/act-root/issues/1370)). Third-party
- * adapters need it to pass the store TCK's Date round-trip cases.
+ * Kept exported for host applications that parse Act JSON themselves and want
+ * the old shape-based behaviour. New code should let the schema decide.
  *
- * The trade-off is deliberate: a string that happens to look like a
- * timestamp is revived into a \`Date\`. That is the price of dates surviving
- * a JSON round trip at all, and it is applied uniformly.
- *
- * @param _key - Unused; present to satisfy the \`JSON.parse\` reviver shape.
- * @param value - The parsed value.
- * @returns A \`Date\` when \`value\` is an ISO-8601 string, otherwise \`value\`.
- *
- * @example
- * \`\`\`typescript
- * JSON.parse('{"at":"2024-03-01T10:20:30.000Z"}', dateReviver);
- * // → { at: Date }
- * \`\`\`
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
@@ -40323,6 +40670,12 @@ export type SchemaRegister<TSchemaReg> = {
  *   forgotten) while dropping the isolated \`pii\` sidecar. The gate is prebuilt
  *   so the read path never recomputes the sensitive-field lookup per event —
  *   only the sensitive events pay any cost.
+ * @property revive_dates - Prebuilt per-event date revival, derived once at
+ *   build time from the declared \`z.date()\` paths. Returns \`undefined\` for an
+ *   event whose schema declares no dates — the overwhelming majority — so the
+ *   read path skips the field entirely and pays nothing. JSON has no date
+ *   type, and an adapter cannot know which strings were dates; the schema
+ *   does, so it decides.
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
@@ -40349,6 +40702,9 @@ export type Registry<
   };
   readonly events: EventRegister<TEvents>;
   readonly sensitive_fields: (event_name: string) => readonly string[];
+  readonly revive_dates: (
+    event_name: string
+  ) => ((data: Schema) => void) | undefined;
   readonly query_gate: (
     event_name: string
   ) => (
@@ -40684,7 +41040,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-function is_pii(schema: z.ZodType): boolean {
+export function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -50760,7 +51116,6 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  dateReviver,
   log,
   SNAP_EVENT,
   StoreError,
@@ -50792,7 +51147,7 @@ const JSONB_OID = types.builtins.JSONB;
 const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
   getTypeParser: ((oid: number, format?: unknown) =>
     oid === JSONB_OID
-      ? (val: string) => JSON.parse(val, dateReviver)
+      ? (val: string) => JSON.parse(val)
       : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
           oid,
           format
@@ -51699,11 +52054,7 @@ export class PostgresStore implements Store {
       // the driver are mutable in-flight before they cross back to
       // the framework.
       if (this._resolve_pii_key && typeof row.pii === "string") {
-        const decrypted = await decrypt(
-          row.pii,
-          this._resolve_pii_key,
-          dateReviver
-        );
+        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
         (row as { pii: unknown }).pii = decrypted;
       }
       await Promise.resolve(callback(row));
@@ -51855,11 +52206,7 @@ export class PostgresStore implements Store {
         if (this._resolve_pii_key) {
           for (const row of rows) {
             if (typeof row.pii === "string") {
-              const decrypted = await decrypt(
-                row.pii,
-                this._resolve_pii_key,
-                dateReviver
-              );
+              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
               (row as { pii: unknown }).pii = decrypted;
             }
           }
@@ -53460,7 +53807,6 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  dateReviver,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -53586,7 +53932,7 @@ const resolve_url = (url: unknown): string => {
  * for cross-adapter payload parity (#1198).
  * @internal
  */
-const parse_json = (raw: string): unknown => JSON.parse(raw, dateReviver);
+const parse_json = (raw: string): unknown => JSON.parse(raw);
 
 /**
  * SQLite extended result code for a UNIQUE constraint violation
@@ -53775,15 +54121,14 @@ export class SqliteStore implements Store {
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
     // Revive dates like \`data\`/\`meta\` do (#1198/#1365). Base64 ciphertext
-    // never matches the ISO-8601 pattern, so the encrypted branch below is
-    // unaffected by the reviver here — it gets its own on the plaintext.
+    // Dates are resolved from the declared schema by the framework, so the
+    // store returns exactly what it stored — plaintext or decrypted alike.
     const parsed = parse_json(raw as string);
     if (this._resolve_pii_key && typeof parsed === "string") {
-      return (await decrypt(
-        parsed,
-        this._resolve_pii_key,
-        dateReviver
-      )) as Record<string, unknown>;
+      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
+        string,
+        unknown
+      >;
     }
     return parsed as Record<string, unknown>;
   }
@@ -62396,11 +62741,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
-      it("revives a Date in pii like data/meta (#1365/#1370)", async () => {
-        // A Date must come back a Date wherever it sits, and whether or
-        // not the adapter encrypts the pii column — encryption is an
-        // at-rest concern, not a payload-type change. The same Date in
-        // \`data\` is the in-row control.
+      it("round-trips a Date losslessly in pii, like data/meta (#1365/#1370/#1556)", async () => {
+        // A store persists bytes; it does not type them. JSON has no date
+        // type, so a \`Date\` is stored as its ISO form and read back as that
+        // same string — identically in \`data\` and \`pii\`, and whether or not
+        // the adapter encrypts the pii column, since encryption is an
+        // at-rest concern and not a payload-type change.
+        //
+        // Turning that string back into a \`Date\` is the framework's job,
+        // driven by the \`z.date()\` the schema declares (#1556): an adapter
+        // cannot know which strings were dates, and guessing from shape
+        // revived any ISO-looking string — including fields declared
+        // \`z.string()\`. The same Date in \`data\` is the in-row control.
         const s = \`pii-date-\${uid()}\`;
         const when = new Date("2024-03-01T10:20:30.000Z");
         await store.commit<CounterEvents>(
@@ -62425,9 +62777,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen).toHaveLength(1);
         const at = (seen[0].data as unknown as { at: unknown }).at;
         const born = (seen[0].pii as { born: unknown }).born;
-        expect(at).toBeInstanceOf(Date);
-        expect(born).toBeInstanceOf(Date);
-        expect((born as Date).toISOString()).toBe(when.toISOString());
+        // The contract is LOSSLESS RECOVERY, not a particular runtime type.
+        // A store that serializes (Postgres, SQLite) hands back the ISO form;
+        // one that holds references (InMemory) hands back the \`Date\` itself.
+        // Both are correct at this layer — an adapter cannot know which
+        // strings were dates, so typing them is the framework's job, driven
+        // by the declared \`z.date()\` (#1556). What every adapter owes is that
+        // no precision is lost, identically in \`data\` and \`pii\`.
+        const recovered = (v: unknown) =>
+          v instanceof Date ? v.getTime() : new Date(v as string).getTime();
+        expect(recovered(at)).toBe(when.getTime());
+        expect(recovered(born)).toBe(when.getTime());
+        // ...and that both columns are treated the same way, whichever it is.
+        expect(typeof at).toBe(typeof born);
       });
 
       it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {

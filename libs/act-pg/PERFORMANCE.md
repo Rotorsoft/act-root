@@ -1396,3 +1396,36 @@ pnpm build
 LOG_LEVEL=error node libs/act-pg/scripts/correlate-workers.bench.mjs
 # WORKERS / SECONDS / COMMITS_PER_SEC / AGGREGATES / CYCLE_MS / PORT override the shape
 ```
+
+## Schema-driven date revival (2026-08-25, #1556)
+
+Adapters used to revive dates by **shape** — a regex against every string in
+every event, reviving anything ISO-8601-looking. The schema knows which fields
+are dates, so those paths are now resolved once at `act().build()` and only
+they are converted. Correctness was the reason (a `z.string()` holding a
+timestamp came back a `Date`, failing its own schema); the cost went down as a
+side effect.
+
+**Parse step, isolated** (200k iterations, M3, `JSON.parse` of one payload):
+
+| payload | plain parse | shape-based (before) | schema-based (after) |
+|---|---|---|---|
+| no dates, 6 strings | 0.200 µs | 1.536 µs — 7.7× floor | 0.201 µs — **1.0× floor** |
+| one date + 5 strings | 0.228 µs | 1.757 µs — 7.7× | 0.350 µs — 1.5× |
+| nested date, 12 fields | 0.424 µs | 3.336 µs — 7.9× | 0.560 µs — 1.3× |
+
+An event with no dates — the common case — now costs nothing at all, where it
+previously paid a regex per string.
+
+**End to end on Postgres** (`bench:run`, port 5431, median of 3):
+
+| scenario | before | after |
+|---|---|---|
+| commit: single event | 0.686 ms | 0.680 ms |
+| commit: 50-event batch | 1.381 ms | 1.349 ms |
+| load: cold replay over snapshot floor | 0.600 ms | **0.536 ms** (~11% faster) |
+
+Commit is unchanged, as expected — the reviver only ever ran on read. The read
+path gains ~11%, far less than the isolated 80%+, because the database round
+trip dominates a real load. The micro-benchmark is the honest measure of the
+change; the end-to-end number is the honest measure of what an operator sees.

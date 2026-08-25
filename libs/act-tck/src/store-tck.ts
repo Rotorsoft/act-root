@@ -4841,11 +4841,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
-      it("revives a Date in pii like data/meta (#1365/#1370)", async () => {
-        // A Date must come back a Date wherever it sits, and whether or
-        // not the adapter encrypts the pii column — encryption is an
-        // at-rest concern, not a payload-type change. The same Date in
-        // `data` is the in-row control.
+      it("round-trips a Date losslessly in pii, like data/meta (#1365/#1370/#1556)", async () => {
+        // A store persists bytes; it does not type them. JSON has no date
+        // type, so a `Date` is stored as its ISO form and read back as that
+        // same string — identically in `data` and `pii`, and whether or not
+        // the adapter encrypts the pii column, since encryption is an
+        // at-rest concern and not a payload-type change.
+        //
+        // Turning that string back into a `Date` is the framework's job,
+        // driven by the `z.date()` the schema declares (#1556): an adapter
+        // cannot know which strings were dates, and guessing from shape
+        // revived any ISO-looking string — including fields declared
+        // `z.string()`. The same Date in `data` is the in-row control.
         const s = `pii-date-${uid()}`;
         const when = new Date("2024-03-01T10:20:30.000Z");
         await store.commit<CounterEvents>(
@@ -4870,9 +4877,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen).toHaveLength(1);
         const at = (seen[0].data as unknown as { at: unknown }).at;
         const born = (seen[0].pii as { born: unknown }).born;
-        expect(at).toBeInstanceOf(Date);
-        expect(born).toBeInstanceOf(Date);
-        expect((born as Date).toISOString()).toBe(when.toISOString());
+        // The contract is LOSSLESS RECOVERY, not a particular runtime type.
+        // A store that serializes (Postgres, SQLite) hands back the ISO form;
+        // one that holds references (InMemory) hands back the `Date` itself.
+        // Both are correct at this layer — an adapter cannot know which
+        // strings were dates, so typing them is the framework's job, driven
+        // by the declared `z.date()` (#1556). What every adapter owes is that
+        // no precision is lost, identically in `data` and `pii`.
+        const recovered = (v: unknown) =>
+          v instanceof Date ? v.getTime() : new Date(v as string).getTime();
+        expect(recovered(at)).toBe(when.getTime());
+        expect(recovered(born)).toBe(when.getTime());
+        // ...and that both columns are treated the same way, whichever it is.
+        expect(typeof at).toBe(typeof born);
       });
 
       it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {

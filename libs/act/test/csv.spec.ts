@@ -171,8 +171,8 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     await source.dispose();
 
     const at = (back[0].data as { at: unknown }).at;
-    expect(at).toBeInstanceOf(Date);
-    expect((at as Date).toISOString()).toBe(when.toISOString());
+    expect(typeof at).toBe("string");
+    expect(at).toBe(when.toISOString());
     // `created` has always been parsed explicitly — asserting it alone
     // was the wrong half, and is why this went unnoticed.
     expect(back[0].created).toBeInstanceOf(Date);
@@ -207,7 +207,7 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     // A Date in `data` must survive as a Date. This round-trip writes and
     // reads through CsvFile on both ends, so serializer and parser share
     // any defect — the store differential below is the real guard (#1399).
-    expect((back[0].data as { at: unknown }).at).toBeInstanceOf(Date);
+    expect(typeof (back[0].data as { at: unknown }).at).toBe("string");
     expect(back.map((e) => e.stream)).toEqual(["a", "a", "b"]);
     expect(back.map((e) => e.version)).toEqual([0, 1, 0]);
   });

@@ -19,7 +19,6 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
-  dateReviver,
   is_literal_source,
   StoreError,
   ValidationError,
@@ -145,7 +144,7 @@ const resolve_url = (url: unknown): string => {
  * for cross-adapter payload parity (#1198).
  * @internal
  */
-const parse_json = (raw: string): unknown => JSON.parse(raw, dateReviver);
+const parse_json = (raw: string): unknown => JSON.parse(raw);
 
 /**
  * SQLite extended result code for a UNIQUE constraint violation
@@ -334,15 +333,14 @@ export class SqliteStore implements Store {
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
     // Revive dates like `data`/`meta` do (#1198/#1365). Base64 ciphertext
-    // never matches the ISO-8601 pattern, so the encrypted branch below is
-    // unaffected by the reviver here — it gets its own on the plaintext.
+    // Dates are resolved from the declared schema by the framework, so the
+    // store returns exactly what it stored — plaintext or decrypted alike.
     const parsed = parse_json(raw as string);
     if (this._resolve_pii_key && typeof parsed === "string") {
-      return (await decrypt(
-        parsed,
-        this._resolve_pii_key,
-        dateReviver
-      )) as Record<string, unknown>;
+      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
+        string,
+        unknown
+      >;
     }
     return parsed as Record<string, unknown>;
   }

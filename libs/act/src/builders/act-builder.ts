@@ -10,8 +10,10 @@ import {
   current_version_of,
   deprecated_event_names,
   type EventGate,
+  event_tags,
   FOLD_RESET,
   IDENTITY_GATE,
+  make_date_reviver,
   make_fold_handler,
   make_gate,
   type PatchFn,
@@ -25,7 +27,7 @@ import {
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
-import { DEFAULT_LANE, log } from "../ports.js";
+import { DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
@@ -328,6 +330,10 @@ export function act<
   // registry.deprecated_events / registry.autoclose_policy. Populated
   // on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
+  // Prebuilt date revivers, one per event whose schema declares a `z.date()`.
+  // Events without dates are absent → `revive_dates` returns undefined and the
+  // read path skips the step entirely.
+  const _rd = new Map<string, (data: Schema) => void>();
   // Prebuilt default-deny read gates, one per sensitive event. Non-sensitive
   // events are absent → `query_gate` falls back to the shared IDENTITY_GATE.
   const _qg = new Map<string, EventGate>();
@@ -343,6 +349,7 @@ export function act<
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
+    revive_dates: (event_name) => _rd.get(event_name),
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
@@ -397,6 +404,7 @@ export function act<
   const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
     const wrapped = async (events: readonly any[], stream: string) => {
       const stripped = events.map((e) => {
+        _rd.get(e.name as string)?.(e.data);
         const f = _sf.get(e.name as string);
         return f ? pii_strip(e, f) : e;
       });
@@ -726,7 +734,31 @@ export function act<
               }
             >
           )) {
-            const fields = pii_fields(reg.schema);
+            // One pass over the declared schema resolves both facts: which
+            // fields are sensitive, and which are dates. Walking twice for two
+            // answers would be the same work done twice.
+            const { sensitive: fields, dates } = event_tags(reg.schema);
+
+            const revive = make_date_reviver(dates);
+            if (revive) {
+              _rd.set(event_name, revive);
+              // Reactions read the payload directly, so they need the same
+              // schema-driven typing the fold and the query surfaces get.
+              // Independent of sensitivity — most date-bearing events carry
+              // no PII at all.
+              for (const [name, reaction] of reg.reactions) {
+                const inner = reaction.handler;
+                const typed = (event: any, stream: string, app: any) => {
+                  revive(event.data);
+                  return inner(event, stream, app);
+                };
+                // Preserve handler.name — build_handle asserts on named functions.
+                Object.defineProperty(typed, "name", { value: inner.name });
+                reaction.handler = typed;
+                reg.reactions.set(name, reaction as never);
+              }
+            }
+
             if (fields.length === 0) continue;
             _sf.set(event_name, fields);
             // Prebuild the default-deny read gate once, capturing `fields`.
@@ -787,6 +819,32 @@ export function act<
             state.message = (validated) => {
               const fields = fields_by_event.get(validated.name as string);
               return fields ? pii_split(validated, fields) : validated;
+            };
+          }
+          // Date revival composes onto whatever `view` already is — the PII
+          // gate for a sensitive state, identity otherwise. Every state gets
+          // it, because dates and sensitivity are unrelated declarations.
+          //
+          // A `__snapshot__` carries folded STATE, not event data, so its
+          // dates come from the state schema. Without that a restart from a
+          // snapshot would lose every `z.date()` the state holds.
+          for (const state of states.values()) {
+            const revivers = new Map<string, (data: Schema) => void>();
+            for (const event_name of Object.keys(state.events)) {
+              const revive = _rd.get(event_name);
+              if (revive) revivers.set(event_name, revive);
+            }
+            const snap_revive = make_date_reviver(
+              event_tags(state.state as never).dates
+            );
+            if (snap_revive) revivers.set(SNAP_EVENT, snap_revive);
+            if (revivers.size === 0) continue;
+            const inner = state.view;
+            state.view = (event, actor) => {
+              // Revive before the gate: the gate copies, so converting after
+              // it would leave the folded value a string.
+              revivers.get(event.name as string)?.(event.data as Schema);
+              return inner(event, actor);
             };
           }
           for (const [target, original] of batch_handlers) {

@@ -390,7 +390,7 @@ describe("SqliteStore pii_encryption", () => {
     expect(typeof raw_rows.rows[0]!.pii).toBe("string");
   });
 
-  it("revives a Date in pii under encryption (#1370)", async () => {
+  it("round-trips a Date in pii losslessly under encryption (#1370/#1556)", async () => {
     // Encryption is an at-rest concern: a Date must survive it as a Date,
     // exactly as it does on the plaintext path. `data.at` is the in-row
     // control — it never travels through the envelope.
@@ -416,10 +416,12 @@ describe("SqliteStore pii_encryption", () => {
     await store.query((e) => rows.push(e as never), { stream });
 
     expect(rows).toHaveLength(1);
-    expect((rows[0].data as { at: unknown }).at).toBeInstanceOf(Date);
-    expect((rows[0].pii as { born: unknown }).born).toBeInstanceOf(Date);
-    expect((rows[0].pii as { born: Date }).born.toISOString()).toBe(
-      when.toISOString()
-    );
+    // The store returns what it stored, identically in both columns —
+    // encryption is an at-rest concern, not a payload-type change. Typing
+    // these back to `Date` is the framework's job, from the declared
+    // `z.date()` (#1556).
+    expect(typeof (rows[0].data as { at: unknown }).at).toBe("string");
+    expect(typeof (rows[0].pii as { born: unknown }).born).toBe("string");
+    expect((rows[0].pii as { born: string }).born).toBe(when.toISOString());
   });
 });
