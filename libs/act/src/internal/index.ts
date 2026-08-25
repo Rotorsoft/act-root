@@ -101,10 +101,6 @@ export {
   IDENTITY_GATE,
   is_pii,
   make_gate,
-  pii_fields,
-  pii_gate,
-  pii_split,
-  pii_strip,
   REDACTED,
   SHREDDED,
 } from "./sensitive.js";

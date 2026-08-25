@@ -14,7 +14,6 @@ import {
   IDENTITY_GATE,
   make_fold_handler,
   type PatchFn,
-  pii_split,
   type ResettableBatchHandler,
   resolveActConfig,
   resolveAutocloseConfig,
@@ -366,12 +365,12 @@ export function act<
   let _built = false;
 
   /**
-   * Wraps a batch handler so the batch dispatcher stays PII-unaware —
-   * sensitive keys are stripped from every event before the handler
-   * sees it. the reader is resolved lazily at dispatch time, by when the
-   * events pass has populated it.
+   * Wraps a batch handler so it receives events in handler form — payload
+   * typed from the declared schema, sensitive keys removed — the same reader
+   * `event-builder` gives per-event handlers. Resolved lazily at dispatch, by
+   * when the events pass has populated it.
    */
-  const pii_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
+  const read_wrap = (original: BatchHandler<any>): BatchHandler<any> => {
     const wrapped = async (events: readonly any[], stream: string) => {
       // The same prebuilt reader the per-event handlers get: typed payload,
       // sensitive keys removed. Absent → the event passes through untouched.
@@ -410,7 +409,7 @@ export function act<
     for (const spec of fold_specs) {
       handlers.set(
         spec.target,
-        pii_wrap(
+        read_wrap(
           make_fold_handler(
             spec.merged,
             spec.flush,
@@ -664,42 +663,9 @@ export function act<
             if (state.disclose) _dp.set(state.name, state.disclose);
             if (state.autoclose) _ac.set(state.name, state.autoclose);
             if (state.archive) _aa.set(state.name, state.archive);
-            const fields_by_event = new Map<string, readonly string[]>();
-            for (const event_name of Object.keys(state.events)) {
-              const fields = _sf.get(event_name);
-              if (fields) fields_by_event.set(event_name, fields);
-            }
-            if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
-            // Snapshots write derived state into `__snapshot__.data`, which
-            // `forget_pii` cannot reach. Reject the combination at build so
-            // the misconfiguration surfaces in dev/CI, not as a silent leak
-            // past the GDPR boundary months later.
-            if (state.snap) {
-              const offending = [...fields_by_event.keys()];
-              throw new Error(
-                `State "${state.name}" cannot snapshot — events {${offending.join(", ")}} carry sensitive fields. ` +
-                  "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
-                  "Remove .snap() or remove sensitive(...) markers."
-              );
-            }
-            state.pii_aware = true;
-            // `state.view` is composed once, below, for every state — a
-            // sensitive state's disclosure predicate is one input to that
-            // reader rather than a second gate layered here.
-            state.message = (validated) => {
-              const fields = fields_by_event.get(validated.name as string);
-              return fields ? pii_split(validated, fields) : validated;
-            };
           }
-          // Date revival composes onto whatever `view` already is — the PII
-          // gate for a sensitive state, identity otherwise. Every state gets
-          // it, because dates and sensitivity are unrelated declarations.
-          //
-          // A `__snapshot__` carries folded STATE, not event data, so its
-          // dates come from the state schema. Without that a restart from a
-          // snapshot would lose every `z.date()` the state holds.
           for (const [target, original] of batch_handlers) {
-            batch_handlers.set(target, pii_wrap(original) as never);
+            batch_handlers.set(target, read_wrap(original) as never);
           }
           // Synthesize the autoclose reactions last, once the registry is
           // fully merged — their dynamic resolvers must be present before

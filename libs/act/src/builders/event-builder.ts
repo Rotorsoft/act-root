@@ -35,8 +35,9 @@ import {
   IDENTITY_GATE,
   is_pii,
   make_gate,
+  pii_split,
   pii_strip,
-} from "../internal/index.js";
+} from "../internal/sensitive.js";
 import { DEFAULT_LANE, SNAP_EVENT } from "../ports.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
 
@@ -295,11 +296,41 @@ export function build_events(
 
   if (lane_errors.length > 0) throw new Error(lane_errors[0]);
 
-  // Per-state views: the same composition, with this state's disclosure
-  // predicate as an input. A `__snapshot__` carries folded STATE rather than
-  // event data, so its typing comes from the state schema — without that a
-  // restart from a snapshot loses every `z.date()` the state holds.
+  // Per-state wiring, all of it derived from the same event resolution: the
+  // read view, the write split, and the guard that refuses to combine the two
+  // things that cannot coexist.
   for (const state of states.values()) {
+    const state_fields = new Map<string, readonly string[]>();
+    for (const event_name of Object.keys(state.events)) {
+      const fields = sensitive.get(event_name);
+      if (fields) state_fields.set(event_name, fields);
+    }
+
+    if (state_fields.size > 0) {
+      // Snapshots write derived state into `__snapshot__.data`, which
+      // `forget_pii` cannot reach. Reject the combination at build so the
+      // misconfiguration surfaces in dev/CI, not as a silent leak past the
+      // GDPR boundary months later.
+      if (state.snap)
+        throw new Error(
+          `State "${state.name}" cannot snapshot — events {${[...state_fields.keys()].join(", ")}} carry sensitive fields. ` +
+            "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
+            "Remove .snap() or remove sensitive(...) markers."
+        );
+      state.pii_aware = true;
+      // The write half: split declared fields into the `pii` sidecar on the
+      // way to `Store.commit`.
+      state.message = (validated: { name: string }) => {
+        const fields = state_fields.get(validated.name);
+        return fields ? pii_split(validated as never, fields) : validated;
+      };
+    }
+
+    // The read half. A state's disclosure predicate is an input to the
+    // reader, not a second gate layered over it. A `__snapshot__` carries
+    // folded STATE rather than event data, so its typing comes from the state
+    // schema — without that a restart from a snapshot loses every `z.date()`
+    // the state holds.
     const readers = new Map<string, EventGate>();
     for (const event_name of Object.keys(state.events)) {
       const event = tags.get(event_name);
