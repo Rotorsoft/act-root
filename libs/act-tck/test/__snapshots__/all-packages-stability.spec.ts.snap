@@ -308,7 +308,7 @@ export function act<
   // derived from it: the sensitive-field list the write path splits on, and
   // the per-surface readers (query, per-state view, handler strip) composed
   // below. Nothing walks a schema twice.
-  const _tags = new Map<string, EventTags>();
+  const _et = new Map<string, EventTags>();
   // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
   // when the event needs neither.
   const _hr = new Map<string, EventGate>();
@@ -326,7 +326,7 @@ export function act<
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-    sensitive_fields: (event_name) => _tags.get(event_name)?.sensitive ?? [],
+    sensitive_fields: (event_name) => _et.get(event_name)?.sensitive ?? [],
     query_gate: (event_name) => _qg.get(event_name) ?? IDENTITY_GATE,
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
@@ -662,7 +662,7 @@ export function act<
             fold_targets: new Set(fold_specs.map((f) => f.target)),
             projection_reactions,
           });
-          for (const [name, tags] of built.tags) _tags.set(name, tags);
+          for (const [name, tags] of built.tags) _et.set(name, tags);
           for (const [name, gate] of built.query_readers) _qg.set(name, gate);
           for (const [name, gate] of built.handler_readers) _hr.set(name, gate);
           finalize_deprecations();
@@ -673,7 +673,7 @@ export function act<
             if (state.archive) _aa.set(state.name, state.archive);
             const fields_by_event = new Map<string, readonly string[]>();
             for (const event_name of Object.keys(state.events)) {
-              const fields = _tags.get(event_name)?.sensitive;
+              const fields = _et.get(event_name)?.sensitive;
               if (fields?.length) fields_by_event.set(event_name, fields);
             }
             if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
@@ -712,7 +712,7 @@ export function act<
           for (const state of states.values()) {
             const readers = new Map<string, EventGate>();
             for (const event_name of Object.keys(state.events)) {
-              const tags = _tags.get(event_name);
+              const tags = _et.get(event_name);
               const reader =
                 tags &&
                 make_event_reader(tags, "redact", state.disclose ?? null);
