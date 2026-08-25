@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, projection, state } from "../src/index.js";
+import { act, log, projection, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
@@ -73,6 +73,44 @@ describe("a dynamic resolution onto a projection's target (#1563)", () => {
     // The projection holds its own aggregate and nothing else — the `o1`
     // Other aggregate never reaches a Counter fold's table.
     expect(rows).toEqual([{ stream: "c1", state: { count: 1 } }]);
+    await dispose();
+  });
+
+  it("says so — a skipped misrouting is not silent", async () => {
+    // Its own target: the report is deduped per stream|handler|event, so a
+    // test reusing "counters" would be correctly suppressed by the case above.
+    const solo = projection("counters-solo")
+      .of(Counter)
+      .flush(async () => {})
+      .build();
+    const errors: string[] = [];
+    const real = log().error.bind(log());
+    (log() as unknown as { error: unknown }).error = (e: unknown) => {
+      errors.push(e instanceof Error ? e.message : String(e));
+    };
+
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Counter)
+        .withState(Other)
+        .withProjection(solo)
+        .on("Pinged")
+        .do(async function onPinged() {})
+        .to(() => ({ target: "counters-solo" }))
+    );
+
+    await app.do("ping", { stream: "o1", actor }, { label: "ping" });
+    for (let i = 0; i < 2; i++) {
+      await app.correlate();
+      await app.drain();
+    }
+    (log() as unknown as { error: unknown }).error = real;
+
+    // The reaction cannot run; the operator must be able to find out why.
+    const reported = errors.find((m) => /a projection already serves/.test(m));
+    expect(reported).toMatch(/Reaction "onPinged" on "Pinged"/);
+    expect(reported).toMatch(/counters-solo/);
+    expect(reported).toMatch(/rejected at build/);
     await dispose();
   });
 
