@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.9...@rotorsoft/act-v1.31.10) (2026-08-27)
+
+
+### Bug Fixes
+
+* **act:** warn instead of error on self-healing failures ([#1580](https://github.com/Rotorsoft/act-root/issues/1580)) ([85c29ea](https://github.com/Rotorsoft/act-root/commit/85c29eaf935be2df4c3ab01d18c4383db81c5a0b)), closes [#1579](https://github.com/Rotorsoft/act-root/issues/1579)
+
 # [@rotorsoft/act-v1.31.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.8...@rotorsoft/act-v1.31.9) (2026-08-27)
 
 
