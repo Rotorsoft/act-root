@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.10...@rotorsoft/act-tck-v1.36.11) (2026-08-27)
+
+
+### Bug Fixes
+
+* **act:** normalize the lane name on both sides of the agreement guard ([#1586](https://github.com/Rotorsoft/act-root/issues/1586)) ([088b508](https://github.com/Rotorsoft/act-root/commit/088b508d1b56bb3fdaba5253fb78bf3c678bf9a8)), closes [#1583](https://github.com/Rotorsoft/act-root/issues/1583)
+
 # [@rotorsoft/act-tck-v1.36.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.9...@rotorsoft/act-tck-v1.36.10) (2026-08-27)
 
 
