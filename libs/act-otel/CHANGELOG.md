@@ -1,3 +1,10 @@
+# [@rotorsoft/act-otel-v0.1.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.5...@rotorsoft/act-otel-v0.1.6) (2026-08-27)
+
+
+### Bug Fixes
+
+* **act:** warn instead of error on self-healing failures ([#1580](https://github.com/Rotorsoft/act-root/issues/1580)) ([85c29ea](https://github.com/Rotorsoft/act-root/commit/85c29eaf935be2df4c3ab01d18c4383db81c5a0b)), closes [#1579](https://github.com/Rotorsoft/act-root/issues/1579)
+
 # [@rotorsoft/act-otel-v0.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.4...@rotorsoft/act-otel-v0.1.5) (2026-08-18)
 
 
