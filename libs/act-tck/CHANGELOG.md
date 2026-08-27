@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.8...@rotorsoft/act-tck-v1.36.9) (2026-08-27)
+
+
+### Bug Fixes
+
+* **act:** explain a failed correlation-lease handback instead of logging it raw ([#1578](https://github.com/Rotorsoft/act-root/issues/1578)) ([7a64bd9](https://github.com/Rotorsoft/act-root/commit/7a64bd987a7161e02caac4e5842435b0290fd9bb)), closes [#1577](https://github.com/Rotorsoft/act-root/issues/1577) [#1577](https://github.com/Rotorsoft/act-root/issues/1577)
+
 # [@rotorsoft/act-tck-v1.36.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.7...@rotorsoft/act-tck-v1.36.8) (2026-08-25)
 
 
