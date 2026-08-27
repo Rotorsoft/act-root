@@ -819,18 +819,20 @@ export class CorrelateCycle<
       // own expiry, so failing here costs at most `_lease_millis` before a
       // successor can take over, and nothing is lost.
       //
-      // Reported with that context rather than raw. This runs during
-      // shutdown, where the store is at its most contended — a pool closing
-      // under it, or, on a single-writer store like SQLite, another
-      // connection holding the file. A bare `SQLITE_BUSY: database is
-      // locked` stack at the end of a clean Ctrl-C reads as a fatal
-      // shutdown fault, and it is not one (#1577).
-      log().error(
-        new Error(
-          `Could not hand back the correlation lease during shutdown; it expires on its own within ${this._lease_millis}ms and correlation resumes normally after that. ` +
-            "On a single-writer store this usually means another connection holds the database. " +
-            `Cause: ${String(error)}`
-        )
+      // `warn`, not `error`, and deliberately: this runs during shutdown,
+      // where the store is at its most contended — a pool closing under it,
+      // or, on a single-writer store like SQLite, another connection holding
+      // the file. Nothing is lost and it self-heals, so it does not deserve
+      // a severity operators routinely page on; a clean Ctrl-C would page
+      // every time. It stays visible because a contended file is still worth
+      // investigating (#1577).
+      //
+      // A plain message rather than an `Error`: the stack would point at
+      // this catch, not at whatever holds the lock, so it is noise.
+      log().warn(
+        `Could not hand back the correlation lease during shutdown; it expires on its own within ${this._lease_millis}ms and correlation resumes normally after that. ` +
+          "On a single-writer store this usually means another connection holds the database. " +
+          `Cause: ${String(error)}`
       );
     }
   }

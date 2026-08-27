@@ -49,8 +49,13 @@ describe("correlation lease handback under a contended file (#1577)", () => {
   afterAll(cleanup);
 
   it("shuts down cleanly and explains the skipped handback", async () => {
+    const warnings: string[] = [];
     const errors: string[] = [];
-    const real = log().error.bind(log());
+    const real_warn = log().warn.bind(log());
+    const real_error = log().error.bind(log());
+    (log() as unknown as { warn: unknown }).warn = (e: unknown) => {
+      warnings.push(e instanceof Error ? e.message : String(e));
+    };
     (log() as unknown as { error: unknown }).error = (e: unknown) => {
       errors.push(e instanceof Error ? e.message : String(e));
     };
@@ -73,15 +78,21 @@ describe("correlation lease handback under a contended file (#1577)", () => {
 
     await tx.rollback().catch(() => undefined);
     other.close();
-    (log() as unknown as { error: unknown }).error = real;
+    (log() as unknown as { warn: unknown }).warn = real_warn;
+    (log() as unknown as { error: unknown }).error = real_error;
     await dispose();
 
     // The failure is benign — the lease carries its own expiry — so the
-    // operator must be told that, not handed a bare SQLITE_BUSY stack that
-    // reads as a fatal shutdown fault.
-    const reported = errors.find((m) => /correlation lease/i.test(m));
+    // operator is told that, rather than handed a bare SQLITE_BUSY stack
+    // that reads as a fatal shutdown fault.
+    const reported = warnings.find((m) => /correlation lease/i.test(m));
     expect(reported).toBeDefined();
     expect(reported).toMatch(/expire/i);
     expect(reported).toMatch(/SQLITE_BUSY|locked/i);
+
+    // Severity is part of the contract, not a detail: operators page on
+    // `error`, and a clean Ctrl-C must not page. Nothing about the handback
+    // may reach that level.
+    expect(errors.filter((m) => /correlation lease/i.test(m))).toEqual([]);
   }, 30_000);
 });
