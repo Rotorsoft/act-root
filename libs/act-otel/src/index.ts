@@ -285,7 +285,10 @@ export function instrument(
         try {
           total += await provider();
         } catch (error) {
-          log().error(error as Error);
+          // `warn`, not `error`: a dropped metric sample costs one collection
+          // interval and the next scrape retries. Metrics are observability,
+          // so a failure here must not itself page anyone (#1579).
+          log().warn(error as Error, "metrics provider threw during collect");
         }
       }
       this.set(total);

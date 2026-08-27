@@ -554,7 +554,10 @@ describe("a handler that only ever loses its lease (#1418)", () => {
     // Budget wide open, so the claim-time guard stays out of the way and
     // the competitor actually runs and acks.
     const w = workers("dropped", 5);
-    const logged = vi.spyOn(log(), "error");
+    // `warn`, not `error` (#1579): the work is redelivered, so this occurrence
+    // needs no operator action. Persistent drops are a sizing problem.
+    const logged = vi.spyOn(log(), "warn");
+    const errored = vi.spyOn(log(), "error");
     const { inflight, stolen } = await steal(w);
 
     expect(w.fast_attempts()).toBe(1);
@@ -570,7 +573,13 @@ describe("a handler that only ever loses its lease (#1418)", () => {
         String(c[0]).includes("acks were dropped")
       ).length
     ).toBe(1);
+    expect(
+      errored.mock.calls.filter((c) =>
+        String(c[0]).includes("acks were dropped")
+      ).length
+    ).toBe(0);
 
+    errored.mockRestore();
     logged.mockRestore();
     await w.slow.shutdown();
     await w.fast.shutdown();

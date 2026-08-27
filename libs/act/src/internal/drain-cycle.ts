@@ -377,11 +377,12 @@ export async function run_drain_cycle<
   // Deferred entries are excluded from ack's return by contract, so they are
   // not "missing" — only non-due submissions are counted here.
   const expected = submitted.filter((l) => l.due === undefined).length;
+  // `warn`, not `error`: the work is redelivered, so nothing is lost and no
+  // operator action is required for this occurrence. Persistent drops are a
+  // sizing problem worth investigating, which is what `warn` is for (#1579).
   if (acked.length < expected)
-    log().error(
-      new Error(
-        `drain: ${expected - acked.length} of ${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.`
-      )
+    log().warn(
+      `drain: ${expected - acked.length} of ${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.`
     );
 
   // Collect close requests (#1090). A close result was already acked above

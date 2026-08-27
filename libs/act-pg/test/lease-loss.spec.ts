@@ -121,7 +121,10 @@ describe("a handler that only ever loses its lease (#1418)", () => {
     // maxRetries 0: the first claim (retry 0) is the one attempt allowed,
     // the second (retry 1) is past the budget.
     const w = workers(target, 0);
-    const logged = vi.spyOn(log(), "error");
+    // The dropped-ack report is `warn` (#1579) — that work is redelivered.
+    // Blocking stays `error`: it needs `app.unblock` and never self-heals.
+    const logged = vi.spyOn(log(), "warn");
+    const errored = vi.spyOn(log(), "error");
 
     await w.slow.do("tick", { stream: `s-${randomUUID()}`, actor }, {});
     await w.slow.correlate();
@@ -157,6 +160,15 @@ describe("a handler that only ever loses its lease (#1418)", () => {
     );
     expect(drops.length).toBe(1);
 
+    // The two severities are not interchangeable: the block is the part a
+    // human must act on, so it stays at the level operators page on.
+    expect(
+      errored.mock.calls.filter((c) =>
+        String(c[0]).includes("no acknowledged progress")
+      ).length
+    ).toBe(1);
+
+    errored.mockRestore();
     logged.mockRestore();
     await w.slow.shutdown();
     await w.fast.shutdown();
@@ -167,7 +179,10 @@ describe("a handler that only ever loses its lease (#1418)", () => {
     // Budget left wide open so the claim-time guard stays out of the way
     // and the competitor actually runs and acks.
     const w = workers(target, 5);
-    const logged = vi.spyOn(log(), "error");
+    // `warn`, not `error` (#1579): the work is redelivered, so this occurrence
+    // needs no operator action. Persistent drops are a sizing problem.
+    const logged = vi.spyOn(log(), "warn");
+    const errored = vi.spyOn(log(), "error");
 
     await w.slow.do("tick", { stream: `s-${randomUUID()}`, actor }, {});
     await w.slow.correlate();
@@ -194,6 +209,11 @@ describe("a handler that only ever loses its lease (#1418)", () => {
     );
     expect(drops.length).toBe(1);
 
+    // Budget wide open here, so nothing blocks — and with nothing to act on,
+    // nothing may reach `error`.
+    expect(errored).not.toHaveBeenCalled();
+
+    errored.mockRestore();
     logged.mockRestore();
     await w.slow.shutdown();
     await w.fast.shutdown();
