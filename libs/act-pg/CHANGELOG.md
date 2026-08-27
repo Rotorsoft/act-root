@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.19.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.1...@rotorsoft/act-pg-v1.19.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **act:** warn instead of error on self-healing failures ([#1580](https://github.com/Rotorsoft/act-root/issues/1580)) ([85c29ea](https://github.com/Rotorsoft/act-root/commit/85c29eaf935be2df4c3ab01d18c4383db81c5a0b)), closes [#1579](https://github.com/Rotorsoft/act-root/issues/1579)
+
 # [@rotorsoft/act-pg-v1.19.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.0...@rotorsoft/act-pg-v1.19.1) (2026-08-25)
 
 
