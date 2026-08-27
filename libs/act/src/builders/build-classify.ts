@@ -83,7 +83,7 @@ export function classify_registry<
   // keys lane per-target with last-writer-wins semantics, so lane must agree
   // target-wide — the `(target, source)` scoping of `statics` is too narrow
   // to catch a same-target/different-source lane disagreement.
-  const target_lanes = new Map<string, string | undefined>();
+  const target_lanes = new Map<string, string>();
   const reactive_events = new Set<string>();
   const event_to_lanes = new Map<string, EventLaneSet>();
 
@@ -108,15 +108,16 @@ export function classify_registry<
         // ACT-1103 / #1325: lanes don't merge — any two reactions to the
         // same target must declare the same lane, regardless of source.
         // First reaction to a target records its lane; every later one must
-        // match or it's a config error caught at build time.
-        if (!target_lanes.has(target)) {
-          target_lanes.set(target, lane);
-        } else if (
-          (target_lanes.get(target) ?? undefined) !== (lane ?? undefined)
-        ) {
+        // match or it's a config error caught at build time. Both sides
+        // compare the NORMALIZED name (#1583), so an omitted lane and an
+        // explicit "default" — the same lane — agree.
+        const recorded_lane = target_lanes.get(target);
+        if (recorded_lane === undefined) {
+          target_lanes.set(target, lane_name);
+        } else if (recorded_lane !== lane_name) {
           throw new Error(
             `Stream "${target}" has conflicting lane assignments ` +
-              `("${target_lanes.get(target) ?? "default"}" vs "${lane ?? "default"}")`
+              `("${recorded_lane}" vs "${lane_name}")`
           );
         }
         const key = `${target}|${source ?? ""}`;

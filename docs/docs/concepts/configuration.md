@@ -289,6 +289,18 @@ act()
   .build();
 ```
 
+"The same lane" is decided on the **resolved** lane name, not on how it was spelled. Omitting `lane` and writing `lane: "default"` name the identical lane, so the two forms agree and the build succeeds — a target reached from a generated call site that spells the default out and a hand-written one that leaves it off is a legal configuration, not a conflict:
+
+```typescript no-check
+// builds — both reactions land on the default lane
+act()
+  .withState(Ticket)
+  .withLane({ name: "slow" })
+  .on("OrderConfirmed").do(handlerA).to({ target: "shared", lane: "default" })
+  .on("OrderConfirmed").do(handlerB).to({ target: "shared" })
+  .build();
+```
+
 A **dynamic** `.to(fn)` resolver is a function until an event arrives, so the build-time scan has nothing to inspect. Correlate applies the same rules where the answer finally exists:
 
 - Two dynamic resolutions disagreeing on one target's lane at equal priority keep the lane the target was first discovered on, and log an error naming both. The lane isn't corrected mid-run — a live stream's lane is the one its in-flight leases were taken under, and re-laning is restart-driven. Until you align the resolvers, the losing reaction runs inside the winner's `leaseMillis` and `streamLimit`, and a process restricted to the losing lane via `onlyLanes` never runs it at all.

@@ -118,6 +118,121 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(app.lanes.map((l) => l.name)).toContain("fast");
   });
 
+  // #1583 — an omitted `lane` and an explicit `"default"` denote the SAME
+  // lane. The agreement guard used to store and compare the raw value, so
+  // `undefined` and `"default"` read as a disagreement and the build threw
+  // the self-refuting `("default" vs "default")`. Both sides now normalize
+  // through the same `lane ?? "default"` the classifier already computes.
+  it("accepts same-target reactions when both omit the lane (#1583)", () => {
+    const app = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function reactOmitA() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA" })
+      .on("Incremented")
+      .do(function reactOmitB() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB" })
+      .build();
+    expect(app.lanes).toEqual([]);
+  });
+
+  it("accepts same-target reactions when both declare 'default' (#1583)", () => {
+    const app = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function reactDefaultA() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA", lane: "default" })
+      .on("Incremented")
+      .do(function reactDefaultB() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB", lane: "default" })
+      .build();
+    expect(app.lanes).toEqual([]);
+  });
+
+  it("accepts an explicit 'default' followed by an omitted lane (#1583)", () => {
+    const app = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function reactExplicitFirst() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA", lane: "default" })
+      .on("Incremented")
+      .do(function reactOmittedSecond() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB" })
+      .build();
+    expect(app.lanes).toEqual([]);
+  });
+
+  it("accepts an omitted lane followed by an explicit 'default' (#1583)", () => {
+    const app = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function reactOmittedFirst() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA" })
+      .on("Incremented")
+      .do(function reactExplicitSecond() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB", lane: "default" })
+      .build();
+    expect(app.lanes).toEqual([]);
+  });
+
+  it("still rejects a declared lane against an omitted one (#1583)", () => {
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "slow" })
+        .on("Incremented")
+        .do(function reactSlowLane() {
+          return Promise.resolve();
+        })
+        .to({ target: "shared", source: "sA", lane: "slow" })
+        .on("Incremented")
+        .do(function reactImplicitDefault() {
+          return Promise.resolve();
+        })
+        .to({ target: "shared", source: "sB" })
+        .build()
+    ).toThrow(
+      'Stream "shared" has conflicting lane assignments ("slow" vs "default")'
+    );
+  });
+
+  it("builds the failure scenario from #1583 with no cast anywhere", () => {
+    // The reported repro verbatim: a lane declared elsewhere, one call site
+    // spelling the default lane out and another omitting it. `"default"` is
+    // a legal member of TLanes, so this compiles without a `as never`.
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "slow" })
+      .on("Incremented")
+      .do(function reactOne() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", lane: "default" })
+      .on("Incremented")
+      .do(function reactTwo() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared" })
+      .build();
+    expect(app.lanes.map((l) => l.name)).toEqual(["slow"]);
+  });
+
   it("compile-time-rejects slice .to({lane}) referencing an undeclared lane", () => {
     // Slices now carry their own TLanes union via .withLane(...). The
     // builder narrows .to({lane}) against that union, so an undeclared
