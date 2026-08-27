@@ -133,7 +133,7 @@ describe("cache integration", () => {
     expect((await c.get("c1"))?.state).toEqual({ count: 5 });
   });
 
-  it("cache.set rejection is logged but does not fail the action", async () => {
+  it("cache.set rejection warns but does not fail the action", async () => {
     // Reset singletons so we can inject a failing cache for this test only
     await dispose()();
     store(new InMemoryStore());
@@ -149,6 +149,7 @@ describe("cache integration", () => {
     };
     cache(failingCache);
 
+    const warnSpy = vi.spyOn(log(), "warn").mockImplementation(() => {});
     const errorSpy = vi.spyOn(log(), "error").mockImplementation(() => {});
 
     // Action should succeed despite cache.set rejecting
@@ -158,7 +159,11 @@ describe("cache integration", () => {
     // Flush the fire-and-forget .catch microtask
     await new Promise((r) => setImmediate(r));
 
-    expect(errorSpy).toHaveBeenCalledWith(setError);
+    // `warn`, not `error` (#1579): a cache miss costs a re-fold, nothing
+    // more, so it must not reach the level operators page on.
+    expect(warnSpy).toHaveBeenCalledWith(setError, expect.any(String));
+    expect(errorSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
     errorSpy.mockRestore();
   });
 });

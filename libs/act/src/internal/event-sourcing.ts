@@ -594,7 +594,12 @@ export async function load<
         patches,
         snaps,
       })
-      .catch((err) => log().error(err));
+      .catch((err) =>
+        log().warn(
+          err,
+          "cache set skipped; the next load re-folds from the store"
+        )
+      );
   }
 
   return {
@@ -781,7 +786,12 @@ export async function action<
         if (error instanceof ConcurrencyError) {
           cache()
             .invalidate(stream)
-            .catch((err) => log().error(err));
+            .catch((err) =>
+              log().warn(
+                err,
+                "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
+              )
+            );
         }
         throw error;
       }
@@ -847,14 +857,24 @@ export async function action<
               patches: snap_event ? 0 : last.patches,
               snaps: snap_event ? last.snaps + 1 : last.snaps,
             })
-            .catch((err) => log().error(err));
+            .catch((err) =>
+              log().warn(
+                err,
+                "cache set skipped; the next load re-folds from the store"
+              )
+            );
         // A gapped entry would sit at the head position with unfolded
         // events baked in — drop the checkpoint and let the next load
         // replay to truth instead.
         else
           cache()
             .invalidate(stream)
-            .catch((err) => log().error(err));
+            .catch((err) =>
+              log().warn(
+                err,
+                "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
+              )
+            );
       }
 
       return snapshots;
