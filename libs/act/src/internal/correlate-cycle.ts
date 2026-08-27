@@ -815,7 +815,23 @@ export class CorrelateCycle<
         millis: 0,
       });
     } catch (error) {
-      log().error(error);
+      // The handback is best-effort by construction: the lease carries its
+      // own expiry, so failing here costs at most `_lease_millis` before a
+      // successor can take over, and nothing is lost.
+      //
+      // Reported with that context rather than raw. This runs during
+      // shutdown, where the store is at its most contended — a pool closing
+      // under it, or, on a single-writer store like SQLite, another
+      // connection holding the file. A bare `SQLITE_BUSY: database is
+      // locked` stack at the end of a clean Ctrl-C reads as a fatal
+      // shutdown fault, and it is not one (#1577).
+      log().error(
+        new Error(
+          `Could not hand back the correlation lease during shutdown; it expires on its own within ${this._lease_millis}ms and correlation resumes normally after that. ` +
+            "On a single-writer store this usually means another connection holds the database. " +
+            `Cause: ${String(error)}`
+        )
+      );
     }
   }
 

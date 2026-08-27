@@ -103,7 +103,15 @@ Idempotent. Creates the events table, the streams (subscription) table, and the 
 
 ### Concurrency model
 
-SQLite serializes write transactions at the database level. No application-layer locking, no `FOR UPDATE SKIP LOCKED` needed — writes queue automatically and `ack`/`block` validate `leased_by` to prevent stale workers from interfering. For a single-server deployment, this gives the same isolation guarantees as Postgres.
+SQLite serializes write transactions at the database level. No application-layer locking, no `FOR UPDATE SKIP LOCKED` needed — writes queue on the store's connection, and `ack`/`block` validate `leased_by` to prevent stale workers from interfering. For a single-server deployment, this gives the same isolation guarantees as Postgres.
+
+#### One connection per database file
+
+The store owns a single libSQL connection, which is what makes the above true: writes issued through it queue rather than collide. **Opening a second connection to the same file — a bare `createClient()` in a backup script, a migration tool, a second `SqliteStore` — breaks that property.** SQLite permits only one writer, and `busy_timeout` is left at its default of `0`, so the losing write fails immediately with `SQLITE_BUSY: database is locked` instead of waiting.
+
+Raising `busy_timeout` is not the fix, and is worse than it looks. libSQL's busy wait blocks the Node event loop for its full duration: in a single process where both connections share that loop, the other connection's commit cannot run while the wait is in progress, so the wait is guaranteed to reach its timeout — having frozen your server, timers and all, the whole time. Measured, the failure moves from ~1 ms to the full timeout, and still fails.
+
+If a second component needs the same data, route it through the store (`query`, `query_streams`) rather than opening its own connection. If it genuinely must have raw SQL access, run it while the app is stopped.
 
 ### Database schema reference
 
