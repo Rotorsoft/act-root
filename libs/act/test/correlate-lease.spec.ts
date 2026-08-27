@@ -121,11 +121,12 @@ describe("correlate lease", () => {
     await two.shutdown();
   });
 
-  it("logs and swallows a failure to hand the lease back", async () => {
+  it("warns and swallows a failure to hand the lease back", async () => {
     const store = new InMemoryStore();
     await store.seed();
     const a = build(store);
-    const spy = vi.spyOn(log(), "error").mockImplementation(() => log());
+    const warn = vi.spyOn(log(), "warn").mockImplementation(() => log());
+    const error = vi.spyOn(log(), "error").mockImplementation(() => log());
     vi.spyOn(store, "subscribe").mockRejectedValue(new Error("release failed"));
 
     // Releasing early is best-effort: the fallback is the expiry that would
@@ -134,7 +135,13 @@ describe("correlate lease", () => {
     // the tick before asserting.
     await expect(a.shutdown()).resolves.toBeUndefined();
     await new Promise((r) => setTimeout(r, 20));
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+    // `warn`, not `error` (#1577): nothing is lost and the lease self-heals
+    // on expiry, so a clean shutdown must not reach a level operators page
+    // on. The cause still rides along in the message.
+    expect(warn).toHaveBeenCalled();
+    expect(String(warn.mock.calls[0][0])).toMatch(/release failed/);
+    expect(error).not.toHaveBeenCalled();
+    warn.mockRestore();
+    error.mockRestore();
   });
 });
