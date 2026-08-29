@@ -16,6 +16,16 @@
  * line per event on a busy stream. Reporting once per offending declaration is
  * what makes the message readable.
  *
+ * Which makes the key the whole design. It may only be built from things the
+ * *declaration* names — handler names, event names, lane names, a statically
+ * declared target — and never from a value a resolver computed at runtime.
+ * A resolved target is the trap: the documented per-aggregate shape is
+ * `.to(e => ({target: e.stream}))`, so a target-keyed report dedups nothing
+ * across aggregates and one typo scales into one line per aggregate — the
+ * unbounded volume this module exists to prevent (#1584). Runtime values
+ * still belong in the *message*, as the concrete example that turns "a
+ * reaction misdeclared its lane" into something an operator can go look at.
+ *
  * Never throws. A throw inside correlate pins the checkpoint for the whole app
  * (#1420); inside drain it reaches the circuit breaker as a store failure and
  * stalls every stream.
@@ -33,7 +43,8 @@ import { log } from "../ports.js";
  * remembering anything between calls — `internal/` holds no module state.
  *
  * @param seen - The caller's set of already-reported keys. Mutated.
- * @param key - Identifies the offending declaration, not the occurrence.
+ * @param key - Identifies the offending declaration, not the occurrence —
+ *   declared identifiers only, never a runtime-resolved target.
  * @param message - Wrapped in an `Error` so the logger renders a stack.
  *
  * @internal

@@ -204,17 +204,25 @@ export type CorrelateCycleDeps<
  * no health surface can see it — loses work that the operator never asked to
  * lose. `"default"` is where the reaction would have run had the lane been
  * omitted, which makes this the smallest correction that keeps it running.
+ *
+ * Keyed on the reaction and the lane it named, not on the target it minted
+ * (#1584). One typo in one `.to(fn)` reroutes every target that resolver
+ * produces, and the documented per-aggregate shape produces one per
+ * aggregate — the target belongs in the message as an example, never in the
+ * key. A resolver computing its lane from the event still reports each
+ * distinct bad name, because each is a separate thing to fix.
  */
 function report_undeclared_lane(
   seen: Set<string>,
+  handler: string,
   target: string,
   lane: string,
   declared: ReadonlySet<string>
 ): void {
   report_once(
     seen,
-    `lane|${target}|${lane}`,
-    `Reaction resolved target "${target}" onto undeclared lane "${lane}". ` +
+    `lane|${handler}|${lane}`,
+    `Reaction "${handler}" resolved onto undeclared lane "${lane}" — for example target "${target}". ` +
       `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
       'No controller claims it, so the stream would never drain — running it on "default" instead. ' +
       "The equivalent static `.to({ lane })` is rejected at build; a dynamic resolver's lane is only knowable here."
@@ -231,17 +239,34 @@ function report_undeclared_lane(
  * reaction runs inside the winner's `leaseMillis` and `streamLimit` — and
  * under `onlyLanes` sharding, a process provisioned for the losing lane never
  * runs it at all.
+ *
+ * Keyed on the losing declaration — the reaction whose lane was dropped, and
+ * the two lanes — with the target out of the key (#1584), because a resolver
+ * mints one target per aggregate and a target-keyed report scales with the
+ * aggregate count rather than with the number of things to fix.
+ *
+ * The winner is named by lane rather than by handler on purpose. Which side
+ * wins is "first discovered", so the same pair can land either way on
+ * different targets, and those are two different facts about the same
+ * misdeclaration: an operator seeing only one of them would read the outcome
+ * as deterministic. Keeping the orientation in the key reports both, and the
+ * count stays bounded by the declarations, which is what #1584 asked for.
+ * (The winning handler is not available here anyway — a lane carried over
+ * from an earlier scan, or seeded by a static subscribe, has no handler
+ * recorded against it.)
  */
 function report_lane_conflict(
   seen: Set<string>,
+  handler: string,
   target: string,
   kept: string,
   dropped: string
 ): void {
   report_once(
     seen,
-    `conflict|${target}|${kept}|${dropped}`,
-    `Stream "${target}" has conflicting lane assignments ("${kept}" vs "${dropped}") from two dynamic resolutions at equal priority. ` +
+    `conflict|${handler}|${kept}|${dropped}`,
+    `Reaction "${handler}" resolved lane "${dropped}" for a stream already on "${kept}" — for example "${target}". ` +
+      `These are conflicting lane assignments from two dynamic resolutions at equal priority. ` +
       `Keeping "${kept}", the lane it was first discovered on — re-laning a live stream would move it out from under a worker holding its lease. ` +
       `The reaction resolving "${dropped}" runs inside the "${kept}" lane's budget, and a process restricted to "${dropped}" via onlyLanes never runs it. ` +
       "The equivalent static declaration is rejected at build; align the resolvers, or split the target."
@@ -610,6 +635,7 @@ export class CorrelateCycle<
             if (lane !== undefined && !this._declared_lanes.has(lane)) {
               report_undeclared_lane(
                 this._reported,
+                reaction.handler.name,
                 resolved.target,
                 lane,
                 this._declared_lanes
@@ -652,7 +678,13 @@ export class CorrelateCycle<
               held !== lane &&
               priority === entry.priority
             )
-              report_lane_conflict(this._reported, resolved.target, held, lane);
+              report_lane_conflict(
+                this._reported,
+                reaction.handler.name,
+                resolved.target,
+                held,
+                lane
+              );
             // Multiple reactions targeting the same stream within a
             // single correlate scan — keep the max priority, and carry the
             // winning reaction's lane so the highest-priority reaction sets
