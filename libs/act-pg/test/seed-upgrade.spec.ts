@@ -9,9 +9,10 @@
 
 import { dispose, store } from "@rotorsoft/act";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 const PORT = 5431;
-const SCHEMA = "act_seed_upgrade_test";
+const SCHEMA = schema("act_seed_upgrade_test");
 const TABLE = "events";
 
 const pool = () => (store() as unknown as { _pool: any })._pool;

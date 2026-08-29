@@ -1,6 +1,7 @@
 import type { EventMeta } from "@rotorsoft/act";
 import { ValidationError } from "@rotorsoft/act";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
 /**
  * #1422 — a NUL byte is legal JSON and a legal JS string, so it passes Zod
@@ -20,7 +21,7 @@ describe("NUL bytes are refused by Postgres, legibly (#1422)", () => {
   const NUL = String.fromCharCode(0);
   const store = new PostgresStore({
     port: 5431,
-    schema: "nul_1422",
+    schema: schema("nul_1422"),
     table: "events",
   });
   const meta: EventMeta = { correlation: "", causation: {} };

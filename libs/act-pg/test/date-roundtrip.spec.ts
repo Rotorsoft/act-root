@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
 // #1198: payload-Date round-trip and per-Pool parser isolation.
 //
@@ -12,7 +13,7 @@ import { PostgresStore } from "../src/index.js";
 describe("pg Date round-trip + per-Pool parser isolation (#1198)", () => {
   const store = new PostgresStore({
     port: 5431,
-    schema: "date_rt_1198",
+    schema: schema("date_rt_1198"),
     table: "date_rt_store",
   });
 

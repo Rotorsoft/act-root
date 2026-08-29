@@ -30,8 +30,13 @@ import {
 } from "@rotorsoft/act";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
-const PG = { port: 5431, schema: "lease_loss_test", table: "events" } as const;
+const PG = {
+  port: 5431,
+  schema: schema("lease_loss_test"),
+  table: "events",
+} as const;
 const actor = { id: "a", name: "a" };
 
 const counter = state({ Counter: z.object({ count: z.number() }) })

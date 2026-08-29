@@ -1,6 +1,7 @@
 import { InMemoryStore } from "@rotorsoft/act";
 import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
 // Cross-adapter differential (#1030, fuzz workloads #1057): drive a family
 // of randomized seeded workloads against the in-memory reference and
@@ -29,7 +30,7 @@ runStoreDifferentialTck({
       factory: () =>
         new PostgresStore({
           port: 5431,
-          schema: "tck_diff",
+          schema: schema("tck_diff"),
           table: "tck_diff",
         }),
     },

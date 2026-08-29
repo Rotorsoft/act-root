@@ -18,9 +18,10 @@ import {
 } from "@rotorsoft/act";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 const PORT = 5431;
-const SCHEMA = "act_autoclose";
+const SCHEMA = schema("act_autoclose");
 
 const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
   .init(() => ({ open: false }))

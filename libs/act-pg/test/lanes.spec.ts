@@ -11,9 +11,10 @@
 
 import { dispose, store } from "@rotorsoft/act";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 const PORT = 5431;
-const SCHEMA = "act_lane_test";
+const SCHEMA = schema("act_lane_test");
 const TABLE = "events";
 
 describe("PostgresStore lane migration", () => {

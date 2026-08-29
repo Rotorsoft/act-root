@@ -16,11 +16,12 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
+import { table } from "./schema.js";
 
 const make = (table: string) =>
   new PostgresStore({ port: 5431, schema: "public", table });
 
-const stores = [make("scope_iso_alpha"), make("scope_iso_beta")];
+const stores = [make(table("scope_iso_alpha")), make(table("scope_iso_beta"))];
 const [alpha, beta] = stores;
 
 const peek = async (s: PostgresStore) => (await s.subscribe([])).correlated_at;

@@ -5,9 +5,10 @@
  */
 import { sleep } from "@rotorsoft/act";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 const PORT = 5431;
-const SCHEMA = "schema_notify_test";
+const SCHEMA = schema("schema_notify_test");
 const TABLE = "notify_test";
 
 /**

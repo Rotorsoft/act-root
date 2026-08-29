@@ -37,8 +37,13 @@ import type {
 } from "@rotorsoft/act";
 import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
-const PG = { port: 5431, schema: "contention_test", table: "events" } as const;
+const PG = {
+  port: 5431,
+  schema: schema("contention_test"),
+  table: "events",
+} as const;
 const META: EventMeta = { correlation: "", causation: {} };
 
 /** Unique per-test stream prefix so the file is internally collision-free. */
