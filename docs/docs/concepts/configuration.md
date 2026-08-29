@@ -135,7 +135,7 @@ const app = act()
   });
 ```
 
-- **`maxSubscribedStreams`** (default `1000`) — cap for the LRU set tracking already-subscribed reaction targets. Apps that mint many dynamic targets (e.g. one stream per user activity) should raise this; the LRU is a memory bound, not a correctness mechanism — eviction at most causes a redundant `subscribe()` call.
+- **`maxSubscribedStreams`** (default `1000`) — cap for the LRU tracking what each **dynamically resolved** reaction target was last subscribed at. Apps that mint many dynamic targets (e.g. one stream per user activity) should raise this; for those the LRU is a memory bound, not a correctness mechanism — eviction at most causes a redundant `subscribe()` call. Targets declared statically (`.to({ target, lane, priority })`) are never evicted: they are a bounded, build-time-known list held outside the LRU, so their declared lane and priority stay owned by the build-time subscribe no matter how much dynamic churn passes through (#1582).
 - **`settleDebounceMs`** (default `10`) — debounce window used by `settle()` when no per-call `debounceMs` is given. Coalesces commits in the same tick into a single correlate→drain pass. Lower for tight tests; raise for bursty production traffic.
 - **`onlyLanes`** (default: every declared lane) — restrict this process to a subset of declared drain lanes (ACT-1103). See [Lanes](#lanes) below.
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.

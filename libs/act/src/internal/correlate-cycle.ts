@@ -137,6 +137,10 @@ export type StaticTarget = {
  * rides `subscribe`, and `subscribe` writes lane unconditionally, so a
  * mark-carrying upsert has to carry the row's own lane to leave it alone.
  *
+ * Where the record lives decides whether the floor survives: dynamic
+ * targets are unbounded and go in the evictable LRU, static targets are a
+ * bounded build-time list and go in a plain map that never evicts (#1582).
+ *
  * @internal
  */
 type Subscription = {
@@ -305,6 +309,22 @@ export class CorrelateCycle<
   // and otherwise re-sends the row's own values so the mark changes nothing
   // else. See {@link Subscription}.
   private readonly _subscribed: LruMap<string, Subscription>;
+  /**
+   * What each static target was subscribed at by `init`. A plain map, never
+   * evicted: the collection is the build-time `_static_targets` list, so it
+   * is already bounded by the registry and costs nothing the registry does
+   * not already hold.
+   *
+   * Keeping these out of the LRU is what makes the `+Infinity` floor an
+   * invariant rather than a race (#1582). Sharing the bounded map meant a
+   * churn of dynamic targets could evict a static record, and the next
+   * dynamic resolution to that target found no record, took the
+   * first-discovery branch, and re-subscribed the target with its own
+   * priority and lane — silently re-laning a stream whose lane the
+   * build-time subscribe owns, and starving it wherever `onlyLanes` had
+   * provisioned a worker for the declared lane.
+   */
+  private readonly _static_subscriptions = new Map<string, Subscription>();
   /** Compiled pattern sources, bounded by {@link PATTERN_CACHE_SIZE}. */
   private readonly _patterns = new LruMap<string, RegExp>(PATTERN_CACHE_SIZE);
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
@@ -437,7 +457,9 @@ export class CorrelateCycle<
       // so a static target is never re-opened through the dynamic path
       // (#1363) — its priority/lane are owned by the build-time subscribe
       // above, and a scan that marks it re-sends exactly those values.
-      this._subscribed.set(stream, {
+      // Recorded outside the LRU so eviction can't take the floor with it
+      // (#1582).
+      this._static_subscriptions.set(stream, {
         floor: Number.POSITIVE_INFINITY,
         priority,
         lane,
@@ -459,14 +481,12 @@ export class CorrelateCycle<
    * the documented per-aggregate shape `.to(e => ({target: e.stream}))`
    * makes those two namespaces collide by construction (#1398).
    *
-   * Static targets are left alone: they are subscribed once at init and
-   * recorded at +Infinity so the dynamic path never re-opens them.
+   * Static targets are left alone: their record lives in
+   * `_static_subscriptions`, which this never touches, so they stay pinned
+   * at +Infinity and the dynamic path never re-opens them.
    */
   forget_subscribed(streams: Iterable<string>): void {
-    const statics = new Set(this._static_targets.map((t) => t.stream));
-    for (const stream of streams) {
-      if (!statics.has(stream)) this._subscribed.delete(stream);
-    }
+    for (const stream of streams) this._subscribed.delete(stream);
   }
 
   /**
@@ -624,7 +644,12 @@ export class CorrelateCycle<
             // first resolution always wins; a static target sits at +Infinity
             // and never does. Otherwise the row's own values ride along
             // unchanged, because the mark travels on the same upsert.
-            const recorded = this._subscribed.get(resolved.target);
+            //
+            // Statics are consulted first and from their own map: the LRU
+            // can evict, and a missing record reads as never-seen (#1582).
+            const recorded =
+              this._static_subscriptions.get(resolved.target) ??
+              this._subscribed.get(resolved.target);
             const priority = resolved.priority ?? 0;
             const upgraded = !recorded || priority > recorded.floor;
             const carried = upgraded
@@ -726,6 +751,8 @@ export class CorrelateCycle<
       // Record what each upgraded target was just subscribed at (the
       // within-scan max), so a later lower-or-equal resolution carries these
       // values forward and a strictly-higher one re-opens the guard (#1363).
+      // Only dynamic targets reach here — a static sits at +Infinity, so no
+      // resolution to one is ever `upgraded`.
       for (const { stream, priority, lane } of streams) {
         if (correlated.get(stream)?.upgraded)
           this._subscribed.set(stream, {
