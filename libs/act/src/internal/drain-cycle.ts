@@ -169,7 +169,17 @@ function budget_exhausted<TEvents extends Schemas>(
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
 
-/** Report a misrouted resolution once per offending declaration. */
+/**
+ * Report a misrouted resolution once per offending declaration.
+ *
+ * All three key parts are declared, not resolved — which is the rule
+ * `report-once` states and the one #1584 caught the lane reporters breaking.
+ * `stream` looks like the runtime target that trap is about, but it is only
+ * ever a key of `batch_handlers`, and those are the projections' *static*
+ * targets: one per projection declaration, bounded by the build, never one
+ * per aggregate. A handler registered on several events misroutes once per
+ * event, and each of those is its own `.on(E).do(h).to(fn)` to fix.
+ */
 function warn_misrouted(
   seen: Set<string>,
   stream: string,
