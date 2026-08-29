@@ -219,8 +219,11 @@ export type ActLifecycleEvents<
 /**
  * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
  *
- * @property maxSubscribedStreams - Cap for the LRU set tracking already-
- *   subscribed reaction streams. Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
+ * @property maxSubscribedStreams - Cap for the LRU tracking what each
+ *   dynamically resolved reaction target was last subscribed at. Statically
+ *   declared targets are held outside it and never evicted, so their lane
+ *   and priority stay owned by the build-time subscribe (#1582).
+ *   Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
  * @property settleDebounceMs - Debounce window (ms) used by `settle()` when
  *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
  *   Act instance instead of threading the value through every call site.

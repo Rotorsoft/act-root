@@ -775,10 +775,10 @@ describe("close and reaction subscriptions (#1398)", () => {
   });
 
   // Static targets are subscribed once by init() and recorded at +Infinity
-  // so the dynamic path never re-opens them. Evicting one from the dedup
-  // would achieve nothing — correlate only re-subscribes dynamic
-  // resolutions — so `forget_subscribed` deliberately skips them, and a
-  // full close retires the target as asked.
+  // in their own non-evictable map, so the dynamic path never re-opens
+  // them. Forgetting one would achieve nothing — correlate only
+  // re-subscribes dynamic resolutions — so `forget_subscribed` never
+  // touches that map, and a full close retires the target as asked.
   it("retires a static reaction target on a full close", async () => {
     const hits: string[] = [];
     const app = act()

@@ -85,7 +85,9 @@ The checkpoint advances only after `subscribe` succeeds. If `subscribe` throws, 
 
 It no longer decides *whether* a target is re-subscribed (every marked target is), only *what travels with the mark*. A resolution that beats the recorded priority floor raises priority and lane; one that doesn't re-sends the values the row already holds, because `subscribe` writes lane on every call and the mark has to ride the same upsert. Static targets sit at a `+Infinity` floor, so a dynamic resolution can never re-open what the build-time subscribe owns ([#1363](https://github.com/Rotorsoft/act-root/issues/1363)).
 
-Eviction cost: the next resolution of an evicted target re-sends its own priority and lane instead of the row's. The LRU is a memory bound, not a correctness mechanism.
+Only **dynamic** targets live in the LRU. A static target's record is held in a plain map alongside it, never evicted — the collection is the build-time list of static targets, already bounded by the registry ([#1582](https://github.com/Rotorsoft/act-root/issues/1582)). Sharing the bounded map made the `+Infinity` floor a matter of luck: evict a static record and the next dynamic resolution to that target saw no record, read that as never-seen, and re-subscribed the target with its own lane — re-laning a stream whose lane the build-time subscribe owns, and starving it wherever `onlyLanes` had provisioned a worker for the declared lane. There is nothing to warn about now, because there is no path left that reaches it.
+
+Eviction cost, for a dynamic target: the next resolution re-sends its own priority and lane instead of the row's. For those the LRU is a memory bound, not a correctness mechanism.
 
 ## Drain — claim, fetch, dispatch
 
