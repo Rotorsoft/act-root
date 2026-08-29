@@ -10,6 +10,7 @@ import {
   onIncremented,
   setApp,
 } from "./app.js";
+import { schema } from "./schema.js";
 
 const chance = new Chance();
 const a4 = chance.guid();
@@ -20,7 +21,7 @@ describe("pg store", () => {
     store(
       new PostgresStore({
         port: 5431,
-        schema: "schema_test",
+        schema: schema("schema_test"),
         table: "store_test",
       })
     );
@@ -203,7 +204,7 @@ describe("PostgresStore error paths", () => {
   beforeAll(() => {
     db = new PostgresStore({
       port: 5431,
-      schema: "err_test",
+      schema: schema("err_test"),
       table: "err_test",
     });
   });

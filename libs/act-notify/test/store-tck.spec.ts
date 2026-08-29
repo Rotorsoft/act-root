@@ -1,6 +1,7 @@
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { runStoreTck } from "@rotorsoft/act-tck";
 import { LoopbackBroker, withBroker } from "../src/index.js";
+import { schema } from "./schema.js";
 
 /**
  * The acceptance bar from the audit: the decorator must be a perfect
@@ -20,7 +21,7 @@ runStoreTck({
     withBroker(
       new PostgresStore({
         port: 5431,
-        schema: "tck_notify",
+        schema: schema("tck_notify"),
         table: "tck_notify_store",
         notify: false,
       }),

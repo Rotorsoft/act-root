@@ -15,10 +15,11 @@ import { Chance } from "chance";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
 const chance = new Chance();
 const PORT = 5431;
-const SCHEMA = "schema_pii_enc";
+const SCHEMA = schema("schema_pii_enc");
 const TABLE = "pii_enc_events";
 
 function buildStore(key: Buffer | (() => Buffer | Promise<Buffer>)) {

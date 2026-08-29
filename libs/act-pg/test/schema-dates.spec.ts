@@ -3,6 +3,7 @@ import { sandbox } from "@rotorsoft/act/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
 /**
  * #1556 on a durable adapter — the path that actually matters.
@@ -32,7 +33,7 @@ describe("schema-driven dates over a serializing store (#1556)", () => {
     const at = new Date("2026-01-01T00:00:00.000Z");
     const { app, store, cache, dispose } = await sandbox(act().withState(Doc), {
       store: () =>
-        new PostgresStore({ port: 5431, schema: "sdates", table: "t" }),
+        new PostgresStore({ port: 5431, schema: schema("sdates"), table: "t" }),
     });
     await app.do("stamp", { stream: "d1", actor }, { at, label: LOOKALIKE });
 

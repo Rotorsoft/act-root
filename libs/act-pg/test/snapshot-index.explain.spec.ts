@@ -22,9 +22,10 @@
 import { SNAP_EVENT } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 const PORT = 5431;
-const SCHEMA = "act_snapshot_explain";
+const SCHEMA = schema("act_snapshot_explain");
 const TABLE = "events";
 const FQT = `"${SCHEMA}"."${TABLE}"`;
 const SNAPSHOT_IX = `${TABLE}_snapshot_ix`;

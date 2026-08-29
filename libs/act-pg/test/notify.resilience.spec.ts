@@ -14,6 +14,7 @@
  */
 import { EventEmitter } from "node:events";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 // A fake pg PoolClient that is an EventEmitter, so tests can emit
 // `error` the way node-postgres would surface a connection loss.
@@ -51,7 +52,11 @@ vi.mock("pg", () => {
 });
 
 const makeStore = () => {
-  const store = new PostgresStore({ notify: true, schema: "x", table: "y" });
+  const store = new PostgresStore({
+    notify: true,
+    schema: schema("x"),
+    table: "y",
+  });
   const pool = new FakePool();
   // Swap in the fake pool — the constructor built a mocked (empty) Pool.
   (store as unknown as { _pool: FakePool })._pool = pool;

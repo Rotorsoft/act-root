@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { dispose, store } from "@rotorsoft/act";
 import type { Store } from "@rotorsoft/act/types";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 /**
  * Correlate's job, done by hand: `claim` follows the work mark since #1488,
@@ -42,7 +43,7 @@ const mark_all = async (s: Store) => {
 };
 
 const PORT = 5431;
-const SCHEMA = "act_priority_test";
+const SCHEMA = schema("act_priority_test");
 const TABLE = "events";
 
 describe("PostgresStore priority lanes", () => {

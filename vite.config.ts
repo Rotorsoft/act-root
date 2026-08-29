@@ -26,6 +26,8 @@
  * for sub-package invocations too (e.g. `pnpm -F @rotorsoft/act-pg exec
  * vitest run ...`), so resolution is CWD-independent.
  */
+
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { configDefaults, defineConfig } from "vitest/config";
@@ -73,6 +75,33 @@ export default defineConfig({
     env: {
       NO_COLOR: "1",
       FORCE_COLOR: "0",
+      // Namespaces every Postgres schema the adapter suites create, to the
+      // checkout they were run from (#1589).
+      //
+      // The `.claude/**` exclude above stops ONE `vitest run` from also
+      // discovering a worktree's copy of the specs. It cannot help when two
+      // vitest processes run concurrently in different worktrees, which is
+      // the normal shape of parallel agent work: both target the docker
+      // Postgres on 5431, both use the same hardcoded schema names, and both
+      // `drop()`/`seed()` in `beforeAll` — so they delete each other's tables
+      // mid-run. Measured on an unmodified tree: 110 failures against a
+      // sibling, and a full run swinging between 135 and 322 on identical
+      // code. Results that vary with what else is running are not evidence.
+      //
+      // Derived from the config's own directory, so it is stable across runs
+      // of one checkout (schemas are reused, not accumulated per run) and
+      // necessarily different between worktrees. No configuration, nothing to
+      // remember, and CI — one checkout per job — is unaffected.
+      //
+      // Six hex characters, not more: the NOTIFY channel is
+      // `act_commit_<schema>_<table>` and Postgres caps identifiers at 63
+      // bytes, a budget the notify suites already spend most of. A collision
+      // between two worktrees is merely the status quo this fixes, so the
+      // width is chosen against the cap rather than against birthday odds.
+      ACT_TEST_SCHEMA_SUFFIX: createHash("sha256")
+        .update(root)
+        .digest("hex")
+        .slice(0, 6),
     },
     // Expose `globalThis.gc` to workers so the retention guarantee in
     // `disposers.spec.ts` is enforced rather than skipped (#1441). A claim

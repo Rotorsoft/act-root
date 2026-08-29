@@ -17,6 +17,7 @@ import type { EventMeta } from "@rotorsoft/act";
 import type { Store } from "@rotorsoft/act/types";
 import { Pool, type PoolClient } from "pg";
 import { PostgresStore } from "../src/index.js";
+import { schema } from "./schema.js";
 
 /**
  * Correlate's job, done by hand: `claim` follows the work mark since #1488,
@@ -50,7 +51,11 @@ const mark_all = async (s: Store) => {
   if (marks.length) await s.subscribe(marks);
 };
 
-const PG = { port: 5431, schema: "visibility_test", table: "events" } as const;
+const PG = {
+  port: 5431,
+  schema: schema("visibility_test"),
+  table: "events",
+} as const;
 const FQT = `"${PG.schema}"."${PG.table}"`;
 const META: EventMeta = { correlation: "vis", causation: {} };
 
@@ -158,7 +163,7 @@ describe("pg commit visibility — end-to-end no-loss (#1178)", () => {
   beforeAll(async () => {
     store = new PostgresStore({
       port: 5431,
-      schema: "visibility_e2e",
+      schema: schema("visibility_e2e"),
       table: "events",
     });
     await store.drop();
@@ -179,7 +184,7 @@ describe("pg commit visibility — end-to-end no-loss (#1178)", () => {
   });
 
   it("a consumer never acks past an in-flight event — nothing is lost", async () => {
-    const FQ = '"visibility_e2e"."events"';
+    const FQ = `"${schema("visibility_e2e")}"."events"`;
     // Slow writer A: mid-commit (lock held, id assigned, not yet visible) —
     // the faithful shape of another Act process inside PostgresStore.commit.
     const a = await pool.connect();

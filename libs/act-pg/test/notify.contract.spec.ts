@@ -23,6 +23,7 @@
 import { sleep } from "@rotorsoft/act";
 import type { Store } from "@rotorsoft/act/types";
 import { PostgresStore } from "../src/postgres-store.js";
+import { schema } from "./schema.js";
 
 /**
  * Correlate's job, done by hand: `claim` follows the work mark since #1488,
@@ -57,7 +58,7 @@ const mark_all = async (s: Store) => {
 };
 
 const PORT = 5431;
-const SCHEMA = "schema_notify_contract_test";
+const SCHEMA = schema("notify_contract");
 const TABLE = "notify_contract_test";
 
 /**
