@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.13...@rotorsoft/act-tck-v1.36.14) (2026-08-29)
+
+
+### Bug Fixes
+
+* **act:** don't quarantine a stream while the database is failing (ACT-1592) ([#1593](https://github.com/Rotorsoft/act-root/issues/1593)) ([25f308b](https://github.com/Rotorsoft/act-root/commit/25f308b669a4cf7a7fed0b9a394b4aaddc0c8cee)), closes [#1592](https://github.com/Rotorsoft/act-root/issues/1592)
+
 # [@rotorsoft/act-tck-v1.36.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.12...@rotorsoft/act-tck-v1.36.13) (2026-08-29)
 
 
