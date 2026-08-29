@@ -302,13 +302,17 @@ export class CorrelateCycle<
   /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
-  // target → what it was last subscribed at. Every scan re-subscribes the
+  // Dynamically discovered targets → what each was last subscribed at,
+  // bounded by `maxSubscribedStreams`. The static half lives in
+  // `_static_subscriptions` below, which is deliberately not evictable.
+  //
+  // Every scan re-subscribes the
   // targets it resolved (that is how the work mark lands), so this no longer
   // decides *whether* a target is sent — it decides *what* is sent with it:
   // a resolution raises priority/lane only when it beats the recorded floor,
   // and otherwise re-sends the row's own values so the mark changes nothing
   // else. See {@link Subscription}.
-  private readonly _subscribed: LruMap<string, Subscription>;
+  private readonly _dynamic_subscriptions: LruMap<string, Subscription>;
   /**
    * What each static target was subscribed at by `init`. A plain map, never
    * evicted: the collection is the build-time `_static_targets` list, so it
@@ -378,7 +382,7 @@ export class CorrelateCycle<
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
     this._lease_millis = lease_millis;
     this._key = registry_key(registry.events);
-    this._subscribed = new LruMap(max_subscribed_streams);
+    this._dynamic_subscriptions = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._declared_lanes = declared_lanes;
     this._static_targets = static_targets;
@@ -486,7 +490,7 @@ export class CorrelateCycle<
    * at +Infinity and the dynamic path never re-opens them.
    */
   forget_subscribed(streams: Iterable<string>): void {
-    for (const stream of streams) this._subscribed.delete(stream);
+    for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }
 
   /**
@@ -649,7 +653,7 @@ export class CorrelateCycle<
             // can evict, and a missing record reads as never-seen (#1582).
             const recorded =
               this._static_subscriptions.get(resolved.target) ??
-              this._subscribed.get(resolved.target);
+              this._dynamic_subscriptions.get(resolved.target);
             const priority = resolved.priority ?? 0;
             const upgraded = !recorded || priority > recorded.floor;
             const carried = upgraded
@@ -755,7 +759,7 @@ export class CorrelateCycle<
       // resolution to one is ever `upgraded`.
       for (const { stream, priority, lane } of streams) {
         if (correlated.get(stream)?.upgraded)
-          this._subscribed.set(stream, {
+          this._dynamic_subscriptions.set(stream, {
             floor: priority as number,
             priority: priority as number,
             lane,

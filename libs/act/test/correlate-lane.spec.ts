@@ -63,7 +63,7 @@ describe("correlate dynamic-resolver lane (#1255)", () => {
   // #1363: the runtime max() invariant must hold ACROSS correlate scans, not
   // only within one. A dynamic target subscribed at a low priority must be
   // re-subscribed (raising the store's priority) when a later scan resolves a
-  // higher one — the `_subscribed` dedup used to freeze it at first discovery.
+  // higher one — the `_dynamic_subscriptions` dedup used to freeze it at first discovery.
   describe("cross-scan priority upgrade (#1363)", () => {
     const tiered = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))

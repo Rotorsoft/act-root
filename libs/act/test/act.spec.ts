@@ -341,7 +341,7 @@ describe("act", () => {
     // Second correlate — same events, target already subscribed
     // Reset checkpoint to force re-scan
     (dynApp as any)._correlate._checkpoint = -1;
-    (dynApp as any)._correlate._subscribed.delete("dyn-x");
+    (dynApp as any)._correlate._dynamic_subscriptions.delete("dyn-x");
     const r2 = await dynApp.correlate({ limit: 100 });
     expect(r2.subscribed).toBe(0); // already subscribed from r1
   });
@@ -615,7 +615,9 @@ describe("act", () => {
     // in the non-evictable static map, never the LRU (#1582).
     await staticApp.correlate();
     expect(correlate._static_subscriptions.has("my-static-target")).toBe(true);
-    expect(correlate._subscribed.has("my-static-target")).toBe(false);
+    expect(correlate._dynamic_subscriptions.has("my-static-target")).toBe(
+      false
+    );
 
     // Commit + drain with static resolver — covers the non-function branch in drain's payload filter
     await staticApp.do("doStatic", { stream: "static-1", actor }, {});
