@@ -156,20 +156,27 @@ export type DrainCycle<TEvents extends Schemas> = {
  * Gated on `blockOnError` for the same reason `finalize` is: an operator who
  * opted out of blocking chose "retry forever," and that choice holds here too.
  *
- * `lease.retry` here is the *charged* counter — claims spent on a store
- * failure are already discounted out of it by {@link discount_store_charges}
- * — so the message's remediation (raise `leaseMillis`) matches the only cause
- * that can still reach this point.
+ * Skipped entirely while the store is failing. `claim` writes the counter up
+ * before a handler runs, and only a completed pass resets it, so a pass that
+ * dies on a store call leaves a count behind that no handler earned. A few of
+ * those in a row look exactly like a lost lease from here, and quarantining a
+ * healthy stream over a database hiccup is the worse mistake — the store
+ * recovering resets the counter on its own.
  *
  * @internal
  */
 function budget_exhausted<TEvents extends Schemas>(
   lease: Lease,
-  options: ReactionPayload<TEvents>["options"] | undefined
+  options: ReactionPayload<TEvents>["options"] | undefined,
+  store_failing: boolean
 ): HandleResult | undefined {
-  if (!options?.blockOnError || lease.retry <= options.maxRetries)
+  if (
+    store_failing ||
+    !options?.blockOnError ||
+    lease.retry <= options.maxRetries
+  )
     return undefined;
-  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the lease was lost on every attempt, so the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. Raise leaseMillis for this handler, then unblock the stream.`;
+  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. That means every attempt lost its lease before it could ack: raise leaseMillis for this handler, then unblock the stream.`;
   log().error(error);
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
@@ -201,86 +208,6 @@ function warn_misrouted(
 }
 
 /**
- * Claims charged to the store rather than to a handler, keyed by stream.
- *
- * `claim` persists `retry = retry + 1` before any handler runs, and only a
- * confirmed write-back resets it. A cycle that throws on `fetch`, `block` or
- * `ack` therefore walks the counter up by a claim no handler ever spent — and
- * a transient store failure repeated a few times blocks the stream, with a
- * message prescribing a lease size that was never the constraint (#1592). The
- * framework already classifies that failure as the store's (it routes it to
- * the circuit breaker); this is the other half of the reconciliation.
- *
- * The map counts every claim since the stream's last confirmed write-back,
- * the one in flight included. A cycle that finalizes converts its claim into
- * a handler attempt; a cycle that throws leaves it charged, and the next
- * claim discounts it back out. What the block decisions read is then the
- * counter `maxRetries` and `blockOnError` are documented to mean: handler
- * failures only.
- *
- * Process-local, like the defer schedule: a restart forgets the refunds and
- * the stream falls back to today's behavior, never worse than it.
- *
- * @internal
- */
-export type StoreCharges = Map<string, number>;
-
-/**
- * Charge this cycle's claims and hand back leases whose `retry` is net of
- * every claim a store failure already spent.
- *
- * The discounted counter travels with the lease from here on — into the
- * budget check, into the dispatcher's block decision, and into the `retry`
- * a due-marked ack writes back — so a refund earned in memory becomes
- * durable the moment the store confirms anything for the stream.
- */
-function discount_store_charges(
-  charges: StoreCharges,
-  leased: Lease[]
-): Lease[] {
-  let discounted = 0;
-  const refunded = leased.map((lease) => {
-    const charged = (charges.get(lease.stream) ?? 0) + 1;
-    charges.set(lease.stream, charged);
-    // The in-flight claim is a handler attempt until proven otherwise — only
-    // claims that already died at the store are refunded.
-    const credit = charged - 1;
-    if (!credit) return lease;
-    discounted++;
-    return { ...lease, retry: Math.max(0, lease.retry - credit) };
-  });
-  if (discounted)
-    log().warn(
-      `drain: ${discounted} of ${leased.length} claimed streams carry claims a store failure spent — refunded, not charged to the retry budget. Persistent refunds mean the store is failing mid-cycle; look for the failing store op, not the handler.`
-    );
-  return refunded;
-}
-
-/**
- * Close the ledger for a cycle that finalized.
- *
- * A stream the store confirmed carries its refund forward in the persisted
- * counter — a due-marked ack writes back the discounted `retry`, a plain ack
- * resets it — so nothing is owed. A stream that submitted nothing (a handler
- * that failed with no progress, whose claim-bumped counter stands) keeps its
- * earlier refunds and gives up only the claim it just spent.
- */
-function settle_store_charges(
-  charges: StoreCharges,
-  leased: Lease[],
-  written: Iterable<string>
-): void {
-  const confirmed = new Set(written);
-  for (const { stream } of leased) {
-    // Every leased stream was charged on the way in, so the entry is always
-    // there (asserted with `!`).
-    const remaining = confirmed.has(stream) ? 0 : charges.get(stream)! - 1;
-    if (remaining > 0) charges.set(stream, remaining);
-    else charges.delete(stream);
-  }
-}
-
-/**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
  *
@@ -302,7 +229,8 @@ export async function run_drain_cycle<
   registry: Registry<TSchemaReg, TEvents, TActions>,
   batch_handlers: Map<string, BatchHandler<TEvents>>,
   misrouted: Set<string>,
-  store_charges: StoreCharges,
+  /** The store failed on the previous pass — see {@link budget_exhausted}. */
+  store_failing: boolean,
   handle: Handle<TEvents>,
   handle_batch: HandleBatch<TEvents>,
   lagging: number,
@@ -320,18 +248,14 @@ export async function run_drain_cycle<
   lane?: string
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
-  const claimed = await ops.claim(
+  const leased = await ops.claim(
     lagging,
     leading,
     randomUUID(),
     leaseMillis,
     lane
   );
-  if (!claimed.length) return undefined;
-
-  // Refund the claims a failed store op spent before they reach a block
-  // decision (#1592) — see {@link StoreCharges}.
-  const leased = discount_store_charges(store_charges, claimed);
+  if (!leased.length) return undefined;
 
   // Fetch events for each leased stream. Streams in a backoff window are
   // already excluded here: the store persists `deferred_at` on a due-marked
@@ -406,7 +330,11 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
-      const exhausted = budget_exhausted(lease, payloads[0]?.options);
+      const exhausted = budget_exhausted(
+        lease,
+        payloads[0]?.options,
+        store_failing
+      );
       if (exhausted) return Promise.resolve(exhausted);
       const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
@@ -466,13 +394,6 @@ export async function run_drain_cycle<
           : [];
   });
   const acked = await ops.ack(submitted);
-
-  // The store answered for this cycle: everything it was handed is either
-  // written back or, on the no-progress-failure path, deliberately unwritten.
-  settle_store_charges(store_charges, leased, [
-    ...submitted.map(({ stream }) => stream),
-    ...blocked.map(({ stream }) => stream),
-  ]);
 
   // Every adapter gates `ack` on the lease still being held
   // (`WHERE leased_by = by`) — correctly, since that is what stops an
@@ -611,12 +532,6 @@ export class DrainController<
    * would bury the signal it exists to raise.
    */
   private readonly _misrouted = new Set<string>();
-  /**
-   * Claims this lane charged to the store instead of to a handler (#1592).
-   * See {@link StoreCharges} — the ledger has to outlive the cycle that
-   * failed, because the cycle that pays it back is the next one.
-   */
-  private readonly _store_charges: StoreCharges = new Map();
   private _stopped = false;
   /**
    * Resolves when the cycle currently in flight finishes; `undefined` when
@@ -764,7 +679,7 @@ export class DrainController<
         this._deps.registry,
         this._deps.batch_handlers,
         this._misrouted,
-        this._store_charges,
+        this._deps.breaker.failing,
         this._deps.handle,
         this._deps.handle_batch,
         lagging,
