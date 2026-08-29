@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.12...@rotorsoft/act-tck-v1.36.13) (2026-08-29)
+
+
+### Bug Fixes
+
+* **act:** keep static reaction targets out of the subscribed LRU (ACT-1582) ([#1588](https://github.com/Rotorsoft/act-root/issues/1588)) ([03e132e](https://github.com/Rotorsoft/act-root/commit/03e132e4a2c557a7799684267e8a5379fa7a071c)), closes [#1582](https://github.com/Rotorsoft/act-root/issues/1582)
+
 # [@rotorsoft/act-tck-v1.36.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.11...@rotorsoft/act-tck-v1.36.12) (2026-08-29)
 
 
