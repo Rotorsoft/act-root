@@ -56,6 +56,16 @@ export class CircuitBreaker {
     this._hooks = hooks;
   }
 
+  /**
+   * True when the store has failed at least once since the last pass that
+   * went all the way through. The breaker can still read "closed" here: it
+   * only opens after several failures in a row, so this catches the first
+   * one, which `state()` cannot.
+   */
+  get failing(): boolean {
+    return this._failures > 0;
+  }
+
   /** Current state given the wall-clock `now`. */
   state(now: number): CircuitState {
     if (this._opened_at === undefined) return "closed";

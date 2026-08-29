@@ -156,15 +156,27 @@ export type DrainCycle<TEvents extends Schemas> = {
  * Gated on `blockOnError` for the same reason `finalize` is: an operator who
  * opted out of blocking chose "retry forever," and that choice holds here too.
  *
+ * Skipped entirely while the store is failing. `claim` writes the counter up
+ * before a handler runs, and only a completed pass resets it, so a pass that
+ * dies on a store call leaves a count behind that no handler earned. A few of
+ * those in a row look exactly like a lost lease from here, and quarantining a
+ * healthy stream over a database hiccup is the worse mistake — the store
+ * recovering resets the counter on its own.
+ *
  * @internal
  */
 function budget_exhausted<TEvents extends Schemas>(
   lease: Lease,
-  options: ReactionPayload<TEvents>["options"] | undefined
+  options: ReactionPayload<TEvents>["options"] | undefined,
+  store_failing: boolean
 ): HandleResult | undefined {
-  if (!options?.blockOnError || lease.retry <= options.maxRetries)
+  if (
+    store_failing ||
+    !options?.blockOnError ||
+    lease.retry <= options.maxRetries
+  )
     return undefined;
-  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the lease was lost on every attempt, so the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. Raise leaseMillis for this handler, then unblock the stream.`;
+  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. That means every attempt lost its lease before it could ack: raise leaseMillis for this handler, then unblock the stream.`;
   log().error(error);
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
@@ -217,6 +229,8 @@ export async function run_drain_cycle<
   registry: Registry<TSchemaReg, TEvents, TActions>,
   batch_handlers: Map<string, BatchHandler<TEvents>>,
   misrouted: Set<string>,
+  /** The store failed on the previous pass — see {@link budget_exhausted}. */
+  store_failing: boolean,
   handle: Handle<TEvents>,
   handle_batch: HandleBatch<TEvents>,
   lagging: number,
@@ -316,7 +330,11 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
-      const exhausted = budget_exhausted(lease, payloads[0]?.options);
+      const exhausted = budget_exhausted(
+        lease,
+        payloads[0]?.options,
+        store_failing
+      );
       if (exhausted) return Promise.resolve(exhausted);
       const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
@@ -661,6 +679,7 @@ export class DrainController<
         this._deps.registry,
         this._deps.batch_handlers,
         this._misrouted,
+        this._deps.breaker.failing,
         this._deps.handle,
         this._deps.handle_batch,
         lagging,

@@ -138,7 +138,7 @@ Three "exits" from a leased state:
 
 - **`ack`** — handler succeeded; advance the watermark to the last processed event ID, clear the lease, reset retry count.
 - **`block`** — handler failed past the retry budget (or threw `NonRetryableError`); set `blocked=true`. The stream stays out of `claim()` results until something explicitly unblocks it. Use `app.unblock(input)` to resume from where the stream stopped (the common case — operator fixed the underlying issue), or `app.reset(input)` to rebuild from event 0 (projection rebuild, rare). Both accept either a `string[]` of stream names or a `StreamFilter` (`{ stream?, source?, blocked? }`) for bulk operations — e.g., `app.unblock({ stream: "^webhooks-out-" })` to clear a whole family at once, or `app.unblock({})` for a post-incident "unblock everything blocked" sweep.
-- **Timeout** — worker died or hung; `leased_until` passes; the next `claim()` from any worker can acquire the stream. The reclaim **counts against the retry budget**: every `claim()` increments the stream's retry counter and only `ack` resets it, so a stream whose workers keep dying marches toward `blockOnError` exactly like one whose handlers keep throwing. That is the safe default — repeated worker deaths on one stream are poison-adjacent (the events themselves may be what kills the worker), and quarantining beats an infinite crash loop. The timed-out worker may in fact have processed the events and only failed to ack; at-least-once delivery already requires handlers to tolerate that replay, and a successful re-run acks and resets the counter.
+- **Timeout** — worker died or hung; `leased_until` passes; the next `claim()` from any worker can acquire the stream. The reclaim **counts against the retry budget**: every `claim()` increments the stream's retry counter and only `ack` resets it, so a stream whose workers keep dying marches toward `blockOnError` exactly like one whose handlers keep throwing. That is the safe default — repeated worker deaths on one stream are poison-adjacent (the events themselves may be what kills the worker), and quarantining beats an infinite crash loop. A count the *store* ran up, by failing before the pass could finish, is treated differently: see [When the database, not the handler, spent the count](#when-the-database-not-the-handler-spent-the-count). The timed-out worker may in fact have processed the events and only failed to ack; at-least-once delivery already requires handlers to tolerate that replay, and a successful re-run acks and resets the counter.
 
 ### Why a stream stays in `claim()` after a partial handler failure
 
@@ -178,6 +178,16 @@ The drain therefore checks the budget once more where it can still act on it: at
 Strictly greater, not `>=`, and the difference matters. A stream legitimately reaches `retry === maxRetries` on its final attempt, and that attempt is entitled to run — it blocks only if it fails again. Arriving *past* the budget is only possible when no attempt ever produced an error, which means the lease was lost every single round. That is the stuck stream and nothing else. Recovery is the ordinary one: raise `leaseMillis` for that handler, then `app.unblock`.
 
 Operators who set `blockOnError: false` chose "retry forever" and keep it here too.
+
+### When the database, not the handler, spent the count
+
+The same counter has a second way to climb, and it has nothing to do with a handler. `claim` writes the count up before any handler runs, and only a pass that gets all the way to its `ack` writes it back down. A pass that dies partway through, on a read that could not get through or an `ack` the database refused, leaves a count behind that no handler earned. A few of those in a row and the stream arrives past its budget with no error anywhere, which from the block's point of view is indistinguishable from a lease lost every round.
+
+That is not a rare shape on a single-writer store, where a second connection holding a write for a moment is routine: a dev server restarting over itself, a backup, a viewer with the database file open.
+
+So the block stands down whenever the store has failed since the last pass that completed. The circuit breaker already tracks exactly that, so nothing new had to be recorded. Waiting costs nothing. A stream that is genuinely stuck stays stuck, and the next pass that completes either resets the count, because the work finally went through, or leaves it standing for the block to act on once the store is healthy.
+
+One case still resolves the other way. If the store eats a few claims and then a handler starts failing for real, that handler is blocked sooner than its full budget would allow, because the count it inherits is already high. The handler's own error is logged either way, and `app.unblock` resets the count, so the next round gives it the full budget.
 
 ## Why no framework-level request deduplication
 

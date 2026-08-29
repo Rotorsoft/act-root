@@ -226,6 +226,8 @@ Streams block on three paths:
 2. A reaction handler throws `NonRetryableError` (or a subclass like `NonRetryableWebhookError`) — the drain finalizer blocks the stream on the first failed attempt without consuming the retry budget. See [Non-retryable errors](#non-retryable-errors).
 3. A reaction handler never fails but never finishes inside its lease. Each attempt completes, submits an ack the store drops (the lease is gone), and the next claim bumps `retry` again — the budget is spent without a single error, so paths 1 and 2 can't fire. The drain blocks such a stream at claim time, before dispatching, once `retry` is **strictly greater** than `maxRetries`. The fix is `leaseMillis`, not `maxRetries`: size the lease above the handler's real duration, then `app.unblock`. See [When every attempt loses its lease](../architecture/concurrency-model#when-every-attempt-loses-its-lease).
 
+A failing store is deliberately not a fourth path. `claim` writes the retry count up before any handler runs, so a store that fails partway through a pass raises the count with no handler behind it, and path 3 would fire on that. Path 3 therefore stands down while the store is failing. See [When the database, not the handler, spent the count](../architecture/concurrency-model#when-the-database-not-the-handler-spent-the-count).
+
 Recovery uses `app.unblock(input)` (resume from where the stream stopped) or `app.reset(input)` (rebuild from event 0). Both accept either an explicit `string[]` or a `StreamFilter` for bulk operations. See [Recovering a blocked stream](#recovering-a-blocked-stream--appunblock) and [Discovering blocked streams](#discovering-blocked-streams--appblocked_streams).
 
 Monitor blocked streams via the `"blocked"` lifecycle event:
