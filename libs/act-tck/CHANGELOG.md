@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.11...@rotorsoft/act-tck-v1.36.12) (2026-08-29)
+
+
+### Bug Fixes
+
+* **act:** key the dynamic-lane reports on the declaration, not the target ([#1587](https://github.com/Rotorsoft/act-root/issues/1587)) ([c2a3b6f](https://github.com/Rotorsoft/act-root/commit/c2a3b6f3f2a8ba39a24659e72db9bbfa67ed4e52)), closes [#1584](https://github.com/Rotorsoft/act-root/issues/1584)
+
 # [@rotorsoft/act-tck-v1.36.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.10...@rotorsoft/act-tck-v1.36.11) (2026-08-27)
 
 
