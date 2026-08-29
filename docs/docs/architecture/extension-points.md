@@ -314,6 +314,25 @@ const tenantApp = act()
 
 The framework threads the bag through `AsyncLocalStorage` and wraps every public Act method (`do`, `load`, `query`, `drain`, `settle`, `close`, ...) so internal `store()`/`cache()` calls resolve to the scoped ports transparently. Adapters are unchanged. Both `store` and `cache` are required together — sharing a single cache across two distinct stores would collide on stream-keyed entries.
 
+### One store, one application
+
+Each Act in the pattern above gets **its own store**. That is not incidental — it is the constraint.
+
+**Two Acts built from *different registries* must never share one store**, whether through `scoped` or through the singleton `store()`. Correlation keeps a single shared read cursor per store, and a correlator key with no row of its own is seeded from that shared position. So a second application's first pass resumes wherever the first application had read to, and every event below that point is never correlated: the reactions for them do not run late, they **never run**, and nothing is logged ([#1581](https://github.com/Rotorsoft/act-root/issues/1581)).
+
+The framework does not detect this, and cannot do so cheaply. The obvious signal — a correlator key sitting behind the shared cursor — is produced by a perfectly healthy single application, because an explicit `app.correlate()` is unleased and advances only the shared cursor. The same reading therefore means both "someone else is here" and "nothing is wrong," so an automatic warning would fire on ordinary restarts. Detecting it properly means seeing the other key, and no `Store` call exposes more than the caller's own row.
+
+What is safe, and what is not:
+
+| | |
+|---|---|
+| Many processes running the **same** application over one store | ✅ the core scaling model — same registry, same correlator key |
+| Two Acts built from the **same builder** (multi-tenant, A/B), each with its own store | ✅ the pattern above |
+| An empty Act wrapping a raw store for tooling (the inspector's `restore` path) | ✅ a registry with no reactions resolves no targets and never writes a checkpoint |
+| Two **different** registries over one store | ❌ silently loses reactions |
+
+If one store is currently serving several bounded contexts, [recipes/scaling/split-stores](https://github.com/Rotorsoft/act-root/blob/master/recipes/scaling/split-stores/README.md) is the migration: one Act per context, each with its own store and cache.
+
 ### The shared-builder pattern (multi-tenant, A/B testing)
 
 For more than a couple of Acts — multi-tenant SaaS, parallel test workers, side-by-side store experiments — hold the builder in a constant and call `.build({ scoped: ... })` once per tenant. The builder is reusable: the first build performs one-time work (projection merge, deprecation scan, startup advisory) and subsequent builds reuse the merged registry to produce independent Acts.

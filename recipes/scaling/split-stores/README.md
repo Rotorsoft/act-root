@@ -44,6 +44,35 @@ If something *does* read across the boundary — a projection that spans
 contexts, a debugging habit of "what happened first, system-wide" — read
 [What you give up](#what-you-give-up) first, honestly.
 
+### This is a correctness boundary, not only a scaling one
+
+The page above frames sharing a store as a *performance* problem: one
+sequence, one drain, contention nobody asked for. There is a sharper
+reason, and it applies long before the sequence becomes a bottleneck.
+
+Two Acts built from **different registries** over one store silently lose
+reactions. Correlation keeps one shared read cursor per store, and a
+correlator key with no row of its own is seeded from it — so the second
+application's first pass resumes wherever the first had read to, and
+every event below that point is never correlated. The reactions do not
+run late. They never run, and nothing is logged
+([#1581](https://github.com/Rotorsoft/act-root/issues/1581)).
+
+Nothing stops you at build time. The framework cannot detect it cheaply:
+the signal that would reveal it — a correlator key behind the shared
+cursor — is also what a perfectly healthy single application looks like
+after any explicit `correlate()`, so an automatic warning would fire on
+ordinary restarts.
+
+So if two contexts share a store today and each has its own reactions,
+you are already losing work, whatever the table size says. Split first,
+tune later.
+
+Note what is *not* affected: many processes running the **same**
+application over one store is the core scaling model and is entirely
+safe — same registry, same correlator key. The hazard is two *different*
+registries, not two processes.
+
 ## The mechanics
 
 One builder (or one per context), N builds, each with its own ports:

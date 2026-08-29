@@ -85,6 +85,14 @@ const DEFAULT_CORRELATION_LEASE_MS = 5_000;
  * order. Truncated to 32 hex characters: a collision means two applications
  * with identical event *and* handler names share a lease, and those are
  * interchangeable by construction.
+ *
+ * **This separates leases; it does not make the topology supported.** Two
+ * applications over one store still share a single read cursor, and a key
+ * with no row of its own is seeded from it — so the second application
+ * resumes where the first had read to and never correlates what lies below
+ * (#1581). One store belongs to one application; the split-stores recipe is
+ * the migration. The key exists so that many processes of the *same*
+ * application can hand the scan between them, which is the supported case.
  */
 const registry_key = <TEvents extends Schemas>(
   events: EventRegister<TEvents>
