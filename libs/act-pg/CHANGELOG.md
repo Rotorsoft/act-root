@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.19.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.2...@rotorsoft/act-pg-v1.19.3) (2026-08-30)
+
+
+### Bug Fixes
+
+* **act-pg:** exclude the boundary event from created_after ([#1603](https://github.com/Rotorsoft/act-root/issues/1603)) ([e8c6a18](https://github.com/Rotorsoft/act-root/commit/e8c6a182ead2c7631b1512dcd1e726dcc14a0a1a)), closes [#1595](https://github.com/Rotorsoft/act-root/issues/1595)
+
 # [@rotorsoft/act-pg-v1.19.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.1...@rotorsoft/act-pg-v1.19.2) (2026-08-27)
 
 
