@@ -9,7 +9,7 @@
  * `disposeAndExit`, issued it against a disposed store.
  */
 import { act, dispose, InMemoryStore, state, store } from "@rotorsoft/act";
-import type { Store } from "@rotorsoft/act/types";
+import type { Store, StoreNotification } from "@rotorsoft/act/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -160,4 +160,86 @@ describe("shutdown waits for an in-flight settle cycle (#1468)", () => {
     await app.shutdown();
     expect(Date.now() - started).toBeLessThan(50);
   });
+});
+
+describe("a notification during shutdown cannot arm a new cycle (#1596)", () => {
+  /** The harness above, plus a `notify` capability the test fires by hand. */
+  const notifiable = (after_shutdown: string[], flags: { shut: boolean }) => {
+    const raw = new InMemoryStore();
+    let handler: ((n: StoreNotification) => void) | undefined;
+    const wrapped = new Proxy(raw, {
+      get(t, p, r) {
+        if (p === "notify")
+          return (h: (n: StoreNotification) => void) => {
+            handler = h;
+            return () => {
+              handler = undefined;
+            };
+          };
+        const v = Reflect.get(t, p, r);
+        if (typeof v !== "function" || typeof p !== "string") return v;
+        return (...args: unknown[]) => {
+          if (flags.shut) after_shutdown.push(p);
+          return (v as (...a: unknown[]) => unknown).apply(t, args);
+        };
+      },
+    }) as unknown as Store;
+    return {
+      wrapped,
+      fire: (n: StoreNotification) => handler?.(n),
+      subscribed: () => handler !== undefined,
+    };
+  };
+
+  const scenario = async (fire_during_grace: boolean) => {
+    const after_shutdown: string[] = [];
+    const flags = { shut: false };
+    const n = notifiable(after_shutdown, flags);
+    store(n.wrapped);
+
+    let release!: () => void;
+    const parked = new Promise<void>((r) => {
+      release = r;
+    });
+    let first = true;
+    const app = act()
+      .withState(Ticker)
+      .on("Ticked")
+      .do(async function hold() {
+        if (first) {
+          first = false;
+          await parked;
+        }
+      })
+      .to(() => ({ target: "t" }))
+      .build();
+
+    await app.do("tick", { stream: "s1", actor }, {});
+    await app.correlate();
+    const draining = app.drain();
+    await new Promise<void>((r) => setTimeout(r, 20));
+
+    // Shutdown is now waiting out its grace budget on the parked handler.
+    const shutting = app.shutdown({ graceMs: 5_000 });
+    await new Promise<void>((r) => setTimeout(r, 20));
+    if (fire_during_grace)
+      n.fire({ stream: "s2", events: [{ id: 99, name: "Ticked" }] });
+    release();
+    await draining;
+    await shutting;
+
+    flags.shut = true;
+    // Give any cycle the notification armed a chance to run.
+    await new Promise<void>((r) => setTimeout(r, 150));
+    const escaped = [...after_shutdown];
+    await dispose()();
+    return escaped;
+  };
+
+  it("takes no lease after shutdown resolves, notified or not", async () => {
+    // The control fixes everything except the notification, so a difference
+    // between the two is the notification's doing and nothing else.
+    expect(await scenario(false)).toEqual([]);
+    expect(await scenario(true)).toEqual([]);
+  }, 20_000);
 });
