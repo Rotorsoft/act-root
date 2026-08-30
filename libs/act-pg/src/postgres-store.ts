@@ -925,8 +925,17 @@ export class PostgresStore implements Store {
         conditions.push(`id<$${values.length}`);
       }
       if (created_after) {
-        values.push(created_after.toISOString());
-        conditions.push(`created>$${values.length}`);
+        // `created` is stored at microsecond resolution, but a caller only
+        // ever sees the millisecond a JS `Date` can hold — a row stamped
+        // ...976999 reads back as ...976, so `created > '...976'` matched the
+        // row against its own timestamp and returned it (#1595). Millisecond
+        // is the resolution the whole contract is expressed in, so
+        // strictly-after means "at least the next millisecond", which is what
+        // InMemory and SQLite already do. Advancing the bound rather than
+        // truncating the column keeps this a plain range scan on
+        // (created, id), and fixes rows already written at microseconds.
+        values.push(new Date(created_after.getTime() + 1).toISOString());
+        conditions.push(`created>=$${values.length}`);
       }
       if (created_before) {
         values.push(created_before.toISOString());
