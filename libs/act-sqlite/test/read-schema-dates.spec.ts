@@ -147,6 +147,7 @@ describe("read schema converts dates without validating (#1594)", () => {
       a: z.date(),
       b: z.date().default(() => new Date(0)),
       t: z.tuple([z.date(), z.string()]),
+      td: z.tuple([z.string(), z.string()]),
       r: z.date().readonly(),
       c: z.date().catch(() => new Date(0)),
       n: z.date().optional().nonoptional(),
@@ -174,6 +175,7 @@ describe("read schema converts dates without validating (#1594)", () => {
         a: new Date("2020-01-01"),
         b: new Date("2021-01-01"),
         t: [when, "x"],
+        td: ["no", "dates"],
         r: when,
         c: when,
         n: when,
@@ -190,13 +192,14 @@ describe("read schema converts dates without validating (#1594)", () => {
       expect(d[key], key).toBeInstanceOf(Date);
     expect(d.t[0]).toBeInstanceOf(Date);
     expect(d.t[1]).toBe("x");
+    expect(d.td).toEqual(["no", "dates"]);
     expect(d.l[0]).toBeInstanceOf(Date);
     expect(d.m.k).toBeInstanceOf(Date);
     expect(d.o.deep).toBeInstanceOf(Date);
     expect(d.x).toBeNull();
   });
 
-  it("hands back what is stored when the payload predates the declaration", async () => {
+  it("revives dates in a payload that predates the declaration", async () => {
     await open_store("f");
     const Happened = z.object({ at: z.date(), label: z.string() });
     const S = state({ F: z.object({ n: z.number() }) })
@@ -220,9 +223,33 @@ describe("read schema converts dates without validating (#1594)", () => {
       at: unknown;
       label: unknown;
     };
-    // reading does not throw, and the stored value comes back as stored
+    // reading does not throw; the missing field is simply absent, and the
+    // date still revives because the schema only ever described the date
     expect(data.label).toBeUndefined();
-    expect(typeof data.at).toBe("string");
+    expect(data.at).toBeInstanceOf(Date);
+  });
+
+  it("hands back what is stored when a date field holds something else", async () => {
+    await open_store("g");
+    const Happened = z.object({ at: z.date() });
+    const S = state({ G: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Happened })
+      .patch({ Happened: (_, s) => ({ n: s.n + 1 }) })
+      .on({ Do: Happened })
+      .emit((p) => ["Happened", p])
+      .build();
+    const app = act().withState(S).build();
+
+    await store().commit(
+      "g1",
+      [{ name: "Happened", data: { at: "not a date" } } as never],
+      { correlation: "c", causation: {} },
+      -1
+    );
+
+    const data = (await app.query_array({}))[0]!.data as { at: unknown };
+    expect(data.at).toBe("not a date");
   });
 
   it("leaves an ISO-shaped z.string() a string (#1556 stays fixed)", async () => {

@@ -10965,11 +10965,11 @@ export type EventTags = {
   /** Keys marked \`sensitive(...)\`, top level (and across union variants). */
   readonly sensitive: readonly string[];
   /**
-   * Types a stored payload against the declaration, or \`undefined\` when the
-   * schema declares no dates.
+   * Revives the dates in a stored payload, or \`undefined\` when the schema
+   * declares none.
    */
   readonly parse: ((data: unknown) => unknown) | undefined;
-  /** The same, for the \`pii\` sidecar's half of the declaration. */
+  /** The same for the \`pii\` sidecar, when a sensitive field is a date. */
   readonly parse_pii: ((data: unknown) => unknown) | undefined;
 };
 
@@ -10979,72 +10979,82 @@ const def_of = (schema: unknown): Record<string, unknown> | undefined =>
   (schema as { def?: Record<string, unknown> }).def;
 
 /**
- * Rebuild a schema for reading: dates coerce from their stored string, the
- * sensitive keys are left out, and objects keep keys they don't declare.
+ * Build a schema that describes an event's date fields and nothing else, or
+ * \`undefined\` when it declares no dates.
  *
- * Reading revives dates, it does not re-validate — the payload was validated
- * on the way in. The sensitive keys are left out rather than made optional
- * because the write path moved them into the \`pii\` sidecar: \`data\` does not
- * hold them, so there is nothing to describe. Anything that does turn up under
- * one of those names rides through the loose object untouched.
+ * JSON has no date type, so a stored \`Date\` comes back as text and something
+ * has to turn it back. That is the entire job. The payload was validated when
+ * it was committed, so every other field is already known to be good and is
+ * left out — it rides through the loose object untouched rather than being
+ * checked a second time.
  *
- * A construct this doesn't recognise is returned untouched, so an unfamiliar
- * schema still parses — it just won't coerce dates buried inside one. That
- * fallthrough is what keeps this small: it describes the shapes worth
- * rebuilding, not every shape that exists.
+ * Leaving them out is also what stops a read from rejecting what the framework
+ * itself wrote. A \`sensitive(...)\` field is moved into the \`pii\` sidecar on the
+ * way in, so \`data\` does not hold it; an event written against an older
+ * declaration predates whatever was added since. Neither is a date, so neither
+ * is this schema's business. The dates themselves are optional for the same
+ * reason: absent is not wrong.
+ *
+ * Zod still does the walking, so nesting, arrays, records, unions and the
+ * wrappers are handled by the engine rather than by a traversal of our own
+ * that would drift as Zod grows constructs. A construct this doesn't
+ * recognise contributes no date, which is the documented fallthrough.
  */
-function to_read_schema(
+function to_date_schema(
   schema: unknown,
-  found: { date: boolean },
   sensitive?: readonly string[]
-): unknown {
+): z.ZodType | undefined {
   const def = def_of(schema);
-  if (!def) return schema;
+  if (!def) return undefined;
+  const inner = () => to_date_schema(def.innerType);
   switch (def.type) {
     case "date":
-      found.date = true;
       return z.coerce.date();
     case "object": {
       const shape = def.shape as Record<string, z.ZodType> | undefined;
-      if (!shape) return schema;
-      const next: Record<string, z.ZodType> = {};
-      for (const [key, inner] of Object.entries(shape)) {
+      if (!shape) return undefined;
+      const dated: Record<string, z.ZodType> = {};
+      for (const [key, field] of Object.entries(shape)) {
         if (sensitive?.includes(key)) continue;
-        next[key] = to_read_schema(inner, found) as z.ZodType;
+        const dates = to_date_schema(field);
+        if (dates) dated[key] = dates.optional();
       }
-      return z.looseObject(next);
+      return Object.keys(dated).length ? z.looseObject(dated) : undefined;
     }
-    case "array":
-      return z.array(to_read_schema(def.element, found) as z.ZodType);
-    case "record":
-      return z.record(
-        z.string(),
-        to_read_schema(def.valueType, found) as z.ZodType
+    case "array": {
+      const element = to_date_schema(def.element);
+      return element && z.array(element);
+    }
+    case "tuple": {
+      const items = (def.items as unknown[]).map((i) => to_date_schema(i));
+      return items.some(Boolean)
+        ? z.tuple(items.map((i) => i ?? z.unknown()) as never)
+        : undefined;
+    }
+    case "record": {
+      const value = to_date_schema(def.valueType);
+      return value && z.record(z.string(), value);
+    }
+    case "union": {
+      const options = (def.options as unknown[]).map((o) =>
+        to_date_schema(o, sensitive)
       );
-    case "union":
-      return z.union(
-        (def.options as unknown[]).map(
-          (o) => to_read_schema(o, found, sensitive) as z.ZodType
-        ) as never
-      );
-    case "tuple":
-      return z.tuple(
-        (def.items as unknown[]).map(
-          (i) => to_read_schema(i, found) as z.ZodType
-        ) as never
-      );
-    case "readonly":
-    case "nonoptional":
-      return to_read_schema(def.innerType, found);
+      return options.some(Boolean)
+        ? z.union(options.map((o) => o ?? z.unknown()) as never)
+        : undefined;
+    }
+    case "nullable":
+      // Keep the null: coercing it would hand back the epoch.
+      return inner()?.nullable();
     case "optional":
+    case "nonoptional":
+    case "readonly":
     case "default":
     case "prefault":
     case "catch":
-      return (to_read_schema(def.innerType, found) as z.ZodType).optional();
-    case "nullable":
-      return (to_read_schema(def.innerType, found) as z.ZodType).nullable();
+      return inner();
     default:
-      return schema;
+      return undefined;
   }
 }
 
@@ -11061,8 +11071,7 @@ function to_read_schema(
  */
 export function event_tags(schema: z.ZodType): EventTags {
   const sensitive: string[] = [];
-  const pii_shape: Record<string, z.ZodType> = {};
-  const found = { date: false };
+  const pii_dates: Record<string, z.ZodType> = {};
 
   const collect = (node: unknown): void => {
     const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
@@ -11070,9 +11079,8 @@ export function event_tags(schema: z.ZodType): EventTags {
       for (const key of Object.keys(shape))
         if (is_pii(shape[key])) {
           sensitive.push(key);
-          pii_shape[key] ??= (
-            to_read_schema(shape[key], found) as z.ZodType
-          ).optional();
+          const dates = to_date_schema(shape[key]);
+          if (dates) pii_dates[key] ??= dates.optional();
         }
       return;
     }
@@ -11082,22 +11090,22 @@ export function event_tags(schema: z.ZodType): EventTags {
   collect(schema);
 
   const unique = [...new Set(sensitive)];
-  const read_schema = to_read_schema(schema, found, unique) as z.ZodType;
-  // The sidecar carries the split-out fields alone, so it gets their half of
-  // the same rebuild — without it a disclosed \`sensitive(z.date())\` arrives as
-  // a string beside a plain sibling that is a Date.
-  const pii_schema = z.looseObject(pii_shape);
-  // Reviving must never reject: a stored payload can disagree with the current
-  // declaration (a field added since it was written), and dropping the read is
-  // worse than handing back what is stored.
+  const data_schema = to_date_schema(schema, unique);
+  // The sidecar holds the split-out fields alone, so a date among them needs
+  // its own pass — without it a disclosed \`sensitive(z.date())\` arrives as
+  // text beside a plain sibling that is a Date.
+  const has_pii_date = Object.keys(pii_dates).length > 0;
+  // Reviving must never reject. A stored payload can disagree with the current
+  // declaration in ways this schema deliberately does not describe, and handing
+  // back what is stored beats refusing to read it.
   const revive = (schema: z.ZodType) => (data: unknown) => {
     const revived = schema.safeParse(data);
     return revived.success ? revived.data : data;
   };
   return {
     sensitive: unique,
-    parse: found.date ? revive(read_schema) : undefined,
-    parse_pii: found.date && unique.length ? revive(pii_schema) : undefined,
+    parse: data_schema && revive(data_schema),
+    parse_pii: has_pii_date ? revive(z.looseObject(pii_dates)) : undefined,
   };
 }
 
