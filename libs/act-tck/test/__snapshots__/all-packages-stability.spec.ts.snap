@@ -10982,31 +10982,29 @@ const def_of = (schema: unknown): Record<string, unknown> | undefined =>
   (schema as { def?: Record<string, unknown> }).def;
 
 /**
- * Build a schema that describes an event's date fields and nothing else, or
- * \`undefined\` when it declares no dates.
+ * Build the schema that revives an event's dates, or \`undefined\` when it
+ * declares none.
  *
  * JSON has no date type, so a stored \`Date\` comes back as text and something
- * has to turn it back. That is the entire job. The payload was validated when
- * it was committed, so every other field is already known to be good and is
- * left out — it rides through the loose object untouched rather than being
- * checked a second time.
+ * has to turn it back. That is this function's only job, and the schema it
+ * returns says only where the dates are: every other field is left out and
+ * rides through the loose object untouched. The payload was validated when it
+ * was committed, so re-checking it on the way out would be work already done.
  *
- * Leaving them out is also what stops a read from rejecting what the framework
- * itself wrote. A \`sensitive(...)\` field is moved into the \`pii\` sidecar on the
- * way in, so \`data\` does not hold it; an event written against an older
- * declaration predates whatever was added since. Neither is a date, so neither
- * is this schema's business. The dates themselves are optional for the same
- * reason: absent is not wrong.
+ * Naming only the dates is also what makes a read tolerant, without needing a
+ * rule per exception. A \`sensitive(...)\` field lives in the \`pii\` sidecar
+ * rather than in \`data\`; an event written against an older declaration
+ * predates whatever was added since; a field dropped from the declaration is
+ * still in the store. None of those are dates, so none of them are described
+ * here, and a payload carrying any of them still reads. The dates themselves
+ * are optional for the same reason — absent is not wrong.
  *
- * Zod still does the walking, so nesting, arrays, records, unions and the
- * wrappers are handled by the engine rather than by a traversal of our own
- * that would drift as Zod grows constructs. A construct this doesn't
- * recognise contributes no date, which is the documented fallthrough.
+ * Zod does the walking, so nesting, arrays, records, unions and the wrappers
+ * are handled by the engine rather than by a traversal of our own that would
+ * drift as Zod grows constructs. A construct this doesn't recognise
+ * contributes no date, which is the documented fallthrough.
  */
-function date_reviver_schema(
-  schema: unknown,
-  sensitive?: readonly string[]
-): z.ZodType | undefined {
+function date_reviver_schema(schema: unknown): z.ZodType | undefined {
   const def = def_of(schema);
   if (!def) return undefined;
   const inner = () => date_reviver_schema(def.innerType);
@@ -11018,7 +11016,6 @@ function date_reviver_schema(
       if (!shape) return undefined;
       const dated: Record<string, z.ZodType> = {};
       for (const [key, field] of Object.entries(shape)) {
-        if (sensitive?.includes(key)) continue;
         const dates = date_reviver_schema(field);
         if (dates) dated[key] = dates.optional();
       }
@@ -11040,7 +11037,7 @@ function date_reviver_schema(
     }
     case "union": {
       const options = (def.options as unknown[]).map((o) =>
-        date_reviver_schema(o, sensitive)
+        date_reviver_schema(o)
       );
       return options.some(Boolean)
         ? z.union(options.map((o) => o ?? z.unknown()) as never)
@@ -11093,7 +11090,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   collect(schema);
 
   const unique = [...new Set(sensitive)];
-  const data_reviver_schema = date_reviver_schema(schema, unique);
+  const data_reviver_schema = date_reviver_schema(schema);
   // The sidecar holds the split-out fields alone, so a date among them needs
   // its own pass — without it a disclosed \`sensitive(z.date())\` arrives as
   // text beside a plain sibling that is a Date.
