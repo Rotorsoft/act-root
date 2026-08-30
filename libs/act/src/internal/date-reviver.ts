@@ -13,7 +13,8 @@
  *
  * Sits beside the other schema utilities rather than inside the event builder,
  * which composes it: `event_tags` asks for one reviver for an event's `data`
- * and another for the sensitive fields held in its `pii` sidecar.
+ * and another for the sensitive fields held in its `pii` sidecar. One function
+ * is the whole interface — how a Zod schema is taken apart stays in here.
  *
  * The shape-based {@link dateReviver} in `utils.ts` is the predecessor this
  * replaced — it revived anything ISO-8601-looking, including fields declared
@@ -24,8 +25,8 @@
 
 import { z } from "zod";
 
-/** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. @internal */
-export const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+/** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
   (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
   (schema as { def?: Record<string, unknown> }).def;
 

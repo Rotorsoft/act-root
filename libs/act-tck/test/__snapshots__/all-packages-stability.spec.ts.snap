@@ -9164,7 +9164,8 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
  *
  * Sits beside the other schema utilities rather than inside the event builder,
  * which composes it: \`event_tags\` asks for one reviver for an event's \`data\`
- * and another for the sensitive fields held in its \`pii\` sidecar.
+ * and another for the sensitive fields held in its \`pii\` sidecar. One function
+ * is the whole interface — how a Zod schema is taken apart stays in here.
  *
  * The shape-based {@link dateReviver} in \`utils.ts\` is the predecessor this
  * replaced — it revived anything ISO-8601-looking, including fields declared
@@ -9175,8 +9176,8 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
 
 import { z } from "zod";
 
-/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. @internal */
-export const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
   (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
   (schema as { def?: Record<string, unknown> }).def;
 
@@ -11102,7 +11103,7 @@ export class NonRetryableError extends Error {
  */
 
 import { z } from "zod";
-import { date_reviver_schema, def_of } from "../internal/index.js";
+import { date_reviver_schema } from "../internal/index.js";
 import {
   type EventGate,
   IDENTITY_GATE,
@@ -11146,7 +11147,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   const pii_dates: Record<string, z.ZodType> = {};
 
   const collect = (node: unknown): void => {
-    const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
+    const shape = (node as { shape?: Record<string, z.ZodType> }).shape;
     if (shape) {
       for (const key of Object.keys(shape))
         if (is_pii(shape[key])) {
@@ -13980,7 +13981,7 @@ export {
 export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export { date_reviver_schema, def_of } from "./date-reviver.js";
+export { date_reviver_schema } from "./date-reviver.js";
 export {
   assert_defer_when,
   type DeferSchedule,
@@ -28515,7 +28516,8 @@ export function close_correlation(
  *
  * Sits beside the other schema utilities rather than inside the event builder,
  * which composes it: \`event_tags\` asks for one reviver for an event's \`data\`
- * and another for the sensitive fields held in its \`pii\` sidecar.
+ * and another for the sensitive fields held in its \`pii\` sidecar. One function
+ * is the whole interface — how a Zod schema is taken apart stays in here.
  *
  * The shape-based {@link dateReviver} in \`utils.ts\` is the predecessor this
  * replaced — it revived anything ISO-8601-looking, including fields declared
@@ -28526,8 +28528,8 @@ export function close_correlation(
 
 import { z } from "zod";
 
-/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. @internal */
-export const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
   (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
   (schema as { def?: Record<string, unknown> }).def;
 
@@ -32969,7 +32971,7 @@ export {
 export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export { date_reviver_schema, def_of } from "./date-reviver.js";
+export { date_reviver_schema } from "./date-reviver.js";
 export {
   assert_defer_when,
   type DeferSchedule,

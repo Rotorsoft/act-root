@@ -70,7 +70,7 @@ export {
 export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export { date_reviver_schema, def_of } from "./date-reviver.js";
+export { date_reviver_schema } from "./date-reviver.js";
 export {
   assert_defer_when,
   type DeferSchedule,

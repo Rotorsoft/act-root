@@ -32,7 +32,7 @@
  */
 
 import { z } from "zod";
-import { date_reviver_schema, def_of } from "../internal/index.js";
+import { date_reviver_schema } from "../internal/index.js";
 import {
   type EventGate,
   IDENTITY_GATE,
@@ -76,7 +76,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   const pii_dates: Record<string, z.ZodType> = {};
 
   const collect = (node: unknown): void => {
-    const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
+    const shape = (node as { shape?: Record<string, z.ZodType> }).shape;
     if (shape) {
       for (const key of Object.keys(shape))
         if (is_pii(shape[key])) {
