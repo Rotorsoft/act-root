@@ -10965,12 +10965,15 @@ export type EventTags = {
   /** Keys marked \`sensitive(...)\`, top level (and across union variants). */
   readonly sensitive: readonly string[];
   /**
-   * Revives the dates in a stored payload, or \`undefined\` when the schema
-   * declares none.
+   * Revives the dates in a stored \`data\` payload, or \`undefined\` when the
+   * schema declares none.
    */
-  readonly parse: ((data: unknown) => unknown) | undefined;
-  /** The same for the \`pii\` sidecar, when a sensitive field is a date. */
-  readonly parse_pii: ((data: unknown) => unknown) | undefined;
+  readonly date_reviver: ((data: unknown) => unknown) | undefined;
+  /**
+   * Revives the dates in a stored \`pii\` sidecar, or \`undefined\` when no
+   * sensitive field is a date.
+   */
+  readonly pii_date_reviver: ((pii: unknown) => unknown) | undefined;
 };
 
 /** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
@@ -11000,13 +11003,13 @@ const def_of = (schema: unknown): Record<string, unknown> | undefined =>
  * that would drift as Zod grows constructs. A construct this doesn't
  * recognise contributes no date, which is the documented fallthrough.
  */
-function to_date_schema(
+function date_reviver_schema(
   schema: unknown,
   sensitive?: readonly string[]
 ): z.ZodType | undefined {
   const def = def_of(schema);
   if (!def) return undefined;
-  const inner = () => to_date_schema(def.innerType);
+  const inner = () => date_reviver_schema(def.innerType);
   switch (def.type) {
     case "date":
       return z.coerce.date();
@@ -11016,28 +11019,28 @@ function to_date_schema(
       const dated: Record<string, z.ZodType> = {};
       for (const [key, field] of Object.entries(shape)) {
         if (sensitive?.includes(key)) continue;
-        const dates = to_date_schema(field);
+        const dates = date_reviver_schema(field);
         if (dates) dated[key] = dates.optional();
       }
       return Object.keys(dated).length ? z.looseObject(dated) : undefined;
     }
     case "array": {
-      const element = to_date_schema(def.element);
+      const element = date_reviver_schema(def.element);
       return element && z.array(element);
     }
     case "tuple": {
-      const items = (def.items as unknown[]).map((i) => to_date_schema(i));
+      const items = (def.items as unknown[]).map((i) => date_reviver_schema(i));
       return items.some(Boolean)
         ? z.tuple(items.map((i) => i ?? z.unknown()) as never)
         : undefined;
     }
     case "record": {
-      const value = to_date_schema(def.valueType);
+      const value = date_reviver_schema(def.valueType);
       return value && z.record(z.string(), value);
     }
     case "union": {
       const options = (def.options as unknown[]).map((o) =>
-        to_date_schema(o, sensitive)
+        date_reviver_schema(o, sensitive)
       );
       return options.some(Boolean)
         ? z.union(options.map((o) => o ?? z.unknown()) as never)
@@ -11079,7 +11082,7 @@ export function event_tags(schema: z.ZodType): EventTags {
       for (const key of Object.keys(shape))
         if (is_pii(shape[key])) {
           sensitive.push(key);
-          const dates = to_date_schema(shape[key]);
+          const dates = date_reviver_schema(shape[key]);
           if (dates) pii_dates[key] ??= dates.optional();
         }
       return;
@@ -11090,7 +11093,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   collect(schema);
 
   const unique = [...new Set(sensitive)];
-  const data_schema = to_date_schema(schema, unique);
+  const data_reviver_schema = date_reviver_schema(schema, unique);
   // The sidecar holds the split-out fields alone, so a date among them needs
   // its own pass — without it a disclosed \`sensitive(z.date())\` arrives as
   // text beside a plain sibling that is a Date.
@@ -11104,8 +11107,10 @@ export function event_tags(schema: z.ZodType): EventTags {
   };
   return {
     sensitive: unique,
-    parse: data_schema && revive(data_schema),
-    parse_pii: has_pii_date ? revive(z.looseObject(pii_dates)) : undefined,
+    date_reviver: data_reviver_schema && revive(data_reviver_schema),
+    pii_date_reviver: has_pii_date
+      ? revive(z.looseObject(pii_dates))
+      : undefined,
   };
 }
 
@@ -11137,8 +11142,8 @@ export function make_event_reader(
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null
 ): EventGate | undefined {
-  const { sensitive, parse, parse_pii } = tags;
-  if (!parse && sensitive.length === 0) return undefined;
+  const { sensitive, date_reviver, pii_date_reviver } = tags;
+  if (!date_reviver && sensitive.length === 0) return undefined;
 
   const gate: EventGate =
     sensitive.length === 0
@@ -11147,7 +11152,7 @@ export function make_event_reader(
         ? (((event) => pii_strip(event as never, sensitive)) as EventGate)
         : make_gate(sensitive, predicate as never);
 
-  if (!parse) return gate;
+  if (!date_reviver) return gate;
 
   // Revive before disclosing: the gate copies, so reviving afterwards would
   // leave the consumer's value a string — and it substitutes REDACTED and
@@ -11157,8 +11162,10 @@ export function make_event_reader(
     return gate(
       {
         ...event,
-        data: parse(event.data),
-        ...(parse_pii && pii != null ? { pii: parse_pii(pii) } : {}),
+        data: date_reviver(event.data),
+        ...(pii_date_reviver && pii != null
+          ? { pii: pii_date_reviver(pii) }
+          : {}),
       } as never,
       actor
     );
