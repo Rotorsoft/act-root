@@ -16,7 +16,9 @@
  *   target a projection already serves. Both checks skip dynamic resolvers,
  *   because a `.to(fn)` target is unknowable until an event arrives.
  * - **resolution** — each event's schema is read once into {@link EventTags}:
- *   which fields are sensitive, and how to type the stored payload.
+ *   which fields are sensitive, and how to revive the dates in a stored
+ *   payload. Working out where the dates are is a Zod concern, so it lives in
+ *   `internal/date-reviver.ts`; this module composes what that returns.
  * - **composition** — the per-surface readers, each a single {@link EventGate}
  *   that types the payload and applies disclosure in one call.
  *
@@ -30,11 +32,12 @@
  */
 
 import { z } from "zod";
+import { date_reviver_schema } from "../internal/index.js";
 import {
   type EventGate,
   IDENTITY_GATE,
-  is_pii,
   make_gate,
+  pii_schemas,
   pii_split,
   pii_strip,
 } from "../internal/sensitive.js";
@@ -46,62 +49,16 @@ export type EventTags = {
   /** Keys marked `sensitive(...)`, top level (and across union variants). */
   readonly sensitive: readonly string[];
   /**
-   * Types a stored payload against the declaration, or `undefined` when the
-   * schema declares no dates.
+   * Revives the dates in a stored `data` payload, or `undefined` when the
+   * schema declares none.
    */
-  readonly parse: ((data: unknown) => unknown) | undefined;
+  readonly date_reviver: ((data: unknown) => unknown) | undefined;
+  /**
+   * Revives the dates in a stored `pii` sidecar, or `undefined` when no
+   * sensitive field is a date.
+   */
+  readonly pii_date_reviver: ((pii: unknown) => unknown) | undefined;
 };
-
-/** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
-const def_of = (schema: unknown): Record<string, unknown> | undefined =>
-  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
-  (schema as { def?: Record<string, unknown> }).def;
-
-/**
- * Rebuild a schema for reading: dates coerce from their stored string, and
- * objects keep keys they don't declare.
- *
- * A construct this doesn't recognise is returned untouched, so an unfamiliar
- * schema still parses — it just won't coerce dates buried inside one. That
- * fallthrough is what keeps this small: it describes the shapes worth
- * rebuilding, not every shape that exists.
- */
-function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
-  const def = def_of(schema);
-  if (!def) return schema;
-  switch (def.type) {
-    case "date":
-      found.date = true;
-      return z.coerce.date();
-    case "object": {
-      const shape = def.shape as Record<string, z.ZodType> | undefined;
-      if (!shape) return schema;
-      const next: Record<string, z.ZodType> = {};
-      for (const [key, inner] of Object.entries(shape))
-        next[key] = to_read_schema(inner, found) as z.ZodType;
-      return z.looseObject(next);
-    }
-    case "array":
-      return z.array(to_read_schema(def.element, found) as z.ZodType);
-    case "record":
-      return z.record(
-        z.string(),
-        to_read_schema(def.valueType, found) as z.ZodType
-      );
-    case "union":
-      return z.union(
-        (def.options as unknown[]).map(
-          (o) => to_read_schema(o, found) as z.ZodType
-        ) as never
-      );
-    case "optional":
-      return (to_read_schema(def.innerType, found) as z.ZodType).optional();
-    case "nullable":
-      return (to_read_schema(def.innerType, found) as z.ZodType).nullable();
-    default:
-      return schema;
-  }
-}
 
 /**
  * Resolve an event's schema in a single pass.
@@ -115,27 +72,31 @@ function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
  * @internal
  */
 export function event_tags(schema: z.ZodType): EventTags {
-  const sensitive: string[] = [];
+  // Which fields are sensitive is `sensitive.ts`'s question and where the
+  // dates are is `date-reviver.ts`'s; this composes the two answers. The
+  // sidecar holds the split-out fields alone, so a date among them needs its
+  // own reviver — without it a disclosed `sensitive(z.date())` arrives as text
+  // beside a plain sibling that is a Date.
+  const pii = pii_schemas(schema);
+  const pii_dates: Record<string, z.ZodType> = {};
+  for (const [key, field] of Object.entries(pii)) {
+    const dates = date_reviver_schema(field);
+    if (dates) pii_dates[key] = dates.optional();
+  }
 
-  const collect = (node: unknown): void => {
-    const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
-    if (shape) {
-      for (const key of Object.keys(shape))
-        if (is_pii(shape[key])) sensitive.push(key);
-      return;
-    }
-    const options = (node as { options?: unknown }).options;
-    if (Array.isArray(options)) for (const option of options) collect(option);
+  const data_reviver_schema = date_reviver_schema(schema);
+  // Reviving must never reject. A stored payload can disagree with the current
+  // declaration in ways this schema deliberately does not describe, and handing
+  // back what is stored beats refusing to read it.
+  const revive = (schema: z.ZodType) => (data: unknown) => {
+    const revived = schema.safeParse(data);
+    return revived.success ? revived.data : data;
   };
-  collect(schema);
-
-  const found = { date: false };
-  const read_schema = to_read_schema(schema, found);
+  const dated_pii = Object.keys(pii_dates).length > 0;
   return {
-    sensitive: [...new Set(sensitive)],
-    parse: found.date
-      ? (data: unknown) => (read_schema as z.ZodType).parse(data)
-      : undefined,
+    sensitive: Object.keys(pii),
+    date_reviver: data_reviver_schema && revive(data_reviver_schema),
+    pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
 }
 
@@ -167,8 +128,8 @@ export function make_event_reader(
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null
 ): EventGate | undefined {
-  const { sensitive, parse } = tags;
-  if (!parse && sensitive.length === 0) return undefined;
+  const { sensitive, date_reviver, pii_date_reviver } = tags;
+  if (!date_reviver && sensitive.length === 0) return undefined;
 
   const gate: EventGate =
     sensitive.length === 0
@@ -177,12 +138,31 @@ export function make_event_reader(
         ? (((event) => pii_strip(event as never, sensitive)) as EventGate)
         : make_gate(sensitive, predicate as never);
 
-  if (!parse) return gate;
+  if (!date_reviver) return gate;
 
-  // Type before disclosing: the gate copies, so parsing afterwards would
-  // leave the consumer's value a string.
-  return ((event, actor) =>
-    gate({ ...event, data: parse(event.data) } as never, actor)) as EventGate;
+  // The sidecar is only worth reviving for a reader that can be shown it.
+  // A `strip` reader drops `pii` outright, and a redacting one discloses only
+  // to an actor a predicate approves — so no actor and no predicate means the
+  // values are on their way to REDACTED whatever they hold. The predicate
+  // itself stays uncalled here: the gate owns that decision and calling it
+  // twice would run a caller's code twice.
+  const revive_pii =
+    disclosure === "redact" && predicate ? pii_date_reviver : undefined;
+
+  // Revive before disclosing: the gate copies, so reviving afterwards would
+  // leave the consumer's value a string — and it substitutes REDACTED and
+  // SHREDDED, which are not dates.
+  return ((event, actor) => {
+    const pii = (event as { pii?: unknown }).pii;
+    return gate(
+      {
+        ...event,
+        data: date_reviver(event.data),
+        ...(revive_pii && actor && pii != null ? { pii: revive_pii(pii) } : {}),
+      } as never,
+      actor
+    );
+  }) as EventGate;
 }
 
 /**

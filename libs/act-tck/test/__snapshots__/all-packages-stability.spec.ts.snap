@@ -9148,6 +9148,158 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
   });
 }
 
+// === date-reviver.ts ===
+/**
+ * @module date-reviver
+ * @category Internal
+ *
+ * Turning stored text back into \`Date\`s, driven by the declared schema.
+ *
+ * JSON has no date type, so a \`Date\` is stored as its ISO form and something
+ * has to revive it on the way out. Which fields those are is a property of the
+ * Zod schema, so working it out is a Zod concern rather than an event one —
+ * this module knows nothing about events, states or PII. It takes a declared
+ * schema and returns the schema that revives its dates, or \`undefined\` when
+ * there are none to revive.
+ *
+ * Sits beside the other schema utilities rather than inside the event builder,
+ * which composes it: \`event_tags\` asks for one reviver for an event's \`data\`
+ * and another for the sensitive fields held in its \`pii\` sidecar. One function
+ * is the whole interface — how a Zod schema is taken apart stays in here.
+ *
+ * The shape-based {@link dateReviver} in \`utils.ts\` is the predecessor this
+ * replaced — it revived anything ISO-8601-looking, including fields declared
+ * \`z.string()\` ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)).
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
+  (schema as { def?: Record<string, unknown> }).def;
+
+/**
+ * Rebuild one union variant so it still recognises its own payloads.
+ *
+ * Same date coercion as everywhere else, but the variant keeps its other
+ * fields — this is the one place the date paths alone are not enough. A
+ * variant can only reject a sibling's payload if enough of its shape is left
+ * to check, and which fields do that is not knowable: a literal discriminator
+ * usually does it, but a union can just as well be told apart by the *type* of
+ * an ordinary field. Narrowing to the dates, or relaxing the rest, makes the
+ * first variant match everything, so the one that declared the date is never
+ * tried and a sibling's payload is read under the wrong rules.
+ *
+ * Every key is optional, so the variant still matches when a \`sensitive(...)\`
+ * field sits in the \`pii\` sidecar or when a stored payload predates a field
+ * the declaration has since gained.
+ *
+ * Reports whether this variant declared a date, so a union with none anywhere
+ * builds nothing at all.
+ */
+function variant_schema(schema: unknown): {
+  schema: z.ZodType;
+  dated: boolean;
+} {
+  const shape = def_of(schema)?.shape as Record<string, z.ZodType> | undefined;
+  if (!shape) {
+    const dates = date_reviver_schema(schema);
+    return { schema: dates ?? (schema as z.ZodType), dated: !!dates };
+  }
+  const next: Record<string, z.ZodType> = {};
+  let dated = false;
+  for (const [key, field] of Object.entries(shape)) {
+    const dates = date_reviver_schema(field);
+    if (dates) dated = true;
+    next[key] = (dates ?? field).optional();
+  }
+  return { schema: z.looseObject(next), dated };
+}
+
+/**
+ * Build the schema that revives an event's dates, or \`undefined\` when it
+ * declares none.
+ *
+ * JSON has no date type, so a stored \`Date\` comes back as text and something
+ * has to turn it back. That is this function's only job, and the schema it
+ * returns says only where the dates are: every other field is left out and
+ * rides through the loose object untouched. The payload was validated when it
+ * was committed, so re-checking it on the way out would be work already done.
+ *
+ * Naming only the dates is also what makes a read tolerant, without needing a
+ * rule per exception. A \`sensitive(...)\` field lives in the \`pii\` sidecar
+ * rather than in \`data\`; an event written against an older declaration
+ * predates whatever was added since; a field dropped from the declaration is
+ * still in the store. None of those are dates, so none of them are described
+ * here, and a payload carrying any of them still reads. The dates themselves
+ * are optional for the same reason — absent is not wrong.
+ *
+ * Zod does the walking, so nesting, arrays, records, unions and the wrappers
+ * are handled by the engine rather than by a traversal of our own that would
+ * drift as Zod grows constructs. A construct this doesn't recognise
+ * contributes no date, which is the documented fallthrough.
+ */
+export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
+  const def = def_of(schema);
+  if (!def) return undefined;
+  const inner = () => date_reviver_schema(def.innerType);
+  switch (def.type) {
+    case "date":
+      return z.coerce.date();
+    case "object": {
+      const shape = def.shape as Record<string, z.ZodType> | undefined;
+      if (!shape) return undefined;
+      const dated: Record<string, z.ZodType> = {};
+      for (const [key, field] of Object.entries(shape)) {
+        const dates = date_reviver_schema(field);
+        if (dates) dated[key] = dates.optional();
+      }
+      return Object.keys(dated).length ? z.looseObject(dated) : undefined;
+    }
+    case "array": {
+      const element = date_reviver_schema(def.element);
+      return element && z.array(element);
+    }
+    case "tuple": {
+      const items = (def.items as unknown[]).map((i) => date_reviver_schema(i));
+      return items.some(Boolean)
+        ? z.tuple(items.map((i) => i ?? z.unknown()) as never)
+        : undefined;
+    }
+    case "record": {
+      const value = date_reviver_schema(def.valueType);
+      return value && z.record(z.string(), value);
+    }
+    case "union": {
+      // A union is the one place the date paths are not enough. Zod picks a
+      // variant by trying each until one matches, so an option reduced to its
+      // dates matches almost anything and the first one wins — the variant
+      // that actually declared the date never gets tried, and a sibling's
+      // payload gets the wrong variant's rules. Every option therefore keeps
+      // its fields; see {@link variant_schema}.
+      const variants = (def.options as unknown[]).map(variant_schema);
+      return variants.some((v) => v.dated)
+        ? z.union(variants.map((v) => v.schema) as never)
+        : undefined;
+    }
+    case "nullable":
+      // Keep the null: coercing it would hand back the epoch.
+      return inner()?.nullable();
+    case "optional":
+    case "nonoptional":
+    case "readonly":
+    case "default":
+    case "prefault":
+    case "catch":
+      return inner();
+    default:
+      return undefined;
+  }
+}
+
 // === defer-config.ts ===
 /**
  * @module defer-config
@@ -10935,7 +11087,9 @@ export class NonRetryableError extends Error {
  *   target a projection already serves. Both checks skip dynamic resolvers,
  *   because a \`.to(fn)\` target is unknowable until an event arrives.
  * - **resolution** — each event's schema is read once into {@link EventTags}:
- *   which fields are sensitive, and how to type the stored payload.
+ *   which fields are sensitive, and how to revive the dates in a stored
+ *   payload. Working out where the dates are is a Zod concern, so it lives in
+ *   \`internal/date-reviver.ts\`; this module composes what that returns.
  * - **composition** — the per-surface readers, each a single {@link EventGate}
  *   that types the payload and applies disclosure in one call.
  *
@@ -10949,11 +11103,12 @@ export class NonRetryableError extends Error {
  */
 
 import { z } from "zod";
+import { date_reviver_schema } from "../internal/index.js";
 import {
   type EventGate,
   IDENTITY_GATE,
-  is_pii,
   make_gate,
+  pii_schemas,
   pii_split,
   pii_strip,
 } from "../internal/sensitive.js";
@@ -10965,62 +11120,16 @@ export type EventTags = {
   /** Keys marked \`sensitive(...)\`, top level (and across union variants). */
   readonly sensitive: readonly string[];
   /**
-   * Types a stored payload against the declaration, or \`undefined\` when the
-   * schema declares no dates.
+   * Revives the dates in a stored \`data\` payload, or \`undefined\` when the
+   * schema declares none.
    */
-  readonly parse: ((data: unknown) => unknown) | undefined;
+  readonly date_reviver: ((data: unknown) => unknown) | undefined;
+  /**
+   * Revives the dates in a stored \`pii\` sidecar, or \`undefined\` when no
+   * sensitive field is a date.
+   */
+  readonly pii_date_reviver: ((pii: unknown) => unknown) | undefined;
 };
-
-/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
-const def_of = (schema: unknown): Record<string, unknown> | undefined =>
-  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
-  (schema as { def?: Record<string, unknown> }).def;
-
-/**
- * Rebuild a schema for reading: dates coerce from their stored string, and
- * objects keep keys they don't declare.
- *
- * A construct this doesn't recognise is returned untouched, so an unfamiliar
- * schema still parses — it just won't coerce dates buried inside one. That
- * fallthrough is what keeps this small: it describes the shapes worth
- * rebuilding, not every shape that exists.
- */
-function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
-  const def = def_of(schema);
-  if (!def) return schema;
-  switch (def.type) {
-    case "date":
-      found.date = true;
-      return z.coerce.date();
-    case "object": {
-      const shape = def.shape as Record<string, z.ZodType> | undefined;
-      if (!shape) return schema;
-      const next: Record<string, z.ZodType> = {};
-      for (const [key, inner] of Object.entries(shape))
-        next[key] = to_read_schema(inner, found) as z.ZodType;
-      return z.looseObject(next);
-    }
-    case "array":
-      return z.array(to_read_schema(def.element, found) as z.ZodType);
-    case "record":
-      return z.record(
-        z.string(),
-        to_read_schema(def.valueType, found) as z.ZodType
-      );
-    case "union":
-      return z.union(
-        (def.options as unknown[]).map(
-          (o) => to_read_schema(o, found) as z.ZodType
-        ) as never
-      );
-    case "optional":
-      return (to_read_schema(def.innerType, found) as z.ZodType).optional();
-    case "nullable":
-      return (to_read_schema(def.innerType, found) as z.ZodType).nullable();
-    default:
-      return schema;
-  }
-}
 
 /**
  * Resolve an event's schema in a single pass.
@@ -11034,27 +11143,31 @@ function to_read_schema(schema: unknown, found: { date: boolean }): unknown {
  * @internal
  */
 export function event_tags(schema: z.ZodType): EventTags {
-  const sensitive: string[] = [];
+  // Which fields are sensitive is \`sensitive.ts\`'s question and where the
+  // dates are is \`date-reviver.ts\`'s; this composes the two answers. The
+  // sidecar holds the split-out fields alone, so a date among them needs its
+  // own reviver — without it a disclosed \`sensitive(z.date())\` arrives as text
+  // beside a plain sibling that is a Date.
+  const pii = pii_schemas(schema);
+  const pii_dates: Record<string, z.ZodType> = {};
+  for (const [key, field] of Object.entries(pii)) {
+    const dates = date_reviver_schema(field);
+    if (dates) pii_dates[key] = dates.optional();
+  }
 
-  const collect = (node: unknown): void => {
-    const shape = def_of(node)?.shape as Record<string, z.ZodType> | undefined;
-    if (shape) {
-      for (const key of Object.keys(shape))
-        if (is_pii(shape[key])) sensitive.push(key);
-      return;
-    }
-    const options = (node as { options?: unknown }).options;
-    if (Array.isArray(options)) for (const option of options) collect(option);
+  const data_reviver_schema = date_reviver_schema(schema);
+  // Reviving must never reject. A stored payload can disagree with the current
+  // declaration in ways this schema deliberately does not describe, and handing
+  // back what is stored beats refusing to read it.
+  const revive = (schema: z.ZodType) => (data: unknown) => {
+    const revived = schema.safeParse(data);
+    return revived.success ? revived.data : data;
   };
-  collect(schema);
-
-  const found = { date: false };
-  const read_schema = to_read_schema(schema, found);
+  const dated_pii = Object.keys(pii_dates).length > 0;
   return {
-    sensitive: [...new Set(sensitive)],
-    parse: found.date
-      ? (data: unknown) => (read_schema as z.ZodType).parse(data)
-      : undefined,
+    sensitive: Object.keys(pii),
+    date_reviver: data_reviver_schema && revive(data_reviver_schema),
+    pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
 }
 
@@ -11086,8 +11199,8 @@ export function make_event_reader(
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null
 ): EventGate | undefined {
-  const { sensitive, parse } = tags;
-  if (!parse && sensitive.length === 0) return undefined;
+  const { sensitive, date_reviver, pii_date_reviver } = tags;
+  if (!date_reviver && sensitive.length === 0) return undefined;
 
   const gate: EventGate =
     sensitive.length === 0
@@ -11096,12 +11209,31 @@ export function make_event_reader(
         ? (((event) => pii_strip(event as never, sensitive)) as EventGate)
         : make_gate(sensitive, predicate as never);
 
-  if (!parse) return gate;
+  if (!date_reviver) return gate;
 
-  // Type before disclosing: the gate copies, so parsing afterwards would
-  // leave the consumer's value a string.
-  return ((event, actor) =>
-    gate({ ...event, data: parse(event.data) } as never, actor)) as EventGate;
+  // The sidecar is only worth reviving for a reader that can be shown it.
+  // A \`strip\` reader drops \`pii\` outright, and a redacting one discloses only
+  // to an actor a predicate approves — so no actor and no predicate means the
+  // values are on their way to REDACTED whatever they hold. The predicate
+  // itself stays uncalled here: the gate owns that decision and calling it
+  // twice would run a caller's code twice.
+  const revive_pii =
+    disclosure === "redact" && predicate ? pii_date_reviver : undefined;
+
+  // Revive before disclosing: the gate copies, so reviving afterwards would
+  // leave the consumer's value a string — and it substitutes REDACTED and
+  // SHREDDED, which are not dates.
+  return ((event, actor) => {
+    const pii = (event as { pii?: unknown }).pii;
+    return gate(
+      {
+        ...event,
+        data: date_reviver(event.data),
+        ...(revive_pii && actor && pii != null ? { pii: revive_pii(pii) } : {}),
+      } as never,
+      actor
+    );
+  }) as EventGate;
 }
 
 /**
@@ -13836,6 +13968,7 @@ export {
 export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export { date_reviver_schema } from "./date-reviver.js";
 export {
   assert_defer_when,
   type DeferSchedule,
@@ -18184,42 +18317,59 @@ export function is_pii(schema: z.ZodType): boolean {
 }
 
 /**
- * Derive the list of sensitive field names from an event's Zod schema.
+ * Derive an event's sensitive fields, as the declared schema of each.
  *
- * Walks the top-level shape of a \`z.object({...})\` and returns the keys whose
+ * Walks the top-level shape of a \`z.object({...})\` and keeps the keys whose
  * schema (after unwrapping optional/nullable/default wrappers) was marked via
- * \`sensitive(...)\`. Returns an empty array for non-object schemas or events
+ * \`sensitive(...)\`. Returns an empty object for non-object schemas or events
  * with no sensitive fields — the common-case zero-cost path.
  *
  * Only the top-level shape is walked. Sensitive fields nested inside a
  * \`z.object\` declared inside the event payload would require recursive
  * descent; that's deferred until a real callsite needs it.
  *
- * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup.
+ * A union event has no top-level shape, so the options are walked and merged:
+ * a key sensitive in any variant must be split, because the stored payload
+ * could be that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ * The first variant to declare a key wins, which only matters to a caller that
+ * wants the schema rather than the name.
+ *
+ * Returning the schemas rather than just the names is what lets a caller do
+ * something per field — the event builder asks each one whether it holds a
+ * date, so the \`pii\` sidecar's dates can be revived like any other.
+ *
+ * @internal
  */
-export function pii_fields(schema: z.ZodType): readonly string[] {
+export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
   if (shape && typeof shape === "object") {
-    const fields: string[] = [];
-    for (const key of Object.keys(shape)) {
-      if (is_pii(shape[key])) fields.push(key);
-    }
+    const fields: Record<string, z.ZodType> = {};
+    for (const key of Object.keys(shape))
+      if (is_pii(shape[key])) fields[key] = shape[key];
     return fields;
   }
-  // A union event has no top-level shape, so reading \`.shape\` alone returned
-  // [] and dropped EVERY marker in every variant (#1417). Take the union of
-  // the options' field sets: a key that is sensitive in any variant must be
-  // split, because the stored payload could be that variant. This is not the
-  // documented nested-object carve-out below — here the union IS the top
-  // level.
   const options = (schema as { options?: unknown }).options;
   if (Array.isArray(options)) {
-    const fields = new Set<string>();
+    const fields: Record<string, z.ZodType> = {};
     for (const option of options)
-      for (const key of pii_fields(option as z.ZodType)) fields.add(key);
-    return [...fields];
+      for (const [key, field] of Object.entries(
+        pii_schemas(option as z.ZodType)
+      ))
+        fields[key] ??= field;
+    return fields;
   }
-  return [];
+  return {};
+}
+
+/**
+ * The names of an event's sensitive fields — {@link pii_schemas} keyed.
+ *
+ * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup,
+ * and public through \`types/schemas.ts\`, where act-http's OpenAPI emitter uses
+ * it to mark request-body properties \`writeOnly\`.
+ */
+export function pii_fields(schema: z.ZodType): readonly string[] {
+  return Object.keys(pii_schemas(schema));
 }
 
 /**
@@ -28354,6 +28504,158 @@ export function close_correlation(
   });
 }
 
+// === date-reviver.ts ===
+/**
+ * @module date-reviver
+ * @category Internal
+ *
+ * Turning stored text back into \`Date\`s, driven by the declared schema.
+ *
+ * JSON has no date type, so a \`Date\` is stored as its ISO form and something
+ * has to revive it on the way out. Which fields those are is a property of the
+ * Zod schema, so working it out is a Zod concern rather than an event one —
+ * this module knows nothing about events, states or PII. It takes a declared
+ * schema and returns the schema that revives its dates, or \`undefined\` when
+ * there are none to revive.
+ *
+ * Sits beside the other schema utilities rather than inside the event builder,
+ * which composes it: \`event_tags\` asks for one reviver for an event's \`data\`
+ * and another for the sensitive fields held in its \`pii\` sidecar. One function
+ * is the whole interface — how a Zod schema is taken apart stays in here.
+ *
+ * The shape-based {@link dateReviver} in \`utils.ts\` is the predecessor this
+ * replaced — it revived anything ISO-8601-looking, including fields declared
+ * \`z.string()\` ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)).
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+
+/** Zod exposes its shape under \`_zod.def\` in v4 and \`def\` in older builds. */
+const def_of = (schema: unknown): Record<string, unknown> | undefined =>
+  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
+  (schema as { def?: Record<string, unknown> }).def;
+
+/**
+ * Rebuild one union variant so it still recognises its own payloads.
+ *
+ * Same date coercion as everywhere else, but the variant keeps its other
+ * fields — this is the one place the date paths alone are not enough. A
+ * variant can only reject a sibling's payload if enough of its shape is left
+ * to check, and which fields do that is not knowable: a literal discriminator
+ * usually does it, but a union can just as well be told apart by the *type* of
+ * an ordinary field. Narrowing to the dates, or relaxing the rest, makes the
+ * first variant match everything, so the one that declared the date is never
+ * tried and a sibling's payload is read under the wrong rules.
+ *
+ * Every key is optional, so the variant still matches when a \`sensitive(...)\`
+ * field sits in the \`pii\` sidecar or when a stored payload predates a field
+ * the declaration has since gained.
+ *
+ * Reports whether this variant declared a date, so a union with none anywhere
+ * builds nothing at all.
+ */
+function variant_schema(schema: unknown): {
+  schema: z.ZodType;
+  dated: boolean;
+} {
+  const shape = def_of(schema)?.shape as Record<string, z.ZodType> | undefined;
+  if (!shape) {
+    const dates = date_reviver_schema(schema);
+    return { schema: dates ?? (schema as z.ZodType), dated: !!dates };
+  }
+  const next: Record<string, z.ZodType> = {};
+  let dated = false;
+  for (const [key, field] of Object.entries(shape)) {
+    const dates = date_reviver_schema(field);
+    if (dates) dated = true;
+    next[key] = (dates ?? field).optional();
+  }
+  return { schema: z.looseObject(next), dated };
+}
+
+/**
+ * Build the schema that revives an event's dates, or \`undefined\` when it
+ * declares none.
+ *
+ * JSON has no date type, so a stored \`Date\` comes back as text and something
+ * has to turn it back. That is this function's only job, and the schema it
+ * returns says only where the dates are: every other field is left out and
+ * rides through the loose object untouched. The payload was validated when it
+ * was committed, so re-checking it on the way out would be work already done.
+ *
+ * Naming only the dates is also what makes a read tolerant, without needing a
+ * rule per exception. A \`sensitive(...)\` field lives in the \`pii\` sidecar
+ * rather than in \`data\`; an event written against an older declaration
+ * predates whatever was added since; a field dropped from the declaration is
+ * still in the store. None of those are dates, so none of them are described
+ * here, and a payload carrying any of them still reads. The dates themselves
+ * are optional for the same reason — absent is not wrong.
+ *
+ * Zod does the walking, so nesting, arrays, records, unions and the wrappers
+ * are handled by the engine rather than by a traversal of our own that would
+ * drift as Zod grows constructs. A construct this doesn't recognise
+ * contributes no date, which is the documented fallthrough.
+ */
+export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
+  const def = def_of(schema);
+  if (!def) return undefined;
+  const inner = () => date_reviver_schema(def.innerType);
+  switch (def.type) {
+    case "date":
+      return z.coerce.date();
+    case "object": {
+      const shape = def.shape as Record<string, z.ZodType> | undefined;
+      if (!shape) return undefined;
+      const dated: Record<string, z.ZodType> = {};
+      for (const [key, field] of Object.entries(shape)) {
+        const dates = date_reviver_schema(field);
+        if (dates) dated[key] = dates.optional();
+      }
+      return Object.keys(dated).length ? z.looseObject(dated) : undefined;
+    }
+    case "array": {
+      const element = date_reviver_schema(def.element);
+      return element && z.array(element);
+    }
+    case "tuple": {
+      const items = (def.items as unknown[]).map((i) => date_reviver_schema(i));
+      return items.some(Boolean)
+        ? z.tuple(items.map((i) => i ?? z.unknown()) as never)
+        : undefined;
+    }
+    case "record": {
+      const value = date_reviver_schema(def.valueType);
+      return value && z.record(z.string(), value);
+    }
+    case "union": {
+      // A union is the one place the date paths are not enough. Zod picks a
+      // variant by trying each until one matches, so an option reduced to its
+      // dates matches almost anything and the first one wins — the variant
+      // that actually declared the date never gets tried, and a sibling's
+      // payload gets the wrong variant's rules. Every option therefore keeps
+      // its fields; see {@link variant_schema}.
+      const variants = (def.options as unknown[]).map(variant_schema);
+      return variants.some((v) => v.dated)
+        ? z.union(variants.map((v) => v.schema) as never)
+        : undefined;
+    }
+    case "nullable":
+      // Keep the null: coercing it would hand back the epoch.
+      return inner()?.nullable();
+    case "optional":
+    case "nonoptional":
+    case "readonly":
+    case "default":
+    case "prefault":
+    case "catch":
+      return inner();
+    default:
+      return undefined;
+  }
+}
+
 // === defer-config.ts ===
 /**
  * @module defer-config
@@ -32673,6 +32975,7 @@ export {
 export type { StaticTarget } from "./correlate-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export { date_reviver_schema } from "./date-reviver.js";
 export {
   assert_defer_when,
   type DeferSchedule,
@@ -36403,42 +36706,59 @@ export function is_pii(schema: z.ZodType): boolean {
 }
 
 /**
- * Derive the list of sensitive field names from an event's Zod schema.
+ * Derive an event's sensitive fields, as the declared schema of each.
  *
- * Walks the top-level shape of a \`z.object({...})\` and returns the keys whose
+ * Walks the top-level shape of a \`z.object({...})\` and keeps the keys whose
  * schema (after unwrapping optional/nullable/default wrappers) was marked via
- * \`sensitive(...)\`. Returns an empty array for non-object schemas or events
+ * \`sensitive(...)\`. Returns an empty object for non-object schemas or events
  * with no sensitive fields — the common-case zero-cost path.
  *
  * Only the top-level shape is walked. Sensitive fields nested inside a
  * \`z.object\` declared inside the event payload would require recursive
  * descent; that's deferred until a real callsite needs it.
  *
- * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup.
+ * A union event has no top-level shape, so the options are walked and merged:
+ * a key sensitive in any variant must be split, because the stored payload
+ * could be that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ * The first variant to declare a key wins, which only matters to a caller that
+ * wants the schema rather than the name.
+ *
+ * Returning the schemas rather than just the names is what lets a caller do
+ * something per field — the event builder asks each one whether it holds a
+ * date, so the \`pii\` sidecar's dates can be revived like any other.
+ *
+ * @internal
  */
-export function pii_fields(schema: z.ZodType): readonly string[] {
+export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
   if (shape && typeof shape === "object") {
-    const fields: string[] = [];
-    for (const key of Object.keys(shape)) {
-      if (is_pii(shape[key])) fields.push(key);
-    }
+    const fields: Record<string, z.ZodType> = {};
+    for (const key of Object.keys(shape))
+      if (is_pii(shape[key])) fields[key] = shape[key];
     return fields;
   }
-  // A union event has no top-level shape, so reading \`.shape\` alone returned
-  // [] and dropped EVERY marker in every variant (#1417). Take the union of
-  // the options' field sets: a key that is sensitive in any variant must be
-  // split, because the stored payload could be that variant. This is not the
-  // documented nested-object carve-out below — here the union IS the top
-  // level.
   const options = (schema as { options?: unknown }).options;
   if (Array.isArray(options)) {
-    const fields = new Set<string>();
+    const fields: Record<string, z.ZodType> = {};
     for (const option of options)
-      for (const key of pii_fields(option as z.ZodType)) fields.add(key);
-    return [...fields];
+      for (const [key, field] of Object.entries(
+        pii_schemas(option as z.ZodType)
+      ))
+        fields[key] ??= field;
+    return fields;
   }
-  return [];
+  return {};
+}
+
+/**
+ * The names of an event's sensitive fields — {@link pii_schemas} keyed.
+ *
+ * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup,
+ * and public through \`types/schemas.ts\`, where act-http's OpenAPI emitter uses
+ * it to mark request-body properties \`writeOnly\`.
+ */
+export function pii_fields(schema: z.ZodType): readonly string[] {
+  return Object.keys(pii_schemas(schema));
 }
 
 /**
@@ -41635,42 +41955,59 @@ export function is_pii(schema: z.ZodType): boolean {
 }
 
 /**
- * Derive the list of sensitive field names from an event's Zod schema.
+ * Derive an event's sensitive fields, as the declared schema of each.
  *
- * Walks the top-level shape of a \`z.object({...})\` and returns the keys whose
+ * Walks the top-level shape of a \`z.object({...})\` and keeps the keys whose
  * schema (after unwrapping optional/nullable/default wrappers) was marked via
- * \`sensitive(...)\`. Returns an empty array for non-object schemas or events
+ * \`sensitive(...)\`. Returns an empty object for non-object schemas or events
  * with no sensitive fields — the common-case zero-cost path.
  *
  * Only the top-level shape is walked. Sensitive fields nested inside a
  * \`z.object\` declared inside the event payload would require recursive
  * descent; that's deferred until a real callsite needs it.
  *
- * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup.
+ * A union event has no top-level shape, so the options are walked and merged:
+ * a key sensitive in any variant must be split, because the stored payload
+ * could be that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ * The first variant to declare a key wins, which only matters to a caller that
+ * wants the schema rather than the name.
+ *
+ * Returning the schemas rather than just the names is what lets a caller do
+ * something per field — the event builder asks each one whether it holds a
+ * date, so the \`pii\` sidecar's dates can be revived like any other.
+ *
+ * @internal
  */
-export function pii_fields(schema: z.ZodType): readonly string[] {
+export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
   if (shape && typeof shape === "object") {
-    const fields: string[] = [];
-    for (const key of Object.keys(shape)) {
-      if (is_pii(shape[key])) fields.push(key);
-    }
+    const fields: Record<string, z.ZodType> = {};
+    for (const key of Object.keys(shape))
+      if (is_pii(shape[key])) fields[key] = shape[key];
     return fields;
   }
-  // A union event has no top-level shape, so reading \`.shape\` alone returned
-  // [] and dropped EVERY marker in every variant (#1417). Take the union of
-  // the options' field sets: a key that is sensitive in any variant must be
-  // split, because the stored payload could be that variant. This is not the
-  // documented nested-object carve-out below — here the union IS the top
-  // level.
   const options = (schema as { options?: unknown }).options;
   if (Array.isArray(options)) {
-    const fields = new Set<string>();
+    const fields: Record<string, z.ZodType> = {};
     for (const option of options)
-      for (const key of pii_fields(option as z.ZodType)) fields.add(key);
-    return [...fields];
+      for (const [key, field] of Object.entries(
+        pii_schemas(option as z.ZodType)
+      ))
+        fields[key] ??= field;
+    return fields;
   }
-  return [];
+  return {};
+}
+
+/**
+ * The names of an event's sensitive fields — {@link pii_schemas} keyed.
+ *
+ * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup,
+ * and public through \`types/schemas.ts\`, where act-http's OpenAPI emitter uses
+ * it to mark request-body properties \`writeOnly\`.
+ */
+export function pii_fields(schema: z.ZodType): readonly string[] {
+  return Object.keys(pii_schemas(schema));
 }
 
 /**

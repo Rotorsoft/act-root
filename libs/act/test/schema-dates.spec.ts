@@ -65,11 +65,11 @@ describe("schema-driven date revival (#1556)", () => {
       })
     );
     expect(tags.sensitive).toEqual([]);
-    expect(tags.parse).toBeTypeOf("function");
+    expect(tags.date_reviver).toBeTypeOf("function");
 
     // Zod does the work, so nesting, arrays and records all type correctly —
     // the shapes a hand-rolled path walk would have had to re-implement.
-    const out = tags.parse!({
+    const out = tags.date_reviver!({
       at: "2026-01-01T00:00:00.000Z",
       label: "2026-06-06T00:00:00.000Z",
       nested: { born: "1990-02-03T00:00:00.000Z" },
@@ -85,14 +85,16 @@ describe("schema-driven date revival (#1556)", () => {
   });
 
   it("builds no reader when a schema declares no dates", () => {
-    expect(event_tags(z.object({ a: z.string() })).parse).toBeUndefined();
+    expect(
+      event_tags(z.object({ a: z.string() })).date_reviver
+    ).toBeUndefined();
   });
 
   it("keeps keys the schema does not declare", () => {
     // Event stores hold payloads written against older schemas. A strict Zod
     // object would silently drop them; losing committed data on read would be
     // worse than the mistyping this fixes.
-    const read = event_tags(z.object({ at: z.date() })).parse!;
+    const read = event_tags(z.object({ at: z.date() })).date_reviver!;
     const out = read({
       at: "2026-01-01T00:00:00.000Z",
       legacy: "written before this field was removed",
@@ -110,7 +112,7 @@ describe("schema-driven date revival (#1556)", () => {
           z.object({ n: z.number() }),
         ]),
       })
-    ).parse!;
+    ).date_reviver!;
     const out = read({
       maybe: "2026-01-01T00:00:00.000Z",
       orNull: null,
@@ -128,7 +130,7 @@ describe("schema-driven date revival (#1556)", () => {
       z.object({ at: z.date(), blob: z.map(z.string(), z.string()) })
     );
     const m = new Map([["k", "v"]]);
-    const out = tags.parse!({
+    const out = tags.date_reviver!({
       at: "2026-01-01T00:00:00.000Z",
       blob: m,
     }) as Record<string, any>;
@@ -140,19 +142,19 @@ describe("schema-driven date revival (#1556)", () => {
     // Guards the recursion: a malformed or foreign node reached through a
     // child slot must pass through, not crash the build.
     const foreign = { not: "a zod schema" } as unknown as z.ZodType;
-    expect(event_tags(foreign).parse).toBeUndefined();
+    expect(event_tags(foreign).date_reviver).toBeUndefined();
     expect(event_tags(foreign).sensitive).toEqual([]);
 
     // An object def with no shape takes the same path.
     const shapeless = {
       _zod: { def: { type: "object" } },
     } as unknown as z.ZodType;
-    expect(event_tags(shapeless).parse).toBeUndefined();
+    expect(event_tags(shapeless).date_reviver).toBeUndefined();
   });
 
   it("leaves an already-typed value alone", () => {
     // InMemory holds references, so the value can already be a `Date`.
-    const read = event_tags(z.object({ at: z.date() })).parse!;
+    const read = event_tags(z.object({ at: z.date() })).date_reviver!;
     const already = new Date("2020-01-01T00:00:00.000Z");
     const out = read({ at: already }) as { at: Date };
     expect(out.at.getTime()).toBe(already.getTime());
@@ -271,5 +273,76 @@ describe("schema-driven date revival (#1556)", () => {
 
     expect(seen).toEqual({ at: "Date", label: "string" });
     await dispose();
+  });
+
+  it("revives dates in the variant a union payload actually matches", () => {
+    // The variants share a key: `at` is a string in one and a date in the
+    // other. Reducing a variant to its date paths would make every variant
+    // match every payload, so the first one wins and the wrong rule applies.
+    const U = z.union([
+      z.object({ k: z.literal("b"), at: z.string() }),
+      z.object({ k: z.literal("a"), at: z.date() }),
+    ]);
+    const revive = event_tags(U).date_reviver!;
+    expect(revive({ k: "a", at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      k: "a",
+      at: new Date("2020-01-01T00:00:00.000Z"),
+    });
+    expect(revive({ k: "b", at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      k: "b",
+      at: "2020-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("revives a union's date when a variant without one is declared first", () => {
+    const U = z.union([
+      z.object({ k: z.literal("b"), n: z.number() }),
+      z.object({ k: z.literal("a"), at: z.date() }),
+    ]);
+    const out = event_tags(U).date_reviver!({
+      k: "a",
+      at: "2020-01-01T00:00:00.000Z",
+    }) as { at: unknown };
+    expect(out.at).toBeInstanceOf(Date);
+  });
+
+  it("builds nothing for a union with no dates in any variant", () => {
+    const U = z.union([
+      z.object({ k: z.literal("a") }),
+      z.object({ k: z.literal("b"), n: z.number() }),
+    ]);
+    expect(event_tags(U).date_reviver).toBeUndefined();
+  });
+
+  it("still revives a union variant when a field it declares is missing", () => {
+    const U = z.union([
+      z.object({ k: z.literal("a"), at: z.date(), added_later: z.string() }),
+      z.object({ k: z.literal("b") }),
+    ]);
+    const out = event_tags(U).date_reviver!({
+      k: "a",
+      at: "2020-01-01T00:00:00.000Z",
+    }) as { at: unknown };
+    expect(out.at).toBeInstanceOf(Date);
+  });
+
+  it("revives a union told apart by field type, not a discriminator", () => {
+    // No literal to discriminate on: the variants differ only in the TYPE of
+    // `v`, and `at` is a date in one and a string in the other. This is why a
+    // variant keeps its fields — narrow them and the first variant matches
+    // everything, so the one that declared the date is never tried.
+    const U = z.union([
+      z.object({ v: z.number(), at: z.string() }),
+      z.object({ v: z.string(), at: z.date() }),
+    ]);
+    const revive = event_tags(U).date_reviver!;
+    expect(revive({ v: "x", at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      v: "x",
+      at: new Date("2020-01-01T00:00:00.000Z"),
+    });
+    expect(revive({ v: 7, at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      v: 7,
+      at: "2020-01-01T00:00:00.000Z",
+    });
   });
 });

@@ -7,6 +7,7 @@ coverage/
 local.db*
 test-store.db*
 test-autoclose.db*
+test-rsd-*.db*
 tck-store.db*
 .DS_Store
 *.tsbuildinfo

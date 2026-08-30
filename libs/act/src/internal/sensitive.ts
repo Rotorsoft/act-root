@@ -116,42 +116,59 @@ export function is_pii(schema: z.ZodType): boolean {
 }
 
 /**
- * Derive the list of sensitive field names from an event's Zod schema.
+ * Derive an event's sensitive fields, as the declared schema of each.
  *
- * Walks the top-level shape of a `z.object({...})` and returns the keys whose
+ * Walks the top-level shape of a `z.object({...})` and keeps the keys whose
  * schema (after unwrapping optional/nullable/default wrappers) was marked via
- * `sensitive(...)`. Returns an empty array for non-object schemas or events
+ * `sensitive(...)`. Returns an empty object for non-object schemas or events
  * with no sensitive fields — the common-case zero-cost path.
  *
  * Only the top-level shape is walked. Sensitive fields nested inside a
  * `z.object` declared inside the event payload would require recursive
  * descent; that's deferred until a real callsite needs it.
  *
- * @internal — consumed by the registry's `sensitive_fields(event_name)` lookup.
+ * A union event has no top-level shape, so the options are walked and merged:
+ * a key sensitive in any variant must be split, because the stored payload
+ * could be that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ * The first variant to declare a key wins, which only matters to a caller that
+ * wants the schema rather than the name.
+ *
+ * Returning the schemas rather than just the names is what lets a caller do
+ * something per field — the event builder asks each one whether it holds a
+ * date, so the `pii` sidecar's dates can be revived like any other.
+ *
+ * @internal
  */
-export function pii_fields(schema: z.ZodType): readonly string[] {
+export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
   if (shape && typeof shape === "object") {
-    const fields: string[] = [];
-    for (const key of Object.keys(shape)) {
-      if (is_pii(shape[key])) fields.push(key);
-    }
+    const fields: Record<string, z.ZodType> = {};
+    for (const key of Object.keys(shape))
+      if (is_pii(shape[key])) fields[key] = shape[key];
     return fields;
   }
-  // A union event has no top-level shape, so reading `.shape` alone returned
-  // [] and dropped EVERY marker in every variant (#1417). Take the union of
-  // the options' field sets: a key that is sensitive in any variant must be
-  // split, because the stored payload could be that variant. This is not the
-  // documented nested-object carve-out below — here the union IS the top
-  // level.
   const options = (schema as { options?: unknown }).options;
   if (Array.isArray(options)) {
-    const fields = new Set<string>();
+    const fields: Record<string, z.ZodType> = {};
     for (const option of options)
-      for (const key of pii_fields(option as z.ZodType)) fields.add(key);
-    return [...fields];
+      for (const [key, field] of Object.entries(
+        pii_schemas(option as z.ZodType)
+      ))
+        fields[key] ??= field;
+    return fields;
   }
-  return [];
+  return {};
+}
+
+/**
+ * The names of an event's sensitive fields — {@link pii_schemas} keyed.
+ *
+ * @internal — consumed by the registry's `sensitive_fields(event_name)` lookup,
+ * and public through `types/schemas.ts`, where act-http's OpenAPI emitter uses
+ * it to mark request-body properties `writeOnly`.
+ */
+export function pii_fields(schema: z.ZodType): readonly string[] {
+  return Object.keys(pii_schemas(schema));
 }
 
 /**
