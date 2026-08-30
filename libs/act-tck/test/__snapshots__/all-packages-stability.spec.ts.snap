@@ -10980,11 +10980,13 @@ const def_of = (schema: unknown): Record<string, unknown> | undefined =>
 
 /**
  * Rebuild a schema for reading: dates coerce from their stored string, the
- * sensitive keys are optional, and objects keep keys they don't declare.
+ * sensitive keys are left out, and objects keep keys they don't declare.
  *
  * Reading revives dates, it does not re-validate — the payload was validated
- * on the way in. The sensitive keys are optional because the write path moved
- * them into the \`pii\` sidecar, so \`data\` structurally cannot hold them.
+ * on the way in. The sensitive keys are left out rather than made optional
+ * because the write path moved them into the \`pii\` sidecar: \`data\` does not
+ * hold them, so there is nothing to describe. Anything that does turn up under
+ * one of those names rides through the loose object untouched.
  *
  * A construct this doesn't recognise is returned untouched, so an unfamiliar
  * schema still parses — it just won't coerce dates buried inside one. That
@@ -11007,8 +11009,8 @@ function to_read_schema(
       if (!shape) return schema;
       const next: Record<string, z.ZodType> = {};
       for (const [key, inner] of Object.entries(shape)) {
-        const rebuilt = to_read_schema(inner, found) as z.ZodType;
-        next[key] = sensitive?.includes(key) ? rebuilt.optional() : rebuilt;
+        if (sensitive?.includes(key)) continue;
+        next[key] = to_read_schema(inner, found) as z.ZodType;
       }
       return z.looseObject(next);
     }
