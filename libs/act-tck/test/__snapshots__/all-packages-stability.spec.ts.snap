@@ -11151,6 +11151,15 @@ export function make_event_reader(
 
   if (!date_reviver) return gate;
 
+  // The sidecar is only worth reviving for a reader that can be shown it.
+  // A \`strip\` reader drops \`pii\` outright, and a redacting one discloses only
+  // to an actor a predicate approves — so no actor and no predicate means the
+  // values are on their way to REDACTED whatever they hold. The predicate
+  // itself stays uncalled here: the gate owns that decision and calling it
+  // twice would run a caller's code twice.
+  const revive_pii =
+    disclosure === "redact" && predicate ? pii_date_reviver : undefined;
+
   // Revive before disclosing: the gate copies, so reviving afterwards would
   // leave the consumer's value a string — and it substitutes REDACTED and
   // SHREDDED, which are not dates.
@@ -11160,9 +11169,7 @@ export function make_event_reader(
       {
         ...event,
         data: date_reviver(event.data),
-        ...(pii_date_reviver && pii != null
-          ? { pii: pii_date_reviver(pii) }
-          : {}),
+        ...(revive_pii && actor && pii != null ? { pii: revive_pii(pii) } : {}),
       } as never,
       actor
     );
