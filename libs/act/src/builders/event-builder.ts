@@ -16,7 +16,9 @@
  *   target a projection already serves. Both checks skip dynamic resolvers,
  *   because a `.to(fn)` target is unknowable until an event arrives.
  * - **resolution** — each event's schema is read once into {@link EventTags}:
- *   which fields are sensitive, and how to type the stored payload.
+ *   which fields are sensitive, and how to revive the dates in a stored
+ *   payload. Working out where the dates are is a Zod concern, so it lives in
+ *   `internal/date-reviver.ts`; this module composes what that returns.
  * - **composition** — the per-surface readers, each a single {@link EventGate}
  *   that types the payload and applies disclosure in one call.
  *
@@ -30,6 +32,7 @@
  */
 
 import { z } from "zod";
+import { date_reviver_schema, def_of } from "../internal/index.js";
 import {
   type EventGate,
   IDENTITY_GATE,
@@ -56,88 +59,6 @@ export type EventTags = {
    */
   readonly pii_date_reviver: ((pii: unknown) => unknown) | undefined;
 };
-
-/** Zod exposes its shape under `_zod.def` in v4 and `def` in older builds. */
-const def_of = (schema: unknown): Record<string, unknown> | undefined =>
-  (schema as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
-  (schema as { def?: Record<string, unknown> }).def;
-
-/**
- * Build the schema that revives an event's dates, or `undefined` when it
- * declares none.
- *
- * JSON has no date type, so a stored `Date` comes back as text and something
- * has to turn it back. That is this function's only job, and the schema it
- * returns says only where the dates are: every other field is left out and
- * rides through the loose object untouched. The payload was validated when it
- * was committed, so re-checking it on the way out would be work already done.
- *
- * Naming only the dates is also what makes a read tolerant, without needing a
- * rule per exception. A `sensitive(...)` field lives in the `pii` sidecar
- * rather than in `data`; an event written against an older declaration
- * predates whatever was added since; a field dropped from the declaration is
- * still in the store. None of those are dates, so none of them are described
- * here, and a payload carrying any of them still reads. The dates themselves
- * are optional for the same reason — absent is not wrong.
- *
- * Zod does the walking, so nesting, arrays, records, unions and the wrappers
- * are handled by the engine rather than by a traversal of our own that would
- * drift as Zod grows constructs. A construct this doesn't recognise
- * contributes no date, which is the documented fallthrough.
- */
-function date_reviver_schema(schema: unknown): z.ZodType | undefined {
-  const def = def_of(schema);
-  if (!def) return undefined;
-  const inner = () => date_reviver_schema(def.innerType);
-  switch (def.type) {
-    case "date":
-      return z.coerce.date();
-    case "object": {
-      const shape = def.shape as Record<string, z.ZodType> | undefined;
-      if (!shape) return undefined;
-      const dated: Record<string, z.ZodType> = {};
-      for (const [key, field] of Object.entries(shape)) {
-        const dates = date_reviver_schema(field);
-        if (dates) dated[key] = dates.optional();
-      }
-      return Object.keys(dated).length ? z.looseObject(dated) : undefined;
-    }
-    case "array": {
-      const element = date_reviver_schema(def.element);
-      return element && z.array(element);
-    }
-    case "tuple": {
-      const items = (def.items as unknown[]).map((i) => date_reviver_schema(i));
-      return items.some(Boolean)
-        ? z.tuple(items.map((i) => i ?? z.unknown()) as never)
-        : undefined;
-    }
-    case "record": {
-      const value = date_reviver_schema(def.valueType);
-      return value && z.record(z.string(), value);
-    }
-    case "union": {
-      const options = (def.options as unknown[]).map((o) =>
-        date_reviver_schema(o)
-      );
-      return options.some(Boolean)
-        ? z.union(options.map((o) => o ?? z.unknown()) as never)
-        : undefined;
-    }
-    case "nullable":
-      // Keep the null: coercing it would hand back the epoch.
-      return inner()?.nullable();
-    case "optional":
-    case "nonoptional":
-    case "readonly":
-    case "default":
-    case "prefault":
-    case "catch":
-      return inner();
-    default:
-      return undefined;
-  }
-}
 
 /**
  * Resolve an event's schema in a single pass.

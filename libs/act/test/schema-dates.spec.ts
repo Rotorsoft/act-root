@@ -274,4 +274,55 @@ describe("schema-driven date revival (#1556)", () => {
     expect(seen).toEqual({ at: "Date", label: "string" });
     await dispose();
   });
+
+  it("revives dates in the variant a union payload actually matches", () => {
+    // The variants share a key: `at` is a string in one and a date in the
+    // other. Reducing a variant to its date paths would make every variant
+    // match every payload, so the first one wins and the wrong rule applies.
+    const U = z.union([
+      z.object({ k: z.literal("b"), at: z.string() }),
+      z.object({ k: z.literal("a"), at: z.date() }),
+    ]);
+    const revive = event_tags(U).date_reviver!;
+    expect(revive({ k: "a", at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      k: "a",
+      at: new Date("2020-01-01T00:00:00.000Z"),
+    });
+    expect(revive({ k: "b", at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      k: "b",
+      at: "2020-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("revives a union's date when a variant without one is declared first", () => {
+    const U = z.union([
+      z.object({ k: z.literal("b"), n: z.number() }),
+      z.object({ k: z.literal("a"), at: z.date() }),
+    ]);
+    const out = event_tags(U).date_reviver!({
+      k: "a",
+      at: "2020-01-01T00:00:00.000Z",
+    }) as { at: unknown };
+    expect(out.at).toBeInstanceOf(Date);
+  });
+
+  it("builds nothing for a union with no dates in any variant", () => {
+    const U = z.union([
+      z.object({ k: z.literal("a") }),
+      z.object({ k: z.literal("b"), n: z.number() }),
+    ]);
+    expect(event_tags(U).date_reviver).toBeUndefined();
+  });
+
+  it("still revives a union variant when a field it declares is missing", () => {
+    const U = z.union([
+      z.object({ k: z.literal("a"), at: z.date(), added_later: z.string() }),
+      z.object({ k: z.literal("b") }),
+    ]);
+    const out = event_tags(U).date_reviver!({
+      k: "a",
+      at: "2020-01-01T00:00:00.000Z",
+    }) as { at: unknown };
+    expect(out.at).toBeInstanceOf(Date);
+  });
 });
