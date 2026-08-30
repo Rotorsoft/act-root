@@ -37,7 +37,6 @@ import {
   type EventGate,
   IDENTITY_GATE,
   make_gate,
-  pii_fields,
   pii_schemas,
   pii_split,
   pii_strip,
@@ -78,8 +77,9 @@ export function event_tags(schema: z.ZodType): EventTags {
   // sidecar holds the split-out fields alone, so a date among them needs its
   // own reviver — without it a disclosed `sensitive(z.date())` arrives as text
   // beside a plain sibling that is a Date.
+  const pii = pii_schemas(schema);
   const pii_dates: Record<string, z.ZodType> = {};
-  for (const [key, field] of Object.entries(pii_schemas(schema))) {
+  for (const [key, field] of Object.entries(pii)) {
     const dates = date_reviver_schema(field);
     if (dates) pii_dates[key] = dates.optional();
   }
@@ -94,7 +94,7 @@ export function event_tags(schema: z.ZodType): EventTags {
   };
   const dated_pii = Object.keys(pii_dates).length > 0;
   return {
-    sensitive: pii_fields(schema),
+    sensitive: Object.keys(pii),
     date_reviver: data_reviver_schema && revive(data_reviver_schema),
     pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
