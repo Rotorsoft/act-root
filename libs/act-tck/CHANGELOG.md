@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.36.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.14...@rotorsoft/act-tck-v1.36.15) (2026-08-30)
+
+
+### Bug Fixes
+
+* **act-pg:** exclude the boundary event from created_after ([#1603](https://github.com/Rotorsoft/act-root/issues/1603)) ([e8c6a18](https://github.com/Rotorsoft/act-root/commit/e8c6a182ead2c7631b1512dcd1e726dcc14a0a1a)), closes [#1595](https://github.com/Rotorsoft/act-root/issues/1595)
+* **act:** revive dates on read instead of re-validating the payload ([#1601](https://github.com/Rotorsoft/act-root/issues/1601)) ([97ed5b9](https://github.com/Rotorsoft/act-root/commit/97ed5b9190601127e48d0b102c998eec95c38c78)), closes [#1594](https://github.com/Rotorsoft/act-root/issues/1594)
+
 # [@rotorsoft/act-tck-v1.36.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.13...@rotorsoft/act-tck-v1.36.14) (2026-08-29)
 
 
