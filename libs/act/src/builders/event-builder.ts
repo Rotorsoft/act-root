@@ -36,8 +36,9 @@ import { date_reviver_schema } from "../internal/index.js";
 import {
   type EventGate,
   IDENTITY_GATE,
-  is_pii,
   make_gate,
+  pii_fields,
+  pii_schemas,
   pii_split,
   pii_strip,
 } from "../internal/sensitive.js";
@@ -72,31 +73,18 @@ export type EventTags = {
  * @internal
  */
 export function event_tags(schema: z.ZodType): EventTags {
-  const sensitive: string[] = [];
+  // Which fields are sensitive is `sensitive.ts`'s question and where the
+  // dates are is `date-reviver.ts`'s; this composes the two answers. The
+  // sidecar holds the split-out fields alone, so a date among them needs its
+  // own reviver — without it a disclosed `sensitive(z.date())` arrives as text
+  // beside a plain sibling that is a Date.
   const pii_dates: Record<string, z.ZodType> = {};
+  for (const [key, field] of Object.entries(pii_schemas(schema))) {
+    const dates = date_reviver_schema(field);
+    if (dates) pii_dates[key] = dates.optional();
+  }
 
-  const collect = (node: unknown): void => {
-    const shape = (node as { shape?: Record<string, z.ZodType> }).shape;
-    if (shape) {
-      for (const key of Object.keys(shape))
-        if (is_pii(shape[key])) {
-          sensitive.push(key);
-          const dates = date_reviver_schema(shape[key]);
-          if (dates) pii_dates[key] ??= dates.optional();
-        }
-      return;
-    }
-    const options = (node as { options?: unknown }).options;
-    if (Array.isArray(options)) for (const option of options) collect(option);
-  };
-  collect(schema);
-
-  const unique = [...new Set(sensitive)];
   const data_reviver_schema = date_reviver_schema(schema);
-  // The sidecar holds the split-out fields alone, so a date among them needs
-  // its own pass — without it a disclosed `sensitive(z.date())` arrives as
-  // text beside a plain sibling that is a Date.
-  const has_pii_date = Object.keys(pii_dates).length > 0;
   // Reviving must never reject. A stored payload can disagree with the current
   // declaration in ways this schema deliberately does not describe, and handing
   // back what is stored beats refusing to read it.
@@ -104,12 +92,11 @@ export function event_tags(schema: z.ZodType): EventTags {
     const revived = schema.safeParse(data);
     return revived.success ? revived.data : data;
   };
+  const dated_pii = Object.keys(pii_dates).length > 0;
   return {
-    sensitive: unique,
+    sensitive: pii_fields(schema),
     date_reviver: data_reviver_schema && revive(data_reviver_schema),
-    pii_date_reviver: has_pii_date
-      ? revive(z.looseObject(pii_dates))
-      : undefined,
+    pii_date_reviver: dated_pii ? revive(z.looseObject(pii_dates)) : undefined,
   };
 }
 
