@@ -325,4 +325,24 @@ describe("schema-driven date revival (#1556)", () => {
     }) as { at: unknown };
     expect(out.at).toBeInstanceOf(Date);
   });
+
+  it("revives a union told apart by field type, not a discriminator", () => {
+    // No literal to discriminate on: the variants differ only in the TYPE of
+    // `v`, and `at` is a date in one and a string in the other. This is why a
+    // variant keeps its fields — narrow them and the first variant matches
+    // everything, so the one that declared the date is never tried.
+    const U = z.union([
+      z.object({ v: z.number(), at: z.string() }),
+      z.object({ v: z.string(), at: z.date() }),
+    ]);
+    const revive = event_tags(U).date_reviver!;
+    expect(revive({ v: "x", at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      v: "x",
+      at: new Date("2020-01-01T00:00:00.000Z"),
+    });
+    expect(revive({ v: 7, at: "2020-01-01T00:00:00.000Z" })).toEqual({
+      v: 7,
+      at: "2020-01-01T00:00:00.000Z",
+    });
+  });
 });

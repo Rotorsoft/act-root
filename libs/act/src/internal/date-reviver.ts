@@ -33,10 +33,17 @@ export const def_of = (schema: unknown): Record<string, unknown> | undefined =>
  * Rebuild one union variant so it still recognises its own payloads.
  *
  * Same date coercion as everywhere else, but the variant keeps its other
- * fields: a discriminator can only reject a sibling's payload if it is still
- * there to be checked. Every key is optional, so the variant still matches
- * when a `sensitive(...)` field sits in the `pii` sidecar or when a stored
- * payload predates a field the declaration has since gained.
+ * fields — this is the one place the date paths alone are not enough. A
+ * variant can only reject a sibling's payload if enough of its shape is left
+ * to check, and which fields do that is not knowable: a literal discriminator
+ * usually does it, but a union can just as well be told apart by the *type* of
+ * an ordinary field. Narrowing to the dates, or relaxing the rest, makes the
+ * first variant match everything, so the one that declared the date is never
+ * tried and a sibling's payload is read under the wrong rules.
+ *
+ * Every key is optional, so the variant still matches when a `sensitive(...)`
+ * field sits in the `pii` sidecar or when a stored payload predates a field
+ * the declaration has since gained.
  *
  * Reports whether this variant declared a date, so a union with none anywhere
  * builds nothing at all.
