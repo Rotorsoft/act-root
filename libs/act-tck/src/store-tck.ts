@@ -716,6 +716,38 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(out_of_window.length).toBe(0);
       });
 
+      it("created bounds exclude the event they are pinned to", async () => {
+        // The window case above is built as `ts ± 60_000`, so no bound ever
+        // lands ON an event's own timestamp — which is where the two
+        // directions can disagree. A store may hold `created` at a finer
+        // resolution than the `Date` it hands back (Postgres keeps
+        // microseconds), and then a row compares as strictly-after its own
+        // truncated timestamp and returns itself (#1595). Millisecond is the
+        // resolution the contract is expressed in, since that is all a `Date`
+        // carries, so both bounds must exclude the event they name.
+        const s = `q-ts-self-${uid()}`;
+        const committed = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const own = committed[0].created;
+        const after_own = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          created_after: own,
+        });
+        expect(after_own).toEqual([]);
+        // The mirror direction, already strict everywhere — the control that
+        // isolates a failure to the `created_after` side.
+        const before_own = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          created_before: own,
+        });
+        expect(before_own).toEqual([]);
+      });
+
       it("backward traversal short-circuits at `after` id boundary", async () => {
         const s = `q-back-after-${uid()}`;
         const committed = await store.commit<CounterEvents>(
