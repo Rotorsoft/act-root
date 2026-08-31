@@ -3,7 +3,7 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports } from "./scoped.js";
+import { current_ports, reset_acts } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -254,6 +254,8 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
     log().info(`[act] - ${adapter.constructor.name}`);
   }
   adapters.clear();
+  // The ports these Acts resolved through are gone (#1597).
+  reset_acts();
   config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
 }
 

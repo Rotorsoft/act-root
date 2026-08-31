@@ -74,6 +74,70 @@ const reacting = new AsyncLocalStorage<Reacting>();
  *
  * @internal
  */
+/**
+ * How many live Acts of each kind this process holds.
+ *
+ * Counts, not references: an entry that held the Act would keep it alive and
+ * re-introduce the retention [#1441](https://github.com/Rotorsoft/act-root/issues/1441)
+ * removed from the disposers.
+ *
+ * @internal
+ */
+const live = { scoped: 0, singleton: 0 };
+
+/**
+ * Record a new Act, refusing to let both kinds be live at once.
+ *
+ * A scoped Act resolves its ports through an ambient frame and a singleton one
+ * through the process-wide adapters. With both alive, which store a call
+ * reaches depends on the frame it happens to be running in — a singleton Act
+ * dispatched from inside a scoped handler writes to that tenant's store
+ * ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)). Rather than
+ * make that resolve some particular way, the combination is refused: a process
+ * either scopes its ports or it does not.
+ *
+ * Counts live Acts rather than built ones, so building, shutting down, and
+ * then building the other kind is fine — it is only overlap that is ambiguous.
+ *
+ * @returns The function that gives the slot back. `shutdown()` memoizes its
+ *   promise, so this runs exactly once per Act and needs no guard of its own.
+ *   An Act abandoned without `shutdown()` holds its slot until the process
+ *   tears its ports down — see {@link reset_acts}.
+ * @internal
+ */
+/**
+ * Forget every recorded Act, because the ports they resolved through are gone.
+ *
+ * Called by `disposeAndExit`. An Act that is abandoned rather than shut down
+ * never gives its slot back — the count deliberately holds no reference to it,
+ * so there is nothing to notice its collection — and without this a test file
+ * that drops an Act would decide the port strategy for every file after it in
+ * the same worker.
+ *
+ * @internal
+ */
+export function reset_acts(): void {
+  live.scoped = 0;
+  live.singleton = 0;
+}
+
+export function register_act(scoped: boolean): () => void {
+  const kind = scoped ? "scoped" : "singleton";
+  const other = scoped ? "singleton" : "scoped";
+  if (live[other] > 0)
+    throw new Error(
+      `Cannot build a ${kind} Act while ${live[other]} ${other} Act(s) are live. ` +
+        "A process either resolves its ports through ActOptions.scoped or through the " +
+        "singleton adapters, not both: with both alive, which store a call reaches " +
+        "depends on the frame it runs in. Give every Act in this process a `scoped` bag, " +
+        "or none of them, and shut one down before building the other kind."
+    );
+  live[kind]++;
+  return () => {
+    live[kind]--;
+  };
+}
+
 export function make_run_scoped(
   bag: Scoped | undefined
 ): <T>(fn: () => Promise<T>) => Promise<T> {

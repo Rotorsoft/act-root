@@ -44,6 +44,7 @@ import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
+  register_act,
 } from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
@@ -544,6 +545,8 @@ export class Act<
    * per-Act ports (ACT-501). No-op when the Act is unscoped — so the singleton
    * path keeps reading fresh `store()`/`cache()` per call, which matters for
    * tests that dispose and re-seed mid-suite. */
+  /** Gives this Act's slot back to the scoped/singleton guard (#1597). */
+  private readonly _release_act: () => void;
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   /**
@@ -700,6 +703,9 @@ export class Act<
     // reference weakly keeps process-wide `dispose()()` working for a live
     // Act while letting an unreachable one be collected, shut down or not.
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
+    // Last, so a build that throws further up leaves no slot held: this is
+    // the point where an Act exists and the process is committed to it.
+    this._release_act = register_act(!!options.scoped);
   }
 
   /**
@@ -1020,6 +1026,7 @@ export class Act<
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
+        this._release_act();
         this._emitter.removeAllListeners();
         // `_wire_notify` swallows subscription errors and resolves to
         // `undefined`, so this promise never rejects.
