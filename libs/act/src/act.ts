@@ -1016,15 +1016,22 @@ export class Act<
         // port — a scoped Act would otherwise release against the singleton
         // and leave its real lease held.
         await this._scoped(() => this._correlate.release_correlation());
+        // Unsubscribe BEFORE stopping the settle loop. A notification
+        // arriving after `stop_settling()` reaches the handler below and
+        // schedules a fresh cycle that nothing is left to cancel, so a
+        // worker that has already shut down takes a new lease — and with a
+        // grace budget in play that window is seconds wide (#1596). Stopping
+        // the source first leaves nothing able to arm.
+        //
+        // `_wire_notify` swallows subscription errors and resolves to
+        // `undefined`, so this promise never rejects.
+        const disposer = await this._notify_disposer;
+        if (disposer) await disposer();
         this.stop_settling();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
         this._emitter.removeAllListeners();
-        // `_wire_notify` swallows subscription errors and resolves to
-        // `undefined`, so this promise never rejects.
-        const disposer = await this._notify_disposer;
-        if (disposer) await disposer();
       })();
     }
     return this._shutdown_promise;
