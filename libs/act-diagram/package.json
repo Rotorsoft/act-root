@@ -71,7 +71,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
-    "@vitejs/plugin-react": "^6.1.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "picocolors": "^1.1.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
