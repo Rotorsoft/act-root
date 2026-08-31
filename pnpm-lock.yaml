@@ -118,8 +118,8 @@ importers:
         specifier: ^4.9.0
         version: 4.9.0
       lint-staged:
-        specifier: ^17.3.0
-        version: 17.3.0
+        specifier: ^17.4.1
+        version: 17.4.1
       semantic-release:
         specifier: ^25.0.9
         version: 25.0.9(supports-color@10.2.2)(typescript@7.0.2)
@@ -198,13 +198,13 @@ importers:
         version: 19.2.5(@types/react@19.2.18)
       docusaurus-plugin-typedoc:
         specifier: ^1.4.2
-        version: 1.4.2(typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@6.0.3)))
+        version: 1.4.2(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3)))
       typedoc:
         specifier: ~0.28.20
         version: 0.28.20(typescript@6.0.3)
       typedoc-plugin-markdown:
-        specifier: ~4.12.0
-        version: 4.12.0(typedoc@0.28.20(typescript@6.0.3))
+        specifier: ~4.13.0
+        version: 4.13.0(typedoc@0.28.20(typescript@6.0.3))
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -256,8 +256,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.120.0
-        version: 0.120.0(zod@4.4.3)
+        specifier: ^0.122.0
+        version: 0.122.0(zod@4.4.3)
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
@@ -763,8 +763,8 @@ importers:
         version: link:../libs/act-otel
     devDependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.1115.0
-        version: 3.1116.0
+        specifier: ^3.1120.0
+        version: 3.1121.0
       '@types/node':
         specifier: ^25.9.5
         version: 25.9.5
@@ -880,8 +880,8 @@ packages:
     resolution: {integrity: sha512-qmo1LXrNKLHvJE6mdQbLnsZAoZvj7VyF2ft4xmbSGWI2WWm87fx/CjUX4kEExt4y0a6T6nEts6ofpUfH5TEE1A==}
     engines: {node: '>= 14.0.0'}
 
-  '@anthropic-ai/sdk@0.120.0':
-    resolution: {integrity: sha512-ZlvmNFT/iIF6JD13rxbbMWD8nvGR0RaUp6yMQnoc+4Af0YjVVe/bIdW1XSQQsoxXAtg1NaT6Vak0LKFlJ4d37Q==}
+  '@anthropic-ai/sdk@0.122.0':
+    resolution: {integrity: sha512-GGPNftt0caaz9MDlmNQGHX8855Ojaduyy5pm9Sm1h7HalCn0cWNb5/bweadJF+4yzbal+QL6ztBa09WAAOzLmQ==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -893,8 +893,8 @@ packages:
     resolution: {integrity: sha512-Dtu0gr4dnATZAPwEYbpCsG+MpLM7OAliy2gTepEFQwl1vZ6DL3QMH2FveMa3HLvPsOdhJsPRB3KtxVhph9T75A==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-s3@3.1116.0':
-    resolution: {integrity: sha512-UKRl9qSVW0rZpvSOauQNpYAy8+ONBAVYnpfKVtCyOF+FZVT1tl6MunYuHvuarCrroD2/YJs+tHTALYNgAlec3Q==}
+  '@aws-sdk/client-s3@3.1121.0':
+    resolution: {integrity: sha512-hBnoqaVBeWdkgXcJElMXA2yUZWkBCBntu2qmN+tfqmzC+j4LzJC3ox8qIgS2WdMS1cb8UwyBogUVrkRXybNm0A==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.977.9':
@@ -3787,10 +3787,6 @@ packages:
   '@slorber/remark-comment@1.0.0':
     resolution: {integrity: sha512-RCE24n7jsOj1M0UPvIQCHTe7fI0sFL4S2nwKVWwHyVr/wI/H8GosgsJGyhnsZoGFnD/P2hLf1mSbrrgSLN93NA==}
 
-  '@smithy/core@3.31.1':
-    resolution: {integrity: sha512-CyogUINxvi7C7LDsh8Syo6hVJOT9ckz4rG8dRZfTJ8r91HkMY59PnNooaj7WcHyxEkxPfBAmbgztZU+xTo76lg==}
-    engines: {node: '>=18.0.0'}
-
   '@smithy/core@3.33.3':
     resolution: {integrity: sha512-CsOeKq/9kA3y6VJHt+/+VTCtBaxJ4OTFpgrjIUhPpDIKxBci1k2bJaQASF2h/ELWrulGp+t97DZ0mevfAD8idg==}
     engines: {node: '>=18.0.0'}
@@ -3809,10 +3805,6 @@ packages:
 
   '@smithy/signature-v4@5.6.12':
     resolution: {integrity: sha512-I6KLtq3H0qqSuV9vLglfi8puHqzygzWHOnI4z/Rdoo+q50vvo18vBRdPAvvEtcaKROz7Zn6qnPa14kRfPH6PcQ==}
-    engines: {node: '>=18.0.0'}
-
-  '@smithy/types@4.16.1':
-    resolution: {integrity: sha512-0JFs3V2y2M9tKW5na/qxe69Zv+uxLMO7QBbhxF/FHu/Gp2NFZAAL9tWl9PU02xxo07pb3G9FTyjNc6D5uZrJIg==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/types@4.17.2':
@@ -6959,8 +6951,8 @@ packages:
   linkify-it@5.0.2:
     resolution: {integrity: sha512-ONTm2jCMAVZjgQa/Fy1kScXsuOoF5NPTsoFBdE1KVIZ2vAh/r9+Bqo+0jINCBYnavTPQZz38QzFTme79ENoN3Q==}
 
-  lint-staged@17.3.0:
-    resolution: {integrity: sha512-woZS3vNe3UKqBaLPvbLOtKRY4tLANpWQhom12MGWqC8Mh1lCOO+WgSwmX2amjJAqTY9BkXYW87fCUH5H9Ph6xw==}
+  lint-staged@17.4.1:
+    resolution: {integrity: sha512-FmJeudcalbSfg1du+JCfvi5vS6Qt08KgbfLWiHinbef+2JJwUZwAWVoaO1AcJVUTWPfk0t30PMQNwPAeCzYQ+Q==}
     engines: {node: '>=22.22.1'}
     hasBin: true
 
@@ -9195,6 +9187,10 @@ packages:
     resolution: {integrity: sha512-SHf/r48b7vOrjve9PxJo3MN5v5yuyjHvdUcrQffT3WXMUfnGmHDVbC4k3sHJaJTgZCwpUplIaAo5ANtMyp3YHg==}
     engines: {node: '>=18'}
 
+  tinyexec@1.3.0:
+    resolution: {integrity: sha512-QKAl9m8gWWGHV8jZcPeym6j+XULi6tOf1mT83WYJ4Lk2ytW/uwAWkrP0uFsdoYMdueVJ0qs26wZ+23xeB4ibNQ==}
+    engines: {node: '>=18'}
+
   tinyglobby@0.2.16:
     resolution: {integrity: sha512-pn99VhoACYR8nFHhxqix+uvsbXineAasWm5ojXoN8xEwK5Kd3/TrhNn1wByuD52UxWRLy8pu+kRMniEi6Eq9Zg==}
     engines: {node: '>=12.0.0'}
@@ -9348,8 +9344,8 @@ packages:
     peerDependencies:
       typedoc-plugin-markdown: '>=4.8.0'
 
-  typedoc-plugin-markdown@4.12.0:
-    resolution: {integrity: sha512-eJDEMAfxCmede22c/Jw7d0FA13ggAQv+KkwQYKYCdqI02cin6Rc9QRwbG/7XvvHWinuFejySnZVUWDtvGk3Vbg==}
+  typedoc-plugin-markdown@4.13.0:
+    resolution: {integrity: sha512-OHaOLoMTS0wL2ud73WXvxv486mrUEtgXxW4iKiTOGJVipT/VBWY76rlVRMQGes7aVonoIf5roWRe1UvHbufLlQ==}
     engines: {node: '>= 18'}
     peerDependencies:
       typedoc: 0.28.x
@@ -9962,7 +9958,7 @@ snapshots:
     dependencies:
       '@algolia/client-common': 5.50.1
 
-  '@anthropic-ai/sdk@0.120.0(zod@4.4.3)':
+  '@anthropic-ai/sdk@0.122.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
@@ -9977,7 +9973,7 @@ snapshots:
       '@smithy/types': 4.17.2
       tslib: 2.8.1
 
-  '@aws-sdk/client-s3@3.1116.0':
+  '@aws-sdk/client-s3@3.1121.0':
     dependencies:
       '@aws-sdk/checksums': 3.1000.29
       '@aws-sdk/core': 3.977.9
@@ -13739,11 +13735,6 @@ snapshots:
       micromark-util-character: 1.2.0
       micromark-util-symbol: 1.1.0
 
-  '@smithy/core@3.31.1':
-    dependencies:
-      '@smithy/types': 4.16.1
-      tslib: 2.8.1
-
   '@smithy/core@3.33.3':
     dependencies:
       '@smithy/types': 4.17.2
@@ -13751,8 +13742,8 @@ snapshots:
 
   '@smithy/credential-provider-imds@4.4.16':
     dependencies:
-      '@smithy/core': 3.31.1
-      '@smithy/types': 4.16.1
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.17.2
       tslib: 2.8.1
 
   '@smithy/fetch-http-handler@5.7.2':
@@ -13769,12 +13760,8 @@ snapshots:
 
   '@smithy/signature-v4@5.6.12':
     dependencies:
-      '@smithy/core': 3.31.1
-      '@smithy/types': 4.16.1
-      tslib: 2.8.1
-
-  '@smithy/types@4.16.1':
-    dependencies:
+      '@smithy/core': 3.33.3
+      '@smithy/types': 4.17.2
       tslib: 2.8.1
 
   '@smithy/types@4.17.2':
@@ -15565,10 +15552,10 @@ snapshots:
     dependencies:
       '@leichtgewicht/ip-codec': 2.0.5
 
-  docusaurus-plugin-typedoc@1.4.2(typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@6.0.3))):
+  docusaurus-plugin-typedoc@1.4.2(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3))):
     dependencies:
-      typedoc-docusaurus-theme: 1.4.2(typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@6.0.3)))
-      typedoc-plugin-markdown: 4.12.0(typedoc@0.28.20(typescript@6.0.3))
+      typedoc-docusaurus-theme: 1.4.2(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3)))
+      typedoc-plugin-markdown: 4.13.0(typedoc@0.28.20(typescript@6.0.3))
 
   dom-converter@0.2.0:
     dependencies:
@@ -16946,11 +16933,11 @@ snapshots:
     dependencies:
       uc.micro: 2.1.0
 
-  lint-staged@17.3.0:
+  lint-staged@17.4.1:
     dependencies:
       picomatch: 4.0.7
       string-argv: 0.3.2
-      tinyexec: 1.2.4
+      tinyexec: 1.3.0
     optionalDependencies:
       yaml: 2.9.0
 
@@ -19589,6 +19576,8 @@ snapshots:
 
   tinyexec@1.2.4: {}
 
+  tinyexec@1.3.0: {}
+
   tinyglobby@0.2.16:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.7)
@@ -19726,11 +19715,11 @@ snapshots:
     dependencies:
       is-typedarray: 1.0.0
 
-  typedoc-docusaurus-theme@1.4.2(typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@6.0.3))):
+  typedoc-docusaurus-theme@1.4.2(typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3))):
     dependencies:
-      typedoc-plugin-markdown: 4.12.0(typedoc@0.28.20(typescript@6.0.3))
+      typedoc-plugin-markdown: 4.13.0(typedoc@0.28.20(typescript@6.0.3))
 
-  typedoc-plugin-markdown@4.12.0(typedoc@0.28.20(typescript@6.0.3)):
+  typedoc-plugin-markdown@4.13.0(typedoc@0.28.20(typescript@6.0.3)):
     dependencies:
       typedoc: 0.28.20(typescript@6.0.3)
 
