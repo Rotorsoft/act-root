@@ -289,4 +289,152 @@ describe("correlate dynamic-resolver lane (#1255)", () => {
       }
     });
   });
+  /**
+   * The dynamic twin of #1582. A dynamic target's record lives in the
+   * evictable LRU, and a missing record used to read as never-seen — so a
+   * later, lower-priority resolution won the lane it had already lost. The
+   * LRU calls itself "a memory bound, not a correctness mechanism", which
+   * was true of a target's priority (the store merges that with max) and
+   * false of its lane (the store overwrote that unconditionally).
+   *
+   * The repair is in the store: the lane now rides the priority max, so the
+   * durable row holds the invariant and forgetting cannot break it. That
+   * also covers the case no LRU bound reaches — a fresh process, whose
+   * records are all missing by definition.
+   */
+  describe("dynamic targets survive a forgotten record (#1599)", () => {
+    const ranker = state({ Ranker: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({
+        hied: ZodEmpty,
+        loed: ZodEmpty,
+        churned: z.object({ to: z.string() }),
+      })
+      .patch({
+        hied: (_e, s) => ({ count: s.count + 1 }),
+        loed: (_e, s) => ({ count: s.count + 1 }),
+        churned: (_e, s) => ({ count: s.count + 1 }),
+      })
+      .on({ hi: ZodEmpty })
+      .emit(() => ["hied", {}])
+      .on({ lo: ZodEmpty })
+      .emit(() => ["loed", {}])
+      .on({ churn: z.object({ to: z.string() }) })
+      .emit((a) => ["churned", { to: a.to }])
+      .build();
+
+    /**
+     * Two dynamic reactions on one target at different ranks: the winner
+     * lanes "T" fast at priority 10, the loser asks for slow at 0. `churn`
+     * mints a fresh target per action so the LRU can be driven past its
+     * bound on demand.
+     */
+    function buildRanked(
+      maxSubscribedStreams: number,
+      ran?: string[],
+      onlyLanes?: ReadonlyArray<"fast">
+    ) {
+      return act()
+        .withState(ranker)
+        .withLane({ name: "fast" })
+        .withLane({ name: "slow" })
+        .on("hied")
+        .do(async function hi() {
+          ran?.push("hi");
+        })
+        .to(() => ({ target: "T", lane: "fast", priority: 10 }))
+        .on("loed")
+        .do(async function lo() {
+          ran?.push("lo");
+        })
+        .to(() => ({ target: "T", lane: "slow", priority: 0 }))
+        .on("churned")
+        .do(async function churn() {})
+        .to((e) => ({
+          target: (e.data as { to: string }).to,
+          lane: "fast",
+          priority: 10,
+        }))
+        .build({ maxSubscribedStreams, onlyLanes });
+    }
+
+    async function targetLane(): Promise<string | undefined> {
+      let lane: string | undefined;
+      await store().query_streams((p) => {
+        if (p.stream === "T") lane = p.lane;
+      });
+      return lane;
+    }
+
+    it("CONTROL — no eviction: the loser does not take the lane", async () => {
+      const app = buildRanked(10);
+      await app.do("hi", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.do("lo", { stream: "s1", actor }, {});
+      await app.correlate();
+
+      expect(await targetLane()).toBe("fast");
+    });
+
+    it("eviction does not let a lower-priority resolution re-lane a dynamic target", async () => {
+      // maxSubscribedStreams: 1 makes eviction deterministic — one churned
+      // target is enough to push "T" out of the LRU.
+      const app = buildRanked(1);
+      await app.do("hi", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.do("churn", { stream: "s1", actor }, { to: "d1" });
+      await app.correlate();
+      await app.do("lo", { stream: "s1", actor }, {});
+      await app.correlate();
+
+      expect(await targetLane()).toBe("fast");
+    });
+
+    it("CONTROL — no eviction: both reactions run on the fast shard", async () => {
+      const ran: string[] = [];
+      const app = buildRanked(10, ran, ["fast"]);
+      await app.do("hi", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await app.do("lo", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.drain();
+
+      expect(ran).toEqual(["hi", "lo"]);
+    });
+
+    it("eviction does not starve the target's stream under onlyLanes", async () => {
+      const ran: string[] = [];
+      const app = buildRanked(1, ran, ["fast"]);
+      await app.do("hi", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await app.do("churn", { stream: "s1", actor }, { to: "d1" });
+      await app.correlate();
+      await app.drain();
+      await app.do("lo", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.drain();
+
+      // Re-laned to "slow", the stream is invisible to this worker: the
+      // reaction that asked for "slow" does not run, and neither does
+      // anything else the target carries.
+      expect(ran).toEqual(["hi", "lo"]);
+    });
+
+    it("a fresh process does not re-lane a dynamic target it never recorded", async () => {
+      // No eviction involved — a restart starts with an empty LRU while the
+      // rows persist, so every dynamic target reads as never-seen. The bound
+      // is irrelevant here, which is why the repair had to live in the store.
+      const app = buildRanked(10);
+      await app.do("hi", { stream: "s1", actor }, {});
+      await app.correlate();
+
+      const restarted = buildRanked(10);
+      await restarted.do("lo", { stream: "s1", actor }, {});
+      await restarted.correlate();
+
+      expect(await targetLane()).toBe("fast");
+    });
+  });
 });

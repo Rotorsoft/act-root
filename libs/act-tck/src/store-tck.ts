@@ -271,9 +271,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           }),
         { limit: 1000 }
       );
-      // Carry the row's own priority and lane back with the mark: `subscribe`
-      // writes lane unconditionally, so a mark-only upsert would re-lane the
-      // row to "default" — the trap #1487 hit in the orchestrator.
+      // Carry the row's own priority and lane back with the mark, the way
+      // correlate does: the mark rides `subscribe`, and a subscribe that
+      // outranks the row writes its lane — the trap #1487 hit in the
+      // orchestrator.
       const marks: SubscribeInput[] = [];
       for (const row of rows) {
         let mark = -1;
@@ -2891,6 +2892,66 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           stream_exact: true,
         });
         expect(seen).toEqual(["fast"]);
+      });
+
+      it("keeps the lane when a lower-priority subscribe re-registers", async () => {
+        // The lane rides the priority max (#1599). Without this, a caller
+        // that has forgotten what a stream carries — an evicted LRU
+        // record, a fresh process — re-lanes it by resolving to it at a
+        // lower priority, and a worker sharded on the declared lane never
+        // drains it again.
+        const s = `lane-rank-${uid()}`;
+        await store.subscribe([{ stream: s, lane: "fast", priority: 10 }]);
+        await store.subscribe([{ stream: s, lane: "slow", priority: 0 }]);
+        const seen: { lane?: string; priority: number }[] = [];
+        await store.query_streams(
+          (p) => seen.push({ lane: p.lane, priority: p.priority }),
+          { stream: s, stream_exact: true }
+        );
+        expect(seen).toEqual([{ lane: "fast", priority: 10 }]);
+      });
+
+      it("keeps the lane when a mark-only subscribe re-registers", async () => {
+        // An omitted lane is the default lane, and an omitted priority is
+        // 0 — so a bare mark carries a losing lane by construction. It
+        // must leave the stored lane alone rather than pulling the stream
+        // back to "default".
+        const s = `lane-mark-${uid()}`;
+        await store.subscribe([{ stream: s, lane: "fast", priority: 10 }]);
+        await store.subscribe([{ stream: s, correlated_at: 7 }]);
+        const seen: { lane?: string; correlated_at?: number }[] = [];
+        await store.query_streams(
+          (p) => seen.push({ lane: p.lane, correlated_at: p.correlated_at }),
+          { stream: s, stream_exact: true }
+        );
+        expect(seen).toEqual([{ lane: "fast", correlated_at: 7 }]);
+      });
+
+      it("re-lanes when the subscribe outranks the stored priority", async () => {
+        const s = `lane-outrank-${uid()}`;
+        await store.subscribe([{ stream: s, lane: "fast", priority: 0 }]);
+        await store.subscribe([{ stream: s, lane: "slow", priority: 5 }]);
+        const seen: { lane?: string; priority: number }[] = [];
+        await store.query_streams(
+          (p) => seen.push({ lane: p.lane, priority: p.priority }),
+          { stream: s, stream_exact: true }
+        );
+        expect(seen).toEqual([{ lane: "slow", priority: 5 }]);
+      });
+
+      it("re-lanes at equal priority, which is what keeps re-laning restart-driven", async () => {
+        // A restart re-subscribes every declared target at its declared
+        // priority, so equal priority has to write the lane — otherwise
+        // editing a lane in the builder would need a data migration.
+        const s = `lane-equal-${uid()}`;
+        await store.subscribe([{ stream: s, lane: "fast", priority: 7 }]);
+        await store.subscribe([{ stream: s, lane: "slow", priority: 7 }]);
+        const seen: string[] = [];
+        await store.query_streams((p) => seen.push(p.lane as string), {
+          stream: s,
+          stream_exact: true,
+        });
+        expect(seen).toEqual(["slow"]);
       });
 
       it("claim() filters by lane when supplied and returns lane on the Lease", async () => {

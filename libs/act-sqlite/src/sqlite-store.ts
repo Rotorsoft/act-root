@@ -764,10 +764,16 @@ export class SqliteStore implements Store {
             sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
             args: [priority, stream, priority],
           });
-          // ACT-1103: current subscribe wins on lane.
+          // ACT-1103 / #1599: the lane rides the priority max. `priority <=
+          // ?` reads the row after the merge above, which is the same test
+          // as "at or above the stored priority" — the merge only fires when
+          // the incoming value is higher. A subscribe below the stored
+          // priority leaves the lane alone, so a caller that has forgotten
+          // what a stream carries cannot re-lane it from underneath the
+          // highest-priority reaction that owns it.
           await tx.execute({
-            sql: "UPDATE streams SET lane = ? WHERE stream = ? AND lane <> ?",
-            args: [lane, stream, lane],
+            sql: "UPDATE streams SET lane = ? WHERE stream = ? AND lane <> ? AND priority <= ?",
+            args: [lane, stream, lane, priority],
           });
         }
         // The work mark never regresses (#1485). `WHERE correlated_at IS

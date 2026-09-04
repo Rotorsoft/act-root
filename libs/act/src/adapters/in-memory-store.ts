@@ -775,8 +775,13 @@ export class InMemoryStore implements Store {
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
+        // The lane rides the priority max (#1599): compared before the
+        // bump, so a subscribe at or above the stored priority sets the
+        // lane and one below leaves it alone. A caller that has forgotten
+        // what a stream carries — an evicted LRU record, a fresh process —
+        // then cannot re-lane it by resolving to it at a lower priority.
+        if (priority >= existing.priority) existing.lane = lane;
         existing.bump_priority(priority);
-        existing.lane = lane;
         if (correlated_at !== undefined) existing.mark(correlated_at);
       } else {
         const created = new InMemoryStream(stream, source, priority, lane);
