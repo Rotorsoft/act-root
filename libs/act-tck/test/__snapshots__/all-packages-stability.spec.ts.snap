@@ -7971,7 +7971,7 @@ export class ConsoleLogger implements Logger {
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { log, store } from "../ports.js";
+import { DEFAULT_LANE, log, store } from "../ports.js";
 import type {
   EventRegister,
   Query,
@@ -8657,22 +8657,32 @@ export class CorrelateCycle<
             // rejects for static declarations (#1567). Priority still decides
             // below; this only reports the tie the operator can't otherwise
             // see. Compare against what this target already carries, whether
-            // that came from an earlier reaction in this scan or a past one.
-            const held = correlated.has(resolved.target)
-              ? entry.lane
-              : recorded?.lane;
-            if (
-              held !== undefined &&
-              lane !== undefined &&
-              held !== lane &&
-              priority === entry.priority
-            )
+            // that came from an earlier reaction in this scan or a past one,
+            // and against that same source's priority — a resolution that
+            // beat the floor outranks what it found rather than tying with
+            // itself.
+            //
+            // Both lanes are compared by their resolved name, exactly as the
+            // static guard does (#1583): an omitted lane *is* the default
+            // lane, and the default lane is what the subscription row ends up
+            // holding, so an omitted lane against a declared one is a real
+            // disagreement. A never-seen target holds no lane at all, which is
+            // not the same as holding "default" — the record's existence is
+            // what gates the report.
+            const seen_in_scan = correlated.has(resolved.target);
+            const held_lane =
+              (seen_in_scan ? entry.lane : recorded?.lane) ?? DEFAULT_LANE;
+            const held_priority = seen_in_scan
+              ? entry.priority
+              : recorded?.priority;
+            const resolved_lane = lane ?? DEFAULT_LANE;
+            if (held_priority === priority && held_lane !== resolved_lane)
               report_lane_conflict(
                 this._reported,
                 reaction.handler.name,
                 resolved.target,
-                held,
-                lane
+                held_lane,
+                resolved_lane
               );
             // Multiple reactions targeting the same stream within a
             // single correlate scan — keep the max priority, and carry the
@@ -27614,7 +27624,7 @@ export class ConsoleLogger implements Logger {
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { log, store } from "../ports.js";
+import { DEFAULT_LANE, log, store } from "../ports.js";
 import type {
   EventRegister,
   Query,
@@ -28300,22 +28310,32 @@ export class CorrelateCycle<
             // rejects for static declarations (#1567). Priority still decides
             // below; this only reports the tie the operator can't otherwise
             // see. Compare against what this target already carries, whether
-            // that came from an earlier reaction in this scan or a past one.
-            const held = correlated.has(resolved.target)
-              ? entry.lane
-              : recorded?.lane;
-            if (
-              held !== undefined &&
-              lane !== undefined &&
-              held !== lane &&
-              priority === entry.priority
-            )
+            // that came from an earlier reaction in this scan or a past one,
+            // and against that same source's priority — a resolution that
+            // beat the floor outranks what it found rather than tying with
+            // itself.
+            //
+            // Both lanes are compared by their resolved name, exactly as the
+            // static guard does (#1583): an omitted lane *is* the default
+            // lane, and the default lane is what the subscription row ends up
+            // holding, so an omitted lane against a declared one is a real
+            // disagreement. A never-seen target holds no lane at all, which is
+            // not the same as holding "default" — the record's existence is
+            // what gates the report.
+            const seen_in_scan = correlated.has(resolved.target);
+            const held_lane =
+              (seen_in_scan ? entry.lane : recorded?.lane) ?? DEFAULT_LANE;
+            const held_priority = seen_in_scan
+              ? entry.priority
+              : recorded?.priority;
+            const resolved_lane = lane ?? DEFAULT_LANE;
+            if (held_priority === priority && held_lane !== resolved_lane)
               report_lane_conflict(
                 this._reported,
                 reaction.handler.name,
                 resolved.target,
-                held,
-                lane
+                held_lane,
+                resolved_lane
               );
             // Multiple reactions targeting the same stream within a
             // single correlate scan — keep the max priority, and carry the
