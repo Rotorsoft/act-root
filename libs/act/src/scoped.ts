@@ -68,19 +68,31 @@ const reacting = new AsyncLocalStorage<Reacting>();
 /**
  * Builds the runner an Act uses to enter its own port scope.
  *
- * A scoped Act wraps every entry point so `store()`/`cache()` resolve to its
- * bag; a singleton Act needs no frame at all, so the runner collapses to
- * calling `fn` — the non-scoped path pays nothing.
+ * Every Act gets a frame, including one built without `ActOptions.scoped` —
+ * that one carries the singleton adapters (see `default_scope` in `ports.ts`).
+ * Entering unconditionally is what makes an Act's ports its own: a runner that
+ * collapsed to `fn()` for a singleton Act did not leave whatever frame it was
+ * called from, so dispatching into a shared Act from inside a tenant's handler
+ * resolved `store()` to that tenant and wrote the shared Act's events into the
+ * tenant's log ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)).
  *
  * @internal
  */
 export function make_run_scoped(
-  bag: Scoped | undefined
+  bag: Scoped
 ): <T>(fn: () => Promise<T>) => Promise<T> {
-  return bag ? (fn) => scoped.run(bag, fn) : (fn) => fn();
+  return (fn) => scoped.run(bag, fn);
 }
 
-/** The active Act's ports, or `undefined` on the singleton path. @internal */
+/**
+ * The active Act's ports, or `undefined` outside any Act.
+ *
+ * Every Act runs in a frame, so this is `undefined` only for a call made
+ * outside one — `store()` and `cache()` fall back to the singleton adapters
+ * there, which is what a bare `store()` in application setup expects.
+ *
+ * @internal
+ */
 export function current_ports(): Scoped | undefined {
   return scoped.getStore();
 }

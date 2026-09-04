@@ -3,7 +3,7 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports } from "./scoped.js";
+import { current_ports, type Scoped } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -208,6 +208,34 @@ const _cache = port(function cache(adapter?: Cache) {
 export const cache = ((adapter?: Cache): Cache => {
   return current_ports()?.cache ?? _cache(adapter);
 }) as (adapter?: Cache) => Cache;
+
+/**
+ * The ports bag an Act without `ActOptions.scoped` runs in: the singleton
+ * adapters, read through the same frame a scoped Act uses.
+ *
+ * Every Act entering a frame is what keeps its ports its own. Without one, a
+ * shared Act called from inside a tenant's handler inherited that tenant's
+ * frame and committed to the tenant's store (#1597).
+ *
+ * The properties are getters on purpose. The adapters are resolved lazily and
+ * injected after `act().build()` in the normal case — `store(new PgStore())`
+ * in application setup, or a test's `beforeEach` — so capturing them when the
+ * bag is made would pin whatever existed at build time. They read the raw
+ * resolvers rather than the public `store()`/`cache()`, which consult the
+ * frame this bag *is* and would recurse.
+ *
+ * @internal
+ */
+export const default_scope = (): Scoped => DEFAULT_SCOPE;
+
+const DEFAULT_SCOPE: Scoped = {
+  get store() {
+    return _store();
+  },
+  get cache() {
+    return _cache();
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Disposal
