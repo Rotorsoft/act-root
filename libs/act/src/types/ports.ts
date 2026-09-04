@@ -273,7 +273,8 @@ export type StreamPosition = {
  * @property after - Keyset pagination cursor: returns only streams with
  *   `stream > after` (lexicographic). Pass the last seen `stream` to fetch
  *   the next page.
- * @property limit - Max rows to return (default: 100).
+ * @property limit - Max rows to return (default: 100). A bound, applied
+ *   before a row is emitted: `limit: 0` returns none.
  */
 export type QueryStreams = {
   readonly stream?: string;
@@ -441,7 +442,8 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
  *   which defaults to 100. Omitting it preserves the historical
  *   "return everything" behavior; set it (with `after`) to page through
- *   large stream sets a bounded chunk at a time.
+ *   large stream sets a bounded chunk at a time. A bound, applied before a
+ *   stream is added to the result: `limit: 0` returns none.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;
@@ -665,7 +667,12 @@ export interface Store extends Disposable, EventSource {
    * @param lagging - Max streams from the lagging frontier (ascending watermark)
    * @param leading - Max streams from the leading frontier (descending watermark)
    * @param by - Unique lease holder identifier (UUID)
-   * @param millis - Lease duration in milliseconds
+   * @param millis - How long the lease stands, in milliseconds. It bounds
+   *   the expiry only — the holder (`by`) is recorded whatever the value,
+   *   so a zero-length lease is granted, expires immediately, and its
+   *   {@link ack} still lands. A store that skipped recording the holder
+   *   would hand out a lease whose every ack is dropped, parking the
+   *   watermark and redelivering every event on every drain.
    * @param lane - Optional lane filter (ACT-1103)
    * @returns Array of successfully leased streams with metadata
    *

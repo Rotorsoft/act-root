@@ -170,10 +170,14 @@ class InMemoryStream {
    * @returns The granted lease or undefined if blocked.
    */
   lease(lease: Lease, millis: number): Lease {
-    if (millis > 0) {
-      this._leased_by = lease.by;
-      this._leased_until = new Date(Date.now() + millis);
-    }
+    // The holder is recorded whatever the duration, matching both SQL
+    // adapters. `millis` governs only how long the lease stands: a
+    // zero-length one expires the instant it is granted, so the stream is
+    // immediately re-claimable — but `ack` is gated on the holder, and a
+    // lease granted with no holder recorded is one whose every ack is
+    // dropped, leaving the watermark parked and every event redelivered.
+    this._leased_by = lease.by;
+    this._leased_until = new Date(Date.now() + millis);
     this._retry = this._retry + 1;
     return {
       stream: this.stream,
@@ -1080,6 +1084,10 @@ export class InMemoryStore implements Store {
       }
       if (blocked !== undefined && s.blocked !== blocked) continue;
       if (query?.lane !== undefined && s.lane !== query.lane) continue;
+      // Checked before emitting, not after: a bound applied afterwards
+      // lets `limit: 0` through as exactly one row, where both SQL
+      // adapters return none.
+      if (count >= limit) break;
       callback({
         stream: s.stream,
         source: s.source,
@@ -1095,7 +1103,6 @@ export class InMemoryStore implements Store {
         correlated_at: s.correlated_at,
       });
       count++;
-      if (count >= limit) break;
     }
     return { maxEventId: this._events.at(-1)?.id ?? -1, count };
   }
@@ -1193,6 +1200,8 @@ export class InMemoryStore implements Store {
     const ordered = [...acc.keys()].sort();
     const out = new Map<string, StreamStats<E>>();
     for (const stream of ordered) {
+      // Before the row, not after it — `limit: 0` means none.
+      if (limit !== undefined && out.size >= limit) break;
       if (after !== undefined && stream <= after) continue;
       const a = acc.get(stream)!;
       const stats: {
@@ -1205,7 +1214,6 @@ export class InMemoryStore implements Store {
       if (want_count) stats.count = a.count;
       if (want_names) stats.names = a.names;
       out.set(stream, stats as StreamStats<E>);
-      if (limit !== undefined && out.size >= limit) break;
     }
     return out;
   }
