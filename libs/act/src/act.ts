@@ -44,13 +44,19 @@ import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
-  register_act,
 } from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
+import {
+  cache,
+  default_scope,
+  log,
+  type Scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -545,8 +551,8 @@ export class Act<
    * per-Act ports (ACT-501). No-op when the Act is unscoped — so the singleton
    * path keeps reading fresh `store()`/`cache()` per call, which matters for
    * tests that dispose and re-seed mid-suite. */
-  /** Gives this Act's slot back to the scoped/singleton guard (#1597). */
-  private readonly _release_act: () => void;
+  /** This Act's ports: its own bag, or the singleton adapters. */
+  private readonly _ports: Scoped;
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   /**
@@ -646,7 +652,11 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     validate_only_lanes(options, lanes);
-    this._scoped = make_run_scoped(options.scoped);
+    // Every Act runs in its own ports frame. Without `scoped` that frame
+    // carries the singleton adapters, which is what stops a shared Act
+    // inheriting the frame of whoever called it (#1597).
+    this._ports = options.scoped ?? default_scope();
+    this._scoped = make_run_scoped(this._ports);
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -692,7 +702,7 @@ export class Act<
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late `store(adapter)` injection after build won't
     // take effect. Scoped Acts bind against their own store.
-    this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
+    this._notify_disposer = this._wire_notify(this._ports.store);
 
     // Registered weakly (#1441). A plain `dispose(() => this.shutdown())`
     // closure captures `this` in a module-level array that is never emptied,
@@ -703,9 +713,6 @@ export class Act<
     // reference weakly keeps process-wide `dispose()()` working for a live
     // Act while letting an unreachable one be collected, shut down or not.
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
-    // Last, so a build that throws further up leaves no slot held: this is
-    // the point where an Act exists and the process is committed to it.
-    this._release_act = register_act(!!options.scoped);
   }
 
   /**
@@ -1026,7 +1033,6 @@ export class Act<
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
-        this._release_act();
         this._emitter.removeAllListeners();
         // `_wire_notify` swallows subscription errors and resolves to
         // `undefined`, so this promise never rejects.

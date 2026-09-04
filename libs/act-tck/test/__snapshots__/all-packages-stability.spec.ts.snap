@@ -754,13 +754,19 @@ import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
-  register_act,
 } from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
+import {
+  cache,
+  default_scope,
+  log,
+  type Scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -1255,8 +1261,8 @@ export class Act<
    * per-Act ports (ACT-501). No-op when the Act is unscoped — so the singleton
    * path keeps reading fresh \`store()\`/\`cache()\` per call, which matters for
    * tests that dispose and re-seed mid-suite. */
-  /** Gives this Act's slot back to the scoped/singleton guard (#1597). */
-  private readonly _release_act: () => void;
+  /** This Act's ports: its own bag, or the singleton adapters. */
+  private readonly _ports: Scoped;
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   /**
@@ -1356,7 +1362,11 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     validate_only_lanes(options, lanes);
-    this._scoped = make_run_scoped(options.scoped);
+    // Every Act runs in its own ports frame. Without \`scoped\` that frame
+    // carries the singleton adapters, which is what stops a shared Act
+    // inheriting the frame of whoever called it (#1597).
+    this._ports = options.scoped ?? default_scope();
+    this._scoped = make_run_scoped(this._ports);
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -1402,7 +1412,7 @@ export class Act<
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late \`store(adapter)\` injection after build won't
     // take effect. Scoped Acts bind against their own store.
-    this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
+    this._notify_disposer = this._wire_notify(this._ports.store);
 
     // Registered weakly (#1441). A plain \`dispose(() => this.shutdown())\`
     // closure captures \`this\` in a module-level array that is never emptied,
@@ -1413,9 +1423,6 @@ export class Act<
     // reference weakly keeps process-wide \`dispose()()\` working for a live
     // Act while letting an unreachable one be collected, shut down or not.
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
-    // Last, so a build that throws further up leaves no slot held: this is
-    // the point where an Act exists and the process is committed to it.
-    this._release_act = register_act(!!options.scoped);
   }
 
   /**
@@ -1736,7 +1743,6 @@ export class Act<
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
-        this._release_act();
         this._emitter.removeAllListeners();
         // \`_wire_notify\` swallows subscription errors and resolves to
         // \`undefined\`, so this promise never rejects.
@@ -14361,7 +14367,7 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports, reset_acts } from "./scoped.js";
+import { current_ports, type Scoped } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -14567,6 +14573,34 @@ export const cache = ((adapter?: Cache): Cache => {
   return current_ports()?.cache ?? _cache(adapter);
 }) as (adapter?: Cache) => Cache;
 
+/**
+ * The ports bag an Act without \`ActOptions.scoped\` runs in: the singleton
+ * adapters, read through the same frame a scoped Act uses.
+ *
+ * Every Act entering a frame is what keeps its ports its own. Without one, a
+ * shared Act called from inside a tenant's handler inherited that tenant's
+ * frame and committed to the tenant's store (#1597).
+ *
+ * The properties are getters on purpose. The adapters are resolved lazily and
+ * injected after \`act().build()\` in the normal case — \`store(new PgStore())\`
+ * in application setup, or a test's \`beforeEach\` — so capturing them when the
+ * bag is made would pin whatever existed at build time. They read the raw
+ * resolvers rather than the public \`store()\`/\`cache()\`, which consult the
+ * frame this bag *is* and would recurse.
+ *
+ * @internal
+ */
+export const default_scope = (): Scoped => DEFAULT_SCOPE;
+
+const DEFAULT_SCOPE: Scoped = {
+  get store() {
+    return _store();
+  },
+  get cache() {
+    return _cache();
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Disposal
 // ---------------------------------------------------------------------------
@@ -14612,8 +14646,6 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
     log().info(\`[act] - \${adapter.constructor.name}\`);
   }
   adapters.clear();
-  // The ports these Acts resolved through are gone (#1597).
-  reset_acts();
   config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
 }
 
@@ -17986,83 +18018,31 @@ const reacting = new AsyncLocalStorage<Reacting>();
 /**
  * Builds the runner an Act uses to enter its own port scope.
  *
- * A scoped Act wraps every entry point so \`store()\`/\`cache()\` resolve to its
- * bag; a singleton Act needs no frame at all, so the runner collapses to
- * calling \`fn\` — the non-scoped path pays nothing.
+ * Every Act gets a frame, including one built without \`ActOptions.scoped\` —
+ * that one carries the singleton adapters (see \`default_scope\` in \`ports.ts\`).
+ * Entering unconditionally is what makes an Act's ports its own: a runner that
+ * collapsed to \`fn()\` for a singleton Act did not leave whatever frame it was
+ * called from, so dispatching into a shared Act from inside a tenant's handler
+ * resolved \`store()\` to that tenant and wrote the shared Act's events into the
+ * tenant's log ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)).
  *
  * @internal
  */
-/**
- * How many live Acts of each kind this process holds.
- *
- * Counts, not references: an entry that held the Act would keep it alive and
- * re-introduce the retention [#1441](https://github.com/Rotorsoft/act-root/issues/1441)
- * removed from the disposers.
- *
- * @internal
- */
-const live = { scoped: 0, singleton: 0 };
-
-/**
- * Record a new Act, refusing to let both kinds be live at once.
- *
- * A scoped Act resolves its ports through an ambient frame and a singleton one
- * through the process-wide adapters. With both alive, which store a call
- * reaches depends on the frame it happens to be running in — a singleton Act
- * dispatched from inside a scoped handler writes to that tenant's store
- * ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)). Rather than
- * make that resolve some particular way, the combination is refused: a process
- * either scopes its ports or it does not.
- *
- * Counts live Acts rather than built ones, so building, shutting down, and
- * then building the other kind is fine — it is only overlap that is ambiguous.
- *
- * @returns The function that gives the slot back. \`shutdown()\` memoizes its
- *   promise, so this runs exactly once per Act and needs no guard of its own.
- *   An Act abandoned without \`shutdown()\` holds its slot until the process
- *   tears its ports down — see {@link reset_acts}.
- * @internal
- */
-/**
- * Forget every recorded Act, because the ports they resolved through are gone.
- *
- * Called by \`disposeAndExit\`. An Act that is abandoned rather than shut down
- * never gives its slot back — the count deliberately holds no reference to it,
- * so there is nothing to notice its collection — and without this a test file
- * that drops an Act would decide the port strategy for every file after it in
- * the same worker.
- *
- * @internal
- */
-export function reset_acts(): void {
-  live.scoped = 0;
-  live.singleton = 0;
-}
-
-export function register_act(scoped: boolean): () => void {
-  const kind = scoped ? "scoped" : "singleton";
-  const other = scoped ? "singleton" : "scoped";
-  if (live[other] > 0)
-    throw new Error(
-      \`Cannot build a \${kind} Act while \${live[other]} \${other} Act(s) are live. \` +
-        "A process either resolves its ports through ActOptions.scoped or through the " +
-        "singleton adapters, not both: with both alive, which store a call reaches " +
-        "depends on the frame it runs in. Give every Act in this process a \`scoped\` bag, " +
-        "or none of them, and shut one down before building the other kind."
-    );
-  live[kind]++;
-  return () => {
-    live[kind]--;
-  };
-}
-
 export function make_run_scoped(
-  bag: Scoped | undefined
+  bag: Scoped
 ): <T>(fn: () => Promise<T>) => Promise<T> {
-  return bag ? (fn) => scoped.run(bag, fn) : (fn) => fn();
+  return (fn) => scoped.run(bag, fn);
 }
 
-/** The active Act's ports, or \`undefined\` on the singleton path. @internal */
+/**
+ * The active Act's ports, or \`undefined\` outside any Act.
+ *
+ * Every Act runs in a frame, so this is \`undefined\` only for a call made
+ * outside one — \`store()\` and \`cache()\` fall back to the singleton adapters
+ * there, which is what a bare \`store()\` in application setup expects.
+ *
+ * @internal
+ */
 export function current_ports(): Scoped | undefined {
   return scoped.getStore();
 }
@@ -20501,13 +20481,19 @@ import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
-  register_act,
 } from "./scoped.js";
 
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, log, type Scoped, store, TOMBSTONE_EVENT } from "./ports.js";
+import {
+  cache,
+  default_scope,
+  log,
+  type Scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -21002,8 +20988,8 @@ export class Act<
    * per-Act ports (ACT-501). No-op when the Act is unscoped — so the singleton
    * path keeps reading fresh \`store()\`/\`cache()\` per call, which matters for
    * tests that dispose and re-seed mid-suite. */
-  /** Gives this Act's slot back to the scoped/singleton guard (#1597). */
-  private readonly _release_act: () => void;
+  /** This Act's ports: its own bag, or the singleton adapters. */
+  private readonly _ports: Scoped;
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   /**
@@ -21103,7 +21089,11 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     validate_only_lanes(options, lanes);
-    this._scoped = make_run_scoped(options.scoped);
+    // Every Act runs in its own ports frame. Without \`scoped\` that frame
+    // carries the singleton adapters, which is what stops a shared Act
+    // inheriting the frame of whoever called it (#1597).
+    this._ports = options.scoped ?? default_scope();
+    this._scoped = make_run_scoped(this._ports);
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -21149,7 +21139,7 @@ export class Act<
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late \`store(adapter)\` injection after build won't
     // take effect. Scoped Acts bind against their own store.
-    this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
+    this._notify_disposer = this._wire_notify(this._ports.store);
 
     // Registered weakly (#1441). A plain \`dispose(() => this.shutdown())\`
     // closure captures \`this\` in a module-level array that is never emptied,
@@ -21160,9 +21150,6 @@ export class Act<
     // reference weakly keeps process-wide \`dispose()()\` working for a live
     // Act while letting an unreachable one be collected, shut down or not.
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
-    // Last, so a build that throws further up leaves no slot held: this is
-    // the point where an Act exists and the process is committed to it.
-    this._release_act = register_act(!!options.scoped);
   }
 
   /**
@@ -21483,7 +21470,6 @@ export class Act<
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
-        this._release_act();
         this._emitter.removeAllListeners();
         // \`_wire_notify\` swallows subscription errors and resolves to
         // \`undefined\`, so this promise never rejects.
@@ -32958,7 +32944,7 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports, reset_acts } from "./scoped.js";
+import { current_ports, type Scoped } from "./scoped.js";
 import type {
   Cache,
   Disposable,
@@ -33164,6 +33150,34 @@ export const cache = ((adapter?: Cache): Cache => {
   return current_ports()?.cache ?? _cache(adapter);
 }) as (adapter?: Cache) => Cache;
 
+/**
+ * The ports bag an Act without \`ActOptions.scoped\` runs in: the singleton
+ * adapters, read through the same frame a scoped Act uses.
+ *
+ * Every Act entering a frame is what keeps its ports its own. Without one, a
+ * shared Act called from inside a tenant's handler inherited that tenant's
+ * frame and committed to the tenant's store (#1597).
+ *
+ * The properties are getters on purpose. The adapters are resolved lazily and
+ * injected after \`act().build()\` in the normal case — \`store(new PgStore())\`
+ * in application setup, or a test's \`beforeEach\` — so capturing them when the
+ * bag is made would pin whatever existed at build time. They read the raw
+ * resolvers rather than the public \`store()\`/\`cache()\`, which consult the
+ * frame this bag *is* and would recurse.
+ *
+ * @internal
+ */
+export const default_scope = (): Scoped => DEFAULT_SCOPE;
+
+const DEFAULT_SCOPE: Scoped = {
+  get store() {
+    return _store();
+  },
+  get cache() {
+    return _cache();
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Disposal
 // ---------------------------------------------------------------------------
@@ -33209,8 +33223,6 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
     log().info(\`[act] - \${adapter.constructor.name}\`);
   }
   adapters.clear();
-  // The ports these Acts resolved through are gone (#1597).
-  reset_acts();
   config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
 }
 
@@ -36278,83 +36290,31 @@ const reacting = new AsyncLocalStorage<Reacting>();
 /**
  * Builds the runner an Act uses to enter its own port scope.
  *
- * A scoped Act wraps every entry point so \`store()\`/\`cache()\` resolve to its
- * bag; a singleton Act needs no frame at all, so the runner collapses to
- * calling \`fn\` — the non-scoped path pays nothing.
+ * Every Act gets a frame, including one built without \`ActOptions.scoped\` —
+ * that one carries the singleton adapters (see \`default_scope\` in \`ports.ts\`).
+ * Entering unconditionally is what makes an Act's ports its own: a runner that
+ * collapsed to \`fn()\` for a singleton Act did not leave whatever frame it was
+ * called from, so dispatching into a shared Act from inside a tenant's handler
+ * resolved \`store()\` to that tenant and wrote the shared Act's events into the
+ * tenant's log ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)).
  *
  * @internal
  */
-/**
- * How many live Acts of each kind this process holds.
- *
- * Counts, not references: an entry that held the Act would keep it alive and
- * re-introduce the retention [#1441](https://github.com/Rotorsoft/act-root/issues/1441)
- * removed from the disposers.
- *
- * @internal
- */
-const live = { scoped: 0, singleton: 0 };
-
-/**
- * Record a new Act, refusing to let both kinds be live at once.
- *
- * A scoped Act resolves its ports through an ambient frame and a singleton one
- * through the process-wide adapters. With both alive, which store a call
- * reaches depends on the frame it happens to be running in — a singleton Act
- * dispatched from inside a scoped handler writes to that tenant's store
- * ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)). Rather than
- * make that resolve some particular way, the combination is refused: a process
- * either scopes its ports or it does not.
- *
- * Counts live Acts rather than built ones, so building, shutting down, and
- * then building the other kind is fine — it is only overlap that is ambiguous.
- *
- * @returns The function that gives the slot back. \`shutdown()\` memoizes its
- *   promise, so this runs exactly once per Act and needs no guard of its own.
- *   An Act abandoned without \`shutdown()\` holds its slot until the process
- *   tears its ports down — see {@link reset_acts}.
- * @internal
- */
-/**
- * Forget every recorded Act, because the ports they resolved through are gone.
- *
- * Called by \`disposeAndExit\`. An Act that is abandoned rather than shut down
- * never gives its slot back — the count deliberately holds no reference to it,
- * so there is nothing to notice its collection — and without this a test file
- * that drops an Act would decide the port strategy for every file after it in
- * the same worker.
- *
- * @internal
- */
-export function reset_acts(): void {
-  live.scoped = 0;
-  live.singleton = 0;
-}
-
-export function register_act(scoped: boolean): () => void {
-  const kind = scoped ? "scoped" : "singleton";
-  const other = scoped ? "singleton" : "scoped";
-  if (live[other] > 0)
-    throw new Error(
-      \`Cannot build a \${kind} Act while \${live[other]} \${other} Act(s) are live. \` +
-        "A process either resolves its ports through ActOptions.scoped or through the " +
-        "singleton adapters, not both: with both alive, which store a call reaches " +
-        "depends on the frame it runs in. Give every Act in this process a \`scoped\` bag, " +
-        "or none of them, and shut one down before building the other kind."
-    );
-  live[kind]++;
-  return () => {
-    live[kind]--;
-  };
-}
-
 export function make_run_scoped(
-  bag: Scoped | undefined
+  bag: Scoped
 ): <T>(fn: () => Promise<T>) => Promise<T> {
-  return bag ? (fn) => scoped.run(bag, fn) : (fn) => fn();
+  return (fn) => scoped.run(bag, fn);
 }
 
-/** The active Act's ports, or \`undefined\` on the singleton path. @internal */
+/**
+ * The active Act's ports, or \`undefined\` outside any Act.
+ *
+ * Every Act runs in a frame, so this is \`undefined\` only for a call made
+ * outside one — \`store()\` and \`cache()\` fall back to the singleton adapters
+ * there, which is what a bare \`store()\` in application setup expects.
+ *
+ * @internal
+ */
 export function current_ports(): Scoped | undefined {
   return scoped.getStore();
 }

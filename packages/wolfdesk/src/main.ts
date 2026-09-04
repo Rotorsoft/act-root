@@ -8,18 +8,12 @@ import {
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
-import { builder, tenantCorrelator } from "./bootstrap.js";
+import { app } from "./bootstrap.js";
 import { db, tickets } from "./drizzle/index.js";
 import { Priority } from "./schemas/index.js";
 
 const chance = new Chance();
 const rand_sleep = (max = 10_000) => sleep(chance.integer({ min: 100, max }));
-
-/** This process owns one Act. Built here rather than at module scope in
- *  bootstrap: a process resolves its ports through the singleton adapters or
- *  through `ActOptions.scoped`, never both (#1597), and building on import
- *  decided that for every module that imported bootstrap. */
-const app = builder.build({ correlator: tenantCorrelator });
 
 async function main() {
   // to use pg, run `docker-compose up -d`

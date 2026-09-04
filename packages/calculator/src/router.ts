@@ -8,10 +8,7 @@ import { Calculator } from "./calculator.js";
  * generated Hono REST routes and the OpenAPI document against the
  * same registry — one Act, three transports.
  */
-/** Builds the calculator orchestrator. The caller owns it — see `makeRouter`. */
-export const buildCalculatorApp = () => act().withState(Calculator).build();
-
-export type CalculatorApp = ReturnType<typeof buildCalculatorApp>;
+export const calculatorApp = act().withState(Calculator).build();
 
 const t = initTRPC.create();
 const target = {
@@ -38,14 +35,13 @@ const target = {
  * Tracking the typing follow-up as part of the act-http-api epic;
  * once tRPC v11 exposes a portable `BuiltRouter` substitute (or
  * isolated-declarations support lands), this file becomes a single
- * `trpc(app, options)` call.
+ * `trpc(calculatorApp, options)` call.
  */
-export const makeRouter = (app: CalculatorApp) =>
-  t.router({
-    PressKey: t.procedure
-      .input(Calculator.actions.PressKey)
-      .mutation(({ input }) => app.do("PressKey", target, input)),
-    Clear: t.procedure.mutation(() => app.do("Clear", target, {})),
-  });
+export const calculatorRouter = t.router({
+  PressKey: t.procedure
+    .input(Calculator.actions.PressKey)
+    .mutation(({ input }) => calculatorApp.do("PressKey", target, input)),
+  Clear: t.procedure.mutation(() => calculatorApp.do("Clear", target, {})),
+});
 
-export type CalculatorRouter = ReturnType<typeof makeRouter>;
+export type CalculatorRouter = typeof calculatorRouter;

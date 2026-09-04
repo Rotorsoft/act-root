@@ -1,6 +1,6 @@
 import type { Target } from "@rotorsoft/act";
 import { Chance } from "chance";
-import type { builder } from "../src/bootstrap.js";
+import type { app as ProdApp } from "../src/bootstrap.js";
 import { Priority } from "../src/schemas/index.js";
 
 const chance = new Chance();
@@ -8,7 +8,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const oneDay = () => new Date(Date.now() + DAY);
 
 /** The scoped Act each suite builds via `sandbox(builder, …)`. */
-type App = ReturnType<typeof builder.build>;
+type App = typeof ProdApp;
 
 export const target = (
   userId = chance.guid(),

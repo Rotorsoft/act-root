@@ -1,6 +1,6 @@
 import {
-  buildCalculatorApp,
-  makeRouter,
+  calculatorApp,
+  calculatorRouter,
   type Operators,
 } from "@act/calculator";
 import { serve } from "@hono/node-server";
@@ -55,12 +55,6 @@ type CalculatorLiveState = {
 // generated Hono surface below, which mounts one streaming
 // `GET /api/sse/<stateName>?stream=<streamId>` per registered state.
 // Publication is host-owned: every local commit — tRPC bridge and
-/** This process owns one Act. Built here, not at module scope in the domain
- *  package: a process resolves its ports through the singleton adapters or
- *  through `ActOptions.scoped`, never both (#1597). */
-const calculatorApp = buildCalculatorApp();
-const calculatorRouter = makeRouter(calculatorApp);
-
 // REST alike, both funnel through `calculatorApp.do` — lands here
 // via the `committed` lifecycle event and fans out to subscribers
 // as version-keyed domain patches.

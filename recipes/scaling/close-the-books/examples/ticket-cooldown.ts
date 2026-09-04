@@ -22,9 +22,7 @@
  * Run:  pnpm tsx recipes/scaling/close-the-books/examples/ticket-cooldown.ts
  */
 
-import { builder, tenantCorrelator } from "@act/wolfdesk";
-
-const app = builder.build({ correlator: tenantCorrelator });
+import { app } from "@act/wolfdesk";
 
 async function main() {
   // The registry exposes the compiled predicate that wolfdesk declared.

@@ -264,55 +264,6 @@ export const app2 = act().withSlice(MySlice).build();
     expect(model.entries.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("names the slices it can when one of them failed to evaluate", () => {
-    // `.withSlice(A).withSlice(B)` names two slices, but B's file throws, so
-    // the built act carries a hole where B should be. Naming has to skip the
-    // hole rather than write onto it. This was covered only by parsing
-    // wolfdesk's real source, where a broken file happened to produce the
-    // same shape — so it moved here, where it is the point of the test.
-    const files: FileTab[] = [
-      {
-        path: "src/states.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-export const S = state({ S: z.object({}) })
-  .init(() => ({})).emits({ E: z.object({}) })
-  .patch({ E: () => ({}) }).on({ a: z.object({}) })
-  .emit(() => ["E", {}]).build();
-`,
-      },
-      {
-        path: "src/good.ts",
-        content: `
-import { slice } from "@rotorsoft/act";
-import { S } from "./states.js";
-export const GoodSlice = slice().withState(S).build();
-`,
-      },
-      {
-        path: "src/bad.ts",
-        content: `
-import { slice } from "@rotorsoft/act";
-import { S } from "./states.js";
-export const BadSlice = slice().withState(S).withState(nope).build();
-`,
-      },
-      {
-        path: "src/app.ts",
-        content: `
-import { act } from "@rotorsoft/act";
-import { GoodSlice } from "./good.js";
-import { BadSlice } from "./bad.js";
-export const app = act().withSlice(GoodSlice).withSlice(BadSlice).build();
-`,
-      },
-    ];
-    const { model } = extract_model(files);
-    // The good slice still gets its declared name; nothing throws.
-    expect(model.slices.some((s) => s.name === "GoodSlice")).toBe(true);
-  });
-
   it("duplicate .withSlice() in same file (line 149 false branch)", () => {
     const files: FileTab[] = [
       {

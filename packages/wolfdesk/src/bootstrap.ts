@@ -47,4 +47,7 @@ export const builder = act()
   .withSlice(TicketWebhooksSlice)
   .withProjection(TicketProjection);
 
+/** Production singleton (used by `main.ts`). */
+export const app = builder.build({ correlator: tenantCorrelator });
+
 export { tenantCorrelator };
