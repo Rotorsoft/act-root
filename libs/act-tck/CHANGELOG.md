@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.36.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.15...@rotorsoft/act-tck-v1.36.16) (2026-09-04)
+
+
+### Bug Fixes
+
+* **act:** give every Act its own ports frame ([#1609](https://github.com/Rotorsoft/act-root/issues/1609)) ([32b415a](https://github.com/Rotorsoft/act-root/commit/32b415a0177e48799844531037a3045777bb0c2d)), closes [#1597](https://github.com/Rotorsoft/act-root/issues/1597)
+* **act:** unsubscribe from notify before stopping the settle loop ([#1602](https://github.com/Rotorsoft/act-root/issues/1602)) ([2e07111](https://github.com/Rotorsoft/act-root/commit/2e07111755a666dfd2ff47a629a5257ac5935b20)), closes [#1468](https://github.com/Rotorsoft/act-root/issues/1468) [#1468](https://github.com/Rotorsoft/act-root/issues/1468) [#1596](https://github.com/Rotorsoft/act-root/issues/1596)
+
 # [@rotorsoft/act-tck-v1.36.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.14...@rotorsoft/act-tck-v1.36.15) (2026-08-30)
 
 
