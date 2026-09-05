@@ -468,7 +468,23 @@ export type SubscribeInput = {
    * operator-driven changes.
    */
   readonly priority?: number;
-  /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
+  /**
+   * Drain lane (ACT-1103). Default `"default"`.
+   *
+   * Written on the same rule as {@link priority}: the lane rides the max,
+   * so a subscribe whose priority is **at or above** the stored priority
+   * sets the lane, and one below it leaves the lane alone. The highest
+   * priority registered for a stream therefore owns its lane, durably —
+   * the same outcome the correlate scan applies within one pass, made a
+   * property of the row so a caller that has forgotten what a stream
+   * carries cannot re-lane it by resolving to it at a lower priority
+   * (#1599).
+   *
+   * Re-laning stays restart-driven: a restart re-subscribes at the same
+   * declared priority, and equal priority writes the lane. A stream whose
+   * stored priority was raised out of band by {@link Store.prioritize}
+   * keeps its lane until a subscribe reaches that priority.
+   */
   readonly lane?: string;
   /**
    * Highest event id observed to resolve to this target — the stream's

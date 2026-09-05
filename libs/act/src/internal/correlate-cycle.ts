@@ -141,9 +141,15 @@ export type StaticTarget = {
  * own priority/lane only when it beats the floor, and a static target sits
  * at `+Infinity` so a dynamic resolution never re-opens what the build-time
  * subscribe owns. `priority`/`lane` are what the row holds, re-sent
- * verbatim by a resolution that does *not* beat the floor — the work mark
- * rides `subscribe`, and `subscribe` writes lane unconditionally, so a
- * mark-carrying upsert has to carry the row's own lane to leave it alone.
+ * verbatim by a resolution that does *not* beat the floor, so the work mark
+ * riding the same `subscribe` carries the row's own values rather than a
+ * losing resolution's.
+ *
+ * This is an optimization, not the guarantee. A record can go missing —
+ * eviction here, an empty map after a restart — and a missing record reads
+ * as never-seen. What keeps a forgotten target on its lane is the store:
+ * `subscribe` writes the lane only when the incoming priority is at or
+ * above the stored one, the same max it merges priority with (#1599).
  *
  * Where the record lives decides whether the floor survives: dynamic
  * targets are unbounded and go in the evictable LRU, static targets are a

@@ -80,9 +80,9 @@ export function classify_registry<
   const statics = new Map<string, StaticTarget>();
   // Per-target lane, checked across EVERY reaction to a target regardless of
   // source (#1325). A stream drains on exactly one lane, and `subscribe`
-  // keys lane per-target with last-writer-wins semantics, so lane must agree
-  // target-wide — the `(target, source)` scoping of `statics` is too narrow
-  // to catch a same-target/different-source lane disagreement.
+  // keys lane per-target, so lane must agree target-wide — the
+  // `(target, source)` scoping of `statics` is too narrow to catch a
+  // same-target/different-source lane disagreement.
   const target_lanes = new Map<string, string>();
   const reactive_events = new Set<string>();
   const event_to_lanes = new Map<string, EventLaneSet>();

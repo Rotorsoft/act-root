@@ -1364,21 +1364,28 @@ export class PostgresStore implements Store {
         subscribed = inserted ?? 0;
         // Priority keeps the max (ACT-102: the highest-priority registered
         // reaction wins; operator overrides, which may *decrease*, go through
-        // `prioritize()`), lane is last-writer-wins (ACT-1103), and the work
-        // mark never regresses (#1485) — `GREATEST` reads through a NULL on
-        // either side, so a first mark lands and an omitted one leaves the
-        // stored value alone. The WHERE keeps the no-op case free of dead
-        // tuples: a row is rewritten only when one of the three would change.
+        // `prioritize()`), the lane rides that same max (ACT-1103 / #1599:
+        // a subscribe at or above the stored priority sets the lane, one
+        // below leaves it alone, so a caller that has forgotten what a
+        // stream carries cannot re-lane it from underneath the
+        // highest-priority reaction that owns it), and the work mark never
+        // regresses (#1485) — `GREATEST` reads through a NULL on either
+        // side, so a first mark lands and an omitted one leaves the stored
+        // value alone. The WHERE keeps the no-op case free of dead tuples:
+        // a row is rewritten only when one of the three would change.
         await client.query(
           `
           UPDATE ${this._fqs} t
           SET priority = GREATEST(t.priority, COALESCE((s->>'priority')::int, 0)),
-              lane = COALESCE(s->>'lane', 'default'),
+              lane = CASE WHEN COALESCE((s->>'priority')::int, 0) >= t.priority
+                          THEN COALESCE(s->>'lane', 'default')
+                          ELSE t.lane END,
               correlated_at = GREATEST(t.correlated_at, (s->>'correlated_at')::int)
           FROM jsonb_array_elements($1::jsonb) AS s
           WHERE t.stream = s->>'stream'
             AND (COALESCE((s->>'priority')::int, 0) > t.priority
-                 OR t.lane <> COALESCE(s->>'lane', 'default')
+                 OR (t.lane <> COALESCE(s->>'lane', 'default')
+                     AND COALESCE((s->>'priority')::int, 0) >= t.priority)
                  OR (s->>'correlated_at' IS NOT NULL
                      AND (t.correlated_at IS NULL
                           OR t.correlated_at < (s->>'correlated_at')::int)))
