@@ -283,15 +283,20 @@ async function runArm(
   ackedAtTtf: Map<string, number>;
   ackedAtEnd: Map<string, number>;
   totalAcked: number;
+  cycles: number;
 }> {
   const acked = new Map<string, number>();
   const workerId = randomUUID();
   const start = performance.now();
   let totalAcked = 0;
+  // Claim cycles are what the ordering strategy actually controls, and
+  // unlike wall-clock they don't move when the runner does.
+  let cycles = 0;
   let ttfMs = -1;
   let ackedAtTtf: Map<string, number> = new Map();
   // Bounded loop in case something stalls — generous upper bound.
   for (let cycle = 0; cycle < 20_000; cycle++) {
+    cycles++;
     const { rows: leases } = await pool.query<ClaimRow>(claimSql, [
       STREAM_LIMIT,
       0, // leading=0 to isolate lagging-frontier behavior
@@ -321,6 +326,7 @@ async function runArm(
     ackedAtTtf,
     ackedAtEnd: acked,
     totalAcked,
+    cycles,
   };
 }
 
@@ -395,7 +401,10 @@ describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
           "\n          without starving others or ballooning total drain." +
           `\nWorkload: ${SOURCE_EVENTS} events × ${TARGET_STREAMS} targets, ` +
           `streamLimit=${STREAM_LIMIT}, eventLimit=${EVENT_LIMIT}` +
-          "\nAsserts:  priority TTF ≤ baseline TTF; total drain < baseline × 1.25" +
+          "\nAsserts:  priority TTF ≤ baseline TTF; equal work acked;" +
+          "\n          priority claim cycles < baseline × 2 (wall-clock drain is" +
+          "\n          reported, not asserted — the arms run back-to-back, so" +
+          "\n          runner drift lands on the second one)" +
           "\nReads:    priority-aware row should show smaller priority TTF (faster)," +
           "\n          comparable total drain, smaller others-median-@TTF" +
           "\n          (priority skipped ahead), and matching others-median-@end" +
@@ -406,6 +415,7 @@ describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
         baseline: {
           "priority TTF (ms)": baseline.ttfMs.toFixed(0),
           "total drain (ms)": baseline.totalDrainMs.toFixed(0),
+          "claim cycles": baseline.cycles,
           "others median @TTF": baselineOthersAtTtf.median,
           "others p10 @TTF": baselineOthersAtTtf.p10,
           "others median @end": baselineOthersAtEnd.median,
@@ -413,6 +423,7 @@ describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
         "priority-aware": {
           "priority TTF (ms)": priority.ttfMs.toFixed(0),
           "total drain (ms)": priority.totalDrainMs.toFixed(0),
+          "claim cycles": priority.cycles,
           "others median @TTF": priorityOthersAtTtf.median,
           "others p10 @TTF": priorityOthersAtTtf.p10,
           "others median @end": priorityOthersAtEnd.median,
@@ -428,15 +439,27 @@ describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
 
       // Sanity assertions:
       // 1. Priority target must finish at least as fast as baseline — this
-      //    is the feature's actual guarantee.
-      // 2. Total drain time must not *balloon*. This compares two
-      //    independent full-drain wall-clock runs on a shared CI runner,
-      //    where ±25% jitter is routine, so the guard is a loose
-      //    anti-regression catch (2x), not a precise budget. The real
-      //    overhead is printed in the table above (typically well under
-      //    25%); a 2x blowup means the feature genuinely regressed drain.
+      //    is the feature's actual guarantee, and it holds even on a runner
+      //    having a bad minute.
+      // 2. Both arms must do the same amount of work. Ordering decides who
+      //    goes first, never how much there is to do, so an arm that acks a
+      //    different total has lost or duplicated events.
+      // 3. The priority arm must not need materially more claim cycles to
+      //    drain everything — the anti-regression guard.
+      //
+      // Cycles rather than wall-clock, because the arms run back-to-back and
+      // the priority arm always runs second: a runner that slows down
+      // partway through lands the whole slowdown on it and reads as a
+      // feature regression. That is what two CI failures looked like — total
+      // drain +115% and +125% while the priority speedup collapsed from its
+      // usual 9-11x to 2.15x, both arms degrading together, which is a
+      // machine getting slower rather than an ordering getting worse. A
+      // claim cycle is the unit the ordering strategy actually controls and
+      // it does not move when the runner does. The wall-clock delta is still
+      // printed above as a diagnostic.
       expect(priority.ttfMs).toBeLessThanOrEqual(baseline.ttfMs);
-      expect(priority.totalDrainMs).toBeLessThan(baseline.totalDrainMs * 2);
+      expect(priority.totalAcked).toBe(baseline.totalAcked);
+      expect(priority.cycles).toBeLessThan(baseline.cycles * 2);
     } finally {
       await pool.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
       await pool.end();

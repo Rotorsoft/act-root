@@ -104,6 +104,10 @@ async function setupReader(notifyEnabled: boolean, rec: LatencyRecorder) {
     .build();
 
   let pollTimer: NodeJS.Timeout | undefined;
+  // The pump is best-effort — the pool can close mid-flight at teardown —
+  // but a swallowed error is also the only trace left when every pass
+  // fails, so the last one is kept for the report.
+  const pump: { errors: number; last?: unknown } = { errors: 0 };
   if (!notifyEnabled) {
     // Tear down the auto-wired notify subscription and drive reactions
     // with an explicit correlate→drain pump — the classic poll-based
@@ -120,15 +124,16 @@ async function setupReader(notifyEnabled: boolean, rec: LatencyRecorder) {
       try {
         await reader.correlate({ limit: 100 });
         await reader.drain({ streamLimit: 50, eventLimit: 100 });
-      } catch {
-        // best-effort — pool may close mid-flight at teardown
+      } catch (e) {
+        pump.errors++;
+        pump.last = e;
       }
     }, POLL_INTERVAL_MS);
   } else {
     reader.on("notified", () => reader.settle({ debounceMs: 0 }));
   }
 
-  return { reader, pollTimer };
+  return { reader, pollTimer, pump };
 }
 
 async function runScenario(
@@ -136,7 +141,7 @@ async function runScenario(
   notifyEnabled: boolean
 ): Promise<number[]> {
   const rec = recorder();
-  const { reader, pollTimer } = await setupReader(notifyEnabled, rec);
+  const { reader, pollTimer, pump } = await setupReader(notifyEnabled, rec);
   const writer = new PostgresStore({
     port: PORT,
     schema: SCHEMA,
@@ -162,7 +167,20 @@ async function runScenario(
     await new Promise((r) =>
       setTimeout(r, notifyEnabled ? 500 : POLL_INTERVAL_MS * 8)
     );
-    return rec.drain();
+    const samples = rec.drain();
+    // An arm that recorded nothing is not a slow arm, it is a run that
+    // never happened — and the percentile helper reports an empty sample
+    // set as `0 ms`, which reads as "infinitely fast" in the comparison
+    // below. Fail here instead, where the cause can still be named.
+    if (samples.length === 0)
+      throw new Error(
+        `The ${prefix} arm recorded 0 of ${COMMITS} reactions. ` +
+          (pump.errors
+            ? `The poll pump failed ${pump.errors} times; last error: ${pump.last}`
+            : "Nothing failed, so the reader never got to run — " +
+              "most likely starved of CPU by a bench running alongside it.")
+      );
+    return samples;
   } finally {
     if (pollTimer) clearInterval(pollTimer);
     reader.stop_correlations();
