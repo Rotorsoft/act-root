@@ -367,3 +367,228 @@ describe("reporting once per declaration, not once per aggregate (#1584)", () =>
     });
   });
 });
+
+/**
+ * An omitted lane *is* `"default"` (#1598).
+ *
+ * That is what #1583 settled on the static side, where the build-time guard
+ * normalizes both operands before comparing, so `.to({target})` and
+ * `.to({target, lane: "slow"})` are rejected as the disagreement they are.
+ * The dynamic reporter compared the raw resolutions, so the one shape the
+ * operator has no other diagnostic for — undefined vs a declared lane — was
+ * the one shape it stayed silent about.
+ *
+ * Silence there costs the whole point of the lane: `T` lands on whichever
+ * lane was discovered first, and a worker sharded `onlyLanes: ["slow"]`
+ * never runs the reaction that asked for "slow".
+ */
+describe("an omitted lane disagreeing with a declared one (#1598)", () => {
+  it("CONTROL — the static form is still rejected at build", () => {
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "slow" })
+        .on("Bumped")
+        .do(async function onBumped() {})
+        .to({ target: "T" })
+        .on("Pinged")
+        .do(async function onPinged() {})
+        .to({ target: "T", lane: "slow" })
+        .build()
+    ).toThrow(/conflicting lane assignments \("slow" vs "default"\)/);
+  });
+
+  it("reports the same disagreement on the dynamic path", async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Bumped")
+          .do(async function onBumpedDefault() {})
+          .to(() => ({ target: "T-1598" }))
+          .on("Pinged")
+          .do(async function onPingedSlow() {})
+          .to(() => ({ target: "T-1598", lane: "slow" }))
+      );
+      await app.do("bump", { stream: "c1", actor }, {});
+      await app.do("ping", { stream: "c1", actor }, {});
+      for (let i = 0; i < 2; i++) {
+        await app.correlate();
+        await app.drain();
+      }
+      await dispose();
+    });
+
+    const reported = errors.find((m) => /conflicting lane/.test(m));
+    expect(reported).toMatch(/T-1598/);
+    expect(reported).toMatch(/"default"/);
+    expect(reported).toMatch(/"slow"/);
+  });
+
+  it("reports it in the other discovery order too", async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Bumped")
+          .do(async function onBumpedSlow() {})
+          .to(() => ({ target: "T-1598-rev", lane: "slow" }))
+          .on("Pinged")
+          .do(async function onPingedDefault() {})
+          .to(() => ({ target: "T-1598-rev" }))
+      );
+      await app.do("bump", { stream: "c1", actor }, {});
+      await app.do("ping", { stream: "c1", actor }, {});
+      for (let i = 0; i < 2; i++) {
+        await app.correlate();
+        await app.drain();
+      }
+      await dispose();
+    });
+
+    const reported = errors.find((m) => /conflicting lane/.test(m));
+    expect(reported).toMatch(/T-1598-rev/);
+    expect(reported).toMatch(/"slow"/);
+    expect(reported).toMatch(/"default"/);
+  });
+
+  it("reports it across scans, where the held lane comes from the row", async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Bumped")
+          .do(async function onBumpedAcross() {})
+          .to(() => ({ target: "T-1598-across" }))
+          .on("Pinged")
+          .do(async function onPingedAcross() {})
+          .to(() => ({ target: "T-1598-across", lane: "slow" }))
+      );
+      // Two scans: the first records the target's lane on its subscription
+      // row, the second reads it back from there rather than from the
+      // running scan — the second of the two sources of `held`.
+      await app.do("bump", { stream: "c1", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await app.do("ping", { stream: "c1", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await dispose();
+    });
+
+    expect(errors.find((m) => /conflicting lane/.test(m))).toMatch(
+      /T-1598-across/
+    );
+  });
+
+  it("reports a rerouted undeclared lane against a stream already laned", async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Bumped")
+          .do(async function onBumpedLaned() {})
+          .to(() => ({ target: "T-1598-reroute", lane: "slow" }))
+          .on("Pinged")
+          .do(async function onPingedTypo() {})
+          .to(() => ({ target: "T-1598-reroute", lane: "typo" as "slow" }))
+      );
+      await app.do("bump", { stream: "c1", actor }, {});
+      await app.do("ping", { stream: "c1", actor }, {});
+      for (let i = 0; i < 2; i++) {
+        await app.correlate();
+        await app.drain();
+      }
+      await dispose();
+    });
+
+    // The reroute lands the reaction on "default", which is a different
+    // lane from the one the stream is on — the reroute is not the end of
+    // the story, and the operator needs both halves.
+    expect(errors.find((m) => /undeclared lane/.test(m))).toMatch(/"typo"/);
+    expect(errors.find((m) => /conflicting lane/.test(m))).toMatch(
+      /T-1598-reroute/
+    );
+  });
+
+  it('CONTROL — an omitted lane and an explicit "default" agree', async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Bumped")
+          .do(async function onBumpedOmitted() {})
+          .to(() => ({ target: "T-1598-agree" }))
+          .on("Pinged")
+          .do(async function onPingedExplicit() {})
+          .to(() => ({ target: "T-1598-agree", lane: "default" as "slow" }))
+      );
+      await app.do("bump", { stream: "c1", actor }, {});
+      await app.do("ping", { stream: "c1", actor }, {});
+      for (let i = 0; i < 2; i++) {
+        await app.correlate();
+        await app.drain();
+      }
+      await dispose();
+    });
+
+    expect(errors.filter((m) => /conflicting lane/.test(m))).toHaveLength(0);
+  });
+
+  it("CONTROL — a first resolution onto a never-seen target is not a conflict", async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Pinged")
+          .do(async function onPingedFirst() {})
+          .to(() => ({ target: "T-1598-first", lane: "slow" }))
+      );
+      await app.do("ping", { stream: "c1", actor }, {});
+      for (let i = 0; i < 2; i++) {
+        await app.correlate();
+        await app.drain();
+      }
+      await dispose();
+    });
+
+    // There is no held lane to disagree with — normalizing "no record" to
+    // "default" would turn every first sighting into a false report.
+    expect(errors.filter((m) => /conflicting lane/.test(m))).toHaveLength(0);
+  });
+
+  it("CONTROL — a higher-priority resolution outranks, it does not conflict", async () => {
+    const errors = await captured(async () => {
+      const { app, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .withLane({ name: "slow" })
+          .on("Bumped")
+          .do(async function onBumpedLow() {})
+          .to(() => ({ target: "T-1598-rank" }))
+          .on("Pinged")
+          .do(async function onPingedHigh() {})
+          .to(() => ({ target: "T-1598-rank", lane: "slow", priority: 5 }))
+      );
+      // Separate scans, so the second resolution meets the first through
+      // the recorded row and beats its floor.
+      await app.do("bump", { stream: "c1", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await app.do("ping", { stream: "c1", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await dispose();
+    });
+
+    // Priority decides the lane, deterministically and documented — that is
+    // not the silent tie this report exists for.
+    expect(errors.filter((m) => /conflicting lane/.test(m))).toHaveLength(0);
+  });
+});
