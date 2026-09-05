@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.15...@rotorsoft/act-v1.31.16) (2026-09-05)
+
+
+### Bug Fixes
+
+* **act:** normalize omitted lanes in the dynamic lane-conflict report ([#1611](https://github.com/Rotorsoft/act-root/issues/1611)) ([826036e](https://github.com/Rotorsoft/act-root/commit/826036eab2d1697754df4ac0eeabbdc3e47311e1)), closes [#1598](https://github.com/Rotorsoft/act-root/issues/1598)
+
 # [@rotorsoft/act-v1.31.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.14...@rotorsoft/act-v1.31.15) (2026-09-04)
 
 
