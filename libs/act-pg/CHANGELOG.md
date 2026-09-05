@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.19.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.3...@rotorsoft/act-pg-v1.19.4) (2026-09-05)
+
+
+### Bug Fixes
+
+* **act:** keep a stream's lane when the subscriber has forgotten it ([#1612](https://github.com/Rotorsoft/act-root/issues/1612)) ([2978061](https://github.com/Rotorsoft/act-root/commit/29780612c93d1fce4474baeae3dccfdf5428e386)), closes [#1598](https://github.com/Rotorsoft/act-root/issues/1598) [#1599](https://github.com/Rotorsoft/act-root/issues/1599)
+
 # [@rotorsoft/act-pg-v1.19.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.2...@rotorsoft/act-pg-v1.19.3) (2026-08-30)
 
 
