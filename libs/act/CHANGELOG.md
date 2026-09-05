@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.31.17](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.16...@rotorsoft/act-v1.31.17) (2026-09-05)
+
+
+### Bug Fixes
+
+* **act:** grant a zero-length lease a holder, bound reads before emitting ([#1613](https://github.com/Rotorsoft/act-root/issues/1613)) ([4c076f9](https://github.com/Rotorsoft/act-root/commit/4c076f9dddafdbf46fbfc4b627657573706c0b20)), closes [#1600](https://github.com/Rotorsoft/act-root/issues/1600)
+* **act:** keep a stream's lane when the subscriber has forgotten it ([#1612](https://github.com/Rotorsoft/act-root/issues/1612)) ([2978061](https://github.com/Rotorsoft/act-root/commit/29780612c93d1fce4474baeae3dccfdf5428e386)), closes [#1598](https://github.com/Rotorsoft/act-root/issues/1598) [#1599](https://github.com/Rotorsoft/act-root/issues/1599)
+
 # [@rotorsoft/act-v1.31.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.15...@rotorsoft/act-v1.31.16) (2026-09-05)
 
 

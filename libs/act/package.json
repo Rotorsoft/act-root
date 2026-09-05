@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act",
   "type": "module",
-  "version": "1.31.16",
+  "version": "1.31.17",
   "description": "act core library",
   "keywords": [
     "typescript",
