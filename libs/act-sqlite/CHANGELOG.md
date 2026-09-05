@@ -1,3 +1,11 @@
+# [@rotorsoft/act-sqlite-v1.19.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.19.2...@rotorsoft/act-sqlite-v1.19.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* **act:** keep a stream's lane when the subscriber has forgotten it ([#1612](https://github.com/Rotorsoft/act-root/issues/1612)) ([2978061](https://github.com/Rotorsoft/act-root/commit/29780612c93d1fce4474baeae3dccfdf5428e386)), closes [#1598](https://github.com/Rotorsoft/act-root/issues/1598) [#1599](https://github.com/Rotorsoft/act-root/issues/1599)
+* **act:** revive dates on read instead of re-validating the payload ([#1601](https://github.com/Rotorsoft/act-root/issues/1601)) ([97ed5b9](https://github.com/Rotorsoft/act-root/commit/97ed5b9190601127e48d0b102c998eec95c38c78)), closes [#1594](https://github.com/Rotorsoft/act-root/issues/1594)
+
 # [@rotorsoft/act-sqlite-v1.19.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.19.1...@rotorsoft/act-sqlite-v1.19.2) (2026-08-27)
 
 
