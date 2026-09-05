@@ -1754,6 +1754,45 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
+      it("records the lease holder for a zero-length lease, so its ack lands", async () => {
+        // `millis` bounds how long a lease stands, not whether it was
+        // granted. A store that skips recording the holder for a
+        // zero-length lease hands out a lease whose every `ack` is dropped
+        // — the watermark never advances and every event is redelivered on
+        // every drain, silently and forever. `leaseMillis: 0` is legal
+        // config, so this is reachable from type-checked source.
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = `lease-zero-${uid()}`;
+          await fresh.subscribe([{ stream: s }]);
+          const [committed] = await fresh.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          await correlate(fresh);
+          const leased = await fresh.claim(1, 0, `w-${uid()}`, 0);
+          const mine = leased.find((l) => l.stream === s);
+          expect(mine).toBeDefined();
+
+          const acked = await fresh.ack([{ ...mine!, at: committed.id }]);
+          expect(acked).toHaveLength(1);
+
+          let at = -1;
+          await fresh.query_streams(
+            (p) => {
+              at = p.at;
+            },
+            { stream: s, stream_exact: true }
+          );
+          expect(at).toBe(committed.id);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
       it("reports lagging=true from the lagging frontier and false from the leading frontier", async () => {
         const fresh = await options.factory();
         try {
@@ -3479,6 +3518,31 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect([...visited].sort()).toEqual([...names].sort());
       });
 
+      it("limit: 0 returns no rows", async () => {
+        // The bound is applied before a row is emitted, not after it — an
+        // after-the-fact check lets exactly one row through.
+        const s = `qs-zero-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        const seen: string[] = [];
+        const push = (p: { stream: string }) => {
+          seen.push(p.stream);
+        };
+        const filter = { stream: s, stream_exact: true };
+
+        // CONTROL — the same query under the default bound sees the row.
+        const control = await store.query_streams(push, filter);
+        expect(control.count).toBe(1);
+        expect(seen).toEqual([s]);
+
+        seen.length = 0;
+        const { count } = await store.query_streams(push, {
+          ...filter,
+          limit: 0,
+        });
+        expect(seen).toEqual([]);
+        expect(count).toBe(0);
+      });
+
       it("returns positions filtered by stream regex, exact, source, and source_exact", async () => {
         const tag = uid();
         const proj1 = `qs-${tag}-projection-tickets`;
@@ -3632,6 +3696,25 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // Unknown stream name — absent, not an error.
         const unknown = await store.query_stats([`qst-${tag}-missing`]);
         expect(unknown.size).toBe(0);
+      });
+
+      it("limit: 0 returns no rows", async () => {
+        const s = `qst-zero-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const filter = { stream: s, stream_exact: true };
+
+        // CONTROL — unbounded, the stream is there to be counted.
+        const control = await store.query_stats<CounterEvents>(filter);
+        expect(control.size).toBe(1);
+
+        const stats = await store.query_stats<CounterEvents>(filter, {
+          limit: 0,
+        });
+        expect(stats.size).toBe(0);
       });
 
       it("keyset pagination visits every stream regardless of name case (#1357)", async () => {
