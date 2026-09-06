@@ -473,6 +473,14 @@ export class PostgresStore implements Store {
    * Clearing `_notify_handler` and the reconnect timer here is what makes
    * `dispose()` safe during a pending reconnect (#1189): a scheduled
    * `_reconnect` bails the moment it finds no handler.
+   *
+   * A pending reconnect has two states, and that covers one of them. An
+   * open already *in flight* has passed every handler check, and it holds
+   * no `_listen_client` yet — so the early return above fires and this
+   * releases nothing, leaving `pool.end()` waiting on the client that open
+   * is about to take (#1616). The other half of the guard therefore lives
+   * at the end of `_open_listen`, which re-reads `_notify_handler` before
+   * assigning and hands the client back when disposal won the race.
    */
   private async _teardown_listen() {
     if (this._reconnect_timer) {
@@ -2291,6 +2299,23 @@ export class PostgresStore implements Store {
       client.removeListener("error", on_error);
       client.release(true);
       throw err;
+    }
+    // Disposal may have won the race while this open was in flight
+    // (#1616). `_teardown_listen` answers "is there a subscription?" by
+    // looking at `_listen_client`, which is undefined for the whole
+    // duration of an open — so a teardown landing in this window returned
+    // early, and `pool.end()` is now waiting on the very client held here.
+    // Handing it back is what lets `dispose()` finish; keeping it would
+    // also resurrect a LISTEN on a store that was already disposed.
+    //
+    // `_notify_handler` is the signal because teardown clears it first and
+    // `_subscribe_notifications` sets it before calling this, so it is
+    // present on both the initial and the reconnect path.
+    if (this._notify_handler === undefined) {
+      client.removeListener("notification", on_notification);
+      client.removeListener("error", on_error);
+      client.release(true);
+      return;
     }
     this._listen_client = client;
     this._listen_handler = on_notification;

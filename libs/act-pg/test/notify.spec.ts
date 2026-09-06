@@ -346,3 +346,75 @@ describe("PostgresStore.notify", () => {
     await dispose();
   });
 });
+
+/**
+ * The user-visible half of #1616: `dispose()` has to resolve. The unit
+ * test over a fake pool proves the in-flight open hands its client back;
+ * only a real pool shows why that matters, because `pool.end()` waits for
+ * every checked-out client and a stranded one keeps a graceful shutdown
+ * pending forever.
+ */
+describe("PostgresStore.dispose racing an in-flight re-LISTEN (#1616)", () => {
+  const DISPOSE_SCHEMA = schema("schema_dispose_race");
+
+  const mk = () =>
+    new PostgresStore({
+      port: PORT,
+      schema: DISPOSE_SCHEMA,
+      table: "dispose_race",
+      notify: true,
+    });
+
+  it("CONTROL — with no reconnect in flight, dispose resolves promptly", async () => {
+    const store = mk();
+    await store.drop();
+    await store.seed();
+    await store.notify!(() => {});
+
+    const started = Date.now();
+    await store.dispose();
+
+    expect(Date.now() - started).toBeLessThan(2_000);
+  }, 30_000);
+
+  it("resolves while a reconnect sits in the pool checkout", async () => {
+    const store = mk();
+    await store.drop();
+    await store.seed();
+    await store.notify!(() => {});
+
+    const inner = store as unknown as {
+      _pool: { connect: () => Promise<unknown> };
+      _listen_client: { emit: (e: string, x: Error) => void } | undefined;
+    };
+    // Park the reconnect's checkout — a stand-in for the slow or hung
+    // connect a struggling database produces, which is exactly when a
+    // reconnect and a shutdown overlap.
+    const real_connect = inner._pool.connect.bind(inner._pool);
+    let release!: () => void;
+    const parked = new Promise<void>((r) => {
+      release = r;
+    });
+    let parked_once = false;
+    inner._pool.connect = async () => {
+      const client = await real_connect();
+      if (!parked_once) {
+        parked_once = true;
+        await parked;
+      }
+      return client;
+    };
+
+    // Force the reconnect the way a real blip would.
+    inner._listen_client!.emit("error", new Error("simulated blip"));
+    await waitFor(() => parked_once, { timeout: 3_000 });
+
+    const started = Date.now();
+    const disposing = store.dispose();
+    release();
+    await disposing;
+
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(inner._listen_client).toBeUndefined();
+  }, 30_000);
+});
