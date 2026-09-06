@@ -243,3 +243,102 @@ describe("a notification during shutdown cannot arm a new cycle (#1596)", () => 
     expect(await scenario(true)).toEqual([]);
   }, 20_000);
 });
+
+/**
+ * Two defects in the same teardown sequence, found together (#1617, #1618).
+ *
+ * Every test above passes `graceMs: 5_000` explicitly, which is exactly why
+ * the *derived* budget's hole survived them: `_derive_grace_ms` folded over
+ * the drain controllers alone, so a settle running on its own derived `0`
+ * and `_await_inflight` returned before awaiting the settle promise it was
+ * about to add to its own list.
+ *
+ * The second is ordering: the correlation lease was handed back as
+ * teardown's first act, while the settle it had not yet waited for could
+ * still re-take it on its ordinary path — leaving a dead worker holding the
+ * lease to expiry, which is the delay handing it back exists to remove.
+ */
+describe("teardown budget and lease ordering (#1617, #1618)", () => {
+  /** Records the correlator argument of every `subscribe`, in order. */
+  const lease_harness = (park_on: string) => {
+    const raw = new InMemoryStore();
+    const correlator_millis: number[] = [];
+    const flags = { parking: false, entered: false, released: false };
+    let release!: () => void;
+    const parked = new Promise<void>((r) => {
+      release = r;
+    });
+    const wrapped = new Proxy(raw, {
+      get(t, p, r) {
+        const v = Reflect.get(t, p, r);
+        if (typeof v !== "function") return v;
+        return async (...args: unknown[]) => {
+          const name = String(p);
+          if (name === "subscribe") {
+            const correlator = args[2] as { millis: number } | undefined;
+            if (correlator) correlator_millis.push(correlator.millis);
+          }
+          if (flags.parking && name === park_on && !flags.entered) {
+            flags.entered = true;
+            await parked;
+          }
+          return (v as (...a: unknown[]) => unknown).apply(t, args);
+        };
+      },
+    }) as unknown as Store;
+    return {
+      wrapped,
+      correlator_millis,
+      flags,
+      release: () => {
+        flags.released = true;
+        release();
+      },
+    };
+  };
+
+  it("the DEFAULT budget waits for a settle that is the only thing in flight", async () => {
+    const h = lease_harness("query");
+    store(h.wrapped);
+    const app = build();
+    await app.do("tick", { stream: "src", actor }, {});
+
+    h.flags.parking = true;
+    app.settle({ debounceMs: 0 });
+    await until(() => h.flags.entered);
+
+    let returned = false;
+    // No graceMs — this is the derived path, and no drain controller is in
+    // flight, so the budget comes from the settle alone.
+    const shutting = app.shutdown().then(() => {
+      returned = true;
+    });
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(returned).toBe(false);
+
+    h.release();
+    await shutting;
+    expect(returned).toBe(true);
+  });
+
+  it("hands the correlation lease back last, so nothing re-takes it", async () => {
+    const h = lease_harness("query");
+    store(h.wrapped);
+    const app = build();
+    await app.do("tick", { stream: "src", actor }, {});
+
+    h.flags.parking = true;
+    app.settle({ debounceMs: 0 });
+    await until(() => h.flags.entered);
+
+    const shutting = app.shutdown({ graceMs: 5_000 });
+    await new Promise<void>((r) => setTimeout(r, 50));
+    h.release();
+    await shutting;
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // `millis: 0` is the handback; anything positive is an acquisition.
+    // The release has to be the last word, or the lease outlives teardown.
+    expect(h.correlator_millis.at(-1)).toBe(0);
+  });
+});
