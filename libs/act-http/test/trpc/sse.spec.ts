@@ -289,3 +289,146 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
     ).rejects.toBeInstanceOf(TRPCError);
   });
 });
+
+/**
+ * Step 1 of the documented subscription contract — `auto-generated-api.md`
+ * "What the generator owns": "For every subscription, on every open: 1. Run
+ * the `actor` extractor (`401` / `UNAUTHORIZED` on throw)."
+ *
+ * The generator implemented steps 2 through 5 — connection cap, cached state
+ * frame, patch forwarding, heartbeat — and skipped step 1, so a caller the
+ * extractor would have denied got a live subscription and the cached state
+ * with it (#1620). Hono never had the gap, because it mounts the extractor as
+ * middleware across the whole API; tRPC resolves the actor inline, and the
+ * subscription path simply had no copy of that block.
+ */
+describe("trpc(app, { sse }) — the actor extractor gates the open (#1620)", () => {
+  const denying = (
+    // `any`: same wide channel shape the helper above uses
+    channel: BroadcastChannel<any>,
+    ran: { value: boolean }
+  ): TrpcOptions<Ctx> => ({
+    actor: () => {
+      ran.value = true;
+      throw new Error("nope");
+    },
+    stream: () => "calc-1",
+    sse: { channel },
+  });
+
+  const subscribe = (router: ReturnType<typeof trpc<Ctx>>) => {
+    const t = initTRPC.context<Ctx>().create();
+    const caller = t.createCallerFactory(router)({ actorId: "anonymous" });
+    return (
+      caller as unknown as {
+        subscribe: {
+          Calculator: (i: {
+            stream: string;
+          }) => Promise<AsyncIterable<SubscriptionFrame>>;
+        };
+      }
+    ).subscribe.Calculator({ stream: "calc-1" });
+  };
+
+  test("CONTROL — an accepting extractor still yields the cached state", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; display: string }>();
+    channel.publish("calc-1", { _v: 1, display: "7" }, [{ display: "7" }]);
+    const ran = { value: false };
+    const router = trpc<Ctx>(app as never, {
+      ...default_options(channel),
+      actor: (ctx) => {
+        ran.value = true;
+        return { id: (ctx as Ctx).actorId, name: (ctx as Ctx).actorId };
+      },
+    });
+    const abort = new AbortController();
+    const frames = await take_frames(await subscribe(router), 1, abort);
+
+    expect(ran.value).toBe(true);
+    // `toMatchObject`: the state frame's data also carries the `_v`
+    // version key, which this case is not about.
+    expect(frames).toMatchObject([{ kind: "state", data: { display: "7" } }]);
+  });
+
+  test("a denying extractor runs, and no state reaches the caller", async ({
+    app,
+  }) => {
+    const channel = new BroadcastChannel<{ _v: number; display: string }>();
+    // Cached state the caller must not see.
+    channel.publish("calc-1", { _v: 1, display: "SECRET" }, [
+      { display: "SECRET" },
+    ]);
+    const ran = { value: false };
+    const router = trpc<Ctx>(app as never, denying(channel, ran));
+
+    const frames: SubscriptionFrame[] = [];
+    await expect(async () => {
+      for await (const frame of await subscribe(router)) {
+        frames.push(frame);
+        break;
+      }
+    }).rejects.toThrow(/nope/);
+
+    expect(ran.value).toBe(true);
+    expect(frames).toEqual([]);
+  });
+
+  test("the denial is UNAUTHORIZED, not a framework 500", async ({ app }) => {
+    const channel = new BroadcastChannel();
+    const ran = { value: false };
+    const router = trpc<Ctx>(app as never, denying(channel, ran));
+
+    let code: string | undefined;
+    try {
+      for await (const _ of await subscribe(router)) break;
+    } catch (err) {
+      code = err instanceof TRPCError ? err.code : "not-a-TRPCError";
+    }
+    // The same mapping the generated mutations use for a throw-to-deny,
+    // and the same outcome Hono's `authenticated` middleware produces.
+    expect(code).toBe("UNAUTHORIZED");
+  });
+
+  test("the extractor runs before a connection slot is taken", async ({
+    app,
+  }) => {
+    // One router, so one shared connection counter, capped at a single
+    // slot. The extractor denies "anonymous" and accepts everyone else:
+    // if the denied open consumed the slot, the accepted open below
+    // would be refused with TOO_MANY_REQUESTS instead of yielding.
+    const channel = new BroadcastChannel<{ _v: number; display: string }>();
+    channel.publish("calc-1", { _v: 1, display: "9" }, [{ display: "9" }]);
+    const router = trpc<Ctx>(app as never, {
+      actor: (ctx) => {
+        const id = (ctx as Ctx).actorId;
+        if (id === "anonymous") throw new Error("nope");
+        return { id, name: id };
+      },
+      stream: () => "calc-1",
+      sse: { channel, maxConnections: 1 },
+    });
+    const t = initTRPC.context<Ctx>().create();
+    const open = (actorId: string) =>
+      (
+        t.createCallerFactory(router)({ actorId }) as unknown as {
+          subscribe: {
+            Calculator: (i: {
+              stream: string;
+            }) => Promise<AsyncIterable<SubscriptionFrame>>;
+          };
+        }
+      ).subscribe.Calculator({ stream: "calc-1" });
+
+    try {
+      for await (const _ of await open("anonymous")) break;
+    } catch {
+      // expected — the point is what the denied open did NOT consume
+    }
+
+    const abort = new AbortController();
+    const frames = await take_frames(await open("u-1"), 1, abort);
+    expect(frames).toMatchObject([{ kind: "state", data: { display: "9" } }]);
+  });
+});
