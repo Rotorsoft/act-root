@@ -20,18 +20,16 @@ import {
   type PatchFn,
   type ResettableBatchHandler,
   resolveActConfig,
-  resolveAutocloseConfig,
   resolveLaneConfig,
   synthesize_autoclose_reactions,
   validating_patch,
 } from "../internal/index.js";
-import { type DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
+import { type DEFAULT_LANE, log } from "../ports.js";
 import { current_autoclose_window } from "../scoped.js";
 import type {
   Actor,
   BatchHandler,
   LaneConfig,
-  Reaction,
   Registry,
   Schema,
   SchemaRegister,
