@@ -244,6 +244,9 @@ Critically, the autoclose reaction runs on a **synthetic per-aggregate stream** 
 
 `start > end` is an overnight window (the example above runs 22:00–06:00). `start === end` is rejected at build. Omit the window to evaluate on every commit. A reaction that triggers outside the window parks until the exact instant the window next opens — derived from the window itself, DST-correct, no polling cadence to configure. (`autocloseCycleMinutes` used to pace this re-check; since #1175 it is deprecated and ignored.)
 
+
+**It is per-Act.** `autocloseWindow` is read from the Act that is running the reaction, not from the builder it was declared on, so one builder built once per tenant — the documented multi-tenant shape — gives each tenant its own window ([#1615](https://github.com/Rotorsoft/act-root/issues/1615)). An out-of-range window throws at every `build()` that declares it, not only the first.
+
 ## The archive contract
 
 On a full close, `.archives(fn)` runs **inside the close cycle's guard window** — the same window the explicit `app.close({ stream, archive })` uses. The cycle:

@@ -45,7 +45,9 @@ export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
  * Inject one synthesized autoclose reaction per `.autocloses(...)` state
  * into the registry's event registers. The handler resolves ports at call
  * time (`store()`), so the reaction is orchestrator-agnostic; the resolved
- * window/cadence config is captured here, at build.
+ * The reactions are synthesized once into the shared registry, so nothing
+ * per-Act is captured here — the off-hours window is read from the running
+ * Act at resolution time via the injected `read_window` (#1615).
  *
  * @internal
  */
@@ -56,7 +58,14 @@ export function synthesize_autoclose_reactions<
 >(
   registry: Registry<TSchemaReg, TEvents, TActions>,
   states: ReadonlyMap<string, State<any, any, any>>,
-  config: AutocloseConfig
+  /**
+   * Reads the *running* Act's off-hours window. Injected rather than
+   * imported: these reactions are synthesized once into the shared
+   * registry and run by every Act built from that builder, so the window
+   * has to be resolved per call, and `internal/` never reaches for
+   * ambient state itself (#1615).
+   */
+  read_window: () => AutocloseConfig["autocloseWindow"]
 ): void {
   for (const st of states.values()) {
     const predicate = st.autoclose;
@@ -82,10 +91,16 @@ export function synthesize_autoclose_reactions<
         const aggregate = event.stream;
         // Off-hours gating: outside the window, park until the window
         // opens. Derived from the window itself — no polling cadence.
-        if (!in_autoclose_window(config.autocloseWindow, new Date()))
-          throw new DeferSignal({
-            at: next_window_open(config.autocloseWindow!, new Date()),
-          });
+        //
+        // Read from the running Act's frame, not from a closure. These
+        // reactions are synthesized once into the shared registry and
+        // handed by reference to every Act built from the same builder, so
+        // a captured window would be the first-built Act's for all of them
+        // — and the documented multi-tenant shape is one builder built per
+        // tenant (#1615).
+        const window = read_window();
+        if (!in_autoclose_window(window, new Date()))
+          throw new DeferSignal({ at: next_window_open(window!, new Date()) });
         // Every policy keys on the *domain* head/count, so snapshots are
         // excluded unconditionally (#1356) — matching `scan_stream_heads` in
         // close-cycle.ts. `snap()` commits a `__snapshot__` at a higher id

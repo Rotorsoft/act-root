@@ -31,6 +31,7 @@ import {
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   type ResettableBatchHandler,
+  resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -656,7 +657,25 @@ export class Act<
     // carries the singleton adapters, which is what stops a shared Act
     // inheriting the frame of whoever called it (#1597).
     this._ports = options.scoped ?? default_scope();
-    this._scoped = make_run_scoped(this._ports);
+    // Resolved here rather than at reaction synthesis, so it is this Act's
+    // window and not the first-built Act's (#1615). Parsing on every
+    // construction is also what restores the startup-validation contract:
+    // an out-of-range window throws where it was declared, on every build,
+    // not only the first.
+    const ports = this._ports;
+    this._scoped = make_run_scoped({
+      // Delegating getters, NOT a spread: `default_scope()` resolves the
+      // process singletons lazily, so copying its properties would freeze
+      // whichever adapters happened to be installed at construction and
+      // ignore a later `store(...)` / `cache(...)`.
+      get store() {
+        return ports.store;
+      },
+      get cache() {
+        return ports.cache;
+      },
+      autoclose_window: resolveAutocloseConfig(options).autocloseWindow,
+    });
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
