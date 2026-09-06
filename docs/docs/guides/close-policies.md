@@ -150,9 +150,48 @@ Four things to know:
 
 **It is independent of the terminate fields.** `keep` participates in neither the top-level AND group nor the `or` block — declaring `keep` inside `or` rejects at build. A policy may terminate, prune, or both: `.autocloses({ is: "AccountClosed", keep: { days: 180 } })` prunes the rolling window while the account lives and full-closes when it ends, and a terminate match always takes precedence over a prune on the same visit.
 
-**The reaction defers to the tail, not the head.** The prune decision keys on the stream's oldest *domain* event (snapshots and tombstones excluded): when it has aged past `now − keep`, the reaction stages the windowed close with `before = now − keep`; otherwise it parks until `tail.created + keep` — the exact moment the oldest surviving event ages out of the window — or the terminate cooldown's opening, whichever comes first. After a prune the tail moves forward, the next due-time moves with it, and the stream settles into a steady rhythm of one productive prune per window.
+**The reaction defers to the tail, not the head.** The prune decision keys on the stream's oldest *domain* event (snapshots and tombstones excluded): when it has aged past `now − keep`, the reaction stages the windowed close with `before = now − keep`; otherwise it parks until `tail.created + keep` — the exact moment the oldest surviving event ages out of the window — or the terminate cooldown's opening, whichever comes first. After a prune the tail moves forward and the next due-time moves with it.
+
+**The window advances on commits.** `.autocloses` compiles to a reaction, and a reaction runs when an event is waiting for it — so a stream that stops committing stops pruning, and keeps whatever history it had at that moment ([#1619](https://github.com/Rotorsoft/act-root/issues/1619)). This is not a gap that can be closed inside the reaction: a prune has to mark its triggering event consumed, or the safety probe (which refuses to delete below the laggiest consumer's watermark) sees this very reaction lagging and caps the prune short. Once the event is consumed there is nothing left to redeliver, so nothing can wake the policy again on its own.
+
+For an active stream that is exactly what you want — the window rolls with the traffic, and the prune costs nothing on a stream nobody is writing to. For a **retention obligation** it is not enough on its own, because the streams that must be pruned are usually the ones that went quiet: an abandoned draft, a session nobody came back to, an audit log past its statutory window. Those are pruned on demand instead — see [Pruning streams that have gone silent](#pruning-streams-that-have-gone-silent) below.
 
 Be clear about what `keep` is *not* for. It is not a load-latency feature — events behind the latest snapshot never affect load results anyway, so pruning them makes `app.load` exactly zero faster. If your streams have lifecycles that end, the terminate fields above are the right tool; if the whole events table is too big across many streams, look at the [scaling recipes](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling) instead. `keep` earns its place when a live, never-closing stream must hold a bounded window of history — usually because a regulator or a storage budget says so. The imperative twin is `app.close([{ stream, before: cutoff }])` for one-off prunes driven by your own scheduler; the mechanics of both are in [Windowed close in the close-cycle architecture](../architecture/close-cycle.md#windowed-close--prune-behind-a-snapshot).
+
+### Pruning streams that have gone silent
+
+The rolling window rides the aggregate's own commits, so a stream nobody writes to is a stream nobody prunes. When retention is an obligation rather than a storage optimization, the operator goes looking for the quiet ones directly.
+
+Nothing new is needed for that — the two halves already exist, and an operator can run them whenever retention has to be enforced. `query_stats` reports each stream's head, its most recent domain event, which is the dormancy signal; it pages, so the walk is bounded on a large store. `app.close` takes the same windowed form the reaction stages, so this prunes through exactly the same path with the same safety probe:
+
+```typescript no-check
+const KEEP_DAYS = 30;
+
+async function pruneDormantStreams(app: typeof myApp) {
+  const cutoff = new Date(Date.now() - KEEP_DAYS * 86_400_000);
+  let after: string | undefined;
+  for (;;) {
+    const page = await store().query_stats({}, { after, limit: 500 });
+    if (page.size === 0) break;
+    const dormant = [...page]
+      // The head is older than the window, so everything under it is too.
+      .filter(([, { head }]) => head.created < cutoff)
+      .map(([stream]) => ({ stream, before: cutoff }));
+    if (dormant.length) await app.close(dormant);
+    after = [...page.keys()].at(-1);
+  }
+}
+```
+
+Call it when you need it: from an operator endpoint, a maintenance script, a console, or whatever you already run one-off jobs with. There is nothing to keep running and nothing to configure — the window is denominated in days, so running it more than about once a day finds nothing new to do.
+
+Three things worth knowing before you use it:
+
+- **It is idempotent and cheap on a caught-up store.** A stream already pruned to the cutoff has no qualifying snapshot below it, so the store reports it in `skipped` rather than erroring, and nothing is written.
+- **It does not fight the reaction.** Both go through `run_close_cycle` under a per-stream lock, so an active stream being pruned by its own reaction and an operator prune arriving at the same moment serialize; the second sees the already-pruned prefix and skips its archive ([#1222](https://github.com/Rotorsoft/act-root/issues/1222)).
+- **`.archives(...)` still runs.** This prunes through the same path, so an archiver declared on the state receives the same `(stream, head, before)` call it would have received from the reaction. Archive-then-prune stays intact.
+
+This is the same division of labor the close recipe draws elsewhere: the declaration handles what the aggregate's own traffic can drive, and the operator handles what only they know is needed.
 
 ### Stacking — top-level AND + `or` block
 
