@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.19](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.18...@rotorsoft/act-v1.31.19) (2026-09-06)
+
+
+### Bug Fixes
+
+* **act:** count the settle in the grace budget, release the lease last ([#1627](https://github.com/Rotorsoft/act-root/issues/1627)) ([9660859](https://github.com/Rotorsoft/act-root/commit/9660859fc708afe0963f80ec784f8ab13572b4e9)), closes [#1468](https://github.com/Rotorsoft/act-root/issues/1468) [#1617](https://github.com/Rotorsoft/act-root/issues/1617) [#1618](https://github.com/Rotorsoft/act-root/issues/1618)
+
 # [@rotorsoft/act-v1.31.18](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.17...@rotorsoft/act-v1.31.18) (2026-09-06)
 
 
