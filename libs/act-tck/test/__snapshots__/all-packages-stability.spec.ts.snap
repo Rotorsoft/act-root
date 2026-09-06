@@ -50471,13 +50471,13 @@ export type HttpDisposition = "ok" | "retry" | "block";
  * SDK-based reactions, etc.) can apply the same retry semantics
  * without inventing a parallel rule.
  */
-export function classify_http_response(response: Response): HttpDisposition {
+export function classifyHttpResponse(response: Response): HttpDisposition {
   if (response.ok) return "ok";
   if (response.status >= 500) return "retry";
   return "block";
 }
 
-/** Options for {@link try_ok}. */
+/** Options for {@link tryOk}. */
 export type TryOkOptions = {
   /** The endpoint that received the request. Surfaced on the thrown error and in its message. */
   url: string;
@@ -50510,11 +50510,11 @@ export type TryOkOptions = {
  * here, so \`instanceof RetryableHttpError\` matches both webhook and
  * custom-integration errors uniformly.
  */
-export async function try_ok(
+export async function tryOk(
   response: Response,
   options: TryOkOptions
 ): Promise<void> {
-  const disposition = classify_http_response(response);
+  const disposition = classifyHttpResponse(response);
   if (disposition === "ok") return;
 
   let responseBody: string | undefined;
@@ -50563,7 +50563,7 @@ export async function try_ok(
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
-import { classify_http_response } from "./classify.js";
+import { classifyHttpResponse } from "./classify.js";
 import { sign_request } from "./sign.js";
 import {
   NonRetryableWebhookError,
@@ -50571,7 +50571,11 @@ import {
   WebhookError,
 } from "./types.js";
 
-export type { HttpDisposition } from "./classify.js";
+export type { HttpDisposition, TryOkOptions } from "./classify.js";
+// Documented in this subpath's README as public API since the helpers were
+// written — implemented, tested, and with a doc-comment describing external
+// use — but never actually exported (#1621). See rfcs/1621-webhook-classify-exports.md.
+export { classifyHttpResponse, tryOk } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
   WebhookBody,
@@ -50683,7 +50687,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       clearTimeout(timer);
     }
 
-    const disposition = classify_http_response(response);
+    const disposition = classifyHttpResponse(response);
     if (disposition === "ok") return;
 
     let responseBody: string | undefined;
