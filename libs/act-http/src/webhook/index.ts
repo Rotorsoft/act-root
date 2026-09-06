@@ -26,7 +26,7 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
-import { classify_http_response } from "./classify.js";
+import { classifyHttpResponse } from "./classify.js";
 import { sign_request } from "./sign.js";
 import {
   NonRetryableWebhookError,
@@ -34,7 +34,11 @@ import {
   WebhookError,
 } from "./types.js";
 
-export type { HttpDisposition } from "./classify.js";
+export type { HttpDisposition, TryOkOptions } from "./classify.js";
+// Documented in this subpath's README as public API since the helpers were
+// written — implemented, tested, and with a doc-comment describing external
+// use — but never actually exported (#1621). See rfcs/1621-webhook-classify-exports.md.
+export { classifyHttpResponse, tryOk } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
   WebhookBody,
@@ -146,7 +150,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       clearTimeout(timer);
     }
 
-    const disposition = classify_http_response(response);
+    const disposition = classifyHttpResponse(response);
     if (disposition === "ok") return;
 
     let responseBody: string | undefined;

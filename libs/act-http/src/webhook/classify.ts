@@ -25,13 +25,13 @@ export type HttpDisposition = "ok" | "retry" | "block";
  * SDK-based reactions, etc.) can apply the same retry semantics
  * without inventing a parallel rule.
  */
-export function classify_http_response(response: Response): HttpDisposition {
+export function classifyHttpResponse(response: Response): HttpDisposition {
   if (response.ok) return "ok";
   if (response.status >= 500) return "retry";
   return "block";
 }
 
-/** Options for {@link try_ok}. */
+/** Options for {@link tryOk}. */
 export type TryOkOptions = {
   /** The endpoint that received the request. Surfaced on the thrown error and in its message. */
   url: string;
@@ -64,11 +64,11 @@ export type TryOkOptions = {
  * here, so `instanceof RetryableHttpError` matches both webhook and
  * custom-integration errors uniformly.
  */
-export async function try_ok(
+export async function tryOk(
   response: Response,
   options: TryOkOptions
 ): Promise<void> {
-  const disposition = classify_http_response(response);
+  const disposition = classifyHttpResponse(response);
   if (disposition === "ok") return;
 
   let responseBody: string | undefined;

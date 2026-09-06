@@ -1,6 +1,6 @@
 import { NonRetryableError } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
-import { classify_http_response, try_ok } from "../../src/webhook/classify.js";
+import { classifyHttpResponse, tryOk } from "../../src/webhook/classify.js";
 import {
   NonRetryableHttpError,
   NonRetryableWebhookError,
@@ -12,57 +12,57 @@ function response(status: number, body?: string): Response {
   return new Response(body ?? null, { status });
 }
 
-describe("classify_http_response", () => {
+describe("classifyHttpResponse", () => {
   describe("ok (2xx)", () => {
     it("classifies 200 as ok", () => {
-      expect(classify_http_response(response(200))).toBe("ok");
+      expect(classifyHttpResponse(response(200))).toBe("ok");
     });
 
     it("classifies 204 as ok", () => {
-      expect(classify_http_response(response(204))).toBe("ok");
+      expect(classifyHttpResponse(response(204))).toBe("ok");
     });
   });
 
   describe("retry (5xx)", () => {
     it("classifies 500 as retry", () => {
-      expect(classify_http_response(response(500))).toBe("retry");
+      expect(classifyHttpResponse(response(500))).toBe("retry");
     });
 
     it("classifies 503 as retry", () => {
-      expect(classify_http_response(response(503))).toBe("retry");
+      expect(classifyHttpResponse(response(503))).toBe("retry");
     });
   });
 
   describe("block (3xx, 4xx)", () => {
     it("classifies 301 as block", () => {
-      expect(classify_http_response(response(301))).toBe("block");
+      expect(classifyHttpResponse(response(301))).toBe("block");
     });
 
     it("classifies 400 as block", () => {
-      expect(classify_http_response(response(400))).toBe("block");
+      expect(classifyHttpResponse(response(400))).toBe("block");
     });
 
     it("classifies 403 as block", () => {
-      expect(classify_http_response(response(403))).toBe("block");
+      expect(classifyHttpResponse(response(403))).toBe("block");
     });
 
     it("classifies 422 as block", () => {
-      expect(classify_http_response(response(422))).toBe("block");
+      expect(classifyHttpResponse(response(422))).toBe("block");
     });
   });
 });
 
-describe("try_ok", () => {
+describe("tryOk", () => {
   describe("ok (2xx)", () => {
     it("returns undefined on 200", async () => {
       await expect(
-        try_ok(response(200), { url: "https://x.example" })
+        tryOk(response(200), { url: "https://x.example" })
       ).resolves.toBeUndefined();
     });
 
     it("returns undefined on 204", async () => {
       await expect(
-        try_ok(response(204), { url: "https://x.example" })
+        tryOk(response(204), { url: "https://x.example" })
       ).resolves.toBeUndefined();
     });
   });
@@ -70,7 +70,7 @@ describe("try_ok", () => {
   describe("retry (5xx)", () => {
     it("throws RetryableHttpError on 500", async () => {
       try {
-        await try_ok(response(500), { url: "https://x.example" });
+        await tryOk(response(500), { url: "https://x.example" });
         throw new Error("expected throw");
       } catch (err) {
         expect(err).toBeInstanceOf(RetryableHttpError);
@@ -83,7 +83,7 @@ describe("try_ok", () => {
 
     it("includes the response body in the thrown error", async () => {
       try {
-        await try_ok(response(503, "service unavailable"), {
+        await tryOk(response(503, "service unavailable"), {
           url: "https://x.example",
         });
         throw new Error("expected throw");
@@ -97,7 +97,7 @@ describe("try_ok", () => {
   describe("block (3xx, 4xx)", () => {
     it("throws NonRetryableHttpError on 400", async () => {
       try {
-        await try_ok(response(400, "bad request"), {
+        await tryOk(response(400, "bad request"), {
           url: "https://x.example",
         });
         throw new Error("expected throw");
@@ -112,7 +112,7 @@ describe("try_ok", () => {
 
     it("throws NonRetryableHttpError on 301", async () => {
       try {
-        await try_ok(response(301), { url: "https://x.example" });
+        await tryOk(response(301), { url: "https://x.example" });
         throw new Error("expected throw");
       } catch (err) {
         expect(err).toBeInstanceOf(NonRetryableHttpError);
@@ -125,7 +125,7 @@ describe("try_ok", () => {
   describe("message formatting", () => {
     it("prefixes the message with the caller-supplied label", async () => {
       try {
-        await try_ok(response(500), {
+        await tryOk(response(500), {
           url: "https://x.example",
           label: "my_sdk",
         });
@@ -139,7 +139,7 @@ describe("try_ok", () => {
 
     it("defaults the label to 'request' when omitted", async () => {
       try {
-        await try_ok(response(503), { url: "https://x.example" });
+        await tryOk(response(503), { url: "https://x.example" });
         throw new Error("expected throw");
       } catch (err) {
         expect((err as Error).message).toBe(
@@ -158,7 +158,7 @@ describe("try_ok", () => {
         text: () => Promise.reject(new Error("stream error")),
       } as unknown as Response;
       try {
-        await try_ok(flaky, { url: "https://x.example" });
+        await tryOk(flaky, { url: "https://x.example" });
         throw new Error("expected throw");
       } catch (err) {
         expect((err as RetryableHttpError).responseBody).toBeUndefined();
@@ -213,5 +213,41 @@ describe("error class inheritance", () => {
     expect(err.url).toBe("https://y.example");
     expect(err.responseBody).toBe("validation failed");
     expect(err.name).toBe("NonRetryableHttpError");
+  });
+});
+
+/**
+ * The README documents these as public API of the `/webhook` subpath, and
+ * for a long time the subpath did not export them (#1621) — they were
+ * reachable only by deep-importing `classify.js`, which is off the
+ * stability contract. `webhook()` itself never called `tryOk`, so nothing
+ * inside the package noticed.
+ *
+ * This asserts the entry point, not the module: importing from the same
+ * specifier a reader would type after following the README.
+ */
+describe("the /webhook subpath exports what its README documents (#1621)", () => {
+  it("exports tryOk and classifyHttpResponse as values", async () => {
+    const entry = await import("../../src/webhook/index.js");
+    expect(typeof entry.tryOk).toBe("function");
+    expect(typeof entry.classifyHttpResponse).toBe("function");
+  });
+
+  it("the exported classifier is the one webhook() uses", async () => {
+    const entry = await import("../../src/webhook/index.js");
+    // Same three buckets, reached through the public name.
+    expect(entry.classifyHttpResponse(response(200))).toBe("ok");
+    expect(entry.classifyHttpResponse(response(503))).toBe("retry");
+    expect(entry.classifyHttpResponse(response(404))).toBe("block");
+  });
+
+  it("the exported tryOk throws the exported error classes", async () => {
+    const entry = await import("../../src/webhook/index.js");
+    await expect(
+      entry.tryOk(response(500), { url: "https://x.example" })
+    ).rejects.toBeInstanceOf(entry.RetryableHttpError);
+    await expect(
+      entry.tryOk(response(400), { url: "https://x.example" })
+    ).rejects.toBeInstanceOf(entry.NonRetryableHttpError);
   });
 });
