@@ -504,6 +504,86 @@ describe("autoclose rolling window (keep)", () => {
     await app.do("bump", { stream: "k1", actor }, {});
   });
 
+  /**
+   * The window advances on commits (#1619). A prune has to mark its
+   * triggering event consumed — otherwise the safety probe, which refuses
+   * to delete below the laggiest consumer's watermark, sees this very
+   * reaction lagging and caps the prune short (#1520) — and once it is
+   * consumed there is nothing left to redeliver, so nothing wakes the
+   * policy again on its own.
+   *
+   * That is a documented limit, not an accident, and `close-policies.md`
+   * § "The window advances on commits" says so. Streams that go quiet are
+   * pruned on demand instead, via `app.close([{stream, before}])` — the
+   * second case here is that path, proving the data really did qualify.
+   */
+  it("does not prune again while the stream stays idle", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ keep: { days: 1 } })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    for (let i = 0; i < 4; i++)
+      await app.do("bump", { stream: "idle-1", actor }, {});
+    await app.correlate();
+    await app.drain();
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
+    await app.do("bump", { stream: "idle-1", actor }, {});
+    await app.drain();
+    expect(closed).toHaveLength(1);
+
+    // Two more days with no commits. The day-2 survivors have aged out of
+    // the one-day window, so a prune WOULD be productive — but nothing
+    // triggers the reaction.
+    vi.setSystemTime(new Date("2026-01-05T00:00:00Z"));
+    await app.correlate();
+    await app.drain();
+    expect(closed).toHaveLength(1);
+  });
+
+  it("an on-demand close prunes the idle stream the reaction left alone", async () => {
+    const closed: CloseResult[] = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ keep: { days: 1 } })
+          .build()
+      )
+      .build();
+    app.on("closed", (r) => closed.push(r));
+
+    for (let i = 0; i < 4; i++)
+      await app.do("bump", { stream: "idle-2", actor }, {});
+    await app.correlate();
+    await app.drain();
+    // Enough day-2 traffic to leave a snapshot below the later cutoff —
+    // a windowed prune needs a boundary snapshot to prune behind.
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
+    for (let i = 0; i < 4; i++)
+      await app.do("bump", { stream: "idle-2", actor }, {});
+    await app.correlate();
+    await app.drain();
+    const after_reaction = closed.length;
+
+    // The operator's path: find the stream by its head age, prune it with
+    // the same windowed form the reaction stages.
+    vi.setSystemTime(new Date("2026-01-05T00:00:00Z"));
+    const cutoff = new Date(Date.now() - 86_400_000);
+    const stats = await store().query_stats(["idle-2"], { tail: true });
+    expect(stats.get("idle-2")!.head.created < cutoff).toBe(true);
+    const result = await app.close([{ stream: "idle-2", before: cutoff }]);
+
+    // It really did qualify — which is what makes the case above a
+    // limitation of the trigger, not of the data.
+    expect(result.truncated.get("idle-2")?.before).toBeInstanceOf(Date);
+    expect(closed).toHaveLength(after_reaction + 1);
+  });
+
   it("passes the cutoff to the archiver on a windowed close", async () => {
     const calls: Array<{ stream: string; before?: Date }> = [];
     const app = act()

@@ -170,6 +170,25 @@ and the [archival recipe](../archival/README.md).
 its own candidates. "Close stream A only after B is closed"
 patterns belong in the host scheduler, not in `.autocloses(...)`.
 
+**Pruning a stream that has gone silent.** `keep: { days: N }`
+rides the aggregate's own commits, so a stream nobody writes to is
+a stream nobody prunes — it keeps whatever history it held when the
+traffic stopped
+([#1619](https://github.com/Rotorsoft/act-root/issues/1619)). For a
+storage budget that is fine: a dormant stream is not growing. For a
+**retention obligation** it is not, because the streams that must
+be pruned are usually the quiet ones — abandoned drafts, sessions
+nobody returned to, audit logs past a statutory window. Prune those on
+demand instead: walk `query_stats` for streams whose head has aged
+past the cutoff, and hand them to `app.close([{ stream, before }])`,
+which prunes through the same path with the same safety probe and
+the same `.archives` call. Nothing new to deploy — the walk pages,
+the prune is idempotent (an already-pruned stream lands in
+`skipped`), and one racing the reaction serializes under the
+per-stream lock. Worked example in
+[docs/docs/guides/close-policies.md § Pruning streams that have
+gone silent](../../../docs/docs/guides/close-policies.md).
+
 ## Examples in this folder
 
 - [examples/ticket-cooldown.ts](examples/ticket-cooldown.ts) —
