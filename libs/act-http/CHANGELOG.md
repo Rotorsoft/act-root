@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.12...@rotorsoft/act-http-v1.10.0) (2026-09-06)
+
+
+### Features
+
+* **act-http:** export the HTTP delivery classifier from /webhook ([#1629](https://github.com/Rotorsoft/act-root/issues/1629)) ([8ddac7d](https://github.com/Rotorsoft/act-root/commit/8ddac7d3f453454c2a7bd28938b183bd4021bd08)), closes [#1621](https://github.com/Rotorsoft/act-root/issues/1621)
+
 # [@rotorsoft/act-http-v1.9.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.11...@rotorsoft/act-http-v1.9.12) (2026-09-06)
 
 
