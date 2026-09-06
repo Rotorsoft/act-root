@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.9.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.11...@rotorsoft/act-http-v1.9.12) (2026-09-06)
+
+
+### Bug Fixes
+
+* **act-http:** run the actor extractor on generated tRPC subscriptions ([#1623](https://github.com/Rotorsoft/act-root/issues/1623)) ([3ff7d47](https://github.com/Rotorsoft/act-root/commit/3ff7d4783e2599c3abb5bc48f3fb1affda93977e)), closes [#1620](https://github.com/Rotorsoft/act-root/issues/1620)
+
 # [@rotorsoft/act-http-v1.9.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.9.10...@rotorsoft/act-http-v1.9.11) (2026-08-31)
 
 
