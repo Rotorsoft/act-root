@@ -22,6 +22,7 @@ import {
   validating_patch,
 } from "../internal/index.js";
 import { type DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
+import { current_autoclose_window } from "../scoped.js";
 import type {
   Actor,
   BatchHandler,
@@ -669,14 +670,16 @@ export function act<
           }
           // Synthesize the autoclose reactions last, once the registry is
           // fully merged — their dynamic resolvers must be present before
-          // the orchestrator classifies the registry. The window/cadence
-          // knobs resolve from this first build() call's options; repeat
-          // builds (per-tenant scoped Acts) share the registry and the
-          // synthesized reaction with it.
+          // the orchestrator classifies the registry.
+          //
+          // Repeat builds (per-tenant scoped Acts) share the registry and
+          // these reactions with it, so nothing per-Act may be captured
+          // here. The off-hours window is read from the running Act's
+          // frame instead, which each Act installs for itself (#1615).
           synthesize_autoclose_reactions(
             registry,
             states,
-            resolveAutocloseConfig(options ?? {})
+            current_autoclose_window
           );
           // The registry is complete: freeze the containers so any later
           // registration or orchestrator-side mutation throws instead of

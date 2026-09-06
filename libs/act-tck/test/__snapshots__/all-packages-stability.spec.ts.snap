@@ -26,6 +26,7 @@ import {
   validating_patch,
 } from "../internal/index.js";
 import { type DEFAULT_LANE, log, SNAP_EVENT } from "../ports.js";
+import { current_autoclose_window } from "../scoped.js";
 import type {
   Actor,
   BatchHandler,
@@ -673,14 +674,16 @@ export function act<
           }
           // Synthesize the autoclose reactions last, once the registry is
           // fully merged — their dynamic resolvers must be present before
-          // the orchestrator classifies the registry. The window/cadence
-          // knobs resolve from this first build() call's options; repeat
-          // builds (per-tenant scoped Acts) share the registry and the
-          // synthesized reaction with it.
+          // the orchestrator classifies the registry.
+          //
+          // Repeat builds (per-tenant scoped Acts) share the registry and
+          // these reactions with it, so nothing per-Act may be captured
+          // here. The off-hours window is read from the running Act's
+          // frame instead, which each Act installs for itself (#1615).
           synthesize_autoclose_reactions(
             registry,
             states,
-            resolveAutocloseConfig(options ?? {})
+            current_autoclose_window
           );
           // The registry is complete: freeze the containers so any later
           // registration or orchestrator-side mutation throws instead of
@@ -741,6 +744,7 @@ import {
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   type ResettableBatchHandler,
+  resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -1366,7 +1370,25 @@ export class Act<
     // carries the singleton adapters, which is what stops a shared Act
     // inheriting the frame of whoever called it (#1597).
     this._ports = options.scoped ?? default_scope();
-    this._scoped = make_run_scoped(this._ports);
+    // Resolved here rather than at reaction synthesis, so it is this Act's
+    // window and not the first-built Act's (#1615). Parsing on every
+    // construction is also what restores the startup-validation contract:
+    // an out-of-range window throws where it was declared, on every build,
+    // not only the first.
+    const ports = this._ports;
+    this._scoped = make_run_scoped({
+      // Delegating getters, NOT a spread: \`default_scope()\` resolves the
+      // process singletons lazily, so copying its properties would freeze
+      // whichever adapters happened to be installed at construction and
+      // ignore a later \`store(...)\` / \`cache(...)\`.
+      get store() {
+        return ports.store;
+      },
+      get cache() {
+        return ports.cache;
+      },
+      autoclose_window: resolveAutocloseConfig(options).autocloseWindow,
+    });
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -5522,7 +5544,9 @@ export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
  * Inject one synthesized autoclose reaction per \`.autocloses(...)\` state
  * into the registry's event registers. The handler resolves ports at call
  * time (\`store()\`), so the reaction is orchestrator-agnostic; the resolved
- * window/cadence config is captured here, at build.
+ * The reactions are synthesized once into the shared registry, so nothing
+ * per-Act is captured here — the off-hours window is read from the running
+ * Act at resolution time via the injected \`read_window\` (#1615).
  *
  * @internal
  */
@@ -5533,7 +5557,14 @@ export function synthesize_autoclose_reactions<
 >(
   registry: Registry<TSchemaReg, TEvents, TActions>,
   states: ReadonlyMap<string, State<any, any, any>>,
-  config: AutocloseConfig
+  /**
+   * Reads the *running* Act's off-hours window. Injected rather than
+   * imported: these reactions are synthesized once into the shared
+   * registry and run by every Act built from that builder, so the window
+   * has to be resolved per call, and \`internal/\` never reaches for
+   * ambient state itself (#1615).
+   */
+  read_window: () => AutocloseConfig["autocloseWindow"]
 ): void {
   for (const st of states.values()) {
     const predicate = st.autoclose;
@@ -5559,10 +5590,16 @@ export function synthesize_autoclose_reactions<
         const aggregate = event.stream;
         // Off-hours gating: outside the window, park until the window
         // opens. Derived from the window itself — no polling cadence.
-        if (!in_autoclose_window(config.autocloseWindow, new Date()))
-          throw new DeferSignal({
-            at: next_window_open(config.autocloseWindow!, new Date()),
-          });
+        //
+        // Read from the running Act's frame, not from a closure. These
+        // reactions are synthesized once into the shared registry and
+        // handed by reference to every Act built from the same builder, so
+        // a captured window would be the first-built Act's for all of them
+        // — and the documented multi-tenant shape is one builder built per
+        // tenant (#1615).
+        const window = read_window();
+        if (!in_autoclose_window(window, new Date()))
+          throw new DeferSignal({ at: next_window_open(window!, new Date()) });
         // Every policy keys on the *domain* head/count, so snapshots are
         // excluded unconditionally (#1356) — matching \`scan_stream_heads\` in
         // close-cycle.ts. \`snap()\` commits a \`__snapshot__\` at a higher id
@@ -18183,6 +18220,31 @@ export type Scoped = {
 };
 
 /**
+ * What an Act actually installs in its frame: the ports a caller passed,
+ * plus per-Act settings that runtime code has to read from the *running*
+ * Act rather than from whatever closure it was built in.
+ *
+ * \`autoclose_window\` is here because the autoclose reactions are
+ * synthesized once into the shared registry and handed by reference to
+ * every Act built from that builder, so a window captured at synthesis is
+ * the first tenant's window for everyone (#1615). The frame is per-Act, so
+ * reading it here is what makes the setting per-Act too.
+ *
+ * Wider than {@link Scoped} on purpose: \`Scoped\` types what a caller
+ * *passes* through \`ActOptions.scoped\` and is public; this is what the
+ * orchestrator *installs* and is not.
+ *
+ * @internal
+ */
+export type ActFrame = Scoped & {
+  readonly autoclose_window?: {
+    readonly start: number;
+    readonly end: number;
+    readonly timeZone: string;
+  };
+};
+
+/**
  * AsyncLocalStorage carrying the active Act's ports.
  *
  * Exported for in-repo tooling that measures the context itself (the
@@ -18190,7 +18252,7 @@ export type Scoped = {
  * \`index.ts\` reaches this module only for the \`Scoped\` type, so it is not
  * importable from the package. Everything else uses the helpers below.
  */
-export const scoped = new AsyncLocalStorage<Scoped>();
+export const scoped = new AsyncLocalStorage<ActFrame>();
 
 /**
  * The reaction currently running, as a box the handler can empty.
@@ -18221,9 +18283,23 @@ const reacting = new AsyncLocalStorage<Reacting>();
  * @internal
  */
 export function make_run_scoped(
-  bag: Scoped
+  bag: ActFrame
 ): <T>(fn: () => Promise<T>) => Promise<T> {
   return (fn) => scoped.run(bag, fn);
+}
+
+/**
+ * The running Act's off-hours autoclose window, or \`undefined\` when it
+ * declared none (or when read outside any Act).
+ *
+ * Read at resolution time rather than captured at synthesis: the autoclose
+ * reactions belong to the shared registry, and only the frame knows which
+ * Act is running them (#1615).
+ *
+ * @internal
+ */
+export function current_autoclose_window(): ActFrame["autoclose_window"] {
+  return scoped.getStore()?.autoclose_window;
 }
 
 /**
@@ -20677,6 +20753,7 @@ import {
   MAX_SHUTDOWN_GRACE_MS,
   type PatchFn,
   type ResettableBatchHandler,
+  resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
@@ -21302,7 +21379,25 @@ export class Act<
     // carries the singleton adapters, which is what stops a shared Act
     // inheriting the frame of whoever called it (#1597).
     this._ports = options.scoped ?? default_scope();
-    this._scoped = make_run_scoped(this._ports);
+    // Resolved here rather than at reaction synthesis, so it is this Act's
+    // window and not the first-built Act's (#1615). Parsing on every
+    // construction is also what restores the startup-validation contract:
+    // an out-of-range window throws where it was declared, on every build,
+    // not only the first.
+    const ports = this._ports;
+    this._scoped = make_run_scoped({
+      // Delegating getters, NOT a spread: \`default_scope()\` resolves the
+      // process singletons lazily, so copying its properties would freeze
+      // whichever adapters happened to be installed at construction and
+      // ignore a later \`store(...)\` / \`cache(...)\`.
+      get store() {
+        return ports.store;
+      },
+      get cache() {
+        return ports.cache;
+      },
+      autoclose_window: resolveAutocloseConfig(options).autocloseWindow,
+    });
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
@@ -25458,7 +25553,9 @@ export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
  * Inject one synthesized autoclose reaction per \`.autocloses(...)\` state
  * into the registry's event registers. The handler resolves ports at call
  * time (\`store()\`), so the reaction is orchestrator-agnostic; the resolved
- * window/cadence config is captured here, at build.
+ * The reactions are synthesized once into the shared registry, so nothing
+ * per-Act is captured here — the off-hours window is read from the running
+ * Act at resolution time via the injected \`read_window\` (#1615).
  *
  * @internal
  */
@@ -25469,7 +25566,14 @@ export function synthesize_autoclose_reactions<
 >(
   registry: Registry<TSchemaReg, TEvents, TActions>,
   states: ReadonlyMap<string, State<any, any, any>>,
-  config: AutocloseConfig
+  /**
+   * Reads the *running* Act's off-hours window. Injected rather than
+   * imported: these reactions are synthesized once into the shared
+   * registry and run by every Act built from that builder, so the window
+   * has to be resolved per call, and \`internal/\` never reaches for
+   * ambient state itself (#1615).
+   */
+  read_window: () => AutocloseConfig["autocloseWindow"]
 ): void {
   for (const st of states.values()) {
     const predicate = st.autoclose;
@@ -25495,10 +25599,16 @@ export function synthesize_autoclose_reactions<
         const aggregate = event.stream;
         // Off-hours gating: outside the window, park until the window
         // opens. Derived from the window itself — no polling cadence.
-        if (!in_autoclose_window(config.autocloseWindow, new Date()))
-          throw new DeferSignal({
-            at: next_window_open(config.autocloseWindow!, new Date()),
-          });
+        //
+        // Read from the running Act's frame, not from a closure. These
+        // reactions are synthesized once into the shared registry and
+        // handed by reference to every Act built from the same builder, so
+        // a captured window would be the first-built Act's for all of them
+        // — and the documented multi-tenant shape is one builder built per
+        // tenant (#1615).
+        const window = read_window();
+        if (!in_autoclose_window(window, new Date()))
+          throw new DeferSignal({ at: next_window_open(window!, new Date()) });
         // Every policy keys on the *domain* head/count, so snapshots are
         // excluded unconditionally (#1356) — matching \`scan_stream_heads\` in
         // close-cycle.ts. \`snap()\` commits a \`__snapshot__\` at a higher id
@@ -36684,6 +36794,31 @@ export type Scoped = {
 };
 
 /**
+ * What an Act actually installs in its frame: the ports a caller passed,
+ * plus per-Act settings that runtime code has to read from the *running*
+ * Act rather than from whatever closure it was built in.
+ *
+ * \`autoclose_window\` is here because the autoclose reactions are
+ * synthesized once into the shared registry and handed by reference to
+ * every Act built from that builder, so a window captured at synthesis is
+ * the first tenant's window for everyone (#1615). The frame is per-Act, so
+ * reading it here is what makes the setting per-Act too.
+ *
+ * Wider than {@link Scoped} on purpose: \`Scoped\` types what a caller
+ * *passes* through \`ActOptions.scoped\` and is public; this is what the
+ * orchestrator *installs* and is not.
+ *
+ * @internal
+ */
+export type ActFrame = Scoped & {
+  readonly autoclose_window?: {
+    readonly start: number;
+    readonly end: number;
+    readonly timeZone: string;
+  };
+};
+
+/**
  * AsyncLocalStorage carrying the active Act's ports.
  *
  * Exported for in-repo tooling that measures the context itself (the
@@ -36691,7 +36826,7 @@ export type Scoped = {
  * \`index.ts\` reaches this module only for the \`Scoped\` type, so it is not
  * importable from the package. Everything else uses the helpers below.
  */
-export const scoped = new AsyncLocalStorage<Scoped>();
+export const scoped = new AsyncLocalStorage<ActFrame>();
 
 /**
  * The reaction currently running, as a box the handler can empty.
@@ -36722,9 +36857,23 @@ const reacting = new AsyncLocalStorage<Reacting>();
  * @internal
  */
 export function make_run_scoped(
-  bag: Scoped
+  bag: ActFrame
 ): <T>(fn: () => Promise<T>) => Promise<T> {
   return (fn) => scoped.run(bag, fn);
+}
+
+/**
+ * The running Act's off-hours autoclose window, or \`undefined\` when it
+ * declared none (or when read outside any Act).
+ *
+ * Read at resolution time rather than captured at synthesis: the autoclose
+ * reactions belong to the shared registry, and only the frame knows which
+ * Act is running them (#1615).
+ *
+ * @internal
+ */
+export function current_autoclose_window(): ActFrame["autoclose_window"] {
+  return scoped.getStore()?.autoclose_window;
 }
 
 /**

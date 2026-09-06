@@ -41,6 +41,31 @@ export type Scoped = {
 };
 
 /**
+ * What an Act actually installs in its frame: the ports a caller passed,
+ * plus per-Act settings that runtime code has to read from the *running*
+ * Act rather than from whatever closure it was built in.
+ *
+ * `autoclose_window` is here because the autoclose reactions are
+ * synthesized once into the shared registry and handed by reference to
+ * every Act built from that builder, so a window captured at synthesis is
+ * the first tenant's window for everyone (#1615). The frame is per-Act, so
+ * reading it here is what makes the setting per-Act too.
+ *
+ * Wider than {@link Scoped} on purpose: `Scoped` types what a caller
+ * *passes* through `ActOptions.scoped` and is public; this is what the
+ * orchestrator *installs* and is not.
+ *
+ * @internal
+ */
+export type ActFrame = Scoped & {
+  readonly autoclose_window?: {
+    readonly start: number;
+    readonly end: number;
+    readonly timeZone: string;
+  };
+};
+
+/**
  * AsyncLocalStorage carrying the active Act's ports.
  *
  * Exported for in-repo tooling that measures the context itself (the
@@ -48,7 +73,7 @@ export type Scoped = {
  * `index.ts` reaches this module only for the `Scoped` type, so it is not
  * importable from the package. Everything else uses the helpers below.
  */
-export const scoped = new AsyncLocalStorage<Scoped>();
+export const scoped = new AsyncLocalStorage<ActFrame>();
 
 /**
  * The reaction currently running, as a box the handler can empty.
@@ -79,9 +104,23 @@ const reacting = new AsyncLocalStorage<Reacting>();
  * @internal
  */
 export function make_run_scoped(
-  bag: Scoped
+  bag: ActFrame
 ): <T>(fn: () => Promise<T>) => Promise<T> {
   return (fn) => scoped.run(bag, fn);
+}
+
+/**
+ * The running Act's off-hours autoclose window, or `undefined` when it
+ * declared none (or when read outside any Act).
+ *
+ * Read at resolution time rather than captured at synthesis: the autoclose
+ * reactions belong to the shared registry, and only the frame knows which
+ * Act is running them (#1615).
+ *
+ * @internal
+ */
+export function current_autoclose_window(): ActFrame["autoclose_window"] {
+  return scoped.getStore()?.autoclose_window;
 }
 
 /**

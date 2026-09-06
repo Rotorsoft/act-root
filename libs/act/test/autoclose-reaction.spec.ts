@@ -392,6 +392,91 @@ describe("autoclose as a synthesized reaction", () => {
     );
   });
 
+  /**
+   * The autoclose reactions are synthesized once into the shared registry
+   * and handed by reference to every Act built from the same builder — and
+   * the documented multi-tenant shape (`extension-points.md`) is exactly
+   * one builder built once per tenant. A window captured at synthesis is
+   * therefore the first-built tenant's window for everyone (#1615).
+   *
+   * The damaging orientation is the second case: a tenant that restricted
+   * closing to a maintenance window gets its streams tombstoned and
+   * truncated mid-business-day because another tenant built first.
+   */
+  describe("the off-hours window is per-Act, not per-builder (#1615)", () => {
+    /** A UTC window that cannot contain "now", whatever the wall clock says. */
+    const shut = () => {
+      const h = new Date().getUTCHours();
+      return { start: (h + 2) % 24, end: (h + 3) % 24, timeZone: "UTC" };
+    };
+
+    const resolve_on = async (
+      app: { do: Function; correlate: Function; drain: Function },
+      stream: string
+    ) => {
+      await app.do("open", { stream, actor }, {});
+      await app.do("resolve", { stream, actor }, {});
+      await app.correlate();
+      await app.drain();
+    };
+
+    it("a second Act built with no window closes immediately", async () => {
+      const builder = act().withState(ticket({ is: "Resolved" }));
+      // First build declares a window that excludes now.
+      const closed_a: CloseResult[] = [];
+      const a = builder.build({ autocloseWindow: shut() });
+      a.on("closed", (r) => closed_a.push(r));
+      // Second build declares none at all — "always open".
+      const closed_b: CloseResult[] = [];
+      const b = builder.build();
+      b.on("closed", (r) => closed_b.push(r));
+
+      await resolve_on(a, "w-a");
+      await resolve_on(b, "w-b");
+
+      expect(closed_a).toHaveLength(0);
+      expect(closed_b).toHaveLength(1);
+    });
+
+    it("a second Act built WITH a window still defers, whoever built first", async () => {
+      const builder = act().withState(ticket({ is: "Resolved" }));
+      const closed_b: CloseResult[] = [];
+      const b = builder.build();
+      b.on("closed", (r) => closed_b.push(r));
+      const closed_a: CloseResult[] = [];
+      const a = builder.build({ autocloseWindow: shut() });
+      a.on("closed", (r) => closed_a.push(r));
+
+      await resolve_on(b, "w-b2");
+      await resolve_on(a, "w-a2");
+
+      expect(closed_b).toHaveLength(1);
+      // The order is reversed from the case above; the outcome must not be.
+      expect(closed_a).toHaveLength(0);
+    });
+
+    it("validates a window on every build, not only the first", () => {
+      const builder = act().withState(ticket({ is: "Resolved" }));
+      builder.build();
+      // `resolveAutocloseConfig` is what parses the window, so a build that
+      // skipped it would accept nonsense and fail on the first cycle tick
+      // instead of at startup.
+      expect(() =>
+        builder.build({
+          autocloseWindow: { start: 99, end: 3 } as never,
+        })
+      ).toThrow();
+    });
+
+    it("CONTROL — the same invalid window throws on a first build too", () => {
+      expect(() =>
+        act()
+          .withState(ticket({ is: "Resolved" }))
+          .build({ autocloseWindow: { start: 99, end: 3 } as never })
+      ).toThrow();
+    });
+  });
+
   it("parks an off-window tick until the window opens, then closes (#1175)", async () => {
     // The re-check is derived from the window itself — no polling
     // cadence. At 00:00 the {2, 6} window is closed and the reaction
