@@ -330,3 +330,85 @@ describe("PostgresStore LISTEN client resilience (#1189)", () => {
     ).toBeUndefined();
   });
 });
+
+/**
+ * #1616: `_teardown_listen` answers "is there a subscription?" by looking
+ * at `_listen_client`, which is `undefined` for the whole duration of an
+ * open — between the pool checkout and the assignment. A disposal landing
+ * in that window returns early, having released nothing, and then
+ * `pool.end()` waits on the very client the in-flight open is about to
+ * hold. Against a real pool that never resolves: `dispose()` hangs, and
+ * the completed open resurrects a LISTEN on a disposed store.
+ *
+ * The #1189 guards cover the other half of the race — a reconnect still
+ * *scheduled* when disposal lands — which is why this one survived.
+ */
+describe("PostgresStore disposal racing an in-flight re-LISTEN (#1616)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** A pool whose second checkout parks until the test releases it. */
+  const parkable = () => {
+    const { store, pool } = makeStore();
+    let release!: () => void;
+    const parked = new Promise<void>((r) => {
+      release = r;
+    });
+    // The first checkout is the initial LISTEN and must go straight
+    // through; only the reconnect's checkout parks.
+    const real_connect = pool.connect.getMockImplementation()!;
+    let checkouts = 0;
+    let parked_at_checkout = false;
+    pool.connect.mockImplementation(async () => {
+      const client = await real_connect();
+      if (++checkouts < 2) return client;
+      parked_at_checkout = true;
+      await parked;
+      return client;
+    });
+    return { store, pool, release, parked_at: () => parked_at_checkout };
+  };
+
+  it("CONTROL — with no open in flight, disposal clears the listen client", async () => {
+    const { store, pool } = makeStore();
+    await store.notify!(() => {});
+    const client = pool.clients[0];
+
+    await store.dispose();
+
+    expect(client.released).toBe(true);
+    expect(
+      (store as unknown as { _listen_client: unknown })._listen_client
+    ).toBeUndefined();
+  });
+
+  it("releases the client an in-flight open was holding, instead of stranding it", async () => {
+    const { store, pool, release, parked_at } = parkable();
+    await store.notify!(() => {});
+    // First checkout already happened for the initial LISTEN; park the
+    // reconnect's checkout by failing the live client.
+    pool.clients[0].emit("error", new Error("blip"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(parked_at()).toBe(true);
+
+    // Disposal lands while the reconnect sits in `pool.connect`.
+    const disposing = store.dispose();
+    release();
+    await disposing;
+    // Let the parked open finish its work after disposal resolved.
+    await vi.advanceTimersByTimeAsync(0);
+
+    const late = pool.clients.at(-1)!;
+    expect(late.released).toBe(true);
+    // Nothing resurrected: the store carries no subscription after dispose.
+    expect(
+      (store as unknown as { _listen_client: unknown })._listen_client
+    ).toBeUndefined();
+  });
+});
