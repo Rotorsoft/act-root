@@ -49620,6 +49620,28 @@ export function trpc<
   // import\` has a hashed file name that varies per build). Inlining
   // sidesteps the issue entirely — the standalone \`authenticated\`
   // export still works for hosts who want middleware composition.
+  /**
+   * Run the actor extractor for a generated procedure, mapping a
+   * "throw to deny" onto \`UNAUTHORIZED\` rather than a framework 500.
+   *
+   * Shared by mutations and subscriptions on purpose. Each used to carry
+   * its own copy of this block, and the subscription copy was simply
+   * missing — a denied caller got a live subscription and the cached
+   * state frame with it (#1620). One helper is what keeps the two paths
+   * from drifting again.
+   */
+  const resolve_actor = async (host_ctx: Ctx): Promise<Actor> => {
+    try {
+      return await options.actor(host_ctx);
+    } catch (err) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: err instanceof Error ? err.message : undefined,
+        cause: err instanceof Error ? err : undefined,
+      });
+    }
+  };
+
   const handlers: Record<
     string,
     ReturnType<ReturnType<typeof t.procedure.input>["mutation"]>
@@ -49640,16 +49662,7 @@ export function trpc<
         // a "throw to deny" from the extractor is 401 UNAUTHORIZED, not a 500.
         // The actor step is auth — distinct from a framework error inside
         // \`app.do\`, which the main try below maps via \`to_trpc_error\` (#1286).
-        let actor: Actor;
-        try {
-          actor = await options.actor(host_ctx);
-        } catch (err) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: err instanceof Error ? err.message : undefined,
-            cause: err instanceof Error ? err : undefined,
-          });
-        }
+        const actor: Actor = await resolve_actor(host_ctx);
         try {
           // Validate the payload before the stream / expectedVersion resolvers
           // see it, mirroring Hono's zValidator-then-handler order. \`validate\`
@@ -49721,8 +49734,15 @@ export function trpc<
     for (const state_name of state_names) {
       sse_handlers[state_name] = t.procedure
         .input(z.object({ stream: z.string().min(1) }))
-        .subscription(({ input, signal }) =>
-          runSseSubscription(
+        .subscription(async function* ({ input, ctx, signal }) {
+          // Step 1 of the documented subscription contract: the actor
+          // extractor runs before a slot is taken or a frame is yielded,
+          // so a denying extractor denies the open. Hono gets this from
+          // the \`authenticated\` middleware it mounts across \`/api/*\`;
+          // this generator is where the same rule lives for tRPC, which
+          // resolves the actor inline rather than through middleware.
+          await resolve_actor(ctx as unknown as Ctx);
+          yield* runSseSubscription(
             sse_config.channel,
             input.stream,
             sse_counter,
@@ -49736,8 +49756,8 @@ export function trpc<
                 });
               },
             }
-          )
-        );
+          );
+        });
     }
     handlers.subscribe = t.router(sse_handlers as never) as never;
   }
