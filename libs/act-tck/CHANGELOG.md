@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.36.20](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.19...@rotorsoft/act-tck-v1.36.20) (2026-09-06)
+
+
+### Bug Fixes
+
+* **act:** read the off-hours autoclose window per Act, not per builder ([#1626](https://github.com/Rotorsoft/act-root/issues/1626)) ([31e5bb1](https://github.com/Rotorsoft/act-root/commit/31e5bb144de0593cc7976ab17af688ca8e47c015)), closes [#1609](https://github.com/Rotorsoft/act-root/issues/1609) [#1615](https://github.com/Rotorsoft/act-root/issues/1615)
+
 # [@rotorsoft/act-tck-v1.36.19](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.18...@rotorsoft/act-tck-v1.36.19) (2026-09-06)
 
 
