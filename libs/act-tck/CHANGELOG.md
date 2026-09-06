@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.36.19](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.18...@rotorsoft/act-tck-v1.36.19) (2026-09-06)
+
+
+### Bug Fixes
+
+* **act-http:** run the actor extractor on generated tRPC subscriptions ([#1623](https://github.com/Rotorsoft/act-root/issues/1623)) ([3ff7d47](https://github.com/Rotorsoft/act-root/commit/3ff7d4783e2599c3abb5bc48f3fb1affda93977e)), closes [#1620](https://github.com/Rotorsoft/act-root/issues/1620)
+* **act-pg:** hand back the client an in-flight re-LISTEN was holding ([#1625](https://github.com/Rotorsoft/act-root/issues/1625)) ([3ccde09](https://github.com/Rotorsoft/act-root/commit/3ccde096206940e4f115f54f22a36040ba1b59b8)), closes [#1189](https://github.com/Rotorsoft/act-root/issues/1189) [#1616](https://github.com/Rotorsoft/act-root/issues/1616)
+
 # [@rotorsoft/act-tck-v1.36.18](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.36.17...@rotorsoft/act-tck-v1.36.18) (2026-09-05)
 
 
