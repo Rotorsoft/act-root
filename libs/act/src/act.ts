@@ -1039,15 +1039,6 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         this.stop_correlations();
-        // Hand the correlation lease back rather than making the next worker
-        // wait out its expiry (#1532), and *await* it: a fire-and-forget
-        // release can land after the process that replaces this one has
-        // already asked, which reads as the successor being denied.
-        //
-        // Wrapped in `_scoped` because it resolves the store through the
-        // port — a scoped Act would otherwise release against the singleton
-        // and leave its real lease held.
-        await this._scoped(() => this._correlate.release_correlation());
         // Unsubscribe BEFORE stopping the settle loop. A notification
         // arriving after `stop_settling()` reaches the handler below and
         // schedules a fresh cycle that nothing is left to cancel, so a
@@ -1063,6 +1054,22 @@ export class Act<
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
+        // Hand the correlation lease back rather than making the next worker
+        // wait out its expiry (#1532), and *await* it: a fire-and-forget
+        // release can land after the process that replaces this one has
+        // already asked, which reads as the successor being denied.
+        //
+        // After the wait, not before it (#1618). `stop_correlations()`
+        // cancels the polling timer, not a correlate already running inside
+        // a settle cycle — and that cycle re-takes the lease on its ordinary
+        // path. Released first, it was re-acquired seconds later and then
+        // held to expiry by a worker that had already shut down, which is
+        // the delay the release exists to remove.
+        //
+        // Wrapped in `_scoped` because it resolves the store through the
+        // port — a scoped Act would otherwise release against the singleton
+        // and leave its real lease held.
+        await this._scoped(() => this._correlate.release_correlation());
         this._emitter.removeAllListeners();
       })();
     }
@@ -1081,11 +1088,17 @@ export class Act<
    * lane that pinned no lease contributes `drain()`'s own fallback, and the
    * whole thing is capped so a long-leased lane cannot hold a deploy open.
    * Idle lanes do not count — nothing is running on them to wait for.
+   *
+   * An in-flight settle counts the same way, on the same fallback (#1617).
+   * It is waited on like any cycle, and deriving from the lanes alone gave
+   * it a budget of `0` whenever it was the only thing running — which
+   * returned before the wait it was about to be added to.
    */
   private _derive_grace_ms(
-    running: { readonly lease_millis: number | undefined }[]
+    running: { readonly lease_millis: number | undefined }[],
+    settling: boolean
   ): number {
-    let max = 0;
+    let max = settling ? DEFAULT_SHUTDOWN_GRACE_MS : 0;
     for (const c of running)
       max = Math.max(max, c.lease_millis ?? DEFAULT_SHUTDOWN_GRACE_MS);
     return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
@@ -1102,7 +1115,7 @@ export class Act<
     // after the store adapter was disposed.
     const settling = this._settle.inflight;
     if (running.length === 0 && !settling) return;
-    const grace = grace_ms ?? this._derive_grace_ms(running);
+    const grace = grace_ms ?? this._derive_grace_ms(running, !!settling);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
     if (settling) inflight.push(settling);
