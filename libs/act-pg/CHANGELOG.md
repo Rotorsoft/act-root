@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.19.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.4...@rotorsoft/act-pg-v1.19.5) (2026-09-06)
+
+
+### Bug Fixes
+
+* **act-pg:** hand back the client an in-flight re-LISTEN was holding ([#1625](https://github.com/Rotorsoft/act-root/issues/1625)) ([3ccde09](https://github.com/Rotorsoft/act-root/commit/3ccde096206940e4f115f54f22a36040ba1b59b8)), closes [#1189](https://github.com/Rotorsoft/act-root/issues/1189) [#1616](https://github.com/Rotorsoft/act-root/issues/1616)
+
 # [@rotorsoft/act-pg-v1.19.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.19.3...@rotorsoft/act-pg-v1.19.4) (2026-09-05)
 
 
