@@ -7,7 +7,7 @@ description: Runs an adversarial bug-hunting "wave" over the Act framework and i
 
 A wave is a fan-out of independent **hunter** agents, each scanning one *lens* of the codebase for a real, previously-unknown defect, followed by a **main-loop verification-and-triage pass** that reproduces every survivor and files it as a ticket. The whole point is to find bugs the test suite is green over — divergences and contract violations that ship because no test exercises the exact composition that exposes them.
 
-**Reference:** [invariants.md](invariants.md) — the standing domain facts a hunter must not violate, the log of past confirmed bugs and false positives. Read it before every wave and append to it after.
+**Reference:** [invariants.md](invariants.md) — the standing domain facts a hunter must not violate, plus the mechanics that have cost previous waves time. Short; read it before every wave. [bug-log.md](bug-log.md) holds the history — confirmed bugs, false positives, and the per-wave logs — and is consulted per lens rather than read end to end. Append to both after a wave: new standing facts to the first, findings and ruled-out areas to the second.
 
 The wave earns its cost by being adversarial and disciplined, not by being large. A finding is worthless unless it survives two gates: a **red test with a control**, and the **domain model**. Most of this skill is those two gates.
 
@@ -17,10 +17,10 @@ The user drives cadence. They will say "run a wave" or "run another wave" — th
 
 ## The shape of a wave
 
-1. **Sync and scope.** Make sure the working tree is on an up-to-date `master` (or the branch under test) and clean. Pick the lenses (below) — favor dimensions not swept in recent waves; check [invariants.md](invariants.md) for what prior waves already ruled out.
+1. **Sync and scope.** Make sure the working tree is on an up-to-date `master` (or the branch under test) and clean. Pick the lenses (below) — favor dimensions not swept in recent waves; check [bug-log.md](bug-log.md) for what prior waves already ruled out.
 2. **Fan out hunters.** Launch several general-purpose `Agent`s in parallel (one message, multiple tool calls), one per lens. Each gets the hunter contract below, specialized to its lens. Three to five is the usual size; scale to what the user asked for ("quick pass" → 2-3, "thorough" / "another wave" → 4-5).
 3. **Collect as they finish.** Hunters run in the background and notify on completion. Don't block the user — relay each result as it lands.
-4. **Verify survivors yourself.** For every CONFIRMED finding, **independently reproduce it in the main loop** before you believe it. Hunters are fallible and their red claims are not evidence on their own (see the #1254 lesson in [invariants.md](invariants.md)). Reproduce the higher-severity ones at minimum; trust a hunter's low-severity finding only when its control is a clean cross-adapter A/B.
+4. **Verify survivors yourself.** For every CONFIRMED finding, **independently reproduce it in the main loop** before you believe it. Hunters are fallible and their red claims are not evidence on their own (see the #1254 lesson in [bug-log.md](bug-log.md)). Reproduce the higher-severity ones at minimum; trust a hunter's low-severity finding only when its control is a clean cross-adapter A/B.
 5. **Sweep and triage.** Delete any probe files hunters left behind (they sometimes write into `libs/*/test` against instructions). Confirm the tree is clean. Consolidate into a severity-ranked report.
 6. **File, don't fix.** File each confirmed bug as a ticket (structure below). Do **not** start fixing without the user's go-ahead — propose a fix order and let them direct. Filing is the deliverable of a wave; fixing is a separate, approved step.
 
@@ -41,7 +41,7 @@ Specialize the lens, but every hunter carries the same discipline:
 
 **Proof-first (mandatory).** No finding ships on reasoning alone. Write a throwaway spec that is RED on the suspected bug and GREEN on a control — another adapter, or the documented contract. Run it. A hypothesis you can't turn red is not a finding.
 
-**Survive the domain model (mandatory).** Before declaring a bug, rule out "correct by design." Read [invariants.md](invariants.md) and the relevant `docs/docs/architecture/*.md` and the method's doc-comment to confirm which behavior is the *contract*. A red test that contradicts a load-bearing invariant is a bug in the test, not the code — that is the #1254 lesson. After writing the red test, **run the existing suite for that subsystem** and confirm the implied fix wouldn't break it. A proven-red behavior is not a bug until the fix survives the full suite and the invariants.
+**Survive the domain model (mandatory).** Before declaring a bug, rule out "correct by design." Read [invariants.md](invariants.md), your lens's entries in [bug-log.md](bug-log.md), and the relevant `docs/docs/architecture/*.md` and the method's doc-comment to confirm which behavior is the *contract*. A red test that contradicts a load-bearing invariant is a bug in the test, not the code — that is the #1254 lesson. After writing the red test, **run the existing suite for that subsystem** and confirm the implied fix wouldn't break it. A proven-red behavior is not a bug until the fix survives the full suite and the invariants.
 
 **Mechanics.**
 - Postgres runs on port **5431** (`docker ps` → `act-pg`); copy the connection helper from an existing `libs/act-pg/test/*.spec.ts`.
@@ -71,4 +71,4 @@ Severity grading: silently returns wrong data → **high**; conditional or recov
 
 ## Closing a wave
 
-After filing, append to [invariants.md](invariants.md): any new confirmed bug (as a pattern for future waves to check regressions against) and any new "correct by design" fact a hunter should not re-flag. This is how the wave compounds — each one makes the next one sharper. Then report the consolidated table to the user and recommend a fix order; stop there until they choose.
+After filing, append to [bug-log.md](bug-log.md): each new confirmed bug (as a pattern for future waves to check regressions against) and each new "correct by design" fact a hunter should not re-flag. If the wave established something that applies to *every* lens — a domain fact, or a rule about how to hunt — add that line to [invariants.md](invariants.md) instead, and keep it short. This is how the wave compounds — each one makes the next one sharper. Then report the consolidated table to the user and recommend a fix order; stop there until they choose.
