@@ -69,13 +69,18 @@ jobs:
           node-version: 22.23.2
           cache: "pnpm"
       - run: pnpm install
+      # Run from the repo root, not `pnpm -F <pkg> exec vitest`: the root
+      # vite config aliases `@rotorsoft/*` to each package's SOURCE, and
+      # these jobs never build. From inside a package that alias is not
+      # applied, so vitest falls back to act-tck's `exports`, which point
+      # at a `dist/` that does not exist here.
       - name: Run TCK against PostgreSQL ${{ matrix.pg }}
-        run: pnpm -F @rotorsoft/act-pg exec vitest run test/store-tck.spec.ts
+        run: pnpm vitest run libs/act-pg/test/store-tck.spec.ts
       # act-notify runs the full Store TCK over withBroker(PostgresStore),
       # so a with-broker.ts change gets the same multi-version PG coverage
       # as the base adapter (its correctness rides on PG semantics).
       - name: Run act-notify TCK against PostgreSQL ${{ matrix.pg }}
-        run: pnpm -F @rotorsoft/act-notify exec vitest run test/store-tck.spec.ts
+        run: pnpm vitest run libs/act-notify/test/store-tck.spec.ts
 
   sqlite:
     name: libsql-${{ matrix.libsql }}
@@ -120,7 +125,7 @@ jobs:
       - name: Print resolved @libsql/client version
         run: pnpm list --filter @rotorsoft/act-sqlite @libsql/client --depth 0
       - name: Run TCK against libSQL ${{ matrix.libsql }}
-        run: pnpm -F @rotorsoft/act-sqlite exec vitest run test/store-tck.spec.ts
+        run: pnpm vitest run libs/act-sqlite/test/store-tck.spec.ts
 
   summary:
     # Always runs so the workflow summary is populated even when a cell
