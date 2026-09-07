@@ -34,8 +34,22 @@ export default mergeConfig(base, {
     // (and CI's step-summary parser captures nothing).
     reporters: ["verbose"],
     coverage: { enabled: false },
-  },
-  benchmark: {
-    include: ["libs/*/bench/**/*.micro.bench.ts"],
+    // Benchmarks run *inside* a test as of vitest 5, so the test timeout
+    // now bounds them where the bench runner used to own its own budget.
+    // A 2000-event PG bench legitimately runs past the 60s default and
+    // was killed mid-measurement. Benchmarks are long by nature — the
+    // suite's job is to finish them, not to cap them. An explicit budget
+    // rather than `0`: vitest 5 treats 0 as "use the default" here, which
+    // is the 60s that was killing the run.
+    testTimeout: 30 * 60_000,
+    hookTimeout: 30 * 60_000,
+    // Nested under `test` since vitest 5: a top-level `benchmark` key is
+    // no longer read, which silently fell back to the default include and
+    // swept up `libs/*/scripts/*.bench.mjs` — the standalone tsx scripts
+    // this repo runs directly and vitest is not meant to collect (they
+    // export no suite, so every one failed with "No test suite found").
+    benchmark: {
+      include: ["libs/*/bench/**/*.micro.bench.ts"],
+    },
   },
 });

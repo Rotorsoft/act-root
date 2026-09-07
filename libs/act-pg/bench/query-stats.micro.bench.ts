@@ -12,7 +12,7 @@
  * Run: pnpm bench:micro libs/act-pg/bench/query-stats.micro.bench.ts
  */
 import type { Committed, Schemas } from "@rotorsoft/act";
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { PostgresStore } from "../src/postgres-store.js";
 
 const PORT = 5431;
@@ -69,19 +69,24 @@ async function perStreamHeads(streams: string[]) {
 
 for (const N of SWEEP_STREAMS) {
   describe(`PG query_stats N=${N} streams x ${EVENTS_PER_STREAM} events`, () => {
-    bench("per-stream query() loop (pre-ACT-639)", async () => {
-      // seeded in beforeAll
-      await perStreamHeads(seeded[N]!);
-    });
-
-    bench("query_stats — heads only (DISTINCT ON, indexed)", async () => {
-      // seeded in beforeAll
-      await store.query_stats(seeded[N]!);
-    });
-
-    bench("query_stats — count + names (CTE + jsonb_object_agg)", async () => {
-      // seeded in beforeAll
-      await store.query_stats(seeded[N]!, { count: true, names: true });
+    it("compares implementations", async ({ bench }) => {
+      await bench.compare(
+        bench("per-stream query() loop (pre-ACT-639)", async () => {
+          // seeded in beforeAll
+          await perStreamHeads(seeded[N]!);
+        }),
+        bench("query_stats — heads only (DISTINCT ON, indexed)", async () => {
+          // seeded in beforeAll
+          await store.query_stats(seeded[N]!);
+        }),
+        bench(
+          "query_stats — count + names (CTE + jsonb_object_agg)",
+          async () => {
+            // seeded in beforeAll
+            await store.query_stats(seeded[N]!, { count: true, names: true });
+          }
+        )
+      );
     });
   });
 }

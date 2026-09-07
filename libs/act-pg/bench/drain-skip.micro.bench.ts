@@ -8,7 +8,7 @@
  * Run: pnpm bench:micro libs/act-pg/bench/drain-skip.micro.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -121,23 +121,25 @@ afterAll(async () => {
 });
 
 describe("drain skip — 18 event types, 7 reactive (PostgreSQL)", () => {
-  bench("operational event (drain skipped — 0 DB trips)", async () => {
-    await app.do("update", { stream: "bench-op", actor }, {});
-    await app.drain();
-  });
-
-  bench("lifecycle event (full drain — 3 DB trips)", async () => {
-    await app.do("addMember", { stream: "bench-lc", actor }, {});
-    await app.correlate();
-    await app.drain();
-  });
-
-  bench("mixed burst: 3 operational + 1 lifecycle", async () => {
-    await app.do("update", { stream: "bench-mix", actor }, {});
-    await app.do("changeScore", { stream: "bench-mix", actor }, {});
-    await app.do("logEntry", { stream: "bench-mix", actor }, {});
-    await app.do("addMember", { stream: "bench-mix", actor }, {});
-    await app.correlate();
-    await app.drain();
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("operational event (drain skipped — 0 DB trips)", async () => {
+        await app.do("update", { stream: "bench-op", actor }, {});
+        await app.drain();
+      }),
+      bench("lifecycle event (full drain — 3 DB trips)", async () => {
+        await app.do("addMember", { stream: "bench-lc", actor }, {});
+        await app.correlate();
+        await app.drain();
+      }),
+      bench("mixed burst: 3 operational + 1 lifecycle", async () => {
+        await app.do("update", { stream: "bench-mix", actor }, {});
+        await app.do("changeScore", { stream: "bench-mix", actor }, {});
+        await app.do("logEntry", { stream: "bench-mix", actor }, {});
+        await app.do("addMember", { stream: "bench-mix", actor }, {});
+        await app.correlate();
+        await app.drain();
+      })
+    );
   });
 });

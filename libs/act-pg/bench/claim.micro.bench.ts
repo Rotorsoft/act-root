@@ -7,7 +7,7 @@
  * Run: pnpm bench:micro libs/act-pg/bench/claim.micro.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { PostgresStore } from "../src/postgres-store.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -52,53 +52,63 @@ async function seedStreams(n: number) {
 describe("PG: drain cycle — 10 streams", () => {
   let app_: Awaited<ReturnType<typeof seedStreams>>;
 
-  bench(
-    "drain 10 streams",
-    async () => {
-      await app_.drain({ streamLimit: 10, eventLimit: 10, leaseMillis: 1 });
-    },
-    {
-      async setup() {
-        await dispose()();
-        handler.mockClear();
-        app_ = await seedStreams(10);
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "drain 10 streams",
+      {
+        async beforeAll() {
+          await dispose()();
+          handler.mockClear();
+          app_ = await seedStreams(10);
+        },
       },
-    }
-  );
+      async () => {
+        await app_.drain({ streamLimit: 10, eventLimit: 10, leaseMillis: 1 });
+      }
+    ).run();
+  });
 });
 
 describe("PG: drain cycle — 50 streams", () => {
   let app_: Awaited<ReturnType<typeof seedStreams>>;
 
-  bench(
-    "drain 50 streams",
-    async () => {
-      await app_.drain({ streamLimit: 50, eventLimit: 10, leaseMillis: 1 });
-    },
-    {
-      async setup() {
-        await dispose()();
-        handler.mockClear();
-        app_ = await seedStreams(50);
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "drain 50 streams",
+      {
+        async beforeAll() {
+          await dispose()();
+          handler.mockClear();
+          app_ = await seedStreams(50);
+        },
       },
-    }
-  );
+      async () => {
+        await app_.drain({ streamLimit: 50, eventLimit: 10, leaseMillis: 1 });
+      }
+    ).run();
+  });
 });
 
 describe("PG: drain cycle — 100 streams", () => {
   let app_: Awaited<ReturnType<typeof seedStreams>>;
 
-  bench(
-    "drain 100 streams",
-    async () => {
-      await app_.drain({ streamLimit: 100, eventLimit: 10, leaseMillis: 1 });
-    },
-    {
-      async setup() {
-        await dispose()();
-        handler.mockClear();
-        app_ = await seedStreams(100);
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "drain 100 streams",
+      {
+        async beforeAll() {
+          await dispose()();
+          handler.mockClear();
+          app_ = await seedStreams(100);
+        },
       },
-    }
-  );
+      async () => {
+        await app_.drain({
+          streamLimit: 100,
+          eventLimit: 10,
+          leaseMillis: 1,
+        });
+      }
+    ).run();
+  });
 });

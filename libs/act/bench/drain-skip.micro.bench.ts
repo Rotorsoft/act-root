@@ -5,7 +5,7 @@
  * reactions vs events that do. With the _needs_drain optimization,
  * non-reactive drains return immediately without touching the store.
  */
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { z } from "zod";
 import { act, dispose, state, store, ZodEmpty } from "../src/index.js";
 
@@ -44,14 +44,17 @@ afterAll(async () => {
 });
 
 describe("drain skip optimization", () => {
-  bench("drain after non-reactive event (should skip)", async () => {
-    await app.do("noReaction", { stream: "bench-nr", actor }, {});
-    await app.drain();
-  });
-
-  bench("drain after reactive event (should process)", async () => {
-    await app.do("increment", { stream: "bench-r", actor }, {});
-    await app.correlate();
-    await app.drain();
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("drain after non-reactive event (should skip)", async () => {
+        await app.do("noReaction", { stream: "bench-nr", actor }, {});
+        await app.drain();
+      }),
+      bench("drain after reactive event (should process)", async () => {
+        await app.do("increment", { stream: "bench-r", actor }, {});
+        await app.correlate();
+        await app.drain();
+      })
+    );
   });
 });
