@@ -11,6 +11,12 @@ allowBuilds:
   esbuild: true
   simple-git-hooks: true
 linkWorkspacePackages: true
+# The act <-> act-tck build cycle is deliberate: act-tck is the executable
+# contract for act's ports, and act devDepends on it for its own stability
+# spec. pnpm tolerated the cycle through 11.24 and makes it fatal from
+# 11.25 (ERR_PNPM_TASK_CYCLE), so declare it rather than discover it on the
+# next pnpm bump.
+ignoreWorkspaceCycles: true
 onlyBuiltDependencies:
   - "@swc/core"
   - core-js
