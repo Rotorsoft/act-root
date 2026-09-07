@@ -129,7 +129,7 @@
   },
   "devDependencies": {
     "@hono/node-server": "^2.1.1",
-    "@hono/zod-validator": "^0.9.0",
+    "@hono/zod-validator": "^0.9.1",
     "@rotorsoft/act-ops": "workspace:^",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
