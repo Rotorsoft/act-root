@@ -23,7 +23,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/pg": "^8.23.1",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },
   "stackblitz": {
