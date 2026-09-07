@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-inspector",
   "version": "0.0.1",
   "private": true,
-  "description": "Act event sourcing observatory — inspect, query, and visualize events in Act stores",
+  "description": "Act event sourcing observatory \u2014 inspect, query, and visualize events in Act stores",
   "type": "module",
   "author": {
     "name": "rotorsoft",
@@ -33,7 +33,7 @@
     "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
