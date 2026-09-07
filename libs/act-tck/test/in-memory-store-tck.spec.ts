@@ -1,5 +1,5 @@
-import { runStoreTck } from "@rotorsoft/act-tck";
-import { InMemoryStore } from "../src/adapters/in-memory-store.js";
+import { InMemoryStore } from "@rotorsoft/act";
+import { runStoreTck } from "../src/index.js";
 
 runStoreTck({
   name: "InMemoryStore",

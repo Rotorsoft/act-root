@@ -1,6 +1,6 @@
-import { runCacheDifferentialTck } from "@rotorsoft/act-tck";
-import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
-import type { Cache, CacheEntry, Schema } from "../src/types/index.js";
+import { InMemoryCache } from "@rotorsoft/act";
+import type { Cache, CacheEntry, Schema } from "@rotorsoft/act/types";
+import { runCacheDifferentialTck } from "../src/index.js";
 
 /**
  * A second, structurally independent {@link Cache} so the differential has

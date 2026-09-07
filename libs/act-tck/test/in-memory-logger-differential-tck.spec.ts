@@ -1,6 +1,6 @@
-import { runLoggerDifferentialTck } from "@rotorsoft/act-tck";
-import { ConsoleLogger } from "../src/adapters/console-logger.js";
-import type { Logger } from "../src/types/index.js";
+import { ConsoleLogger } from "@rotorsoft/act";
+import type { Logger } from "@rotorsoft/act/types";
+import { runLoggerDifferentialTck } from "../src/index.js";
 
 /**
  * A second, structurally independent {@link Logger} so the differential has
