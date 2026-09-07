@@ -18,7 +18,7 @@
   "keywords": [],
   "license": "ISC",
   "dependencies": {
-    "@libsql/client": "^0.17.4",
+    "@libsql/client": "^0.18.0",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
     "@rotorsoft/act-sqlite": "workspace:^",
@@ -29,11 +29,11 @@
     "cors": "^2.8.6",
     "d3-scale": "^4.0.2",
     "d3-time": "^3.1.0",
-    "lucide-react": "^1.34.0",
+    "lucide-react": "^1.41.0",
     "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -52,12 +52,12 @@
     "bench:update": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-baseline.json"
   },
   "dependencies": {
-    "@libsql/client": "^0.17.4",
+    "@libsql/client": "^0.18.0",
     "@rotorsoft/act-crypto": "workspace:^"
   },
   "peerDependencies": {
     "@rotorsoft/act": "workspace:^",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@rotorsoft/act-tck": "workspace:^",
