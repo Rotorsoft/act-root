@@ -52,6 +52,23 @@
       "matchPackageNames": ["typescript"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "A package declared as BOTH a peerDependency and a devDependency must move in one PR. The devDep exists only to satisfy the peer locally, so bumping one and not the other leaves the package contradicting itself, and with autoInstallPeers pnpm resolves a second copy. For a type-bearing package that is fatal: two zod copies made TypeScript reject its own types (`Type '5' is not assignable to type '4'`), breaking every release job on master. That happened because the `Dev dependencies` rule above captured zod's devDependency while its peerDependency stayed in `Non-major dependencies` \u2014 two PRs, merged hours apart, skewed in between. #632 is the same failure mode for act itself. `{{{depName}}}` groups per package, so these keep their own PRs rather than piling into one.",
+      "matchPackageNames": [
+        "zod",
+        "vitest",
+        "@fast-check/vitest",
+        "react",
+        "react-dom",
+        "hono",
+        "@hono/node-server",
+        "@trpc/server",
+        "express",
+        "fastify",
+        "prom-client"
+      ],
+      "groupName": "{{{depName}}}"
     }
   ],
   "lockFileMaintenance": {
