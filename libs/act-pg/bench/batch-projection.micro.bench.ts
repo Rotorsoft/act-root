@@ -9,7 +9,7 @@
  */
 import { act, dispose, projection, state, store } from "@rotorsoft/act";
 import pg from "pg";
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -81,69 +81,66 @@ afterAll(async () => {
 
 for (const EVENTS of [1_000, 5_000, 10_000]) {
   describe(`${EVENTS.toLocaleString()} events (PostgreSQL)`, () => {
-    bench(
-      "per-event (N PG writes)",
-      async () => {
-        await resetAndSeed(`pe-${EVENTS}`, EVENTS);
+    it("compares implementations", async ({ bench }) => {
+      await bench.compare(
+        bench("per-event (N PG writes)", async () => {
+          await resetAndSeed(`pe-${EVENTS}`, EVENTS);
 
-        const proj = projection(`pe-${EVENTS}`)
-          .on({ Incremented })
-          .do(async ({ stream, data }) => {
-            await pool.query(
-              `INSERT INTO "${SCHEMA}".counters (stream, total) VALUES ($1, $2)
-               ON CONFLICT (stream) DO UPDATE SET total = counters.total + $2`,
-              [stream, data.by]
-            );
-          })
-          .build();
+          const proj = projection(`pe-${EVENTS}`)
+            .on({ Incremented })
+            .do(async function perEventApply({ stream, data }) {
+              await pool.query(
+                `INSERT INTO "${SCHEMA}".counters (stream, total) VALUES ($1, $2)
+                 ON CONFLICT (stream) DO UPDATE SET total = counters.total + $2`,
+                [stream, data.by]
+              );
+            })
+            .build();
 
-        const app_ = act().withState(Counter).withProjection(proj).build();
-        await app_.correlate();
-        await app_.drain({ eventLimit: EVENTS });
-      },
-      { iterations: 1, warmupIterations: 0 }
-    );
+          const app_ = act().withState(Counter).withProjection(proj).build();
+          await app_.correlate();
+          await app_.drain({ eventLimit: EVENTS });
+        }),
 
-    bench(
-      "batched (1 PG transaction)",
-      async () => {
-        await resetAndSeed(`ba-${EVENTS}`, EVENTS);
+        bench("batched (1 PG transaction)", async () => {
+          await resetAndSeed(`ba-${EVENTS}`, EVENTS);
 
-        const proj = projection(`ba-${EVENTS}`)
-          .on({ Incremented })
-          .do(async ({ stream, data }) => {
-            await pool.query(
-              `INSERT INTO "${SCHEMA}".counters (stream, total) VALUES ($1, $2)
-               ON CONFLICT (stream) DO UPDATE SET total = counters.total + $2`,
-              [stream, data.by]
-            );
-          })
-          .batch(async (events) => {
-            const client = await pool.connect();
-            try {
-              await client.query("BEGIN");
-              for (const event of events) {
-                await client.query(
-                  `INSERT INTO "${SCHEMA}".counters (stream, total) VALUES ($1, $2)
-                   ON CONFLICT (stream) DO UPDATE SET total = counters.total + $2`,
-                  [event.stream, event.data.by]
-                );
+          const proj = projection(`ba-${EVENTS}`)
+            .on({ Incremented })
+            .do(async function batchedApply({ stream, data }) {
+              await pool.query(
+                `INSERT INTO "${SCHEMA}".counters (stream, total) VALUES ($1, $2)
+                 ON CONFLICT (stream) DO UPDATE SET total = counters.total + $2`,
+                [stream, data.by]
+              );
+            })
+            .batch(async (events) => {
+              const client = await pool.connect();
+              try {
+                await client.query("BEGIN");
+                for (const event of events) {
+                  await client.query(
+                    `INSERT INTO "${SCHEMA}".counters (stream, total) VALUES ($1, $2)
+                     ON CONFLICT (stream) DO UPDATE SET total = counters.total + $2`,
+                    [event.stream, event.data.by]
+                  );
+                }
+                await client.query("COMMIT");
+              } catch (e) {
+                await client.query("ROLLBACK");
+                throw e;
+              } finally {
+                client.release();
               }
-              await client.query("COMMIT");
-            } catch (e) {
-              await client.query("ROLLBACK");
-              throw e;
-            } finally {
-              client.release();
-            }
-          })
-          .build();
+            })
+            .build();
 
-        const app_ = act().withState(Counter).withProjection(proj).build();
-        await app_.correlate();
-        await app_.drain({ eventLimit: EVENTS });
-      },
-      { iterations: 1, warmupIterations: 0 }
-    );
+          const app_ = act().withState(Counter).withProjection(proj).build();
+          await app_.correlate();
+          await app_.drain({ eventLimit: EVENTS });
+        }),
+        { iterations: 1, warmupIterations: 0 }
+      );
+    });
   });
 }

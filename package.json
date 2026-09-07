@@ -66,6 +66,7 @@
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
     "@fast-check/vitest": "^0.4.1",
+    "@rotorsoft/act-tck": "workspace:^",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/exec": "^7.1.0",
@@ -79,7 +80,7 @@
     "@types/chance": "^1.1.8",
     "@types/minimist": "^1.2.5",
     "@types/node": "^25.9.5",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "chance": "^1.1.13",
     "concurrently": "^10.0.5",
     "fast-check": "^4.9.0",
@@ -92,7 +93,7 @@
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",

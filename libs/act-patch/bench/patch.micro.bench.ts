@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { patch } from "../src/index.js";
 
 type S = Record<string, any>;
@@ -84,125 +84,159 @@ const deleteOp: JsonPatchOp[] = [{ op: "remove", path: "/b" }];
 
 // --- Benchmarks ---
 describe("shallow single-key", () => {
-  bench("act-patch", () => {
-    patch(shallow, { a: 2 });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch(shallow, { a: 2 });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply(shallow, shallowOp);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch(shallow, { a: 2 });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch(shallow, { a: 2 });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply(shallow, shallowOp);
+      })
+    );
   });
 });
 
 describe("deep 3-level", () => {
-  bench("act-patch", () => {
-    patch(deep, { l1: { l2: { l3: { val: "new" } } } });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch(deep, { l1: { l2: { l3: { val: "new" } } } });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply(deep, deepOps);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch(deep, { l1: { l2: { l3: { val: "new" } } } });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch(deep, { l1: { l2: { l3: { val: "new" } } } });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply(deep, deepOps);
+      })
+    );
   });
 });
 
 describe("wide object (100 keys)", () => {
-  bench("act-patch", () => {
-    patch(wide, { k50: 999 });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch(wide, { k50: 999 });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply(wide, wideOp);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch(wide, { k50: 999 });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch(wide, { k50: 999 });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply(wide, wideOp);
+      })
+    );
   });
 });
 
 describe("large state (1000 keys, 10-key patch)", () => {
-  bench("act-patch", () => {
-    patch(large, {
-      k10: 100,
-      k100: 200,
-      k200: 300,
-      k300: 400,
-      k400: 500,
-      k500: 600,
-      k600: 700,
-      k700: 800,
-      k800: 900,
-      k900: 1000,
-    });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch(large, {
-      k10: 100,
-      k100: 200,
-      k200: 300,
-      k300: 400,
-      k400: 500,
-      k500: 600,
-      k600: 700,
-      k700: 800,
-      k800: 900,
-      k900: 1000,
-    });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply(large, largeOps);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch(large, {
+          k10: 100,
+          k100: 200,
+          k200: 300,
+          k300: 400,
+          k400: 500,
+          k500: 600,
+          k600: 700,
+          k700: 800,
+          k800: 900,
+          k900: 1000,
+        });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch(large, {
+          k10: 100,
+          k100: 200,
+          k200: 300,
+          k300: 400,
+          k400: 500,
+          k500: 600,
+          k600: 700,
+          k700: 800,
+          k800: 900,
+          k900: 1000,
+        });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply(large, largeOps);
+      })
+    );
   });
 });
 
 describe("delete", () => {
-  bench("act-patch", () => {
-    patch(shallow, { b: null });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch(shallow, { b: null });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply(shallow, deleteOp);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch(shallow, { b: null });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch(shallow, { b: null });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply(shallow, deleteOp);
+      })
+    );
   });
 });
 
 describe("no-op", () => {
-  bench("act-patch", () => {
-    patch(shallow, {});
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch(shallow, {});
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply(shallow, []);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch(shallow, {});
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch(shallow, {});
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply(shallow, []);
+      })
+    );
   });
 });
 
 describe("array replacement", () => {
-  bench("act-patch", () => {
-    patch({ items: [1, 2, 3, 4, 5] } as S, { items: [6, 7, 8] });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    mergePatch({ items: [1, 2, 3, 4, 5] }, { items: [6, 7, 8] });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    jsonPatchApply({ items: [1, 2, 3, 4, 5] }, [
-      { op: "replace", path: "/items", value: [6, 7, 8] },
-    ]);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        patch({ items: [1, 2, 3, 4, 5] } as S, { items: [6, 7, 8] });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        mergePatch({ items: [1, 2, 3, 4, 5] }, { items: [6, 7, 8] });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        jsonPatchApply({ items: [1, 2, 3, 4, 5] }, [
+          { op: "replace", path: "/items", value: [6, 7, 8] },
+        ]);
+      })
+    );
   });
 });
 
 describe("sequential 10 patches", () => {
-  bench("act-patch", () => {
-    let state: S = shallow;
-    for (let i = 0; i < 10; i++) state = patch(state, { a: i });
-  });
-  bench("merge-patch (RFC 7396)", () => {
-    let state: S = shallow;
-    for (let i = 0; i < 10; i++) state = mergePatch(state, { a: i });
-  });
-  bench("json-patch (RFC 6902)", () => {
-    let state: S = shallow;
-    for (let i = 0; i < 10; i++)
-      state = jsonPatchApply(state, [{ op: "replace", path: "/a", value: i }]);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch", () => {
+        let state: S = shallow;
+        for (let i = 0; i < 10; i++) state = patch(state, { a: i });
+      }),
+      bench("merge-patch (RFC 7396)", () => {
+        let state: S = shallow;
+        for (let i = 0; i < 10; i++) state = mergePatch(state, { a: i });
+      }),
+      bench("json-patch (RFC 6902)", () => {
+        let state: S = shallow;
+        for (let i = 0; i < 10; i++)
+          state = jsonPatchApply(state, [
+            { op: "replace", path: "/a", value: i },
+          ]);
+      })
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { delta } from "../src/index.js";
 
 type S = Record<string, any>;
@@ -98,85 +98,113 @@ const arrayAfter: S = { items: [6, 7, 8] };
 
 // --- Benchmarks ---
 describe("shallow single-key", () => {
-  bench("act-patch delta", () => {
-    delta(shallowBefore, shallowAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(shallowBefore, shallowAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(shallowBefore, shallowAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(shallowBefore, shallowAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(shallowBefore, shallowAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(shallowBefore, shallowAfter);
+      })
+    );
   });
 });
 
 describe("deep 3-level", () => {
-  bench("act-patch delta", () => {
-    delta(deepBefore, deepAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(deepBefore, deepAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(deepBefore, deepAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(deepBefore, deepAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(deepBefore, deepAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(deepBefore, deepAfter);
+      })
+    );
   });
 });
 
 describe("wide object (100 keys)", () => {
-  bench("act-patch delta", () => {
-    delta(wideBefore, wideAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(wideBefore, wideAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(wideBefore, wideAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(wideBefore, wideAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(wideBefore, wideAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(wideBefore, wideAfter);
+      })
+    );
   });
 });
 
 describe("large state (1000 keys, 10-key change)", () => {
-  bench("act-patch delta", () => {
-    delta(largeBefore, largeAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(largeBefore, largeAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(largeBefore, largeAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(largeBefore, largeAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(largeBefore, largeAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(largeBefore, largeAfter);
+      })
+    );
   });
 });
 
 describe("delete only", () => {
-  bench("act-patch delta", () => {
-    delta(deleteBefore, deleteAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(deleteBefore, deleteAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(deleteBefore, deleteAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(deleteBefore, deleteAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(deleteBefore, deleteAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(deleteBefore, deleteAfter);
+      })
+    );
   });
 });
 
 describe("no-op (deeply equal)", () => {
-  bench("act-patch delta", () => {
-    delta(noopBefore, noopAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(noopBefore, noopAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(noopBefore, noopAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(noopBefore, noopAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(noopBefore, noopAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(noopBefore, noopAfter);
+      })
+    );
   });
 });
 
 describe("array replacement", () => {
-  bench("act-patch delta", () => {
-    delta(arrayBefore, arrayAfter);
-  });
-  bench("merge-patch (RFC 7396) diff", () => {
-    mergePatchDiff(arrayBefore, arrayAfter);
-  });
-  bench("json-patch (RFC 6902) compare", () => {
-    jsonPatchDiff(arrayBefore, arrayAfter);
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("act-patch delta", () => {
+        delta(arrayBefore, arrayAfter);
+      }),
+      bench("merge-patch (RFC 7396) diff", () => {
+        mergePatchDiff(arrayBefore, arrayAfter);
+      }),
+      bench("json-patch (RFC 6902) compare", () => {
+        jsonPatchDiff(arrayBefore, arrayAfter);
+      })
+    );
   });
 });

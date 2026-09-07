@@ -19,7 +19,7 @@
  * `close-bulk.scenario.bench.ts` and the per-adapter benches when they
  * land.
  */
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import type { Committed, Schemas } from "../src/types/index.js";
 
@@ -76,19 +76,21 @@ async function perStreamHeads(
 
 for (const N of SWEEP_STREAMS) {
   describe(`query_stats N=${N} streams × ${EVENTS_PER_STREAM} events`, () => {
-    bench("per-stream query() loop (pre-ACT-639)", async () => {
-      // seeded in beforeAll
-      await perStreamHeads(seeded[N]!);
-    });
-
-    bench("query_stats — heads only", async () => {
-      // seeded in beforeAll
-      await store.query_stats(seeded[N]!);
-    });
-
-    bench("query_stats — count + names (full scan)", async () => {
-      // seeded in beforeAll
-      await store.query_stats(seeded[N]!, { count: true, names: true });
+    it("compares implementations", async ({ bench }) => {
+      await bench.compare(
+        bench("per-stream query() loop (pre-ACT-639)", async () => {
+          // seeded in beforeAll
+          await perStreamHeads(seeded[N]!);
+        }),
+        bench("query_stats — heads only", async () => {
+          // seeded in beforeAll
+          await store.query_stats(seeded[N]!);
+        }),
+        bench("query_stats — count + names (full scan)", async () => {
+          // seeded in beforeAll
+          await store.query_stats(seeded[N]!, { count: true, names: true });
+        })
+      );
     });
   });
 }

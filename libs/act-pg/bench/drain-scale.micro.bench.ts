@@ -7,7 +7,7 @@
  * Run: pnpm bench:micro libs/act-pg/bench/drain-scale.micro.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -54,23 +54,25 @@ for (const streams of [50, 200, 500, 1000]) {
   describe(`1 worker × ${streams} streams`, () => {
     let app_: Awaited<ReturnType<typeof seedStreams>>;
 
-    bench(
-      `drain ${streams}`,
-      async () => {
-        await app_.drain({
-          streamLimit: streams,
-          eventLimit: 50,
-          leaseMillis: 1,
-        });
-      },
-      {
-        async setup() {
-          await dispose()();
-          handler.mockClear();
-          app_ = await seedStreams(streams);
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `drain ${streams}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            handler.mockClear();
+            app_ = await seedStreams(streams);
+          },
         },
-      }
-    );
+        async () => {
+          await app_.drain({
+            streamLimit: streams,
+            eventLimit: 50,
+            leaseMillis: 1,
+          });
+        }
+      ).run();
+    });
   });
 }
 
@@ -81,28 +83,30 @@ for (const workers of [3, 5]) {
     describe(`${workers} workers × ${streams} streams`, () => {
       let app_: Awaited<ReturnType<typeof seedStreams>>;
 
-      bench(
-        `drain ${streams} with ${workers} concurrent workers`,
-        async () => {
-          const limit = Math.ceil(streams / workers);
-          await Promise.all(
-            Array.from({ length: workers }, () =>
-              app_.drain({
-                streamLimit: limit,
-                eventLimit: 50,
-                leaseMillis: 1,
-              })
-            )
-          );
-        },
-        {
-          async setup() {
-            await dispose()();
-            handler.mockClear();
-            app_ = await seedStreams(streams);
+      it("compares implementations", async ({ bench }) => {
+        await bench(
+          `drain ${streams} with ${workers} concurrent workers`,
+          {
+            async beforeAll() {
+              await dispose()();
+              handler.mockClear();
+              app_ = await seedStreams(streams);
+            },
           },
-        }
-      );
+          async () => {
+            const limit = Math.ceil(streams / workers);
+            await Promise.all(
+              Array.from({ length: workers }, () =>
+                app_.drain({
+                  streamLimit: limit,
+                  eventLimit: 50,
+                  leaseMillis: 1,
+                })
+              )
+            );
+          }
+        ).run();
+      });
     });
   }
 }

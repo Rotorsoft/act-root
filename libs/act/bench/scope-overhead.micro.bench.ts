@@ -19,7 +19,7 @@
  *
  * Run: pnpm bench:micro libs/act/bench/scope-overhead.micro.bench.ts
  */
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { z } from "zod";
 import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
@@ -55,51 +55,49 @@ let i = 0;
 const nextStream = () => `bench-${++i}`;
 
 describe("ports getter (one scoped.getStore() read)", () => {
-  bench("store() — no active scope (falls through to singleton)", () => {
-    store();
-  });
-
-  bench("store() — inside scoped.run() (returns scoped bag)", () => {
-    scoped.run(scopedBag, () => {
-      store();
-    });
-  });
-
-  bench("cache() — no active scope", () => {
-    cache();
-  });
-
-  bench("cache() — inside scoped.run()", () => {
-    scoped.run(scopedBag, () => {
-      cache();
-    });
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("store() — no active scope (falls through to singleton)", () => {
+        store();
+      }),
+      bench("store() — inside scoped.run() (returns scoped bag)", () => {
+        scoped.run(scopedBag, () => {
+          store();
+        });
+      }),
+      bench("cache() — no active scope", () => {
+        cache();
+      }),
+      bench("cache() — inside scoped.run()", () => {
+        scoped.run(scopedBag, () => {
+          cache();
+        });
+      }),
+      { iterations: 1_000 }
+    );
   });
 });
 
 describe("app.do() — wrap cost end-to-end", () => {
-  bench(
-    "unscoped Act (no-op wrap)",
-    async () => {
-      await unscoped.do(
-        "increment",
-        { stream: nextStream(), actor },
-        { by: 1 }
-      );
-    },
-    { iterations: 1_000 }
-  );
-
-  bench(
-    "scoped Act (real scoped.run wrap)",
-    async () => {
-      await scopedApp.do(
-        "increment",
-        { stream: nextStream(), actor },
-        { by: 1 }
-      );
-    },
-    { iterations: 1_000 }
-  );
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("unscoped Act (no-op wrap)", async () => {
+        await unscoped.do(
+          "increment",
+          { stream: nextStream(), actor },
+          { by: 1 }
+        );
+      }),
+      bench("scoped Act (real scoped.run wrap)", async () => {
+        await scopedApp.do(
+          "increment",
+          { stream: nextStream(), actor },
+          { by: 1 }
+        );
+      }),
+      { iterations: 1_000 }
+    );
+  });
 });
 
 // Pre-seed both apps so the load benches hit a warm stream.
@@ -108,19 +106,15 @@ await unscoped.do("increment", { stream: warmStream, actor }, { by: 1 });
 await scopedApp.do("increment", { stream: warmStream, actor }, { by: 1 });
 
 describe("app.load() — read-heavy path", () => {
-  bench(
-    "unscoped Act",
-    async () => {
-      await unscoped.load("Counter", warmStream);
-    },
-    { iterations: 1_000 }
-  );
-
-  bench(
-    "scoped Act",
-    async () => {
-      await scopedApp.load("Counter", warmStream);
-    },
-    { iterations: 1_000 }
-  );
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("unscoped Act", async () => {
+        await unscoped.load("Counter", warmStream);
+      }),
+      bench("scoped Act", async () => {
+        await scopedApp.load("Counter", warmStream);
+      }),
+      { iterations: 1_000 }
+    );
+  });
 });

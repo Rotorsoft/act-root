@@ -23,7 +23,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
-import { afterAll, bench, describe } from "vitest";
+import { afterAll, describe, it } from "vitest";
 import { z } from "zod";
 import { act } from "../src/builders/act-builder.js";
 import { state } from "../src/builders/state-builder.js";
@@ -45,55 +45,61 @@ describe("orchestrator — non-sensitive workload (master vs PR baseline)", () =
   // `any`: bench-only, narrow generic preserved at runtime
   let app: any;
 
-  bench(
-    "app.do() — commit one Incremented per call",
-    async () => {
-      await app.do(
-        "increment",
-        { stream: `c-${streamId++}`, actor },
-        { by: 1 }
-      );
-    },
-    {
-      setup: async () => {
-        await dispose()();
-        app = act().withState(Counter).build();
-        streamId = 0;
-      },
-    }
-  );
-
-  bench(
-    "app.load() — replay a 100-event stream",
-    async () => {
-      await app.load(Counter as any, "load-bench");
-    },
-    {
-      setup: async () => {
-        await dispose()();
-        app = act().withState(Counter).build();
-        for (let i = 0; i < 100; i++) {
-          await app.do("increment", { stream: "load-bench", actor }, { by: 1 });
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench(
+        "app.do() — commit one Incremented per call",
+        {
+          beforeAll: async () => {
+            await dispose()();
+            app = act().withState(Counter).build();
+            streamId = 0;
+          },
+        },
+        async () => {
+          await app.do(
+            "increment",
+            { stream: `c-${streamId++}`, actor },
+            { by: 1 }
+          );
         }
-      },
-    }
-  );
-
-  bench(
-    "app.do() then app.load() — round-trip per call",
-    async () => {
-      const stream = `rt-${streamId++}`;
-      await app.do("increment", { stream, actor }, { by: 1 });
-      await app.load(Counter as any, stream);
-    },
-    {
-      setup: async () => {
-        await dispose()();
-        app = act().withState(Counter).build();
-        streamId = 0;
-      },
-    }
-  );
+      ),
+      bench(
+        "app.load() — replay a 100-event stream",
+        {
+          beforeAll: async () => {
+            await dispose()();
+            app = act().withState(Counter).build();
+            for (let i = 0; i < 100; i++) {
+              await app.do(
+                "increment",
+                { stream: "load-bench", actor },
+                { by: 1 }
+              );
+            }
+          },
+        },
+        async () => {
+          await app.load(Counter as any, "load-bench");
+        }
+      ),
+      bench(
+        "app.do() then app.load() — round-trip per call",
+        {
+          beforeAll: async () => {
+            await dispose()();
+            app = act().withState(Counter).build();
+            streamId = 0;
+          },
+        },
+        async () => {
+          const stream = `rt-${streamId++}`;
+          await app.do("increment", { stream, actor }, { by: 1 });
+          await app.load(Counter as any, stream);
+        }
+      )
+    );
+  });
 });
 
 afterAll(async () => {

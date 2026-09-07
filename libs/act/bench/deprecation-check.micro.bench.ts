@@ -15,7 +15,7 @@
  *
  * Run: pnpm bench:micro libs/act/bench/deprecation-check.micro.bench.ts
  */
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act } from "../src/builders/act-builder.js";
@@ -59,21 +59,20 @@ const nextStream = () => `bench-${++i}`;
 describe("action() deprecation check overhead", () => {
   // Pre-seed each app's stream so load() finds something — we want to
   // isolate the action() path, not the cold-start cost.
-  bench(
-    "no deprecation in registry",
-    async () => {
-      await plainApp.do("doTick", { stream: nextStream(), actor }, {});
-    },
-    { iterations: 1_000 }
-  );
-
-  bench(
-    "with deprecation in registry (targets current version)",
-    async () => {
-      await deprecatedApp.do("doTick", { stream: nextStream(), actor }, {});
-    },
-    { iterations: 1_000 }
-  );
+  it("compares implementations", async ({ bench }) => {
+    await bench.compare(
+      bench("no deprecation in registry", async () => {
+        await plainApp.do("doTick", { stream: nextStream(), actor }, {});
+      }),
+      bench(
+        "with deprecation in registry (targets current version)",
+        async () => {
+          await deprecatedApp.do("doTick", { stream: nextStream(), actor }, {});
+        }
+      ),
+      { iterations: 1_000 }
+    );
+  });
 });
 
 // Best-effort cleanup; vitest bench mode doesn't expose afterAll on

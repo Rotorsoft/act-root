@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-diagram",
   "type": "module",
   "version": "1.0.20",
-  "description": "Act domain model diagram — extract, visualize, and navigate Act event-sourced models",
+  "description": "Act domain model diagram \u2014 extract, visualize, and navigate Act event-sourced models",
   "keywords": [
     "typescript",
     "event-sourcing",
@@ -79,6 +79,6 @@
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   }
 }

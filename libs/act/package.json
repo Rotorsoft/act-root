@@ -70,7 +70,6 @@
     "vitest": "^5.0.0"
   },
   "devDependencies": {
-    "@rotorsoft/act-tck": "workspace:^",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0"
   },

@@ -15,7 +15,7 @@
  * Run: pnpm bench:micro libs/act-sqlite/bench/query-stats.micro.bench.ts
  */
 import type { Committed, Schemas } from "@rotorsoft/act";
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { SqliteStore } from "../src/sqlite-store.js";
 
 const SWEEP_STREAMS = [10, 100, 1000] as const;
@@ -68,19 +68,27 @@ async function perStreamHeads(streams: string[]) {
 
 for (const N of SWEEP_STREAMS) {
   describe(`SQLite query_stats N=${N} streams x ${EVENTS_PER_STREAM} events`, () => {
-    bench("per-stream query() loop (pre-ACT-639)", async () => {
-      // seeded in beforeAll
-      await perStreamHeads(seeded[N]!);
-    });
-
-    bench("query_stats — heads only (ROW_NUMBER window, indexed)", async () => {
-      // seeded in beforeAll
-      await store.query_stats(seeded[N]!);
-    });
-
-    bench("query_stats — count + names (CTE + json_group_object)", async () => {
-      // seeded in beforeAll
-      await store.query_stats(seeded[N]!, { count: true, names: true });
+    it("compares implementations", async ({ bench }) => {
+      await bench.compare(
+        bench("per-stream query() loop (pre-ACT-639)", async () => {
+          // seeded in beforeAll
+          await perStreamHeads(seeded[N]!);
+        }),
+        bench(
+          "query_stats — heads only (ROW_NUMBER window, indexed)",
+          async () => {
+            // seeded in beforeAll
+            await store.query_stats(seeded[N]!);
+          }
+        ),
+        bench(
+          "query_stats — count + names (CTE + json_group_object)",
+          async () => {
+            // seeded in beforeAll
+            await store.query_stats(seeded[N]!, { count: true, names: true });
+          }
+        )
+      );
     });
   });
 }

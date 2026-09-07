@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { z } from "zod";
 import { state } from "../../act/src/builders/state-builder.js";
 import { action, load } from "../../act/src/internal/event-sourcing.js";
@@ -101,91 +101,100 @@ async function seedSnap(n: number, cfg: SnapConfig) {
 // Cache is always on — benchmarks test stream length × snap interval
 
 describe("PG: load() 50 events", () => {
-  bench(
-    "no snap",
-    async () => {
-      await load(Counter, { stream: noSnapStream });
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedNoSnap(50);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}`,
-      async () => {
-        await load(cfg.me, { stream: cfg.stream });
-      },
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "no snap",
       {
-        async setup() {
+        async beforeAll() {
           await dispose()();
-          await seedSnap(50, cfg);
+          await seedNoSnap(50);
         },
+      },
+      async () => {
+        await load(Counter, { stream: noSnapStream });
       }
-    );
+    ).run();
+  });
+  for (const [label, cfg] of Object.entries(snaps)) {
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `${label}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            await seedSnap(50, cfg);
+          },
+        },
+        async () => {
+          await load(cfg.me, { stream: cfg.stream });
+        }
+      ).run();
+    });
   }
 });
 
 describe("PG: load() 500 events", () => {
-  bench(
-    "no snap",
-    async () => {
-      await load(Counter, { stream: noSnapStream });
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedNoSnap(500);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}`,
-      async () => {
-        await load(cfg.me, { stream: cfg.stream });
-      },
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "no snap",
       {
-        async setup() {
+        async beforeAll() {
           await dispose()();
-          await seedSnap(500, cfg);
+          await seedNoSnap(500);
         },
+      },
+      async () => {
+        await load(Counter, { stream: noSnapStream });
       }
-    );
+    ).run();
+  });
+  for (const [label, cfg] of Object.entries(snaps)) {
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `${label}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            await seedSnap(500, cfg);
+          },
+        },
+        async () => {
+          await load(cfg.me, { stream: cfg.stream });
+        }
+      ).run();
+    });
   }
 });
 
 describe("PG: load() 2000 events", () => {
-  bench(
-    "no snap",
-    async () => {
-      await load(Counter, { stream: noSnapStream });
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedNoSnap(2000);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}`,
-      async () => {
-        await load(cfg.me, { stream: cfg.stream });
-      },
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "no snap",
       {
-        async setup() {
+        async beforeAll() {
           await dispose()();
-          await seedSnap(2000, cfg);
+          await seedNoSnap(2000);
         },
+      },
+      async () => {
+        await load(Counter, { stream: noSnapStream });
       }
-    );
+    ).run();
+  });
+  for (const [label, cfg] of Object.entries(snaps)) {
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `${label}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            await seedSnap(2000, cfg);
+          },
+        },
+        async () => {
+          await load(cfg.me, { stream: cfg.stream });
+        }
+      ).run();
+    });
   }
 });

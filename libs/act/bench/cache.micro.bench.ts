@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
-import { bench, describe } from "vitest";
+import { describe, it } from "vitest";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
@@ -79,91 +79,100 @@ async function seedEvents(n: number, me: AnyState = Counter) {
 // Cache is always on — benchmarks test stream length × snap interval
 
 describe("load() 50 events", () => {
-  bench(
-    "no snap",
-    async () => {
-      await load(Counter, { stream: stream });
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedEvents(50);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}`,
-      async () => {
-        await load(cfg.me, { stream: stream });
-      },
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "no snap",
       {
-        async setup() {
+        async beforeAll() {
           await dispose()();
-          await seedEvents(50, cfg.me);
+          await seedEvents(50);
         },
+      },
+      async () => {
+        await load(Counter, { stream: stream });
       }
-    );
+    ).run();
+  });
+  for (const [label, cfg] of Object.entries(snaps)) {
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `${label}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            await seedEvents(50, cfg.me);
+          },
+        },
+        async () => {
+          await load(cfg.me, { stream: stream });
+        }
+      ).run();
+    });
   }
 });
 
 describe("load() 500 events", () => {
-  bench(
-    "no snap",
-    async () => {
-      await load(Counter, { stream: stream });
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedEvents(500);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}`,
-      async () => {
-        await load(cfg.me, { stream: stream });
-      },
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "no snap",
       {
-        async setup() {
+        async beforeAll() {
           await dispose()();
-          await seedEvents(500, cfg.me);
+          await seedEvents(500);
         },
+      },
+      async () => {
+        await load(Counter, { stream: stream });
       }
-    );
+    ).run();
+  });
+  for (const [label, cfg] of Object.entries(snaps)) {
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `${label}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            await seedEvents(500, cfg.me);
+          },
+        },
+        async () => {
+          await load(cfg.me, { stream: stream });
+        }
+      ).run();
+    });
   }
 });
 
 describe("load() 2000 events", () => {
-  bench(
-    "no snap",
-    async () => {
-      await load(Counter, { stream: stream });
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedEvents(2000);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}`,
-      async () => {
-        await load(cfg.me, { stream: stream });
-      },
+  it("compares implementations", async ({ bench }) => {
+    await bench(
+      "no snap",
       {
-        async setup() {
+        async beforeAll() {
           await dispose()();
-          await seedEvents(2000, cfg.me);
+          await seedEvents(2000);
         },
+      },
+      async () => {
+        await load(Counter, { stream: stream });
       }
-    );
+    ).run();
+  });
+  for (const [label, cfg] of Object.entries(snaps)) {
+    it("compares implementations", async ({ bench }) => {
+      await bench(
+        `${label}`,
+        {
+          async beforeAll() {
+            await dispose()();
+            await seedEvents(2000, cfg.me);
+          },
+        },
+        async () => {
+          await load(cfg.me, { stream: stream });
+        }
+      ).run();
+    });
   }
 });
