@@ -323,3 +323,61 @@ describe("subscriber containment and overlay cache misses (#1423)", () => {
     expect(r).toMatchObject({ ok: false, reason: "behind" });
   });
 });
+
+/**
+ * #1648 — `overlay()` was hardened against a missing baseline (#1423), but
+ * `publish()` was not: it skipped its overlay carry when the baseline had
+ * been evicted and said nothing, so a reconnecting client reseeded without
+ * presence a live client was still showing.
+ *
+ * Catching it at eviction reports the loss at the moment it happens, and
+ * reads the marker off the entry being dropped rather than keeping the
+ * parallel bookkeeping structure the OVERLAY_KEYS design rejected.
+ */
+describe("evicting overlay state is reported (#1648)", () => {
+  const st = (v: number, name = "n"): TestState =>
+    ({ _v: v, name, count: 1 }) as TestState;
+
+  it("fires the overlay-miss hook when the evicted entry carried overlay keys", () => {
+    const missed: string[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 1,
+      onOverlayMiss: (id) => missed.push(id),
+    });
+    bc.publish("game", st(0), [{ count: 1 }]);
+    bc.overlay("game", { name: "typing" } as Partial<TestState>);
+    bc.publish("other", st(0), [{ count: 1 }]); // evicts "game"
+    expect(missed).toEqual(["game"]);
+  });
+
+  it("tells live subscribers of the evicted stream to refetch", () => {
+    const bc = new BroadcastChannel<TestState>({ cacheSize: 1 });
+    bc.publish("game", st(0), [{ count: 1 }]);
+    bc.overlay("game", { name: "typing" } as Partial<TestState>);
+    const frames: PatchMessage<TestState>[] = [];
+    bc.subscribe("game", (m) => frames.push(m));
+    bc.publish("other", st(0), [{ count: 1 }]);
+
+    const resync = frames.find((f) => f._resync);
+    expect(resync).toBeDefined();
+    expect(
+      applyPatchMessage(resync!, { _v: 0, name: "n", count: 1 } as TestState)
+    ).toMatchObject({ ok: false, reason: "behind" });
+  });
+
+  it("says nothing when the evicted entry carried no overlay state", () => {
+    // An ordinary LRU eviction is not a loss: a reconnecting client reseeds
+    // from the store. Only cache-only overlay data goes missing.
+    const missed: string[] = [];
+    const frames: PatchMessage<TestState>[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 1,
+      onOverlayMiss: (id) => missed.push(id),
+    });
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.subscribe("a", (m) => frames.push(m));
+    bc.publish("b", st(0), [{ count: 1 }]); // evicts "a"
+    expect(missed).toEqual([]);
+    expect(frames.filter((f) => f._resync)).toHaveLength(0);
+  });
+});

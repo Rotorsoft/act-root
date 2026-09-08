@@ -1,6 +1,11 @@
 import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
-import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
+import {
+  type BroadcastState,
+  type PatchMessage,
+  resync_frame,
+  type Subscriber,
+} from "./types.js";
 
 /**
  * Server-side broadcast channel for incremental state sync over SSE.
@@ -79,30 +84,54 @@ function fan_out<S extends BroadcastState>(
  * survives JSON, so normalizing here makes the two spellings equivalent on
  * the wire as they already are in memory.
  *
- * Only the broadcast frame is normalized. Server-side state is applied
- * through `apply_patch`, which handles `undefined` natively.
+ * One walker serves both destinations. The frame and the cached state
+ * agree on every encoding except the delete: see `wire_safe` /
+ * `cache_safe` below.
  */
-const wire_safe = <T>(patch: T): T => {
-  if (patch === null || typeof patch !== "object") return patch;
-  if (Array.isArray(patch)) return patch.map(wire_safe) as T;
+const normalize = <T>(value: T, nulls: boolean): T => {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => normalize(v, nulls)) as T;
   // A Set has exactly one sensible JSON encoding, and `JSON.stringify` gives
   // it the wrong one: `{}`. The framework's own `PresenceTracker.online()`
   // returns a Set and the presence recipe feeds it straight to `overlay()`,
   // so the documented way to broadcast presence shipped an empty object to
   // every client — and then froze, because a client holding `{}` treats
   // every later empty patch as a no-op (#1472).
-  if (patch instanceof Set) return [...patch].map(wire_safe) as T;
+  if (value instanceof Set)
+    return [...value].map((v) => normalize(v, nulls)) as T;
   // Everything else non-plain (Date, Map, class instances) is left to
   // whatever the host's serializer already does with it. `Date` has a
   // defined encoding; `Map` does not have an unambiguous one (entries or
   // object?), so guessing would trade a visible bug for a silent choice.
-  const proto = Object.getPrototypeOf(patch);
-  if (proto !== Object.prototype && proto !== null) return patch;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(patch as Record<string, unknown>))
-    out[k] = v === undefined ? null : wire_safe(v);
+  for (const [k, v] of Object.entries(value as Record<string, unknown>))
+    out[k] = v === undefined && nulls ? null : normalize(v, nulls);
   return out as T;
 };
+
+/**
+ * Frame-bound normalization: Sets become arrays, and `undefined` becomes
+ * `null` so a delete survives `JSON.stringify` (#1471).
+ */
+const wire_safe = <T>(patch: T): T => normalize(patch, true);
+
+/**
+ * Cache-bound normalization: Sets become arrays, `undefined` is left alone.
+ *
+ * The cached state is what a reconnecting client reseeds from, and #1471
+ * settled that it must keep a cleared key *absent* rather than `null`, so
+ * the wire's delete encoding is exactly the part the cache must not adopt.
+ * That single difference is why `nulls` is a parameter instead of two
+ * separate walkers — a second copy would drift the moment either side grew
+ * a case.
+ *
+ * Non-enumerable properties are invisible to `Object.entries`, so the
+ * `OVERLAY_KEYS` marker is neither copied nor clobbered here; callers tag
+ * after normalizing.
+ */
+const cache_safe = <T>(state: T): T => normalize(state, false);
 
 /**
  * Keys an `overlay()` contributed to a stream's cached state, carried on the
@@ -193,11 +222,40 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     cache_size?: number;
   }) {
     this.state_cache = new StateCache<S>(
-      options?.cacheSize ?? options?.cache_size ?? 50
+      options?.cacheSize ?? options?.cache_size ?? 50,
+      (streamId, dropped) => this.on_cache_evict(streamId, dropped)
     );
     this.on_overlay_miss = options?.onOverlayMiss ?? (() => {});
     this.on_subscriber_error =
       options?.onSubscriberError ?? default_subscriber_error;
+  }
+
+  /**
+   * Fan a resync out to a stream's live subscribers. `applyPatchMessage`
+   * always reports `behind` for it, so they refetch.
+   */
+  private broadcast_resync(streamId: string): void {
+    fan_out(this.channels.get(streamId), resync_frame<S>(), (error) =>
+      this.on_subscriber_error(error, streamId)
+    );
+  }
+
+  /**
+   * The LRU dropped an entry. If it carried overlay-contributed keys, that
+   * data existed only in the cache and is now gone: a later `publish()` has
+   * no baseline to carry it from, and the reseed a reconnecting client gets
+   * would silently lack presence a live client is still showing (#1648).
+   *
+   * `overlay()` was hardened for the same loss on its own path (#1423);
+   * catching it here covers `publish()` too, and does it at the moment the
+   * data is lost rather than at a later commit that may never come. Reading
+   * the marker off the entry being evicted is what avoids the parallel
+   * bookkeeping structure the `OVERLAY_KEYS` design explicitly rejected.
+   */
+  private on_cache_evict(streamId: string, dropped: S): void {
+    if (!(dropped as S & WithOverlayKeys)[OVERLAY_KEYS]?.size) return;
+    this.on_overlay_miss(streamId);
+    this.broadcast_resync(streamId);
   }
 
   /**
@@ -217,16 +275,22 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     // an `overlay()` actually owns, and only when the new domain state does
     // not speak to them — so a publisher that drops or overwrites a key
     // still wins, and presence survives a commit as the docs imply.
+    // Normalize once, up front: the cache entry and the frame are both
+    // derived from this, so the reseed a reconnecting client gets cannot
+    // disagree with what a live client applied (#1646). `overlay()` already
+    // normalized before its own cache write; `publish()` did not, so a Set
+    // shipped as an array live and as `{}` on reseed — and then froze.
+    const safe_state = cache_safe(state);
     const prev = this.state_cache.get(streamId) as
       | (S & WithOverlayKeys)
       | undefined;
     const overlay_keys = prev?.[OVERLAY_KEYS];
-    let cached = state;
+    let cached = safe_state;
     if (overlay_keys?.size && prev) {
-      const carried = { ...state } as S;
+      const carried = { ...safe_state } as S;
       const kept: string[] = [];
       for (const key of overlay_keys)
-        if (!(key in state) && key in prev) {
+        if (!(key in safe_state) && key in prev) {
           (carried as Record<string, unknown>)[key] = (
             prev as Record<string, unknown>
           )[key];
@@ -273,10 +337,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // a host can count these — a steady stream of them means `cacheSize`
       // is too small for the working set.
       this.on_overlay_miss(streamId);
-      const resync: PatchMessage<S> = { _resync: true } as PatchMessage<S>;
-      fan_out(this.channels.get(streamId), resync, (error) =>
-        this.on_subscriber_error(error, streamId)
-      );
+      this.broadcast_resync(streamId);
       // Still `undefined`: no overlay state was produced, and callers use the
       // return value as "the patch I broadcast", which a resync is not.
       return undefined;

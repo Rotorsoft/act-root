@@ -345,3 +345,114 @@ describe("runSseSubscription", () => {
     expect(counter.open).toBe(0);
   });
 });
+
+/**
+ * #1649 — the per-connection backlog dropped the oldest frame unconditionally,
+ * and its doc-comment justified that with "each frame is a full version-keyed
+ * patch, so the consumer converges regardless of skips." That is false for
+ * `_overlay` and `_resync`: they carry no versions, so a dropped one leaves no
+ * gap for `applyPatchMessage` to report as `behind` and is lost silently.
+ */
+describe("runSseSubscription backlog keeps version-neutral frames (#1649)", () => {
+  type S = { _v: number; n: number; typing?: string[] };
+
+  /** Yield to the generator without consuming, so the backlog fills. */
+  const settle = () => new Promise((r) => setTimeout(r, 5));
+
+  async function drain(
+    gen: AsyncGenerator<SseSubscriptionFrame<S>>,
+    count: number
+  ): Promise<SseSubscriptionFrame<S>[]> {
+    const frames: SseSubscriptionFrame<S>[] = [];
+    for await (const frame of gen) {
+      frames.push(frame);
+      if (frames.length >= count) break;
+    }
+    return frames;
+  }
+
+  it("evicts a version-keyed frame rather than the overlay beside it", async () => {
+    const channel = new BroadcastChannel<S>();
+    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+    const gen = runSseSubscription(channel, "k", undefined, undefined, {
+      maxPending: 2,
+    });
+    // Pull the initial state frame, then stop consuming.
+    const first = await gen.next();
+    expect(first.value).toMatchObject({ kind: "state" });
+
+    channel.overlay("k", { typing: ["alice"] });
+    channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
+    channel.publish("k", { _v: 3, n: 3 }, [{ n: 3 }]); // forces an eviction
+    await settle();
+
+    const frames = await drain(gen, 2);
+    const payloads = frames.map((f) => f.data as Record<string, unknown>);
+    // The overlay survived; a version-keyed patch was dropped instead, and
+    // the client sees that gap and refetches on its own.
+    expect(payloads.some((p) => p._overlay)).toBe(true);
+    await gen.return(undefined as never);
+  });
+
+  it("collapses an all-neutral backlog into a single resync", async () => {
+    const channel = new BroadcastChannel<S>();
+    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+    const gen = runSseSubscription(channel, "k", undefined, undefined, {
+      maxPending: 1,
+    });
+    await gen.next(); // state frame
+
+    channel.overlay("k", { typing: ["alice"] });
+    channel.overlay("k", { typing: ["alice", "bob"] });
+    await settle();
+
+    const frames = await drain(gen, 1);
+    const payload = frames[0].data as Record<string, unknown>;
+    // Nothing was lost silently: the client is told to refetch.
+    expect(payload._resync).toBe(true);
+    await gen.return(undefined as never);
+  });
+
+  it("keeps the newest frame alongside the collapsed resync when there is room", async () => {
+    // Same collapse, but a cap above 1 leaves space for the frame that
+    // triggered it — the resync supersedes only what it replaced.
+    const channel = new BroadcastChannel<S>();
+    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+    const gen = runSseSubscription(channel, "k", undefined, undefined, {
+      maxPending: 2,
+    });
+    await gen.next(); // state frame
+
+    channel.overlay("k", { typing: ["alice"] });
+    channel.overlay("k", { typing: ["alice", "bob"] });
+    channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
+    await settle();
+
+    const frames = await drain(gen, 2);
+    const payloads = frames.map((f) => f.data as Record<string, unknown>);
+    expect(payloads[0]._resync).toBe(true);
+    expect(payloads[1]["2"]).toBeDefined();
+    await gen.return(undefined as never);
+  });
+
+  it("still drops the oldest frame when every frame is version-keyed", async () => {
+    // The pre-existing drop-oldest behavior is unchanged for ordinary
+    // patches — that path is what the version gap already covers.
+    const channel = new BroadcastChannel<S>();
+    channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+    const gen = runSseSubscription(channel, "k", undefined, undefined, {
+      maxPending: 1,
+    });
+    await gen.next();
+
+    channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
+    channel.publish("k", { _v: 3, n: 3 }, [{ n: 3 }]);
+    await settle();
+
+    const frames = await drain(gen, 1);
+    const payload = frames[0].data as Record<string, unknown>;
+    expect(payload["3"]).toBeDefined();
+    expect(payload["2"]).toBeUndefined();
+    await gen.return(undefined as never);
+  });
+});

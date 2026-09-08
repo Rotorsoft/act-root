@@ -13,9 +13,20 @@ import type { BroadcastState } from "./types.js";
 export class StateCache<S extends BroadcastState = BroadcastState> {
   private cache = new Map<string, S>();
   private maxSize: number;
+  private on_evict: (key: string, state: S) => void;
 
-  constructor(maxSize = 50) {
+  /**
+   * @param maxSize - Max entries before the LRU drops its oldest.
+   * @param onEvict - Called with the entry the LRU just dropped. Eviction is
+   *   the moment cached-only data is lost, so it is the only place a caller
+   *   can still see what went (#1648).
+   */
+  constructor(
+    maxSize = 50,
+    onEvict: (key: string, state: S) => void = () => {}
+  ) {
     this.maxSize = maxSize;
+    this.on_evict = onEvict;
   }
 
   /** Get a cached state, promoting it to MRU position. */
@@ -33,7 +44,10 @@ export class StateCache<S extends BroadcastState = BroadcastState> {
     this.cache.delete(key);
     this.cache.set(key, state);
     if (this.cache.size > this.maxSize) {
-      this.cache.delete(this.cache.keys().next().value!);
+      const oldest = this.cache.keys().next().value!;
+      const dropped = this.cache.get(oldest)!;
+      this.cache.delete(oldest);
+      this.on_evict(oldest, dropped);
     }
   }
 

@@ -1,6 +1,11 @@
 import { z } from "zod";
 import type { BroadcastChannel } from "../sse/broadcast.js";
-import type { BroadcastState } from "../sse/types.js";
+import {
+  type BroadcastState,
+  is_version_neutral,
+  type PatchMessage,
+  resync_frame,
+} from "../sse/types.js";
 
 /**
  * SSE wiring options shared by the auto-generated `trpc` and `hono`
@@ -56,10 +61,15 @@ export type SseOptions = {
    * broadcast frames. A consumer that stalls (slow client, paused
    * tab) can't drain frames as fast as a busy stream publishes them;
    * without a bound the backlog grows until the process runs out of
-   * memory. When the backlog is full the **oldest** frame is dropped
-   * to make room for the newest — the consumer always converges on
-   * current state (each frame carries a full version-keyed patch),
-   * it just skips intermediate versions it was too slow to see.
+   * memory. When the backlog is full the oldest **version-keyed** frame
+   * is dropped to make room for the newest: the consumer sees the
+   * version gap, reports `behind`, and refetches, so it still converges
+   * on current state having skipped intermediate versions it was too
+   * slow to see.
+   *
+   * Version-neutral frames (`_overlay`, `_resync`) are never dropped
+   * silently — they create no gap to notice, so a backlog made only of
+   * them collapses into a single `_resync` instead (#1649).
    *
    * Default `256`. Validated range `[1, 100_000]`.
    */
@@ -99,9 +109,11 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  * Default cap on the per-connection undelivered-frame backlog. Sized
  * so a briefly-stalled consumer on a busy stream keeps recent history
  * without letting a permanently-wedged client pin unbounded memory.
- * At overflow the oldest frame is dropped (drop-oldest) — each frame
- * is a full version-keyed patch, so the consumer converges on current
- * state regardless of which intermediate versions it missed.
+ * At overflow the oldest version-keyed frame is dropped: it is a full
+ * version-keyed patch, so the consumer sees the gap and converges on
+ * current state regardless of which intermediate versions it missed.
+ * Version-neutral frames create no gap, so they collapse into a
+ * `_resync` rather than being dropped silently (#1649).
  */
 export const DEFAULT_SSE_MAX_PENDING_PER_CONNECTION = 256;
 
@@ -297,14 +309,42 @@ export async function* runSseSubscription<S extends { _v: number } = any>(
   const pending: unknown[] = [];
   let resolve_wait: (() => void) | null = null;
   const unsubscribe = channel.subscribe(stream_id, (msg) => {
-    // Bound the per-connection backlog: a stalled consumer can't drain
-    // as fast as a busy stream publishes, so drop the oldest frame to
-    // cap memory. Each frame is a full version-keyed patch, so the
-    // consumer converges on current state regardless of skips.
-    if (pending.length >= max_pending) pending.shift();
-    pending.push(msg);
+    enqueue(msg as PatchMessage<never>);
     resolve_wait?.();
   });
+  /**
+   * Bound the per-connection backlog: a stalled consumer (slow client,
+   * paused tab) can't drain as fast as a busy stream publishes, so a frame
+   * has to go.
+   *
+   * Which frame is not arbitrary. A version-keyed patch can be dropped
+   * safely — the client sees the version gap, reports `behind`, and
+   * refetches. A version-neutral frame (`_overlay`, `_resync`) carries no
+   * versions at all, so dropping one leaves no gap to notice and the update
+   * is lost silently (#1649). So: evict the oldest version-keyed frame if
+   * there is one, and only if the whole backlog is version-neutral collapse
+   * it into the single frame that says "you missed something".
+   */
+  const enqueue = (msg: PatchMessage<never>) => {
+    if (pending.length < max_pending) {
+      pending.push(msg);
+      return;
+    }
+    const versioned = pending.findIndex(
+      (m) => !is_version_neutral(m as PatchMessage<never>)
+    );
+    if (versioned >= 0) {
+      pending.splice(versioned, 1);
+      pending.push(msg);
+      return;
+    }
+    // Every pending frame is version-neutral. Collapsing them into one
+    // resync loses no signal — a resync supersedes anything it replaces,
+    // including `msg` when the cap leaves no room for it.
+    pending.splice(0, pending.length, resync_frame());
+    if (pending.length < max_pending) pending.push(msg);
+  };
+
   const on_abort = () => resolve_wait?.();
   signal?.addEventListener("abort", on_abort);
   try {
