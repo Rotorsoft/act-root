@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.37.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.2...@rotorsoft/act-tck-v1.37.3) (2026-09-08)
+
+
+### Bug Fixes
+
+* **act-http:** normalize the publish cache write, keep version-neutral frames ([#1655](https://github.com/Rotorsoft/act-root/issues/1655)) ([a5720c4](https://github.com/Rotorsoft/act-root/commit/a5720c4e12793b743bafab70e8579fff36480888)), closes [#1471](https://github.com/Rotorsoft/act-root/issues/1471) [#1473](https://github.com/Rotorsoft/act-root/issues/1473) [#1648](https://github.com/Rotorsoft/act-root/issues/1648) [#1649](https://github.com/Rotorsoft/act-root/issues/1649) [#1646](https://github.com/Rotorsoft/act-root/issues/1646) [#1648](https://github.com/Rotorsoft/act-root/issues/1648) [#1649](https://github.com/Rotorsoft/act-root/issues/1649)
+
 # [@rotorsoft/act-tck-v1.37.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.1...@rotorsoft/act-tck-v1.37.2) (2026-09-08)
 
 
