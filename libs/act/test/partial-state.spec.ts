@@ -1,6 +1,13 @@
 import { z } from "zod";
-import { act, state, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  ConcurrencyError,
+  sensitive,
+  state,
+  ZodEmpty,
+} from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
+import type { Store } from "../src/types/index.js";
 
 describe("partial-state", () => {
   const schema = z.object({
@@ -540,5 +547,194 @@ describe("partial-state", () => {
     ).rejects.toThrow("Must not be locked");
 
     await dispose();
+  });
+});
+
+/**
+ * `merge_into_existing` spreads `existing` and then re-lists the fields it
+ * merges, so anything missing from that list silently kept the FIRST
+ * partial's value and discarded the incoming one (#1645). These cover the
+ * fields that were missing: per-action `options`, and the single-declaration
+ * policies `disclose` / `autoclose` (+ its day fields) / `archive`.
+ */
+describe("partial-state — policies declared on a later partial (#1645)", () => {
+  const actor = { id: "a", name: "a" };
+  const Ticket = z.object({ open: z.boolean() });
+  const Opened = ZodEmpty;
+  const Resolved = ZodEmpty;
+
+  /** A partial carrying no policy of its own, to register alongside. */
+  const plain = () =>
+    state({ Tkt: Ticket })
+      .init(() => ({ open: false }))
+      .emits({ Opened })
+      .patch({ Opened: () => ({ open: true }) })
+      .on({ open: ZodEmpty })
+      .emit(() => ["Opened", {}])
+      .build();
+
+  /** The policy-bearing partial. Identical in every test; only its
+   *  registration ORDER varies, which is what the bug was sensitive to. */
+  const base = () =>
+    state({ Tkt: Ticket })
+      .init(() => ({ open: false }))
+      .emits({ Resolved })
+      .patch({ Resolved: () => ({ open: false }) })
+      .on({ resolve: ZodEmpty }, { maxRetries: 2 });
+
+  it("carries per-action options from a later partial into the retry loop", async () => {
+    const with_retry = base()
+      .emit(() => ["Resolved", {}])
+      .build();
+    // The options-bearing partial is registered SECOND.
+    const { app, store, dispose } = await sandbox(
+      act().withState(plain()).withState(with_retry)
+    );
+    const original = store.commit.bind(store);
+    let thrown = false;
+    store.commit = (async (...args: Parameters<Store["commit"]>) => {
+      if (!thrown) {
+        thrown = true;
+        throw new ConcurrencyError(args[0] as string, 0, [], 0);
+      }
+      return original(...args);
+    }) as Store["commit"];
+
+    // Without the merge fix `max_retries` falls back to 0 and this rejects.
+    await expect(
+      app.do("resolve", { stream: "t1", actor }, {})
+    ).resolves.toBeDefined();
+
+    store.commit = original;
+    await dispose();
+  });
+
+  it("combines the per-action options maps of both partials", async () => {
+    const a = state({ Tkt: Ticket })
+      .init(() => ({ open: false }))
+      .emits({ Opened })
+      .patch({ Opened: () => ({ open: true }) })
+      .on({ open: ZodEmpty }, { maxRetries: 1 })
+      .emit(() => ["Opened", {}])
+      .build();
+    const b = base()
+      .emit(() => ["Resolved", {}])
+      .build();
+    const { app, dispose } = await sandbox(act().withState(a).withState(b));
+    // Both actions resolve through their own options entry.
+    await app.do("open", { stream: "t2", actor }, {});
+    await app.do("resolve", { stream: "t2", actor }, {});
+    await dispose();
+  });
+
+  it("carries a disclosure predicate from a later partial", async () => {
+    const Secret = z.object({ email: sensitive(z.string()) });
+    const a = state({ Sec: z.object({ email: z.string() }) })
+      .init(() => ({ email: "" }))
+      .emits({ Noted: ZodEmpty })
+      .patch({ Noted: () => ({}) })
+      .on({ note: ZodEmpty })
+      .emit(() => ["Noted", {}])
+      .build();
+    const b = state({ Sec: z.object({ email: z.string() }) })
+      .init(() => ({ email: "" }))
+      .emits({ Registered: Secret })
+      .patch({ Registered: ({ data }) => ({ email: data.email }) })
+      .on({ register: Secret })
+      .emit((p) => ["Registered", p])
+      .discloses(() => true)
+      .build();
+
+    // Predicate-bearing partial registered SECOND: without the fix the
+    // merged state default-denies and the actor reads "[REDACTED]".
+    const { app, dispose } = await sandbox(act().withState(a).withState(b));
+    const snaps = await app.do(
+      "register",
+      { stream: "s1", actor },
+      { email: "u@example.com" }
+    );
+    expect(snaps.at(-1)?.state.email).toBe("u@example.com");
+    await dispose();
+  });
+
+  it("carries an autoclose policy and its day fields from a later partial", async () => {
+    const closing = base()
+      .emit(() => ["Resolved", {}])
+      .snap(() => true)
+      .autocloses({ keep: { days: 7 } })
+      .build();
+    const app = act().withState(plain()).withState(closing).build();
+    expect(app.registry.autoclose_policy("Tkt")).toBeTruthy();
+  });
+
+  it("carries an archiver from a later partial", () => {
+    const archive = async () => {};
+    const archiving = base()
+      .emit(() => ["Resolved", {}])
+      .autocloses({ is: "Resolved" })
+      .archives(archive)
+      .build();
+    const app = act().withState(plain()).withState(archiving).build();
+    expect(app.registry.autoclose_archiver("Tkt")).toBe(archive);
+  });
+
+  it("leaves options undefined when neither partial declared any", () => {
+    const app = act()
+      .withState(plain())
+      .withState(
+        base()
+          .emit(() => ["Resolved", {}])
+          .build()
+      )
+      .build();
+    expect(app.registry.autoclose_policy("Tkt")).toBeFalsy();
+  });
+
+  describe("two conflicting declarations are a conflict, not first-wins", () => {
+    const other = (build: (b: any) => any) =>
+      build(
+        state({ Tkt: Ticket })
+          .init(() => ({ open: false }))
+          .emits({ Opened })
+          .patch({ Opened: () => ({ open: true }) })
+          .on({ open: ZodEmpty })
+          .emit(() => ["Opened", {}])
+      ).build();
+
+    it("throws on two disclosure predicates", () => {
+      const a = other((b: any) => b.discloses(() => true));
+      const c = base()
+        .emit(() => ["Resolved", {}])
+        .discloses(() => false)
+        .build();
+      expect(() => act().withState(a).withState(c).build()).toThrow(
+        'Duplicate disclosure predicate for state "Tkt"'
+      );
+    });
+
+    it("throws on two archivers", () => {
+      const a = other((b: any) =>
+        b.autocloses({ is: "Opened" }).archives(async () => {})
+      );
+      const c = base()
+        .emit(() => ["Resolved", {}])
+        .autocloses({ is: "Resolved" })
+        .archives(async () => {})
+        .build();
+      expect(() => act().withState(a).withState(c).build()).toThrow(
+        /Duplicate (archiver|autoclose policy) for state "Tkt"/
+      );
+    });
+
+    it("throws on two autoclose policies", () => {
+      const a = other((b: any) => b.autocloses({ is: "Opened" }));
+      const c = base()
+        .emit(() => ["Resolved", {}])
+        .autocloses({ is: "Resolved" })
+        .build();
+      expect(() => act().withState(a).withState(c).build()).toThrow(
+        'Duplicate autoclose policy for state "Tkt"'
+      );
+    });
   });
 });

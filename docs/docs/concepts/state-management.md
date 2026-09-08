@@ -71,6 +71,8 @@ const TicketOperations = state({ Ticket: z.object({ status: z.string() }) })
 
 This means a partial can redeclare an event in `.emits()` (to react to it via `.on()`) without overwriting the custom reducer from the partial that owns the event.
 
+**State-level policies:** `.discloses()`, `.autocloses()`, `.archives()`, and the per-action options passed to `.on(entry, options)` survive the merge no matter which partial declared them — a retention policy on the third slice of a state behaves exactly like one on the first. Per-action options combine, since they are keyed by action name. The single-valued policies follow the same rule as `.snap()`: one declaration wins, and two *different* declarations throw at build time instead of silently keeping the first. `.autocloses()` carries its `after` / `keep` windows along with it, so the predicate and its windows always come from the same partial.
+
 ### Cross-slice event schemas — reference identity
 
 When a partial redeclares an event so it can `.on()` it (or for a slice that reacts to events owned by another slice), the **Zod schema in both partials must be the same JS reference**. The merge throws at build time if two partials declare the same event with different schema instances — silent contract drift is the failure mode this rule prevents.
