@@ -283,3 +283,56 @@ describe("overlay state survives a commit (#1473)", () => {
     });
   });
 });
+
+describe("publish() normalizes its cache entry too (#1646)", () => {
+  it("gives a reconnecting client the same Set-valued field a live one holds", () => {
+    const ch = new BroadcastChannel<Calc>();
+    const frame = ch.publish(
+      "g",
+      { _v: 0, onlineUsers: new Set(["alice"]) } as unknown as Calc,
+      [{ onlineUsers: new Set(["alice"]) } as unknown as Partial<Calc>]
+    );
+    // The live frame was already correct before the fix; the reseed was not.
+    const live = JSON.parse(JSON.stringify(frame));
+    const reseed = JSON.parse(JSON.stringify(ch.state("g")));
+    expect(live["0"].onlineUsers).toEqual(["alice"]);
+    expect(reseed.onlineUsers).toEqual(live["0"].onlineUsers);
+  });
+
+  it("normalizes a Set nested inside the published state", () => {
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g", {
+      _v: 0,
+      nested: { users: new Set(["bob"]) },
+    } as unknown as Calc);
+    expect(JSON.parse(JSON.stringify(ch.state("g")))).toEqual({
+      _v: 0,
+      nested: { users: ["bob"] },
+    });
+  });
+
+  it("leaves a cleared key ABSENT in the cache, not null (#1471 still holds)", () => {
+    // The cache must not adopt the wire's delete encoding: `undefined` is
+    // the one conversion `cache_safe` deliberately does not make.
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("s", { _v: 0, left: "7" } as Calc);
+    ch.overlay("s", { left: undefined } as Partial<Calc>);
+    expect(ch.state("s")).not.toHaveProperty("left");
+  });
+
+  it("still carries overlay keys across a commit (#1473 still holds)", () => {
+    // Normalizing before the carry must not clobber the OVERLAY_KEYS marker.
+    const ch = new BroadcastChannel<Calc>();
+    ch.publish("g", { _v: 0 } as Calc);
+    ch.overlay("g", { onlineUsers: ["alice"] } as Partial<Calc>);
+    ch.publish("g", { _v: 1 } as Calc, [{} as Partial<Calc>]);
+    expect((ch.state("g") as Calc).onlineUsers).toEqual(["alice"]);
+  });
+
+  it("leaves a Map alone on the publish path too", () => {
+    const ch = new BroadcastChannel<Calc>();
+    const m = new Map([["a", 1]]);
+    ch.publish("g", { _v: 0, m } as unknown as Calc);
+    expect((ch.state("g") as unknown as { m: unknown }).m).toBeInstanceOf(Map);
+  });
+});
