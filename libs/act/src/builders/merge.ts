@@ -106,11 +106,60 @@ function register_new_state(
 }
 
 /**
+ * Picks the value of a field only one partial may declare. Mirrors the
+ * `snap` rule: whichever partial declared it wins, and two different
+ * declarations are a conflict rather than a silent first-wins.
+ *
+ * Without this, a spread of `existing` keeps the FIRST partial's value and
+ * silently discards the incoming one, so a policy declared on a later slice
+ * never runs (#1645).
+ */
+function pick_declared<T>(
+  existing: T | undefined,
+  incoming: T | undefined,
+  what: string,
+  state_name: string
+): T | undefined {
+  if (existing && incoming && existing !== incoming)
+    throw new Error(`Duplicate ${what} for state "${state_name}"`);
+  return incoming ?? existing;
+}
+
+/**
+ * Resolves the `.autocloses(...)` triple. The predicate and its two day
+ * fields are set together by the builder, so they move together — taking the
+ * predicate from one partial and a day field from another would produce a
+ * window the caller never declared.
+ */
+function autoclose_of(
+  existing: State<any, any, any>,
+  state: State<any, any, any>
+): Pick<
+  State<any, any, any>,
+  "autoclose" | "autoclose_after_days" | "autoclose_keep_days"
+> {
+  pick_declared(
+    existing.autoclose,
+    state.autoclose,
+    "autoclose policy",
+    state.name
+  );
+  const owner = state.autoclose ? state : existing;
+  return {
+    autoclose: owner.autoclose,
+    autoclose_after_days: owner.autoclose_after_days,
+    autoclose_keep_days: owner.autoclose_keep_days,
+  };
+}
+
+/**
  * Merges an incoming partial state into an existing same-name state and
  * updates the action/event registries. Splits into four phases:
  *   1. validate no cross-state action/event collisions
  *   2. merge per-event patches (one custom patch per event)
  *   3. build the merged state and replace it in the states map
+ *      (including the single-declaration policies, which a bare spread
+ *       would silently take from the first partial only)
  *   4. update action→state pointers and register new events
  */
 function merge_into_existing(
@@ -159,14 +208,29 @@ function merge_into_existing(
     patch: merged_patch,
     on: { ...existing.on, ...state.on },
     given: { ...existing.given, ...state.given },
-    snap:
-      state.snap && existing.snap && state.snap !== existing.snap
-        ? (() => {
-            throw new Error(
-              `Duplicate snap strategy for state "${state.name}"`
-            );
-          })()
-        : state.snap || existing.snap,
+    snap: pick_declared(existing.snap, state.snap, "snap strategy", state.name),
+    // Per-action retry policy is keyed by action name, so the two partials'
+    // maps combine. Left `undefined` when neither declared one, so the
+    // orchestrator's `me.options?.[action]` lookup is unchanged.
+    options:
+      existing.options || state.options
+        ? { ...existing.options, ...state.options }
+        : undefined,
+    disclose: pick_declared(
+      existing.disclose,
+      state.disclose,
+      "disclosure predicate",
+      state.name
+    ),
+    archive: pick_declared(
+      existing.archive,
+      state.archive,
+      "archiver",
+      state.name
+    ),
+    // `.autocloses(...)` sets its two day fields alongside the predicate, so
+    // the whole triple travels together from whichever partial declared it.
+    ...autoclose_of(existing, state),
   };
   states.set(state.name, merged);
 
