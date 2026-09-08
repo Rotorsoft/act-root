@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.37.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.1...@rotorsoft/act-tck-v1.37.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **act:** keep a later partial's policies through the state merge ([#1654](https://github.com/Rotorsoft/act-root/issues/1654)) ([ce273c4](https://github.com/Rotorsoft/act-root/commit/ce273c46b819c98decdf143f38b0aa2eade4209c)), closes [#1645](https://github.com/Rotorsoft/act-root/issues/1645)
+
 # [@rotorsoft/act-tck-v1.37.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.0...@rotorsoft/act-tck-v1.37.1) (2026-09-07)
 
 
