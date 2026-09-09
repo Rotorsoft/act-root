@@ -22,9 +22,12 @@
  * `pnpm paths:check`), so a new subpath export propagates here for free. That map also carries
  * the private `@act/*` namespace (the in-repo example apps — calculator /
  * server / client, not a published scope); no test imports those, but they
- * ride along so one map serves both tools. vitest discovers this root config
- * for sub-package invocations too (e.g. `pnpm -F @rotorsoft/act-pg exec
- * vitest run ...`), so resolution is CWD-independent.
+ * ride along so one map serves both tools.
+ *
+ * Vitest 4 found this config from a sub-package cwd; vitest 5 does not
+ * (#1652), so each package that runs vitest re-exports it from a local
+ * `vitest.config.ts`. Without it a package run loses `globals` and these
+ * aliases — the latter silently, by testing a stale `dist/`.
  */
 
 import { createHash } from "node:crypto";
