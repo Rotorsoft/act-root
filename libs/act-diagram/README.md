@@ -88,11 +88,16 @@ Interactive mode uses arrow-key navigation ([`@clack/prompts`](https://github.co
 | `emptyModel()` | Construct an empty `DomainModel`. |
 
 Extraction, layout, source navigation and the AI-pipeline helpers are
-internal. `ActDiagram` owns the pipeline end to end — give it files, it
-parses the Act code and renders. There is no supported way to drive the
-individual stages from outside, and no plan to add one: the package
-parses Act source, and a host that wants a different pipeline is better
-served by the parser it already has than by a second public API here.
+internal — they are not on the `exports` map, so they cannot be imported
+even by path. `ActDiagram` owns the pipeline end to end: give it files,
+it parses the Act code and renders.
+
+That is what an IDE integration uses. The Neovim and VS Code plugins
+drive the diagram through the component plus the postMessage protocol
+below, not through the parsing stages, which is why those stay internal
+and free to change. If a host does need a stage on its own, open an
+issue — it would be new public surface and wants an RFC, so it is a
+conversation rather than a deep import.
 
 ### Types
 
