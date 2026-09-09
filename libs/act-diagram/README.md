@@ -84,27 +84,31 @@ Interactive mode uses arrow-key navigation ([`@clack/prompts`](https://github.co
 
 | Function | Purpose |
 |---|---|
+| `extractModel(files)` | The whole extraction — sort, execute, build. Returns `{ model, error? }`. |
+| `topoSort(files)` | Order files so imports come before importers. |
 | `validate(model)` | Check for missing emits, orphan reactions, etc. Returns `ValidationWarning[]`. |
+| `computeLayout(model)` | Pure layout — positions nodes, edges and slice boxes. Returns `Layout`. |
+| `navigateToCode(files, name, type?, targetFile?)` | Pure — resolve a named element to `{ file, line, col }`, or `undefined`. |
 | `emptyModel()` | Construct an empty `DomainModel`. |
+| `parseMultiFileResponse(raw)`, `stripFences(code)`, `deriveProjectName(prompt, code?)` | AI-pipeline helpers used by `ActDiagram` when `onAiRequest` is wired. |
 
-Extraction, layout, source navigation and the AI-pipeline helpers are
-internal — they are not on the `exports` map, so they cannot be imported
-even by path. `ActDiagram` owns the pipeline end to end: give it files,
-it parses the Act code and renders.
+`ActDiagram` runs these for you. They are exported so an IDE integration can
+run them itself — cache a model across renders, extract in a worker, or
+resolve click-to-source without rendering (RFC 1650). `navigateToCode` and
+`computeLayout` are pure, so they are safe to call off the render path.
 
-That is what an IDE integration uses. The Neovim and VS Code plugins
-drive the diagram through the component plus the postMessage protocol
-below, not through the parsing stages, which is why those stay internal
-and free to change. If a host does need a stage on its own, open an
-issue — it would be new public surface and wants an RFC, so it is a
-conversation rather than a deep import.
+`buildModel` is internal: its input comes from an unexported `execute`, and
+`extractModel` is the supported way in.
 
 ### Types
 
 `DomainModel`, `ValidationWarning`, `FileTab`, `HostMessage`,
-`DiagramMessage`, `AiOptions`, and the node types (`ActNode`,
-`ActionNode`, `EventNode`, `ProjectionNode`, `ReactionNode`, `SliceNode`,
-`StateNode`, `EntryPoint`).
+`DiagramMessage`, `AiOptions`, `NavigateResult`, and the node types
+(`ActNode`, `ActionNode`, `EventNode`, `ProjectionNode`, `ReactionNode`,
+`SliceNode`, `StateNode`, `EntryPoint`).
+
+Layout types: `Layout` and its members `LayoutNode`, `LayoutEdge`,
+`LayoutBox`, `LayoutPos`.
 
 ### IDE plugin protocol (postMessage)
 
@@ -139,6 +143,23 @@ webview.postMessage({ type: "fileChanged", path: "src/app.ts", content: "..." })
 ```
 
 The webview side picks up host messages automatically when `usePostMessage` is set; the diagram emits `navigate` and `aiRequest` back through `window.parent.postMessage`.
+
+### Bring-your-own pipeline
+
+```tsx
+import { Diagram, extractModel, validate } from "@rotorsoft/act-diagram";
+
+const { model } = extractModel(files);
+const warnings = validate(model);
+
+<Diagram
+  model={model}
+  warnings={warnings}
+  onClickElement={(name, type, file) => {/* … */}}
+/>
+```
+
+Use when you want to cache the extracted model, run extraction in a worker, or wire it to a non-standard file source.
 
 
 ### Optional AI refinement
