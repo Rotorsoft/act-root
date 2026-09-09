@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.22](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.21...@rotorsoft/act-v1.31.22) (2026-09-09)
+
+
+### Bug Fixes
+
+* **act:** treat a zero-length lane lease as no pinned lease on shutdown ([#1657](https://github.com/Rotorsoft/act-root/issues/1657)) ([0f67a3f](https://github.com/Rotorsoft/act-root/commit/0f67a3f43df6848f90bb2d70e05f2023def807f6)), closes [#1617](https://github.com/Rotorsoft/act-root/issues/1617) [#1613](https://github.com/Rotorsoft/act-root/issues/1613) [#1647](https://github.com/Rotorsoft/act-root/issues/1647)
+
 # [@rotorsoft/act-v1.31.21](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.20...@rotorsoft/act-v1.31.21) (2026-09-08)
 
 
