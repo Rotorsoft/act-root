@@ -84,14 +84,22 @@ Interactive mode uses arrow-key navigation ([`@clack/prompts`](https://github.co
 
 | Function | Purpose |
 |---|---|
-| `extractModel(files)` | High-level extract: `topoSort` + `buildModel`. Returns `{ model, error? }`. |
-| `buildModel(files)` | Lower-level: transpile + execute per-file, returns merged inventory + per-file errors. |
 | `validate(model)` | Check for missing emits, orphan reactions, etc. Returns `ValidationWarning[]`. |
-| `navigateToCode(files, name, type?)` | Pure function — find `{ file, line, col }` for a named element. |
-| `topoSort(files)` | Sort files by import dependency order. |
-| `computeLayout(model)` | Pure layout — positions nodes, edges, slice boxes. |
 | `emptyModel()` | Construct an empty `DomainModel`. |
-| `parseMultiFileResponse(text)`, `stripFences(text)`, `deriveProjectName(files)` | AI-pipeline helpers used by `ActDiagram` when `onAiRequest` is wired. |
+
+Extraction, layout, source navigation and the AI-pipeline helpers are
+internal. `ActDiagram` owns the pipeline end to end — give it files, it
+parses the Act code and renders. There is no supported way to drive the
+individual stages from outside, and no plan to add one: the package
+parses Act source, and a host that wants a different pipeline is better
+served by the parser it already has than by a second public API here.
+
+### Types
+
+`DomainModel`, `ValidationWarning`, `FileTab`, `HostMessage`,
+`DiagramMessage`, `AiOptions`, and the node types (`ActNode`,
+`ActionNode`, `EventNode`, `ProjectionNode`, `ReactionNode`, `SliceNode`,
+`StateNode`, `EntryPoint`).
 
 ### IDE plugin protocol (postMessage)
 
@@ -127,22 +135,6 @@ webview.postMessage({ type: "fileChanged", path: "src/app.ts", content: "..." })
 
 The webview side picks up host messages automatically when `usePostMessage` is set; the diagram emits `navigate` and `aiRequest` back through `window.parent.postMessage`.
 
-### Bring-your-own pipeline
-
-```tsx
-import { Diagram, extractModel, validate } from "@rotorsoft/act-diagram";
-
-const { model } = extractModel(files);
-const warnings = validate(model);
-
-<Diagram
-  model={model}
-  warnings={warnings}
-  onClickElement={(name, type, file) => {/* … */}}
-/>
-```
-
-Use when you want to cache the extracted model, run extraction in a worker, or wire it to a non-standard file source.
 
 ### Optional AI refinement
 
