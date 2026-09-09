@@ -176,7 +176,7 @@ Bottom-up: inventory scan → per-state validation → per-slice composition (wi
 
 ## Compatibility
 
-- **Node**: >=22.18.0
+- **Node**: >=22.23.2
 - **Peer**: `react` ^18 || ^19, `react-dom` ^18 || ^19, `zod` ^4.4.3
 - **Bundled deps**: `lucide-react`, `sucrase`
 - **CLI**: works from any project where the package is installed; recognizes `$VISUAL` / `$EDITOR` (vim, nvim, nano, emacs, VS Code, Cursor)

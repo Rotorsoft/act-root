@@ -484,7 +484,7 @@ For the recommended receiver-side idempotency contract that pairs with `webhook`
 
 ## Compatibility
 
-- **Node**: >=22.18.0
+- **Node**: >=22.23.2
 - **Peer**: `@rotorsoft/act` (workspace version)
 - **Runtime deps**: `@rotorsoft/act-patch` (used by the SSE subpath for state merging)
 - **Module formats**: ESM + CJS, dual subpath exports
