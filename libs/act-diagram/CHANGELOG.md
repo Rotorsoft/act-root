@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.1.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.22...@rotorsoft/act-diagram-v1.1.0) (2026-09-09)
+
+
+### Features
+
+* **act-diagram:** export the pipeline stages the IDE plugins need ([#1659](https://github.com/Rotorsoft/act-root/issues/1659)) ([52e79f6](https://github.com/Rotorsoft/act-root/commit/52e79f6e47a0c7123858af3073c43a64c6d3e057)), closes [#1621](https://github.com/Rotorsoft/act-root/issues/1621) [#1650](https://github.com/Rotorsoft/act-root/issues/1650) [#1650](https://github.com/Rotorsoft/act-root/issues/1650)
+
 # [@rotorsoft/act-diagram-v1.0.22](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.21...@rotorsoft/act-diagram-v1.0.22) (2026-09-09)
 
 
