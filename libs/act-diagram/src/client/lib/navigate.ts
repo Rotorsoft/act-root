@@ -89,7 +89,7 @@ function build_patterns(esc: string, type?: string): RegExp[] {
   }
 }
 
-type NavigateResult = { file: string; line: number; col: number };
+export type NavigateResult = { file: string; line: number; col: number };
 
 export function navigate_to_code(
   files: FileTab[],

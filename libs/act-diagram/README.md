@@ -84,14 +84,31 @@ Interactive mode uses arrow-key navigation ([`@clack/prompts`](https://github.co
 
 | Function | Purpose |
 |---|---|
-| `extractModel(files)` | High-level extract: `topoSort` + `buildModel`. Returns `{ model, error? }`. |
-| `buildModel(files)` | Lower-level: transpile + execute per-file, returns merged inventory + per-file errors. |
+| `extractModel(files)` | The whole extraction — sort, execute, build. Returns `{ model, error? }`. |
+| `topoSort(files)` | Order files so imports come before importers. |
 | `validate(model)` | Check for missing emits, orphan reactions, etc. Returns `ValidationWarning[]`. |
-| `navigateToCode(files, name, type?)` | Pure function — find `{ file, line, col }` for a named element. |
-| `topoSort(files)` | Sort files by import dependency order. |
-| `computeLayout(model)` | Pure layout — positions nodes, edges, slice boxes. |
+| `computeLayout(model)` | Pure layout — positions nodes, edges and slice boxes. Returns `Layout`. |
+| `navigateToCode(files, name, type?, targetFile?)` | Pure — resolve a named element to `{ file, line, col }`, or `undefined`. |
 | `emptyModel()` | Construct an empty `DomainModel`. |
-| `parseMultiFileResponse(text)`, `stripFences(text)`, `deriveProjectName(files)` | AI-pipeline helpers used by `ActDiagram` when `onAiRequest` is wired. |
+| `parseMultiFileResponse(raw)`, `stripFences(code)`, `deriveProjectName(prompt, code?)` | AI-pipeline helpers used by `ActDiagram` when `onAiRequest` is wired. |
+
+`ActDiagram` runs these for you. They are exported so an IDE integration can
+run them itself — cache a model across renders, extract in a worker, or
+resolve click-to-source without rendering (RFC 1650). `navigateToCode` and
+`computeLayout` are pure, so they are safe to call off the render path.
+
+`buildModel` is internal: its input comes from an unexported `execute`, and
+`extractModel` is the supported way in.
+
+### Types
+
+`DomainModel`, `ValidationWarning`, `FileTab`, `HostMessage`,
+`DiagramMessage`, `AiOptions`, `NavigateResult`, and the node types
+(`ActNode`, `ActionNode`, `EventNode`, `ProjectionNode`, `ReactionNode`,
+`SliceNode`, `StateNode`, `EntryPoint`).
+
+Layout types: `Layout` and its members `LayoutNode`, `LayoutEdge`,
+`LayoutBox`, `LayoutPos`.
 
 ### IDE plugin protocol (postMessage)
 
@@ -143,6 +160,7 @@ const warnings = validate(model);
 ```
 
 Use when you want to cache the extracted model, run extraction in a worker, or wire it to a non-standard file source.
+
 
 ### Optional AI refinement
 
