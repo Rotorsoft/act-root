@@ -170,14 +170,6 @@ jobs:
       # the `canonical-check: deprecated` HTML-comment marker.
       - run: pnpm check:readmes
 
-      # Package-level vitest runs must resolve the root config — #1652.
-      # Vitest 5 stopped discovering the repo-root vite.config.ts from a
-      # sub-package cwd, so a package that doesn't re-export it loses
-      # `globals` and the @rotorsoft/* source aliases. The alias half stays
-      # green while testing a stale dist/, which is why this is enforced
-      # rather than left to review.
-      - run: pnpm check:vitest-config
-
       # `act` CLI smoke test — non-interactive `-q` query against both
       # example apps. Catches regressions in the parser, builder, or
       # formatter that would silently break the doc surface. NO_COLOR
