@@ -234,4 +234,40 @@ describe("default grace budget derivation", () => {
     const { settles_at } = await budget_of(120_000);
     expect(await settles_at(30_000)).toEqual({ before: false, after: true });
   });
+
+  it("does not abandon a parked handler on a zero-lease lane", async () => {
+    // The same defect seen through the symptom rather than the clock: the
+    // default path is what `dispose()()` uses, and it walked away from a
+    // handler that was still running.
+    const g = gate();
+    const app = laned_parked_app(g, 0);
+    const actor = { id: "a", name: "a" };
+    await app.do("tick", { stream: "src", actor }, {});
+    await app.correlate();
+    const draining = app.drain({ leaseMillis: 60_000 });
+    await until(() => g.entered);
+
+    let settled = false;
+    const shutting = app.shutdown().then(() => {
+      settled = true;
+    });
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(settled).toBe(false);
+
+    g.release();
+    await shutting;
+    await draining;
+    expect(settled).toBe(true);
+  });
+
+  it("treats a lane's leaseMillis: 0 as no pinned lease, not a zero budget", async () => {
+    // `??` does not coalesce `0`, so a zero-length lease derived a budget of
+    // `0` and `_await_inflight` returned before awaiting the cycle it had
+    // just found running (#1647) — the #1617 fold, other operand. A lease
+    // that expires the instant it is granted says nothing about how long a
+    // handler may hold the stream, so it takes the same fallback a lane that
+    // pinned no lease at all takes.
+    const { settles_at } = await budget_of(0);
+    expect(await settles_at(10_000)).toEqual({ before: false, after: true });
+  });
 });
