@@ -25,11 +25,15 @@
  * ride along so one map serves both tools.
  *
  * Vitest 4 discovered this root config from a sub-package cwd, which made
- * resolution CWD-independent. Vitest 5 does not (#1652), so a package that
- * runs vitest names this file explicitly — `vitest run --config
- * ../../vite.config.ts` — and `pnpm check:vitest-config` fails the build if
- * one forgets. A bare `vitest run` in a package loses `globals` and these
- * aliases, and the alias half fails silently by testing a stale `dist/`.
+ * resolution CWD-independent. Vitest 5 does not (#1652), so each package
+ * that runs vitest keeps a one-line `vitest.config.ts` re-exporting this
+ * file. That restores CWD-independence for every entry point — the `test`
+ * script and a bare `vitest` typed in the package folder alike — and keeps
+ * one alias map for the workspace instead of a copy per package.
+ * `pnpm check:vitest-config` fails the build if a package runs vitest
+ * without resolving this config. Getting it wrong costs `globals` and
+ * these aliases, and the alias half fails silently, by testing a stale
+ * `dist/` instead of the working tree.
  */
 
 import { createHash } from "node:crypto";

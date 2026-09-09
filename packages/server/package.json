@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "test": "vitest run --config ../../vite.config.ts"
+    "test": "vitest run"
   },
   "keywords": [],
   "license": "ISC",

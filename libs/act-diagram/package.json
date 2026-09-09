@@ -53,7 +53,7 @@
     "dev": "vite",
     "dev:server": "tsx watch --env-file=.env src/server/server.ts",
     "act": "NODE_OPTIONS=--disable-warning=DEP0205 FORCE_COLOR=${FORCE_COLOR:-1} tsx src/cli/index.ts",
-    "test": "vitest run --config ../../vite.config.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "lucide-react": "^1.41.0",
