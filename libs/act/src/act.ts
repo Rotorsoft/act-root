@@ -1093,6 +1093,14 @@ export class Act<
    * It is waited on like any cycle, and deriving from the lanes alone gave
    * it a budget of `0` whenever it was the only thing running — which
    * returned before the wait it was about to be added to.
+   *
+   * A lane configured `leaseMillis: 0` takes the fallback rather than its
+   * own value, which is why this coalesces on falsy and not just on absent
+   * (#1647). A zero-length lease expires the instant it is granted, so it
+   * has no answer to offer for "how long may a handler hold this stream" —
+   * it is the pinned-no-lease case spelled with a number, and #1617 already
+   * settled what that case is worth. Taking it literally derived a budget
+   * of `0` and abandoned the very cycle this had just found running.
    */
   private _derive_grace_ms(
     running: { readonly lease_millis: number | undefined }[],
@@ -1100,7 +1108,7 @@ export class Act<
   ): number {
     let max = settling ? DEFAULT_SHUTDOWN_GRACE_MS : 0;
     for (const c of running)
-      max = Math.max(max, c.lease_millis ?? DEFAULT_SHUTDOWN_GRACE_MS);
+      max = Math.max(max, c.lease_millis || DEFAULT_SHUTDOWN_GRACE_MS);
     return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
   }
 
