@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.0.22](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.21...@rotorsoft/act-diagram-v1.0.22) (2026-09-09)
+
+
+### Bug Fixes
+
+* **build:** re-export the root vitest config from the four packages that run it ([#1656](https://github.com/Rotorsoft/act-root/issues/1656)) ([4e13112](https://github.com/Rotorsoft/act-root/commit/4e13112587bdd264b1d6bed855fb35b5da75a712)), closes [#1652](https://github.com/Rotorsoft/act-root/issues/1652)
+
 # [@rotorsoft/act-diagram-v1.0.21](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.20...@rotorsoft/act-diagram-v1.0.21) (2026-09-07)
 
 
