@@ -12,7 +12,7 @@
     "dev:rebuild": "tsx src/rebuild-demo.ts",
     "dev:close": "tsx src/close-demo.ts",
     "dev:audit": "tsx src/audit-demo.ts",
-    "test": "vitest run"
+    "test": "vitest run --config ../../vite.config.ts"
   },
   "stackblitz": {
     "installDependencies": true,

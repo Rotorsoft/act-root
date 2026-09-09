@@ -11,7 +11,7 @@
     "drizzle:migrate": "drizzle-kit generate && drizzle-kit migrate",
     "drizzle:push": "drizzle-kit push",
     "drizzle:studio": "drizzle-kit studio",
-    "test": "vitest run"
+    "test": "vitest run --config ../../vite.config.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
