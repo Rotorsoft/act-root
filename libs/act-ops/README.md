@@ -84,7 +84,7 @@ The practical implication: when you swap `InMemoryIdempotencyStore` for a durabl
 
 ## Compatibility
 
-- **Node**: >=22.18.0
+- **Node**: >=22.23.2
 - **Peer**: none — does not depend on `@rotorsoft/act`. Designed to be installed by non-Act receivers (bus consumers, HTTP endpoints) and by Act apps alike.
 - **Module formats**: ESM (`import`) and CJS (`require`). No side effects.
 

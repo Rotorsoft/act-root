@@ -128,7 +128,7 @@ await app.unblock({ stream: "^webhooks-out-" }); // bulk
 
 ## Compatibility
 
-- **Node**: >=22.18.0
+- **Node**: >=22.23.2
 - **Peer**: `zod` ^4.4.3
 - **Bundled deps**: `@rotorsoft/act-patch` (state reducer)
 - **Module formats**: ESM + CJS
