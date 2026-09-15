@@ -16,8 +16,8 @@
     "@tanstack/react-query-devtools": "^5.102.8",
     "@trpc/client": "11.18.0",
     "@trpc/react-query": "11.18.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
