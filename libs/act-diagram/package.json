@@ -65,20 +65,20 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.123.0",
-    "@clack/prompts": "^1.7.0",
+    "@anthropic-ai/sdk": "^0.125.0",
+    "@clack/prompts": "^1.8.0",
     "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "picocolors": "^1.1.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2",
+    "vite": "^8.3.0",
     "vitest": "^5.0.0"
   }
 }
