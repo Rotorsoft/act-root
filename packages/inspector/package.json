@@ -29,11 +29,11 @@
     "cors": "^2.8.6",
     "d3-scale": "^4.0.2",
     "d3-time": "^3.1.0",
-    "lucide-react": "^1.41.0",
+    "lucide-react": "^1.45.0",
     "pg": "^8.23.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "zod": "^4.5.4"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
