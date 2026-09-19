@@ -65,7 +65,7 @@
     "@biomejs/biome": "^2.5.13",
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
-    "@fast-check/vitest": "^0.4.1",
+    "@fast-check/vitest": "^0.5.0",
     "@rotorsoft/act-tck": "workspace:^",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -83,8 +83,8 @@
     "@vitest/coverage-v8": "^5.0.0",
     "chance": "^1.1.13",
     "concurrently": "^10.0.5",
-    "fast-check": "^4.9.0",
-    "lint-staged": "^17.4.1",
+    "fast-check": "^4.10.1",
+    "lint-staged": "^17.5.1",
     "semantic-release": "^25.0.9",
     "semantic-release-monorepo": "^8.0.2",
     "simple-git-hooks": "^2.14.0",
@@ -92,7 +92,7 @@
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2",
+    "vite": "^8.3.0",
     "vitest": "^5.0.0"
   },
   "simple-git-hooks": {
