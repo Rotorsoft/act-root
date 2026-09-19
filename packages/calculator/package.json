@@ -21,7 +21,7 @@
   "dependencies": {
     "@rotorsoft/act": ">=1.31.22",
     "@trpc/server": "11.18.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^25.9.6",
