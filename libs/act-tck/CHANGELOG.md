@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.37.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.4...@rotorsoft/act-tck-v1.37.5) (2026-09-21)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#1668](https://github.com/Rotorsoft/act-root/issues/1668)) ([7132fb2](https://github.com/Rotorsoft/act-root/commit/7132fb2a063b9a7a6fa0685dd350827c742b5117))
+
 # [@rotorsoft/act-tck-v1.37.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.3...@rotorsoft/act-tck-v1.37.4) (2026-09-09)
 
 
