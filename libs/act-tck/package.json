@@ -51,7 +51,7 @@
   "peerDependencies": {
     "@fast-check/vitest": ">=0.4.1",
     "@rotorsoft/act": "workspace:^",
-    "vitest": ">=5.0.0",
+    "vitest": ">=5.0.1",
     "zod": "^4.5.4"
   },
   "devDependencies": {
