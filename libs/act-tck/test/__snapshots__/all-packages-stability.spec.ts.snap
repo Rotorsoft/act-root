@@ -2368,10 +2368,8 @@ export class Act<
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
     for (const r of results) {
-      // \`fetched\` crosses back to the caller, which carries no actor — gate
-      // it default-deny like \`query\`/\`query_array\` (#1673). Handlers read
-      // through their own strip, which removes sensitive keys rather than
-      // redacting them, so only this observed view is rewritten.
+      // Actor-less like \`query\`/\`query_array\`, so default-deny (#1673).
+      // Handlers are unaffected — they read through their own strip.
       fetched.push(
         ...r.fetched.map((f) => ({
           ...f,
@@ -22477,10 +22475,8 @@ export class Act<
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
     for (const r of results) {
-      // \`fetched\` crosses back to the caller, which carries no actor — gate
-      // it default-deny like \`query\`/\`query_array\` (#1673). Handlers read
-      // through their own strip, which removes sensitive keys rather than
-      // redacting them, so only this observed view is rewritten.
+      // Actor-less like \`query\`/\`query_array\`, so default-deny (#1673).
+      // Handlers are unaffected — they read through their own strip.
       fetched.push(
         ...r.fetched.map((f) => ({
           ...f,
