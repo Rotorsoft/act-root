@@ -1657,7 +1657,18 @@ export class Act<
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
     for (const r of results) {
-      fetched.push(...r.fetched);
+      // `fetched` crosses back to the caller, which carries no actor — gate
+      // it default-deny like `query`/`query_array` (#1673). Handlers read
+      // through their own strip, which removes sensitive keys rather than
+      // redacting them, so only this observed view is rewritten.
+      fetched.push(
+        ...r.fetched.map((f) => ({
+          ...f,
+          events: f.events.map((e) =>
+            this.registry.query_gate(e.name as string)(e)
+          ),
+        }))
+      );
       leased.push(...r.leased);
       acked.push(...r.acked);
       blocked.push(...r.blocked);

@@ -51,6 +51,15 @@ const UserNoPolicy = state({ UserNoPolicy: userSchema })
   .emit((p) => ["NoPolicyRegistered", p])
   .build();
 
+// No sensitive fields at all — must pass through every gate untouched.
+const Plain = state({ Plain: z.object({ n: z.number().optional() }) })
+  .init(() => ({}))
+  .emits({ Pinged: z.object({}) })
+  .patch({ Pinged: () => ({}) })
+  .on({ ping: z.object({}) })
+  .emit(() => ["Pinged", {}])
+  .build();
+
 const owner: Actor = { id: "user-1", name: "Ursula" };
 const stranger: Actor = { id: "user-2", name: "Strange" };
 const admin: Actor = {
@@ -475,5 +484,95 @@ describe("query / query_array default-deny PII gate (#1277)", () => {
     // Non-sensitive event passes through — same object, untouched.
     const promoted = events.find((e) => e.name === "UserPromoted3");
     expect(promoted?.data).toEqual({ plan: "pro" });
+  });
+});
+
+describe("drain() default-deny PII gate (#1673)", () => {
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("Drain.fetched redacts sensitive fields and drops the pii sidecar", async () => {
+    const app = act()
+      .withState(User)
+      .on("UserRegistered")
+      .do(async function noop() {})
+      .to(() => ({ target: "audit" }))
+      .build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "pro" }
+    );
+    await app.correlate();
+    const { fetched } = await app.drain();
+
+    const event = fetched.flatMap((f) => f.events).at(0);
+    expect(event?.name).toBe("UserRegistered");
+    expect(event?.data).toEqual({
+      email: REDACTED,
+      name: REDACTED,
+      plan: "pro",
+    });
+    expect((event as { pii?: unknown }).pii).toBeUndefined();
+  });
+
+  it("a default-deny state (no .discloses) is redacted on drain too", async () => {
+    const app = act()
+      .withState(UserNoPolicy)
+      .on("NoPolicyRegistered")
+      .do(async function noop2() {})
+      .to(() => ({ target: "audit" }))
+      .build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    await app.correlate();
+    const { fetched } = await app.drain();
+
+    const event = fetched.flatMap((f) => f.events).at(0);
+    expect(event?.data).toEqual({
+      email: REDACTED,
+      name: REDACTED,
+      plan: "free",
+    });
+    expect((event as { pii?: unknown }).pii).toBeUndefined();
+  });
+
+  it("the handler still receives plaintext — only the returned view is gated", async () => {
+    const seen: unknown[] = [];
+    const app = act()
+      .withState(User)
+      .on("UserRegistered")
+      .do(async function record(e) {
+        seen.push(e.data);
+      })
+      .to(() => ({ target: "audit" }))
+      .build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor: owner },
+      { email: "u@example.com", name: "Ursula", plan: "pro" }
+    );
+    await app.correlate();
+    await app.drain();
+    // Handlers read through their own strip: sensitive keys removed, never
+    // REDACTED placeholders, and never a pii sidecar.
+    expect(seen).toEqual([{ plan: "pro" }]);
+  });
+
+  it("non-sensitive events pass through drain unchanged", async () => {
+    const app = act()
+      .withState(Plain)
+      .on("Pinged")
+      .do(async function noop3() {})
+      .to(() => ({ target: "audit" }))
+      .build();
+    await app.do("ping", { stream: "p-1", actor: owner }, {});
+    await app.correlate();
+    const { fetched } = await app.drain();
+    expect(fetched.flatMap((f) => f.events).at(0)?.data).toEqual({});
   });
 });
