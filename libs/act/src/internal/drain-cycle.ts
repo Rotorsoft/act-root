@@ -724,7 +724,14 @@ export class DrainController<
       for (const lease of acked) this._defer.delete(lease.stream);
       for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
-        const next = h.defer ?? (h.block ? undefined : h.next_attempt_at);
+        // A no-progress failure submits no ack, so its lease is still held
+        // and `claim` excludes the stream even from this worker — park until
+        // the lease lapses or nothing re-arms us (#1670).
+        const retry_at =
+          h.error && !h.block
+            ? (h.next_attempt_at ?? Date.now() + leaseMillis)
+            : undefined;
+        const next = h.defer ?? retry_at;
         if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
       if (this._defer.size > 0) this._defer.schedule();
