@@ -654,7 +654,7 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
-    await store().query<TEvents>(
+    const found = await store().query<TEvents>(
       (event) => {
         last_id = event.id;
         const register = this._registry.events[event.name];
@@ -823,13 +823,10 @@ export class CorrelateCycle<
       }
       return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance. Disarm only here: this is the
-    // branch where the scan resolved no target at all, which is what "the log
-    // has nothing more for us" looks like. A scan that found something leaves
-    // the flag up, so the next pass continues from the new checkpoint rather
-    // than stopping mid-backlog.
+    // Nothing to subscribe — safe to advance. Only a short page proves the
+    // log is exhausted; resolving no target does not (#1669).
     this._checkpoint = last_id;
-    this._armed = false;
+    this._armed = found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 

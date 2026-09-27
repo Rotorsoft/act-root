@@ -20,6 +20,15 @@ const Ticker = state({ Ticker: z.object({ n: z.number() }) })
   .emit(() => ["Ticked", {}])
   .build();
 
+/** A state whose event has NO registered reaction. */
+const Quiet = state({ Quiet: z.object({ n: z.number() }) })
+  .init(() => ({ n: 0 }))
+  .emits({ Hushed: ZodEmpty })
+  .patch({ Hushed: (_, s) => ({ n: s.n + 1 }) })
+  .on({ hush: ZodEmpty })
+  .emit(() => ["Hushed", {}])
+  .build();
+
 const actor = { id: "a", name: "a" };
 
 /** Count store reads, which is what a correlate scan costs. */
@@ -113,6 +122,105 @@ describe("correlate sits still when nothing has happened", () => {
     // All twelve targets discovered across the windowed scans, not just the
     // first window's three.
     expect(subscribed).toBe(12);
+  });
+
+  it("keeps scanning past a FULL window that resolved no target (#1669)", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function noop() {})
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    // One window's worth of inert events, then the reactive one.
+    for (let i = 0; i < 5; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+    await app.do("tick", { stream: "s1", actor }, {});
+
+    let subscribed = 0;
+    for (let i = 0; i < 10; i++) {
+      const scan = await app.correlate({ after: -1, limit: 5 });
+      subscribed += scan.subscribed;
+    }
+    expect(subscribed).toBe(1);
+  });
+
+  it("a full inert window does not make settle report a false catch-up (#1669)", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const handled: string[] = [];
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function record(e) {
+        handled.push(e.stream);
+      })
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    // The default settle window is 100, so 100 inert commits fill it.
+    for (let i = 0; i < 100; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+    await app.do("tick", { stream: "s1", actor }, {});
+
+    // `settle` is debounced: it schedules and returns.
+    const done = new Promise<void>((resolve) => {
+      app.on("settled", () => resolve());
+    });
+    app.settle({ debounceMs: 0 });
+    await done;
+    expect(handled).toEqual(["s1"]);
+  });
+
+  it("still parks when the window came back short (#1669 keeps #1517)", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function noop() {})
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    for (let i = 0; i < 3; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+
+    // Three events in a window of ten: short, so it parks.
+    await app.correlate({ after: -1, limit: 10 });
+    const queries = count_queries(raw);
+    await app.correlate({ after: -1, limit: 10 });
+    await app.correlate({ after: -1, limit: 10 });
+    expect(queries.n).toBe(0);
+  });
+
+  it("parks after an UNBOUNDED scan that resolved no target (#1669)", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function noop() {})
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    for (let i = 0; i < 4; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+
+    // `{}` overrides the default query, so `limit` is undefined.
+    await app.correlate({});
+    const queries = count_queries(raw);
+    await app.correlate({});
+    expect(queries.n).toBe(0);
   });
 
   it("polling still discovers a commit this process never saw", async () => {
