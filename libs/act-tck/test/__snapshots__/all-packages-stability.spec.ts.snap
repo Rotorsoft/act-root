@@ -53180,6 +53180,34 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // SQL standard. See: https://www.postgresql.org/docs/current/errcodes-appendix.html
 const PG_UNIQUE_VIOLATION = "23505";
 
+/**
+ * Fold a subscribe batch to one entry per stream, keeping the maximum
+ * priority (its lane rides along, #1599) and the maximum work mark (#1485).
+ *
+ * \`UPDATE ... FROM\` may touch a target row only once, so Postgres picks an
+ * arbitrary source row when several match — losing the merge the port
+ * contract requires. \`classify_registry\` keys statics by \`target|source\`,
+ * so two static reactions to one target from different sources really do
+ * arrive as two entries with the same stream (#1672).
+ */
+function merge_by_stream(streams: SubscribeInput[]): SubscribeInput[] {
+  const by_stream = new Map<string, SubscribeInput>();
+  for (const entry of streams) {
+    const prev = by_stream.get(entry.stream);
+    if (!prev) {
+      by_stream.set(entry.stream, entry);
+      continue;
+    }
+    const win = (entry.priority ?? 0) >= (prev.priority ?? 0) ? entry : prev;
+    const mark = Math.max(prev.correlated_at ?? -1, entry.correlated_at ?? -1);
+    by_stream.set(entry.stream, {
+      ...win,
+      ...(mark >= 0 ? { correlated_at: mark } : {}),
+    });
+  }
+  return [...by_stream.values()];
+}
+
 // The two SQLSTATEs Postgres raises for a NUL byte (\`\\u0000\`) in a committed
 // payload: \`22P05\` from the jsonb parser (\`data\` / \`meta\` / \`pii\`) and
 // \`22021\` from the UTF-8 decoder (\`stream\` / \`name\`, which are text).
@@ -54406,6 +54434,7 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       let subscribed = 0;
       if (streams.length) {
+        const merged = merge_by_stream(streams);
         // Two statements, because \`subscribed\` means "newly registered
         // streams" and not "rows touched":
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
@@ -54424,7 +54453,7 @@ export class PostgresStore implements Store {
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           \`,
-          [JSON.stringify(streams)]
+          [JSON.stringify(merged)]
         );
         subscribed = inserted ?? 0;
         // Priority keeps the max (ACT-102: the highest-priority registered
@@ -54455,7 +54484,7 @@ export class PostgresStore implements Store {
                      AND (t.correlated_at IS NULL
                           OR t.correlated_at < (s->>'correlated_at')::int)))
           \`,
-          [JSON.stringify(streams)]
+          [JSON.stringify(merged)]
         );
       }
       // The correlate checkpoint is written by its own producer, in the call
@@ -61620,6 +61649,100 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         } finally {
           await fresh.dispose();
         }
+      });
+      // Placed last in this block: these register extra claimable streams,
+      // and the claim-budget assertions above share one store.
+      // The same contract, but with the duplicates inside ONE call (#1672).
+      // \`classify_registry\` keys statics by \`target|source\`, so two static
+      // reactions to one target from different sources produce two entries
+      // with the same stream in a single \`subscribe\` batch. A batched
+      // multi-row \`UPDATE ... FROM\` may touch a target row only once, which
+      // silently kept an arbitrary entry instead of the max. The stored
+      // value must sit BELOW both entries for two source rows to qualify.
+      it("keeps the maximum priority when one batch names a stream twice", async () => {
+        const s = \`sub-dup-\${uid()}\`;
+        const read = async () => {
+          const got: { priority?: number; correlated_at?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+              got.correlated_at = p.correlated_at;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got;
+        };
+
+        await store.subscribe([{ stream: s, priority: 0 }]);
+        await store.subscribe([
+          { stream: s, priority: 3 },
+          { stream: s, priority: 9 },
+        ]);
+        expect((await read()).priority).toBe(9);
+
+        // Order must not matter — the max wins either way.
+        const s2 = \`sub-dup2-\${uid()}\`;
+        await store.subscribe([{ stream: s2, priority: 0 }]);
+        await store.subscribe([
+          { stream: s2, priority: 9 },
+          { stream: s2, priority: 3 },
+        ]);
+        const read2 = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s2, stream_exact: true }
+          );
+          return got.priority;
+        };
+        expect(await read2()).toBe(9);
+
+        // An omitted priority means 0, so it must not win over a declared
+        // one in either position within the batch.
+        for (const [a, b] of [
+          [{}, { priority: 4 }],
+          [{ priority: 4 }, {}],
+        ] as const) {
+          const s3 = \`sub-dup-omit-\${uid()}\`;
+          await store.subscribe([{ stream: s3, priority: 0 }]);
+          await store.subscribe([
+            { stream: s3, ...a },
+            { stream: s3, ...b },
+          ]);
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s3, stream_exact: true }
+          );
+          expect(got.priority).toBe(4);
+        }
+      });
+
+      // Same statement, the work-mark column: a duplicated stream must keep
+      // the highest \`correlated_at\`, never an arbitrary one (#1672/#1485).
+      it("keeps the maximum correlated_at when one batch names a stream twice", async () => {
+        const s = \`sub-dup-mark-\${uid()}\`;
+        const read = async () => {
+          const got: { correlated_at?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.correlated_at = p.correlated_at;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.correlated_at;
+        };
+
+        await store.subscribe([{ stream: s, priority: 0 }]);
+        await store.subscribe([
+          { stream: s, priority: 0, correlated_at: 1 },
+          { stream: s, priority: 0, correlated_at: 5 },
+        ]);
+        expect(await read()).toBe(5);
       });
     });
 

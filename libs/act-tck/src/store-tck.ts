@@ -1710,6 +1710,100 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.dispose();
         }
       });
+      // Placed last in this block: these register extra claimable streams,
+      // and the claim-budget assertions above share one store.
+      // The same contract, but with the duplicates inside ONE call (#1672).
+      // `classify_registry` keys statics by `target|source`, so two static
+      // reactions to one target from different sources produce two entries
+      // with the same stream in a single `subscribe` batch. A batched
+      // multi-row `UPDATE ... FROM` may touch a target row only once, which
+      // silently kept an arbitrary entry instead of the max. The stored
+      // value must sit BELOW both entries for two source rows to qualify.
+      it("keeps the maximum priority when one batch names a stream twice", async () => {
+        const s = `sub-dup-${uid()}`;
+        const read = async () => {
+          const got: { priority?: number; correlated_at?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+              got.correlated_at = p.correlated_at;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got;
+        };
+
+        await store.subscribe([{ stream: s, priority: 0 }]);
+        await store.subscribe([
+          { stream: s, priority: 3 },
+          { stream: s, priority: 9 },
+        ]);
+        expect((await read()).priority).toBe(9);
+
+        // Order must not matter — the max wins either way.
+        const s2 = `sub-dup2-${uid()}`;
+        await store.subscribe([{ stream: s2, priority: 0 }]);
+        await store.subscribe([
+          { stream: s2, priority: 9 },
+          { stream: s2, priority: 3 },
+        ]);
+        const read2 = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s2, stream_exact: true }
+          );
+          return got.priority;
+        };
+        expect(await read2()).toBe(9);
+
+        // An omitted priority means 0, so it must not win over a declared
+        // one in either position within the batch.
+        for (const [a, b] of [
+          [{}, { priority: 4 }],
+          [{ priority: 4 }, {}],
+        ] as const) {
+          const s3 = `sub-dup-omit-${uid()}`;
+          await store.subscribe([{ stream: s3, priority: 0 }]);
+          await store.subscribe([
+            { stream: s3, ...a },
+            { stream: s3, ...b },
+          ]);
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s3, stream_exact: true }
+          );
+          expect(got.priority).toBe(4);
+        }
+      });
+
+      // Same statement, the work-mark column: a duplicated stream must keep
+      // the highest `correlated_at`, never an arbitrary one (#1672/#1485).
+      it("keeps the maximum correlated_at when one batch names a stream twice", async () => {
+        const s = `sub-dup-mark-${uid()}`;
+        const read = async () => {
+          const got: { correlated_at?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.correlated_at = p.correlated_at;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.correlated_at;
+        };
+
+        await store.subscribe([{ stream: s, priority: 0 }]);
+        await store.subscribe([
+          { stream: s, priority: 0, correlated_at: 1 },
+          { stream: s, priority: 0, correlated_at: 5 },
+        ]);
+        expect(await read()).toBe(5);
+      });
     });
 
     // ACT-980: the TCK previously asserted only the *shape* of claim()

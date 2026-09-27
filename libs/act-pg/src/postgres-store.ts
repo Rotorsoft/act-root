@@ -123,6 +123,34 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // SQL standard. See: https://www.postgresql.org/docs/current/errcodes-appendix.html
 const PG_UNIQUE_VIOLATION = "23505";
 
+/**
+ * Fold a subscribe batch to one entry per stream, keeping the maximum
+ * priority (its lane rides along, #1599) and the maximum work mark (#1485).
+ *
+ * `UPDATE ... FROM` may touch a target row only once, so Postgres picks an
+ * arbitrary source row when several match — losing the merge the port
+ * contract requires. `classify_registry` keys statics by `target|source`,
+ * so two static reactions to one target from different sources really do
+ * arrive as two entries with the same stream (#1672).
+ */
+function merge_by_stream(streams: SubscribeInput[]): SubscribeInput[] {
+  const by_stream = new Map<string, SubscribeInput>();
+  for (const entry of streams) {
+    const prev = by_stream.get(entry.stream);
+    if (!prev) {
+      by_stream.set(entry.stream, entry);
+      continue;
+    }
+    const win = (entry.priority ?? 0) >= (prev.priority ?? 0) ? entry : prev;
+    const mark = Math.max(prev.correlated_at ?? -1, entry.correlated_at ?? -1);
+    by_stream.set(entry.stream, {
+      ...win,
+      ...(mark >= 0 ? { correlated_at: mark } : {}),
+    });
+  }
+  return [...by_stream.values()];
+}
+
 // The two SQLSTATEs Postgres raises for a NUL byte (`\u0000`) in a committed
 // payload: `22P05` from the jsonb parser (`data` / `meta` / `pii`) and
 // `22021` from the UTF-8 decoder (`stream` / `name`, which are text).
@@ -1349,6 +1377,7 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       let subscribed = 0;
       if (streams.length) {
+        const merged = merge_by_stream(streams);
         // Two statements, because `subscribed` means "newly registered
         // streams" and not "rows touched":
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
@@ -1367,7 +1396,7 @@ export class PostgresStore implements Store {
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           `,
-          [JSON.stringify(streams)]
+          [JSON.stringify(merged)]
         );
         subscribed = inserted ?? 0;
         // Priority keeps the max (ACT-102: the highest-priority registered
@@ -1398,7 +1427,7 @@ export class PostgresStore implements Store {
                      AND (t.correlated_at IS NULL
                           OR t.correlated_at < (s->>'correlated_at')::int)))
           `,
-          [JSON.stringify(streams)]
+          [JSON.stringify(merged)]
         );
       }
       // The correlate checkpoint is written by its own producer, in the call
