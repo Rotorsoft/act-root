@@ -300,7 +300,7 @@ Set `maxRetries: 0` for handlers that should never retry — typically those tha
 
 ### Backoff
 
-Without `backoff`, the framework re-claims a failed stream on the next drain cycle — typically within milliseconds. For handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by persisting a defer schedule on the stream, so it isn't re-dispatched — by any worker — until the delay elapses.
+Without `backoff`, the framework re-claims a failed stream once its lease lapses: a failed no-progress cycle submits no ack, so it keeps the lease and `leaseMillis` sets the floor on the next attempt. With a short lease, for handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by persisting a defer schedule on the stream, so it isn't re-dispatched — by any worker — until the delay elapses.
 
 ```typescript no-check
 backoff: {

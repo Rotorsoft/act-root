@@ -204,6 +204,72 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts).toBe(2);
   });
 
+  it("retries a no-backoff failure once its own lease lapses (#1670)", async () => {
+    // A failed no-progress cycle submits no ack, so the lease stays held —
+    // and `claim` excludes a live-leased stream even from its holder. Any
+    // drain inside that window therefore claims nothing, which used to be
+    // read as "fully caught up" and disarmed the controller.
+    const LEASE = 300;
+    let attempts = 0;
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function alwaysFails() {
+          attempts++;
+          throw new Error("transient");
+        },
+        { maxRetries: 5 }
+      )
+      .build();
+
+    await app.do("tick", { stream: "s1", actor }, {});
+    await app.correlate();
+
+    await app.drain({ leaseMillis: LEASE });
+    expect(attempts).toBe(1);
+
+    // Inside the lease window: claims nothing, must not conclude "caught up".
+    await app.drain({ leaseMillis: LEASE });
+    expect(attempts).toBe(1);
+
+    await sleep(LEASE + 100);
+    await app.drain({ leaseMillis: LEASE });
+    expect(attempts).toBe(2);
+  });
+
+  it("spends the whole retry budget and blocks, with no backoff configured (#1670)", async () => {
+    const LEASE = 60;
+    let attempts = 0;
+    const blocked: string[] = [];
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(
+        async function alwaysFails() {
+          attempts++;
+          throw new Error("transient");
+        },
+        { maxRetries: 2, blockOnError: true }
+      )
+      .build();
+    app.on("blocked", (leases) => {
+      for (const l of leases as { stream: string }[]) blocked.push(l.stream);
+    });
+
+    await app.do("tick", { stream: "s1", actor }, {});
+    await app.correlate();
+
+    // A drain inside every lease window, as a cycleMs worker would issue.
+    for (let i = 0; i < 6; i++) {
+      await app.drain({ leaseMillis: LEASE });
+      await app.drain({ leaseMillis: LEASE });
+      await sleep(LEASE + 20);
+    }
+    expect(attempts).toBe(3);
+    expect(blocked).toEqual(["s1"]);
+  });
+
   it("advances the watermark past the succeeded prefix AND persists the window on partial progress (#1278)", async () => {
     // Two `ticked` events land on one stream for a single backoff reaction.
     // The handler succeeds on the first event and throws on the second —
