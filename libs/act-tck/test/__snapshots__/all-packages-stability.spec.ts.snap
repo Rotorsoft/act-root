@@ -6022,17 +6022,21 @@ export function classify_registry<
               \`("\${recorded_lane}" vs "\${lane_name}")\`
           );
         }
-        const key = \`\${target}|\${source ?? ""}\`;
-        const existing = statics.get(key);
+        // Keyed by target alone, because a subscription row IS keyed by
+        // stream: every adapter sets \`source\` once at creation and ignores
+        // it thereafter, so a second entry for one target could only ever
+        // contribute its priority — and a batch carrying two would leave
+        // the merge to the adapter, which a single batched SQL statement
+        // cannot do (#1672). One entry per stream, max priority, so the
+        // highest-priority registrant sets the scheduling priority.
+        const existing = statics.get(target);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority, lane });
+          statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep the max
-          // priority so the highest-priority registrant sets the scheduling
-          // priority (mirrors subscribe-side semantics). \`existing.priority\`
-          // is always defined here since we always set it when inserting, but
-          // the StaticTarget type marks it optional for external consumers.
-          statics.set(key, { ...existing, priority });
+          // \`existing.priority\` is always defined here since we always set
+          // it when inserting, but the StaticTarget type marks it optional
+          // for external consumers.
+          statics.set(target, { ...existing, priority });
         }
       }
     }
@@ -15731,7 +15735,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its \`source\` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (\`UPDATE ... FROM\` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -26120,17 +26132,21 @@ export function classify_registry<
               \`("\${recorded_lane}" vs "\${lane_name}")\`
           );
         }
-        const key = \`\${target}|\${source ?? ""}\`;
-        const existing = statics.get(key);
+        // Keyed by target alone, because a subscription row IS keyed by
+        // stream: every adapter sets \`source\` once at creation and ignores
+        // it thereafter, so a second entry for one target could only ever
+        // contribute its priority — and a batch carrying two would leave
+        // the merge to the adapter, which a single batched SQL statement
+        // cannot do (#1672). One entry per stream, max priority, so the
+        // highest-priority registrant sets the scheduling priority.
+        const existing = statics.get(target);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority, lane });
+          statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep the max
-          // priority so the highest-priority registrant sets the scheduling
-          // priority (mirrors subscribe-side semantics). \`existing.priority\`
-          // is always defined here since we always set it when inserting, but
-          // the StaticTarget type marks it optional for external consumers.
-          statics.set(key, { ...existing, priority });
+          // \`existing.priority\` is always defined here since we always set
+          // it when inserting, but the StaticTarget type marks it optional
+          // for external consumers.
+          statics.set(target, { ...existing, priority });
         }
       }
     }
@@ -34635,7 +34651,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its \`source\` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (\`UPDATE ... FROM\` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -40835,7 +40859,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its \`source\` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (\`UPDATE ... FROM\` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -53180,28 +53212,6 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // SQL standard. See: https://www.postgresql.org/docs/current/errcodes-appendix.html
 const PG_UNIQUE_VIOLATION = "23505";
 
-/**
- * Fold a subscribe batch to one entry per stream, keeping the maximum
- * priority (its lane rides along, #1599) and the maximum work mark (#1485).
- * \`UPDATE ... FROM\` may touch a target row only once, so Postgres would
- * otherwise keep an arbitrary entry when one batch names a stream twice
- * (#1672) — which \`classify_registry\`'s \`target|source\` keying produces.
- */
-function merge_by_stream(streams: SubscribeInput[]): SubscribeInput[] {
-  const by_stream = new Map<string, SubscribeInput>();
-  for (const entry of streams) {
-    // On first sight the entry folds against itself, which is a no-op.
-    const prev = by_stream.get(entry.stream) ?? entry;
-    const win = (entry.priority ?? 0) >= (prev.priority ?? 0) ? entry : prev;
-    const mark = Math.max(prev.correlated_at ?? -1, entry.correlated_at ?? -1);
-    by_stream.set(
-      entry.stream,
-      mark < 0 ? win : { ...win, correlated_at: mark }
-    );
-  }
-  return [...by_stream.values()];
-}
-
 // The two SQLSTATEs Postgres raises for a NUL byte (\`\\u0000\`) in a committed
 // payload: \`22P05\` from the jsonb parser (\`data\` / \`meta\` / \`pii\`) and
 // \`22021\` from the UTF-8 decoder (\`stream\` / \`name\`, which are text).
@@ -54428,7 +54438,6 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       let subscribed = 0;
       if (streams.length) {
-        const merged = merge_by_stream(streams);
         // Two statements, because \`subscribed\` means "newly registered
         // streams" and not "rows touched":
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
@@ -54447,7 +54456,7 @@ export class PostgresStore implements Store {
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           \`,
-          [JSON.stringify(merged)]
+          [JSON.stringify(streams)]
         );
         subscribed = inserted ?? 0;
         // Priority keeps the max (ACT-102: the highest-priority registered
@@ -54478,7 +54487,7 @@ export class PostgresStore implements Store {
                      AND (t.correlated_at IS NULL
                           OR t.correlated_at < (s->>'correlated_at')::int)))
           \`,
-          [JSON.stringify(merged)]
+          [JSON.stringify(streams)]
         );
       }
       // The correlate checkpoint is written by its own producer, in the call
@@ -61643,103 +61652,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         } finally {
           await fresh.dispose();
         }
-      });
-      // Placed last in this block: these register extra claimable streams,
-      // and the claim-budget assertions above share one store.
-      // The same contract, but with the duplicates inside ONE call (#1672).
-      // \`classify_registry\` keys statics by \`target|source\`, so two static
-      // reactions to one target from different sources produce two entries
-      // with the same stream in a single \`subscribe\` batch. A batched
-      // multi-row \`UPDATE ... FROM\` may touch a target row only once, which
-      // silently kept an arbitrary entry instead of the max. The stored
-      // value must sit BELOW both entries for two source rows to qualify.
-      it("keeps the maximum priority when one batch names a stream twice", async () => {
-        const s = \`sub-dup-\${uid()}\`;
-        const read = async () => {
-          const got: { priority?: number; correlated_at?: number } = {};
-          await store.query_streams(
-            (p) => {
-              got.priority = p.priority;
-              got.correlated_at = p.correlated_at;
-            },
-            { stream: s, stream_exact: true }
-          );
-          return got;
-        };
-
-        await store.subscribe([{ stream: s, priority: 0 }]);
-        await store.subscribe([
-          { stream: s, priority: 3 },
-          { stream: s, priority: 9 },
-        ]);
-        expect((await read()).priority).toBe(9);
-
-        // Order must not matter — the max wins either way.
-        const s2 = \`sub-dup2-\${uid()}\`;
-        await store.subscribe([{ stream: s2, priority: 0 }]);
-        await store.subscribe([
-          { stream: s2, priority: 9 },
-          { stream: s2, priority: 3 },
-        ]);
-        const read2 = async () => {
-          const got: { priority?: number } = {};
-          await store.query_streams(
-            (p) => {
-              got.priority = p.priority;
-            },
-            { stream: s2, stream_exact: true }
-          );
-          return got.priority;
-        };
-        expect(await read2()).toBe(9);
-
-        // An omitted priority means 0, so it must not win over a declared
-        // one in either position within the batch.
-        for (const [a, b] of [
-          [{}, { priority: 4 }],
-          [{ priority: 4 }, {}],
-        ] as const) {
-          const s3 = \`sub-dup-omit-\${uid()}\`;
-          await store.subscribe([{ stream: s3, priority: 0 }]);
-          await store.subscribe([
-            { stream: s3, ...a },
-            { stream: s3, ...b },
-          ]);
-          const got: { priority?: number } = {};
-          await store.query_streams(
-            (p) => {
-              got.priority = p.priority;
-            },
-            { stream: s3, stream_exact: true }
-          );
-          expect(got.priority).toBe(4);
-        }
-      });
-
-      // Same statement, the work-mark column: a duplicated stream must keep
-      // the highest \`correlated_at\`, never an arbitrary one (#1672/#1485).
-      it("keeps the maximum correlated_at when one batch names a stream twice", async () => {
-        const s = \`sub-dup-mark-\${uid()}\`;
-        const read = async () => {
-          const got: { correlated_at?: number } = {};
-          await store.query_streams(
-            (p) => {
-              got.correlated_at = p.correlated_at;
-            },
-            { stream: s, stream_exact: true }
-          );
-          return got.correlated_at;
-        };
-
-        await store.subscribe([{ stream: s, priority: 0 }]);
-        await store.subscribe([
-          { stream: s, priority: 0, correlated_at: 1 },
-          { stream: s, priority: 0, correlated_at: 5 },
-        ]);
-        expect(await read()).toBe(5);
-        // A marked stream is claimable, and this block shares one store with
-        // cases that assert against a bounded claim budget. Park it.
-        await store.defer([s], Date.now() + 3_600_000);
       });
     });
 

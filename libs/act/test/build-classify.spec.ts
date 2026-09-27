@@ -53,7 +53,7 @@ describe("classify_registry", () => {
     expect(c.reactive_events.has("Decremented")).toBe(false);
   });
 
-  it("dedupes static targets by (target, source)", () => {
+  it("dedupes static targets by target", () => {
     // Two reactions to different events that land on the same projection
     // should yield ONE static target.
     const Proj = projection("dest")
@@ -78,5 +78,56 @@ describe("classify_registry", () => {
     ]);
     expect(c.reactive_events.has("Incremented")).toBe(true);
     expect(c.reactive_events.has("Decremented")).toBe(true);
+  });
+
+  it("collapses same-target reactions from different sources, keeping the max priority (#1672)", () => {
+    // A subscription row is keyed by stream, so the batch must carry one
+    // entry per target. Two entries would leave the priority merge to the
+    // adapter, and a single batched UPDATE cannot do it.
+    const app = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function reactLow() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA", priority: 1 })
+      .on("Incremented")
+      .do(function reactHigh() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB", priority: 7 })
+      .build() as unknown as {
+      registry: Parameters<typeof classify_registry>[0];
+      _states: Parameters<typeof classify_registry>[1];
+    };
+    const c = classify_registry(app.registry, app._states);
+
+    expect(c.static_targets).toEqual([
+      { stream: "shared", source: "sA", priority: 7 },
+    ]);
+  });
+
+  it("keeps the max priority regardless of declaration order (#1672)", () => {
+    const app = act()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function reactHigh2() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sA", priority: 7 })
+      .on("Incremented")
+      .do(function reactLow2() {
+        return Promise.resolve();
+      })
+      .to({ target: "shared", source: "sB", priority: 1 })
+      .build() as unknown as {
+      registry: Parameters<typeof classify_registry>[0];
+      _states: Parameters<typeof classify_registry>[1];
+    };
+    const c = classify_registry(app.registry, app._states);
+
+    expect(c.static_targets).toEqual([
+      { stream: "shared", source: "sA", priority: 7 },
+    ]);
   });
 });

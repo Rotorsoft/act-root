@@ -724,7 +724,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its `source` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (`UPDATE ... FROM` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns `subscribed` count of newly registered streams, `watermark` max `at` across all streams
    *
    * @example
