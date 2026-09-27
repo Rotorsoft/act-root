@@ -77,6 +77,10 @@ A mark is an assertion about the log, so the scan only raises one for an event t
 
 The checkpoint advances only after `subscribe` succeeds. If `subscribe` throws, the checkpoint stays where it was and the next correlate retries from the same point.
 
+**Parking the scan ([#1510](https://github.com/Rotorsoft/act-root/issues/1510), [#1517](https://github.com/Rotorsoft/act-root/issues/1517)).** Correlate keeps its own armed flag, so a system where nothing has happened stops paying for a scan. A commit through `do()`, a `reset`/`unblock`, a cross-process `notify`, or a poll tick arms it; a scan parks it again once it has read to the end of the log.
+
+"Read to the end" is decided by the **page coming back short**, not by whether the scan resolved a target ([#1669](https://github.com/Rotorsoft/act-root/issues/1669)). Every caller passes a `limit`, and most domain events in a real app have no reactions — so a full window of events that resolved nothing is indistinguishable from an empty log. Parking there would strand every reaction past that window, because the armed check returns without a store read. A scan that fills its window therefore stays armed and the next pass continues from the new checkpoint; only a short page proves there is nothing left. A scan that *did* resolve targets always stays armed, so a backlog keeps moving.
+
 **Cold-start floor (ACT-1207).** A restart resumes from the durable correlate checkpoint ([#1484](https://github.com/Rotorsoft/act-root/issues/1484)). On a *first* boot there is none, and the checkpoint would naively jump to the store watermark (`max(at)` across every subscribed stream) — which overshoots any event committed but not correlated before a crash, since a busier stream can have acked past it. The cold-start checkpoint is therefore floored at `watermark - back_scan` so the crash-window tail is re-scanned. Re-scanning already-correlated events is harmless: `subscribe` is an idempotent UPSERT and a re-issued mark never regresses.
 
 ### The subscribed-streams LRU

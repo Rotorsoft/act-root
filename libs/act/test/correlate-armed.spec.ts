@@ -20,6 +20,19 @@ const Ticker = state({ Ticker: z.object({ n: z.number() }) })
   .emit(() => ["Ticked", {}])
   .build();
 
+/**
+ * A state whose event has NO registered reaction. A page full of these is
+ * indistinguishable from an empty log to a scan that only asks "did I resolve
+ * a target?" — which is what #1669 was.
+ */
+const Quiet = state({ Quiet: z.object({ n: z.number() }) })
+  .init(() => ({ n: 0 }))
+  .emits({ Hushed: ZodEmpty })
+  .patch({ Hushed: (_, s) => ({ n: s.n + 1 }) })
+  .on({ hush: ZodEmpty })
+  .emit(() => ["Hushed", {}])
+  .build();
+
 const actor = { id: "a", name: "a" };
 
 /** Count store reads, which is what a correlate scan costs. */
@@ -113,6 +126,118 @@ describe("correlate sits still when nothing has happened", () => {
     // All twelve targets discovered across the windowed scans, not just the
     // first window's three.
     expect(subscribed).toBe(12);
+  });
+
+  it("keeps scanning past a FULL window that resolved no target (#1669)", async () => {
+    // The disarm used to mean "this scan resolved no target", which reads as
+    // "the log has nothing more for us" only for an UNBOUNDED scan. Every
+    // caller passes a `limit`, so a window filled with events that carry no
+    // reactions looked exactly like the end of the log, and the scan parked
+    // itself with a backlog still ahead of its checkpoint.
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function noop() {})
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    // Exactly one window's worth of inert events, then the reactive one.
+    for (let i = 0; i < 5; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+    await app.do("tick", { stream: "s1", actor }, {});
+
+    let subscribed = 0;
+    for (let i = 0; i < 10; i++) {
+      const scan = await app.correlate({ after: -1, limit: 5 });
+      subscribed += scan.subscribed;
+    }
+    expect(subscribed).toBe(1);
+  });
+
+  it("a full inert window does not make settle report a false catch-up (#1669)", async () => {
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const handled: string[] = [];
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function record(e) {
+        handled.push(e.stream);
+      })
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    // The shipped default window is 100, so 100 inert commits fill it exactly.
+    for (let i = 0; i < 100; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+    await app.do("tick", { stream: "s1", actor }, {});
+
+    // `settle` is debounced — it schedules and returns, so wait for the
+    // lifecycle event rather than the call.
+    const done = new Promise<void>((resolve) => {
+      app.on("settled", () => resolve());
+    });
+    app.settle({ debounceMs: 0 });
+    await done;
+    expect(handled).toEqual(["s1"]);
+  });
+
+  it("still parks when the window came back short (#1669 keeps #1517)", async () => {
+    // The point of #1517 stands: a scan that reached the end of the log must
+    // stop reading. Only a FULL window is ambiguous.
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function noop() {})
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    for (let i = 0; i < 3; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+
+    // Three inert events in a window of ten: the scan proved it reached the
+    // end, so it parks even though it resolved nothing.
+    await app.correlate({ after: -1, limit: 10 });
+    const queries = count_queries(raw);
+    await app.correlate({ after: -1, limit: 10 });
+    await app.correlate({ after: -1, limit: 10 });
+    expect(queries.n).toBe(0);
+  });
+
+  it("parks after an UNBOUNDED scan that resolved no target (#1669)", async () => {
+    // With no `limit` the scan is unbounded, so exhausting it always reaches
+    // the end of the log — the short-page test is vacuously true and the park
+    // is unconditionally safe. This is the pre-#1669 semantics, preserved for
+    // the one shape it was ever correct for.
+    const raw = new InMemoryStore();
+    store(raw);
+    await store().seed();
+    const app = act()
+      .withState(Ticker)
+      .withState(Quiet)
+      .on("Ticked")
+      .do(async function noop() {})
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
+
+    for (let i = 0; i < 4; i++)
+      await app.do("hush", { stream: `q${i}`, actor }, {});
+
+    // `{}` overrides the default query outright, so `limit` is undefined.
+    await app.correlate({});
+    const queries = count_queries(raw);
+    await app.correlate({});
+    expect(queries.n).toBe(0);
   });
 
   it("polling still discovers a commit this process never saw", async () => {

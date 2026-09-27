@@ -654,8 +654,13 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
+    // How many events this page actually yielded. A page that came back
+    // short is the only evidence a scan has that it reached the end of the
+    // log — see the disarm at the end of this method (#1669).
+    let scanned_count = 0;
     await store().query<TEvents>(
       (event) => {
+        scanned_count++;
         last_id = event.id;
         const register = this._registry.events[event.name];
         // skip events with no registered reactions
@@ -823,13 +828,24 @@ export class CorrelateCycle<
       }
       return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance. Disarm only here: this is the
-    // branch where the scan resolved no target at all, which is what "the log
-    // has nothing more for us" looks like. A scan that found something leaves
-    // the flag up, so the next pass continues from the new checkpoint rather
-    // than stopping mid-backlog.
+    // Nothing to subscribe — safe to advance. Disarm only here, and only when
+    // this page proved it reached the end of the log by coming back SHORT.
+    //
+    // "Resolved no target" is not the same claim (#1669). Every caller passes
+    // a `limit`, and a full window whose events all happen to carry no
+    // registered reactions is indistinguishable from an empty log — most
+    // domain events in a real app have no reactions, so a burst of
+    // `limit`-or-more inert commits is ordinary. Disarming there parks the
+    // scan with a backlog still ahead of the checkpoint, and the `_armed`
+    // guard above then returns without a store read forever.
+    //
+    // A page with no limit is unbounded, so exhausting it always reaches the
+    // end. A scan that found something leaves the flag up regardless, so the
+    // next pass continues from the new checkpoint rather than stopping
+    // mid-backlog.
     this._checkpoint = last_id;
-    this._armed = false;
+    if (scanned_count < (query.limit ?? Number.POSITIVE_INFINITY))
+      this._armed = false;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
