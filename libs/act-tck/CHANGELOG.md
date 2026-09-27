@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.37.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.5...@rotorsoft/act-tck-v1.37.6) (2026-09-27)
+
+
+### Bug Fixes
+
+* **act:** park a no-backoff retry until its own lease lapses ([#1681](https://github.com/Rotorsoft/act-root/issues/1681)) ([e5ca037](https://github.com/Rotorsoft/act-root/commit/e5ca037d3e58dbfa11253b25661c7f2522545b51)), closes [#1670](https://github.com/Rotorsoft/act-root/issues/1670)
+* **act:** park the correlate scan only on a short page ([#1680](https://github.com/Rotorsoft/act-root/issues/1680)) ([de4938b](https://github.com/Rotorsoft/act-root/commit/de4938beed3cf8ec11acc56a1b0d55ccb5ff25a3)), closes [#1669](https://github.com/Rotorsoft/act-root/issues/1669)
+
 # [@rotorsoft/act-tck-v1.37.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.4...@rotorsoft/act-tck-v1.37.5) (2026-09-21)
 
 
