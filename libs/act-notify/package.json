@@ -52,7 +52,7 @@
   },
   "devDependencies": {
     "@rotorsoft/act-tck": "workspace:^",
-    "zod": "^4.5.4",
+    "zod": "^4.6.5",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^"
   }
