@@ -2,10 +2,15 @@ import {
   act,
   type Committed,
   type EventSource,
+  InMemoryStore,
   type ScanOptions,
   type Schemas,
+  type Store,
+  state,
+  ZodEmpty,
 } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { scan } from "../src/internal/event-sourcing.js";
 import { sandbox } from "../src/test/index.js";
 import { Calculator } from "./calculator.js";
@@ -652,6 +657,85 @@ describe("Act.restore (orchestrator)", () => {
       await expect(
         ctx.app.restore(calc([baseEvent({ version: -1 })]), { dry_run: true })
       ).rejects.toThrow(/Invalid event at index 1/);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+});
+
+describe("restore from a real Store source (#1671)", () => {
+  // `fromArray` above ignores `with_snaps`, so snapshots always reach the
+  // walk from a synthetic source. A real Store filters them out unless the
+  // scan asks — which is the gap this block covers.
+  const Counter = state({ Counter: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ Ticked: ZodEmpty })
+    .patch({ Ticked: (_e, s) => ({ count: s.count + 1 }) })
+    .on({ Tick: ZodEmpty })
+    .emit(() => ["Ticked", {}])
+    .snap((s) => s.state.count >= 2)
+    .build();
+
+  const actor = { id: "u1", name: "u1" };
+
+  const names_in = async (s: Store, stream?: string) => {
+    const names: string[] = [];
+    await s.query((e) => names.push(e.name), { stream, with_snaps: true });
+    return names;
+  };
+
+  it("carries a __snapshot__ through a store-to-store restore", async () => {
+    const ctx = await sandbox(act().withState(Counter));
+    try {
+      for (let i = 0; i < 4; i++)
+        await ctx.app.do("Tick", { stream: "r1", actor }, {});
+      expect(await names_in(ctx.store)).toContain("__snapshot__");
+
+      const sink = new InMemoryStore();
+      await sink.seed();
+      await ctx.app.restore(ctx.store, {}, sink);
+
+      expect(await names_in(sink)).toContain("__snapshot__");
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("does not lose a stream whose history was pruned by a windowed close", async () => {
+    const ctx = await sandbox(act().withState(Counter));
+    try {
+      for (let i = 0; i < 6; i++)
+        await ctx.app.do("Tick", { stream: "r2", actor }, {});
+      // A windowed close prunes the prefix below the boundary snapshot, so
+      // that snapshot IS the stream's state from here on.
+      await ctx.app.close([
+        { stream: "r2", before: new Date(Date.now() + 60_000) },
+      ]);
+      expect(await names_in(ctx.store, "r2")).toEqual(["__snapshot__"]);
+      expect((await ctx.app.load(Counter, "r2")).state.count).toBe(6);
+
+      const sink = new InMemoryStore();
+      await sink.seed();
+      const result = await ctx.app.restore(ctx.store, {}, sink);
+
+      expect(result.kept).toBe(1);
+      expect(await names_in(sink, "r2")).toEqual(["__snapshot__"]);
+    } finally {
+      await ctx.dispose();
+    }
+  });
+
+  it("drop_snapshots actually drops them from a Store source", async () => {
+    const ctx = await sandbox(act().withState(Counter));
+    try {
+      for (let i = 0; i < 6; i++)
+        await ctx.app.do("Tick", { stream: "r3", actor }, {});
+      const result = await ctx.app.restore(ctx.store, {
+        dry_run: true,
+        drop_snapshots: true,
+      });
+      expect(result.dropped.snapshots).toBeGreaterThan(0);
+      expect(result.kept).toBe(6);
     } finally {
       await ctx.dispose();
     }

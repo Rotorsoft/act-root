@@ -329,7 +329,7 @@ export async function scan(
     (e) => {
       max_id = e.id;
     },
-    { backward: true, limit: 1 }
+    { backward: true, limit: 1, with_snaps: true }
   );
   if (probed !== 1) max_id = undefined;
 
@@ -419,7 +419,7 @@ export async function scan(
         id_map.set(event.id, new_id);
         kept++;
       },
-      { after: at, limit }
+      { after: at, limit, with_snaps: true }
     );
 
     // Termination:
