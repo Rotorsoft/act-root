@@ -8662,10 +8662,8 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
-    let found = 0;
-    await store().query<TEvents>(
+    const found = await store().query<TEvents>(
       (event) => {
-        found++;
         last_id = event.id;
         const register = this._registry.events[event.name];
         // skip events with no registered reactions
@@ -28514,10 +28512,8 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
-    let found = 0;
-    await store().query<TEvents>(
+    const found = await store().query<TEvents>(
       (event) => {
-        found++;
         last_id = event.id;
         const register = this._registry.events[event.name];
         // skip events with no registered reactions
