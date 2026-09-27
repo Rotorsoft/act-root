@@ -20,11 +20,7 @@ const Ticker = state({ Ticker: z.object({ n: z.number() }) })
   .emit(() => ["Ticked", {}])
   .build();
 
-/**
- * A state whose event has NO registered reaction. A page full of these is
- * indistinguishable from an empty log to a scan that only asks "did I resolve
- * a target?" — which is what #1669 was.
- */
+/** A state whose event has NO registered reaction. */
 const Quiet = state({ Quiet: z.object({ n: z.number() }) })
   .init(() => ({ n: 0 }))
   .emits({ Hushed: ZodEmpty })
@@ -129,11 +125,6 @@ describe("correlate sits still when nothing has happened", () => {
   });
 
   it("keeps scanning past a FULL window that resolved no target (#1669)", async () => {
-    // The disarm used to mean "this scan resolved no target", which reads as
-    // "the log has nothing more for us" only for an UNBOUNDED scan. Every
-    // caller passes a `limit`, so a window filled with events that carry no
-    // reactions looked exactly like the end of the log, and the scan parked
-    // itself with a backlog still ahead of its checkpoint.
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
@@ -145,7 +136,7 @@ describe("correlate sits still when nothing has happened", () => {
       .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
       .build();
 
-    // Exactly one window's worth of inert events, then the reactive one.
+    // One window's worth of inert events, then the reactive one.
     for (let i = 0; i < 5; i++)
       await app.do("hush", { stream: `q${i}`, actor }, {});
     await app.do("tick", { stream: "s1", actor }, {});
@@ -173,13 +164,12 @@ describe("correlate sits still when nothing has happened", () => {
       .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
       .build();
 
-    // The shipped default window is 100, so 100 inert commits fill it exactly.
+    // The default settle window is 100, so 100 inert commits fill it.
     for (let i = 0; i < 100; i++)
       await app.do("hush", { stream: `q${i}`, actor }, {});
     await app.do("tick", { stream: "s1", actor }, {});
 
-    // `settle` is debounced — it schedules and returns, so wait for the
-    // lifecycle event rather than the call.
+    // `settle` is debounced: it schedules and returns.
     const done = new Promise<void>((resolve) => {
       app.on("settled", () => resolve());
     });
@@ -189,8 +179,6 @@ describe("correlate sits still when nothing has happened", () => {
   });
 
   it("still parks when the window came back short (#1669 keeps #1517)", async () => {
-    // The point of #1517 stands: a scan that reached the end of the log must
-    // stop reading. Only a FULL window is ambiguous.
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
@@ -205,8 +193,7 @@ describe("correlate sits still when nothing has happened", () => {
     for (let i = 0; i < 3; i++)
       await app.do("hush", { stream: `q${i}`, actor }, {});
 
-    // Three inert events in a window of ten: the scan proved it reached the
-    // end, so it parks even though it resolved nothing.
+    // Three events in a window of ten: short, so it parks.
     await app.correlate({ after: -1, limit: 10 });
     const queries = count_queries(raw);
     await app.correlate({ after: -1, limit: 10 });
@@ -215,10 +202,6 @@ describe("correlate sits still when nothing has happened", () => {
   });
 
   it("parks after an UNBOUNDED scan that resolved no target (#1669)", async () => {
-    // With no `limit` the scan is unbounded, so exhausting it always reaches
-    // the end of the log — the short-page test is vacuously true and the park
-    // is unconditionally safe. This is the pre-#1669 semantics, preserved for
-    // the one shape it was ever correct for.
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
@@ -233,7 +216,7 @@ describe("correlate sits still when nothing has happened", () => {
     for (let i = 0; i < 4; i++)
       await app.do("hush", { stream: `q${i}`, actor }, {});
 
-    // `{}` overrides the default query outright, so `limit` is undefined.
+    // `{}` overrides the default query, so `limit` is undefined.
     await app.correlate({});
     const queries = count_queries(raw);
     await app.correlate({});
