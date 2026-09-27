@@ -53183,27 +53183,21 @@ const PG_UNIQUE_VIOLATION = "23505";
 /**
  * Fold a subscribe batch to one entry per stream, keeping the maximum
  * priority (its lane rides along, #1599) and the maximum work mark (#1485).
- *
- * \`UPDATE ... FROM\` may touch a target row only once, so Postgres picks an
- * arbitrary source row when several match — losing the merge the port
- * contract requires. \`classify_registry\` keys statics by \`target|source\`,
- * so two static reactions to one target from different sources really do
- * arrive as two entries with the same stream (#1672).
+ * \`UPDATE ... FROM\` may touch a target row only once, so Postgres would
+ * otherwise keep an arbitrary entry when one batch names a stream twice
+ * (#1672) — which \`classify_registry\`'s \`target|source\` keying produces.
  */
 function merge_by_stream(streams: SubscribeInput[]): SubscribeInput[] {
   const by_stream = new Map<string, SubscribeInput>();
   for (const entry of streams) {
-    const prev = by_stream.get(entry.stream);
-    if (!prev) {
-      by_stream.set(entry.stream, entry);
-      continue;
-    }
+    // On first sight the entry folds against itself, which is a no-op.
+    const prev = by_stream.get(entry.stream) ?? entry;
     const win = (entry.priority ?? 0) >= (prev.priority ?? 0) ? entry : prev;
     const mark = Math.max(prev.correlated_at ?? -1, entry.correlated_at ?? -1);
-    by_stream.set(entry.stream, {
-      ...win,
-      ...(mark >= 0 ? { correlated_at: mark } : {}),
-    });
+    by_stream.set(
+      entry.stream,
+      mark < 0 ? win : { ...win, correlated_at: mark }
+    );
   }
   return [...by_stream.values()];
 }
@@ -61743,6 +61737,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { stream: s, priority: 0, correlated_at: 5 },
         ]);
         expect(await read()).toBe(5);
+        // A marked stream is claimable, and this block shares one store with
+        // cases that assert against a bounded claim budget. Park it.
+        await store.defer([s], Date.now() + 3_600_000);
       });
     });
 

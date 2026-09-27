@@ -1803,6 +1803,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { stream: s, priority: 0, correlated_at: 5 },
         ]);
         expect(await read()).toBe(5);
+        // A marked stream is claimable, and this block shares one store with
+        // cases that assert against a bounded claim budget. Park it.
+        await store.defer([s], Date.now() + 3_600_000);
       });
     });
 
