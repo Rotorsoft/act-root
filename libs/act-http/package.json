@@ -84,7 +84,7 @@
   },
   "sideEffects": false,
   "engines": {
-    "node": ">=22.23.2"
+    "node": ">=22.23.3"
   },
   "publishConfig": {
     "access": "public"
@@ -102,7 +102,7 @@
     "@trpc/server": ">=11.18.0",
     "express": "^5.2.1",
     "fastify": "^5.12.5",
-    "hono": "^4.13.8"
+    "hono": "^4.13.9"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
