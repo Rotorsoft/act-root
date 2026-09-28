@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.31.26](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.25...@rotorsoft/act-v1.31.26) (2026-09-28)
+
+
+### Bug Fixes
+
+* **act:** key static targets by target so subscribe gets unique streams ([8553eda](https://github.com/Rotorsoft/act-root/commit/8553eda8c43d8ea3693512961ab51253e139e84e)), closes [#1672](https://github.com/Rotorsoft/act-root/issues/1672)
+
 # [@rotorsoft/act-v1.31.25](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.24...@rotorsoft/act-v1.31.25) (2026-09-28)
 
 
