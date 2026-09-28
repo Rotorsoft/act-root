@@ -120,17 +120,21 @@ export function classify_registry<
               `("${recorded_lane}" vs "${lane_name}")`
           );
         }
-        const key = `${target}|${source ?? ""}`;
-        const existing = statics.get(key);
+        // Keyed by target alone, because a subscription row IS keyed by
+        // stream: every adapter sets `source` once at creation and ignores
+        // it thereafter, so a second entry for one target could only ever
+        // contribute its priority — and a batch carrying two would leave
+        // the merge to the adapter, which a single batched SQL statement
+        // cannot do (#1672). One entry per stream, max priority, so the
+        // highest-priority registrant sets the scheduling priority.
+        const existing = statics.get(target);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority, lane });
+          statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep the max
-          // priority so the highest-priority registrant sets the scheduling
-          // priority (mirrors subscribe-side semantics). `existing.priority`
-          // is always defined here since we always set it when inserting, but
-          // the StaticTarget type marks it optional for external consumers.
-          statics.set(key, { ...existing, priority });
+          // `existing.priority` is always defined here since we always set
+          // it when inserting, but the StaticTarget type marks it optional
+          // for external consumers.
+          statics.set(target, { ...existing, priority });
         }
       }
     }

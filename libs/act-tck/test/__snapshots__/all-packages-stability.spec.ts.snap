@@ -6022,17 +6022,21 @@ export function classify_registry<
               \`("\${recorded_lane}" vs "\${lane_name}")\`
           );
         }
-        const key = \`\${target}|\${source ?? ""}\`;
-        const existing = statics.get(key);
+        // Keyed by target alone, because a subscription row IS keyed by
+        // stream: every adapter sets \`source\` once at creation and ignores
+        // it thereafter, so a second entry for one target could only ever
+        // contribute its priority — and a batch carrying two would leave
+        // the merge to the adapter, which a single batched SQL statement
+        // cannot do (#1672). One entry per stream, max priority, so the
+        // highest-priority registrant sets the scheduling priority.
+        const existing = statics.get(target);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority, lane });
+          statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep the max
-          // priority so the highest-priority registrant sets the scheduling
-          // priority (mirrors subscribe-side semantics). \`existing.priority\`
-          // is always defined here since we always set it when inserting, but
-          // the StaticTarget type marks it optional for external consumers.
-          statics.set(key, { ...existing, priority });
+          // \`existing.priority\` is always defined here since we always set
+          // it when inserting, but the StaticTarget type marks it optional
+          // for external consumers.
+          statics.set(target, { ...existing, priority });
         }
       }
     }
@@ -15731,7 +15735,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its \`source\` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (\`UPDATE ... FROM\` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -26120,17 +26132,21 @@ export function classify_registry<
               \`("\${recorded_lane}" vs "\${lane_name}")\`
           );
         }
-        const key = \`\${target}|\${source ?? ""}\`;
-        const existing = statics.get(key);
+        // Keyed by target alone, because a subscription row IS keyed by
+        // stream: every adapter sets \`source\` once at creation and ignores
+        // it thereafter, so a second entry for one target could only ever
+        // contribute its priority — and a batch carrying two would leave
+        // the merge to the adapter, which a single batched SQL statement
+        // cannot do (#1672). One entry per stream, max priority, so the
+        // highest-priority registrant sets the scheduling priority.
+        const existing = statics.get(target);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority, lane });
+          statics.set(target, { stream: target, source, priority, lane });
         } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep the max
-          // priority so the highest-priority registrant sets the scheduling
-          // priority (mirrors subscribe-side semantics). \`existing.priority\`
-          // is always defined here since we always set it when inserting, but
-          // the StaticTarget type marks it optional for external consumers.
-          statics.set(key, { ...existing, priority });
+          // \`existing.priority\` is always defined here since we always set
+          // it when inserting, but the StaticTarget type marks it optional
+          // for external consumers.
+          statics.set(target, { ...existing, priority });
         }
       }
     }
@@ -34635,7 +34651,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its \`source\` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (\`UPDATE ... FROM\` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
@@ -40835,7 +40859,15 @@ export interface Store extends Disposable, EventSource {
    * @param streams - Streams to register with optional source hint — a
    *   literal stream name (matched by equality in {@link claim}'s has-work
    *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite
+   *   streams); non-portable patterns are rejected here on SQLite.
+   *
+   *   **At most one entry per stream.** A subscription row is keyed by
+   *   stream and its \`source\` is set once at creation, so a second entry
+   *   for the same stream could only ever contribute its priority — and
+   *   an adapter that merges the batch in one statement cannot do even
+   *   that (\`UPDATE ... FROM\` may touch a target row only once, so
+   *   Postgres picks an arbitrary source row). Callers de-duplicate
+   *   before calling; adapters may assume uniqueness (#1672).
    * @returns \`subscribed\` count of newly registered streams, \`watermark\` max \`at\` across all streams
    *
    * @example
