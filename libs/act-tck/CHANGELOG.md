@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.37.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.7...@rotorsoft/act-tck-v1.37.8) (2026-09-28)
+
+
+### Bug Fixes
+
+* **act-pg:** fold a subscribe batch per stream before the merge statement ([31ab28a](https://github.com/Rotorsoft/act-root/commit/31ab28ab24888e86181440dbbc07114835cbb7ce)), closes [#1497](https://github.com/Rotorsoft/act-root/issues/1497) [#1672](https://github.com/Rotorsoft/act-root/issues/1672)
+* **act:** key static targets by target so subscribe gets unique streams ([8553eda](https://github.com/Rotorsoft/act-root/commit/8553eda8c43d8ea3693512961ab51253e139e84e)), closes [#1672](https://github.com/Rotorsoft/act-root/issues/1672)
+
 # [@rotorsoft/act-tck-v1.37.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.6...@rotorsoft/act-tck-v1.37.7) (2026-09-28)
 
 
