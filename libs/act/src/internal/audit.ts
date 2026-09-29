@@ -57,6 +57,7 @@ import type {
   AuditOptions,
   Committed,
   Logger,
+  Query,
   Schemas,
   State,
   Store,
@@ -120,6 +121,7 @@ const ALL_CATEGORIES = [
   "routing-health",
   "correlation-gaps",
   "clock-anomalies",
+  "unreadable-events",
 ] as const satisfies readonly AuditCategory[];
 
 /**
@@ -128,6 +130,9 @@ const ALL_CATEGORIES = [
  * - `on_event` / `on_stream` / `on_stat` are called by the dispatcher
  *   during the shared scans. Each is optional; the dispatcher uses
  *   the presence/absence to decide which scans to run.
+ * - `on_unreadable` is called when the event scan trips on a row the
+ *   store cannot hand back. It is fed by the dispatcher rather than by
+ *   a scan callback, because the row never reaches one.
  * - `finalize` runs after all shared scans complete. Categories that
  *   need targeted follow-up store calls (snapshot-drift fetches the
  *   last `__snapshot__` per drifted stream; correlation-gaps cross-
@@ -137,6 +142,7 @@ const ALL_CATEGORIES = [
 type AuditPass = {
   category: AuditCategory;
   on_event?: (e: Committed<Schemas, string>) => void;
+  on_unreadable?: (row: UnreadableRow) => void;
   on_stream?: (p: StreamPosition) => void;
   on_stat?: (stream: string, s: StreamStats<Schemas>) => void;
   finalize?: (deps: AuditDeps) => Promise<void>;
@@ -177,7 +183,11 @@ export async function* audit(
   // walks at worst.
   const need_stats = passes.some((p) => p.on_stat !== undefined);
   const need_streams = passes.some((p) => p.on_stream !== undefined);
-  const need_events = passes.some((p) => p.on_event !== undefined);
+  // An `on_unreadable`-only pass still needs the scan: the row it reports is
+  // what the scan trips on.
+  const need_events = passes.some(
+    (p) => p.on_event !== undefined || p.on_unreadable !== undefined
+  );
 
   if (need_stats) {
     // Exclude `__snapshot__` so `head` and `count` are DOMAIN figures.
@@ -210,9 +220,16 @@ export async function* audit(
   }
 
   if (need_events) {
-    await deps.store().query<Schemas>((event) => {
-      for (const p of passes) p.on_event?.(event);
-    }, options.query);
+    await scan_events_resiliently(
+      deps,
+      options.query,
+      (event) => {
+        for (const p of passes) p.on_event?.(event);
+      },
+      (row) => {
+        for (const p of passes) p.on_unreadable?.(row);
+      }
+    );
   }
 
   // Async post-processing (per-stream queries, second-pass orphan
@@ -223,6 +240,87 @@ export async function* audit(
   // Yield findings in requested-category order.
   for (const p of passes) {
     for (const f of p.drain()) yield f;
+  }
+}
+
+/**
+ * A row the store refused to hand back, located well enough to repair.
+ *
+ * The adapters attach `stream` / `event_id` to the error they throw when a
+ * `pii` column will not decrypt (`@rotorsoft/act-pg`, `@rotorsoft/act-sqlite`).
+ * Core reads them structurally rather than by `instanceof`, because
+ * `DecryptionError` lives in `@rotorsoft/act-crypto` and core does not depend
+ * on it — that layering is deliberate and worth more than a nominal check.
+ */
+type UnreadableRow = {
+  stream: string;
+  event_id: number;
+  error: unknown;
+};
+
+/**
+ * Read `stream` / `event_id` off a thrown error, when it carries them.
+ *
+ * Anything else — a connection drop, a query timeout — is not one poison row
+ * and must not be swallowed as one, so it reads as `undefined` and the caller
+ * rethrows.
+ */
+function as_unreadable_row(error: unknown): UnreadableRow | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const e = error as { stream?: unknown; event_id?: unknown };
+  return typeof e.stream === "string" && typeof e.event_id === "number"
+    ? { stream: e.stream, event_id: e.event_id, error }
+    : undefined;
+}
+
+/**
+ * Run the audit's event scan so that one unreadable row does not end it.
+ *
+ * A store that trips on a row throws out of `query`, abandoning the rest of
+ * the scan — so a single corrupt `pii` column used to take `app.audit()` down
+ * with it, and the audit is the tool an operator reaches for precisely when
+ * something is corrupt. Because the error now names the row, the scan can
+ * step over it: report it, resume `after` that id, and keep going.
+ *
+ * Only forward scans are resumable — `after` is meaningless walking backward,
+ * and a `limit` is spent against rows already delivered — so the resume
+ * carries the remaining budget and a backward scan rethrows untouched rather
+ * than quietly returning a partial answer.
+ */
+async function scan_events_resiliently(
+  deps: AuditDeps,
+  query: Query | undefined,
+  on_event: (e: Committed<Schemas, string>) => void,
+  on_unreadable: (row: UnreadableRow) => void
+): Promise<void> {
+  let cursor = query?.after;
+  let remaining = query?.limit;
+  for (;;) {
+    let seen = 0;
+    try {
+      await deps.store().query<Schemas>(
+        (event) => {
+          seen++;
+          cursor = event.id;
+          on_event(event);
+        },
+        {
+          ...query,
+          after: cursor,
+          ...(remaining !== undefined && { limit: remaining }),
+        }
+      );
+      return;
+    } catch (error) {
+      const row = as_unreadable_row(error);
+      if (!row || query?.backward) throw error;
+      on_unreadable(row);
+      // The tripping row is never delivered, so `seen` is at most
+      // `remaining - 1` and the resumed budget stays at 1 or more. No
+      // zero-limit query can be issued from here.
+      if (remaining !== undefined) remaining -= seen;
+      cursor = row.event_id;
+    }
   }
 }
 
@@ -736,6 +834,31 @@ function restart_is_supported(
   return state?.snap !== undefined;
 }
 
+/**
+ * `unreadable-events` — rows the store could not hand back.
+ *
+ * Contributes no scan callback of its own: the dispatcher feeds it the rows
+ * the event scan tripped on, since a row that cannot be read never reaches an
+ * `on_event`. Requesting this category alone still runs the event scan, which
+ * is the only thing that surfaces such a row.
+ */
+function make_unreadable_events_pass(): AuditPass {
+  const findings: AuditFinding[] = [];
+  return {
+    category: "unreadable-events",
+    on_unreadable({ stream, event_id, error }) {
+      findings.push({
+        category: "unreadable-events",
+        stream,
+        event_id,
+        reason: "pii_decrypt_failed",
+        error,
+      });
+    },
+    drain: () => findings,
+  };
+}
+
 /** Factory registry — pass-creation indexed by category name. */
 const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   schema: make_schema_pass,
@@ -747,4 +870,5 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "routing-health": make_routing_health_pass,
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
+  "unreadable-events": make_unreadable_events_pass,
 };

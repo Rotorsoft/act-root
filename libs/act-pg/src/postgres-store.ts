@@ -30,12 +30,43 @@ import {
   ValidationError,
 } from "@rotorsoft/act";
 import {
+  DecryptionError,
   decrypt,
   type Encryption,
   encrypt,
   makeKeyResolver,
 } from "@rotorsoft/act-crypto";
 import pg from "pg";
+
+/**
+ * Re-throw a decrypt failure with the row that carries it.
+ *
+ * `DecryptionError`'s message is deliberately generic about the *cause* —
+ * corrupt framing, wrong key and tampered ciphertext read alike, so an
+ * adversarial caller cannot probe which one an input hit. The stream name
+ * and event id are not secret, and without them a single unreadable row is
+ * unfindable: the read that trips on it aborts the whole scan, so neither
+ * the error nor `blocked_streams()` names the row an operator has to repair.
+ *
+ * The located error stays `instanceof DecryptionError` — callers that catch
+ * the framework signal keep working — and carries `stream` / `event_id` as
+ * own properties so a caller can act on them without parsing the message.
+ * `@rotorsoft/act` reads them structurally (it does not depend on
+ * `@rotorsoft/act-crypto`) to report the row from `app.audit()`.
+ */
+function locate_decryption_error(
+  error: unknown,
+  stream: string,
+  event_id: number
+): never {
+  if (!(error instanceof DecryptionError)) throw error;
+  const located = new DecryptionError(
+    `${error.message} (stream "${stream}", event id ${event_id})`
+  );
+  located.cause = error;
+  Object.assign(located, { stream, event_id });
+  throw located;
+}
 
 const logger: Logger = log();
 
@@ -978,8 +1009,12 @@ export class PostgresStore implements Store {
       // the driver are mutable in-flight before they cross back to
       // the framework.
       if (this._resolve_pii_key && typeof row.pii === "string") {
-        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
-        (row as { pii: unknown }).pii = decrypted;
+        try {
+          const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+          (row as { pii: unknown }).pii = decrypted;
+        } catch (error) {
+          locate_decryption_error(error, row.stream, row.id);
+        }
       }
       await Promise.resolve(callback(row));
     }
@@ -1130,8 +1165,12 @@ export class PostgresStore implements Store {
         if (this._resolve_pii_key) {
           for (const row of rows) {
             if (typeof row.pii === "string") {
-              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
-              (row as { pii: unknown }).pii = decrypted;
+              try {
+                const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+                (row as { pii: unknown }).pii = decrypted;
+              } catch (error) {
+                locate_decryption_error(error, row.stream, row.id);
+              }
             }
           }
         }

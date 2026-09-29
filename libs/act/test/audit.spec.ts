@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InMemoryCache } from "../src/adapters/index.js";
 import {
   act,
   dispose,
@@ -1500,5 +1501,236 @@ describe("audit", () => {
       expect(out).toContain("schema_validation_failed");
       await app.shutdown();
     });
+  });
+});
+
+/**
+ * One row the store refuses to hand back used to end the whole audit (#1675).
+ *
+ * The event scan throws out of `query`, abandoning every row behind it — so
+ * the tool an operator reaches for when data is corrupt was the one tool that
+ * died on corrupt data, naming neither the stream nor the id. Now the
+ * adapters locate the row on the error and the scan steps over it.
+ */
+describe("unreadable-events category (#1675)", () => {
+  const gadget = state({ Gadget: z.object({ name: z.string() }) })
+    .init(() => ({ name: "" }))
+    .emits({ Renamed: z.object({ name: z.string() }) })
+    .patch({ Renamed: ({ data }) => ({ name: data.name }) })
+    .on({ rename: z.object({ name: z.string() }) })
+    .emit(({ name }) => ["Renamed", { name }])
+    .build();
+
+  /**
+   * A store whose `query` trips on one id, the way a bad `pii` column does:
+   * it throws after delivering the rows ahead of the poison row, and the
+   * error carries the `stream` / `event_id` the adapters attach.
+   *
+   * A Proxy rather than a spread — the other Store methods are class methods
+   * that need their own `this`.
+   */
+  const poison = (inner: Store, poison_id: number): Store =>
+    new Proxy(inner, {
+      get(target, prop, receiver) {
+        if (prop !== "query") {
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (
+          callback: (e: never) => void,
+          q?: { after?: number }
+        ): Promise<number> => {
+          let count = 0;
+          let tripped = false;
+          await target.query((event) => {
+            if (tripped) return;
+            if (event.id === poison_id && (q?.after ?? -1) < poison_id) {
+              tripped = true;
+              return;
+            }
+            count++;
+            callback(event as never);
+          }, q as never);
+          if (tripped) {
+            const error = new Error("decryption failed") as Error & {
+              stream: string;
+              event_id: number;
+            };
+            error.name = "DecryptionError";
+            error.stream = "g1";
+            error.event_id = poison_id;
+            throw error;
+          }
+          return count;
+        };
+      },
+    }) as Store;
+
+  beforeEach(async () => {
+    await store().drop();
+    await store().seed();
+  });
+
+  it("reports the poison row and still audits every row behind it", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b", "c"])
+      await app.do("rename", { stream: "g1", actor }, { name });
+    // An event the registry doesn't know, committed AFTER the poison row —
+    // the schema pass only sees it if the scan resumed.
+    await store().commit("g1", [{ name: "Vanished", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+
+    const scoped = act()
+      .withState(gadget)
+      .build({
+        scoped: { store: poison(store(), 2), cache: new InMemoryCache() },
+      });
+
+    const findings: AuditFinding[] = [];
+    for await (const f of scoped.audit()) findings.push(f);
+
+    expect(findings).toContainEqual({
+      category: "unreadable-events",
+      stream: "g1",
+      event_id: 2,
+      reason: "pii_decrypt_failed",
+      error: expect.any(Error),
+    });
+    // The scan resumed: the unknown-name event sits past the poison row.
+    expect(
+      findings.some(
+        (f) => f.category === "schema" && f.reason === "unknown_event_name"
+      )
+    ).toBe(true);
+  });
+
+  it("stops at the caller's limit rather than spending it again per resume", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b", "c", "d"])
+      await app.do("rename", { stream: "g3", actor }, { name });
+
+    // Event ids start at 0, so a limit of 2 covers ids 0 and 1: the first is
+    // delivered, the second trips. The resume must carry the budget the first
+    // attempt already spent, not the caller's original limit.
+    const scoped = act()
+      .withState(gadget)
+      .build({
+        scoped: { store: poison(store(), 1), cache: new InMemoryCache() },
+      });
+
+    const findings: AuditFinding[] = [];
+    for await (const f of scoped.audit(undefined, { query: { limit: 2 } }))
+      findings.push(f);
+
+    expect(
+      findings.filter((f) => f.category === "unreadable-events")
+    ).toHaveLength(1);
+  });
+
+  it("rethrows a backward scan rather than answering it partially", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b", "c"])
+      await app.do("rename", { stream: "g4", actor }, { name });
+
+    const scoped = act()
+      .withState(gadget)
+      .build({
+        scoped: { store: poison(store(), 2), cache: new InMemoryCache() },
+      });
+
+    // `after` is meaningless walking backward, so resuming would silently
+    // skip the rows the scan had not reached yet.
+    await expect(async () => {
+      for await (const _ of scoped.audit(undefined, {
+        query: { backward: true },
+      }));
+    }).rejects.toThrow("decryption failed");
+  });
+
+  it.each([
+    ["a string", "connection terminated"],
+    ["null", null],
+  ])("rethrows a non-object throw (%s)", async (label, thrown) => {
+    const stream = `g6-${label.replace(/\W/g, "")}`;
+    // A throw that isn't an object carries no row, so it cannot be one poison
+    // row and must not be swallowed as one.
+    const app = act().withState(gadget).build();
+    await app.do(
+      "rename",
+      { stream, actor: { id: "u", name: "u" } },
+      { name: "a" }
+    );
+
+    const broken = new Proxy(store(), {
+      get(target, prop, receiver) {
+        if (prop !== "query") {
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async () => {
+          throw thrown;
+        };
+      },
+    }) as Store;
+
+    const scoped = act()
+      .withState(gadget)
+      .build({ scoped: { store: broken, cache: new InMemoryCache() } });
+
+    const caught = await (async () => {
+      try {
+        for await (const _ of scoped.audit());
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(caught).toBe(thrown);
+  });
+
+  it("rethrows an error that names no row", async () => {
+    const app = act().withState(gadget).build();
+    await app.do(
+      "rename",
+      { stream: "g5", actor: { id: "u", name: "u" } },
+      { name: "a" }
+    );
+
+    // A connection drop is not one poison row and must not be swallowed as one.
+    const broken = new Proxy(store(), {
+      get(target, prop, receiver) {
+        if (prop !== "query") {
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async () => {
+          throw new Error("connection terminated");
+        };
+      },
+    }) as Store;
+
+    const scoped = act()
+      .withState(gadget)
+      .build({ scoped: { store: broken, cache: new InMemoryCache() } });
+
+    await expect(async () => {
+      for await (const _ of scoped.audit());
+    }).rejects.toThrow("connection terminated");
+  });
+
+  it("control — an intact store reports no unreadable rows", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    await app.do("rename", { stream: "g2", actor }, { name: "a" });
+
+    const findings: AuditFinding[] = [];
+    for await (const f of app.audit()) findings.push(f);
+    expect(
+      findings.filter((f) => f.category === "unreadable-events")
+    ).toHaveLength(0);
   });
 });

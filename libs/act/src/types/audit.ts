@@ -35,7 +35,8 @@ export type AuditCategory =
   | "snapshot-drift"
   | "routing-health"
   | "correlation-gaps"
-  | "clock-anomalies";
+  | "clock-anomalies"
+  | "unreadable-events";
 
 /**
  * Tunable thresholds for categories whose findings depend on a
@@ -143,4 +144,24 @@ export type AuditFinding =
       stream: string;
       event_id: number;
       reason: "future-created" | "out-of-order";
+    }
+  | {
+      /**
+       * An event the store could not hand back at all — currently only a
+       * `pii` column the configured key cannot decrypt (corrupt ciphertext,
+       * bit-rot, a partial restore, or a rotation that outran a stream's
+       * correlate checkpoint).
+       *
+       * Every other finding describes an event the audit could read. This one
+       * names the row that stopped it being read, which is the information an
+       * operator needs and which the failing read alone does not give: the
+       * scan aborts, so nothing reports the stream, and `blocked_streams()`
+       * is empty because nothing is blocked.
+       */
+      category: "unreadable-events";
+      stream: string;
+      event_id: number;
+      reason: "pii_decrypt_failed";
+      /** The underlying adapter error, for operators who log it. */
+      error: unknown;
     };

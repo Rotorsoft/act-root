@@ -274,6 +274,9 @@ Transparency covers payload **types**, not just values. `encrypt` serializes thr
 - **Rotation is restart-driven.** The resolver caches the operator's key for the store's lifetime. Multi-key reads-during-rollover, KMS rotation policies, and operator audit are out of scope. A future ticket may expose a key-versioned `keyProvider`; for now, the deployment cycles the secret and restarts.
 - **Performance.** AES-256-GCM in `node:crypto` is hardware-accelerated on modern CPUs; the per-event cost is small but non-zero. Bench your workload before enabling encryption on a hot path that already runs near its budget.
 - **No application-layer key management.** No master keys, no KEK/DEK split, no rotation tooling. The framework ships the cipher and the envelope; the operator's KMS owns the key.
+- **One unreadable row has a wide blast radius.** A `pii` column the configured key cannot decrypt throws out of every read that touches it, and the correlate scan is one of those reads — so a single corrupt row stops *every* stream's reactions, not just the affected stream's. Nothing is blocked, so `blocked_streams()` stays empty. `app.load()` on that stream throws too, which makes every later `app.do` on it throw. Restart-driven rotation is a way to reach this: any stream whose correlate checkpoint still sits below its pre-rotation events has rows the new key cannot read.
+
+  The row is locatable. The adapters name the `stream` and `event_id` on the thrown `DecryptionError` — the cause stays generic on purpose, the location does not — and `app.audit()` reports each one as an [`unreadable-events`](./auditing-a-store.md) finding and carries on scanning instead of dying on the first ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)). Run the audit to enumerate every affected row, then restore, re-key, or `forget()` them.
 
 ### Composition with TDE / `pgcrypto`
 

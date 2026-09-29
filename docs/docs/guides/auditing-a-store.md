@@ -110,6 +110,24 @@ Events whose `meta.causation.event.id` references a parent id not present in the
 
 Future-dated `created` timestamps and per-stream out-of-order commits. Surfaces clock skew during deploys, NTP drift, or container clock-jumps. Framework can't act on these directly — remediation is infrastructure-layer — but operators tend to ask "is anything weird in this store?" and a clock check is cheap to fold in.
 
+### `unreadable-events` → repair or forget the row
+
+Events the store could not hand back at all. Today that means one thing: a `pii` column the configured key cannot decrypt — corrupt ciphertext, bit-rot, a partial restore, or a [key rotation](./pii-encryption-at-rest.md) that outran a stream's correlate checkpoint.
+
+Every other category describes an event the audit could read. This one names the row that stopped it being read, and that is the whole point: the failing read aborts the scan, so nothing else reports the stream, and `blocked_streams()` is empty because nothing is blocked ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)). One such row stops every stream's reactions, since the correlate scan is one of the reads that trips on it.
+
+The finding carries `stream`, `event_id`, and the underlying `error`:
+
+```typescript no-check
+for await (const f of app.audit(["unreadable-events"])) {
+  // { category: "unreadable-events", stream: "orders-42",
+  //   event_id: 90210, reason: "pii_decrypt_failed", error: … }
+  console.error(f);
+}
+```
+
+**Remediation:** restore the row from a backup taken under the key that wrote it, re-key it, or `app.forget()` the stream's pii if the payload is genuinely unrecoverable. Then re-run the audit: the scan steps over each unreadable row and keeps going, so one pass reports all of them rather than only the first.
+
 ## Recipes
 
 ### CI gate: fail the build on schema drift since the last release

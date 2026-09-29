@@ -233,6 +233,80 @@ describe("SqliteStore pii_encryption", () => {
     ).rejects.toBeInstanceOf(DecryptionError);
   });
 
+  it("names the stream and event id on an unreadable row (#1675)", async () => {
+    // The generic message is deliberate — it must not say WHICH failure mode
+    // was hit. The stream and id are not secret, and without them the read
+    // that trips aborts the whole scan without naming the row to repair.
+    const key = randomBytes(32);
+    const { store, raw, path } = await freshStore(key);
+    track(store, raw, path);
+    const stream = `locate-${chance.guid()}`;
+
+    await store.commit(
+      stream,
+      [{ name: "UserRegistered", data: {}, pii: { email: "z@example.com" } }],
+      { correlation: "c-locate", causation: {} }
+    );
+
+    const found = await raw.execute({
+      sql: "SELECT id FROM events WHERE stream = ?",
+      args: [stream],
+    });
+    const id = Number(found.rows[0]!.id);
+
+    const junk = JSON.stringify(randomBytes(64).toString("base64"));
+    await raw.execute({
+      sql: "UPDATE events SET pii = ? WHERE stream = ?",
+      args: [junk, stream],
+    });
+
+    const error = await store
+      .query(() => {}, { stream, stream_exact: true })
+      .then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(DecryptionError);
+    expect(error).toMatchObject({ stream, event_id: id });
+    expect((error as Error).message).toContain(stream);
+    expect((error as Error).message).toContain(String(id));
+    expect((error as Error).cause).toBeInstanceOf(DecryptionError);
+  });
+
+  it("passes a non-decryption failure through untouched", async () => {
+    // A key provider that returns the wrong shape fails inside the resolver,
+    // not the cipher — a plain Error, not a DecryptionError. Locating it as a
+    // poison row would be a lie, so it travels as-is.
+    const key = randomBytes(32);
+    const { store, raw, path } = await freshStore(key);
+    track(store, raw, path);
+    const stream = `badkey-${chance.guid()}`;
+
+    await store.commit(
+      stream,
+      [{ name: "UserRegistered", data: {}, pii: { email: "q@example.com" } }],
+      { correlation: "c-badkey", causation: {} }
+    );
+
+    (store as unknown as { _resolve_pii_key: () => Buffer })._resolve_pii_key =
+      () => {
+        throw new Error("kms unavailable");
+      };
+
+    const error = await store
+      .query(() => {}, { stream, stream_exact: true })
+      .then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(DecryptionError);
+    expect((error as Error).message).toBe("kms unavailable");
+    expect(error).not.toHaveProperty("event_id");
+  });
+
   it("reads pre-encryption (plaintext object) rows transparently", async () => {
     // Operator wrote some events before enabling encryption, then
     // restarted with pii_encryption configured. New writes are

@@ -24,11 +24,42 @@ import {
   ValidationError,
 } from "@rotorsoft/act";
 import {
+  DecryptionError,
   decrypt,
   type Encryption,
   encrypt,
   makeKeyResolver,
 } from "@rotorsoft/act-crypto";
+
+/**
+ * Re-throw a decrypt failure with the row that carries it.
+ *
+ * `DecryptionError`'s message is deliberately generic about the *cause* —
+ * corrupt framing, wrong key and tampered ciphertext read alike, so an
+ * adversarial caller cannot probe which one an input hit. The stream name
+ * and event id are not secret, and without them a single unreadable row is
+ * unfindable: the read that trips on it aborts the whole scan, so neither
+ * the error nor `blocked_streams()` names the row an operator has to repair.
+ *
+ * The located error stays `instanceof DecryptionError` — callers that catch
+ * the framework signal keep working — and carries `stream` / `event_id` as
+ * own properties so a caller can act on them without parsing the message.
+ * `@rotorsoft/act` reads them structurally (it does not depend on
+ * `@rotorsoft/act-crypto`) to report the row from `app.audit()`.
+ */
+function locate_decryption_error(
+  error: unknown,
+  stream: string,
+  event_id: number
+): never {
+  if (!(error instanceof DecryptionError)) throw error;
+  const located = new DecryptionError(
+    `${error.message} (stream "${stream}", event id ${event_id})`
+  );
+  located.cause = error;
+  Object.assign(located, { stream, event_id });
+  throw located;
+}
 
 /**
  * SQLite store configuration
@@ -329,7 +360,9 @@ export class SqliteStore implements Store {
    * @internal
    */
   private async _parse_pii_from_read(
-    raw: unknown
+    raw: unknown,
+    stream: string,
+    event_id: number
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
     // Revive dates like `data`/`meta` do (#1198/#1365). Base64 ciphertext
@@ -337,10 +370,14 @@ export class SqliteStore implements Store {
     // store returns exactly what it stored — plaintext or decrypted alike.
     const parsed = parse_json(raw as string);
     if (this._resolve_pii_key && typeof parsed === "string") {
-      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
-        string,
-        unknown
-      >;
+      try {
+        return (await decrypt(parsed, this._resolve_pii_key)) as Record<
+          string,
+          unknown
+        >;
+      } catch (error) {
+        locate_decryption_error(error, stream, event_id);
+      }
     }
     return parsed as Record<string, unknown>;
   }
@@ -698,7 +735,11 @@ export class SqliteStore implements Store {
     let count = 0;
 
     for (const row of result.rows) {
-      const pii_value = await this._parse_pii_from_read(row.pii);
+      const pii_value = await this._parse_pii_from_read(
+        row.pii,
+        row.stream as string,
+        Number(row.id)
+      );
       await Promise.resolve(
         callback({
           id: Number(row.id),

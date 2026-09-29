@@ -237,6 +237,112 @@ describe("PostgresStore pii_encryption", () => {
     await store.dispose();
   });
 
+  it("names the stream and event id on an unreadable row (#1675)", async () => {
+    // The generic message is deliberate — it must not say WHICH failure mode
+    // was hit. The stream and id are not secret, and without them the read
+    // that trips aborts the whole scan without naming the row to repair.
+    const key = randomBytes(32);
+    const store = buildStore(key);
+    const stream = `locate-${chance.guid()}`;
+
+    await store.commit(
+      stream,
+      [{ name: "UserRegistered", data: {}, pii: { email: "z@example.com" } }],
+      { correlation: "c-locate", causation: {} }
+    );
+
+    const rows = await rawPool.query<{ id: string }>(
+      `SELECT id FROM "${SCHEMA}"."${TABLE}" WHERE stream = $1`,
+      [stream]
+    );
+    const id = Number(rows.rows[0]!.id);
+
+    const junk = randomBytes(64).toString("base64");
+    await rawPool.query(
+      `UPDATE "${SCHEMA}"."${TABLE}" SET pii = $1::jsonb WHERE stream = $2`,
+      [JSON.stringify(junk), stream]
+    );
+
+    const error = await store
+      .query(() => {}, { stream, stream_exact: true })
+      .then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+    // Still the framework signal callers catch.
+    expect(error).toBeInstanceOf(DecryptionError);
+    // Machine-readable, so a caller acts without parsing the message.
+    expect(error).toMatchObject({ stream, event_id: id });
+    expect((error as Error).message).toContain(stream);
+    expect((error as Error).message).toContain(String(id));
+    // The original failure is preserved rather than replaced.
+    expect((error as Error).cause).toBeInstanceOf(DecryptionError);
+
+    await store.dispose();
+  });
+
+  it("passes a non-decryption failure through untouched", async () => {
+    // A key provider that returns the wrong shape fails inside the resolver,
+    // not the cipher — a plain Error, not a DecryptionError. Locating it as a
+    // poison row would be a lie, so it travels as-is.
+    const key = randomBytes(32);
+    const writer = buildStore(key);
+    const stream = `badkey-${chance.guid()}`;
+
+    await writer.commit(
+      stream,
+      [{ name: "UserRegistered", data: {}, pii: { email: "q@example.com" } }],
+      { correlation: "c-badkey", causation: {} }
+    );
+
+    const reader = buildStore(() => Buffer.alloc(8));
+    const error = await reader
+      .query(() => {}, { stream, stream_exact: true })
+      .then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(DecryptionError);
+    expect(error).not.toHaveProperty("event_id");
+
+    await writer.dispose();
+    await reader.dispose();
+  });
+
+  it("locates a decrypt failure in the commit echo too", async () => {
+    // The echo decrypts the rows it just wrote, so it cannot fail against a
+    // stable key. Swap the resolver between the encrypt and the decrypt —
+    // private-state fault injection, the only way to reach this branch.
+    const key = randomBytes(32);
+    const other = randomBytes(32);
+    const store = buildStore(key);
+    const stream = `echo-${chance.guid()}`;
+
+    let calls = 0;
+    (store as unknown as { _resolve_pii_key: () => Buffer })._resolve_pii_key =
+      () => (++calls === 1 ? key : other);
+
+    const error = await store
+      .commit(
+        stream,
+        [{ name: "UserRegistered", data: {}, pii: { email: "e@example.com" } }],
+        { correlation: "c-echo", causation: {} }
+      )
+      .then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(DecryptionError);
+    expect(error).toMatchObject({ stream });
+    expect((error as { event_id: number }).event_id).toBeTypeOf("number");
+
+    await store.dispose();
+  });
+
   it("reads pre-encryption (plaintext object) rows transparently", async () => {
     // Operator wrote some events before enabling encryption, then
     // restarted with pii_encryption configured. New writes are
