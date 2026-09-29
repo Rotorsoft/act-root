@@ -2,24 +2,40 @@ name: Mutation
 
 # Mutation testing (StrykerJS) — issue #1028.
 #
-# WARNING, not a PR gate (issue #1056): this workflow runs weekly + on demand
-# only — never on pull_request — so it can NEVER block a PR or merge. The
-# per-package Stryker configs set a `thresholds.break` floor (libs/*/stryker.conf.mjs,
-# ~6 pts under the CI baseline); a real mutation-score regression makes this
-# weekly run go red (a visible signal in the Actions tab), instead of vanishing
-# into a green check.
+# WARNING, not a PR gate (issue #1056): this workflow never runs on
+# pull_request, so it can NEVER block a PR or merge. The per-package Stryker
+# configs set a `thresholds.break` floor (libs/*/stryker.conf.mjs, ~6 pts
+# under the CI baseline); a real mutation-score regression makes the run go
+# red (a visible signal in the Actions tab), instead of vanishing into a
+# green check.
 #
 # Mutation runs are slow (a full pass mutates every source file and re-runs
 # the suite per mutant), which is why this is off the per-PR hot path.
+#
+# The weekly schedule is currently OFF, and `workflow_dispatch` is the only
+# trigger. Vitest 5 matches `testNamePattern` against the suite chain joined
+# with ' > '; @stryker-mutator/vitest-runner still joins with ' ', so the
+# per-test filter that `coverageAnalysis: "perTest"` depends on matches
+# nothing and EVERY covered mutant is reported Survived. Measured on
+# act-patch: the dry run passes 101 tests, then 105 of 105 mutants survive
+# for a score of 0.00 against a break floor of 73. A weekly run that is red
+# for a reason unrelated to test quality trains everyone to ignore the badge,
+# which costs more than the missing signal.
+#
+# Upstream: stryker-mutator/stryker-js#6210, with fixes open but unreleased
+# in #6214 and #6220. Restore the `schedule:` block below once a
+# vitest-runner carrying either fix ships, and confirm against the recorded
+# baselines in libs/*/stryker.conf.mjs before trusting a score again.
 
 permissions:
   contents: read
 
 on:
   workflow_dispatch:
-  schedule:
-    # Weekly, Monday 06:00 UTC.
-    - cron: "0 6 * * 1"
+  # Re-enable once the vitest 5 test-name-separator fix ships upstream
+  # (see the header note). Weekly, Monday 06:00 UTC.
+  # schedule:
+  #   - cron: "0 6 * * 1"
 
 jobs:
   mutation:
