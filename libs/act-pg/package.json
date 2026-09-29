@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-pg",
   "type": "module",
-  "version": "1.19.9",
+  "version": "1.19.10",
   "description": "act pg adapters",
   "keywords": [
     "typescript",
