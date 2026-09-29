@@ -82,9 +82,11 @@ Snapshots are created by user code via the `me.snap?` predicate at the end of ev
 
 ```ts no-check
 const last = snapshots.at(-1)!;
-const snapped = me.snap && me.snap(last);
+const snapped = contiguous && me.snap?.(last);
+// Awaited: the snapshot event takes the next version slot, so the cache
+// must carry the snap checkpoint before the action returns.
+const snap_event = snapped ? await snap(last) : undefined;
 // ... cache.set with patches: snapped ? 0 : last.patches
-if (snapped) void snap(last);  // commits a __snapshot__ event, fire-and-forget
 ```
 
 The user-supplied predicate decides *when* to snap. Common patterns:
@@ -93,7 +95,9 @@ The user-supplied predicate decides *when* to snap. Common patterns:
 - **By time elapsed**: keep timestamp on state, snap when `Date.now() - state.lastSnapAt > 60_000`.
 - **Never**: omit `.snap()`. Streams with bounded length (single-day TTL, capped by app logic) often don't need snapshots.
 
-The actual write is fire-and-forget — `void snap(last)` doesn't block the action's return. Snapshot failures log via `snap()`'s internal try/catch but don't propagate — a **warn**-level line carries the stream, the failure reason, and the operational consequence (cold starts replay full history until snapshots succeed), so a persistently failing snapshot write is visible to operators instead of silently degrading every cold start. The cache is the immediate source of truth; the snapshot is durability for cold start.
+The write is **awaited**, not fire-and-forget. The snapshot event occupies the next version slot, so a follow-up action loading a pre-snap checkpoint from the cache would collide with the framework's own bookkeeping; caching the snap checkpoint before the action returns is what keeps sequential callers from ever seeing a conflict they didn't cause. By the time `app.do()` returns, the `__snapshot__` is already in the log.
+
+What *is* fire-and-forget is failure **containment**, and the distinction matters: `snap()` swallows its own errors, so the action never fails on a snapshot write. A failure logs at **warn** level with the stream, the reason, and the operational consequence (cold starts replay full history until snapshots succeed), so a persistently failing write is visible to operators instead of silently degrading every cold start — and the cache keeps the pre-snap checkpoint, which stays correct. The cache is the immediate source of truth; the snapshot is durability for cold start.
 
 ## How the two interact on cold start
 
@@ -150,7 +154,7 @@ load: orders-1 (as-of before=5000) miss v=4 replayed=11 snaps=0 patches=11
 - `hit/miss` — cache lookup outcome
 - `v=` — stream head version after this load
 - `replayed=` — events processed past the cache point. Zero after a warm cache hit; high on cold start
-- `snaps=` — total snapshots taken on this stream (cumulative across all loads)
+- `snaps=` — snapshots absorbed by **this load's window**, not the stream's lifetime total. A warm load seeds the counter from the cache checkpoint, so it reads as a running total; a cold load has nothing to seed from and the `with_snaps` resume floor hands it only the window from the latest snapshot, so the same head can report a lower number cold than warm
 - `patches=` — events since last snap (snap-policy accumulator)
 
 A `cache: hit` with `patches=8` is *not* a contradiction. The cache had a checkpoint past 8 events of patches-since-snap. The cache hit means we didn't replay; the patches counter is what `snap()` policies key on for "should I take a snap soon."
