@@ -2368,7 +2368,16 @@ export class Act<
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
     for (const r of results) {
-      fetched.push(...r.fetched);
+      // Actor-less like \`query\`/\`query_array\`, so default-deny (#1673).
+      // Handlers are unaffected — they read through their own strip.
+      fetched.push(
+        ...r.fetched.map((f) => ({
+          ...f,
+          events: f.events.map((e) =>
+            this.registry.query_gate(e.name as string)(e)
+          ),
+        }))
+      );
       leased.push(...r.leased);
       acked.push(...r.acked);
       blocked.push(...r.blocked);
@@ -22478,7 +22487,16 @@ export class Act<
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
     for (const r of results) {
-      fetched.push(...r.fetched);
+      // Actor-less like \`query\`/\`query_array\`, so default-deny (#1673).
+      // Handlers are unaffected — they read through their own strip.
+      fetched.push(
+        ...r.fetched.map((f) => ({
+          ...f,
+          events: f.events.map((e) =>
+            this.registry.query_gate(e.name as string)(e)
+          ),
+        }))
+      );
       leased.push(...r.leased);
       acked.push(...r.acked);
       blocked.push(...r.blocked);
