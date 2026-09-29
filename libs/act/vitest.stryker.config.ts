@@ -1,5 +1,4 @@
-import { mergeConfig } from "vitest/config";
-import rootConfig from "../../vite.config";
+import { strykerConfig } from "../../vite.stryker.config";
 
 /**
  * Vitest config for Stryker mutation runs of @rotorsoft/act (issue #1028).
@@ -9,7 +8,7 @@ import rootConfig from "../../vite.config";
  * does its own per-test coverage instrumentation, and the root config's
  * coverage thresholds would otherwise fail this narrowed run.
  */
-export default mergeConfig(rootConfig, {
+export default strykerConfig({
   test: {
     include: ["test/**/*.spec.ts"],
     coverage: { enabled: false },
