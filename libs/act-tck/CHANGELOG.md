@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.37.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.10...@rotorsoft/act-tck-v1.37.11) (2026-09-29)
+
+
+### Bug Fixes
+
+* **ci:** unblock stryker's dry run and pause the weekly mutation schedule ([#1694](https://github.com/Rotorsoft/act-root/issues/1694)) ([0428960](https://github.com/Rotorsoft/act-root/commit/04289609f81bc2046ec4aea68cdbeaacb777d5b7)), closes [#1693](https://github.com/Rotorsoft/act-root/issues/1693)
+
 # [@rotorsoft/act-tck-v1.37.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.9...@rotorsoft/act-tck-v1.37.10) (2026-09-29)
 
 
