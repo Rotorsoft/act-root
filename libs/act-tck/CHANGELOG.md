@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.37.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.9...@rotorsoft/act-tck-v1.37.10) (2026-09-29)
+
+
+### Bug Fixes
+
+* **deps:** update zod to ^4.6.5 ([#1692](https://github.com/Rotorsoft/act-root/issues/1692)) ([efb77a5](https://github.com/Rotorsoft/act-root/commit/efb77a50aa819f1e7a8789133bac4ac4f4db8067)), closes [#1688](https://github.com/Rotorsoft/act-root/issues/1688) [#1689](https://github.com/Rotorsoft/act-root/issues/1689) [#1691](https://github.com/Rotorsoft/act-root/issues/1691) [#1689](https://github.com/Rotorsoft/act-root/issues/1689) [#1688](https://github.com/Rotorsoft/act-root/issues/1688)
+
 # [@rotorsoft/act-tck-v1.37.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.8...@rotorsoft/act-tck-v1.37.9) (2026-09-29)
 
 
