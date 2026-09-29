@@ -1294,27 +1294,29 @@ export class InMemoryStore implements Store {
     }
 
     const full = targets.filter((t) => t.before === undefined);
-    // Count per-stream deletions
-    const deleted_counts = new Map<string, number>();
-    const stream_set = new Set(full.map((t) => t.stream));
-    for (const e of this._events) {
-      if (stream_set.has(e.stream)) {
-        deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
-      }
-    }
-    this._events = this._events.filter((e) => !stream_set.has(e.stream));
-    // Subscriptions are deliberately untouched, for restart *and* retire
-    // targets alike — see the note in truncate's contract. A tombstoned
-    // stream's subscription is inert, and reaping it is maintenance that
-    // `seed()` performs (#1527).
-    for (const stream of stream_set) {
+    // Count / delete / insert per target, not once for the whole set. The
+    // SQL adapters cannot do otherwise — their per-target `DELETE WHERE
+    // stream = $1` sees the seed a previous pass wrote — and the unique
+    // `(stream, version)` constraint makes the alternative impossible there.
+    // Deleting once from a deduped Set and then inserting once per array
+    // entry left this store with two `version: 0` seeds for a stream listed
+    // twice, both reporting the pre-delete count (#1677).
+    for (const { stream, snapshot, meta } of full) {
+      let deleted = 0;
+      this._events = this._events.filter((e) => {
+        if (e.stream !== stream) return true;
+        deleted++;
+        return false;
+      });
+      // Subscriptions are deliberately untouched, for restart *and* retire
+      // targets alike — see the note in truncate's contract. A tombstoned
+      // stream's subscription is inert, and reaping it is maintenance that
+      // `seed()` performs (#1527).
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
       // adapters' `DELETE WHERE stream = ?` scope.
       this._pii.delete(stream);
-    }
-    for (const { stream, snapshot, meta } of full) {
       const event: Committed<Schemas, keyof Schemas> = {
         id: this._next_id++,
         stream,
@@ -1329,10 +1331,7 @@ export class InMemoryStore implements Store {
       if (event.name !== SNAP_EVENT) {
         this._max_event_id_by_stream.set(stream, event.id);
       }
-      result.set(stream, {
-        deleted: deleted_counts.get(stream) ?? 0,
-        committed: event,
-      });
+      result.set(stream, { deleted, committed: event });
     }
     // Recompute global max from the per-stream index — deletions may have
     // dropped the previous max, while new tombstones may have raised it.

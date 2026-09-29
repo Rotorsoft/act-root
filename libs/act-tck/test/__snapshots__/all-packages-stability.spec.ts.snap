@@ -14080,27 +14080,29 @@ export class InMemoryStore implements Store {
     }
 
     const full = targets.filter((t) => t.before === undefined);
-    // Count per-stream deletions
-    const deleted_counts = new Map<string, number>();
-    const stream_set = new Set(full.map((t) => t.stream));
-    for (const e of this._events) {
-      if (stream_set.has(e.stream)) {
-        deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
-      }
-    }
-    this._events = this._events.filter((e) => !stream_set.has(e.stream));
-    // Subscriptions are deliberately untouched, for restart *and* retire
-    // targets alike — see the note in truncate's contract. A tombstoned
-    // stream's subscription is inert, and reaping it is maintenance that
-    // \`seed()\` performs (#1527).
-    for (const stream of stream_set) {
+    // Count / delete / insert per target, not once for the whole set. The
+    // SQL adapters cannot do otherwise — their per-target \`DELETE WHERE
+    // stream = $1\` sees the seed a previous pass wrote — and the unique
+    // \`(stream, version)\` constraint makes the alternative impossible there.
+    // Deleting once from a deduped Set and then inserting once per array
+    // entry left this store with two \`version: 0\` seeds for a stream listed
+    // twice, both reporting the pre-delete count (#1677).
+    for (const { stream, snapshot, meta } of full) {
+      let deleted = 0;
+      this._events = this._events.filter((e) => {
+        if (e.stream !== stream) return true;
+        deleted++;
+        return false;
+      });
+      // Subscriptions are deliberately untouched, for restart *and* retire
+      // targets alike — see the note in truncate's contract. A tombstoned
+      // stream's subscription is inert, and reaping it is maintenance that
+      // \`seed()\` performs (#1527).
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
       // adapters' \`DELETE WHERE stream = ?\` scope.
       this._pii.delete(stream);
-    }
-    for (const { stream, snapshot, meta } of full) {
       const event: Committed<Schemas, keyof Schemas> = {
         id: this._next_id++,
         stream,
@@ -14115,10 +14117,7 @@ export class InMemoryStore implements Store {
       if (event.name !== SNAP_EVENT) {
         this._max_event_id_by_stream.set(stream, event.id);
       }
-      result.set(stream, {
-        deleted: deleted_counts.get(stream) ?? 0,
-        committed: event,
-      });
+      result.set(stream, { deleted, committed: event });
     }
     // Recompute global max from the per-stream index — deletions may have
     // dropped the previous max, while new tombstones may have raised it.
@@ -16311,6 +16310,17 @@ export interface Store extends Disposable, EventSource {
    * them cannot change what \`load()\` returns. \`snapshot\`/\`meta\` must be
    * omitted on windowed targets; \`before\` takes precedence when both
    * appear.
+   *
+   * **Windowed targets are applied before full ones**, and each full target
+   * pairs its own delete with its own seed. Both only matter for inputs the
+   * framework never produces — \`close-cycle\` dedups by stream before calling
+   * — but \`Store\` is a public port, so the order is contract rather than
+   * accident (#1677): a stream listed as both windowed and full ends with its
+   * FULL entry in the result, and a stream listed twice as full leaves
+   * exactly one seed carrying the last target's snapshot, reporting only that
+   * pass's own delete count. Deleting once for a deduped set and seeding once
+   * per entry would write two \`version: 0\` rows, which the SQL adapters'
+   * unique \`(stream, version)\` constraint rejects outright.
    *
    * @param targets - Streams to truncate; full targets carry optional
    *   snapshot state and meta, windowed targets carry \`before\` (and
@@ -33633,27 +33643,29 @@ export class InMemoryStore implements Store {
     }
 
     const full = targets.filter((t) => t.before === undefined);
-    // Count per-stream deletions
-    const deleted_counts = new Map<string, number>();
-    const stream_set = new Set(full.map((t) => t.stream));
-    for (const e of this._events) {
-      if (stream_set.has(e.stream)) {
-        deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
-      }
-    }
-    this._events = this._events.filter((e) => !stream_set.has(e.stream));
-    // Subscriptions are deliberately untouched, for restart *and* retire
-    // targets alike — see the note in truncate's contract. A tombstoned
-    // stream's subscription is inert, and reaping it is maintenance that
-    // \`seed()\` performs (#1527).
-    for (const stream of stream_set) {
+    // Count / delete / insert per target, not once for the whole set. The
+    // SQL adapters cannot do otherwise — their per-target \`DELETE WHERE
+    // stream = $1\` sees the seed a previous pass wrote — and the unique
+    // \`(stream, version)\` constraint makes the alternative impossible there.
+    // Deleting once from a deduped Set and then inserting once per array
+    // entry left this store with two \`version: 0\` seeds for a stream listed
+    // twice, both reporting the pre-delete count (#1677).
+    for (const { stream, snapshot, meta } of full) {
+      let deleted = 0;
+      this._events = this._events.filter((e) => {
+        if (e.stream !== stream) return true;
+        deleted++;
+        return false;
+      });
+      // Subscriptions are deliberately untouched, for restart *and* retire
+      // targets alike — see the note in truncate's contract. A tombstoned
+      // stream's subscription is inert, and reaping it is maintenance that
+      // \`seed()\` performs (#1527).
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
       // adapters' \`DELETE WHERE stream = ?\` scope.
       this._pii.delete(stream);
-    }
-    for (const { stream, snapshot, meta } of full) {
       const event: Committed<Schemas, keyof Schemas> = {
         id: this._next_id++,
         stream,
@@ -33668,10 +33680,7 @@ export class InMemoryStore implements Store {
       if (event.name !== SNAP_EVENT) {
         this._max_event_id_by_stream.set(stream, event.id);
       }
-      result.set(stream, {
-        deleted: deleted_counts.get(stream) ?? 0,
-        committed: event,
-      });
+      result.set(stream, { deleted, committed: event });
     }
     // Recompute global max from the per-stream index — deletions may have
     // dropped the previous max, while new tombstones may have raised it.
@@ -35469,6 +35478,17 @@ export interface Store extends Disposable, EventSource {
    * them cannot change what \`load()\` returns. \`snapshot\`/\`meta\` must be
    * omitted on windowed targets; \`before\` takes precedence when both
    * appear.
+   *
+   * **Windowed targets are applied before full ones**, and each full target
+   * pairs its own delete with its own seed. Both only matter for inputs the
+   * framework never produces — \`close-cycle\` dedups by stream before calling
+   * — but \`Store\` is a public port, so the order is contract rather than
+   * accident (#1677): a stream listed as both windowed and full ends with its
+   * FULL entry in the result, and a stream listed twice as full leaves
+   * exactly one seed carrying the last target's snapshot, reporting only that
+   * pass's own delete count. Deleting once for a deduped set and seeding once
+   * per entry would write two \`version: 0\` rows, which the SQL adapters'
+   * unique \`(stream, version)\` constraint rejects outright.
    *
    * @param targets - Streams to truncate; full targets carry optional
    *   snapshot state and meta, windowed targets carry \`before\` (and
@@ -41725,6 +41745,17 @@ export interface Store extends Disposable, EventSource {
    * them cannot change what \`load()\` returns. \`snapshot\`/\`meta\` must be
    * omitted on windowed targets; \`before\` takes precedence when both
    * appear.
+   *
+   * **Windowed targets are applied before full ones**, and each full target
+   * pairs its own delete with its own seed. Both only matter for inputs the
+   * framework never produces — \`close-cycle\` dedups by stream before calling
+   * — but \`Store\` is a public port, so the order is contract rather than
+   * accident (#1677): a stream listed as both windowed and full ends with its
+   * FULL entry in the result, and a stream listed twice as full leaves
+   * exactly one seed carrying the last target's snapshot, reporting only that
+   * pass's own delete count. Deleting once for a deduped set and seeding once
+   * per entry would write two \`version: 0\` rows, which the SQL adapters'
+   * unique \`(stream, version)\` constraint rejects outright.
    *
    * @param targets - Streams to truncate; full targets carry optional
    *   snapshot state and meta, windowed targets carry \`before\` (and
@@ -56201,6 +56232,38 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
+      // Windowed targets run BEFORE full ones, matching InMemory and SQLite.
+      // A stream listed as both used to land its windowed entry in the result
+      // on this adapter and its full entry on the other two — same on-disk
+      // state, different returned map (#1677). The framework never produces
+      // that input (\`close-cycle\` dedups by stream first), but \`Store\` is a
+      // public port that third-party adapters validate against the TCK, so
+      // the three must agree.
+      for (const { stream, before, max_id } of windowed) {
+        // Closest safe boundary: latest snapshot older than the cutoff and
+        // at/below the consumer watermark cap. No qualifying snapshot →
+        // no-op, stream absent from the result.
+        const { rows } = await client.query(
+          \`SELECT id, stream, version, name, data, created, meta
+           FROM \${this._fqt}
+           WHERE stream = $1 AND name = $2 AND created < $3
+             AND ($4::int IS NULL OR id <= $4)
+           ORDER BY id DESC LIMIT 1\`,
+          [stream, SNAP_EVENT, before, max_id ?? null]
+        );
+        if (!rows.length) continue;
+        const boundary = rows[0] as Committed<Schemas, keyof Schemas>;
+        const { rowCount } = await client.query(
+          \`DELETE FROM \${this._fqt} WHERE stream = $1 AND id < $2\`,
+          [stream, boundary.id]
+        );
+        result.set(stream, {
+          deleted: rowCount ?? 0,
+          committed: boundary,
+          before,
+        });
+      }
+
       // Subscriptions are deliberately untouched, for restart *and* retire
       // targets alike. A tombstoned stream's subscription is inert — the
       // framework refuses new commits on it, so no scan can raise its work
@@ -56228,30 +56291,6 @@ export class PostgresStore implements Store {
         result.set(stream, {
           deleted: rowCount ?? 0,
           committed: rows[0] as Committed<Schemas, keyof Schemas>,
-        });
-      }
-      for (const { stream, before, max_id } of windowed) {
-        // Closest safe boundary: latest snapshot older than the cutoff and
-        // at/below the consumer watermark cap. No qualifying snapshot →
-        // no-op, stream absent from the result.
-        const { rows } = await client.query(
-          \`SELECT id, stream, version, name, data, created, meta
-           FROM \${this._fqt}
-           WHERE stream = $1 AND name = $2 AND created < $3
-             AND ($4::int IS NULL OR id <= $4)
-           ORDER BY id DESC LIMIT 1\`,
-          [stream, SNAP_EVENT, before, max_id ?? null]
-        );
-        if (!rows.length) continue;
-        const boundary = rows[0] as Committed<Schemas, keyof Schemas>;
-        const { rowCount } = await client.query(
-          \`DELETE FROM \${this._fqt} WHERE stream = $1 AND id < $2\`,
-          [stream, boundary.id]
-        );
-        result.set(stream, {
-          deleted: rowCount ?? 0,
-          committed: boundary,
-          before,
         });
       }
       await client.query("COMMIT");
@@ -60637,6 +60676,7 @@ import {
   ConcurrencyError,
   InMemoryCache,
   SNAP_EVENT,
+  sleep,
   TOMBSTONE_EVENT,
   ValidationError,
 } from "@rotorsoft/act";
@@ -63926,6 +63966,84 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           "__snapshot__"
         );
         expect(remaining[0].data).toEqual({ count: 7 });
+      });
+
+      it("leaves exactly one seed when a stream is listed twice (#1677)", async () => {
+        // The delete and the insert must be paired per target. Deleting once
+        // from a deduped set and then inserting once per entry leaves two
+        // \`version: 0\` seeds — a state the SQL adapters' unique
+        // \`(stream, version)\` constraint makes impossible, so only an
+        // in-memory implementation can drift here.
+        const s = \`trunc-dup-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2)],
+          make_meta({ stream: s })
+        );
+
+        const result = await store.truncate([
+          { stream: s, snapshot: { count: 1 } },
+          { stream: s, snapshot: { count: 2 } },
+        ]);
+
+        const remaining: CommittedCounterEvent[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            remaining.push(e as CommittedCounterEvent);
+          },
+          { stream: s, stream_exact: true, with_snaps: true }
+        );
+        // One seed, carrying the LAST target's snapshot — the second pass
+        // deletes what the first wrote.
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].data).toEqual({ count: 2 });
+        // And the reported count is the second pass's own delete (the seed
+        // the first pass wrote), not the original pre-delete total.
+        expect(result.get(s)?.deleted).toBe(1);
+      });
+
+      it("applies windowed targets before full ones (#1677)", async () => {
+        // A stream listed as both is not something the framework produces —
+        // \`close-cycle\` dedups by stream first — but \`Store\` is a public port
+        // and the three adapters used to disagree on which entry survived in
+        // the returned map. Windowed first, so the full entry wins.
+        const s = \`trunc-mix-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(2)],
+          make_meta({ stream: s })
+        );
+        await sleep(5);
+        const cutoff = new Date();
+
+        const result = await store.truncate([
+          { stream: s, before: cutoff },
+          { stream: s, snapshot: { count: 9 } },
+        ]);
+
+        const entry = result.get(s);
+        expect(entry).toBeDefined();
+        // The full pass ran last, so its entry is the one in the map: a seed,
+        // never a \`before\` echo.
+        expect(entry!.before).toBeUndefined();
+        expect((entry!.committed as unknown as { name: string }).name).toBe(
+          "__snapshot__"
+        );
+
+        const remaining: CommittedCounterEvent[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            remaining.push(e as CommittedCounterEvent);
+          },
+          { stream: s, stream_exact: true, with_snaps: true }
+        );
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].data).toEqual({ count: 9 });
       });
 
       it("returns an empty map for empty input", async () => {
