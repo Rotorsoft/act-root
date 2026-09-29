@@ -365,6 +365,83 @@ describe("evicting overlay state is reported (#1648)", () => {
     ).toMatchObject({ ok: false, reason: "behind" });
   });
 
+  it("a throwing hook costs neither stream its frame", () => {
+    // The eviction hook runs inside publish(), for a stream other than the
+    // one being published, and before that stream's own fan_out. Unguarded,
+    // one host bug takes both frames with it — and the evicted stream's
+    // clients, unlike the publisher's, never self-heal.
+    const errors: unknown[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 1,
+      onOverlayMiss: () => {
+        throw new Error("host hook exploded");
+      },
+      onSubscriberError: (error) => errors.push(error),
+    });
+    const a_frames: PatchMessage<TestState>[] = [];
+    const b_frames: PatchMessage<TestState>[] = [];
+
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.overlay("a", { name: "typing" } as Partial<TestState>);
+    bc.subscribe("a", (m) => a_frames.push(m));
+    bc.subscribe("b", (m) => b_frames.push(m));
+
+    // Evicts "a", whose entry carries overlay keys.
+    expect(() => bc.publish("b", st(0), [{ count: 9 }])).not.toThrow();
+
+    // The evicted stream still gets its recovery frame …
+    expect(a_frames.filter((f) => f._resync)).toHaveLength(1);
+    // … and the publishing stream still gets the version it just committed.
+    expect(b_frames).toHaveLength(1);
+    expect(b_frames[0]).toMatchObject({ 0: { count: 9 } });
+    // The host's failure surfaces where delivery failures already go.
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toBe("host hook exploded");
+  });
+
+  it("a throwing hook on the overlay path loses neither the resync nor the call", () => {
+    const errors: unknown[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 1,
+      onOverlayMiss: () => {
+        throw new Error("host hook exploded");
+      },
+      onSubscriberError: (error) => errors.push(error),
+    });
+    const frames: PatchMessage<TestState>[] = [];
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.subscribe("a", (m) => frames.push(m));
+    bc.publish("b", st(0), [{ count: 1 }]); // evicts "a", no overlay keys
+
+    expect(() => bc.overlay("a", { name: "alice" })).not.toThrow();
+    expect(bc.overlay("a", { name: "alice" })).toBeUndefined();
+    expect(frames.filter((f) => f._resync)).toHaveLength(2);
+    expect(errors).toHaveLength(2);
+  });
+
+  it("control — a non-throwing hook reports the miss and both frames land", () => {
+    const missed: string[] = [];
+    const errors: unknown[] = [];
+    const bc = new BroadcastChannel<TestState>({
+      cacheSize: 1,
+      onOverlayMiss: (id) => missed.push(id),
+      onSubscriberError: (error) => errors.push(error),
+    });
+    const a_frames: PatchMessage<TestState>[] = [];
+    const b_frames: PatchMessage<TestState>[] = [];
+
+    bc.publish("a", st(0), [{ count: 1 }]);
+    bc.overlay("a", { name: "typing" } as Partial<TestState>);
+    bc.subscribe("a", (m) => a_frames.push(m));
+    bc.subscribe("b", (m) => b_frames.push(m));
+    bc.publish("b", st(0), [{ count: 9 }]);
+
+    expect(missed).toEqual(["a"]);
+    expect(a_frames.filter((f) => f._resync)).toHaveLength(1);
+    expect(b_frames).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
   it("says nothing when the evicted entry carried no overlay state", () => {
     // An ordinary LRU eviction is not a loss: a reconnecting client reseeds
     // from the store. Only cache-only overlay data goes missing.

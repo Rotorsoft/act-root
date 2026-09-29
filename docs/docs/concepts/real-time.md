@@ -89,9 +89,11 @@ const broadcast = new BroadcastChannel<AppState>({
   // other subscriber and the publish still returns — a bad consumer must not
   // break the publisher. Defaults to the framework's log() port.
   onSubscriberError: (error, streamId) => metrics.sseSubscriberError.inc(),
-  // Called when overlay() finds no cached baseline. Live subscribers get a
-  // `_resync` frame so they refetch, but a steady stream of these means
-  // cacheSize is too small for the working set. Defaults to a no-op.
+  // Called when overlay-contributed state is lost — overlay() finding no
+  // cached baseline, or the LRU evicting an entry that carried overlay keys.
+  // Live subscribers get a `_resync` frame so they refetch; a steady stream
+  // of these means cacheSize is too small for the working set. A throw is
+  // caught and routed to onSubscriberError. Defaults to a no-op.
   onOverlayMiss: (streamId) => metrics.sseOverlayMiss.inc(),
 });
 ```
@@ -143,7 +145,9 @@ This applies the overlay to the cached state, leaves `_v` unchanged, and emits a
 
 Overlay data survives the next commit: `publish()` carries overlay-contributed keys onto the new cached state unless the domain state speaks to them ([#1473](https://github.com/Rotorsoft/act-root/issues/1473)), so a reconnecting client reseeds with the same presence a live client is holding. A domain state that sets or drops one of those keys still wins — the store is authoritative for its own fields.
 
-That carry lives in the LRU cache, so it lasts as long as the entry does. If the stream ages out of the cache the overlay data is genuinely gone, and the server says so rather than letting it vanish quietly: evicting an entry that carried overlay keys fires `onOverlayMiss` and sends the stream's live subscribers a resync, so they refetch instead of showing presence the server has forgotten ([#1648](https://github.com/Rotorsoft/act-root/issues/1648)). A steady trickle of those means `cacheSize` is too small for the working set.
+That carry lives in the LRU cache, so it lasts as long as the entry does. If the stream ages out of the cache the overlay data is genuinely gone, and the server says so rather than letting it vanish quietly: evicting an entry that carried overlay keys sends the stream's live subscribers a resync, so they refetch instead of showing presence the server has forgotten ([#1648](https://github.com/Rotorsoft/act-root/issues/1648)), and then fires `onOverlayMiss`. A steady trickle of those means `cacheSize` is too small for the working set.
+
+The resync goes first, and the hook is wrapped: a throwing `onOverlayMiss` is caught and handed to `onSubscriberError` ([#1674](https://github.com/Rotorsoft/act-root/issues/1674)). That ordering matters because eviction runs inside `publish()`, for a stream other than the one being published — an escaping throw would cost the evicted stream its recovery frame and the publishing stream the frame for a version already written to the cache. The publisher's clients would self-heal on the next commit; the evicted stream's clients never would.
 
 `online()` returns a `Set`, which `JSON.stringify` encodes as `{}` — so the broadcast layer converts a `Set` to an array before it reaches the cache or the wire ([#1472](https://github.com/Rotorsoft/act-root/issues/1472), completed for `publish()` in [#1646](https://github.com/Rotorsoft/act-root/issues/1646)). Clients receive `["alice", "bob"]`, and a reconnecting client's reseed matches what a live one holds. The two paths run the same normalization; the one thing the cache deliberately does not adopt is the wire's delete encoding, since a reseed must show a cleared key as absent rather than `null`. A `Map` is left alone: unlike a `Set` it has no unambiguous JSON encoding, so pass one already shaped the way you want it sent.
 
