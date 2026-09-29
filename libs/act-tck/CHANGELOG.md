@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.37.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.8...@rotorsoft/act-tck-v1.37.9) (2026-09-29)
+
+
+### Bug Fixes
+
+* **act:** carry __snapshot__ events through a store-sourced restore ([#1682](https://github.com/Rotorsoft/act-root/issues/1682)) ([a86718a](https://github.com/Rotorsoft/act-root/commit/a86718a0884a3b4a05ac21987713cdb65da2c2e6)), closes [#1671](https://github.com/Rotorsoft/act-root/issues/1671)
+* **act:** gate the events drain returns to the caller ([#1683](https://github.com/Rotorsoft/act-root/issues/1683)) ([72fcc74](https://github.com/Rotorsoft/act-root/commit/72fcc7444a719e51d6349c0ccc11dbfb70aa35c2)), closes [#1673](https://github.com/Rotorsoft/act-root/issues/1673)
+
 # [@rotorsoft/act-tck-v1.37.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.7...@rotorsoft/act-tck-v1.37.8) (2026-09-28)
 
 
