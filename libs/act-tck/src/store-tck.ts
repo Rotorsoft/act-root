@@ -5017,6 +5017,97 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].data).toEqual({ amount: 1 });
       });
 
+      /**
+       * `with_pii: false` lets a read decline the payload entirely. The
+       * engine uses it on scans that discard `pii` — correlate resolves
+       * reaction targets from `name`/`stream` and throws the rest away — so
+       * an unreadable payload cannot fail a read that never wanted it
+       * (#1675). Before this, one corrupt row stopped every stream's
+       * reactions, because the correlate scan tripped on it.
+       */
+      describe("with_pii (#1675)", () => {
+        const seed_pii = async (s: string) =>
+          await store.commit<CounterEvents>(
+            s,
+            [
+              {
+                name: "Incremented",
+                data: { amount: 1 },
+                pii: { email: "w@example.com" },
+              },
+            ],
+            make_meta({ stream: s })
+          );
+
+        it("returns the payload by default and omits it when declined", async () => {
+          const s = `pii-flag-${uid()}`;
+          await seed_pii(s);
+
+          const read = async (with_pii?: boolean) => {
+            const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+            await store.query<CounterEvents>(
+              (e) => {
+                seen.push(e);
+              },
+              { stream: s, stream_exact: true, with_pii }
+            );
+            return seen;
+          };
+
+          // Default — unchanged behavior.
+          expect((await read())[0].pii).toEqual({ email: "w@example.com" });
+          // Explicit true — same.
+          expect((await read(true))[0].pii).toEqual({
+            email: "w@example.com",
+          });
+
+          const declined = await read(false);
+          expect(declined).toHaveLength(1);
+          // No payload. Adapters differ on whether "absent" is `null` or
+          // undefined — that predates this flag — so assert the meaning.
+          expect(declined[0].pii ?? null).toBeNull();
+          // Everything else is untouched: this is not a projection.
+          expect(declined[0].data).toEqual({ amount: 1 });
+          expect(declined[0].name).toBe("Incremented");
+          expect(declined[0].stream).toBe(s);
+        });
+
+        it("never hands back the stored payload in place of the real one", async () => {
+          // `pii_gate` treats ANY non-null `pii` as discloseable, so leaking
+          // an at-rest representation here would merge ciphertext into
+          // `data` on the read path. The declined payload must be empty,
+          // never a stand-in.
+          const s = `pii-flag-raw-${uid()}`;
+          await seed_pii(s);
+
+          const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+          await store.query<CounterEvents>(
+            (e) => {
+              seen.push(e);
+            },
+            { stream: s, stream_exact: true, with_pii: false }
+          );
+          const pii = seen[0].pii;
+          expect(pii ?? null).toBeNull();
+          expect(typeof pii).not.toBe("string");
+        });
+
+        it("applies to every matching row, not just the first", async () => {
+          const s = `pii-flag-many-${uid()}`;
+          for (let i = 0; i < 3; i++) await seed_pii(s);
+
+          const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+          await store.query<CounterEvents>(
+            (e) => {
+              seen.push(e);
+            },
+            { stream: s, stream_exact: true, with_pii: false }
+          );
+          expect(seen).toHaveLength(3);
+          for (const e of seen) expect(e.pii ?? null).toBeNull();
+        });
+      });
+
       it("round-trips a Date losslessly in pii, like data/meta (#1365/#1370/#1556)", async () => {
         // A store persists bytes; it does not type them. JSON has no date
         // type, so a `Date` is stored as its ISO form and read back as that

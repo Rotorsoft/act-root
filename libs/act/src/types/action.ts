@@ -139,6 +139,19 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   time-travel read full-scans under its filter rather than jumping to
  *   a snapshot outside the window (RFC 1274). Do not combine `with_snaps`
  *   with `before`/`created_*`/`limit` in a direct `query()` call.
+ * @property `with_pii?` - Whether the store should produce the sensitive
+ *   payload. Defaults to **true**, which is today's behavior: the store
+ *   decrypts `pii` when `pii_encryption` is configured and attaches it to
+ *   every returned event. Set `false` on a read that does not need it and
+ *   the store returns `pii: null` **without ever decrypting** — so an
+ *   unreadable payload (corrupt ciphertext, a key rotated past a stream's
+ *   checkpoint) cannot fail the read. `null` rather than the raw ciphertext
+ *   is deliberate: `pii_gate` treats any non-null `pii` as discloseable and
+ *   would merge a base64 blob into `data`.
+ *
+ *   Note the default is the opposite of `with_snaps`: snapshot rows are
+ *   excluded until asked for, while the sensitive payload is included until
+ *   declined. Anything else would newly reject behavior that works today.
  */
 export type Query = z.infer<typeof QuerySchema>;
 

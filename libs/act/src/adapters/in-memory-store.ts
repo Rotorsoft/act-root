@@ -427,8 +427,10 @@ export class InMemoryStore implements Store {
   // Attach the isolated PII payload (or null) to an event before handing it to
   // a caller. Allocation-free for events without PII — by far the common case.
   private _with_pii<E extends Schemas>(
-    e: Committed<E, keyof E>
+    e: Committed<E, keyof E>,
+    wanted = true
   ): Committed<E, keyof E> {
+    if (!wanted) return e;
     const pii = this._pii.get(e.stream)?.get(e.id);
     return pii ? ({ ...e, pii } as Committed<E, keyof E>) : e;
   }
@@ -529,7 +531,12 @@ export class InMemoryStore implements Store {
         // id-ordered `after` bound above may short-circuit.
         if (query.created_after && e.created <= query.created_after) continue;
         await Promise.resolve(
-          callback(this._with_pii(e as Committed<E, keyof E>))
+          callback(
+            this._with_pii(
+              e as Committed<E, keyof E>,
+              query?.with_pii !== false
+            )
+          )
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -551,7 +558,12 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         await Promise.resolve(
-          callback(this._with_pii(e as Committed<E, keyof E>))
+          callback(
+            this._with_pii(
+              e as Committed<E, keyof E>,
+              query?.with_pii !== false
+            )
+          )
         );
         count++;
         if (query?.limit && count >= query.limit) break;

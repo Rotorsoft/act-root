@@ -698,7 +698,14 @@ export class SqliteStore implements Store {
     let count = 0;
 
     for (const row of result.rows) {
-      const pii_value = await this._parse_pii_from_read(row.pii);
+      // The caller declined the payload, so never decrypt it — an unreadable
+      // row cannot fail a read that did not ask for it. `null` rather than
+      // the stored ciphertext: `pii_gate` treats any non-null `pii` as
+      // discloseable and would merge base64 into `data` (#1675).
+      const pii_value =
+        query?.with_pii === false
+          ? null
+          : await this._parse_pii_from_read(row.pii);
       await Promise.resolve(
         callback({
           id: Number(row.id),

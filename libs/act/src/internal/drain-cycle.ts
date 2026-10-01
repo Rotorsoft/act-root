@@ -327,6 +327,23 @@ export async function run_drain_cycle<
       // fetch() returns one entry per leased stream — fetch_map.get is
       // always defined here (asserted with `!`).
       const entry = fetch_map.get(lease.stream)!;
+      // This stream's read failed and was contained there (#1675). Report it
+      // as a no-progress failure for this stream alone: no ack is submitted,
+      // so the watermark holds and the lease stays held until it lapses, and
+      // `retry` keeps accruing until `budget_exhausted` quarantines the
+      // stream the usual way. Healthy streams leased in the same cycle are
+      // untouched, which is the whole point of containing it.
+      if (entry.fetch.error !== undefined) {
+        const error = `Fetch failed for ${lease.stream}: ${entry.fetch.error}`;
+        log().error(error);
+        const failed: HandleResult = {
+          lease,
+          handled: 0,
+          acked_at: lease.at,
+          error,
+        };
+        return Promise.resolve(failed);
+      }
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
