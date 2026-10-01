@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.8...@rotorsoft/act-http-v1.10.9) (2026-10-01)
+
+
+### Bug Fixes
+
+* **act-http:** keep the webhook timeout armed through the response body read ([#1712](https://github.com/Rotorsoft/act-root/issues/1712)) ([dd59e21](https://github.com/Rotorsoft/act-root/commit/dd59e21d8b7aaf17aba049cef61a9b36ada1fa67)), closes [#1701](https://github.com/Rotorsoft/act-root/issues/1701)
+
 # [@rotorsoft/act-http-v1.10.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.7...@rotorsoft/act-http-v1.10.8) (2026-10-01)
 
 
