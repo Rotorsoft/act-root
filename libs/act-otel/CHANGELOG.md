@@ -1,3 +1,10 @@
+# [@rotorsoft/act-otel-v0.1.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.8...@rotorsoft/act-otel-v0.1.9) (2026-10-01)
+
+
+### Bug Fixes
+
+* **act-otel:** keep act_streams_blocked at its last value when no read answered ([#1716](https://github.com/Rotorsoft/act-root/issues/1716)) ([426efde](https://github.com/Rotorsoft/act-root/commit/426efde6786da86604ab62e0d102780e793eb9ad)), closes [#1702](https://github.com/Rotorsoft/act-root/issues/1702)
+
 # [@rotorsoft/act-otel-v0.1.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.7...@rotorsoft/act-otel-v0.1.8) (2026-09-29)
 
 
