@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InMemoryCache, InMemoryStore } from "../src/adapters/index.js";
 import {
   act,
   dispose,
@@ -1500,5 +1501,232 @@ describe("audit", () => {
       expect(out).toContain("schema_validation_failed");
       await app.shutdown();
     });
+  });
+});
+
+/**
+ * One row the store refuses to hand back used to end the whole audit (#1675).
+ *
+ * The engine locates the row itself: when the scan trips it re-reads the one
+ * row with `with_pii: false`, which cannot fail on the same cause and returns
+ * the row's stream and id. No adapter reports anything.
+ */
+describe("unreadable-events category (#1675)", () => {
+  const gadget = state({ Gadget: z.object({ name: z.string() }) })
+    .init(() => ({ name: "" }))
+    .emits({ Renamed: z.object({ name: z.string() }) })
+    .patch({ Renamed: ({ data }) => ({ name: data.name }) })
+    .on({ rename: z.object({ name: z.string() }) })
+    .emit(({ name }) => ["Renamed", { name }])
+    .build();
+
+  /**
+   * A store that trips on one id the way an undecryptable `pii` payload does:
+   * the read fails only when it asked for the payload. A read passing
+   * `with_pii: false` sails through, which is exactly the adapter contract.
+   */
+  const poison = (inner: Store, poison_id: number): Store =>
+    new Proxy(inner, {
+      get(target, prop, receiver) {
+        if (prop !== "query") {
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (
+          callback: (e: never) => void,
+          q?: { after?: number; with_pii?: boolean }
+        ): Promise<number> => {
+          let count = 0;
+          let tripped = false;
+          await target.query((event) => {
+            if (tripped) return;
+            if (
+              event.id === poison_id &&
+              q?.with_pii !== false &&
+              (q?.after ?? -1) < poison_id
+            ) {
+              tripped = true;
+              return;
+            }
+            count++;
+            callback(event as never);
+          }, q as never);
+          if (tripped) throw new Error("ciphertext framing version 22");
+          return count;
+        };
+      },
+    }) as Store;
+
+  beforeEach(async () => {
+    store(new InMemoryStore());
+    await store().seed();
+  });
+
+  afterAll(async () => {
+    await dispose()();
+  });
+
+  it("names the poison row and audits every row behind it", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b", "c"])
+      await app.do("rename", { stream: "g1", actor }, { name });
+    // An event the registry doesn't know, committed AFTER the poison row —
+    // the schema pass only sees it if the scan resumed.
+    await store().commit("g1", [{ name: "Vanished", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+
+    const scoped = act()
+      .withState(gadget)
+      .build({
+        scoped: { store: poison(store(), 1), cache: new InMemoryCache() },
+      });
+
+    const findings: AuditFinding[] = [];
+    for await (const f of scoped.audit()) findings.push(f);
+
+    expect(findings).toContainEqual({
+      category: "unreadable-events",
+      stream: "g1",
+      event_id: 1,
+      reason: "pii_decrypt_failed",
+      error: expect.any(Error),
+    });
+    expect(
+      findings.some(
+        (f) => f.category === "schema" && f.reason === "unknown_event_name"
+      )
+    ).toBe(true);
+  });
+
+  it("honours the caller's limit across a resume", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b", "c", "d"])
+      await app.do("rename", { stream: "g5", actor }, { name });
+
+    // Ids start at 0, so limit 2 covers ids 0 and 1: the first is delivered,
+    // the second trips. The resume must carry the budget already spent.
+    const scoped = act()
+      .withState(gadget)
+      .build({
+        scoped: { store: poison(store(), 1), cache: new InMemoryCache() },
+      });
+
+    const findings: AuditFinding[] = [];
+    for await (const f of scoped.audit(undefined, { query: { limit: 2 } }))
+      findings.push(f);
+
+    expect(
+      findings.filter((f) => f.category === "unreadable-events")
+    ).toHaveLength(1);
+  });
+
+  it("rethrows when the locating read finds no row to blame", async () => {
+    // A drop at the very END of the scan: every row was delivered, so the
+    // single-row locating read past the cursor comes back empty. There is no
+    // poison row to report, so the error is not ours to swallow.
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b"])
+      await app.do("rename", { stream: "g6", actor }, { name });
+
+    const late = (inner: Store): Store =>
+      new Proxy(inner, {
+        get(target, prop, receiver) {
+          if (prop !== "query") {
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return async (
+            callback: (e: never) => void,
+            q?: { with_pii?: boolean }
+          ): Promise<number> => {
+            const count = await target.query(
+              (e) => callback(e as never),
+              q as never
+            );
+            // Only the payload-bearing scan dies, and only once everything
+            // has already been handed over.
+            if (q?.with_pii !== false) throw new Error("connection reset");
+            return count;
+          };
+        },
+      }) as Store;
+
+    const scoped = act()
+      .withState(gadget)
+      .build({ scoped: { store: late(store()), cache: new InMemoryCache() } });
+
+    await expect(async () => {
+      for await (const _ of scoped.audit());
+    }).rejects.toThrow("connection reset");
+  });
+
+  it("rethrows a backward scan rather than answering it partially", async () => {
+    const app = act().withState(gadget).build();
+    const actor = { id: "u", name: "u" };
+    for (const name of ["a", "b", "c"])
+      await app.do("rename", { stream: "g2", actor }, { name });
+
+    const scoped = act()
+      .withState(gadget)
+      .build({
+        scoped: { store: poison(store(), 1), cache: new InMemoryCache() },
+      });
+
+    await expect(async () => {
+      for await (const _ of scoped.audit(undefined, {
+        query: { backward: true },
+      }));
+    }).rejects.toThrow("ciphertext framing");
+  });
+
+  it("rethrows a failure that is not one unreadable row", async () => {
+    const app = act().withState(gadget).build();
+    await app.do(
+      "rename",
+      { stream: "g3", actor: { id: "u", name: "u" } },
+      { name: "a" }
+    );
+
+    // A dropped connection fails every read, including the locating one, so
+    // nothing comes back to name and the error is not ours to swallow.
+    const broken = new Proxy(store(), {
+      get(target, prop, receiver) {
+        if (prop !== "query") {
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async () => {
+          throw new Error("connection terminated");
+        };
+      },
+    }) as Store;
+
+    const scoped = act()
+      .withState(gadget)
+      .build({ scoped: { store: broken, cache: new InMemoryCache() } });
+
+    await expect(async () => {
+      for await (const _ of scoped.audit());
+    }).rejects.toThrow("connection terminated");
+  });
+
+  it("control — an intact store reports no unreadable rows", async () => {
+    const app = act().withState(gadget).build();
+    await app.do(
+      "rename",
+      { stream: "g4", actor: { id: "u", name: "u" } },
+      { name: "a" }
+    );
+
+    const findings: AuditFinding[] = [];
+    for await (const f of app.audit()) findings.push(f);
+    expect(
+      findings.filter((f) => f.category === "unreadable-events")
+    ).toHaveLength(0);
   });
 });

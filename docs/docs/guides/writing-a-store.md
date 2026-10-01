@@ -199,6 +199,20 @@ That single call runs 29+ contract cases against your adapter — every method o
 
 Adapter-specific tests (e.g., dialect-specific error paths, transaction edge cases, performance smoke tests) stay in their own files. The TCK only asserts what every Store must do.
 
+## `with_pii` — a read that declines the sensitive payload
+
+`Query.with_pii` defaults to `true`, which is the behavior every adapter already had: produce the `pii` payload, decrypting it first if the adapter encrypts at rest. When a caller passes `false`, return every matching event with `pii` set to **`null`**, and do not decrypt ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)).
+
+Two things make this contractual rather than an optimization.
+
+**It must not decrypt.** The engine uses the flag on reads that discard the payload — the correlate scan resolves reaction targets from `name` and `stream` and throws the rest away. Before the flag, asking for a payload it discarded meant one unreadable row (corrupt ciphertext, or a key rotated past a stream's correlate checkpoint) failed the scan, and since correlate is the sole producer of the work mark that stopped **every** stream's reactions, with nothing blocked and nothing naming the row. An adapter that decrypts anyway and merely hides the result reintroduces that.
+
+**It must be `null`, never the stored representation.** `pii_gate` treats any non-null `pii` as discloseable, so handing back ciphertext would merge a base64 blob into `data` on the read path. A `null` payload is indistinguishable from an event that declares no sensitive fields, which is already well-defined everywhere in the framework.
+
+Nothing else about the event changes — this is not a projection. `data`, `meta`, `name`, `stream`, `id` and `version` come back exactly as a default read would give them.
+
+The TCK pins all of it in the `with_pii` block of the `pii_isolation` suite: the default and an explicit `true` both return the payload, `false` returns none, the declined payload is never a string, and the flag applies to every matching row rather than just the first. `act-pg`'s own suite adds the case that matters most — a row whose ciphertext has been corrupted fails a default read with `DecryptionError` and comes back cleanly, payload omitted, under `with_pii: false`.
+
 ## Capabilities flags
 
 Some methods are optional. `Store.notify` is the only one today — it's a cross-process wakeup hook implemented by Postgres' `LISTEN`/`NOTIFY` and skipped by single-node adapters like SQLite.

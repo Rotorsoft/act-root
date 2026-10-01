@@ -237,6 +237,55 @@ describe("PostgresStore pii_encryption", () => {
     await store.dispose();
   });
 
+  it("a declined payload survives a row the default read cannot decrypt (#1675)", async () => {
+    // The whole point of the flag. A corrupt row fails any read that asks
+    // for the payload, and used to take the correlate scan — and therefore
+    // every stream's reactions — down with it. A read that declines the
+    // payload never decrypts, so it cannot trip.
+    const key = randomBytes(32);
+    const store = buildStore(key);
+    const stream = `declined-${chance.guid()}`;
+
+    await store.commit(
+      stream,
+      [
+        { name: "UserRegistered", data: { a: 1 }, pii: { email: "x@y.com" } },
+        { name: "UserRegistered", data: { a: 2 }, pii: { email: "p@q.com" } },
+      ],
+      { correlation: "c-declined", causation: {} }
+    );
+
+    // Corrupt BOTH payloads.
+    const junk = randomBytes(64).toString("base64");
+    await rawPool.query(
+      `UPDATE "${SCHEMA}"."${TABLE}" SET pii = $1::jsonb WHERE stream = $2`,
+      [JSON.stringify(junk), stream]
+    );
+
+    // Control: the default read still fails loudly. That contract is pinned
+    // by the two cases above and must not soften.
+    await expect(
+      store.query(() => {}, { stream, stream_exact: true })
+    ).rejects.toBeInstanceOf(DecryptionError);
+
+    // The flagged read gets every row, with the payload omitted.
+    const seen: { name: string; pii: unknown; data: unknown }[] = [];
+    await store.query(
+      (e) => {
+        seen.push({ name: e.name as string, pii: e.pii, data: e.data });
+      },
+      { stream, stream_exact: true, with_pii: false }
+    );
+    expect(seen).toHaveLength(2);
+    for (const e of seen) {
+      expect(e.pii ?? null).toBeNull();
+      expect(e.name).toBe("UserRegistered");
+    }
+    expect(seen.map((e) => e.data)).toEqual([{ a: 1 }, { a: 2 }]);
+
+    await store.dispose();
+  });
+
   it("reads pre-encryption (plaintext object) rows transparently", async () => {
     // Operator wrote some events before enabling encryption, then
     // restarted with pii_encryption configured. New writes are

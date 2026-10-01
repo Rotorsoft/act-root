@@ -756,7 +756,19 @@ export class CorrelateCycle<
           }
         }
       },
-      { ...query, after }
+      // Decline the sensitive payload: this scan reads `name`/`stream`/`id`
+      // to resolve reaction targets and throws the rest away. Asking for a
+      // payload it discards made one unreadable row stop EVERY stream's
+      // reactions — correlate is the sole producer of the work mark, so a
+      // decrypt failure here strands the whole app with nothing blocked and
+      // nothing naming the row (#1675).
+      //
+      // A dynamic `.to(event => …)` resolver therefore sees `pii: null`.
+      // That is deliberate and is itself a fix: correlate runs actor-less,
+      // so handing a resolver decrypted plaintext is un-gated disclosure —
+      // the defect #1673 corrected on the drain return and #1277 before it.
+      // `data` already carries no sensitive keys; nothing merges them here.
+      { ...query, after, with_pii: false }
     );
 
     // A target rides the batch when it has something to say: a mark to

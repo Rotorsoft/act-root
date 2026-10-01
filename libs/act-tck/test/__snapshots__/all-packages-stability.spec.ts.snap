@@ -3212,6 +3212,19 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   time-travel read full-scans under its filter rather than jumping to
  *   a snapshot outside the window (RFC 1274). Do not combine \`with_snaps\`
  *   with \`before\`/\`created_*\`/\`limit\` in a direct \`query()\` call.
+ * @property \`with_pii?\` - Whether the store should produce the sensitive
+ *   payload. Defaults to **true**, which is today's behavior: the store
+ *   decrypts \`pii\` when \`pii_encryption\` is configured and attaches it to
+ *   every returned event. Set \`false\` on a read that does not need it and
+ *   the store returns \`pii: null\` **without ever decrypting** — so an
+ *   unreadable payload (corrupt ciphertext, a key rotated past a stream's
+ *   checkpoint) cannot fail the read. \`null\` rather than the raw ciphertext
+ *   is deliberate: \`pii_gate\` treats any non-null \`pii\` as discloseable and
+ *   would merge a base64 blob into \`data\`.
+ *
+ *   Note the default is the opposite of \`with_snaps\`: snapshot rows are
+ *   excluded until asked for, while the sensitive payload is included until
+ *   declined. Anything else would newly reject behavior that works today.
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -4347,6 +4360,7 @@ import type {
   AuditOptions,
   Committed,
   Logger,
+  Query,
   Schemas,
   State,
   Store,
@@ -4410,6 +4424,7 @@ const ALL_CATEGORIES = [
   "routing-health",
   "correlation-gaps",
   "clock-anomalies",
+  "unreadable-events",
 ] as const satisfies readonly AuditCategory[];
 
 /**
@@ -4427,6 +4442,7 @@ const ALL_CATEGORIES = [
 type AuditPass = {
   category: AuditCategory;
   on_event?: (e: Committed<Schemas, string>) => void;
+  on_unreadable?: (row: UnreadableRow) => void;
   on_stream?: (p: StreamPosition) => void;
   on_stat?: (stream: string, s: StreamStats<Schemas>) => void;
   finalize?: (deps: AuditDeps) => Promise<void>;
@@ -4467,7 +4483,11 @@ export async function* audit(
   // walks at worst.
   const need_stats = passes.some((p) => p.on_stat !== undefined);
   const need_streams = passes.some((p) => p.on_stream !== undefined);
-  const need_events = passes.some((p) => p.on_event !== undefined);
+  // An \`on_unreadable\`-only pass still needs the scan: the row it reports is
+  // what the scan trips on.
+  const need_events = passes.some(
+    (p) => p.on_event !== undefined || p.on_unreadable !== undefined
+  );
 
   if (need_stats) {
     // Exclude \`__snapshot__\` so \`head\` and \`count\` are DOMAIN figures.
@@ -4500,9 +4520,16 @@ export async function* audit(
   }
 
   if (need_events) {
-    await deps.store().query<Schemas>((event) => {
-      for (const p of passes) p.on_event?.(event);
-    }, options.query);
+    await scan_events_resiliently(
+      deps,
+      options.query,
+      (event) => {
+        for (const p of passes) p.on_event?.(event);
+      },
+      (row) => {
+        for (const p of passes) p.on_unreadable?.(row);
+      }
+    );
   }
 
   // Async post-processing (per-stream queries, second-pass orphan
@@ -4513,6 +4540,83 @@ export async function* audit(
   // Yield findings in requested-category order.
   for (const p of passes) {
     for (const f of p.drain()) yield f;
+  }
+}
+
+/**
+ * A row the store refused to hand back, located by the engine itself.
+ *
+ * Nothing in an adapter reports this. When a scan trips, the audit re-reads
+ * the single next row with \`with_pii: false\` — a read that declines the
+ * payload cannot fail on it — and that read returns the row's \`stream\` and
+ * \`id\`. So the locating, the reporting and the resume all live here, and the
+ * adapters carry no decryption error handling at all (#1675).
+ */
+type UnreadableRow = {
+  stream: string;
+  event_id: number;
+  error: unknown;
+};
+
+/**
+ * Run the audit's event scan so that one unreadable row does not end it.
+ *
+ * A store that trips on a row throws out of \`query\`, abandoning the rest of
+ * the scan — so a single corrupt \`pii\` payload used to take \`app.audit()\`
+ * down with it, and the audit is the tool an operator reaches for precisely
+ * when something is corrupt. The recovery is to ask again for the one row
+ * the scan stopped at, declining the payload, which both identifies it and
+ * cannot fail; then report it and resume past it.
+ *
+ * Only forward scans are resumable — \`after\` is meaningless walking backward
+ * — so a backward scan rethrows untouched rather than quietly returning a
+ * partial answer. A \`limit\` is spent against rows already delivered, so the
+ * resume carries the remaining budget.
+ */
+async function scan_events_resiliently(
+  deps: AuditDeps,
+  query: Query | undefined,
+  on_event: (e: Committed<Schemas, string>) => void,
+  on_unreadable: (row: UnreadableRow) => void
+): Promise<void> {
+  let cursor = query?.after;
+  let remaining = query?.limit;
+  for (;;) {
+    let seen = 0;
+    try {
+      await deps.store().query<Schemas>(
+        (event) => {
+          seen++;
+          cursor = event.id;
+          on_event(event);
+        },
+        {
+          ...query,
+          after: cursor,
+          ...(remaining !== undefined && { limit: remaining }),
+        }
+      );
+      return;
+    } catch (error) {
+      if (query?.backward) throw error;
+      // Ask for the one row the scan stopped at, without its payload. This
+      // read cannot trip on the same cause, and it is what names the row.
+      let row: UnreadableRow | undefined;
+      await deps.store().query<Schemas>(
+        (e) => {
+          row = { stream: e.stream, event_id: e.id, error };
+        },
+        { ...query, after: cursor, limit: 1, with_pii: false }
+      );
+      // Nothing came back, so the failure was not one unreadable row — a
+      // dropped connection, a timeout. It is not ours to swallow.
+      if (!row) throw error;
+      on_unreadable(row);
+      // The tripping row is never delivered, so \`seen\` is at most
+      // \`remaining - 1\` and the resumed budget stays at 1 or more.
+      if (remaining !== undefined) remaining -= seen;
+      cursor = row.event_id;
+    }
   }
 }
 
@@ -5026,6 +5130,31 @@ function restart_is_supported(
   return state?.snap !== undefined;
 }
 
+/**
+ * \`unreadable-events\` — rows the store could not hand back.
+ *
+ * Contributes no scan callback of its own: the dispatcher feeds it the rows
+ * the event scan tripped on, since a row that cannot be read never reaches an
+ * \`on_event\`. Requesting this category alone still runs the event scan, which
+ * is the only thing that surfaces such a row.
+ */
+function make_unreadable_events_pass(): AuditPass {
+  const findings: AuditFinding[] = [];
+  return {
+    category: "unreadable-events",
+    on_unreadable({ stream, event_id, error }) {
+      findings.push({
+        category: "unreadable-events",
+        stream,
+        event_id,
+        reason: "pii_decrypt_failed",
+        error,
+      });
+    },
+    drain: () => findings,
+  };
+}
+
 /** Factory registry — pass-creation indexed by category name. */
 const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   schema: make_schema_pass,
@@ -5037,6 +5166,7 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "routing-health": make_routing_health_pass,
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
+  "unreadable-events": make_unreadable_events_pass,
 };
 
 // === audit.ts ===
@@ -5077,7 +5207,8 @@ export type AuditCategory =
   | "snapshot-drift"
   | "routing-health"
   | "correlation-gaps"
-  | "clock-anomalies";
+  | "clock-anomalies"
+  | "unreadable-events";
 
 /**
  * Tunable thresholds for categories whose findings depend on a
@@ -5185,6 +5316,25 @@ export type AuditFinding =
       stream: string;
       event_id: number;
       reason: "future-created" | "out-of-order";
+    }
+  | {
+      /**
+       * An event the store could not hand back at all — currently only a
+       * \`pii\` payload the configured key cannot decrypt (corrupt ciphertext,
+       * bit-rot, a partial restore, or a rotation that outran a stream's
+       * correlate checkpoint).
+       *
+       * Every other finding describes an event the audit could read. This one
+       * names the row that stopped it being read, which the failing read
+       * alone does not give: the scan aborts, nothing reports the stream, and
+       * \`blocked_streams()\` is empty because nothing is blocked.
+       */
+      category: "unreadable-events";
+      stream: string;
+      event_id: number;
+      reason: "pii_decrypt_failed";
+      /** The underlying adapter error, for operators who log it. */
+      error: unknown;
     };
 
 // === autoclose-policy.ts ===
@@ -8777,7 +8927,19 @@ export class CorrelateCycle<
           }
         }
       },
-      { ...query, after }
+      // Decline the sensitive payload: this scan reads \`name\`/\`stream\`/\`id\`
+      // to resolve reaction targets and throws the rest away. Asking for a
+      // payload it discards made one unreadable row stop EVERY stream's
+      // reactions — correlate is the sole producer of the work mark, so a
+      // decrypt failure here strands the whole app with nothing blocked and
+      // nothing naming the row (#1675).
+      //
+      // A dynamic \`.to(event => …)\` resolver therefore sees \`pii: null\`.
+      // That is deliberate and is itself a fix: correlate runs actor-less,
+      // so handing a resolver decrypted plaintext is un-gated disclosure —
+      // the defect #1673 corrected on the drain return and #1277 before it.
+      // \`data\` already carries no sensitive keys; nothing merges them here.
+      { ...query, after, with_pii: false }
     );
 
     // A target rides the batch when it has something to say: a mark to
@@ -13013,8 +13175,10 @@ export class InMemoryStore implements Store {
   // Attach the isolated PII payload (or null) to an event before handing it to
   // a caller. Allocation-free for events without PII — by far the common case.
   private _with_pii<E extends Schemas>(
-    e: Committed<E, keyof E>
+    e: Committed<E, keyof E>,
+    wanted = true
   ): Committed<E, keyof E> {
+    if (!wanted) return e;
     const pii = this._pii.get(e.stream)?.get(e.id);
     return pii ? ({ ...e, pii } as Committed<E, keyof E>) : e;
   }
@@ -13115,7 +13279,12 @@ export class InMemoryStore implements Store {
         // id-ordered \`after\` bound above may short-circuit.
         if (query.created_after && e.created <= query.created_after) continue;
         await Promise.resolve(
-          callback(this._with_pii(e as Committed<E, keyof E>))
+          callback(
+            this._with_pii(
+              e as Committed<E, keyof E>,
+              query?.with_pii !== false
+            )
+          )
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -13137,7 +13306,12 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         await Promise.resolve(
-          callback(this._with_pii(e as Committed<E, keyof E>))
+          callback(
+            this._with_pii(
+              e as Committed<E, keyof E>,
+              query?.with_pii !== false
+            )
+          )
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -18280,6 +18454,7 @@ export const QuerySchema = z
     backward: z.boolean().optional(),
     correlation: z.string().optional(),
     with_snaps: z.boolean().optional(),
+    with_pii: z.boolean().optional(),
     stream_exact: z.boolean().optional(),
   })
   .readonly();
@@ -23331,6 +23506,19 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   time-travel read full-scans under its filter rather than jumping to
  *   a snapshot outside the window (RFC 1274). Do not combine \`with_snaps\`
  *   with \`before\`/\`created_*\`/\`limit\` in a direct \`query()\` call.
+ * @property \`with_pii?\` - Whether the store should produce the sensitive
+ *   payload. Defaults to **true**, which is today's behavior: the store
+ *   decrypts \`pii\` when \`pii_encryption\` is configured and attaches it to
+ *   every returned event. Set \`false\` on a read that does not need it and
+ *   the store returns \`pii: null\` **without ever decrypting** — so an
+ *   unreadable payload (corrupt ciphertext, a key rotated past a stream's
+ *   checkpoint) cannot fail the read. \`null\` rather than the raw ciphertext
+ *   is deliberate: \`pii_gate\` treats any non-null \`pii\` as discloseable and
+ *   would merge a base64 blob into \`data\`.
+ *
+ *   Note the default is the opposite of \`with_snaps\`: snapshot rows are
+ *   excluded until asked for, while the sensitive payload is included until
+ *   declined. Anything else would newly reject behavior that works today.
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -24466,6 +24654,7 @@ import type {
   AuditOptions,
   Committed,
   Logger,
+  Query,
   Schemas,
   State,
   Store,
@@ -24529,6 +24718,7 @@ const ALL_CATEGORIES = [
   "routing-health",
   "correlation-gaps",
   "clock-anomalies",
+  "unreadable-events",
 ] as const satisfies readonly AuditCategory[];
 
 /**
@@ -24546,6 +24736,7 @@ const ALL_CATEGORIES = [
 type AuditPass = {
   category: AuditCategory;
   on_event?: (e: Committed<Schemas, string>) => void;
+  on_unreadable?: (row: UnreadableRow) => void;
   on_stream?: (p: StreamPosition) => void;
   on_stat?: (stream: string, s: StreamStats<Schemas>) => void;
   finalize?: (deps: AuditDeps) => Promise<void>;
@@ -24586,7 +24777,11 @@ export async function* audit(
   // walks at worst.
   const need_stats = passes.some((p) => p.on_stat !== undefined);
   const need_streams = passes.some((p) => p.on_stream !== undefined);
-  const need_events = passes.some((p) => p.on_event !== undefined);
+  // An \`on_unreadable\`-only pass still needs the scan: the row it reports is
+  // what the scan trips on.
+  const need_events = passes.some(
+    (p) => p.on_event !== undefined || p.on_unreadable !== undefined
+  );
 
   if (need_stats) {
     // Exclude \`__snapshot__\` so \`head\` and \`count\` are DOMAIN figures.
@@ -24619,9 +24814,16 @@ export async function* audit(
   }
 
   if (need_events) {
-    await deps.store().query<Schemas>((event) => {
-      for (const p of passes) p.on_event?.(event);
-    }, options.query);
+    await scan_events_resiliently(
+      deps,
+      options.query,
+      (event) => {
+        for (const p of passes) p.on_event?.(event);
+      },
+      (row) => {
+        for (const p of passes) p.on_unreadable?.(row);
+      }
+    );
   }
 
   // Async post-processing (per-stream queries, second-pass orphan
@@ -24632,6 +24834,83 @@ export async function* audit(
   // Yield findings in requested-category order.
   for (const p of passes) {
     for (const f of p.drain()) yield f;
+  }
+}
+
+/**
+ * A row the store refused to hand back, located by the engine itself.
+ *
+ * Nothing in an adapter reports this. When a scan trips, the audit re-reads
+ * the single next row with \`with_pii: false\` — a read that declines the
+ * payload cannot fail on it — and that read returns the row's \`stream\` and
+ * \`id\`. So the locating, the reporting and the resume all live here, and the
+ * adapters carry no decryption error handling at all (#1675).
+ */
+type UnreadableRow = {
+  stream: string;
+  event_id: number;
+  error: unknown;
+};
+
+/**
+ * Run the audit's event scan so that one unreadable row does not end it.
+ *
+ * A store that trips on a row throws out of \`query\`, abandoning the rest of
+ * the scan — so a single corrupt \`pii\` payload used to take \`app.audit()\`
+ * down with it, and the audit is the tool an operator reaches for precisely
+ * when something is corrupt. The recovery is to ask again for the one row
+ * the scan stopped at, declining the payload, which both identifies it and
+ * cannot fail; then report it and resume past it.
+ *
+ * Only forward scans are resumable — \`after\` is meaningless walking backward
+ * — so a backward scan rethrows untouched rather than quietly returning a
+ * partial answer. A \`limit\` is spent against rows already delivered, so the
+ * resume carries the remaining budget.
+ */
+async function scan_events_resiliently(
+  deps: AuditDeps,
+  query: Query | undefined,
+  on_event: (e: Committed<Schemas, string>) => void,
+  on_unreadable: (row: UnreadableRow) => void
+): Promise<void> {
+  let cursor = query?.after;
+  let remaining = query?.limit;
+  for (;;) {
+    let seen = 0;
+    try {
+      await deps.store().query<Schemas>(
+        (event) => {
+          seen++;
+          cursor = event.id;
+          on_event(event);
+        },
+        {
+          ...query,
+          after: cursor,
+          ...(remaining !== undefined && { limit: remaining }),
+        }
+      );
+      return;
+    } catch (error) {
+      if (query?.backward) throw error;
+      // Ask for the one row the scan stopped at, without its payload. This
+      // read cannot trip on the same cause, and it is what names the row.
+      let row: UnreadableRow | undefined;
+      await deps.store().query<Schemas>(
+        (e) => {
+          row = { stream: e.stream, event_id: e.id, error };
+        },
+        { ...query, after: cursor, limit: 1, with_pii: false }
+      );
+      // Nothing came back, so the failure was not one unreadable row — a
+      // dropped connection, a timeout. It is not ours to swallow.
+      if (!row) throw error;
+      on_unreadable(row);
+      // The tripping row is never delivered, so \`seen\` is at most
+      // \`remaining - 1\` and the resumed budget stays at 1 or more.
+      if (remaining !== undefined) remaining -= seen;
+      cursor = row.event_id;
+    }
   }
 }
 
@@ -25145,6 +25424,31 @@ function restart_is_supported(
   return state?.snap !== undefined;
 }
 
+/**
+ * \`unreadable-events\` — rows the store could not hand back.
+ *
+ * Contributes no scan callback of its own: the dispatcher feeds it the rows
+ * the event scan tripped on, since a row that cannot be read never reaches an
+ * \`on_event\`. Requesting this category alone still runs the event scan, which
+ * is the only thing that surfaces such a row.
+ */
+function make_unreadable_events_pass(): AuditPass {
+  const findings: AuditFinding[] = [];
+  return {
+    category: "unreadable-events",
+    on_unreadable({ stream, event_id, error }) {
+      findings.push({
+        category: "unreadable-events",
+        stream,
+        event_id,
+        reason: "pii_decrypt_failed",
+        error,
+      });
+    },
+    drain: () => findings,
+  };
+}
+
 /** Factory registry — pass-creation indexed by category name. */
 const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   schema: make_schema_pass,
@@ -25156,6 +25460,7 @@ const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   "routing-health": make_routing_health_pass,
   "correlation-gaps": make_correlation_gaps_pass,
   "clock-anomalies": make_clock_anomalies_pass,
+  "unreadable-events": make_unreadable_events_pass,
 };
 
 // === audit.ts ===
@@ -25196,7 +25501,8 @@ export type AuditCategory =
   | "snapshot-drift"
   | "routing-health"
   | "correlation-gaps"
-  | "clock-anomalies";
+  | "clock-anomalies"
+  | "unreadable-events";
 
 /**
  * Tunable thresholds for categories whose findings depend on a
@@ -25304,6 +25610,25 @@ export type AuditFinding =
       stream: string;
       event_id: number;
       reason: "future-created" | "out-of-order";
+    }
+  | {
+      /**
+       * An event the store could not hand back at all — currently only a
+       * \`pii\` payload the configured key cannot decrypt (corrupt ciphertext,
+       * bit-rot, a partial restore, or a rotation that outran a stream's
+       * correlate checkpoint).
+       *
+       * Every other finding describes an event the audit could read. This one
+       * names the row that stopped it being read, which the failing read
+       * alone does not give: the scan aborts, nothing reports the stream, and
+       * \`blocked_streams()\` is empty because nothing is blocked.
+       */
+      category: "unreadable-events";
+      stream: string;
+      event_id: number;
+      reason: "pii_decrypt_failed";
+      /** The underlying adapter error, for operators who log it. */
+      error: unknown;
     };
 
 // === autoclose-policy.ts ===
@@ -28655,7 +28980,19 @@ export class CorrelateCycle<
           }
         }
       },
-      { ...query, after }
+      // Decline the sensitive payload: this scan reads \`name\`/\`stream\`/\`id\`
+      // to resolve reaction targets and throws the rest away. Asking for a
+      // payload it discards made one unreadable row stop EVERY stream's
+      // reactions — correlate is the sole producer of the work mark, so a
+      // decrypt failure here strands the whole app with nothing blocked and
+      // nothing naming the row (#1675).
+      //
+      // A dynamic \`.to(event => …)\` resolver therefore sees \`pii: null\`.
+      // That is deliberate and is itself a fix: correlate runs actor-less,
+      // so handing a resolver decrypted plaintext is un-gated disclosure —
+      // the defect #1673 corrected on the drain return and #1277 before it.
+      // \`data\` already carries no sensitive keys; nothing merges them here.
+      { ...query, after, with_pii: false }
     );
 
     // A target rides the batch when it has something to say: a mark to
@@ -32333,8 +32670,10 @@ export class InMemoryStore implements Store {
   // Attach the isolated PII payload (or null) to an event before handing it to
   // a caller. Allocation-free for events without PII — by far the common case.
   private _with_pii<E extends Schemas>(
-    e: Committed<E, keyof E>
+    e: Committed<E, keyof E>,
+    wanted = true
   ): Committed<E, keyof E> {
+    if (!wanted) return e;
     const pii = this._pii.get(e.stream)?.get(e.id);
     return pii ? ({ ...e, pii } as Committed<E, keyof E>) : e;
   }
@@ -32435,7 +32774,12 @@ export class InMemoryStore implements Store {
         // id-ordered \`after\` bound above may short-circuit.
         if (query.created_after && e.created <= query.created_after) continue;
         await Promise.resolve(
-          callback(this._with_pii(e as Committed<E, keyof E>))
+          callback(
+            this._with_pii(
+              e as Committed<E, keyof E>,
+              query?.with_pii !== false
+            )
+          )
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -32457,7 +32801,12 @@ export class InMemoryStore implements Store {
         if (query?.created_before && e.created >= query.created_before)
           continue;
         await Promise.resolve(
-          callback(this._with_pii(e as Committed<E, keyof E>))
+          callback(
+            this._with_pii(
+              e as Committed<E, keyof E>,
+              query?.with_pii !== false
+            )
+          )
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -36900,6 +37249,7 @@ export const QuerySchema = z
     backward: z.boolean().optional(),
     correlation: z.string().optional(),
     with_snaps: z.boolean().optional(),
+    with_pii: z.boolean().optional(),
     stream_exact: z.boolean().optional(),
   })
   .readonly();
@@ -38448,6 +38798,19 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   time-travel read full-scans under its filter rather than jumping to
  *   a snapshot outside the window (RFC 1274). Do not combine \`with_snaps\`
  *   with \`before\`/\`created_*\`/\`limit\` in a direct \`query()\` call.
+ * @property \`with_pii?\` - Whether the store should produce the sensitive
+ *   payload. Defaults to **true**, which is today's behavior: the store
+ *   decrypts \`pii\` when \`pii_encryption\` is configured and attaches it to
+ *   every returned event. Set \`false\` on a read that does not need it and
+ *   the store returns \`pii: null\` **without ever decrypting** — so an
+ *   unreadable payload (corrupt ciphertext, a key rotated past a stream's
+ *   checkpoint) cannot fail the read. \`null\` rather than the raw ciphertext
+ *   is deliberate: \`pii_gate\` treats any non-null \`pii\` as discloseable and
+ *   would merge a base64 blob into \`data\`.
+ *
+ *   Note the default is the opposite of \`with_snaps\`: snapshot rows are
+ *   excluded until asked for, while the sensitive payload is included until
+ *   declined. Anything else would newly reject behavior that works today.
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -39561,7 +39924,8 @@ export type AuditCategory =
   | "snapshot-drift"
   | "routing-health"
   | "correlation-gaps"
-  | "clock-anomalies";
+  | "clock-anomalies"
+  | "unreadable-events";
 
 /**
  * Tunable thresholds for categories whose findings depend on a
@@ -39669,6 +40033,25 @@ export type AuditFinding =
       stream: string;
       event_id: number;
       reason: "future-created" | "out-of-order";
+    }
+  | {
+      /**
+       * An event the store could not hand back at all — currently only a
+       * \`pii\` payload the configured key cannot decrypt (corrupt ciphertext,
+       * bit-rot, a partial restore, or a rotation that outran a stream's
+       * correlate checkpoint).
+       *
+       * Every other finding describes an event the audit could read. This one
+       * names the row that stopped it being read, which the failing read
+       * alone does not give: the scan aborts, nothing reports the stream, and
+       * \`blocked_streams()\` is empty because nothing is blocked.
+       */
+      category: "unreadable-events";
+      stream: string;
+      event_id: number;
+      reason: "pii_decrypt_failed";
+      /** The underlying adapter error, for operators who log it. */
+      error: unknown;
     };
 
 // === errors.ts ===
@@ -42390,6 +42773,7 @@ export const QuerySchema = z
     backward: z.boolean().optional(),
     correlation: z.string().optional(),
     with_snaps: z.boolean().optional(),
+    with_pii: z.boolean().optional(),
     stream_exact: z.boolean().optional(),
   })
   .readonly();
@@ -54212,7 +54596,13 @@ export class PostgresStore implements Store {
       // is \`readonly\` on the public type, but rows materialized from
       // the driver are mutable in-flight before they cross back to
       // the framework.
-      if (this._resolve_pii_key && typeof row.pii === "string") {
+      if (query?.with_pii === false) {
+        // The caller declined the payload, so never decrypt it — an
+        // unreadable row cannot fail a read that did not ask for it. \`null\`
+        // rather than the stored ciphertext: \`pii_gate\` treats any non-null
+        // \`pii\` as discloseable and would merge base64 into \`data\` (#1675).
+        (row as { pii: unknown }).pii = null;
+      } else if (this._resolve_pii_key && typeof row.pii === "string") {
         const decrypted = await decrypt(row.pii, this._resolve_pii_key);
         (row as { pii: unknown }).pii = decrypted;
       }
@@ -56669,7 +57059,14 @@ export class SqliteStore implements Store {
     let count = 0;
 
     for (const row of result.rows) {
-      const pii_value = await this._parse_pii_from_read(row.pii);
+      // The caller declined the payload, so never decrypt it — an unreadable
+      // row cannot fail a read that did not ask for it. \`null\` rather than
+      // the stored ciphertext: \`pii_gate\` treats any non-null \`pii\` as
+      // discloseable and would merge base64 into \`data\` (#1675).
+      const pii_value =
+        query?.with_pii === false
+          ? null
+          : await this._parse_pii_from_read(row.pii);
       await Promise.resolve(
         callback({
           id: Number(row.id),
@@ -65104,6 +65501,97 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(seen[0].pii).toEqual({ email: "u@example.com", name: "Ursula" });
         // Non-pii fields untouched.
         expect(seen[0].data).toEqual({ amount: 1 });
+      });
+
+      /**
+       * \`with_pii: false\` lets a read decline the payload entirely. The
+       * engine uses it on scans that discard \`pii\` — correlate resolves
+       * reaction targets from \`name\`/\`stream\` and throws the rest away — so
+       * an unreadable payload cannot fail a read that never wanted it
+       * (#1675). Before this, one corrupt row stopped every stream's
+       * reactions, because the correlate scan tripped on it.
+       */
+      describe("with_pii (#1675)", () => {
+        const seed_pii = async (s: string) =>
+          await store.commit<CounterEvents>(
+            s,
+            [
+              {
+                name: "Incremented",
+                data: { amount: 1 },
+                pii: { email: "w@example.com" },
+              },
+            ],
+            make_meta({ stream: s })
+          );
+
+        it("returns the payload by default and omits it when declined", async () => {
+          const s = \`pii-flag-\${uid()}\`;
+          await seed_pii(s);
+
+          const read = async (with_pii?: boolean) => {
+            const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+            await store.query<CounterEvents>(
+              (e) => {
+                seen.push(e);
+              },
+              { stream: s, stream_exact: true, with_pii }
+            );
+            return seen;
+          };
+
+          // Default — unchanged behavior.
+          expect((await read())[0].pii).toEqual({ email: "w@example.com" });
+          // Explicit true — same.
+          expect((await read(true))[0].pii).toEqual({
+            email: "w@example.com",
+          });
+
+          const declined = await read(false);
+          expect(declined).toHaveLength(1);
+          // No payload. Adapters differ on whether "absent" is \`null\` or
+          // undefined — that predates this flag — so assert the meaning.
+          expect(declined[0].pii ?? null).toBeNull();
+          // Everything else is untouched: this is not a projection.
+          expect(declined[0].data).toEqual({ amount: 1 });
+          expect(declined[0].name).toBe("Incremented");
+          expect(declined[0].stream).toBe(s);
+        });
+
+        it("never hands back the stored payload in place of the real one", async () => {
+          // \`pii_gate\` treats ANY non-null \`pii\` as discloseable, so leaking
+          // an at-rest representation here would merge ciphertext into
+          // \`data\` on the read path. The declined payload must be empty,
+          // never a stand-in.
+          const s = \`pii-flag-raw-\${uid()}\`;
+          await seed_pii(s);
+
+          const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+          await store.query<CounterEvents>(
+            (e) => {
+              seen.push(e);
+            },
+            { stream: s, stream_exact: true, with_pii: false }
+          );
+          const pii = seen[0].pii;
+          expect(pii ?? null).toBeNull();
+          expect(typeof pii).not.toBe("string");
+        });
+
+        it("applies to every matching row, not just the first", async () => {
+          const s = \`pii-flag-many-\${uid()}\`;
+          for (let i = 0; i < 3; i++) await seed_pii(s);
+
+          const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+          await store.query<CounterEvents>(
+            (e) => {
+              seen.push(e);
+            },
+            { stream: s, stream_exact: true, with_pii: false }
+          );
+          expect(seen).toHaveLength(3);
+          for (const e of seen) expect(e.pii ?? null).toBeNull();
+        });
       });
 
       it("round-trips a Date losslessly in pii, like data/meta (#1365/#1370/#1556)", async () => {

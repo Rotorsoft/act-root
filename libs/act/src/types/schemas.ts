@@ -157,6 +157,7 @@ export const QuerySchema = z
     backward: z.boolean().optional(),
     correlation: z.string().optional(),
     with_snaps: z.boolean().optional(),
+    with_pii: z.boolean().optional(),
     stream_exact: z.boolean().optional(),
   })
   .readonly();

@@ -977,7 +977,13 @@ export class PostgresStore implements Store {
       // is `readonly` on the public type, but rows materialized from
       // the driver are mutable in-flight before they cross back to
       // the framework.
-      if (this._resolve_pii_key && typeof row.pii === "string") {
+      if (query?.with_pii === false) {
+        // The caller declined the payload, so never decrypt it — an
+        // unreadable row cannot fail a read that did not ask for it. `null`
+        // rather than the stored ciphertext: `pii_gate` treats any non-null
+        // `pii` as discloseable and would merge base64 into `data` (#1675).
+        (row as { pii: unknown }).pii = null;
+      } else if (this._resolve_pii_key && typeof row.pii === "string") {
         const decrypted = await decrypt(row.pii, this._resolve_pii_key);
         (row as { pii: unknown }).pii = decrypted;
       }

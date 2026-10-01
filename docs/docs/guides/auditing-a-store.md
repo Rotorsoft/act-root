@@ -110,6 +110,26 @@ Events whose `meta.causation.event.id` references a parent id not present in the
 
 Future-dated `created` timestamps and per-stream out-of-order commits. Surfaces clock skew during deploys, NTP drift, or container clock-jumps. Framework can't act on these directly — remediation is infrastructure-layer — but operators tend to ask "is anything weird in this store?" and a clock check is cheap to fold in.
 
+### `unreadable-events` → repair or forget the row
+
+Events the store could not hand back at all. Today that means one thing: a `pii` payload the configured key cannot decrypt — corrupt ciphertext, bit-rot, a partial restore, or a [key rotation](./pii-encryption-at-rest.md) that outran a stream's correlate checkpoint.
+
+Every other category describes an event the audit could read. This one names the row that stopped it being read, which the failing read alone does not give: the read aborts, so nothing else reports the stream, and `blocked_streams()` is empty because nothing is blocked.
+
+The audit finds the row itself, with no help from the adapter. When its scan trips, it re-reads the single next row with `with_pii: false` — a read that declines the payload cannot fail on the same cause — which returns that row's stream and id. It reports the finding and resumes past it, so **one pass reports every unreadable row** rather than only the first.
+
+```typescript no-check
+for await (const f of app.audit(["unreadable-events"])) {
+  // { category: "unreadable-events", stream: "orders-42",
+  //   event_id: 90210, reason: "pii_decrypt_failed", error: … }
+  console.error(f);
+}
+```
+
+**Remediation:** restore the row from a backup taken under the key that wrote it, re-key it, or `app.forget()` the stream's sensitive payload if it is genuinely unrecoverable.
+
+Reactions are not blocked by such a row — the correlate scan declines the payload it does not need, so it reads past a corrupt one ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)). Handlers that *do* read the payload will still fail on the affected stream, and that stream will block normally and show up in `blocked_streams()`, which is the right blast radius.
+
 ## Recipes
 
 ### CI gate: fail the build on schema drift since the last release
