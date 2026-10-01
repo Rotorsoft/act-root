@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.0...@rotorsoft/act-tck-v1.38.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **act-http:** keep the webhook timeout armed through the response body read ([#1712](https://github.com/Rotorsoft/act-root/issues/1712)) ([dd59e21](https://github.com/Rotorsoft/act-root/commit/dd59e21d8b7aaf17aba049cef61a9b36ada1fa67)), closes [#1701](https://github.com/Rotorsoft/act-root/issues/1701)
+* **act:** validate a lane declared on a slice, as the act() path already does ([#1713](https://github.com/Rotorsoft/act-root/issues/1713)) ([df801d2](https://github.com/Rotorsoft/act-root/commit/df801d220fde33f89656170a99972fcd1bd4f82a)), closes [#1703](https://github.com/Rotorsoft/act-root/issues/1703)
+
 # [@rotorsoft/act-tck-v1.38.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.12...@rotorsoft/act-tck-v1.38.0) (2026-10-01)
 
 
