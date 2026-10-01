@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.7...@rotorsoft/act-http-v1.10.8) (2026-10-01)
+
+
+### Bug Fixes
+
+* **act-http:** contain a throwing onOverlayMiss and resync before reporting ([#1695](https://github.com/Rotorsoft/act-root/issues/1695)) ([3b9c819](https://github.com/Rotorsoft/act-root/commit/3b9c819808d363035897a132467563b414fe44be)), closes [#1648](https://github.com/Rotorsoft/act-root/issues/1648) [#1674](https://github.com/Rotorsoft/act-root/issues/1674)
+
 # [@rotorsoft/act-http-v1.10.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.6...@rotorsoft/act-http-v1.10.7) (2026-09-29)
 
 
