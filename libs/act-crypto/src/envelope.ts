@@ -75,11 +75,23 @@ export class DecryptionError extends Error {
 /**
  * Wrap an {@link Encryption} config into a memoized key resolver.
  *
- * The returned function calls `encryption.keyProvider` on first use,
- * validates the result is a 32-byte Buffer, and caches it for the
- * resolver's lifetime. Subsequent calls hit the cache without
- * re-invoking the provider — important when the provider is a KMS
- * round-trip.
+ * The returned function calls `encryption.keyProvider` **once**, validates
+ * the result is a 32-byte Buffer, and caches it for the resolver's lifetime.
+ * Every later call hits the cache without re-invoking the provider —
+ * important when the provider is a KMS round-trip.
+ *
+ * "Once" includes concurrent callers. The in-flight promise is what is
+ * memoized, not the resolved key: caching the key alone left an `await`
+ * between the cache miss and the cache write, so every caller arriving
+ * before the first provider call settled missed too and made its own. On a
+ * cold process serving concurrent requests that is one KMS round-trip per
+ * request instead of one per process — rate limits, per-call billing, and
+ * an audit-log entry each, exactly where the memo was supposed to help
+ * (#1675's sibling, #1704).
+ *
+ * A rejected attempt is not cached. The next call retries, so a transient
+ * KMS failure at startup does not poison the resolver for the life of the
+ * adapter.
  *
  * Operators who need key rotation construct a new adapter (which makes
  * a new resolver) rather than mutating the in-flight one. The
@@ -89,16 +101,25 @@ export class DecryptionError extends Error {
  *   32-byte Buffer.
  */
 export function makeKeyResolver(encryption: Encryption): () => Promise<Buffer> {
-  let cached: Buffer | undefined;
-  return async () => {
-    if (cached) return cached;
-    const key = await encryption.keyProvider();
-    if (!Buffer.isBuffer(key) || key.length !== KEY_LEN)
-      throw new Error(
-        `act-crypto: keyProvider must return a ${KEY_LEN}-byte Buffer (AES-256 requires a 256-bit key)`
-      );
-    cached = key;
-    return cached;
+  let pending: Promise<Buffer> | undefined;
+  return () => {
+    if (!pending) {
+      pending = (async () => {
+        const key = await encryption.keyProvider();
+        if (!Buffer.isBuffer(key) || key.length !== KEY_LEN)
+          throw new Error(
+            `act-crypto: keyProvider must return a ${KEY_LEN}-byte Buffer (AES-256 requires a 256-bit key)`
+          );
+        return key;
+      })();
+      // Drop a failed attempt so the next caller retries rather than
+      // re-awaiting a permanently rejected promise.
+      pending = pending.catch((error) => {
+        pending = undefined;
+        throw error;
+      });
+    }
+    return pending;
   };
 }
 

@@ -35,6 +35,63 @@ describe("makeKeyResolver", () => {
     expect(provider).toHaveBeenCalledTimes(1);
   });
 
+  it("calls keyProvider once for N CONCURRENT callers (#1704)", async () => {
+    // Caching the resolved key left an `await` between the cache miss and the
+    // cache write, so every caller arriving before the first provider call
+    // settled missed too. On a cold process that is one KMS round-trip per
+    // concurrent request instead of one per process.
+    const key = makeKey();
+    const provider = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return key;
+    });
+    const resolve = makeKeyResolver({
+      keyProvider: provider,
+      algorithm: "aes-256-gcm",
+    });
+
+    const keys = await Promise.all(Array.from({ length: 8 }, () => resolve()));
+    expect(provider).toHaveBeenCalledTimes(1);
+    // And every caller got the same key, not eight equal copies.
+    for (const k of keys) expect(k).toBe(key);
+  });
+
+  it("retries after a failed attempt instead of caching the rejection", async () => {
+    // A transient KMS failure at startup must not poison the resolver for the
+    // life of the adapter.
+    const key = makeKey();
+    let attempts = 0;
+    const resolve = makeKeyResolver({
+      keyProvider: async () => {
+        attempts++;
+        if (attempts === 1) throw new Error("kms unavailable");
+        return key;
+      },
+      algorithm: "aes-256-gcm",
+    });
+
+    await expect(resolve()).rejects.toThrow("kms unavailable");
+    expect(await resolve()).toBe(key);
+    expect(attempts).toBe(2);
+  });
+
+  it("does not cache a validation failure either", async () => {
+    // The validation throw is the resolver's own, not the provider's, and it
+    // travels the same path — so it must not stick either.
+    const key = makeKey();
+    let attempts = 0;
+    const resolve = makeKeyResolver({
+      keyProvider: () => {
+        attempts++;
+        return attempts === 1 ? (randomBytes(16) as Buffer) : key;
+      },
+      algorithm: "aes-256-gcm",
+    });
+
+    await expect(resolve()).rejects.toThrow(/must return a 32-byte Buffer/);
+    expect(await resolve()).toBe(key);
+  });
+
   it("accepts a synchronous keyProvider", async () => {
     const key = makeKey();
     const resolve = makeKeyResolver({
