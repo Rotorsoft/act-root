@@ -9,6 +9,16 @@ import {
   resolveReactionConfig,
   resolveSettleConfig,
 } from "../src/internal/config.js";
+import { sandbox } from "../src/test/index.js";
+
+/** Minimal state for the call-site assertions below. */
+const S_cfg = state({ Cfg: z.object({ n: z.number() }) })
+  .init(() => ({ n: 0 }))
+  .emits({ Bumped: ZodEmpty })
+  .patch({ Bumped: (_e, st) => ({ n: st.n + 1 }) })
+  .on({ bump: ZodEmpty })
+  .emit(() => ["Bumped", {}])
+  .build();
 
 // The single config module (`internal/config.ts`) owns validation for every
 // builder-facing bag. These pin the resolvers directly (unit) and at their
@@ -146,6 +156,37 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
     expect(() => resolveDrainConfig({ streamLimit: -1 })).toThrow();
     expect(() => resolveSettleConfig({ debounceMs: Number.NaN })).toThrow();
     expect(() => resolveSettleConfig({ maxPasses: -1 })).toThrow();
+  });
+
+  /**
+   * `Infinity` is what both public doc-comments name as `maxPasses`'s default,
+   * and what `settle.ts` destructures to — so the one value the docs advertise
+   * was the one value the schema refused (#1711). Reached by wrapper code
+   * normalizing an optional cap: `settle({ maxPasses: opts.maxPasses ?? Infinity })`.
+   */
+  it("accepts maxPasses: Infinity, the documented default (#1711)", () => {
+    const s = { maxPasses: Number.POSITIVE_INFINITY };
+    expect(resolveSettleConfig(s)).toBe(s);
+  });
+
+  it("still rejects -Infinity and NaN for maxPasses", () => {
+    // Accepting the documented "no cap" value must not open the gate to
+    // nonsense — the union admits one literal, not every non-finite number.
+    expect(() =>
+      resolveSettleConfig({ maxPasses: Number.NEGATIVE_INFINITY })
+    ).toThrow();
+    expect(() => resolveSettleConfig({ maxPasses: Number.NaN })).toThrow();
+    expect(() => resolveSettleConfig({ maxPasses: 1.5 })).toThrow();
+  });
+
+  it("settle({ maxPasses: Infinity }) does not throw at the call site", async () => {
+    const ctx = await sandbox(act().withState(S_cfg));
+    try {
+      // Throws a ZodError at `resolveSettleConfig` before this fix.
+      await ctx.app.settle({ maxPasses: Number.POSITIVE_INFINITY });
+    } finally {
+      await ctx.dispose();
+    }
   });
 });
 
