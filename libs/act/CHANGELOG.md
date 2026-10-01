@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.0...@rotorsoft/act-v1.32.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **act:** validate a lane declared on a slice, as the act() path already does ([#1713](https://github.com/Rotorsoft/act-root/issues/1713)) ([df801d2](https://github.com/Rotorsoft/act-root/commit/df801d220fde33f89656170a99972fcd1bd4f82a)), closes [#1703](https://github.com/Rotorsoft/act-root/issues/1703)
+
 # [@rotorsoft/act-v1.32.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.31.29...@rotorsoft/act-v1.32.0) (2026-10-01)
 
 
