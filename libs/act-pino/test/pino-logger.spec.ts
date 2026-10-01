@@ -1,5 +1,10 @@
 import { PinoLogger } from "../src/pino-logger.js";
 
+/** `process.report.getReport()` is typed as `object`; this is the one field we read. */
+const worker_count = (): number =>
+  (process.report.getReport() as unknown as { workers: unknown[] }).workers
+    .length;
+
 describe("PinoLogger", () => {
   let output: string[];
   const originalWrite = process.stdout.write.bind(process.stdout);
@@ -87,6 +92,39 @@ describe("PinoLogger", () => {
     const parsed = JSON.parse(output[0]);
     expect(parsed.request_id).toBe("abc");
     expect(parsed.msg).toBe("from child");
+  });
+
+  it("child() spawns no transport worker (#1705)", async () => {
+    // `child()` used to run the whole constructor, which builds a pino
+    // instance — and a pino-pretty thread-stream Worker when `pretty` is on,
+    // the default outside production — then discarded it. Since `child()` is
+    // the per-request-context API, that leaked one OS thread per request.
+    //
+    // `pretty: true` is the point: the TCK and every other case here use
+    // `pretty: false`, which creates no worker and so cannot see this.
+    const logger = new PinoLogger({ pretty: true });
+    // Let the base logger's own transport thread come up first.
+    await new Promise((r) => setTimeout(r, 200));
+    const before = worker_count();
+
+    for (let i = 0; i < 5; i++) logger.child({ i });
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(worker_count()).toBe(before);
+  });
+
+  it("a child built without the constructor still logs and nests (#1705)", () => {
+    // `Object.create(prototype)` skips field initialization, so prove the
+    // instance is still whole: it logs, carries its bindings, and a
+    // grandchild works — i.e. `child()` is callable on a child.
+    const logger = new PinoLogger({ level: "trace", pretty: false });
+    const child = logger.child({ a: 1 });
+    const grandchild = child.child({ b: 2 });
+    grandchild.info("nested");
+    const parsed = JSON.parse(output[0]);
+    expect(parsed.a).toBe(1);
+    expect(parsed.b).toBe(2);
+    expect(parsed.msg).toBe("nested");
   });
 
   it("child inherits level", () => {

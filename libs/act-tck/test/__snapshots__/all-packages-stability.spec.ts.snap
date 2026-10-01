@@ -56525,7 +56525,14 @@ export class PinoLogger implements Logger {
   }
 
   child(bindings: Record<string, unknown>): Logger {
-    const child = new PinoLogger();
+    // Allocate the prototype rather than running the constructor. \`new
+    // PinoLogger()\` builds a whole pino instance — including a \`pino-pretty\`
+    // thread-stream Worker when \`pretty\` is on, which it is by default
+    // outside production — and the \`defineProperty\` below then throws it
+    // away. Since \`child()\` is the per-request-context API, that leaked one
+    // OS thread per request (#1705). pino's own \`child()\` is free; the cost
+    // was entirely the discarded constructor.
+    const child = Object.create(PinoLogger.prototype) as PinoLogger;
     Object.defineProperty(child, "_pino", {
       value: this._pino.child(bindings),
       writable: false,
