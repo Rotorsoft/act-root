@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.1...@rotorsoft/act-v1.32.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* **act:** make truncate agree across the three adapters ([#1698](https://github.com/Rotorsoft/act-root/issues/1698)) ([3d046fc](https://github.com/Rotorsoft/act-root/commit/3d046fcb63601ba21a0f9374a32fb6f7608eea72)), closes [#1677](https://github.com/Rotorsoft/act-root/issues/1677)
+
 # [@rotorsoft/act-v1.32.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.0...@rotorsoft/act-v1.32.1) (2026-10-01)
 
 
