@@ -167,3 +167,75 @@ describe("cache integration", () => {
     errorSpy.mockRestore();
   });
 });
+
+/**
+ * `snapshot.snaps` counts what THIS load's window carried, not the stream's
+ * lifetime total (#1678).
+ *
+ * `cache-and-snapshots.md` described it as "cumulative across all loads",
+ * which only holds warm: `load()` seeds the counter from the cached
+ * checkpoint and increments per `__snapshot__` it folds. A cold load has
+ * nothing to seed from, and the `with_snaps` resume floor hands it only the
+ * window from the latest snapshot onward — so it reports that window's count
+ * whatever the stream's history.
+ */
+describe("snaps is window-relative, not cumulative (#1678)", () => {
+  const Snapping = state({ Snapping: z.object({ count: z.number() }) })
+    .init(() => ({ count: 0 }))
+    .emits({ Ticked: z.object({ by: z.number() }) })
+    .patch({ Ticked: (event, s) => ({ count: s.count + event.data.by }) })
+    .on({ tick: z.object({ by: z.number() }) })
+    .emit((a) => ["Ticked", { by: a.by }])
+    .snap((s) => s.patches >= 2)
+    .build();
+
+  beforeEach(async () => {
+    store(new InMemoryStore());
+    await store().seed();
+  });
+
+  afterAll(async () => {
+    await dispose()();
+  });
+
+  it("has the snapshot in the log by the time the action returns", async () => {
+    // The write is awaited, not fire-and-forget: the snapshot event takes the
+    // next version slot, so a follow-up action loading a pre-snap checkpoint
+    // would collide with the framework's own bookkeeping.
+    const t = { stream: "s2", actor: { id: "a", name: "a" } };
+    await action(Snapping, "tick", t, { by: 1 });
+    await action(Snapping, "tick", t, { by: 1 });
+
+    const names: string[] = [];
+    await store().query(
+      (e) => {
+        names.push(String(e.name));
+      },
+      { stream: "s2", stream_exact: true, with_snaps: true }
+    );
+    expect(names).toContain("__snapshot__");
+  });
+
+  it("reports the window cold and the carried total warm", async () => {
+    const t = { stream: "s1", actor: { id: "a", name: "a" } };
+    for (let i = 0; i < 5; i++) await action(Snapping, "tick", t, { by: 1 });
+
+    // Warm: the count carried on the cache checkpoint, accumulated by the
+    // action path across every snap this process took.
+    const warm = await load(Snapping, { stream: "s1" });
+    expect(warm.snaps).toBe(2);
+
+    // Cold: nothing to carry, and the resume floor hands back only the
+    // window from the latest snapshot — one snapshot in it, not two.
+    await cache().invalidate("s1");
+    const folded: string[] = [];
+    const cold = await load(Snapping, { stream: "s1" }, (s) =>
+      folded.push(String(s.event?.name))
+    );
+    expect(folded).toEqual(["__snapshot__", "Ticked"]);
+    expect(cold.snaps).toBe(1);
+
+    // The two disagree on `snaps` and agree on the thing that matters.
+    expect(cold.state).toEqual(warm.state);
+  });
+});

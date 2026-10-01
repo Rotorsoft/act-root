@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.6...@rotorsoft/act-http-v1.10.7) (2026-09-29)
+
+
+### Bug Fixes
+
+* **ci:** unblock stryker's dry run and pause the weekly mutation schedule ([#1694](https://github.com/Rotorsoft/act-root/issues/1694)) ([0428960](https://github.com/Rotorsoft/act-root/commit/04289609f81bc2046ec4aea68cdbeaacb777d5b7)), closes [#1693](https://github.com/Rotorsoft/act-root/issues/1693)
+
 # [@rotorsoft/act-http-v1.10.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.5...@rotorsoft/act-http-v1.10.6) (2026-09-29)
 
 
