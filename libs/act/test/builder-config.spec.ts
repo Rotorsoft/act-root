@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { act, state, ZodEmpty } from "../src/index.js";
+import { act, slice, state, ZodEmpty } from "../src/index.js";
 import {
   resolveActConfig,
   resolveActionConfig,
@@ -77,6 +77,54 @@ describe("resolveLaneConfig", () => {
       resolveLaneConfig({ name: "x", leaseMillis: Number.NaN })
     ).toThrow();
     expect(() => resolveLaneConfig({ name: "x", streamLimit: -1 })).toThrow();
+  });
+
+  /**
+   * Both declaration paths must validate, not just `act()`. The slice path
+   * used to register the bag raw, and a lane carrying a bad streamLimit
+   * drained nothing for the life of the process — silently, with nothing in
+   * `blocked_streams()` to find it by (#1703).
+   */
+  describe("both declaration paths validate (#1703)", () => {
+    const S = state({ Box: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Filled: ZodEmpty })
+      .patch({ Filled: (_e, st) => ({ n: st.n + 1 }) })
+      .on({ fill: ZodEmpty })
+      .emit(() => ["Filled", {}])
+      .build();
+
+    const bad = [
+      ["empty name", { name: "" }],
+      ["NaN leaseMillis", { name: "l1", leaseMillis: Number.NaN }],
+      ["negative streamLimit", { name: "l2", streamLimit: -1 }],
+      ["NaN cycleMs", { name: "l3", cycleMs: Number.NaN }],
+    ] as const;
+
+    it.each(bad)("act().withLane rejects %s", (_label, config) => {
+      expect(() =>
+        act()
+          .withState(S)
+          .withLane(config as never)
+      ).toThrow();
+    });
+
+    it.each(bad)("slice().withLane rejects %s", (_label, config) => {
+      expect(() =>
+        slice()
+          .withState(S)
+          .withLane(config as never)
+      ).toThrow();
+    });
+
+    it("both paths still accept a valid lane", () => {
+      expect(() =>
+        act().withState(S).withLane({ name: "ok", streamLimit: 1 })
+      ).not.toThrow();
+      expect(() =>
+        slice().withState(S).withLane({ name: "ok", streamLimit: 1 })
+      ).not.toThrow();
+    });
   });
 });
 

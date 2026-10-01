@@ -6,6 +6,7 @@
  * self-contained functional slices (vertical slice architecture).
  */
 
+import { resolveLaneConfig } from "../internal/index.js";
 import type { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
@@ -200,7 +201,12 @@ export function slice<
       return builder;
     },
     withLane: (config) => {
-      register_lane(config, lanes);
+      // Validate at declaration, exactly as the `act()` path does. Without
+      // this the slice path accepted a bag the act() path rejects — and a
+      // lane carrying a bad streamLimit/leaseMillis/cycleMs drains nothing
+      // for the life of the process, silently: no error, no log, and nothing
+      // in `blocked_streams()` to find it by (#1703).
+      register_lane(resolveLaneConfig(config), lanes);
       return builder as never;
     },
     on: <TKey extends keyof TEvents>(event: TKey) =>
