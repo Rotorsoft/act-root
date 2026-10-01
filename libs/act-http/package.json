@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-http",
   "type": "module",
   "version": "1.10.8",
-  "description": "HTTP integrations for act apps — webhooks and SSE",
+  "description": "HTTP integrations for act apps \u2014 webhooks and SSE",
   "keywords": [
     "typescript",
     "http",
@@ -27,59 +27,48 @@
   ],
   "exports": {
     "./api": {
-      "types": "./dist/@types/api/index.d.ts",
-      "import": "./dist/api/index.js",
-      "require": "./dist/api/index.cjs"
+      "types": "./src/api/index.ts",
+      "import": "./src/api/index.ts"
     },
     "./hono": {
-      "types": "./dist/@types/hono/index.d.ts",
-      "import": "./dist/hono/index.js",
-      "require": "./dist/hono/index.cjs"
+      "types": "./src/hono/index.ts",
+      "import": "./src/hono/index.ts"
     },
     "./openapi": {
-      "types": "./dist/@types/openapi/index.d.ts",
-      "import": "./dist/openapi/index.js",
-      "require": "./dist/openapi/index.cjs"
+      "types": "./src/openapi/index.ts",
+      "import": "./src/openapi/index.ts"
     },
     "./receiver": {
-      "types": "./dist/@types/receiver/index.d.ts",
-      "import": "./dist/receiver/index.js",
-      "require": "./dist/receiver/index.cjs"
+      "types": "./src/receiver/index.ts",
+      "import": "./src/receiver/index.ts"
     },
     "./receiver/express": {
-      "types": "./dist/@types/receiver/express/index.d.ts",
-      "import": "./dist/receiver/express/index.js",
-      "require": "./dist/receiver/express/index.cjs"
+      "types": "./src/receiver/express/index.ts",
+      "import": "./src/receiver/express/index.ts"
     },
     "./receiver/fastify": {
-      "types": "./dist/@types/receiver/fastify/index.d.ts",
-      "import": "./dist/receiver/fastify/index.js",
-      "require": "./dist/receiver/fastify/index.cjs"
+      "types": "./src/receiver/fastify/index.ts",
+      "import": "./src/receiver/fastify/index.ts"
     },
     "./receiver/hono": {
-      "types": "./dist/@types/receiver/hono/index.d.ts",
-      "import": "./dist/receiver/hono/index.js",
-      "require": "./dist/receiver/hono/index.cjs"
+      "types": "./src/receiver/hono/index.ts",
+      "import": "./src/receiver/hono/index.ts"
     },
     "./receiver/trpc": {
-      "types": "./dist/@types/receiver/trpc/index.d.ts",
-      "import": "./dist/receiver/trpc/index.js",
-      "require": "./dist/receiver/trpc/index.cjs"
+      "types": "./src/receiver/trpc/index.ts",
+      "import": "./src/receiver/trpc/index.ts"
     },
     "./sse": {
-      "types": "./dist/@types/sse/index.d.ts",
-      "import": "./dist/sse/index.js",
-      "require": "./dist/sse/index.cjs"
+      "types": "./src/sse/index.ts",
+      "import": "./src/sse/index.ts"
     },
     "./trpc": {
-      "types": "./dist/@types/trpc/index.d.ts",
-      "import": "./dist/trpc/index.js",
-      "require": "./dist/trpc/index.cjs"
+      "types": "./src/trpc/index.ts",
+      "import": "./src/trpc/index.ts"
     },
     "./webhook": {
-      "types": "./dist/@types/webhook/index.d.ts",
-      "import": "./dist/webhook/index.js",
-      "require": "./dist/webhook/index.cjs"
+      "types": "./src/webhook/index.ts",
+      "import": "./src/webhook/index.ts"
     }
   },
   "sideEffects": false,
@@ -87,7 +76,64 @@
     "node": ">=22.23.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./api": {
+        "types": "./dist/@types/api/index.d.ts",
+        "import": "./dist/api/index.js",
+        "require": "./dist/api/index.cjs"
+      },
+      "./hono": {
+        "types": "./dist/@types/hono/index.d.ts",
+        "import": "./dist/hono/index.js",
+        "require": "./dist/hono/index.cjs"
+      },
+      "./openapi": {
+        "types": "./dist/@types/openapi/index.d.ts",
+        "import": "./dist/openapi/index.js",
+        "require": "./dist/openapi/index.cjs"
+      },
+      "./receiver": {
+        "types": "./dist/@types/receiver/index.d.ts",
+        "import": "./dist/receiver/index.js",
+        "require": "./dist/receiver/index.cjs"
+      },
+      "./receiver/express": {
+        "types": "./dist/@types/receiver/express/index.d.ts",
+        "import": "./dist/receiver/express/index.js",
+        "require": "./dist/receiver/express/index.cjs"
+      },
+      "./receiver/fastify": {
+        "types": "./dist/@types/receiver/fastify/index.d.ts",
+        "import": "./dist/receiver/fastify/index.js",
+        "require": "./dist/receiver/fastify/index.cjs"
+      },
+      "./receiver/hono": {
+        "types": "./dist/@types/receiver/hono/index.d.ts",
+        "import": "./dist/receiver/hono/index.js",
+        "require": "./dist/receiver/hono/index.cjs"
+      },
+      "./receiver/trpc": {
+        "types": "./dist/@types/receiver/trpc/index.d.ts",
+        "import": "./dist/receiver/trpc/index.js",
+        "require": "./dist/receiver/trpc/index.cjs"
+      },
+      "./sse": {
+        "types": "./dist/@types/sse/index.d.ts",
+        "import": "./dist/sse/index.js",
+        "require": "./dist/sse/index.cjs"
+      },
+      "./trpc": {
+        "types": "./dist/@types/trpc/index.d.ts",
+        "import": "./dist/trpc/index.js",
+        "require": "./dist/trpc/index.cjs"
+      },
+      "./webhook": {
+        "types": "./dist/@types/webhook/index.d.ts",
+        "import": "./dist/webhook/index.js",
+        "require": "./dist/webhook/index.cjs"
+      }
+    }
   },
   "scripts": {
     "clean": "rm -rf dist",

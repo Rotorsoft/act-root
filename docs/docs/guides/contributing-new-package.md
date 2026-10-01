@@ -18,6 +18,37 @@ git push origin @rotorsoft/act-foo-v0.0.0
 
 Pick a commit on `master` (or just before the feature branch diverged). This tag becomes the "last release" semantic-release compares against, so the first real release on `master` increments from `0.0.0` per conventional-commit prefixes.
 
+## Export source locally, build output on publish
+
+Point `exports` at the package's **source**, and put the `dist` entries under `publishConfig.exports`:
+
+```json
+{
+  "exports": {
+    ".": { "types": "./src/index.ts", "import": "./src/index.ts" }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/@types/index.d.ts",
+        "import": "./dist/index.js",
+        "require": "./dist/index.cjs"
+      }
+    },
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/@types/index.d.ts"
+  }
+}
+```
+
+pnpm swaps the two at publish time, so the package on npm advertises `dist` exactly as before. In the workspace it advertises source, which is what makes every tool — vitest, `tsc`, `node` — resolve a sibling `@rotorsoft/*` import to `src/` from any working directory, with no per-package tool config.
+
+Get this wrong and the failure is quiet: a package that advertises `dist` locally sends siblings to build output, so a `vitest` run inside the package directory tests yesterday's build and **passes while doing it** ([#1676](https://github.com/Rotorsoft/act-root/issues/1676)). `pnpm check:exports` enforces the shape, and CI runs it — including that no top-level `main` / `module` / `types` is left behind to contradict `exports`.
+
+Copy the shape from a sibling (`act-patch` is the smallest) rather than from an older template.
+
 ## Wire the package into the repo
 
 | File | What to add |

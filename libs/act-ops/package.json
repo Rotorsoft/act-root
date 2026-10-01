@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-ops",
   "type": "module",
   "version": "0.2.9",
-  "description": "Operational primitives for act apps and act-independent receivers — idempotency, retry budgets, poison-message classifiers",
+  "description": "Operational primitives for act apps and act-independent receivers \u2014 idempotency, retry budgets, poison-message classifiers",
   "keywords": [
     "typescript",
     "operational",
@@ -27,14 +27,12 @@
   ],
   "exports": {
     "./idempotency": {
-      "types": "./dist/@types/idempotency/index.d.ts",
-      "import": "./dist/idempotency/index.js",
-      "require": "./dist/idempotency/index.cjs"
+      "types": "./src/idempotency/index.ts",
+      "import": "./src/idempotency/index.ts"
     },
     "./receiver": {
-      "types": "./dist/@types/receiver/index.d.ts",
-      "import": "./dist/receiver/index.js",
-      "require": "./dist/receiver/index.cjs"
+      "types": "./src/receiver/index.ts",
+      "import": "./src/receiver/index.ts"
     }
   },
   "sideEffects": false,
@@ -42,7 +40,19 @@
     "node": ">=22.23.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./idempotency": {
+        "types": "./dist/@types/idempotency/index.d.ts",
+        "import": "./dist/idempotency/index.js",
+        "require": "./dist/idempotency/index.cjs"
+      },
+      "./receiver": {
+        "types": "./dist/@types/receiver/index.d.ts",
+        "import": "./dist/receiver/index.js",
+        "require": "./dist/receiver/index.cjs"
+      }
+    }
   },
   "scripts": {
     "clean": "rm -rf dist",

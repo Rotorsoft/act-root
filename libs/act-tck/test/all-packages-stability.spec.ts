@@ -46,12 +46,13 @@ function discover_packages(): Pkg[] {
     for (const [subpath, mapping] of Object.entries(exports)) {
       const import_path =
         typeof mapping === "string" ? mapping : mapping?.import;
-      if (!import_path?.endsWith(".js")) continue;
-      // ./dist/api/index.js → src/api/index.ts
-      const rel = import_path
-        .replace(/^\.\/dist\//, "")
-        .replace(/\.js$/, ".ts");
-      const abs_src = path.join(libs_dir, dir, "src", rel);
+      // `exports` points at source in the workspace and at `dist` only once
+      // pnpm swaps in `publishConfig.exports` at publish time, so the entry
+      // is already the file to read — no dist→src rewriting (#1676). A
+      // non-`.ts` entry is a build artifact (act-diagram's css), not a
+      // surface.
+      if (!import_path?.endsWith(".ts")) continue;
+      const abs_src = path.join(libs_dir, dir, import_path);
       const key = subpath === "." ? "" : subpath;
       entry_points[key] = abs_src;
     }

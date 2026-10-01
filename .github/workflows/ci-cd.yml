@@ -115,6 +115,19 @@ jobs:
           LIVE_BODY="$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}" --jq '.body // ""' || true)"
           PR_BODY="${LIVE_BODY:-$EVENT_BODY}" node scripts/check-rfc-gate.mjs
 
+  workspace-exports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # A published lib that advertises `dist` instead of `src` sends every
+      # workspace sibling to build output, so a `vitest` run inside a package
+      # directory tests stale `dist/` — and passes green doing it (#1676).
+      # pnpm swaps in `publishConfig.exports` at publish time, so the artifact
+      # on npm is unaffected either way, which is what makes the regression
+      # invisible without this check.
+      - name: published libs export source locally and dist on publish
+        run: node scripts/check-workspace-exports.mjs
+
   ci:
     needs: changes
     if: needs.changes.outputs.src-changed == 'true'

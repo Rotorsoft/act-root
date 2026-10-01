@@ -16,8 +16,9 @@
  *
  * Discovery mirrors `libs/act-tck/test/all-packages-stability.spec.ts`: walk
  * every `libs/<pkg>/package.json` whose name is under `@rotorsoft/`, and map
- * each `exports` subpath whose `import` target ends in `.js` to its `src`
- * entry (`./dist/api/index.js` -> `src/api/index.ts`). UI packages
+ * each `exports` subpath whose `import` target ends in `.ts` — which it does
+ * in the workspace, since `publishConfig.exports` carries the `dist` entries
+ * and pnpm swaps them in at publish time (#1676). UI packages
  * (`act-diagram`) are skipped for the same reason the stability gate skips
  * them — their public surface is React components, and the `@rotorsoft/*`
  * catch-all still resolves the bare import to source.
@@ -72,17 +73,17 @@ function derive_paths() {
     for (const [subpath, mapping] of Object.entries(manifest.exports ?? {})) {
       const import_path =
         typeof mapping === "string" ? mapping : mapping?.import;
-      if (!import_path?.endsWith(".js")) continue; // skip .css and friends
-      // ./dist/api/index.js -> src/api/index.ts
-      const rel = import_path
-        .replace(/^\.\/dist\//, "")
-        .replace(/\.js$/, ".ts");
+      // `exports` points at source in the workspace — pnpm swaps in
+      // `publishConfig.exports` (the `dist` entries) at publish time — so the
+      // target is already the file to map to (#1676). A non-`.ts` entry is a
+      // build artifact (act-diagram's css), not a surface.
+      if (!import_path?.endsWith(".ts")) continue;
       const key = subpath === "." ? name : `${name}${subpath.slice(1)}`;
       derived.push({
         key,
         dir,
         sub: subpath === "." ? "" : subpath.slice(2),
-        target: `./libs/${dir}/src/${rel}`,
+        target: `./libs/${dir}/${import_path.slice(2)}`,
       });
     }
   }
