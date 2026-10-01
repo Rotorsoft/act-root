@@ -10316,6 +10316,23 @@ export async function run_drain_cycle<
       // fetch() returns one entry per leased stream — fetch_map.get is
       // always defined here (asserted with \`!\`).
       const entry = fetch_map.get(lease.stream)!;
+      // This stream's read failed and was contained there (#1675). Report it
+      // as a no-progress failure for this stream alone: no ack is submitted,
+      // so the watermark holds and the lease stays held until it lapses, and
+      // \`retry\` keeps accruing until \`budget_exhausted\` quarantines the
+      // stream the usual way. Healthy streams leased in the same cycle are
+      // untouched, which is the whole point of containing it.
+      if (entry.fetch.error !== undefined) {
+        const error = \`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`;
+        log().error(error);
+        const failed: HandleResult = {
+          lease,
+          handled: 0,
+          acked_at: lease.at,
+          error,
+        };
+        return Promise.resolve(failed);
+      }
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
@@ -10891,12 +10908,33 @@ export async function fetch<TEvents extends Schemas>(
       // same streams the has-work probe claimed it for.
       const stream_exact =
         source !== undefined && is_literal_source(source) ? true : undefined;
-      await store().query<TEvents>((e) => events.push(e), {
-        stream: source,
-        stream_exact,
-        after: at,
-        limit: eventLimit,
-      });
+      try {
+        await store().query<TEvents>((e) => events.push(e), {
+          stream: source,
+          stream_exact,
+          after: at,
+          limit: eventLimit,
+        });
+      } catch (error) {
+        // Contain it per stream. These reads are already per-stream, but they
+        // shared one \`Promise.all\`, so one stream's failure rejected the whole
+        // cycle and every healthy stream leased beside it got nothing —
+        // an unreadable \`pii\` payload on one aggregate stalled unrelated
+        // reactions (#1675). The cycle turns this into a no-progress failure
+        // for THIS stream only, which the retry budget then escalates.
+        //
+        // Unlike correlate, this read cannot simply decline the payload:
+        // handlers receive it (through their own gate), so a fetch that
+        // dropped it would hand them a silently incomplete event.
+        return {
+          stream,
+          source,
+          at,
+          lagging,
+          events: [],
+          error: (error as Error)?.message ?? String(error),
+        } as const;
+      }
       return { stream, source, at, lagging, events } as const;
     })
   );
@@ -17915,6 +17953,20 @@ export type Fetch<TEvents extends Schemas> = Array<{
   readonly at: number;
   readonly lagging: boolean;
   readonly events: Committed<TEvents, keyof TEvents>[];
+  /**
+   * Why this stream's read failed, when it did. Present only on failure,
+   * and then \`events\` is empty.
+   *
+   * Reads are per-stream but ran under one \`Promise.all\`, so a single
+   * stream's failure rejected the whole cycle and every healthy stream
+   * leased alongside it got nothing — a corrupt \`pii\` payload on one
+   * aggregate stalled unrelated reactions (#1675). Isolating the failure
+   * here keeps the blast radius on the stream that caused it: the cycle
+   * records the error, submits no ack (so the watermark holds), and the
+   * stream accrues \`retry\` until \`blockOnError\` quarantines it the usual
+   * way — visible in \`blocked_streams()\` instead of silent.
+   */
+  readonly error?: string;
 }>;
 
 /**
@@ -30142,6 +30194,23 @@ export async function run_drain_cycle<
       // fetch() returns one entry per leased stream — fetch_map.get is
       // always defined here (asserted with \`!\`).
       const entry = fetch_map.get(lease.stream)!;
+      // This stream's read failed and was contained there (#1675). Report it
+      // as a no-progress failure for this stream alone: no ack is submitted,
+      // so the watermark holds and the lease stays held until it lapses, and
+      // \`retry\` keeps accruing until \`budget_exhausted\` quarantines the
+      // stream the usual way. Healthy streams leased in the same cycle are
+      // untouched, which is the whole point of containing it.
+      if (entry.fetch.error !== undefined) {
+        const error = \`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`;
+        log().error(error);
+        const failed: HandleResult = {
+          lease,
+          handled: 0,
+          acked_at: lease.at,
+          error,
+        };
+        return Promise.resolve(failed);
+      }
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
@@ -30717,12 +30786,33 @@ export async function fetch<TEvents extends Schemas>(
       // same streams the has-work probe claimed it for.
       const stream_exact =
         source !== undefined && is_literal_source(source) ? true : undefined;
-      await store().query<TEvents>((e) => events.push(e), {
-        stream: source,
-        stream_exact,
-        after: at,
-        limit: eventLimit,
-      });
+      try {
+        await store().query<TEvents>((e) => events.push(e), {
+          stream: source,
+          stream_exact,
+          after: at,
+          limit: eventLimit,
+        });
+      } catch (error) {
+        // Contain it per stream. These reads are already per-stream, but they
+        // shared one \`Promise.all\`, so one stream's failure rejected the whole
+        // cycle and every healthy stream leased beside it got nothing —
+        // an unreadable \`pii\` payload on one aggregate stalled unrelated
+        // reactions (#1675). The cycle turns this into a no-progress failure
+        // for THIS stream only, which the retry budget then escalates.
+        //
+        // Unlike correlate, this read cannot simply decline the payload:
+        // handlers receive it (through their own gate), so a fetch that
+        // dropped it would hand them a silently incomplete event.
+        return {
+          stream,
+          source,
+          at,
+          lagging,
+          events: [],
+          error: (error as Error)?.message ?? String(error),
+        } as const;
+      }
       return { stream, source, at, lagging, events } as const;
     })
   );
@@ -36541,6 +36631,20 @@ export type Fetch<TEvents extends Schemas> = Array<{
   readonly at: number;
   readonly lagging: boolean;
   readonly events: Committed<TEvents, keyof TEvents>[];
+  /**
+   * Why this stream's read failed, when it did. Present only on failure,
+   * and then \`events\` is empty.
+   *
+   * Reads are per-stream but ran under one \`Promise.all\`, so a single
+   * stream's failure rejected the whole cycle and every healthy stream
+   * leased alongside it got nothing — a corrupt \`pii\` payload on one
+   * aggregate stalled unrelated reactions (#1675). Isolating the failure
+   * here keeps the blast radius on the stream that caused it: the cycle
+   * records the error, submits no ack (so the watermark holds), and the
+   * stream accrues \`retry\` until \`blockOnError\` quarantines it the usual
+   * way — visible in \`blocked_streams()\` instead of silent.
+   */
+  readonly error?: string;
 }>;
 
 /**
@@ -42296,6 +42400,20 @@ export type Fetch<TEvents extends Schemas> = Array<{
   readonly at: number;
   readonly lagging: boolean;
   readonly events: Committed<TEvents, keyof TEvents>[];
+  /**
+   * Why this stream's read failed, when it did. Present only on failure,
+   * and then \`events\` is empty.
+   *
+   * Reads are per-stream but ran under one \`Promise.all\`, so a single
+   * stream's failure rejected the whole cycle and every healthy stream
+   * leased alongside it got nothing — a corrupt \`pii\` payload on one
+   * aggregate stalled unrelated reactions (#1675). Isolating the failure
+   * here keeps the blast radius on the stream that caused it: the cycle
+   * records the error, submits no ack (so the watermark holds), and the
+   * stream accrues \`retry\` until \`blockOnError\` quarantines it the usual
+   * way — visible in \`blocked_streams()\` instead of silent.
+   */
+  readonly error?: string;
 }>;
 
 /**

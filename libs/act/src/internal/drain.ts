@@ -61,12 +61,33 @@ export async function fetch<TEvents extends Schemas>(
       // same streams the has-work probe claimed it for.
       const stream_exact =
         source !== undefined && is_literal_source(source) ? true : undefined;
-      await store().query<TEvents>((e) => events.push(e), {
-        stream: source,
-        stream_exact,
-        after: at,
-        limit: eventLimit,
-      });
+      try {
+        await store().query<TEvents>((e) => events.push(e), {
+          stream: source,
+          stream_exact,
+          after: at,
+          limit: eventLimit,
+        });
+      } catch (error) {
+        // Contain it per stream. These reads are already per-stream, but they
+        // shared one `Promise.all`, so one stream's failure rejected the whole
+        // cycle and every healthy stream leased beside it got nothing —
+        // an unreadable `pii` payload on one aggregate stalled unrelated
+        // reactions (#1675). The cycle turns this into a no-progress failure
+        // for THIS stream only, which the retry budget then escalates.
+        //
+        // Unlike correlate, this read cannot simply decline the payload:
+        // handlers receive it (through their own gate), so a fetch that
+        // dropped it would hand them a silently incomplete event.
+        return {
+          stream,
+          source,
+          at,
+          lagging,
+          events: [],
+          error: (error as Error)?.message ?? String(error),
+        } as const;
+      }
       return { stream, source, at, lagging, events } as const;
     })
   );

@@ -307,6 +307,20 @@ export type Fetch<TEvents extends Schemas> = Array<{
   readonly at: number;
   readonly lagging: boolean;
   readonly events: Committed<TEvents, keyof TEvents>[];
+  /**
+   * Why this stream's read failed, when it did. Present only on failure,
+   * and then `events` is empty.
+   *
+   * Reads are per-stream but ran under one `Promise.all`, so a single
+   * stream's failure rejected the whole cycle and every healthy stream
+   * leased alongside it got nothing — a corrupt `pii` payload on one
+   * aggregate stalled unrelated reactions (#1675). Isolating the failure
+   * here keeps the blast radius on the stream that caused it: the cycle
+   * records the error, submits no ack (so the watermark holds), and the
+   * stream accrues `retry` until `blockOnError` quarantines it the usual
+   * way — visible in `blocked_streams()` instead of silent.
+   */
+  readonly error?: string;
 }>;
 
 /**

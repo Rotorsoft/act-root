@@ -19,7 +19,9 @@ The fix is to stop asking for data the read is going to throw away.
 
 ## Public surface added
 
-**One optional field on an existing public type**, `libs/act/src/types/schemas.ts`:
+Two optional fields, both additive.
+
+**1. `Query.with_pii`** — `libs/act/src/types/schemas.ts`:
 
 ```ts
 export const QuerySchema = z.object({
@@ -35,6 +37,21 @@ surfacing on the inferred `Query` type as `readonly with_pii?: boolean`.
 `null` rather than the raw ciphertext is load-bearing: `pii_gate` treats any non-null `pii` as discloseable and would merge a base64 blob into `data`. A `null` payload is indistinguishable from an event that declares no sensitive fields, which is already a well-defined state throughout the framework.
 
 This is a `Store` contract change, so it lands with `runStoreTck` cases and all three in-tree adapters (InMemory, act-pg, act-sqlite) in the same PR.
+
+**2. `Fetch[number].error`** — `libs/act/src/types/reaction.ts`:
+
+```ts
+export type Fetch<TEvents extends Schemas> = Array<{
+  // … existing fields …
+  readonly error?: string;
+}>;
+```
+
+Present only when that stream's read failed, and then `events` is empty.
+
+The drain's per-stream reads already ran per stream, but under one `Promise.all` — so one stream's failure rejected the whole cycle and every healthy stream leased beside it got nothing. Containing the failure here keeps the blast radius on the stream that caused it: the cycle records the error, submits no ack (so the watermark holds and the event is not skipped), and the stream accrues `retry` until `blockOnError` quarantines it the usual way, visibly in `blocked_streams()`.
+
+Unlike correlate, this read cannot simply decline the payload — handlers receive it through their own gate, so a fetch that dropped it would hand them a silently incomplete event. Containment is the only option on this path, which is why the two halves of #1675 need different fixes.
 
 No new exports, builder methods, port methods, or lifecycle events.
 
@@ -64,4 +81,4 @@ It is also a fix. Correlate runs actor-less, so a resolver reading `event.pii` i
 
 ## Open questions
 
-Whether other internal scans that discard `pii` should adopt the flag in this PR or a follow-up. The correlate scan is the one with a proven app-wide blast radius; the audit's shared event scan and the close cycle's scans are candidates, but each needs its own check that nothing downstream reads the payload. This PR takes correlate plus the audit's targeted locating read, and leaves the rest for a follow-up that can justify each one individually.
+Whether other internal scans that discard `pii` should adopt the flag in this PR or a follow-up. The correlate scan is the one with a proven app-wide blast radius; the close cycle's scans are candidates, but each needs its own check that nothing downstream reads the payload. This PR takes correlate plus the audit's targeted locating read, and leaves the rest for a follow-up that can justify each one individually.
