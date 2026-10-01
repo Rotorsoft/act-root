@@ -1080,6 +1080,17 @@ export interface Store extends Disposable, EventSource {
    * omitted on windowed targets; `before` takes precedence when both
    * appear.
    *
+   * **Windowed targets are applied before full ones**, and each full target
+   * pairs its own delete with its own seed. Both only matter for inputs the
+   * framework never produces — `close-cycle` dedups by stream before calling
+   * — but `Store` is a public port, so the order is contract rather than
+   * accident (#1677): a stream listed as both windowed and full ends with its
+   * FULL entry in the result, and a stream listed twice as full leaves
+   * exactly one seed carrying the last target's snapshot, reporting only that
+   * pass's own delete count. Deleting once for a deduped set and seeding once
+   * per entry would write two `version: 0` rows, which the SQL adapters'
+   * unique `(stream, version)` constraint rejects outright.
+   *
    * @param targets - Streams to truncate; full targets carry optional
    *   snapshot state and meta, windowed targets carry `before` (and
    *   optionally `max_id`, the min consumer watermark cap)

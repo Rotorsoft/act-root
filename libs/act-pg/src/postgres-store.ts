@@ -2434,6 +2434,38 @@ export class PostgresStore implements Store {
           before?: Date;
         }
       >();
+      // Windowed targets run BEFORE full ones, matching InMemory and SQLite.
+      // A stream listed as both used to land its windowed entry in the result
+      // on this adapter and its full entry on the other two — same on-disk
+      // state, different returned map (#1677). The framework never produces
+      // that input (`close-cycle` dedups by stream first), but `Store` is a
+      // public port that third-party adapters validate against the TCK, so
+      // the three must agree.
+      for (const { stream, before, max_id } of windowed) {
+        // Closest safe boundary: latest snapshot older than the cutoff and
+        // at/below the consumer watermark cap. No qualifying snapshot →
+        // no-op, stream absent from the result.
+        const { rows } = await client.query(
+          `SELECT id, stream, version, name, data, created, meta
+           FROM ${this._fqt}
+           WHERE stream = $1 AND name = $2 AND created < $3
+             AND ($4::int IS NULL OR id <= $4)
+           ORDER BY id DESC LIMIT 1`,
+          [stream, SNAP_EVENT, before, max_id ?? null]
+        );
+        if (!rows.length) continue;
+        const boundary = rows[0] as Committed<Schemas, keyof Schemas>;
+        const { rowCount } = await client.query(
+          `DELETE FROM ${this._fqt} WHERE stream = $1 AND id < $2`,
+          [stream, boundary.id]
+        );
+        result.set(stream, {
+          deleted: rowCount ?? 0,
+          committed: boundary,
+          before,
+        });
+      }
+
       // Subscriptions are deliberately untouched, for restart *and* retire
       // targets alike. A tombstoned stream's subscription is inert — the
       // framework refuses new commits on it, so no scan can raise its work
@@ -2461,30 +2493,6 @@ export class PostgresStore implements Store {
         result.set(stream, {
           deleted: rowCount ?? 0,
           committed: rows[0] as Committed<Schemas, keyof Schemas>,
-        });
-      }
-      for (const { stream, before, max_id } of windowed) {
-        // Closest safe boundary: latest snapshot older than the cutoff and
-        // at/below the consumer watermark cap. No qualifying snapshot →
-        // no-op, stream absent from the result.
-        const { rows } = await client.query(
-          `SELECT id, stream, version, name, data, created, meta
-           FROM ${this._fqt}
-           WHERE stream = $1 AND name = $2 AND created < $3
-             AND ($4::int IS NULL OR id <= $4)
-           ORDER BY id DESC LIMIT 1`,
-          [stream, SNAP_EVENT, before, max_id ?? null]
-        );
-        if (!rows.length) continue;
-        const boundary = rows[0] as Committed<Schemas, keyof Schemas>;
-        const { rowCount } = await client.query(
-          `DELETE FROM ${this._fqt} WHERE stream = $1 AND id < $2`,
-          [stream, boundary.id]
-        );
-        result.set(stream, {
-          deleted: rowCount ?? 0,
-          committed: boundary,
-          before,
         });
       }
       await client.query("COMMIT");

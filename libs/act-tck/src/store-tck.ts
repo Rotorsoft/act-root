@@ -3,6 +3,7 @@ import {
   ConcurrencyError,
   InMemoryCache,
   SNAP_EVENT,
+  sleep,
   TOMBSTONE_EVENT,
   ValidationError,
 } from "@rotorsoft/act";
@@ -3292,6 +3293,84 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           "__snapshot__"
         );
         expect(remaining[0].data).toEqual({ count: 7 });
+      });
+
+      it("leaves exactly one seed when a stream is listed twice (#1677)", async () => {
+        // The delete and the insert must be paired per target. Deleting once
+        // from a deduped set and then inserting once per entry leaves two
+        // `version: 0` seeds — a state the SQL adapters' unique
+        // `(stream, version)` constraint makes impossible, so only an
+        // in-memory implementation can drift here.
+        const s = `trunc-dup-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2)],
+          make_meta({ stream: s })
+        );
+
+        const result = await store.truncate([
+          { stream: s, snapshot: { count: 1 } },
+          { stream: s, snapshot: { count: 2 } },
+        ]);
+
+        const remaining: CommittedCounterEvent[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            remaining.push(e as CommittedCounterEvent);
+          },
+          { stream: s, stream_exact: true, with_snaps: true }
+        );
+        // One seed, carrying the LAST target's snapshot — the second pass
+        // deletes what the first wrote.
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].data).toEqual({ count: 2 });
+        // And the reported count is the second pass's own delete (the seed
+        // the first pass wrote), not the original pre-delete total.
+        expect(result.get(s)?.deleted).toBe(1);
+      });
+
+      it("applies windowed targets before full ones (#1677)", async () => {
+        // A stream listed as both is not something the framework produces —
+        // `close-cycle` dedups by stream first — but `Store` is a public port
+        // and the three adapters used to disagree on which entry survived in
+        // the returned map. Windowed first, so the full entry wins.
+        const s = `trunc-mix-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(2)],
+          make_meta({ stream: s })
+        );
+        await sleep(5);
+        const cutoff = new Date();
+
+        const result = await store.truncate([
+          { stream: s, before: cutoff },
+          { stream: s, snapshot: { count: 9 } },
+        ]);
+
+        const entry = result.get(s);
+        expect(entry).toBeDefined();
+        // The full pass ran last, so its entry is the one in the map: a seed,
+        // never a `before` echo.
+        expect(entry!.before).toBeUndefined();
+        expect((entry!.committed as unknown as { name: string }).name).toBe(
+          "__snapshot__"
+        );
+
+        const remaining: CommittedCounterEvent[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            remaining.push(e as CommittedCounterEvent);
+          },
+          { stream: s, stream_exact: true, with_snaps: true }
+        );
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].data).toEqual({ count: 9 });
       });
 
       it("returns an empty map for empty input", async () => {
