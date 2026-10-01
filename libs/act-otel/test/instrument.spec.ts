@@ -226,6 +226,54 @@ describe("instrument", () => {
     await dispose();
   });
 
+  /**
+   * `max(act_streams_blocked) > 0` is a documented page. Publishing `0` when
+   * the read failed resolved that page during the very store incident that
+   * broke the read, telling the operator the poison messages had cleared
+   * (#1702). The gauge holds its last good sample instead.
+   */
+  test("a degraded read keeps the gauge's last value instead of publishing 0", async ({
+    app,
+  }) => {
+    const registry = new Registry();
+    let healthy = true;
+    const surface = {
+      on: app.on.bind(app),
+      off: app.off.bind(app),
+      blocked_streams: async () => {
+        if (!healthy) throw new Error("store degraded");
+        return [1, 2, 3, 4, 5].map((i) => ({ stream: `s${i}` }));
+      },
+    };
+    const dispose = instrument(surface as never, { registry });
+
+    expect(await value(registry, "act_streams_blocked")).toBe(5);
+
+    healthy = false;
+    const scrape = await registry.metrics();
+    // Still 5 — the alert stays latched while the store is in trouble.
+    expect(scrape).toContain("act_streams_blocked 5");
+    expect(await value(registry, "act_streams_blocked")).toBe(5);
+
+    // And it recovers on its own once the read does.
+    healthy = true;
+    expect(await value(registry, "act_streams_blocked")).toBe(5);
+
+    await dispose();
+  });
+
+  test("a registry with no providers still publishes 0", async ({ app }) => {
+    // Nothing to measure is not the same as a failed measurement: an empty
+    // registry has no last value to preserve, so the gauge must still appear.
+    const registry = new Registry();
+    const dispose = instrument(
+      { on: app.on.bind(app), off: app.off.bind(app) } as never,
+      { registry }
+    );
+    expect(await registry.metrics()).toContain("act_streams_blocked 0");
+    await dispose();
+  });
+
   test("a second instrument() on the same registry is idempotent", async ({
     app,
   }) => {
