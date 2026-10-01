@@ -199,11 +199,19 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   constructor(options?: {
     cacheSize?: number;
     /**
-     * Called when `overlay()` finds no cached baseline for the stream, so
-     * the update cannot be broadcast. Live subscribers receive nothing and
-     * have no way to notice — a host that cares should raise `cacheSize`,
-     * re-`publish` the stream, or push the viewers to refetch. Defaults to a
-     * no-op so existing behavior is unchanged apart from being observable.
+     * Called when overlay-contributed state is lost, on either of the two
+     * paths that can lose it: `overlay()` finding no cached baseline, and
+     * the LRU evicting an entry that carried overlay keys — the latter from
+     * inside `publish()`, for a stream other than the one being published.
+     *
+     * Live subscribers of the affected stream are sent a resync frame, so
+     * they refetch rather than keep showing state the server has forgotten.
+     * The hook is observability on top of that recovery: a steady stream of
+     * calls means `cacheSize` is too small for the working set.
+     *
+     * A throw is caught and routed to `onSubscriberError` — the resync has
+     * already gone out, and a host bug must not cost the publishing stream
+     * its own frame. Defaults to a no-op.
      */
     onOverlayMiss?: (streamId: string) => void;
     /**
@@ -254,8 +262,33 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    */
   private on_cache_evict(streamId: string, dropped: S): void {
     if (!(dropped as S & WithOverlayKeys)[OVERLAY_KEYS]?.size) return;
-    this.on_overlay_miss(streamId);
+    this.report_overlay_miss(streamId);
+  }
+
+  /**
+   * Overlay-contributed state for `streamId` is gone. Recover first, report
+   * second.
+   *
+   * The resync goes out before the host hook runs, and the hook is contained
+   * the way `fan_out` contains subscribers: a bad consumer must not break the
+   * publisher (#1423), and the same applies to a bad observer. Without this,
+   * a throwing `onOverlayMiss` escapes on the eviction path — which runs
+   * inside `publish()`, before that stream's own `fan_out` — so one host bug
+   * costs the evicted stream its recovery frame *and* an unrelated stream the
+   * frame for a version already written to the cache. The evicted stream's
+   * clients never self-heal from that, which is the silent loss #1648 exists
+   * to end.
+   *
+   * Routing the throw to `onSubscriberError` rather than swallowing it keeps
+   * it wherever the host already reads framework delivery failures.
+   */
+  private report_overlay_miss(streamId: string): void {
     this.broadcast_resync(streamId);
+    try {
+      this.on_overlay_miss(streamId);
+    } catch (error) {
+      this.on_subscriber_error(error, streamId);
+    }
   }
 
   /**
@@ -333,11 +366,10 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
       // busy-but-not-committing stream ages out while fully subscribed.
       //
       // Emit a resync frame so live subscribers refetch instead of silently
-      // missing the update forever (#1423). `on_overlay_miss` still fires so
-      // a host can count these — a steady stream of them means `cacheSize`
-      // is too small for the working set.
-      this.on_overlay_miss(streamId);
-      this.broadcast_resync(streamId);
+      // missing the update forever (#1423). The host hook still fires so a
+      // host can count these — a steady stream of them means `cacheSize` is
+      // too small for the working set.
+      this.report_overlay_miss(streamId);
       // Still `undefined`: no overlay state was produced, and callers use the
       // return value as "the patch I broadcast", which a resync is not.
       return undefined;
