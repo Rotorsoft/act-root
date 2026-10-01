@@ -130,41 +130,59 @@ export function webhook<TEvents extends Schemas = Schemas>(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    let response: Response;
+    // The timer has to outlive the fetch. `fetch` resolves on response
+    // HEADERS, so clearing it as soon as the fetch settled left the
+    // error-path body read below unbounded: a receiver that answers with
+    // headers and then never ends the body hung the handler forever, with
+    // no timer and no signal still watching it (#1701). A hang is worse
+    // than a throw here — an overrun lease is re-claimed by the next
+    // holder and the attempt never spends its retry budget loudly, so the
+    // stream never reaches its `blockOnError` verdict (the #1418 shape).
     try {
-      response = await fetch_impl(url, {
-        method,
-        headers,
-        body,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const aborted = controller.signal.aborted;
-      throw new WebhookError(
-        aborted
-          ? `webhook ${method} ${url} timed out after ${timeoutMs}ms`
-          : `webhook ${method} ${url} failed: ${(err as Error).message}`,
-        { status: 0, url }
+      let response: Response;
+      try {
+        response = await fetch_impl(url, {
+          method,
+          headers,
+          body,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        const aborted = controller.signal.aborted;
+        throw new WebhookError(
+          aborted
+            ? `webhook ${method} ${url} timed out after ${timeoutMs}ms`
+            : `webhook ${method} ${url} failed: ${(err as Error).message}`,
+          { status: 0, url }
+        );
+      }
+
+      const disposition = classifyHttpResponse(response);
+      if (disposition === "ok") return;
+
+      let responseBody: string | undefined;
+      try {
+        responseBody = await response.text();
+      } catch {
+        // Best-effort body capture — a read that fails for its own reasons
+        // (a reset mid-body) still reports the status below. An abort lands
+        // here too, and that one is NOT best-effort: the timeout fired while
+        // reading, so report the timeout rather than a response never read.
+        if (controller.signal.aborted)
+          throw new WebhookError(
+            `webhook ${method} ${url} timed out after ${timeoutMs}ms reading the response body`,
+            { status: response.status, url }
+          );
+      }
+
+      const ErrorClass =
+        disposition === "retry" ? WebhookError : NonRetryableWebhookError;
+      throw new ErrorClass(
+        `webhook ${method} ${url} responded ${response.status}`,
+        { status: response.status, url, responseBody }
       );
     } finally {
       clearTimeout(timer);
     }
-
-    const disposition = classifyHttpResponse(response);
-    if (disposition === "ok") return;
-
-    let responseBody: string | undefined;
-    try {
-      responseBody = await response.text();
-    } catch {
-      // best-effort body capture; ignore read errors
-    }
-
-    const ErrorClass =
-      disposition === "retry" ? WebhookError : NonRetryableWebhookError;
-    throw new ErrorClass(
-      `webhook ${method} ${url} responded ${response.status}`,
-      { status: response.status, url, responseBody }
-    );
   };
 }
