@@ -161,7 +161,12 @@ function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
  * **Scrape resilience.** The `act_streams_blocked` gauge reads
  * `blocked_streams()` inside its per-scrape `collect()`. A rejection there
  * (a degraded store) is swallowed and logged via the {@link Logger} port —
- * the gauge keeps its last value and every other metric still scrapes.
+ * every other metric still scrapes, and when *no* provider answered the gauge
+ * is left alone, so prom-client keeps serving its last good sample. That
+ * matters because `max(act_streams_blocked) > 0` is a documented page:
+ * publishing `0` would resolve it during the very store incident that broke
+ * the read (#1702). A *partial* failure still publishes the reduced sum — a
+ * failing app contributes nothing this scrape.
  * prom-client would otherwise reject the whole `registry.metrics()` if any
  * `collect()` rejected, blinding the dashboard exactly when the store is in
  * trouble.
@@ -277,6 +282,7 @@ export function instrument(
       // contributes nothing this scrape (logged via the Logger port)
       // rather than poisoning the whole gauge.
       let total = 0;
+      let answered = false;
       // `providers` is the shared, per-registry set — a stable reference
       // that every later bridge on this registry mutates in place, so this
       // one collect() (only the first bridge's survives gauge_on) sees them
@@ -284,6 +290,7 @@ export function instrument(
       for (const provider of providers) {
         try {
           total += await provider();
+          answered = true;
         } catch (error) {
           // `warn`, not `error`: a dropped metric sample costs one collection
           // interval and the next scrape retries. Metrics are observability,
@@ -291,7 +298,17 @@ export function instrument(
           log().warn(error as Error, "metrics provider threw during collect");
         }
       }
-      this.set(total);
+      // Publish only what something actually measured. Setting it
+      // unconditionally meant a scrape where EVERY provider rejected
+      // published `0`, so `max(act_streams_blocked) > 0` — a documented page —
+      // resolved while the streams were still blocked, during the very store
+      // incident that broke the read (#1702). Skipping the set leaves
+      // prom-client serving the last good sample, which is what the public
+      // doc-comment promises and what keeps the alert latched.
+      //
+      // An empty registry has nothing to measure and nothing to preserve, so
+      // it still publishes 0 rather than never appearing at all.
+      if (answered || providers.size === 0) this.set(total);
     },
   });
 
