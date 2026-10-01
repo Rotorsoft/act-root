@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.38.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.12...@rotorsoft/act-tck-v1.38.0) (2026-10-01)
+
+
+### Features
+
+* **act:** let a read decline the pii payload, so a corrupt row strands nothing ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)) ([#1715](https://github.com/Rotorsoft/act-root/issues/1715)) ([5c5550f](https://github.com/Rotorsoft/act-root/commit/5c5550f3c351e4f89d04a95e5ea07f1cc07a0cd7)), closes [#1673](https://github.com/Rotorsoft/act-root/issues/1673)
+
 # [@rotorsoft/act-tck-v1.37.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.37.11...@rotorsoft/act-tck-v1.37.12) (2026-10-01)
 
 
