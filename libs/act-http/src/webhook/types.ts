@@ -54,6 +54,12 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
   /**
    * Per-request timeout in milliseconds. Defaults to 5000.
    * The handler throws after the timeout via `AbortController`.
+   *
+   * The budget covers the **whole** exchange, not just the connection:
+   * `fetch` resolves on response headers, so the timer stays armed through
+   * the error-path body read as well. A receiver that answers with headers
+   * and then stalls its body times out like any other overrun instead of
+   * hanging the handler forever (#1701).
    */
   readonly timeoutMs?: number;
   /**

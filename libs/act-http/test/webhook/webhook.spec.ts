@@ -175,6 +175,125 @@ describe("webhook", () => {
     });
   });
 
+  describe("response body timeout (#1701)", () => {
+    /**
+     * `fetch` resolves on response HEADERS, so a timer cleared when the
+     * fetch settles stops bounding the error-path body read. A receiver that
+     * answers with headers and never ends the body used to hang the handler
+     * forever — and a hang never spends the retry budget loudly, so the
+     * stream never reached its `blockOnError` verdict.
+     */
+    const headers_then_endless_body = (status: number) =>
+      vi.fn(
+        async (
+          _url: RequestInfo | URL,
+          init?: RequestInit
+        ): Promise<Response> => {
+          const body = new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(new TextEncoder().encode("partial"));
+              // never close — and never settle, unless aborted
+              init?.signal?.addEventListener("abort", () =>
+                c.error(new DOMException("aborted", "AbortError"))
+              );
+            },
+          });
+          return new Response(body, { status });
+        }
+      ) as unknown as typeof globalThis.fetch;
+
+    it("times out a 5xx whose body never ends", async () => {
+      const handler = webhook<Events>({
+        url: "https://example.com/hook",
+        timeoutMs: 20,
+        fetch: headers_then_endless_body(500),
+      });
+      const err = await handler(makeEvent(), "stream-1", {} as never).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+      expect(err).toBeInstanceOf(WebhookError);
+      expect(err).not.toBeInstanceOf(NonRetryableError);
+      expect((err as WebhookError).message).toContain("timed out after 20ms");
+    });
+
+    it("times out a 4xx whose body never ends", async () => {
+      const handler = webhook<Events>({
+        url: "https://example.com/hook",
+        timeoutMs: 20,
+        fetch: headers_then_endless_body(400),
+      });
+      const err = await handler(makeEvent(), "stream-1", {} as never).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+      // The timeout is retryable even on a 4xx: nothing was read, so the
+      // non-retryable verdict the status would earn is not established.
+      expect(err).toBeInstanceOf(WebhookError);
+      expect((err as WebhookError).message).toContain("timed out after 20ms");
+    });
+
+    it("reports the status when the body read fails without a timeout", async () => {
+      // A reset mid-body is not a timeout: best-effort capture gives up on
+      // the body and the status verdict still stands.
+      const fetch = vi.fn(async () => {
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.error(new Error("connection reset"));
+          },
+        });
+        return new Response(body, { status: 502 });
+      }) as unknown as typeof globalThis.fetch;
+      const handler = webhook<Events>({
+        url: "https://example.com/hook",
+        timeoutMs: 5_000,
+        fetch,
+      });
+      const err = await handler(makeEvent(), "stream-1", {} as never).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+      expect(err).toBeInstanceOf(WebhookError);
+      const e = err as WebhookError;
+      expect(e.status).toBe(502);
+      expect(e.responseBody).toBeUndefined();
+      expect(e.message).not.toContain("timed out");
+    });
+
+    it("still captures a 5xx body that DOES end", async () => {
+      const fetch = vi.fn(
+        async () => new Response("boom", { status: 503 })
+      ) as unknown as typeof globalThis.fetch;
+      const handler = webhook<Events>({
+        url: "https://example.com/hook",
+        timeoutMs: 20,
+        fetch,
+      });
+      const err = await handler(makeEvent(), "stream-1", {} as never).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+      expect(err).toBeInstanceOf(WebhookError);
+      const e = err as WebhookError;
+      expect(e.status).toBe(503);
+      expect(e.responseBody).toBe("boom");
+    });
+
+    it("does not arm anything on the success path", async () => {
+      const fetch = vi.fn(
+        async () => new Response("ok", { status: 200 })
+      ) as unknown as typeof globalThis.fetch;
+      const handler = webhook<Events>({
+        url: "https://example.com/hook",
+        timeoutMs: 20,
+        fetch,
+      });
+      await expect(
+        handler(makeEvent(), "stream-1", {} as never)
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe("idempotency key", () => {
     it("derives Idempotency-Key from event.id by default", async () => {
       const { fetch, calls } = makeFetch({ status: 200 });
