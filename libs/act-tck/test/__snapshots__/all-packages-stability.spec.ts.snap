@@ -491,14 +491,40 @@ export function act<
 
   // The \`as\` chain on \`self\` is the type fanout: each fluent method
   // mutates state and returns \`self\` cast to its post-call generic
+  /**
+   * Registration is closed once \`build()\` has classified the registry.
+   *
+   * \`Object.freeze\` guards the registry's object *shape*, so a post-build
+   * \`withState\` already threw — but a reaction map is a \`Map\`, which freezing
+   * the containing object does not seal, so \`withProjection\` quietly mutated
+   * an already-classified registry. The injected reaction then never ran (its
+   * target is absent from \`static_targets\` and its event from
+   * \`reactive_events\`) **and** never went through \`build_events\`, so it was
+   * not wrapped with the \`handler_reader\` that strips \`sensitive()\` keys.
+   *
+   * Guarding every mutating method on the latch makes the freeze comment's
+   * claim — "any later registration throws" — true uniformly, and gives a
+   * clear message instead of a \`TypeError\` from a frozen object (#1710).
+   *
+   * \`build()\` itself stays callable repeatedly: the multi-tenant pattern
+   * calls \`.build({scoped})\` per tenant, which registers nothing.
+   */
+  const closed = (method: string): never => {
+    throw new Error(
+      \`act().\${method}() was called after build(); the registry is already classified. Register everything before build() — build() itself may be called repeatedly (e.g. once per tenant with ActOptions.scoped).\`
+    );
+  };
+
   // signature. Internal-only — public types stay narrow.
   const builder: ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> =
     {
       withState: (state) => {
+        if (_built) closed("withState");
         register_state(state, states, registry.actions, registry.events);
         return builder as never;
       },
       withSlice: (input) => {
+        if (_built) closed("withSlice");
         for (const s of input.states.values()) {
           register_state(s, states, registry.actions, registry.events);
         }
@@ -523,6 +549,7 @@ export function act<
         return builder as never;
       },
       withProjection: (proj) => {
+        if (_built) closed("withProjection");
         record_projection_reactions(proj as Projection<any>);
         merge_projection(proj as Projection<any>, registry.events);
         register_batch_handler(proj as Projection<any>, batch_handlers);
@@ -539,13 +566,16 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
+        if (_built) closed("withLane");
         // Validate the lane bag at declaration (a bad leaseMillis/streamLimit
         // throws ZodError at build, not on the first cycle).
         register_lane(resolveLaneConfig(config), lanes);
         return builder as never;
       },
-      on: <TKey extends keyof TEvents>(event: TKey) =>
-        reaction_on(event, registry.events, builder) as never,
+      on: <TKey extends keyof TEvents>(event: TKey) => {
+        if (_built) closed("on");
+        return reaction_on(event, registry.events, builder) as never;
+      },
       build: (options?: ActOptions) => {
         // Validate the top-level scalar knobs at build (the nested autoclose /
         // circuitBreaker bags are validated by their own resolvers). A bad
@@ -683,11 +713,14 @@ export function act<
             states,
             current_autoclose_window
           );
-          // The registry is complete: freeze the containers so any later
-          // registration or orchestrator-side mutation throws instead of
-          // silently diverging from what was classified. (Reaction maps
-          // remain Map instances — the freeze guards the object shape,
-          // convention guards the maps.)
+          // The registry is complete: freeze the containers so an
+          // orchestrator-side mutation throws instead of silently diverging
+          // from what was classified. The freeze guards the object *shape*
+          // only — a reaction map is a \`Map\`, which freezing the containing
+          // object does not seal — so later *registration* is stopped by the
+          // \`_built\` latch on each registration method rather than by this
+          // (#1710). Both halves are needed: the latch covers the API, the
+          // freeze covers anything reaching past it.
           Object.freeze(registry.actions);
           Object.freeze(registry.events);
           Object.freeze(registry);
