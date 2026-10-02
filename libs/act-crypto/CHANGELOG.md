@@ -1,3 +1,10 @@
+# [@rotorsoft/act-crypto-v0.1.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.7...@rotorsoft/act-crypto-v0.1.8) (2026-10-02)
+
+
+### Bug Fixes
+
+* **act-crypto:** memoize the in-flight key fetch, not just the resolved key ([a63e794](https://github.com/Rotorsoft/act-root/commit/a63e794e1d1a6710c675da71a30ebcf0bdb2515c)), closes [#1704](https://github.com/Rotorsoft/act-root/issues/1704)
+
 # [@rotorsoft/act-crypto-v0.1.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-crypto-v0.1.6...@rotorsoft/act-crypto-v0.1.7) (2026-09-29)
 
 
