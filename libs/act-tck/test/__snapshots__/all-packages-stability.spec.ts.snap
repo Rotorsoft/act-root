@@ -7767,7 +7767,18 @@ const SettleOptionsSchema = DrainOptionsSchema.extend({
   debounceMs: z.number().min(0).optional(),
   // \`maxPasses\` defaults to Infinity (no cap) when omitted; a present value is
   // a non-negative integer — \`0\` is legal and means "run no passes".
-  maxPasses: z.number().int().min(0).optional(),
+  //
+  // \`Infinity\` is accepted explicitly. It is the documented default
+  // (\`Act.settle\`'s doc-comment and \`SettleOptions.maxPasses\` both name it),
+  // and \`settle.ts\` destructures \`maxPasses = Infinity\`, so the one value the
+  // docs advertise was the one value \`z.number().int()\` refused — Zod 4
+  // rejects \`±Infinity\`, and an integer check cannot pass it either. Wrapper
+  // code normalizing an optional cap (\`maxPasses: opts.maxPasses ?? Infinity\`)
+  // is the natural way to hit it. Accepting it also honors this module's own
+  // rule that a value which works today is never newly rejected (#1711).
+  maxPasses: z
+    .union([z.number().int().min(0), z.literal(Number.POSITIVE_INFINITY)])
+    .optional(),
 }).loose();
 
 /** Validate settle options, or pass \`undefined\` through. Throws \`ZodError\`. */
@@ -27888,7 +27899,18 @@ const SettleOptionsSchema = DrainOptionsSchema.extend({
   debounceMs: z.number().min(0).optional(),
   // \`maxPasses\` defaults to Infinity (no cap) when omitted; a present value is
   // a non-negative integer — \`0\` is legal and means "run no passes".
-  maxPasses: z.number().int().min(0).optional(),
+  //
+  // \`Infinity\` is accepted explicitly. It is the documented default
+  // (\`Act.settle\`'s doc-comment and \`SettleOptions.maxPasses\` both name it),
+  // and \`settle.ts\` destructures \`maxPasses = Infinity\`, so the one value the
+  // docs advertise was the one value \`z.number().int()\` refused — Zod 4
+  // rejects \`±Infinity\`, and an integer check cannot pass it either. Wrapper
+  // code normalizing an optional cap (\`maxPasses: opts.maxPasses ?? Infinity\`)
+  // is the natural way to hit it. Accepting it also honors this module's own
+  // rule that a value which works today is never newly rejected (#1711).
+  maxPasses: z
+    .union([z.number().int().min(0), z.literal(Number.POSITIVE_INFINITY)])
+    .optional(),
 }).loose();
 
 /** Validate settle options, or pass \`undefined\` through. Throws \`ZodError\`. */
