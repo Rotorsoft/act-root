@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pino-v1.0.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.6...@rotorsoft/act-pino-v1.0.7) (2026-10-02)
+
+
+### Bug Fixes
+
+* **act-pino:** stop child() building and discarding a whole pino instance ([1b3cd1a](https://github.com/Rotorsoft/act-root/commit/1b3cd1a30d65ceae01170db59c323ee46d37e9b4)), closes [#1705](https://github.com/Rotorsoft/act-root/issues/1705)
+
 # [@rotorsoft/act-pino-v1.0.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.5...@rotorsoft/act-pino-v1.0.6) (2026-09-28)
 
 
