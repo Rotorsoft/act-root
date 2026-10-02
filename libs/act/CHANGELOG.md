@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.32.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.2...@rotorsoft/act-v1.32.3) (2026-10-02)
+
+
+### Bug Fixes
+
+* **act:** accept maxPasses: Infinity, the value the docs call its default ([44b2a99](https://github.com/Rotorsoft/act-root/commit/44b2a993fa4191c287e336cfd2da2f61bdfd0a8b)), closes [#1711](https://github.com/Rotorsoft/act-root/issues/1711)
+* **act:** close registration once build() has classified the registry ([e1ef22d](https://github.com/Rotorsoft/act-root/commit/e1ef22dada8604568a1cceed40d81d652fd886a4)), closes [#1710](https://github.com/Rotorsoft/act-root/issues/1710)
+
 # [@rotorsoft/act-v1.32.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.1...@rotorsoft/act-v1.32.2) (2026-10-01)
 
 
