@@ -184,4 +184,25 @@ describe("minSafeTtl", () => {
       expect(ttl).toBe(0);
     });
   });
+
+  describe("unbounded sender (maxRetries: Infinity)", () => {
+    // A sender that never stops retrying, such as an Act reaction with
+    // `blockOnError: false`, has no finite retry envelope, so no finite
+    // dedup window is safe. Returning a number would read as one.
+    it("refuses to size a window when there is no backoff", () => {
+      expect(() =>
+        minSafeTtl({ maxRetries: Number.POSITIVE_INFINITY, timeoutMs: 2_000 })
+      ).toThrow(/never stops retrying.*pass ttlMs/s);
+    });
+
+    it("refuses to size a window with a backoff, without walking the retries", () => {
+      expect(() =>
+        minSafeTtl({
+          maxRetries: Number.POSITIVE_INFINITY,
+          backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 },
+          timeoutMs: 2_000,
+        })
+      ).toThrow(/never stops retrying/);
+    });
+  });
 });

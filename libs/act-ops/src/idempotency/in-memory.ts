@@ -20,7 +20,9 @@ import type { IdempotencyStore } from "./port.js";
  *   for the math explained.
  *
  * When both are supplied, {@link ttlMs} wins — an explicit number
- * overrides a derived one.
+ * overrides a derived one. A sender that never stops retrying
+ * (`retryProfile.maxRetries: Infinity`) has no safe derived window, so
+ * the constructor throws unless {@link ttlMs} is supplied.
  */
 export type InMemoryIdempotencyStoreOptions = {
   /** Direct dedup window. Default: 24 hours. */

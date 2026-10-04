@@ -21,7 +21,10 @@
  * A caller holding `act.BackoffOptions` can pass it as `backoff`
  * with no cast — TypeScript treats the two shapes as equivalent.
  *
- * @property maxRetries - Retries after the first attempt fails
+ * @property maxRetries - Retries after the first attempt fails. Use
+ *   `Infinity` for a sender that never gives up, such as an Act reaction
+ *   with `blockOnError: false` (its `maxRetries` stops nothing there, so
+ *   copying it would describe a bounded sender that does not exist)
  * @property backoff - Optional backoff strategy. When omitted,
  *   retries fire back-to-back with only the per-attempt timeout
  *   between them
@@ -56,8 +59,21 @@ export type RetryProfile = {
  * to 4 because operators almost always want headroom over the bare
  * envelope — slow networks, clock skew, and incident-window retries
  * stretch the real-world maximum past the computed one.
+ *
+ * A sender that never stops retrying (`maxRetries: Infinity`) has no
+ * envelope to outlast, so no finite window is safe for it. This throws
+ * rather than returning a number that would read as safe. Size the
+ * window yourself with an explicit `ttlMs`, as long as a duplicate must
+ * still be recognized.
+ *
+ * @throws {Error} When `maxRetries` is `Infinity`
  */
 export function minSafeTtl(profile: RetryProfile): number {
+  if (profile.maxRetries === Number.POSITIVE_INFINITY)
+    throw new Error(
+      "minSafeTtl: maxRetries is Infinity, so the sender never stops retrying and no finite dedup window is safe. " +
+        "Size the window explicitly: pass ttlMs to the store, as long as a duplicate must still be recognized."
+    );
   const safetyFactor = profile.safetyFactor ?? 4;
   const backoff_sum = sum_backoff(profile.maxRetries, profile.backoff);
   const timeout_sum = (profile.maxRetries + 1) * profile.timeoutMs;
