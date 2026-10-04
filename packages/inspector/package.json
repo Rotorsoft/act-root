@@ -25,7 +25,7 @@
     "@tanstack/react-query": "^5.102.8",
     "@trpc/client": "11.18.0",
     "@trpc/react-query": "11.18.0",
-    "@trpc/server": "11.18.0",
+    "@trpc/server": "11.19.0",
     "cors": "^2.8.6",
     "d3-scale": "^4.0.2",
     "d3-time": "^3.1.0",

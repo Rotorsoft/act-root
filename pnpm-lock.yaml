@@ -429,8 +429,8 @@ importers:
         specifier: ^10.0.0
         version: 10.0.0(@stryker-mutator/core@10.0.0(@types/node@25.9.8))(vitest@5.0.3)
       '@trpc/server':
-        specifier: ^11.18.0
-        version: 11.18.0(typescript@7.0.2)
+        specifier: ^11.19.0
+        version: 11.19.0(typescript@7.0.2)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -592,8 +592,8 @@ importers:
         specifier: '>=1.31.29'
         version: link:../../libs/act
       '@trpc/server':
-        specifier: 11.18.0
-        version: 11.18.0(typescript@7.0.2)
+        specifier: 11.19.0
+        version: 11.19.0(typescript@7.0.2)
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -673,13 +673,13 @@ importers:
         version: 5.102.8(react@19.2.8)
       '@trpc/client':
         specifier: 11.18.0
-        version: 11.18.0(@trpc/server@11.18.0(typescript@7.0.2))(typescript@7.0.2)
+        version: 11.18.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2)
       '@trpc/react-query':
         specifier: 11.18.0
-        version: 11.18.0(@tanstack/react-query@5.102.8(react@19.2.8))(@trpc/client@11.18.0(@trpc/server@11.18.0(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.18.0(typescript@7.0.2))(react@19.2.8)(typescript@7.0.2)
+        version: 11.18.0(@tanstack/react-query@5.102.8(react@19.2.8))(@trpc/client@11.18.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.19.0(typescript@7.0.2))(react@19.2.8)(typescript@7.0.2)
       '@trpc/server':
-        specifier: 11.18.0
-        version: 11.18.0(typescript@7.0.2)
+        specifier: 11.19.0
+        version: 11.19.0(typescript@7.0.2)
       cors:
         specifier: ^2.8.6
         version: 2.8.6
@@ -772,8 +772,8 @@ importers:
         specifier: workspace:^
         version: link:../../libs/act-pg
       '@trpc/server':
-        specifier: 11.18.0
-        version: 11.18.0(typescript@7.0.2)
+        specifier: 11.19.0
+        version: 11.19.0(typescript@7.0.2)
       cors:
         specifier: ^2.8.6
         version: 2.8.6
@@ -806,8 +806,8 @@ importers:
         specifier: workspace:^
         version: link:../../libs/act-pg
       '@trpc/server':
-        specifier: 11.18.0
-        version: 11.18.0(typescript@7.0.2)
+        specifier: 11.19.0
+        version: 11.19.0(typescript@7.0.2)
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(@libsql/client@0.18.0)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
@@ -4342,6 +4342,12 @@ packages:
 
   '@trpc/server@11.18.0':
     resolution: {integrity: sha512-JAvXOuNTxgXjIDfQaOvDq1j66LMNfDJUH1IU7Slfn8EvRv2EkH6ehu3A7zpYhjO0syHHiYg77v2lG2JFJgvw7Q==}
+    hasBin: true
+    peerDependencies:
+      typescript: '>=5.7.2'
+
+  '@trpc/server@11.19.0':
+    resolution: {integrity: sha512-7C1goiDurz82yFKtZUbEzjXd0Rg/jyisaIZQhdvus+1l7E6mwcEYZXjZ1US/HF8kOyz1LERL8UN3bcboJtjcyQ==}
     hasBin: true
     peerDependencies:
       typescript: '>=5.7.2'
@@ -14158,6 +14164,11 @@ snapshots:
       '@trpc/server': 11.18.0(typescript@7.0.2)
       typescript: 7.0.2
 
+  '@trpc/client@11.18.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2)':
+    dependencies:
+      '@trpc/server': 11.19.0(typescript@7.0.2)
+      typescript: 7.0.2
+
   '@trpc/react-query@11.18.0(@tanstack/react-query@5.102.8(react@19.2.8))(@trpc/client@11.18.0(@trpc/server@11.18.0(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.18.0(typescript@7.0.2))(react@19.2.8)(typescript@7.0.2)':
     dependencies:
       '@tanstack/react-query': 5.102.8(react@19.2.8)
@@ -14166,7 +14177,19 @@ snapshots:
       react: 19.2.8
       typescript: 7.0.2
 
+  '@trpc/react-query@11.18.0(@tanstack/react-query@5.102.8(react@19.2.8))(@trpc/client@11.18.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2))(@trpc/server@11.19.0(typescript@7.0.2))(react@19.2.8)(typescript@7.0.2)':
+    dependencies:
+      '@tanstack/react-query': 5.102.8(react@19.2.8)
+      '@trpc/client': 11.18.0(@trpc/server@11.19.0(typescript@7.0.2))(typescript@7.0.2)
+      '@trpc/server': 11.19.0(typescript@7.0.2)
+      react: 19.2.8
+      typescript: 7.0.2
+
   '@trpc/server@11.18.0(typescript@7.0.2)':
+    dependencies:
+      typescript: 7.0.2
+
+  '@trpc/server@11.19.0(typescript@7.0.2)':
     dependencies:
       typescript: 7.0.2
 
