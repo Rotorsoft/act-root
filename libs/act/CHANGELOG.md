@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.4...@rotorsoft/act-v1.32.5) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act:** keep the defer wake for parked streams when a drain claims nothing ([#1754](https://github.com/Rotorsoft/act-root/issues/1754)) ([d1c7c5a](https://github.com/Rotorsoft/act-root/commit/d1c7c5aa65b430b154ae29662220fef7720c37aa)), closes [#1740](https://github.com/Rotorsoft/act-root/issues/1740)
+
 # [@rotorsoft/act-v1.32.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.3...@rotorsoft/act-v1.32.4) (2026-10-04)
 
 
