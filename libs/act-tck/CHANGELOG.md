@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.8...@rotorsoft/act-tck-v1.38.9) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act-notify:** never let a stalled broker hold up build or shutdown ([#1757](https://github.com/Rotorsoft/act-root/issues/1757)) ([f6d99fb](https://github.com/Rotorsoft/act-root/commit/f6d99fb0615a08d48b03d75899eef4c9dbcca1b0)), closes [#1743](https://github.com/Rotorsoft/act-root/issues/1743)
+* **act:** stop overlapping full closes from double-truncating a stream ([#1756](https://github.com/Rotorsoft/act-root/issues/1756)) ([17fc46a](https://github.com/Rotorsoft/act-root/commit/17fc46a02194a3a6e059e0526687e0a6ccc62221)), closes [#1738](https://github.com/Rotorsoft/act-root/issues/1738)
+
 # [@rotorsoft/act-tck-v1.38.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.7...@rotorsoft/act-tck-v1.38.8) (2026-10-04)
 
 
