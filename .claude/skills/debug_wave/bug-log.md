@@ -47,6 +47,11 @@ Each of these was found red-first and filed. Future waves should confirm they st
 - **#1650** — `act-diagram/README.md:86-98` documents ten functions; `src/index.ts` exports two. The other eight exist under internal snake_case names, never re-exported, and the README's copy-paste snippet at `:133` does not compile. #1621's shape, larger. A bulk sweep of all 12 `libs/*/README.md` import statements found only this package failing. **Root cause worth its own fix: nothing verifies that README-documented export names resolve** — `check:readmes` does not.
 - **#1651** — `CLAUDE.md:70` and `docs/docs/intro.md:103` still document pnpm ≥ 11.9.0 / Node ≥ 22.23.1 while `engines` enforces `>=12.3.3` / `>=22.23.2`. Actively wrong (pnpm 11.9 hard-fails install), not merely stale.
 - **#1652** — vitest 5 no longer discovers the repo-root `vite.config.ts` from a sub-package CWD, so every package whose `test` script is a bare `vitest run` loses `globals: true` AND the `@rotorsoft/*` → source alias map. Loud half: `pnpm -F calculator test` / `pnpm -F wolfdesk test` fail with `describe is not defined` (wolfdesk runs ZERO tests). Quiet half (worse): packages importing from `"vitest"` explicitly (`packages/server`, `libs/act-diagram`) stay green while testing stale built `dist/` instead of the working tree. Root `pnpm test` (CI) is unaffected, so the merge gate held. `vite.config.ts:26-27` documents the opposite guarantee and is now false.
+- **#1738** — two overlapping FULL closes both archive and truncate (`close-cycle.ts`: the full path never takes `with_stream_lock`, and #1389's `resumed_guard` makes the second closer look like a retry of an interrupted close). With `restart: true` the first closer's late truncate deletes a commit accepted on the reseeded stream. Regression from #1389. *Sibling:* any other "resume an interrupted X" path that cannot tell a crashed original from a live one.
+- **#1739** — the generated Hono/tRPC routes parse action input with its Zod schema, then pass the PARSED output to `app.do`, which parses again; a transform runs twice. *Sibling:* any transport or wrapper that validates and then hands the *output* to an API that validates again.
+- **#1740** — a defer wake is lost when the drain it triggers claims nothing: the timer GCs the came-due entry, and `drain-cycle.ts`'s `!cycle` early return skips `_defer.schedule()`. #1669/#1670's empty-result shape, third instance.
+- **#1741** / **#1742** — #1700's tentative-vs-committed confusion survives in `withIdempotency` (generated API answers an in-flight dup 409), and #1726's own fix marks in-flight only when the winner's claim *reply* lands, which an async store can deliver after the loser's.
+- **#1743** — `app.shutdown()` awaits the notify disposer unbounded (`act.ts:1051`), so a stalled broker hangs shutdown before the grace budget is ever consulted.
 
 ### Wave 8 (2026-07-25 — lenses: receiver finalization, versioned events, fold engine, act-ops idempotency)
 
@@ -522,3 +527,31 @@ Filed:
 - **act-pino `runLoggerTck` conformance, level mapping and structured-field passthrough** (including the #1319 string-payload-plus-message fix) — all green.
 
 **Left unfinished (a real lead, NOT a confirmed finding):** the close hunter's CANDIDATE 3 — `with_stream_lock` (#1222) is applied only inside `run_windowed_closes`; the **full**-close path (Phases 1-6) is unlocked. Since #1389 added `resumed_guard`, a second concurrent closer that scans after the first tombstoned no longer gets `ConcurrencyError`→`skipped`: it REUSES the guard, runs its own archive, and truncates. So two concurrent `app.close([{stream}])` — or `app.close` racing the autoclose terminate close — may archive twice and truncate twice. #1222's own rationale ("a manual `app.close` never takes the `__autoclose__:X` lease") applies verbatim to the full path. **Unproven — no probe was written before the hunter died. Worth a dedicated red test in the next wave.**
+
+### Wave 26 (2026-10-04 — lenses: post-wave-25 fix siblings, full-close concurrency, auto-generated API, act-notify broker, defer/temporal)
+
+**Thirteen tickets filed (#1738-#1750). Six reproduced independently in the main loop (#1738, #1739, #1740 scenario A, #1742, #1743, plus #1741's mechanism in source); the rest are labelled hunter-verified in the ticket.** First wave since 20 where all five hunters delivered complete final reports with no deaths. One finding (#1741) was found independently by two lenses (generated API and siblings), which is good corroboration.
+
+Filed:
+
+- **#1738** (HIGH) — two overlapping full closes double-archive, and with `restart` delete an accepted commit. Wave 25's unproven CANDIDATE 3, now proven on InMemory and Postgres (same instance and two instances). Control: the windowed path (locked) archives once. Fix is a design choice (guard-conditional truncate vs `_with_close_lock` vs exclusive resume).
+- **#1739** (HIGH) — generated Hono/tRPC double-parse. `z.number().transform(d => d*100)` stores 125000 instead of 1250; a type-changing pipe 422s every request. Existing suites green because their schemas are plain.
+- **#1740** (HIGH) — lost defer wake (competing worker handled the due stream; or PG DB clock behind the app clock). Third instance of the empty-result invariant ("Nothing found" is not "nothing left").
+- **#1741** (MED) — generated API in-flight duplicate answered 409 "already used" (blocks an Act webhook sender).
+- **#1742** (MED) — gap in #1726's `track_in_flight` with async stores. **The lead wrote #1726 and its "leaves no gap" docstring**; the shipped async test passed only because its store answered in order.
+- **#1743** (MED) — shutdown hangs on a stalled broker.
+- **#1744** (MED, recipe/docs) — recurring-timers recipe forks into a doubled loop after one redelivered tick (`[1,1,2,2,3,3,4,4]`); README claims a finalize failure is benign.
+- **#1745** (MED, docs-or-code) — a deferred reaction makes its earlier sibling on the same event+stream run twice with no failure (the #1179 group rule redelivers the whole group). Docs promise parking only.
+- **#1746-#1750** (LOW) — OpenAPI documents `io: "output"` schemas; tRPC+SSE drops an action named `subscribe`; Loopback/withBroker lets a throwing subscriber starve the rest; RedisBroker forwards malformed notifications; `receiver` `close()` during a pending `listen()` leaves the port bound.
+
+**Swept clean / ruled out this wave:**
+- **act-notify decorator delegation is drift-proof.** `withBroker` is a Proxy that overrides only `commit` and `notify` and binds everything else to the wrapped store, so Store methods added since July are forwarded automatically with all their arguments. Do not hunt "method not forwarded".
+- **No wakeup after ack/defer/unblock/reset/prioritize/restore/truncate is NOT a broker divergence**: native PG only notifies inside the commit SQL, and the decorator matches it.
+- **A failed initial notify subscribe is never retried** — true for PG too, in core `_wire_notify`; latency-only, not filed.
+- **Error mapping across generated transports** is consistent after #1280/#1286/#1295 (tRPC 409/412/410→404 is documented). `withIdempotency` releasing on a 4xx handler error is correct.
+- **#1720 config schemas:** no other documented default is rejected by its schema. **#1722 past dues:** `make_deferred` checks `now < due`; backoff is `now + delay`; an imperative `DeferSignal` with a past due loops, but that is the user-code contract (the docs example guards it).
+- **#1723 merges:** every `State` field is accounted for in `merge_into_existing`. Lead not filed: `merge_projection` keeps the state's event schema when a projection declares the same event with a different instance (probably a typing hole).
+- **Close:** cache after the double close is consistent with the final seed; a second `_forget_closed_subscriptions` is harmless. **`InMemoryStore.seed()` is a no-op, not a reset** — a probe that "reseeds" between tests is polluting itself.
+
+**Leads not finished:** a close racing `app.do` between Phase 1's scan and the Phase 3 tombstone (needs a hook); live node-redis queue-vs-reject while disconnected (no Redis container); app clock BEHIND the DB clock turning `make_deferred`'s re-defer into a past due (hot claim loop for the duration of the skew); `{ after }` beyond the Date range (SQLite `toISOString` throws); webhook 2xx path never reads/cancels the body; `PinoLogger.dispose()` does not await `flush()`.
+
