@@ -79,9 +79,13 @@ export type CloseCycleDeps = {
    * same prefix — a double S3 upload / double JSONL append. This runs the
    * given work under a process-local per-stream lock so the two closers
    * serialize; the second sees the already-pruned prefix and skips its
-   * archive. Provided by the Act orchestrator (shared across `app.close`
-   * and the drain's `on_close`); defaults to identity (no serialization)
-   * when the cycle is exercised in isolation.
+   * archive. The full (tombstone/restart) path takes the same lock for
+   * every stream it closes: without it, a second full closer that arrives
+   * while the first is archiving mistakes the first closer's tombstone for
+   * an interrupted close, resumes it, and both archive and truncate (#1738).
+   * Provided by the Act orchestrator (shared across `app.close` and the
+   * drain's `on_close`); defaults to identity (no serialization) when the
+   * cycle is exercised in isolation.
    */
   readonly with_stream_lock?: <T>(
     stream: string,
@@ -152,6 +156,46 @@ export async function run_close_cycle(
     ? await run_windowed_closes(windowed, deps, skipped)
     : new Map();
   if (!full.length) return { truncated: windowed_result, skipped };
+  const truncated = await with_stream_locks(
+    full.map((t) => t.stream),
+    deps,
+    () => run_full_closes(full, target_map, deps, skipped)
+  );
+  for (const [stream, entry] of windowed_result) truncated.set(stream, entry);
+  return { truncated, skipped };
+}
+
+/**
+ * Run `work` holding the per-stream close lock of every stream in
+ * `streams`. Locks are taken in sorted order, so two closers whose batches
+ * share streams in a different order cannot each hold one and wait on the
+ * other.
+ */
+function with_stream_locks<T>(
+  streams: string[],
+  deps: CloseCycleDeps,
+  work: () => Promise<T>
+): Promise<T> {
+  const with_lock = deps.with_stream_lock ?? ((_stream, w) => w());
+  return [...streams]
+    .sort()
+    .reduceRight<() => Promise<T>>(
+      (inner, stream) => () => with_lock(stream, inner),
+      work
+    )();
+}
+
+/**
+ * The guarded tombstone/restart pipeline (Phases 1-6), run while holding
+ * every target stream's close lock.
+ */
+async function run_full_closes(
+  full: CloseTarget[],
+  target_map: Map<string, CloseTarget>,
+  deps: CloseCycleDeps,
+  skipped: string[]
+): Promise<CloseResult["truncated"]> {
+  const none: CloseResult["truncated"] = new Map();
   const streams = full.map((t) => t.stream);
 
   // 1. Scan: find the latest non-tombstone event per stream
@@ -191,7 +235,7 @@ export async function run_close_cycle(
     deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE,
     deps.catch_up_correlation
   );
-  if (!safe.length) return { truncated: windowed_result, skipped };
+  if (!safe.length) return none;
 
   // 3. Guard: commit a tombstone with expectedVersion per safe stream.
   // Correlation comes from the orchestrator's configured correlator so
@@ -203,7 +247,7 @@ export async function run_close_cycle(
     deps.tombstone,
     skipped
   );
-  if (!guarded.length) return { truncated: windowed_result, skipped };
+  if (!guarded.length) return none;
 
   // 4. Seed: load final state for restart targets through the owning state
   const seed_states = await load_restart_seeds(
@@ -218,16 +262,25 @@ export async function run_close_cycle(
   // 5. Archive: user-provided per-stream callback while guarded
   await run_archive_callbacks(guarded, target_map);
 
-  // 6. Truncate + seed: atomic per-store transaction
-  const truncated = await truncate_and_warm_cache(
+  // 5b. Re-check: truncate only streams whose head is still this close's
+  // guard. The lock above serializes closers in this process; a closer in
+  // another process can still resume our guard, finish first, and reseed
+  // the stream, after which a commit can land on it. Truncating then would
+  // delete that accepted commit (#1738).
+  const still_guarded = await heads_still_guarded(
     guarded,
+    guard_events,
+    skipped
+  );
+  if (!still_guarded.length) return none;
+
+  // 6. Truncate + seed: atomic per-store transaction
+  return truncate_and_warm_cache(
+    still_guarded,
     seed_states,
     guard_events,
     deps.correlation
   );
-
-  for (const [stream, entry] of windowed_result) truncated.set(stream, entry);
-  return { truncated, skipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -666,6 +719,26 @@ async function run_archive_callbacks(
     const archive_fn = target_map.get(stream)?.archive;
     if (archive_fn) await archive_fn();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5b — confirm the guard is still the head
+// ---------------------------------------------------------------------------
+
+async function heads_still_guarded(
+  guarded: string[],
+  guard_events: Map<string, { id: number; stream: string }>,
+  skipped: string[]
+): Promise<string[]> {
+  // True heads, markers included: the guard is a tombstone, and a reseed
+  // by another closer is a snapshot.
+  const heads = await store().query_stats(guarded, {});
+  return guarded.filter((stream) => {
+    if (heads.get(stream)?.head.id === guard_events.get(stream)!.id)
+      return true;
+    skipped.push(stream);
+    return false;
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -590,9 +590,9 @@ export class Act<
   private readonly _close_locks = new Map<string, Promise<unknown>>();
 
   /**
-   * Run `work` under the per-stream close lock (#1222). Serializes
-   * windowed-close critical sections for the same stream while letting
-   * different streams proceed in parallel.
+   * Run `work` under the per-stream close lock (#1222). Serializes close
+   * critical sections for the same stream (windowed prunes, and full closes
+   * since #1738) while letting different streams proceed in parallel.
    */
   private _with_close_lock<T>(
     stream: string,
