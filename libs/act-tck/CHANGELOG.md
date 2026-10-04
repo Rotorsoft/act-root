@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.6...@rotorsoft/act-tck-v1.38.7) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act-http:** parse generated action input once, in app.do ([#1752](https://github.com/Rotorsoft/act-root/issues/1752)) ([b5cd7ad](https://github.com/Rotorsoft/act-root/commit/b5cd7ad2c725d9138774b374beecb835ea0cd0f3)), closes [#1739](https://github.com/Rotorsoft/act-root/issues/1739)
+* **act:** keep the defer wake for parked streams when a drain claims nothing ([#1754](https://github.com/Rotorsoft/act-root/issues/1754)) ([d1c7c5a](https://github.com/Rotorsoft/act-root/commit/d1c7c5aa65b430b154ae29662220fef7720c37aa)), closes [#1740](https://github.com/Rotorsoft/act-root/issues/1740)
+
 # [@rotorsoft/act-tck-v1.38.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.5...@rotorsoft/act-tck-v1.38.6) (2026-10-04)
 
 
