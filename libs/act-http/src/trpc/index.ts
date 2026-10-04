@@ -384,7 +384,9 @@ export function trpc<
           // see it, mirroring Hono's zValidator-then-handler order. `validate`
           // throws the framework `ValidationError`, which `to_trpc_error` maps
           // to 422 / UNPROCESSABLE_CONTENT with the shared ApiError envelope
-          // (#1295).
+          // (#1295). The resolvers get the parsed value, but `app.do` gets the
+          // raw `input`: it parses again itself, and a second parse of the
+          // output would run every `.transform()` twice.
           const validated = validate(
             action_name,
             input as never,
@@ -411,11 +413,7 @@ export function trpc<
               options.idempotency.store,
               key,
               () =>
-                app.do(
-                  action_name as never,
-                  target as never,
-                  validated as never
-                )
+                app.do(action_name as never, target as never, input as never)
             );
             if (outcome.deduped) {
               throw new TRPCError({
@@ -430,7 +428,7 @@ export function trpc<
           return await app.do(
             action_name as never,
             target as never,
-            validated as never
+            input as never
           );
         } catch (err) {
           if (err instanceof TRPCError) throw err;

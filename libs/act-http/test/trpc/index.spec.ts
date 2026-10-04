@@ -556,3 +556,60 @@ describe("trpc(app, options) — generated router", () => {
     }>();
   });
 });
+
+describe("action input is parsed once", () => {
+  // A transform that appends "!" — a second parse of the first parse's
+  // output would store "a!!".
+  const Shout = state({ Shout: z.object({ text: z.string() }) })
+    .init(() => ({ text: "" }))
+    .emits({ Shouted: z.object({ text: z.string() }) })
+    .patch({ Shouted: ({ data }) => ({ text: data.text }) })
+    .on({ Shout: z.object({ text: z.string().transform((s) => `${s}!`) }) })
+    .emit((a) => ["Shouted", { text: a.text }])
+    .build();
+  const shout_test = fixture(act().withState(Shout));
+  type ShoutCaller = Record<
+    string,
+    (input: unknown) => Promise<Array<{ state: { text: string } }>>
+  >;
+
+  shout_test(
+    "runs a transforming schema once, and resolvers see the parsed value",
+    async ({ app }) => {
+      const seen: unknown[] = [];
+      const router = trpc<Ctx>(app as never, {
+        ...default_options(),
+        stream: async (_action, input) => {
+          seen.push(input);
+          return "shout-1";
+        },
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller = t.createCallerFactory(router)(
+        make_ctx()
+      ) as unknown as ShoutCaller;
+      const out = await caller.Shout({ text: "a" });
+      expect(out[0].state.text).toBe("a!");
+      expect(seen).toEqual([{ text: "a!" }]);
+    }
+  );
+
+  shout_test(
+    "runs a transforming schema once on the idempotent path",
+    async ({ app }) => {
+      const router = trpc<Ctx>(app as never, {
+        ...default_options(),
+        idempotency: {
+          store: new InMemoryIdempotencyStore(),
+          keyFrom: () => "shout-k",
+        },
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller = t.createCallerFactory(router)(
+        make_ctx()
+      ) as unknown as ShoutCaller;
+      const out = await caller.Shout({ text: "a" });
+      expect(out[0].state.text).toBe("a!");
+    }
+  );
+});

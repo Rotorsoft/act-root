@@ -428,3 +428,68 @@ describe("hono(app, options) — generated REST surface", () => {
     });
   });
 });
+
+describe("action input is parsed once", () => {
+  // A transform that counts its runs and appends "!" — a second parse of
+  // the first parse's output would show up as two runs and "a!!".
+  let parses = 0;
+  const Shout = state({ Shout: z.object({ text: z.string() }) })
+    .init(() => ({ text: "" }))
+    .emits({ Shouted: z.object({ text: z.string() }) })
+    .patch({ Shouted: ({ data }) => ({ text: data.text }) })
+    .on({
+      Shout: z.object({
+        text: z.string().transform((s) => {
+          parses++;
+          return `${s}!`;
+        }),
+      }),
+    })
+    .emit((a) => ["Shouted", { text: a.text }])
+    .build();
+  const shout_test = fixture(act().withState(Shout));
+
+  shout_test(
+    "runs a transforming schema once, and resolvers see the parsed value",
+    async ({ app }) => {
+      parses = 0;
+      const seen: unknown[] = [];
+      const api = hono(app as never, {
+        ...default_options(),
+        stream: (_action, input) => {
+          seen.push(input);
+          return "shout-1";
+        },
+      });
+      const res = await api.request("/api/actions/Shout", {
+        method: "POST",
+        headers: make_headers(),
+        body: JSON.stringify({ text: "a" }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{ state: { text: string } }>;
+      expect(body[0].state.text).toBe("a!");
+      expect(seen).toEqual([{ text: "a!" }]);
+      // once by the route's validator, once by app.do — never on its own output
+      expect(parses).toBe(2);
+    }
+  );
+
+  shout_test(
+    "runs a transforming schema once on the idempotent path",
+    async ({ app }) => {
+      parses = 0;
+      const api = hono(app as never, {
+        ...default_options(),
+        idempotency: { store: new InMemoryIdempotencyStore() },
+      });
+      const res = await api.request("/api/actions/Shout", {
+        method: "POST",
+        headers: make_headers({ "idempotency-key": "shout-k" }),
+        body: JSON.stringify({ text: "a" }),
+      });
+      const body = (await res.json()) as Array<{ state: { text: string } }>;
+      expect(body[0].state.text).toBe("a!");
+    }
+  );
+});

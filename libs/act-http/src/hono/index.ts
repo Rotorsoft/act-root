@@ -334,7 +334,12 @@ export function hono<TApp extends ActSurface = ActSurface>(
       }),
       async (c) => {
         try {
+          // The resolvers get the validated value; `app.do` gets the raw
+          // body, because it parses again itself and a second parse of the
+          // validator's output would run every `.transform()` twice. Hono
+          // caches the body, so reading it again here is free.
           const input = c.req.valid("json" as never) as unknown;
+          const raw: unknown = await c.req.json();
           const actor = c.get("actor");
           const stream = await options.stream(action_name, input, c);
           const expected_version = options.expectedVersion
@@ -358,8 +363,7 @@ export function hono<TApp extends ActSurface = ActSurface>(
             const outcome = await withIdempotency(
               options.idempotency.store,
               key,
-              () =>
-                app.do(action_name as never, target as never, input as never)
+              () => app.do(action_name as never, target as never, raw as never)
             );
             if (outcome.deduped) {
               const body: ApiError = {
@@ -376,7 +380,7 @@ export function hono<TApp extends ActSurface = ActSurface>(
           const snapshots = await app.do(
             action_name as never,
             target as never,
-            input as never
+            raw as never
           );
           return c.json(snapshots);
         } catch (err) {
