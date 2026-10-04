@@ -204,8 +204,9 @@ describe("Builder", () => {
     });
   });
 
-  it("should merge states with non-ZodObject schemas (fallback path)", () => {
-    // z.any() is not a ZodObject, so mergeSchemas should return existing unchanged
+  it("should refuse to merge partials whose state schemas are not ZodObjects", () => {
+    // z.any() is not a ZodObject, so there is no shape to extend — keeping one
+    // side would silently drop the other partial's schema
     const s1 = {
       name: "NonObj",
       state: z.any(),
@@ -232,7 +233,9 @@ describe("Builder", () => {
     };
     const builder = act();
     builder.withState(s1);
-    expect(() => builder.withState(s2)).not.toThrow();
+    expect(() => builder.withState(s2)).toThrow(
+      /Cannot merge state schemas for "NonObj": the existing partial's schema is a ZodAny/
+    );
   });
 
   it("should allow multiple reactions for the same event with different handlers", () => {
