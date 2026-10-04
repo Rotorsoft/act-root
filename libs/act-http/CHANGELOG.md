@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.13...@rotorsoft/act-http-v1.10.14) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act-http:** answer an in-flight duplicate with a retryable error everywhere ([#1755](https://github.com/Rotorsoft/act-root/issues/1755)) ([4394f93](https://github.com/Rotorsoft/act-root/commit/4394f93a5cc39294d347b2ec1606761776cc3dba)), closes [#1741](https://github.com/Rotorsoft/act-root/issues/1741) [#1700](https://github.com/Rotorsoft/act-root/issues/1700) [#1700](https://github.com/Rotorsoft/act-root/issues/1700) [#1742](https://github.com/Rotorsoft/act-root/issues/1742) [#1741](https://github.com/Rotorsoft/act-root/issues/1741) [#1742](https://github.com/Rotorsoft/act-root/issues/1742)
+
 # [@rotorsoft/act-http-v1.10.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.12...@rotorsoft/act-http-v1.10.13) (2026-10-04)
 
 
