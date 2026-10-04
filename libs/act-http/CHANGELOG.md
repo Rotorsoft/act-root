@@ -1,3 +1,11 @@
+# [@rotorsoft/act-http-v1.10.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.11...@rotorsoft/act-http-v1.10.12) (2026-10-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @trpc/server to v11.19.0 ([#1734](https://github.com/Rotorsoft/act-root/issues/1734)) ([9fd00bb](https://github.com/Rotorsoft/act-root/commit/9fd00bb116d72991369b003060d4f0acf827ee9f))
+* **deps:** update dependency hono to ^4.13.12 ([#1730](https://github.com/Rotorsoft/act-root/issues/1730)) ([7d2c333](https://github.com/Rotorsoft/act-root/commit/7d2c3337f63603364115fbd140074e0d70996340))
+
 # [@rotorsoft/act-http-v1.10.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.10...@rotorsoft/act-http-v1.10.11) (2026-10-04)
 
 
