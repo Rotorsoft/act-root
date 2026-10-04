@@ -479,6 +479,20 @@ describe("next_window_open — the derived off-window re-check (#1175)", () => {
     expect(in_autoclose_window(w, open)).toBe(true);
   });
 
+  it("never returns a gap boundary that is already behind now in a fractional-offset zone", () => {
+    // 2026-09-27 in Pacific/Chatham: 02:45 local (+12:45) jumps to 03:45
+    // (+13:45) at 14:00Z, skipping local hour 2. The UTC-hour boundary
+    // 14:00Z is the gap opening, but 14:17Z (04:02 local) is already past
+    // it — returning 14:00Z would defer to an instant in the past, which
+    // claim never excludes, so the stream would be re-claimed every cycle.
+    const w = { start: 2, end: 4, timeZone: "Pacific/Chatham" };
+    const now = new Date("2026-09-26T14:17:00Z");
+    expect(in_autoclose_window(w, now)).toBe(false);
+    const open = next_window_open(w, now);
+    expect(open.getTime()).toBeGreaterThanOrEqual(now.getTime());
+    expect(in_autoclose_window(w, open)).toBe(true);
+  });
+
   it("in_autoclose_window is true at the DST gap replacement instant (#1233)", () => {
     const w = { start: 2, end: 3, timeZone: "America/New_York" };
     // 07:00Z presents as local hour 3 (the gap replacement); the empty
