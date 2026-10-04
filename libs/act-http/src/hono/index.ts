@@ -51,6 +51,7 @@ import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { track_in_flight } from "../api/in-flight.js";
 import {
   type ActorExtractor,
   type ApiError,
@@ -92,10 +93,13 @@ export type ActMiddlewareVariables = {
  * - `idempotency` (optional) — when set, the route honors
  *   `Idempotency-Key` via {@link withIdempotency}. The host
  *   supplies the `IdempotencyStore`; `keyFrom` defaults to reading
- *   the `Idempotency-Key` header. On a duplicate claim, the route
- *   responds `409 Conflict` — the contract intentionally doesn't
- *   cache the original handler's result, matching the
- *   receiver-side "ack the duplicate" semantics.
+ *   the `Idempotency-Key` header. A duplicate of a key that already
+ *   succeeded gets `409 Conflict` — the contract intentionally doesn't
+ *   cache the original handler's result. A duplicate that arrives
+ *   while the original is still running gets a retryable
+ *   `503` + `Retry-After` instead, because the original may yet fail
+ *   and release the key, and a client told "already used" would never
+ *   retry.
  * - `basePath` (optional, default `"/api"`) — Hono basePath the
  *   routes mount under.
  */
@@ -195,7 +199,8 @@ const default_key_from = (c: Context): string | undefined =>
  * 4. (Optionally) resolves `expectedVersion` for optimistic
  *    concurrency.
  * 5. (Optionally) claims the `Idempotency-Key` via
- *    {@link withIdempotency} — responds `409` on duplicate.
+ *    {@link withIdempotency} — responds `409` on a duplicate of a
+ *    committed key, `503` on a duplicate of one still in flight.
  * 6. Calls
  *    `app.do(name, { stream, actor, expectedVersion? }, input)`.
  * 7. Maps any thrown framework error onto the shared
@@ -242,6 +247,11 @@ export function hono<TApp extends ActSurface = ActSurface>(
   api.use("*", authenticated(options.actor));
 
   const key_from = options.idempotency?.keyFrom ?? default_key_from;
+  // Counts claims per key so a duplicate of a still-running action can be
+  // told apart from a duplicate of a committed one (see `track_in_flight`).
+  const tracker = options.idempotency
+    ? track_in_flight(options.idempotency.store)
+    : undefined;
 
   // Wire SSE subscriptions before the mutation routes so the
   // `/sse/*` paths sit alongside `/actions/*`. The cap counter is
@@ -360,11 +370,19 @@ export function hono<TApp extends ActSurface = ActSurface>(
               };
               return c.json(body, 400);
             }
-            const outcome = await withIdempotency(
-              options.idempotency.store,
-              key,
-              () => app.do(action_name as never, target as never, raw as never)
+            const outcome = await withIdempotency(tracker!.store, key, () =>
+              app.do(action_name as never, target as never, raw as never)
             );
+            if (outcome.deduped && tracker!.in_flight(key)) {
+              const body: ApiError = {
+                error: "ServiceUnavailable",
+                detail:
+                  "Idempotency-Key in flight; the original request has not finished, retry later",
+                code: "IN_FLIGHT",
+              };
+              c.header("Retry-After", "1");
+              return c.json(body, 503);
+            }
             if (outcome.deduped) {
               const body: ApiError = {
                 error: "Conflict",

@@ -496,6 +496,44 @@ describe("trpc(app, options) — generated router", () => {
         code: "CONFLICT",
       });
     });
+
+    test("a duplicate of a still-running call throws a retryable SERVICE_UNAVAILABLE, and is not lost when the original fails", async ({
+      app,
+    }) => {
+      let fail!: () => void;
+      const parked = new Promise<never>((_, reject) => {
+        fail = () => reject(new Error("downstream down"));
+      });
+      const do_spy = vi.spyOn(app, "do").mockImplementationOnce(() => parked);
+      const router = trpc<Ctx>(app as never, {
+        ...default_options(),
+        idempotency: {
+          store: new InMemoryIdempotencyStore(),
+          keyFrom: (ctx) => ctx.idempotencyKey,
+        },
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller = t.createCallerFactory(router)(
+        make_ctx({ idempotencyKey: "slow-1" })
+      ) as unknown as AnyCaller;
+
+      const original = caller.PressKey({ key: "5" });
+      await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
+        code: "SERVICE_UNAVAILABLE",
+      });
+
+      fail();
+      await expect(original).rejects.toMatchObject({
+        code: "INTERNAL_SERVER_ERROR",
+      });
+
+      // The client retries as told, and the action runs this time.
+      await caller.PressKey({ key: "5" });
+      expect(do_spy).toHaveBeenCalledTimes(2);
+      await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
+        code: "CONFLICT",
+      });
+    });
   });
 
   describe("authenticated (standalone export)", () => {

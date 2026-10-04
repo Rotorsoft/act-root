@@ -368,6 +368,44 @@ describe("hono(app, options) — generated REST surface", () => {
       const body = await res.json();
       expect(body.code).toBe("CONFLICT");
     });
+
+    test("a duplicate of a still-running request gets a retryable 503, and is not lost when the original fails", async ({
+      app,
+    }) => {
+      // The original parks inside app.do, then fails: a slow downstream
+      // the client timed out on and retried while it was still running.
+      let fail!: () => void;
+      const parked = new Promise<never>((_, reject) => {
+        fail = () => reject(new Error("downstream down"));
+      });
+      const do_spy = vi.spyOn(app, "do").mockImplementationOnce(() => parked);
+      const api = hono(app as never, {
+        ...default_options(),
+        idempotency: { store: new InMemoryIdempotencyStore() },
+      });
+      const send = () =>
+        api.request("/api/actions/PressKey", {
+          method: "POST",
+          headers: make_headers({ "idempotency-key": "slow-1" }),
+          body: JSON.stringify({ key: "5" }),
+        });
+
+      const original = send();
+      const duplicate = await send();
+      expect(duplicate.status).toBe(503);
+      expect(duplicate.headers.get("retry-after")).toBe("1");
+      expect((await duplicate.json()).code).toBe("IN_FLIGHT");
+
+      fail();
+      expect((await original).status).toBe(500);
+
+      // The client retries as told, and the action runs this time.
+      const retry = await send();
+      expect(retry.status).toBe(200);
+      expect(do_spy).toHaveBeenCalledTimes(2);
+      // Once it committed, a further duplicate is a settled one.
+      expect((await send()).status).toBe(409);
+    });
   });
 
   describe("authenticated (standalone export)", () => {

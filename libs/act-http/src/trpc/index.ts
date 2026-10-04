@@ -61,6 +61,7 @@ import {
   TRPCError,
 } from "@trpc/server";
 import { z } from "zod";
+import { track_in_flight } from "../api/in-flight.js";
 import {
   type ActorExtractor,
   resolveSseConfig,
@@ -94,11 +95,14 @@ import {
  *   `Idempotency-Key` via the shared
  *   {@link withIdempotency} helper. The host supplies the
  *   `IdempotencyStore` and a `keyFrom` extractor that reads the key
- *   out of the tRPC context (typically a header). On a duplicate
- *   claim, the procedure throws a `CONFLICT` `TRPCError` — the
+ *   out of the tRPC context (typically a header). A duplicate of a key
+ *   that already succeeded throws a `CONFLICT` `TRPCError` — the
  *   receiver-side convention of "ack the duplicate" doesn't carry
  *   over because the contract intentionally does not cache the
- *   original handler's result.
+ *   original handler's result. A duplicate that arrives while the
+ *   original is still running throws a retryable
+ *   `SERVICE_UNAVAILABLE` (503) instead: the original may yet fail and
+ *   release the key, and a client told "already used" would never retry.
  *
  * @template Ctx The host's tRPC context shape. Flows end-to-end —
  *   procedures see this exact context type (plus `actor`) at
@@ -258,7 +262,8 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
  *    `ctx.actor`.
  * 2. Resolves the target stream via `options.stream(name, input, ctx)`.
  * 3. (Optionally) claims the `Idempotency-Key` via
- *    {@link withIdempotency} — throws `CONFLICT` on duplicate.
+ *    {@link withIdempotency} — throws `CONFLICT` on a duplicate of a
+ *    committed key, `SERVICE_UNAVAILABLE` on one still in flight.
  * 4. Calls `app.do(name, { stream, actor: ctx.actor }, input)`.
  * 5. Maps any thrown framework error onto a `TRPCError` via
  *    {@link toApiError}.
@@ -328,6 +333,11 @@ export function trpc<
   TApp extends ActSurface = ActSurface,
 >(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<TApp> {
   const t = initTRPC.context<Ctx>().create();
+  // Counts claims per key so a duplicate of a still-running action can be
+  // told apart from a duplicate of a committed one (see `track_in_flight`).
+  const tracker = options.idempotency
+    ? track_in_flight(options.idempotency.store)
+    : undefined;
 
   // Resolve the actor inline per mutation instead of via
   // `t.procedure.use(authenticated(...))`. The middleware path threads
@@ -409,12 +419,16 @@ export function trpc<
                 message: "Idempotency-Key required",
               });
             }
-            const outcome = await withIdempotency(
-              options.idempotency.store,
-              key,
-              () =>
-                app.do(action_name as never, target as never, input as never)
+            const outcome = await withIdempotency(tracker!.store, key, () =>
+              app.do(action_name as never, target as never, input as never)
             );
+            if (outcome.deduped && tracker!.in_flight(key)) {
+              throw new TRPCError({
+                code: "SERVICE_UNAVAILABLE",
+                message:
+                  "Idempotency-Key in flight; the original request has not finished, retry later",
+              });
+            }
             if (outcome.deduped) {
               throw new TRPCError({
                 code: "CONFLICT",
