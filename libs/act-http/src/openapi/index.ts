@@ -364,7 +364,7 @@ function build_operation(
       // optional (#1287).
       required: true,
       description:
-        "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+        "Required idempotency token. A duplicate of a request that already succeeded produces a 409 Conflict (the first result is not cached on the server). A duplicate that arrives while the original is still running produces a retryable 503 with Retry-After, because the original may yet fail.",
       schema: { type: "string" },
     });
   }
@@ -405,6 +405,9 @@ function build_operation(
       "412": { $ref: "#/components/responses/ApiError" },
       "422": { $ref: "#/components/responses/ApiError" },
       "500": { $ref: "#/components/responses/ApiError" },
+      ...(options.idempotency
+        ? { "503": { $ref: "#/components/responses/ApiError" } }
+        : {}),
     },
   };
 }

@@ -35,7 +35,7 @@ The promise of the registry is that "an action is its Zod schema plus its target
 | Validate body | Run the action's Zod schema against the request payload | Each framework has its own validator hook |
 | Dispatch | `app.do(action, { stream, actor, expectedVersion? }, input)` | Identical |
 | Map errors | Translate framework errors into HTTP status + machine code | Identical (the table is in `@rotorsoft/act-http/api`) |
-| Optional idempotency | Claim an `Idempotency-Key`; ack the duplicate | Identical |
+| Optional idempotency | Claim an `Idempotency-Key`; refuse a committed duplicate, ask an in-flight one to retry | Identical |
 
 Five of those six rows are identical across transports. The remaining row — resolving actor and stream — gets parameterized as two functions that the host supplies. Everything else is one mechanical loop over `app.registry.actions`.
 
@@ -210,7 +210,7 @@ type ApiError = {
 
 `withIdempotency(store, key, handler)` wraps an action handler in an `Idempotency-Key` claim. It reuses the `@rotorsoft/act-ops/idempotency` contract — the same `IdempotencyStore` that `@rotorsoft/act-http/receiver` consumes, so one store implementation covers both halves of the "Act over the wire" surface: outbound (this package's generated APIs) and inbound (the receiver's webhook ingestion).
 
-The semantics intentionally don't cache the original handler's result. A duplicate claim throws / returns a `409 CONFLICT` with `{ deduped: true }`. The contract matches the receiver-side "ack the duplicate" pattern and avoids the operational footgun of replaying potentially-stale responses.
+The semantics intentionally don't cache the original handler's result, which avoids the operational footgun of replaying potentially stale responses. A losing claim returns `{ deduped: true }`, but that alone doesn't say whether the original *succeeded* or is *still running*, and the generated routes answer the two differently. A duplicate of a key that already committed gets `409 CONFLICT`. A duplicate that arrives while the original is still running (typically a client that timed out and retried) gets a retryable `503` instead: the original may yet fail and release the key, and a client told "already used" would never retry, so the action would be lost ([#1741](https://github.com/Rotorsoft/act-root/issues/1741)). The receiver answers the same in-flight case with `503` too (#1700).
 
 ## Authentication — the `actor` seam
 
@@ -303,7 +303,7 @@ Document the header on the OpenAPI emitter the same way:
 openapi(app, { info, servers, idempotency: true });
 ```
 
-Behavior: fresh claim → handler runs, response normal. Duplicate claim → `409 CONFLICT` with `code: "CONFLICT"` and `detail: "Idempotency-Key already used; original result not cached"`. Same shape on tRPC (the procedure throws `CONFLICT`). See the [External integration guide](./external-integration.md) for the surrounding pattern — this is the same `IdempotencyStore` contract that powers receivers.
+Behavior: fresh claim → handler runs, response normal. Duplicate of a committed key → `409 CONFLICT` with `code: "CONFLICT"` and `detail: "Idempotency-Key already used; original result not cached"`. Duplicate while the original is still running → `503` with `Retry-After: 1` and `code: "IN_FLIGHT"`. tRPC throws `CONFLICT` and `SERVICE_UNAVAILABLE` respectively (a procedure can't set `Retry-After`). The in-flight check is local to the process serving the generated API, matching `InMemoryIdempotencyStore`'s single-process scope. See the [External integration guide](./external-integration.md) for the surrounding pattern — this is the same `IdempotencyStore` contract that powers receivers.
 
 ## Real-time subscriptions
 

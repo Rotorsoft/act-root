@@ -45453,6 +45453,100 @@ export async function withIdempotency<T>(
   return { deduped: false, result };
 }
 
+// === in-flight.ts ===
+/**
+ * @module act-http/api/in-flight
+ *
+ * Tells a duplicate of a delivery that is still running apart from a
+ * duplicate of one that already succeeded. An {@link IdempotencyStore}
+ * can't: its \`claim\` returns \`false\` in both cases. Answering the first
+ * "accepted, stop retrying" loses the delivery if the original then fails
+ * and releases the key, so the receiver and the generated API both ask
+ * the sender to retry while the original is in flight.
+ *
+ * Internal — not re-exported from the package. Process-local, which
+ * matches \`InMemoryIdempotencyStore\`'s single-process scope.
+ */
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/** A wrapped store plus the in-flight check it maintains. @internal */
+export type InFlightTracker = {
+  /** Pass this to the code that claims, commits, and releases. */
+  readonly store: IdempotencyStore;
+  /**
+   * True while a claim on \`key\` is pending, or was won and is not yet
+   * committed or released. Read it after your own claim lost.
+   */
+  in_flight(key: string): boolean;
+};
+
+/**
+ * Wraps \`store\` so claims are counted per key. A key is counted **before**
+ * the claim is awaited, not when its reply arrives: with an async store
+ * the loser's \`false\` can arrive before the winner's \`true\`, and marking
+ * only on the winner's reply would leave the loser a window to see the key
+ * unmarked and be answered as a settled duplicate. A claim that loses (or
+ * throws) uncounts itself at once; a claim that wins stays counted until
+ * its commit or release lands.
+ *
+ * A concurrent duplicate of an already-committed key can therefore read
+ * as in flight while another duplicate's claim is pending. That costs one
+ * extra retry, never a lost delivery.
+ *
+ * @internal
+ */
+export function track_in_flight(store: IdempotencyStore): InFlightTracker {
+  const pending = new Map<string, number>();
+  const up = (key: string) => pending.set(key, (pending.get(key) ?? 0) + 1);
+  const down = (key: string) => {
+    const left = (pending.get(key) ?? 0) - 1;
+    if (left > 0) pending.set(key, left);
+    else pending.delete(key);
+  };
+  const settle = (key: string, won: boolean) => {
+    if (!won) down(key);
+    return won;
+  };
+  return {
+    in_flight: (key) => pending.has(key),
+    store: {
+      claim(key, now) {
+        up(key);
+        let won: boolean | Promise<boolean>;
+        try {
+          won = store.claim(key, now);
+        } catch (err) {
+          down(key);
+          throw err;
+        }
+        return typeof won === "boolean"
+          ? settle(key, won)
+          : won.then(
+              (w) => settle(key, w),
+              (err: unknown) => {
+                down(key);
+                throw err;
+              }
+            );
+      },
+      async commit(key, now) {
+        try {
+          await store.commit(key, now);
+        } finally {
+          down(key);
+        }
+      },
+      async release(key) {
+        try {
+          await store.release(key);
+        } finally {
+          down(key);
+        }
+      },
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -45507,6 +45601,7 @@ import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { track_in_flight } from "../api/in-flight.js";
 import {
   type ActorExtractor,
   type ApiError,
@@ -45548,10 +45643,13 @@ export type ActMiddlewareVariables = {
  * - \`idempotency\` (optional) — when set, the route honors
  *   \`Idempotency-Key\` via {@link withIdempotency}. The host
  *   supplies the \`IdempotencyStore\`; \`keyFrom\` defaults to reading
- *   the \`Idempotency-Key\` header. On a duplicate claim, the route
- *   responds \`409 Conflict\` — the contract intentionally doesn't
- *   cache the original handler's result, matching the
- *   receiver-side "ack the duplicate" semantics.
+ *   the \`Idempotency-Key\` header. A duplicate of a key that already
+ *   succeeded gets \`409 Conflict\` — the contract intentionally doesn't
+ *   cache the original handler's result. A duplicate that arrives
+ *   while the original is still running gets a retryable
+ *   \`503\` + \`Retry-After\` instead, because the original may yet fail
+ *   and release the key, and a client told "already used" would never
+ *   retry.
  * - \`basePath\` (optional, default \`"/api"\`) — Hono basePath the
  *   routes mount under.
  */
@@ -45651,7 +45749,8 @@ const default_key_from = (c: Context): string | undefined =>
  * 4. (Optionally) resolves \`expectedVersion\` for optimistic
  *    concurrency.
  * 5. (Optionally) claims the \`Idempotency-Key\` via
- *    {@link withIdempotency} — responds \`409\` on duplicate.
+ *    {@link withIdempotency} — responds \`409\` on a duplicate of a
+ *    committed key, \`503\` on a duplicate of one still in flight.
  * 6. Calls
  *    \`app.do(name, { stream, actor, expectedVersion? }, input)\`.
  * 7. Maps any thrown framework error onto the shared
@@ -45698,6 +45797,11 @@ export function hono<TApp extends ActSurface = ActSurface>(
   api.use("*", authenticated(options.actor));
 
   const key_from = options.idempotency?.keyFrom ?? default_key_from;
+  // Counts claims per key so a duplicate of a still-running action can be
+  // told apart from a duplicate of a committed one (see \`track_in_flight\`).
+  const tracker = options.idempotency
+    ? track_in_flight(options.idempotency.store)
+    : undefined;
 
   // Wire SSE subscriptions before the mutation routes so the
   // \`/sse/*\` paths sit alongside \`/actions/*\`. The cap counter is
@@ -45816,11 +45920,19 @@ export function hono<TApp extends ActSurface = ActSurface>(
               };
               return c.json(body, 400);
             }
-            const outcome = await withIdempotency(
-              options.idempotency.store,
-              key,
-              () => app.do(action_name as never, target as never, raw as never)
+            const outcome = await withIdempotency(tracker!.store, key, () =>
+              app.do(action_name as never, target as never, raw as never)
             );
+            if (outcome.deduped && tracker!.in_flight(key)) {
+              const body: ApiError = {
+                error: "ServiceUnavailable",
+                detail:
+                  "Idempotency-Key in flight; the original request has not finished, retry later",
+                code: "IN_FLIGHT",
+              };
+              c.header("Retry-After", "1");
+              return c.json(body, 503);
+            }
             if (outcome.deduped) {
               const body: ApiError = {
                 error: "Conflict",
@@ -46797,7 +46909,7 @@ function build_operation(
       // optional (#1287).
       required: true,
       description:
-        "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+        "Required idempotency token. A duplicate of a request that already succeeded produces a 409 Conflict (the first result is not cached on the server). A duplicate that arrives while the original is still running produces a retryable 503 with Retry-After, because the original may yet fail.",
       schema: { type: "string" },
     });
   }
@@ -46838,6 +46950,9 @@ function build_operation(
       "412": { $ref: "#/components/responses/ApiError" },
       "422": { $ref: "#/components/responses/ApiError" },
       "500": { $ref: "#/components/responses/ApiError" },
+      ...(options.idempotency
+        ? { "503": { $ref: "#/components/responses/ApiError" } }
+        : {}),
     },
   };
 }
@@ -47131,6 +47246,100 @@ export function make_finalizers(
   };
 }
 
+// === in-flight.ts ===
+/**
+ * @module act-http/api/in-flight
+ *
+ * Tells a duplicate of a delivery that is still running apart from a
+ * duplicate of one that already succeeded. An {@link IdempotencyStore}
+ * can't: its \`claim\` returns \`false\` in both cases. Answering the first
+ * "accepted, stop retrying" loses the delivery if the original then fails
+ * and releases the key, so the receiver and the generated API both ask
+ * the sender to retry while the original is in flight.
+ *
+ * Internal — not re-exported from the package. Process-local, which
+ * matches \`InMemoryIdempotencyStore\`'s single-process scope.
+ */
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/** A wrapped store plus the in-flight check it maintains. @internal */
+export type InFlightTracker = {
+  /** Pass this to the code that claims, commits, and releases. */
+  readonly store: IdempotencyStore;
+  /**
+   * True while a claim on \`key\` is pending, or was won and is not yet
+   * committed or released. Read it after your own claim lost.
+   */
+  in_flight(key: string): boolean;
+};
+
+/**
+ * Wraps \`store\` so claims are counted per key. A key is counted **before**
+ * the claim is awaited, not when its reply arrives: with an async store
+ * the loser's \`false\` can arrive before the winner's \`true\`, and marking
+ * only on the winner's reply would leave the loser a window to see the key
+ * unmarked and be answered as a settled duplicate. A claim that loses (or
+ * throws) uncounts itself at once; a claim that wins stays counted until
+ * its commit or release lands.
+ *
+ * A concurrent duplicate of an already-committed key can therefore read
+ * as in flight while another duplicate's claim is pending. That costs one
+ * extra retry, never a lost delivery.
+ *
+ * @internal
+ */
+export function track_in_flight(store: IdempotencyStore): InFlightTracker {
+  const pending = new Map<string, number>();
+  const up = (key: string) => pending.set(key, (pending.get(key) ?? 0) + 1);
+  const down = (key: string) => {
+    const left = (pending.get(key) ?? 0) - 1;
+    if (left > 0) pending.set(key, left);
+    else pending.delete(key);
+  };
+  const settle = (key: string, won: boolean) => {
+    if (!won) down(key);
+    return won;
+  };
+  return {
+    in_flight: (key) => pending.has(key),
+    store: {
+      claim(key, now) {
+        up(key);
+        let won: boolean | Promise<boolean>;
+        try {
+          won = store.claim(key, now);
+        } catch (err) {
+          down(key);
+          throw err;
+        }
+        return typeof won === "boolean"
+          ? settle(key, won)
+          : won.then(
+              (w) => settle(key, w),
+              (err: unknown) => {
+                down(key);
+                throw err;
+              }
+            );
+      },
+      async commit(key, now) {
+        try {
+          await store.commit(key, now);
+        } finally {
+          down(key);
+        }
+      },
+      async release(key) {
+        try {
+          await store.release(key);
+        } finally {
+          down(key);
+        }
+      },
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -47306,7 +47515,6 @@ function headers_bag(
 }
 
 // === start.ts ===
-import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type {
   Receiver,
   ReceiverBuilder,
@@ -47315,6 +47523,7 @@ import type {
   Validator,
 } from "@rotorsoft/act-ops/receiver";
 import { Hono } from "hono";
+import { track_in_flight } from "../api/in-flight.js";
 import { webhookMiddleware } from "./hono/index.js";
 
 /**
@@ -47374,9 +47583,9 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
   // sender's retries, and if the original then fails and releases, the
   // delivery is lost. The store can't tell the two apart, so the receiver
   // remembers which claims it won and hasn't finalized yet.
-  const in_flight = new Set<string>();
+  const tracker = track_in_flight(options.store);
   const middleware = webhookMiddleware({
-    store: track_in_flight(options.store, in_flight),
+    store: tracker.store,
     secret: options.secret,
   });
 
@@ -47410,7 +47619,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
         }
 
         const idem = c.get("idempotency");
-        if (idem.deduped && in_flight.has(idem.key)) {
+        if (idem.deduped && tracker.in_flight(idem.key)) {
           // The original is still running and may yet fail. Ask the
           // sender to come back instead of telling it to stop: a 5xx is
           // retryable by every sender, including Act's webhook reaction.
@@ -47482,45 +47691,6 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
   };
 
   return builder;
-}
-
-/**
- * Wraps the idempotency store so every claim this receiver wins is
- * recorded in \`in_flight\` as it resolves, and dropped only once its
- * commit or release has landed. Marking the key in the claim's own
- * continuation, rather than later in the route, leaves no gap in which a
- * duplicate could lose the claim yet find the key unmarked.
- */
-function track_in_flight(
-  store: IdempotencyStore,
-  in_flight: Set<string>
-): IdempotencyStore {
-  const mark = (key: string, won: boolean) => {
-    if (won) in_flight.add(key);
-    return won;
-  };
-  return {
-    claim(key, now) {
-      const won = store.claim(key, now);
-      return typeof won === "boolean"
-        ? mark(key, won)
-        : won.then((w) => mark(key, w));
-    },
-    async commit(key, now) {
-      try {
-        await store.commit(key, now);
-      } finally {
-        in_flight.delete(key);
-      }
-    },
-    async release(key) {
-      try {
-        await store.release(key);
-      } finally {
-        in_flight.delete(key);
-      }
-    },
-  };
 }
 
 // === verify.ts ===
@@ -50873,6 +51043,100 @@ export async function withIdempotency<T>(
   return { deduped: false, result };
 }
 
+// === in-flight.ts ===
+/**
+ * @module act-http/api/in-flight
+ *
+ * Tells a duplicate of a delivery that is still running apart from a
+ * duplicate of one that already succeeded. An {@link IdempotencyStore}
+ * can't: its \`claim\` returns \`false\` in both cases. Answering the first
+ * "accepted, stop retrying" loses the delivery if the original then fails
+ * and releases the key, so the receiver and the generated API both ask
+ * the sender to retry while the original is in flight.
+ *
+ * Internal — not re-exported from the package. Process-local, which
+ * matches \`InMemoryIdempotencyStore\`'s single-process scope.
+ */
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/** A wrapped store plus the in-flight check it maintains. @internal */
+export type InFlightTracker = {
+  /** Pass this to the code that claims, commits, and releases. */
+  readonly store: IdempotencyStore;
+  /**
+   * True while a claim on \`key\` is pending, or was won and is not yet
+   * committed or released. Read it after your own claim lost.
+   */
+  in_flight(key: string): boolean;
+};
+
+/**
+ * Wraps \`store\` so claims are counted per key. A key is counted **before**
+ * the claim is awaited, not when its reply arrives: with an async store
+ * the loser's \`false\` can arrive before the winner's \`true\`, and marking
+ * only on the winner's reply would leave the loser a window to see the key
+ * unmarked and be answered as a settled duplicate. A claim that loses (or
+ * throws) uncounts itself at once; a claim that wins stays counted until
+ * its commit or release lands.
+ *
+ * A concurrent duplicate of an already-committed key can therefore read
+ * as in flight while another duplicate's claim is pending. That costs one
+ * extra retry, never a lost delivery.
+ *
+ * @internal
+ */
+export function track_in_flight(store: IdempotencyStore): InFlightTracker {
+  const pending = new Map<string, number>();
+  const up = (key: string) => pending.set(key, (pending.get(key) ?? 0) + 1);
+  const down = (key: string) => {
+    const left = (pending.get(key) ?? 0) - 1;
+    if (left > 0) pending.set(key, left);
+    else pending.delete(key);
+  };
+  const settle = (key: string, won: boolean) => {
+    if (!won) down(key);
+    return won;
+  };
+  return {
+    in_flight: (key) => pending.has(key),
+    store: {
+      claim(key, now) {
+        up(key);
+        let won: boolean | Promise<boolean>;
+        try {
+          won = store.claim(key, now);
+        } catch (err) {
+          down(key);
+          throw err;
+        }
+        return typeof won === "boolean"
+          ? settle(key, won)
+          : won.then(
+              (w) => settle(key, w),
+              (err: unknown) => {
+                down(key);
+                throw err;
+              }
+            );
+      },
+      async commit(key, now) {
+        try {
+          await store.commit(key, now);
+        } finally {
+          down(key);
+        }
+      },
+      async release(key) {
+        try {
+          await store.release(key);
+        } finally {
+          down(key);
+        }
+      },
+    },
+  };
+}
+
 // === index.ts ===
 /**
  * @packageDocumentation
@@ -50937,6 +51201,7 @@ import {
   TRPCError,
 } from "@trpc/server";
 import { z } from "zod";
+import { track_in_flight } from "../api/in-flight.js";
 import {
   type ActorExtractor,
   resolveSseConfig,
@@ -50970,11 +51235,14 @@ import {
  *   \`Idempotency-Key\` via the shared
  *   {@link withIdempotency} helper. The host supplies the
  *   \`IdempotencyStore\` and a \`keyFrom\` extractor that reads the key
- *   out of the tRPC context (typically a header). On a duplicate
- *   claim, the procedure throws a \`CONFLICT\` \`TRPCError\` — the
+ *   out of the tRPC context (typically a header). A duplicate of a key
+ *   that already succeeded throws a \`CONFLICT\` \`TRPCError\` — the
  *   receiver-side convention of "ack the duplicate" doesn't carry
  *   over because the contract intentionally does not cache the
- *   original handler's result.
+ *   original handler's result. A duplicate that arrives while the
+ *   original is still running throws a retryable
+ *   \`SERVICE_UNAVAILABLE\` (503) instead: the original may yet fail and
+ *   release the key, and a client told "already used" would never retry.
  *
  * @template Ctx The host's tRPC context shape. Flows end-to-end —
  *   procedures see this exact context type (plus \`actor\`) at
@@ -51134,7 +51402,8 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
  *    \`ctx.actor\`.
  * 2. Resolves the target stream via \`options.stream(name, input, ctx)\`.
  * 3. (Optionally) claims the \`Idempotency-Key\` via
- *    {@link withIdempotency} — throws \`CONFLICT\` on duplicate.
+ *    {@link withIdempotency} — throws \`CONFLICT\` on a duplicate of a
+ *    committed key, \`SERVICE_UNAVAILABLE\` on one still in flight.
  * 4. Calls \`app.do(name, { stream, actor: ctx.actor }, input)\`.
  * 5. Maps any thrown framework error onto a \`TRPCError\` via
  *    {@link toApiError}.
@@ -51204,6 +51473,11 @@ export function trpc<
   TApp extends ActSurface = ActSurface,
 >(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<TApp> {
   const t = initTRPC.context<Ctx>().create();
+  // Counts claims per key so a duplicate of a still-running action can be
+  // told apart from a duplicate of a committed one (see \`track_in_flight\`).
+  const tracker = options.idempotency
+    ? track_in_flight(options.idempotency.store)
+    : undefined;
 
   // Resolve the actor inline per mutation instead of via
   // \`t.procedure.use(authenticated(...))\`. The middleware path threads
@@ -51285,12 +51559,16 @@ export function trpc<
                 message: "Idempotency-Key required",
               });
             }
-            const outcome = await withIdempotency(
-              options.idempotency.store,
-              key,
-              () =>
-                app.do(action_name as never, target as never, input as never)
+            const outcome = await withIdempotency(tracker!.store, key, () =>
+              app.do(action_name as never, target as never, input as never)
             );
+            if (outcome.deduped && tracker!.in_flight(key)) {
+              throw new TRPCError({
+                code: "SERVICE_UNAVAILABLE",
+                message:
+                  "Idempotency-Key in flight; the original request has not finished, retry later",
+              });
+            }
             if (outcome.deduped) {
               throw new TRPCError({
                 code: "CONFLICT",

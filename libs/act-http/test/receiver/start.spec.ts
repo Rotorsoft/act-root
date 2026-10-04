@@ -445,6 +445,47 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     expect(side_effects).toBe(1);
   });
 
+  it("answers 503 even when an async store replies to the duplicate before the original", async () => {
+    // A durable store records the original's claim at once, but its reply
+    // reaches the receiver after the duplicate's reply does.
+    const inner = new InMemoryIdempotencyStore();
+    const store: IdempotencyStore = {
+      claim: async (k) => {
+        const won = inner.claim(k);
+        if (won) await new Promise((r) => setTimeout(r, 30));
+        return won;
+      },
+      commit: (k) => inner.commit(k),
+      release: (k) => inner.release(k),
+    };
+    let release_handler: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release_handler = resolve;
+    });
+    const r = receiver({ port: 0, store })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        await gate;
+      })
+      .build();
+    const fire = () =>
+      r.fetch(
+        new Request("http://localhost/OrderConfirmed", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": "req-slow-reply",
+          },
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
+        })
+      );
+
+    const first = fire();
+    await new Promise((r) => setTimeout(r, 5)); // original's claim recorded
+    expect((await fire()).status).toBe(503);
+    release_handler?.();
+    expect((await first).status).toBe(204);
+  });
+
   it("tracks in-flight keys through a store whose claim is async", async () => {
     let release_handler: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {

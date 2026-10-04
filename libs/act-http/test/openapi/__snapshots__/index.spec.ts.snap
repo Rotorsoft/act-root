@@ -83,7 +83,7 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         "operationId": "Clear",
         "parameters": [
           {
-            "description": "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+            "description": "Required idempotency token. A duplicate of a request that already succeeded produces a 409 Conflict (the first result is not cached on the server). A duplicate that arrives while the original is still running produces a retryable 503 with Retry-After, because the original may yet fail.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -146,6 +146,9 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
           "500": {
             "$ref": "#/components/responses/ApiError",
           },
+          "503": {
+            "$ref": "#/components/responses/ApiError",
+          },
         },
         "summary": "Commit the Clear action",
         "tags": [
@@ -158,7 +161,7 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         "operationId": "OpenTicket",
         "parameters": [
           {
-            "description": "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+            "description": "Required idempotency token. A duplicate of a request that already succeeded produces a 409 Conflict (the first result is not cached on the server). A duplicate that arrives while the original is still running produces a retryable 503 with Retry-After, because the original may yet fail.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -224,6 +227,9 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
           "500": {
             "$ref": "#/components/responses/ApiError",
           },
+          "503": {
+            "$ref": "#/components/responses/ApiError",
+          },
         },
         "summary": "Commit the OpenTicket action",
         "tags": [
@@ -236,7 +242,7 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
         "operationId": "PressKey",
         "parameters": [
           {
-            "description": "Required idempotency token. Duplicate values produce a 409 Conflict; first-claim result is not cached on the server.",
+            "description": "Required idempotency token. A duplicate of a request that already succeeded produces a 409 Conflict (the first result is not cached on the server). A duplicate that arrives while the original is still running produces a retryable 503 with Retry-After, because the original may yet fail.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -301,6 +307,9 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
             "$ref": "#/components/responses/ApiError",
           },
           "500": {
+            "$ref": "#/components/responses/ApiError",
+          },
+          "503": {
             "$ref": "#/components/responses/ApiError",
           },
         },
