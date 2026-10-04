@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.20.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.2...@rotorsoft/act-pg-v1.20.3) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act:** stop overlapping full closes from double-truncating a stream ([#1756](https://github.com/Rotorsoft/act-root/issues/1756)) ([17fc46a](https://github.com/Rotorsoft/act-root/commit/17fc46a02194a3a6e059e0526687e0a6ccc62221)), closes [#1738](https://github.com/Rotorsoft/act-root/issues/1738)
+
 # [@rotorsoft/act-pg-v1.20.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.1...@rotorsoft/act-pg-v1.20.2) (2026-10-04)
 
 
