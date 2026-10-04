@@ -1,3 +1,11 @@
+# [@rotorsoft/act-ops-v0.2.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.9...@rotorsoft/act-ops-v0.2.10) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act-http:** answer an in-flight duplicate with a retryable 503, not 204 ([#1726](https://github.com/Rotorsoft/act-root/issues/1726)) ([3a3526e](https://github.com/Rotorsoft/act-root/commit/3a3526ec2611e5322dba94a67411b42a68535c6f)), closes [#1700](https://github.com/Rotorsoft/act-root/issues/1700)
+* **act-ops:** refuse to size a dedup window for a sender that never stops ([#1725](https://github.com/Rotorsoft/act-root/issues/1725)) ([cc2ebe6](https://github.com/Rotorsoft/act-root/commit/cc2ebe685a127e8b2d6ea19ce392c562bc8d697a)), closes [#1708](https://github.com/Rotorsoft/act-root/issues/1708)
+
 # [@rotorsoft/act-ops-v0.2.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.8...@rotorsoft/act-ops-v0.2.9) (2026-09-29)
 
 
