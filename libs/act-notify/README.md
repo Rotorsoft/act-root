@@ -47,7 +47,7 @@ Any `{ publish, subscribe }` implementation of the exported `Broker` type works 
 
 ### What this does not do
 
-It does **not** shard the durable log. Writes, replay, and global ordering stay bound to the wrapped store — if the log itself is the wall, see the partitioning and split-stores recipes. A broker outage degrades cross-process latency to the poll cycle and nothing else: publish failures are swallowed and logged, and a broker that drops, duplicates, or reorders every message changes nothing about what drain processes (there is a test that does exactly that).
+It does **not** shard the durable log. Writes, replay, and global ordering stay bound to the wrapped store — if the log itself is the wall, see the partitioning and split-stores recipes. A broker outage degrades cross-process latency to the poll cycle and nothing else: publish failures are swallowed and logged, the subscribe and unsubscribe behind `notify` run in the background so a stalled broker can never hang `act().build()` or `app.shutdown()` ([#1743](https://github.com/Rotorsoft/act-root/issues/1743)), and a broker that drops, duplicates, or reorders every message changes nothing about what drain processes (there is a test that does exactly that).
 
 ### Conformance
 

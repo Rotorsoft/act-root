@@ -29,7 +29,7 @@ That is the whole migration. One Redis connection per worker replaces one Postgr
 
 ## What breaks when the broker breaks
 
-Nothing but latency. Publish failures are swallowed and logged; a Redis outage means remote workers wake on their next poll cycle instead of within milliseconds. A broker that drops, duplicates, or reorders messages changes nothing about what drain processes — there is a test that does exactly that to prove it.
+Nothing but latency. Publish failures are swallowed and logged; a Redis outage means remote workers wake on their next poll cycle instead of within milliseconds. Subscribing and unsubscribing never block either: a worker that starts or shuts down while Redis is unreachable (node-redis queues commands while disconnected, with no timeout) finishes on schedule, stops delivering wakeups the moment it disposes, and logs the broker call that failed. A broker that drops, duplicates, or reorders messages changes nothing about what drain processes — there is a test that does exactly that to prove it.
 
 ## What this deliberately does not solve
 

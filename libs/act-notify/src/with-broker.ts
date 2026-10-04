@@ -107,11 +107,40 @@ export function withBroker<S extends Store>(
     return committed;
   };
 
-  const notify = (handler: (notification: StoreNotification) => void) =>
-    broker.subscribe((message) => {
+  // The subscription is a hint too, so it must never hold the orchestrator
+  // up. `notify` returns at once, and the broker's subscribe and
+  // unsubscribe run in the background with failures logged: a broker that
+  // stalls (a client that queues commands while disconnected) would
+  // otherwise hang `act().build()`'s wiring or `app.shutdown()` before its
+  // grace budget is ever consulted. The local disposer stops delivery
+  // synchronously, so a late message can't wake a worker that is
+  // shutting down even while the broker's own unsubscribe is stuck.
+  const notify = (handler: (notification: StoreNotification) => void) => {
+    let live = true;
+    const warn = (what: string) => (error: unknown) =>
+      log().warn(
+        `Broker ${what} failed: ${
+          error instanceof Error ? error.message : String(error)
+        } — remote workers wake on their next poll cycle.`
+      );
+    const subscribed = broker.subscribe((message) => {
       // Self-filtering contract: only remote commits wake this process.
-      if (message.origin !== origin) handler(message.notification);
+      if (live && message.origin !== origin) handler(message.notification);
     });
+    const release = (disposer: BrokerDisposer) => {
+      try {
+        void Promise.resolve(disposer()).catch(warn("unsubscribe"));
+      } catch (error) {
+        warn("unsubscribe")(error);
+      }
+    };
+    if (typeof subscribed !== "function") subscribed.catch(warn("subscribe"));
+    return () => {
+      live = false;
+      if (typeof subscribed === "function") release(subscribed);
+      else subscribed.then(release, () => {});
+    };
+  };
 
   return new Proxy(store, {
     get(target, prop, receiver) {
