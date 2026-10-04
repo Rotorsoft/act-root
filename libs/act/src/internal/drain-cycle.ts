@@ -716,6 +716,12 @@ export class DrainController<
         // claim() returned no leases — fully caught up
         this._deps.breaker.passed();
         this._armed = false;
+        // A defer wake GCs the entry that came due and leaves re-arming to
+        // this pass. If that stream was already handled (a competing worker
+        // got to it first), the claim is empty, and returning without
+        // rescheduling would drop the wake for every stream still parked —
+        // on an idle aggregate nothing else re-arms the drain.
+        if (this._defer.size > 0) this._defer.schedule();
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
