@@ -183,7 +183,6 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
                 "properties": {
                   "title": {
                     "type": "string",
@@ -264,7 +263,6 @@ exports[`openapi(app, options) — doc emitter > stable surface (snapshot) 1`] =
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
                 "properties": {
                   "key": {
                     "minLength": 1,

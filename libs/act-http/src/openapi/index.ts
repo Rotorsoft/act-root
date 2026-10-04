@@ -474,8 +474,13 @@ export function openapi<TApp extends ActRegistryView>(
         // with no JSON-Schema form (z.date/z.bigint/z.map/z.set/...) instead of
         // Zod 4's default `"throw"`, which would abort the WHOLE document over
         // one such field — while hono() serves the same action fine (#1328).
+        // `io: "input"` describes what a client must SEND: a `.default()`
+        // field is optional, extra keys are not rejected (Zod strips them),
+        // and a `.pipe()`/`.transform()` documents its input type. Zod's
+        // default, `"output"`, describes the parsed result instead.
         z.toJSONSchema(zod_schema, {
           unrepresentable: "any",
+          io: "input",
         }) as Record<string, unknown>
       ),
       zod_schema

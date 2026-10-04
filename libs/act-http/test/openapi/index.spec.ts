@@ -361,3 +361,37 @@ describe("openapi — unrepresentable Zod types (#1328)", () => {
     }
   );
 });
+
+describe("openapi — request bodies describe what a client sends", () => {
+  const Order = state({ Order: z.object({ priority: z.string() }) })
+    .init(() => ({ priority: "" }))
+    .emits({ Placed: z.object({ priority: z.string(), qty: z.number() }) })
+    .on({
+      Place: z.object({
+        priority: z.string().default("normal"),
+        qty: z.string().pipe(z.coerce.number()),
+      }),
+    })
+    .emit((a) => ["Placed", { priority: a.priority, qty: a.qty }])
+    .build();
+  const order_test = fixture(act().withState(Order));
+
+  order_test(
+    "uses the schema's input side, not its parsed output",
+    ({ app }) => {
+      const doc = openapi(app as never, base_options());
+      const schema = doc.paths["/api/actions/Place"]?.post?.requestBody
+        ?.content["application/json"]?.schema as {
+        required?: string[];
+        additionalProperties?: unknown;
+        properties: Record<string, { type?: string }>;
+      };
+      // a defaulted field may be left out
+      expect(schema.required ?? []).not.toContain("priority");
+      // the pipe takes a string on the wire
+      expect(schema.properties.qty.type).toBe("string");
+      // extra keys are stripped by Zod, not rejected
+      expect(schema.additionalProperties).not.toBe(false);
+    }
+  );
+});
