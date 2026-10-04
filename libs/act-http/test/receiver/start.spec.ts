@@ -350,7 +350,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     expect(attempts).toBe(1);
   });
 
-  it("dedups a concurrent duplicate that arrives while the handler is in flight", async () => {
+  it("answers a duplicate that arrives while the handler is in flight with a retryable 503", async () => {
     let attempts = 0;
     let release_handler: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {
@@ -381,14 +381,105 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
 
     // Fire the first delivery; its handler blocks on the gate.
     const first = fire();
-    // A concurrent duplicate arrives mid-flight — the tentative claim
-    // must dedup it so the handler is not entered twice.
+    // A concurrent duplicate arrives mid-flight. The handler must not be
+    // entered twice, but the outcome is still unknown, so the answer is
+    // "try again later", not "accepted, stop retrying".
     const second = await fire();
-    expect(second.status).toBe(204);
+    expect(second.status).toBe(503);
+    expect(second.headers.get("retry-after")).toBe("1");
+    expect(await second.json()).toEqual({ error: "in-flight" });
 
     release_handler?.();
     expect((await first).status).toBe(204);
     expect(attempts).toBe(1);
+
+    // Once the original committed, the same retry is a settled duplicate.
+    expect((await fire()).status).toBe(204);
+    expect(attempts).toBe(1);
+  });
+
+  it("does not lose a delivery when the original fails after a duplicate arrived mid-flight", async () => {
+    let attempts = 0;
+    let side_effects = 0;
+    let fail_handler: (() => void) | undefined;
+    const gate = new Promise<void>((_, reject) => {
+      fail_handler = () => reject(new Error("downstream down"));
+    });
+
+    const r = receiver({
+      port: 0,
+      store: new InMemoryIdempotencyStore(),
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        attempts++;
+        if (attempts === 1) await gate;
+        side_effects++;
+      })
+      .build();
+
+    const fire = () =>
+      r.fetch(
+        new Request("http://localhost/OrderConfirmed", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": "req-inflight-fail",
+          },
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
+        })
+      );
+
+    // D1 is slow; the sender times out and retries (D2) while D1 runs.
+    const first = fire();
+    const second = await fire();
+    // D2 must not be told "accepted, stop retrying".
+    expect(second.status).toBe(503);
+
+    // D1 then fails; its 500 goes to a socket nobody reads.
+    fail_handler?.();
+    expect((await first).status).toBe(500);
+    expect(side_effects).toBe(0);
+
+    // The sender honors D2's retryable answer and retries: it runs.
+    expect((await fire()).status).toBe(204);
+    expect(side_effects).toBe(1);
+  });
+
+  it("tracks in-flight keys through a store whose claim is async", async () => {
+    let release_handler: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release_handler = resolve;
+    });
+    const inner = new InMemoryIdempotencyStore();
+    const store: IdempotencyStore = {
+      claim: async (k) => inner.claim(k),
+      commit: async (k) => inner.commit(k),
+      release: async (k) => inner.release(k),
+    };
+
+    const r = receiver({ port: 0, store })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        await gate;
+      })
+      .build();
+
+    const fire = () =>
+      r.fetch(
+        new Request("http://localhost/OrderConfirmed", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": "req-async",
+          },
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
+        })
+      );
+
+    const first = fire();
+    expect((await fire()).status).toBe(503);
+    release_handler?.();
+    expect((await first).status).toBe(204);
+    expect((await fire()).status).toBe(204);
   });
 
   it("supports chaining multiple .on() calls with independent handler types", async () => {

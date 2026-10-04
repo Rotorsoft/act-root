@@ -1,3 +1,4 @@
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type {
   Receiver,
   ReceiverBuilder,
@@ -58,8 +59,16 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
     Variables: { idempotency: { key: string; deduped: boolean } };
   }>();
 
+  // Keys whose winning delivery is still running in this receiver. A
+  // duplicate that loses the claim is either behind a committed success
+  // (safe to answer 204, "stop retrying") or behind an attempt whose
+  // outcome is still unknown. In the second case a 204 would end the
+  // sender's retries, and if the original then fails and releases, the
+  // delivery is lost. The store can't tell the two apart, so the receiver
+  // remembers which claims it won and hasn't finalized yet.
+  const in_flight = new Set<string>();
   const middleware = webhookMiddleware({
-    store: options.store,
+    store: track_in_flight(options.store, in_flight),
     secret: options.secret,
   });
 
@@ -93,6 +102,13 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
         }
 
         const idem = c.get("idempotency");
+        if (idem.deduped && in_flight.has(idem.key)) {
+          // The original is still running and may yet fail. Ask the
+          // sender to come back instead of telling it to stop: a 5xx is
+          // retryable by every sender, including Act's webhook reaction.
+          c.header("Retry-After", "1");
+          return c.json({ error: "in-flight" }, 503);
+        }
         if (!idem.deduped) {
           try {
             await handler(validated, { key: idem.key });
@@ -158,4 +174,43 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
   };
 
   return builder;
+}
+
+/**
+ * Wraps the idempotency store so every claim this receiver wins is
+ * recorded in `in_flight` as it resolves, and dropped only once its
+ * commit or release has landed. Marking the key in the claim's own
+ * continuation, rather than later in the route, leaves no gap in which a
+ * duplicate could lose the claim yet find the key unmarked.
+ */
+function track_in_flight(
+  store: IdempotencyStore,
+  in_flight: Set<string>
+): IdempotencyStore {
+  const mark = (key: string, won: boolean) => {
+    if (won) in_flight.add(key);
+    return won;
+  };
+  return {
+    claim(key, now) {
+      const won = store.claim(key, now);
+      return typeof won === "boolean"
+        ? mark(key, won)
+        : won.then((w) => mark(key, w));
+    },
+    async commit(key, now) {
+      try {
+        await store.commit(key, now);
+      } finally {
+        in_flight.delete(key);
+      }
+    },
+    async release(key) {
+      try {
+        await store.release(key);
+      } finally {
+        in_flight.delete(key);
+      }
+    },
+  };
 }
