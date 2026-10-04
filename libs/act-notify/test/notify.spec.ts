@@ -2,8 +2,10 @@ import {
   act,
   dispose,
   InMemoryStore,
+  log,
   type StoreNotification,
   state,
+  store,
 } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
 import { z } from "zod";
@@ -140,6 +142,127 @@ describe("withBroker", () => {
     const wrapped = withBroker(new InMemoryStore(), broker);
     await wrapped.commit("s1", [], meta);
     expect(published).toBe(0);
+  });
+
+  describe("a broker that stalls or fails never holds the orchestrator up", () => {
+    const never = <T>() => new Promise<T>(() => {});
+    const reacting = () =>
+      act()
+        .withState(Counter)
+        .on("Incremented")
+        .do(async function reactor() {})
+        .to("sink")
+        .build();
+    const within = (p: Promise<unknown>, ms: number) =>
+      Promise.race([
+        p.then(() => "resolved"),
+        new Promise((r) => setTimeout(() => r("hung"), ms)),
+      ]);
+
+    it("shuts down when the broker's unsubscribe never settles", async () => {
+      class StalledUnsubscribe extends LoopbackBroker {
+        override subscribe(h: Parameters<Broker["subscribe"]>[0]) {
+          super.subscribe(h);
+          return () => never<void>();
+        }
+      }
+      store(withBroker(new InMemoryStore(), new StalledUnsubscribe()));
+      const app = reacting();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(await within(app.shutdown({ graceMs: 50 }), 1_000)).toBe(
+        "resolved"
+      );
+    });
+
+    it("shuts down when the broker's subscribe never settles", async () => {
+      const broker: Broker = {
+        publish: () => {},
+        subscribe: () => never<() => void>(),
+      };
+      store(withBroker(new InMemoryStore(), broker));
+      const app = reacting();
+      expect(await within(app.shutdown({ graceMs: 50 }), 1_000)).toBe(
+        "resolved"
+      );
+    });
+
+    it("stops delivering as soon as the subscription is disposed", async () => {
+      const broker = new LoopbackBroker();
+      const seen: string[] = [];
+      const dispose_sub = await withBroker(new InMemoryStore(), broker).notify(
+        (n) => seen.push(n.stream)
+      );
+      await dispose_sub();
+      // a message already in the broker's pipeline arrives after disposal
+      broker.publish({
+        origin: "remote",
+        notification: { stream: "late", events: [] },
+      });
+      expect(seen).toEqual([]);
+    });
+
+    it("logs subscribe and unsubscribe failures instead of throwing", async () => {
+      const warn = vi.spyOn(log(), "warn");
+      const rejecting: Broker = {
+        publish: () => {},
+        subscribe: () => Promise.reject(new Error("no route to broker")),
+      };
+      const d1 = await withBroker(new InMemoryStore(), rejecting).notify(
+        () => {}
+      );
+      await d1();
+
+      const sync_throw: Broker = {
+        publish: () => {},
+        subscribe: () => () => {
+          throw new Error("unsubscribe exploded");
+        },
+      };
+      const d2 = await withBroker(new InMemoryStore(), sync_throw).notify(
+        () => {}
+      );
+      await d2();
+
+      const async_reject: Broker = {
+        publish: () => {},
+        subscribe: async () => () =>
+          Promise.reject(new Error("unsubscribe timed out")),
+      };
+      const d3 = await withBroker(new InMemoryStore(), async_reject).notify(
+        () => {}
+      );
+      await d3();
+
+      const string_reject: Broker = {
+        publish: () => {},
+        subscribe: () => Promise.reject("ECONNREFUSED"),
+      };
+      const d4 = await withBroker(new InMemoryStore(), string_reject).notify(
+        () => {}
+      );
+      await d4();
+
+      await vi.waitFor(() => {
+        const messages = warn.mock.calls.map((c) => String(c[0]));
+        expect(
+          messages.some((m) => m.includes("subscribe failed: ECONNREFUSED"))
+        ).toBe(true);
+        expect(
+          messages.some((m) => m.includes("subscribe failed: no route"))
+        ).toBe(true);
+        expect(
+          messages.some((m) =>
+            m.includes("unsubscribe failed: unsubscribe exploded")
+          )
+        ).toBe(true);
+        expect(
+          messages.some((m) =>
+            m.includes("unsubscribe failed: unsubscribe timed out")
+          )
+        ).toBe(true);
+      });
+      warn.mockRestore();
+    });
   });
 
   it("wakes a full orchestrator on a remote commit", async () => {
