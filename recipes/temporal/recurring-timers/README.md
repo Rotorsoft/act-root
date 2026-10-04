@@ -34,12 +34,18 @@ act()
   .on("Reminded")
     .defer(opts.schedule)
     .do(async function nudge(event, stream, app) {
-      if (event.data.nth >= opts.max) {
-        await app.do("endReminders", { stream, actor: SYS }, {});
-        return;
+      // Only advance from the tick at head (see Failure modes).
+      const target = { stream, actor: SYS, expectedVersion: event.version };
+      try {
+        if (event.data.nth >= opts.max) {
+          await app.do("endReminders", target, {});
+          return;
+        }
+        await opts.onRemind?.(event.data.nth);
+        await app.do("remind", target, { nth: event.data.nth + 1 });
+      } catch (error) {
+        if (!(error instanceof ConcurrencyError)) throw error;
       }
-      await opts.onRemind?.(event.data.nth);
-      await app.do("remind", { stream, actor: SYS }, { nth: event.data.nth + 1 });
     })
   .build();
 ```
@@ -140,6 +146,7 @@ What happens when the machinery under the loop hiccups:
 
 - **The finalize write fails** (store blip at the end of a drain cycle). The schedule is persisted atomically with the cycle's acks — one store call — so a failure lands *nothing*: no ack, no schedule, no lost work. The framework surfaces the error on the `error` lifecycle event and keeps the drain armed; the next cycle redelivers the tick, your handler re-throws its `DeferSignal`, and because the due-time derives from the tick (the durability rule above), it resolves to the same instant. The failure mode is an early redelivery of one tick, never a stalled loop or a half-landed cycle.
 - **A worker crashes mid-finalize.** Identical outcome: nothing landed, so the first drain after restart redelivers and finalizes again. This is why the due-time must derive from the tick, not from `Date.now()` — the replacement worker lands on the same schedule.
+- **The tick is redelivered after its handler already ran.** The handler sent the nudge and committed the next tick, and then the ack failed or the lease was lost. Delivery is at-least-once, so the same tick runs again. Without a guard, that second run commits a second next tick, each copy schedules its own follow-up, and every tick from then on fires twice, forever ([#1744](https://github.com/Rotorsoft/act-root/issues/1744)). The handler prevents this by committing with `expectedVersion: event.version`: the follow-up lands only if nothing has been committed after the tick being handled. A redelivered tick gets a `ConcurrencyError`, which the handler takes as "already advanced". The nudge itself can still repeat once, so the side effect has to tolerate a duplicate, like any at-least-once handler.
 
 Both paths assume something drives the drain: live deployments get that from commits/notify, the breaker's retry probe, or a lane `cycleMs` poller (see the production checklist's sizing section).
 
