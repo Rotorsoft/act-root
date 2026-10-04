@@ -129,11 +129,16 @@ export function next_window_open(
     if (hour_in_zone(candidate, window.timeZone) === window.start)
       return candidate;
     // The `start` hour may be unreachable on a spring-forward day; catch
-    // the gap boundary at the top of this candidate's hour.
+    // the gap boundary at the top of this candidate's hour. The boundary is
+    // UTC-hour aligned, so in a fractional-offset zone the first one can sit
+    // behind `now` — a past due is never excluded by claim, so skip it.
     const boundary = new Date(
       candidate.getTime() - (candidate.getTime() % 3_600_000)
     );
-    if (is_dst_gap_open(boundary, window.timeZone, window.start))
+    if (
+      boundary.getTime() >= start_ms &&
+      is_dst_gap_open(boundary, window.timeZone, window.start)
+    )
       return boundary;
   }
   return new Date(start_ms + 86_400_000);
