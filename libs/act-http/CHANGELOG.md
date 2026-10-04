@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.9...@rotorsoft/act-http-v1.10.10) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act-http:** answer an in-flight duplicate with a retryable 503, not 204 ([#1726](https://github.com/Rotorsoft/act-root/issues/1726)) ([3a3526e](https://github.com/Rotorsoft/act-root/commit/3a3526ec2611e5322dba94a67411b42a68535c6f)), closes [#1700](https://github.com/Rotorsoft/act-root/issues/1700)
+
 # [@rotorsoft/act-http-v1.10.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.8...@rotorsoft/act-http-v1.10.9) (2026-10-01)
 
 
