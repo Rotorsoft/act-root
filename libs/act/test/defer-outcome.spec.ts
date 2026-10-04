@@ -97,6 +97,38 @@ describe("defer outcome (integration)", () => {
     expect(ran).toEqual(["w1", "w2"]);
   });
 
+  it("re-runs a sibling that shares the deferred reaction's target, but not an isolated one", async () => {
+    // Documented in state-management.md § Isolating a defer with `.to`:
+    // a group is delivered again when its deferred member comes due.
+    async function welcomes(isolate: boolean) {
+      let welcomed = 0;
+      const deferred = act()
+        .withState(counter)
+        .on("ticked")
+        .do(async function welcome() {
+          welcomed++;
+        })
+        .on("ticked")
+        .defer((e) => ({ at: new Date(e.created.getTime() + 60) }))
+        .do(async function later() {});
+      const app = (
+        isolate
+          ? deferred.to((e) => ({ target: `later-${e.stream}` }))
+          : deferred
+      ).build();
+      await app.do("tick", { stream: isolate ? "iso" : "shared", actor }, {});
+      for (let i = 0; i < 4; i++) {
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+        await sleep(50);
+      }
+      await dispose()();
+      return welcomed;
+    }
+    expect(await welcomes(false)).toBe(2);
+    expect(await welcomes(true)).toBe(1);
+  });
+
   it("groups streams sharing one due-time into a single defer call", async () => {
     // A fixed due-time shared by both streams so the cycle's persist loop
     // groups them under one key (exercises the same-due-time branch).

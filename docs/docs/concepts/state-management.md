@@ -285,6 +285,8 @@ A watermark is keyed by its target stream, so every reaction that shares a targe
   .to("counter-deadlines")
 ```
 
+Sharing a target has a second effect worth knowing. Reactions on the same event and the same target stream are delivered as one group, and the stream is never acknowledged past an event until every reaction in its group has run. So when one reaction in the group defers, the event stays pending, and when the due-time arrives **the whole group is delivered again**, including siblings that already succeeded on the first delivery. A `welcome` reaction that runs before a deferred `archive` on the same stream runs twice. No failure is involved, and it happens on every defer (an imperative `DeferSignal` that re-defers several times re-runs the siblings on each pass). Either make those siblings idempotent, as at-least-once delivery already asks, or isolate the defer with `.to(...)` as above, so it has its own stream and group ([#1745](https://github.com/Rotorsoft/act-root/issues/1745)).
+
 The mechanic underneath both surfaces (the pending hold, the persisted `deferred_at`, and the claim-skips-until-due behavior) is covered in [Correlation & drain](../architecture/correlation-and-drain.md) and the [close-cycle](../architecture/close-cycle.md) reference.
 
 Both surfaces are one-shot on purpose. There is no `{ every }` recurrence form, because holding one event forever to re-fire it would pin the stream's watermark. When you need a timer that repeats on a cadence, build it as a reaction that one-shot-defers a tick and then emits the next tick, following the [recurring-timers recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/temporal/recurring-timers).
