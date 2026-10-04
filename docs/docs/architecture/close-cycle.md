@@ -57,6 +57,12 @@ Targets carrying a `before` cutoff never enter this pipeline. `run_close_cycle` 
                       │
                       ▼
           ┌───────────────────────────┐
+          │ Phase 5b: Re-check head   │ Truncate only streams whose head is still this
+          │                           │ close's guard; the rest land in `skipped`.
+          └───────────┬───────────────┘
+                      │
+                      ▼
+          ┌───────────────────────────┐
           │ Phase 6: Truncate + seed  │ Atomic per-store transaction: delete every event for
           │   (atomic per stream)     │ the stream, insert a single seed (`__snapshot__` for
           │                           │ restart, `__tombstone__` for tombstone-only).
@@ -153,6 +159,10 @@ Why sequential: archive callbacks frequently share connections (S3 client, etc).
 
 After this phase: archive completed (or partially completed); streams still tombstoned but not truncated. Safe state.
 
+### Phase 5b — Re-check the head
+
+Before truncating, one `query_stats(guarded, {})` reads each stream's true head (markers included). A stream whose head is no longer this close's guard tombstone is dropped from the truncate and reported in `skipped`. See [Overlapping full closes](#overlapping-full-closes) for when that happens.
+
 ### Phase 6 — Truncate + seed
 
 Atomic per-stream transaction. For each guarded stream:
@@ -177,6 +187,17 @@ The result map contains `{ deleted: count, committed: seed_event }` per stream. 
 - **Tombstone**: `cache.invalidate(stream)`. The cache is cleared; future loads will see only the tombstone and `action()` will throw `StreamClosedError`.
 
 - **Truncate fails for one stream**: that stream's pre-truncate state is preserved (transaction rolled back). Other streams continue. The failed stream is still safely guarded — retryable.
+
+## Overlapping full closes
+
+Phase 1's resume rule (#1389) reads "a tombstone at head with domain events below" as an interrupted close. A close that is merely *still running* (parked in its archive callback, say) leaves the stream in exactly that state. So a second full closer arriving in that window used to resume the first one's guard, archive, and truncate, and the first closer then truncated again. With `restart: true` that late truncate deleted any commit accepted on the stream the second closer had reseeded ([#1738](https://github.com/Rotorsoft/act-root/issues/1738)).
+
+Two things now prevent that:
+
+- **The per-stream close lock covers the full path too.** The same process-local lock the windowed branch uses (see [below](#why-there-is-no-head-guard-but-there-is-a-per-stream-lock)) is taken for every stream a full close targets, for the whole of Phases 1-6, in sorted order so two batches can't deadlock. A second closer in the same process, including a manual `app.close` racing an autoclose terminate close on one Act instance, waits, then finds the stream already closed and does nothing.
+- **Phase 5b re-checks the head before truncating.** The lock is process-local, so a closer in another process can still resume the guard, finish first, and reseed. The original closer then sees a head that is no longer its guard and skips the truncate, so it never deletes what the other closer left or a commit accepted after it.
+
+What remains across processes: both closers can run their archive callback, since archiving happens before the re-check. Archive callbacks must already be idempotent for the retry case (Phase 5), and that requirement covers this one too. A store-level exclusive close would remove it, at the cost of new `Store` surface.
 
 ## Idempotency
 
@@ -208,7 +229,7 @@ The full path tombstone-guards each stream so the archive callback runs against 
 
 **What the cap reads** ([#1520](https://github.com/Rotorsoft/act-root/issues/1520)). A watermark alone stopped answering "how far is it safe to prune?" when correlate became the producer of the work mark: a subscription advances only over events that resolve to it, so a reaction covering a subset of a state's events sits permanently below the head with nothing pending. Capping at that frozen watermark meant a retention window pruned almost nothing, every time, with no error and no `skipped` entry. A consumer with unconsumed work (`at < correlated_at`) still caps at its watermark, exactly as before — the fail-safe property is unchanged. A consumer that has consumed everything marked for it caps at the **correlate checkpoint** instead: not at infinity, because events above the checkpoint have not been resolved yet and a mark for them may still be coming, so pruning past it could delete work a consumer is about to be told about. The cycle catches correlation up first so that bound is as generous as it can honestly be. An unmarked row keeps the conservative watermark cap. The cache also stays warm: current state is unchanged by construction, so there is nothing to invalidate.
 
-The guard-free design assumes a **single closer per stream**, and that assumption doesn't hold on its own ([#1222](https://github.com/Rotorsoft/act-root/issues/1222)). An autoclose windowed close runs under the `__autoclose__:X` drain lease, but a manual `app.close([{ stream: X, before }])` calls `run_close_cycle` directly and never takes that lease — so both can enter the windowed branch for the same stream at once, and each would fire the user's `archive` callback against the same prefix (a double S3 upload / double JSONL append). The orchestrator threads a **process-local per-stream lock** into the cycle (shared across `app.close` and the drain's `on_close`, since both run on the same Act instance). Windowed work for a given stream serializes behind it; the second closer through runs the prune-pending probe, sees the prefix has already been pruned (the boundary is now the earliest event), skips its archive, and lands in `skipped`. Different streams still proceed in parallel. This coordinates archive at-most-once per pruned range without reintroducing a store-level guard or changing the days-only, prune-not-retire semantics.
+The guard-free design assumes a **single closer per stream**, and that assumption doesn't hold on its own ([#1222](https://github.com/Rotorsoft/act-root/issues/1222)). An autoclose windowed close runs under the `__autoclose__:X` drain lease, but a manual `app.close([{ stream: X, before }])` calls `run_close_cycle` directly and never takes that lease — so both can enter the windowed branch for the same stream at once, and each would fire the user's `archive` callback against the same prefix (a double S3 upload / double JSONL append). The orchestrator threads a **process-local per-stream lock** into the cycle (shared across `app.close` and the drain's `on_close`, since both run on the same Act instance). The full path takes the same lock (see [Overlapping full closes](#overlapping-full-closes)). Windowed work for a given stream serializes behind it; the second closer through runs the prune-pending probe, sees the prefix has already been pruned (the boundary is now the earliest event), skips its archive, and lands in `skipped`. Different streams still proceed in parallel. This coordinates archive at-most-once per pruned range without reintroducing a store-level guard or changing the days-only, prune-not-retire semantics.
 
 ### Skipped semantics and result shape
 

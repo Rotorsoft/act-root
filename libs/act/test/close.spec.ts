@@ -815,3 +815,110 @@ describe("close and reaction subscriptions (#1398)", () => {
     await app.shutdown();
   });
 });
+
+describe("overlapping full closes (#1738)", () => {
+  const tally = state({ Tally: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ added: z.object({ by: z.number() }) })
+    .patch({ added: ({ data }, s) => ({ n: s.n + data.by }) })
+    .on({ add: z.object({ by: z.number() }) })
+    .emit((a) => ["added", { by: a.by }])
+    .build();
+  const actor = { id: "t", name: "t" };
+  const build = () => act().withState(tally).build();
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  /** Close `stream` with an archive that parks until the test lets it go. */
+  function parked_close(
+    app: ReturnType<typeof build>,
+    stream: string,
+    restart: boolean,
+    calls: string[],
+    label: string
+  ) {
+    let entered!: () => void;
+    let release!: () => void;
+    const in_archive = new Promise<void>((r) => (entered = r));
+    const gate = new Promise<void>((r) => (release = r));
+    const done = app.close([
+      {
+        stream,
+        restart,
+        archive: async () => {
+          calls.push(label);
+          entered();
+          await gate;
+        },
+      },
+    ]);
+    return { done, in_archive, release };
+  }
+
+  const events_of = async (app: ReturnType<typeof build>, stream: string) =>
+    (
+      await app.query_array({
+        stream,
+        stream_exact: true,
+        with_snaps: true,
+        after: -1,
+      })
+    ).map((e) => e.name as string);
+
+  it("serializes two closes of one stream on the same app, so it is archived once", async () => {
+    const app = build();
+    for (let i = 0; i < 3; i++)
+      await app.do("add", { stream: "o1", actor }, { by: 1 });
+    const calls: string[] = [];
+    const a = parked_close(app, "o1", false, calls, "A");
+    await a.in_archive;
+    const b = app.close([
+      { stream: "o1", archive: async () => void calls.push("B") },
+    ]);
+    a.release();
+    const [ra, rb] = await Promise.all([a.done, b]);
+    expect(calls).toEqual(["A"]);
+    expect(ra.truncated.has("o1")).toBe(true);
+    expect(rb.truncated.has("o1")).toBe(false);
+    expect(await events_of(app, "o1")).toEqual([TOMBSTONE_EVENT]);
+  });
+
+  it("does not let a closer that lost its guard to another app delete a commit accepted after the reseed", async () => {
+    // Two apps over one store stand in for two processes: each has its own
+    // process-local close lock, so only the head re-check can help here.
+    const app1 = build();
+    const app2 = build();
+    for (let i = 0; i < 3; i++)
+      await app1.do("add", { stream: "o2", actor }, { by: 1 });
+    const calls: string[] = [];
+    const a = parked_close(app1, "o2", true, calls, "A");
+    await a.in_archive;
+    // The second closer resumes A's guard, archives, and reseeds the stream.
+    await app2.close([{ stream: "o2", restart: true }]);
+    await app2.do("add", { stream: "o2", actor }, { by: 100 });
+    a.release();
+    const ra = await a.done;
+    expect(ra.skipped).toEqual(["o2"]);
+    expect(ra.truncated.has("o2")).toBe(false);
+    await cache().clear();
+    expect((await app2.load(tally, "o2")).state.n).toBe(103);
+  });
+
+  it("does not truncate a second time after another app finished the close", async () => {
+    const app1 = build();
+    const app2 = build();
+    for (let i = 0; i < 3; i++)
+      await app1.do("add", { stream: "o3", actor }, { by: 1 });
+    const calls: string[] = [];
+    const a = parked_close(app1, "o3", false, calls, "A");
+    await a.in_archive;
+    const rb = await app2.close([{ stream: "o3" }]);
+    expect(rb.truncated.has("o3")).toBe(true);
+    a.release();
+    const ra = await a.done;
+    expect(ra.skipped).toEqual(["o3"]);
+    expect(await events_of(app1, "o3")).toEqual([TOMBSTONE_EVENT]);
+  });
+});
