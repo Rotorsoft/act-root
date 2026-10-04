@@ -198,16 +198,23 @@ export interface IdempotencyStore {
 ```
 
 `claim` returns `true` when the key was fresh — but the claim it makes is
-**tentative**. A tentative claim dedups a concurrent duplicate that arrives while
-the handler is in flight (the second caller sees `false` and serializes behind the
-first), yet it is not durable across the sender's own retries until the caller
-confirms the outcome:
+**tentative**. A tentative claim stops a concurrent duplicate that arrives while
+the handler is in flight from running the handler a second time (the second caller
+sees `false`), yet it is not durable across the sender's own retries until the
+caller confirms the outcome:
 
 - `commit(key)` — the handler succeeded; promote the claim to a durable record so
   every later retry of the same key dedups.
 - `release(key)` — the handler failed transiently; drop the tentative claim so the
   sender's retry re-processes instead of being deduped into a silent success.
   Releasing a key that was already committed is a no-op.
+
+A `false` from `claim` says another delivery holds the key. It does not say
+whether that delivery has succeeded. Answering such a duplicate "accepted, stop
+retrying" while the original is still running is how a delivery gets lost: the
+sender stops, the original then fails and releases, and nothing ever runs it. The
+`receiver` builder tracks the claims it is still running and answers an in-flight
+duplicate with a retryable `503` instead (see the status table below).
 
 This two-phase shape is what stops a transient handler failure from permanently
 dropping a delivery. A `claim`-and-commit-on-arrival contract records the key
@@ -408,14 +415,15 @@ Naming convention: the type is `Receiver` (PascalCase), the factory is `receiver
 
 | Status | Body | When |
 |---:|---|---|
-| **204** | (empty) | Handler ran successfully, or dedup-skipped silently. Sender stops retrying. |
+| **204** | (empty) | Handler ran successfully, or the key was already committed by an earlier delivery (dedup-skipped). Sender stops retrying. |
 | **400** | `{ "error": "missing-key" }` | No `Idempotency-Key` header |
 | **400** | `{ "error": "empty-body" }` | `secret` is set but the resolved raw body is empty — the raw-body parser isn't mounted (see below). Distinct from a signature failure so the misconfiguration is diagnosable. |
 | **401** | `{ "error": "missing-signature" \| "missing-timestamp" \| "stale" \| "future" \| "bad-signature" }` | Signature/timestamp verification failed |
 | **422** | `{ "error": "validation-failed", "detail": "..." }` | Schema rejected the body |
 | **500** | `{ "error": "handler-failed", "detail": "..." }` | Handler threw — the claim is released, and the sender's retry re-processes |
+| **503** | `{ "error": "in-flight" }`, `Retry-After: 1` | A duplicate arrived while the original delivery of the same key is still running here. Its outcome is unknown, so the sender is asked to retry rather than stop |
 
-Successful first-time processing and dedup-skipped re-sends both return 204 — the sender treats both as "accepted, stop retrying." The receiver's logs distinguish them. On a 500 the builder releases the tentative claim, so the sender's retry under the same `Idempotency-Key` re-runs the handler instead of being deduped into a silent success — a transient failure is never permanently lost.
+Successful first-time processing and re-sends of an already-committed key both return 204 — the sender treats both as "accepted, stop retrying." The receiver's logs distinguish them. A re-send that arrives while the original is *still running* gets a 503 instead. The usual cause is a slow handler that outlasts the sender's `timeoutMs`. If the original then fails, the sender's next retry runs the handler, and if it succeeds, the next retry is a committed duplicate and gets 204. Every sender treats a 5xx as retryable, including Act's own `webhook` reaction. The in-flight check is local to the receiver process, which matches `InMemoryIdempotencyStore`'s single-process scope. On a 500 the builder releases the tentative claim, so the sender's retry under the same `Idempotency-Key` re-runs the handler instead of being deduped into a silent success — a transient failure is never permanently lost.
 
 A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch verification + dedup work end-to-end.
 

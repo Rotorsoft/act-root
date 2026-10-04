@@ -33,13 +33,20 @@ export interface IdempotencyStore {
    * The claim is **tentative** until the caller confirms the outcome
    * with {@link commit} or {@link release}. A tentative claim still
    * dedups a concurrent duplicate that arrives while the handler is
-   * in flight — the second caller sees `false` and serializes behind
-   * the first — but it is *not* durable across the caller's own
+   * in flight — the second caller sees `false` and must not run the
+   * handler — but it is *not* durable across the caller's own
    * retries until committed. This two-phase shape is what stops a
    * transient handler failure from permanently dropping a delivery:
    * the sender retries with the same key, and because the failed
    * attempt released (or never committed) the claim, the retry
    * re-processes instead of being deduped into a silent success.
+   *
+   * A `false` says another caller holds the key, not that its delivery
+   * succeeded. While the holder is still running, answering the
+   * duplicate's sender "accepted, stop retrying" can lose the delivery
+   * if the holder then fails and releases. Ask the sender to retry
+   * instead, as the `receiver` builder in `@rotorsoft/act-http` does with
+   * a `503`.
    *
    * `now` is exposed for tests; production callers should leave it
    * undefined so wall-clock is used.
