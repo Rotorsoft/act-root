@@ -59,8 +59,6 @@
         "zod",
         "vitest",
         "@fast-check/vitest",
-        "react",
-        "react-dom",
         "hono",
         "@hono/node-server",
         "@trpc/server",
@@ -69,6 +67,11 @@
         "prom-client"
       ],
       "groupName": "{{{depName}}}"
+    },
+    {
+      "description": "react and react-dom must always be the exact same version: React checks this at runtime, and the docs build (Docusaurus server render) throws 'Incompatible React versions' when they differ. They used to sit in the per-package rule above, which split them into two PRs that each bumped one and failed CI on their own (#1735/#1736). One PR moves both, with every peer and dev entry of each.",
+      "matchPackageNames": ["react", "react-dom"],
+      "groupName": "react"
     }
   ],
   "lockFileMaintenance": {
