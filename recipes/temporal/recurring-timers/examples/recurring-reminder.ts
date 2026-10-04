@@ -19,6 +19,7 @@
 import {
   act,
   type Committed,
+  ConcurrencyError,
   type DeferWhen,
   state,
   ZodEmpty,
@@ -82,16 +83,21 @@ export function buildReminderTimer(opts: {
     .on("Reminded")
     .defer(opts.schedule)
     .do(async function nudge(event, stream, app) {
-      if (event.data.nth >= opts.max) {
-        await app.do("endReminders", { stream, actor: SYS }, {});
-        return;
+      // A tick can be redelivered after its handler already ran (the ack
+      // failed, or the lease was lost). Commit the follow-up only if nothing
+      // has landed after this tick, so a redelivery can't start a second
+      // chain; a ConcurrencyError here means this tick already advanced.
+      const target = { stream, actor: SYS, expectedVersion: event.version };
+      try {
+        if (event.data.nth >= opts.max) {
+          await app.do("endReminders", target, {});
+          return;
+        }
+        await opts.onRemind?.(event.data.nth);
+        await app.do("remind", target, { nth: event.data.nth + 1 });
+      } catch (error) {
+        if (!(error instanceof ConcurrencyError)) throw error;
       }
-      await opts.onRemind?.(event.data.nth);
-      await app.do(
-        "remind",
-        { stream, actor: SYS },
-        { nth: event.data.nth + 1 }
-      );
     })
     .build();
 }
