@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { act, dispose, sleep, state, ZodEmpty } from "../src/index.js";
+import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { DeferSignal } from "../src/internal/defer-signal.js";
 
 /**
@@ -127,6 +127,48 @@ describe("defer outcome (integration)", () => {
     }
     expect(await welcomes(false)).toBe(2);
     expect(await welcomes(true)).toBe(1);
+  });
+
+  it("keeps a woken stream parked when the store can't say whether it is still deferred", async () => {
+    // Same race as above: W1 wakes for a stream a competitor already
+    // handled, so its drain claims nothing. Re-parking asks the store which
+    // woken streams are still deferred; if that read fails, the stream stays
+    // parked (a later wake re-checks) instead of losing its wake.
+    const ran: string[] = [];
+    const worker = () =>
+      act()
+        .withState(counter)
+        .on("ticked")
+        .defer((e) => ({
+          at: new Date(e.created.getTime() + (e.stream === "k1" ? 60 : 200)),
+        }))
+        .do(async function remind(e) {
+          ran.push(e.stream);
+        })
+        .to((e) => ({ target: `remind-${e.stream}` }))
+        .build();
+
+    const w1 = worker();
+    await w1.do("tick", { stream: "k1", actor }, {});
+    await w1.do("tick", { stream: "k2", actor }, {});
+    await w1.correlate();
+    await w1.drain({ leaseMillis: 1 });
+    await sleep(100);
+    const competitor = worker();
+    await competitor.correlate();
+    await competitor.drain({ leaseMillis: 1 });
+
+    const read = vi
+      .spyOn(store(), "query_streams")
+      .mockRejectedValueOnce(new Error("store blip"));
+    const empty = await w1.drain({ leaseMillis: 1 });
+    expect(empty.leased.length).toBe(0);
+    expect(read).toHaveBeenCalled();
+    read.mockRestore();
+
+    await sleep(200);
+    await w1.drain({ leaseMillis: 1 });
+    expect(ran).toEqual(["k1", "k2"]);
   });
 
   it("groups streams sharing one due-time into a single defer call", async () => {

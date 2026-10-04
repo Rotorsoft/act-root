@@ -49,15 +49,15 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 export class DeferTimer {
   private readonly _due = new Map<string, number>();
   private _timer: ReturnType<typeof setTimeout> | undefined;
-  private readonly _on_wake: () => void;
+  private readonly _on_wake: (due: string[]) => void;
 
   /**
    * @param on_wake - invoked once each time the earliest due-time elapses,
-   *   after the come-due entries have been removed. Consumers use it to
-   *   re-arm their loop (the drain sets its `armed` flag; autoclose runs a
-   *   tick).
+   *   after the come-due entries have been removed, with the streams that
+   *   came due. Consumers use it to re-arm their loop (the drain sets its
+   *   `armed` flag and remembers the streams; autoclose runs a tick).
    */
-  constructor(on_wake: () => void) {
+  constructor(on_wake: (due: string[]) => void) {
     this._on_wake = on_wake;
   }
 
@@ -121,13 +121,14 @@ export class DeferTimer {
       // Garbage-collect the entries that have come due so the consumer's
       // next pass sees them as active again.
       const now = Date.now();
-      let came_due = false;
+      const due: string[] = [];
       for (const [stream, at] of this._due)
         if (at <= now) {
           this._due.delete(stream);
-          came_due = true;
+          due.push(stream);
         }
-      this._on_wake();
+      const came_due = due.length > 0;
+      this._on_wake(due);
       // Premature ceiling clamp: nothing came due, yet entries remain — the
       // earliest due-time was past the 32-bit `setTimeout` ceiling, so this
       // wake fired early. The consumer's `on_wake` won't re-arm (the drain's

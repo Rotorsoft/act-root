@@ -241,6 +241,8 @@ There is deliberately no function form of `at`. Wherever you choose a schedule t
 
 That shape enforces the one load-bearing rule of the whole feature, **derivability**: a due-time must derive from event data and never from `Date.now()`. Because watermarks and leases last only seconds while a defer can last days, a competing worker will re-claim the stream long before the wait is over. When it re-resolves the schedule against the same triggering event it must land on the same due-time as the worker that first deferred, otherwise the deferral fires early or drifts. Anchoring `{ after }` to `event.created` and deriving every `{ at }` from event data is what keeps a defer correct across restarts and across competing consumers.
 
+The wait itself is timed by each worker's own clock, while the store decides when the stream is released (Postgres compares `deferred_at` with the database's `NOW()`). If a worker's clock runs ahead of the database's, its wake arrives early and the stream isn't claimable yet. The worker then asks the store whether the stream is still deferred, and if it is, checks again about a second later, until the database releases it. Clock skew costs at most that much extra delay, never a lost defer ([#1753](https://github.com/Rotorsoft/act-root/issues/1753)).
+
 ### The `DeferSignal` escape hatch
 
 When a static schedule is not expressive enough, throw `DeferSignal` from inside the handler. It is exported from `@rotorsoft/act` and carries an unresolved `when`; the drain resolves it against the triggering event it is already dispatching.

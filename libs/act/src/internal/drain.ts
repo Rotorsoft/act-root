@@ -38,6 +38,28 @@ export interface DrainOps<TEvents extends Schemas> {
   ack: typeof ack;
   block: typeof block;
   subscribe: typeof subscribe;
+  still_deferred: typeof still_deferred;
+}
+
+/**
+ * The subset of `streams` whose persisted defer schedule is still in
+ * place. `ack` and `block` clear `deferred_at`, so a stream another worker
+ * already handled drops out, while one the store still holds back (its
+ * clock is behind this process's) stays in.
+ */
+export async function still_deferred(streams: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  await Promise.all(
+    streams.map((stream) =>
+      store().query_streams(
+        (pos) => {
+          if (pos.deferred_at !== undefined) out.add(pos.stream);
+        },
+        { stream, stream_exact: true }
+      )
+    )
+  );
+  return out;
 }
 
 export const claim = (

@@ -39,6 +39,14 @@ import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
 /**
+ * How long to wait before re-checking a stream a defer wake brought due but
+ * the store did not yet release (its clock is behind this process's).
+ *
+ * @internal
+ */
+const DEFER_REPARK_MS = 1_000;
+
+/**
  * Outcome of processing a single leased stream — produced by Act's `handle`
  * / `handle_batch` dispatchers, consumed by `run_drain_cycle` to drive ack/block.
  *
@@ -538,9 +546,16 @@ export class DrainController<
    * for the multi-worker trade-off). Its wake re-arms drain at the earliest
    * pending visit.
    */
-  private readonly _defer = new DeferTimer(() => {
+  private readonly _defer = new DeferTimer((due) => {
     this._armed = true;
+    for (const stream of due) this._woken.add(stream);
   });
+  /**
+   * Streams the last defer wake brought due. The timer has already dropped
+   * them, so if the drain they armed doesn't claim them they are re-parked
+   * (see {@link _repark_woken}) rather than forgotten.
+   */
+  private readonly _woken = new Set<string>();
   /** Worker timer (ACT-1103). Set when `start()` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -588,6 +603,32 @@ export class DrainController<
    * collapses many seeds into one timer, so callers may seed in a loop and
    * let the earliest due-time win.
    */
+  /**
+   * Re-park the streams the last wake brought due that this drain did not
+   * claim, while the store still holds them deferred. The wake runs on this
+   * process's clock, but the store decides what `claim` returns: Postgres
+   * compares `deferred_at` with the database's own `NOW()`. With this
+   * process's clock ahead, the wake arrives "early", the claim comes back
+   * without the stream, and since the timer already dropped it, nothing
+   * would wake the drain for it again. Re-parking at a short floor retries
+   * until the store releases it; a stream another worker already handled
+   * has no persisted defer left and is dropped.
+   */
+  private async _repark_woken(leased: Set<string>): Promise<void> {
+    const unclaimed = [...this._woken].filter((stream) => !leased.has(stream));
+    this._woken.clear();
+    if (!unclaimed.length) return;
+    let keep: Iterable<string>;
+    try {
+      keep = await this._deps.ops.still_deferred(unclaimed);
+    } catch {
+      // Can't tell: keep them parked rather than lose the wake.
+      keep = unclaimed;
+    }
+    const at = Date.now() + DEFER_REPARK_MS;
+    for (const stream of keep) this._defer.set(stream, at);
+  }
+
   seed_defer(stream: string, at: number): void {
     this._defer.set(stream, at);
     this._defer.schedule();
@@ -721,6 +762,7 @@ export class DrainController<
         // got to it first), the claim is empty, and returning without
         // rescheduling would drop the wake for every stream still parked —
         // on an idle aggregate nothing else re-arms the drain.
+        await this._repark_woken(new Set());
         if (this._defer.size > 0) this._defer.schedule();
         return EMPTY_DRAIN as Drain<TEvents>;
       }
@@ -757,6 +799,7 @@ export class DrainController<
         const next = h.defer ?? retry_at;
         if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
+      await this._repark_woken(new Set(leased.map((l) => l.stream)));
       if (this._defer.size > 0) this._defer.schedule();
 
       // Lifecycle sinks are contained individually, mirroring the

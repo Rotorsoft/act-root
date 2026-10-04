@@ -283,6 +283,7 @@ export function build_drain<TEvents extends Schemas>(
     fetch: drain.fetch,
     ack: drain.ack,
     block: drain.block,
+    still_deferred: drain.still_deferred,
     subscribe:
       logger.level !== "trace"
         ? drain.subscribe
