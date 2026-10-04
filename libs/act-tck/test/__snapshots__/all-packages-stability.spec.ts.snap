@@ -47811,18 +47811,32 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
 
       // \`any\`: server lifecycle handle from @hono/node-server
       let server: any | undefined;
+      // The listen in progress, if any. \`server\` is only assigned after the
+      // lazy import resolves, so without this a \`close()\` issued while
+      // \`listen()\` is still pending would see no server, return, and leave
+      // the port bound once the import finished; a second \`listen()\` would
+      // also start a second server.
+      let starting: Promise<void> | undefined;
 
       return {
-        async listen(): Promise<void> {
-          const { serve } = await import("@hono/node-server");
-          const launched = serve({ fetch: app.fetch, port: options.port });
-          server = launched;
-          await new Promise<void>((resolve) => {
-            launched.once("listening", () => resolve());
-          });
+        listen(): Promise<void> {
+          starting ??= (async () => {
+            const { serve } = await import("@hono/node-server");
+            const launched = serve({ fetch: app.fetch, port: options.port });
+            server = launched;
+            await new Promise<void>((resolve) => {
+              launched.once("listening", () => resolve());
+            });
+          })();
+          return starting;
         },
 
         async close(): Promise<void> {
+          if (starting) {
+            const pending = starting;
+            starting = undefined;
+            await pending;
+          }
           if (!server) return;
           const s = server;
           server = undefined;
