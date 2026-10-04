@@ -65,7 +65,7 @@
     "@biomejs/biome": "^2.5.15",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
-    "@fast-check/vitest": "^0.4.1",
+    "@fast-check/vitest": "^0.5.0",
     "@rotorsoft/act-tck": "workspace:^",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/commit-analyzer": "^13.0.1",

@@ -167,8 +167,8 @@ importers:
         specifier: ^21.2.3
         version: 21.2.3
       '@fast-check/vitest':
-        specifier: ^0.4.1
-        version: 0.4.1(vitest@5.0.3)
+        specifier: ^0.5.0
+        version: 0.5.0(vitest@5.0.3)
       '@rotorsoft/act-tck':
         specifier: workspace:^
         version: link:libs/act-tck
@@ -568,8 +568,8 @@ importers:
   libs/act-tck:
     devDependencies:
       '@fast-check/vitest':
-        specifier: ^0.4.1
-        version: 0.4.1(vitest@5.0.3)
+        specifier: ^0.5.0
+        version: 0.5.0(vitest@5.0.3)
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../act
@@ -2840,10 +2840,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@fast-check/vitest@0.4.1':
-    resolution: {integrity: sha512-OX6TecB+ZzRfPc49jcPChcV1cf5aDu77CdDU8liecWVam7eD7mPvJNP50b9bBSTxVoGN5wzxrX9PIcCnqgC8bg==}
+  '@fast-check/vitest@0.5.0':
+    resolution: {integrity: sha512-Kgbj2smuq1P4OhGKuPATs5i2fAxNmGbJ/zSmTrzWhQSLUrHREbKWgv9WGbNUOXcx77q6joLVMmTygyXuwP2Bog==}
     peerDependencies:
-      vitest: ^4.1.0
+      vitest: ^4.1.0 || ^5.0.0
 
   '@fastify/ajv-compiler@4.0.5':
     resolution: {integrity: sha512-KoWKW+MhvfTRWL4qrhUwAAZoaChluo0m0vbiJlGMt2GXvL4LVPQEjt8kSpHI3IBq5Rez8fg+XeH3cneztq+C7A==}
@@ -12687,7 +12687,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@fast-check/vitest@0.4.1(vitest@5.0.3)':
+  '@fast-check/vitest@0.5.0(vitest@5.0.3)':
     dependencies:
       fast-check: 4.9.0
       vitest: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@25.9.8)(@vitest/coverage-v8@5.0.3)(vite@8.2.2(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.1))
