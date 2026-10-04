@@ -62,7 +62,7 @@ try {
 
 The in-memory implementation is sync; durable adapters (Postgres, Redis) return a `Promise<boolean>` — the port's union return type covers both, so the call site is identical.
 
-The `retryProfile` option captures the math that every receiver otherwise computes by hand and many get wrong — the dedup window has to outlast the sender's full retry envelope, otherwise a key expires before the sender finishes retrying and the side effect runs twice. Pass the sender's `{ maxRetries, backoff?, timeoutMs }` and the store sizes the window for you. The full math (per-retry sums per strategy, jitter worst-case 1.5×, default 4× safety factor) is documented inline on `RetryProfile` and worked through in the [external integration guide](https://rotorsoft.github.io/act-root/docs/guides/external-integration#ttl-sizing).
+The `retryProfile` option captures the math that every receiver otherwise computes by hand and many get wrong — the dedup window has to outlast the sender's full retry envelope, otherwise a key expires before the sender finishes retrying and the side effect runs twice. Pass the sender's `{ maxRetries, backoff?, timeoutMs }` and the store sizes the window for you. A sender that never stops retrying (an Act reaction with `blockOnError: false`) is described as `maxRetries: Infinity`. No finite window is safe for it, so the store throws unless you also pass an explicit `ttlMs`. The full math (per-retry sums per strategy, jitter worst-case 1.5×, default 4× safety factor) is documented inline on `RetryProfile` and worked through in the [external integration guide](https://rotorsoft.github.io/act-root/docs/guides/external-integration#ttl-sizing).
 
 ## Subpath layout
 

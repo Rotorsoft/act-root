@@ -250,6 +250,33 @@ describe("InMemoryIdempotencyStore", () => {
       expect(store.claim("k", t0 + 1_001)).toBe(true);
     });
 
+    it("refuses an unbounded retryProfile with no explicit ttlMs", () => {
+      expect(
+        () =>
+          new InMemoryIdempotencyStore({
+            retryProfile: {
+              maxRetries: Number.POSITIVE_INFINITY,
+              timeoutMs: 2_000,
+            },
+          })
+      ).toThrow(/never stops retrying/);
+    });
+
+    it("accepts an unbounded retryProfile when ttlMs sizes the window", () => {
+      const store = new InMemoryIdempotencyStore({
+        ttlMs: 1_000,
+        retryProfile: {
+          maxRetries: Number.POSITIVE_INFINITY,
+          backoff: { strategy: "fixed", baseMs: 100 },
+          timeoutMs: 500,
+        },
+      });
+      const t0 = 1_000_000;
+      expect(store.claim("k", t0)).toBe(true);
+      expect(store.claim("k", t0 + 999)).toBe(false);
+      expect(store.claim("k", t0 + 1_001)).toBe(true);
+    });
+
     it("falls back to the 24-hour default when neither is supplied", () => {
       const store = new InMemoryIdempotencyStore();
       const t0 = 1_000_000;

@@ -350,6 +350,15 @@ const dedup = new InMemoryIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
 
 When both `ttlMs` and `retryProfile` are supplied, `ttlMs` wins (explicit beats derived).
 
+**A sender that never gives up has no safe derived window.** An Act reaction with `blockOnError: false` is never blocked, so it keeps retrying the same event long after its `maxRetries` count. Copying that `maxRetries` into a `retryProfile` describes a sender that stops when this one doesn't. The store would size a window of seconds for retries that go on for hours, and every retry after the window would run the side effect again. Describe such a sender as `maxRetries: Infinity`. With no finite envelope to outlast, the store refuses to derive a window and throws at construction. Choose the window yourself with `ttlMs`, as long as a duplicate must still be recognized:
+
+```ts no-check
+const dedup = new InMemoryIdempotencyStore({
+  ttlMs: 7 * 24 * 60 * 60 * 1000, // how long a duplicate must still be caught
+  retryProfile: { maxRetries: Infinity, timeoutMs: 2_000 }, // documents the sender
+});
+```
+
 The by-hand math, kept as a teaching aid — work through it once so you trust the derived number:
 
 | Attempt | Wait before |
