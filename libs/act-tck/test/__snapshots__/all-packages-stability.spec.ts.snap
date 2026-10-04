@@ -14600,31 +14600,50 @@ function base_type_name(zodType: ZodType): string {
 /**
  * Merges two Zod schemas. If both are ZodObject instances, checks for
  * overlapping shape keys with incompatible base types (throws descriptive
- * error), then merges via \`.extend()\`. Falls back to keeping existing
- * schema if either is not a ZodObject.
+ * error), then merges via \`.extend()\`. The same schema instance (one partial
+ * re-registered through another slice) is kept as-is. Any other pair where
+ * either side is not a ZodObject throws — there is no shape to extend, and
+ * keeping one side would silently drop the other partial's fields.
  */
 function merge_schemas(
   existing: ZodType,
   incoming: ZodType,
   state_name: string
 ): ZodType {
-  if (existing instanceof ZodObject && incoming instanceof ZodObject) {
-    const existing_shape = existing.shape as Record<string, ZodType>;
-    const incoming_shape = incoming.shape as Record<string, ZodType>;
-    for (const key of Object.keys(incoming_shape)) {
-      if (key in existing_shape) {
-        const existing_base = base_type_name(existing_shape[key]);
-        const incoming_base = base_type_name(incoming_shape[key]);
-        if (existing_base !== incoming_base) {
-          throw new Error(
-            \`Schema conflict in "\${state_name}": key "\${key}" has type "\${existing_base}" but incoming partial declares "\${incoming_base}"\`
-          );
-        }
+  if (existing === incoming) return existing;
+  const existing_object = as_object(existing, "existing", state_name);
+  const incoming_object = as_object(incoming, "incoming", state_name);
+  const existing_shape = existing_object.shape as Record<string, ZodType>;
+  const incoming_shape = incoming_object.shape as Record<string, ZodType>;
+  for (const key of Object.keys(incoming_shape)) {
+    if (key in existing_shape) {
+      const existing_base = base_type_name(existing_shape[key]);
+      const incoming_base = base_type_name(incoming_shape[key]);
+      if (existing_base !== incoming_base) {
+        throw new Error(
+          \`Schema conflict in "\${state_name}": key "\${key}" has type "\${existing_base}" but incoming partial declares "\${incoming_base}"\`
+        );
       }
     }
-    return existing.extend(incoming_shape);
   }
-  return existing;
+  return existing_object.extend(incoming_shape);
+}
+
+/**
+ * Narrows a partial's state schema to the ZodObject that merging needs, or
+ * throws naming the state, which side failed, and what it is instead.
+ */
+function as_object(
+  schema: ZodType,
+  side: "existing" | "incoming",
+  state_name: string
+): ZodObject {
+  if (schema instanceof ZodObject) return schema;
+  throw new Error(
+    \`Cannot merge state schemas for "\${state_name}": the \${side} partial's schema is a \${schema.constructor.name}, not a z.object. \` +
+      \`Partials of the same state are merged by extending their shapes, \` +
+      \`so declare every partial's state as a plain z.object({ ... }).\`
+  );
 }
 
 /**

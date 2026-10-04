@@ -64,6 +64,8 @@ const TicketOperations = state({ Ticket: z.object({ status: z.string() }) })
 // These merge into a single "Ticket" state with both actions and events
 ```
 
+**State schema merge:** each partial's state schema is extended into the others, so every partial must declare its state as a plain `z.object({...})`. A key both partials declare must have the same base type, or the build throws. A wrapped schema such as `.readonly()`, `.transform()`, `.default()`, or a union or intersection has no shape to extend. Merging one with any other partial throws at build time, naming the state and the partial at fault. Keeping just one side would silently drop the other partial's fields. Re-registering the same partial through a second slice is fine, because both sides are the same schema instance.
+
 **Patch merge priority:** When partials are merged and both declare the same event:
 - One custom, one passthrough → keep the custom one (order doesn't matter)
 - Same function reference → re-registration from another slice, allowed

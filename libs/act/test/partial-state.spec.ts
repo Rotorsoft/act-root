@@ -327,6 +327,44 @@ describe("partial-state", () => {
     );
   });
 
+  describe("partials whose state schema is not a plain z.object", () => {
+    const plain = state({ Wrapped: z.object({ a: z.number() }) })
+      .init(() => ({ a: 0 }))
+      .emits({ A: ZodEmpty })
+      .patch({ A: () => ({}) })
+      .on({ doA: ZodEmpty })
+      .emit(() => ["A", {}])
+      .build();
+
+    const readonly = state({
+      Wrapped: z.object({ b: z.number() }).readonly(),
+    })
+      .init(() => ({ b: 0 }))
+      .emits({ B: ZodEmpty })
+      .patch({ B: () => ({}) })
+      .on({ doB: ZodEmpty })
+      .emit(() => ["B", {}])
+      .build();
+
+    it("throws instead of dropping the incoming partial's schema", () => {
+      expect(() => act().withState(plain).withState(readonly)).toThrow(
+        /Cannot merge state schemas for "Wrapped": the incoming partial's schema is a ZodReadonly/
+      );
+    });
+
+    it("throws instead of keeping a non-object existing schema", () => {
+      expect(() => act().withState(readonly).withState(plain)).toThrow(
+        /Cannot merge state schemas for "Wrapped": the existing partial's schema is a ZodReadonly/
+      );
+    });
+
+    it("accepts the same partial registered twice", () => {
+      expect(() =>
+        act().withState(readonly).withState(readonly).build()
+      ).not.toThrow();
+    });
+  });
+
   it("should reconstruct state from cross-partial events", async () => {
     const PartialA = state({ Cross: z.object({ total: z.number() }) })
       .init(() => ({ total: 0 }))
