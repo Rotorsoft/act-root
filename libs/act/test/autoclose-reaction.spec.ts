@@ -669,6 +669,52 @@ describe("autoclose rolling window (keep)", () => {
     expect(closed).toHaveLength(after_reaction + 1);
   });
 
+  it("an on-demand close archives only through the target's own archive, never the state's .archives", async () => {
+    const declared: string[] = [];
+    const passed: Array<{ stream: string; before: Date }> = [];
+    const app = act()
+      .withState(
+        windowed_base()
+          .autocloses({ keep: { days: 1 } })
+          .archives(async (stream) => {
+            declared.push(stream);
+          })
+          .build()
+      )
+      .build();
+
+    for (const stream of ["idle-3", "idle-4"])
+      for (let i = 0; i < 4; i++) await app.do("bump", { stream, actor }, {});
+    await app.correlate();
+    await app.drain();
+    vi.setSystemTime(new Date("2026-01-03T00:00:00Z"));
+    for (const stream of ["idle-3", "idle-4"])
+      for (let i = 0; i < 4; i++) await app.do("bump", { stream, actor }, {});
+    await app.correlate();
+    await app.drain();
+    const declared_by_reaction = declared.length;
+
+    vi.setSystemTime(new Date("2026-01-05T00:00:00Z"));
+    const cutoff = new Date(Date.now() - 86_400_000);
+    const result = await app.close([
+      // No archive on the target: the prune runs without one.
+      { stream: "idle-3", before: cutoff },
+      // An explicit archive is the only one the on-demand path calls.
+      {
+        stream: "idle-4",
+        before: cutoff,
+        archive: async () => {
+          passed.push({ stream: "idle-4", before: cutoff });
+        },
+      },
+    ]);
+
+    expect(result.truncated.get("idle-3")?.before).toBeInstanceOf(Date);
+    expect(result.truncated.get("idle-4")?.before).toBeInstanceOf(Date);
+    expect(declared).toHaveLength(declared_by_reaction);
+    expect(passed).toEqual([{ stream: "idle-4", before: cutoff }]);
+  });
+
   it("passes the cutoff to the archiver on a windowed close", async () => {
     const calls: Array<{ stream: string; before?: Date }> = [];
     const app = act()

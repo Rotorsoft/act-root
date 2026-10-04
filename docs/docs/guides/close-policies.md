@@ -47,7 +47,7 @@ const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
 ```
 
 - **`.autocloses(policy)`** decides **when**. It takes a declarative `AutoclosePolicy` object — `{ is, after, reaches, or }` for terminating a stream, plus the independent rolling-window field [`keep`](#keep--days---the-rolling-window). There is no function-predicate form (see the [migration note](#migrating-from-the-function-predicate-form) if you have one).
-- **`.archives(fn)`** decides **what to persist before truncate**. Runs while the stream is guarded (no concurrent writes); a thrown archiver leaves the stream guarded but un-truncated, and the close retries on the next visit. It works whether or not `.autocloses` is declared (it also runs for explicit `app.close({ stream, archive })` calls).
+- **`.archives(fn)`** decides **what to persist before truncate**. Runs while the stream is guarded (no concurrent writes); a thrown archiver leaves the stream guarded but un-truncated, and the close retries on the next visit. It runs only on closes that `.autocloses` stages: the policy's reaction is what hands the archiver to the close cycle, so `.archives` without `.autocloses` never runs. An explicit `app.close(...)` call does not use it either. That call archives only through the `archive` callback you pass on each target (`app.close([{ stream, archive }])`), so pass your archiver there when you close by hand.
 
 Build the app and opt in to the lifecycle:
 
@@ -176,7 +176,13 @@ async function pruneDormantStreams(app: typeof myApp) {
     const dormant = [...page]
       // The head is older than the window, so everything under it is too.
       .filter(([, { head }]) => head.created < cutoff)
-      .map(([stream]) => ({ stream, before: cutoff }));
+      .map(([stream, { head }]) => ({
+        stream,
+        before: cutoff,
+        // An explicit close never calls the state's .archives(...) on its
+        // own; pass the same archiver here to archive before the prune.
+        archive: () => archiveLedger(stream, head, cutoff),
+      }));
     if (dormant.length) await app.close(dormant);
     after = [...page.keys()].at(-1);
   }
@@ -189,7 +195,7 @@ Three things worth knowing before you use it:
 
 - **It is idempotent and cheap on a caught-up store.** A stream already pruned to the cutoff has no qualifying snapshot below it, so the store reports it in `skipped` rather than erroring, and nothing is written.
 - **It does not fight the reaction.** Both go through `run_close_cycle` under a per-stream lock, so an active stream being pruned by its own reaction and an operator prune arriving at the same moment serialize; the second sees the already-pruned prefix and skips its archive ([#1222](https://github.com/Rotorsoft/act-root/issues/1222)).
-- **`.archives(...)` still runs.** This prunes through the same path, so an archiver declared on the state receives the same `(stream, head, before)` call it would have received from the reaction. Archive-then-prune stays intact.
+- **It archives only what you pass it.** An explicit `app.close` never calls the state's `.archives(...)` on its own. That is what the `archive` field on each target is for. The example passes `archiveLedger`, the same function the state declares with `.archives(archiveLedger)`, called with the same `(stream, head, before)` the reaction would have used. Archive-then-prune then holds on this path too. Leave the field off and the prefix is deleted with no archive step. The archive runs only for streams that actually have something to prune, so a skipped stream is never archived.
 
 This is the same division of labor the close recipe draws elsewhere: the declaration handles what the aggregate's own traffic can drive, and the operator handles what only they know is needed.
 
