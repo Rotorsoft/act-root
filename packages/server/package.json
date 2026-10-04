@@ -22,7 +22,7 @@
     "@rotorsoft/act-ops": "workspace:^",
     "@rotorsoft/act-otel": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
-    "@trpc/server": "11.18.0",
+    "@trpc/server": "11.19.0",
     "cors": "^2.8.6",
     "hono": "^4.13.9",
     "prom-client": "^15.1.3",
