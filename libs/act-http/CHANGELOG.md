@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.12...@rotorsoft/act-http-v1.10.13) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act-http:** parse generated action input once, in app.do ([#1752](https://github.com/Rotorsoft/act-root/issues/1752)) ([b5cd7ad](https://github.com/Rotorsoft/act-root/commit/b5cd7ad2c725d9138774b374beecb835ea0cd0f3)), closes [#1739](https://github.com/Rotorsoft/act-root/issues/1739)
+
 # [@rotorsoft/act-http-v1.10.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.11...@rotorsoft/act-http-v1.10.12) (2026-10-04)
 
 
