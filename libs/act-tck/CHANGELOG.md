@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.4...@rotorsoft/act-tck-v1.38.5) (2026-10-04)
+
+
+### Bug Fixes
+
+* **act:** never defer an autoclose window to an instant behind now ([#1722](https://github.com/Rotorsoft/act-root/issues/1722)) ([b3d22a8](https://github.com/Rotorsoft/act-root/commit/b3d22a8e5af8bfb1c3d49fe1d153169f2d68a99b)), closes [#1709](https://github.com/Rotorsoft/act-root/issues/1709)
+* **act:** throw when partial state schemas cannot be merged ([#1723](https://github.com/Rotorsoft/act-root/issues/1723)) ([8c4e764](https://github.com/Rotorsoft/act-root/commit/8c4e76407f8b153a8460fa867a97b9604481f114)), closes [#1706](https://github.com/Rotorsoft/act-root/issues/1706)
+
 # [@rotorsoft/act-tck-v1.38.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.3...@rotorsoft/act-tck-v1.38.4) (2026-10-02)
 
 
