@@ -57,6 +57,46 @@ describe("defer outcome (integration)", () => {
     expect(done.acked.some((l) => l.stream === "d1")).toBe(true);
   });
 
+  it("keeps the wake for other parked streams when a woken drain claims nothing", async () => {
+    // W1 parks two streams. Its timer wakes for the first, but a competing
+    // worker handles that one first, so W1's next drain claims nothing.
+    // That empty claim must not throw away the wake for the second stream:
+    // the aggregate is idle, so no commit would ever re-arm W1.
+    const ran: string[] = [];
+    const worker = () =>
+      act()
+        .withState(counter)
+        .on("ticked")
+        .defer((e) => ({
+          at: new Date(e.created.getTime() + (e.stream === "w1" ? 60 : 200)),
+        }))
+        .do(async function remind(e) {
+          ran.push(e.stream);
+        })
+        .to((e) => ({ target: `remind-${e.stream}` }))
+        .build();
+
+    const w1 = worker();
+    await w1.do("tick", { stream: "w1", actor }, {});
+    await w1.do("tick", { stream: "w2", actor }, {});
+    await w1.correlate();
+    await w1.drain({ leaseMillis: 1 }); // both parked
+    expect(ran).toEqual([]);
+
+    await sleep(100); // W1's timer has woken for w1
+    const competitor = worker();
+    await competitor.correlate();
+    await competitor.drain({ leaseMillis: 1 });
+    expect(ran).toEqual(["w1"]);
+
+    const empty = await w1.drain({ leaseMillis: 1 });
+    expect(empty.leased.length).toBe(0);
+
+    await sleep(200); // past w2's due-time
+    await w1.drain({ leaseMillis: 1 });
+    expect(ran).toEqual(["w1", "w2"]);
+  });
+
   it("groups streams sharing one due-time into a single defer call", async () => {
     // A fixed due-time shared by both streams so the cycle's persist loop
     // groups them under one key (exercises the same-due-time branch).
