@@ -99,6 +99,8 @@ Errors map through `toApiError(...)` from `@rotorsoft/act-http/api` **by error i
 
 A **malformed request body** takes the same route: the generator validates the payload inside the resolver (not via tRPC's `.input()`, whose Zod failure is a hardcoded `BAD_REQUEST`/400 that never reaches `toApiError`), so a body that fails an action's Zod schema surfaces as the same `ValidationError → UNPROCESSABLE_CONTENT` (422) a malformed `app.do` payload raises — matching Hono's `422 / VALIDATION` for the same input ([#1295](https://github.com/Rotorsoft/act-root/issues/1295)).
 
+That up-front parse is only a gate. The `stream` and `expectedVersion` resolvers receive its parsed value, but `app.do` receives the **raw** request body and parses it once itself. Handing it the already-parsed value would run a schema's `.transform()` twice, so a "dollars on the wire, cents in the domain" transform would store 100× the amount, and a type-changing `.pipe()` would reject every request ([#1739](https://github.com/Rotorsoft/act-root/issues/1739)). The Hono generator does the same.
+
 #### One caveat to know about
 
 tRPC v11's `BuiltRouter` type transitively references an internal `Unwrap` symbol from `@trpc/server/dist/unstable-core-do-not-import`. TypeScript's `--declaration` emitter can't name that symbol portably for the generator's `<TApp>`-parameterized return, which means a consumer doing `createTRPCReact<typeof generatedRouter>()` trips the React-tRPC name-collision check (it sees an over-wide procedure record and complains that procedures like `Provider` or `useContext` clash with built-ins).
