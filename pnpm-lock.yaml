@@ -923,7 +923,7 @@ importers:
         version: link:../libs/act-otel
     devDependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.1144.0
+        specifier: ^3.1145.0
         version: 3.1146.0
       '@types/node':
         specifier: ^25.9.9
