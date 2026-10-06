@@ -202,6 +202,94 @@ describe("a stream whose fetch fails does not stall the streams beside it (#1675
     expect(seen).toEqual(["healthy"]);
   });
 
+  describe("a read that keeps failing spends the retry budget (#1774)", () => {
+    afterEach(() => {
+      armed.on = false;
+    });
+
+    const poisoned_app = (options: { blockOnError: boolean }) => {
+      // Threshold raised so the breaker stays closed through the failing
+      // passes below: these tests are about the retry budget.
+      const base = new InMemoryStore();
+      const ran: string[] = [];
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(
+          async function sink(e) {
+            ran.push(e.stream);
+          },
+          { maxRetries: 2, blockOnError: options.blockOnError }
+        )
+        .build({
+          circuitBreaker: { failureThreshold: 20 },
+          scoped: {
+            store: poison_stream(base, "victim"),
+            cache: new InMemoryCache(),
+          },
+        });
+      return { app, base, ran };
+    };
+
+    it("blocks the stream once the budget is spent, with the fetch error", async () => {
+      const { app, ran } = poisoned_app({ blockOnError: true });
+      await app.do("tick", { stream: "victim", actor }, {});
+      armed.on = true;
+      for (let i = 0; i < 6; i++) {
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+        await sleep(2);
+      }
+      const blocked = await app.blocked_streams();
+      expect(blocked.map((b) => b.stream)).toEqual(["victim"]);
+      expect(blocked[0].error).toMatch(/Fetch failed for victim/);
+      expect(ran).toEqual([]);
+    });
+
+    it("keeps retrying when a reaction opted out of blocking", async () => {
+      const { app } = poisoned_app({ blockOnError: false });
+      await app.do("tick", { stream: "victim", actor }, {});
+      armed.on = true;
+      for (let i = 0; i < 6; i++) {
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+        await sleep(2);
+      }
+      expect(await app.blocked_streams()).toEqual([]);
+    });
+
+    it("does not block while the store as a whole is failing", async () => {
+      const { app, base } = poisoned_app({ blockOnError: true });
+      app.on("error", () => {});
+      await app.do("tick", { stream: "victim", actor }, {});
+      await app.do("tick", { stream: "healthy", actor }, {});
+      // The healthy stream's acks fail, so the store reads as failing.
+      const real_ack = base.ack.bind(base);
+      let failing = true;
+      base.ack = ((leases: never) =>
+        failing
+          ? Promise.reject(new StoreError("ack", { cause: new Error("busy") }))
+          : real_ack(leases)) as never;
+      armed.on = true;
+      for (let i = 0; i < 6; i++) {
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+        await sleep(2);
+      }
+      expect(await app.blocked_streams()).toEqual([]);
+      // Once the store recovers, the read that still fails blocks as usual.
+      failing = false;
+      for (let i = 0; i < 6; i++) {
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+        await sleep(2);
+      }
+      expect((await app.blocked_streams()).map((b) => b.stream)).toEqual([
+        "victim",
+      ]);
+    });
+  });
+
   it("delivers to the healthy stream, and never skips the poison one", async () => {
     const base = new InMemoryStore();
     await base.seed();
