@@ -16,7 +16,7 @@ A projection in Act is "an event handler that writes to external state". It has 
 
 1. **Subscribe** to specific event names.
 2. **Update** an external store (a table, an index, a cache, anywhere).
-3. **Be replayable from scratch** — at any point you should be able to drop the read model and rebuild it by replaying every relevant event.
+3. **Be replayable from scratch** — at any point you should be able to drop the read model and rebuild it by replaying every relevant event *that is still in the log* (see [Rebuilding over closed or pruned streams](#rebuilding-over-closed-or-pruned-streams)).
 
 The framework handles the mechanics of #1 (correlation, drain, retries, blocked-stream tracking). You write the handler bodies for #2 and the structure for #3.
 
@@ -236,6 +236,16 @@ async function rebuildTicketsProjection() {
 ```
 
 On a fresh deploy where the read model schema has changed, you'd run this once. With the right `eventLimit` per cycle (1000 is a reasonable default; tune for your workload), settle drains a multi-million-event stream without blocking writes.
+
+### Rebuilding over closed or pruned streams
+
+A rebuild replays the log, and close-the-books deletes from the log, so what a rebuild can recover depends on what was closed and how the projection is written ([#1779](https://github.com/Rotorsoft/act-root/issues/1779)):
+
+- **Windowed prune** (`.autocloses({ keep })`, `app.close([{ stream, before }])`): only an `.of()` state fold rebuilds correctly, because its fold starts from the boundary snapshot the prune keeps. A per-event or `.batch()` projection replays only the surviving tail, so rebuilding it from an empty read model gives the wrong answer for those streams (a counter over 7 events rebuilds to 1).
+- **Full close, retire** (the default): the stream is reduced to a tombstone, so no projection can rebuild its row. Truncating the read model and rebuilding drops every closed aggregate's row.
+- **Full close with `restart: true`**: the stream keeps a `__snapshot__` of its final state, so an `.of()` fold rebuilds the row from it. Per-event and batch projections don't see snapshots.
+
+So for a read model over states that close or prune: write it as an `.of()` fold, or don't rebuild it by truncating. Migrate the rows in place (or rebuild only the streams still live), and leave the rows of closed aggregates alone.
 
 ## Three things that bite people
 
