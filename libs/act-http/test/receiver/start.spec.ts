@@ -611,4 +611,41 @@ describe("receiver — listen mode (long-running Node server)", () => {
     }).build();
     await expect(r.close()).resolves.toBeUndefined();
   });
+
+  const reachable = (port: number) =>
+    fetch(`http://127.0.0.1:${port}/OrderConfirmed`, { method: "POST" }).then(
+      () => true,
+      () => false
+    );
+
+  it("close() during a pending listen() leaves the port free", async () => {
+    const r = receiver({
+      port: 14_005,
+      store: new InMemoryIdempotencyStore(),
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {})
+      .build();
+    const listening = r.listen(); // not awaited: still importing
+    await r.close();
+    await listening;
+    expect(await reachable(14_005)).toBe(false);
+  });
+
+  it("concurrent listen() calls start one server, and it can listen again after close", async () => {
+    const r = receiver({
+      port: 14_006,
+      store: new InMemoryIdempotencyStore(),
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {})
+      .build();
+    const first = r.listen();
+    expect(r.listen()).toBe(first);
+    await first;
+    expect(await reachable(14_006)).toBe(true);
+    await r.close();
+    expect(await reachable(14_006)).toBe(false);
+    await r.listen();
+    expect(await reachable(14_006)).toBe(true);
+    await r.close();
+  });
 });
