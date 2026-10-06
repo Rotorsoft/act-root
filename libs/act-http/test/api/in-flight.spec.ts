@@ -4,6 +4,14 @@ import { describe, expect, it } from "vitest";
 import { track_in_flight } from "../../src/api/in-flight.js";
 
 describe("track_in_flight", () => {
+  it("returns one shared tracker per store", () => {
+    const store = new InMemoryIdempotencyStore();
+    expect(track_in_flight(store)).toBe(track_in_flight(store));
+    expect(track_in_flight(store)).not.toBe(
+      track_in_flight(new InMemoryIdempotencyStore())
+    );
+  });
+
   it("counts a won claim until it is committed", async () => {
     const t = track_in_flight(new InMemoryIdempotencyStore());
     expect(await t.store.claim("k")).toBe(true);

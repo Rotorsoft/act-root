@@ -618,6 +618,28 @@ describe("receiver — listen mode (long-running Node server)", () => {
       () => false
     );
 
+  it("listen() on a busy port rejects, and close() still resolves (#1783)", async () => {
+    const { createServer } = await import("node:net");
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(14_007, () => r()));
+    try {
+      const r = receiver({
+        port: 14_007,
+        store: new InMemoryIdempotencyStore(),
+      })
+        .on("OrderConfirmed", OrderSchema, async () => {})
+        .build();
+      await expect(r.listen()).rejects.toMatchObject({ code: "EADDRINUSE" });
+      await expect(r.close()).resolves.toBeUndefined();
+      // And when close() arrives while that failing listen() is still pending.
+      const starting = r.listen();
+      await expect(r.close()).resolves.toBeUndefined();
+      await expect(starting).rejects.toMatchObject({ code: "EADDRINUSE" });
+    } finally {
+      await new Promise<void>((r) => blocker.close(() => r()));
+    }
+  });
+
   it("close() during a pending listen() leaves the port free", async () => {
     const r = receiver({
       port: 14_005,

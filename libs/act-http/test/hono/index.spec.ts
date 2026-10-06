@@ -369,6 +369,35 @@ describe("hono(app, options) — generated REST surface", () => {
       expect(body.code).toBe("CONFLICT");
     });
 
+    test("sees an in-flight original through another generator on the same store (#1782)", async ({
+      app,
+    }) => {
+      let finish!: () => void;
+      const parked = new Promise<never>((_, reject) => {
+        finish = () => reject(new Error("done"));
+      });
+      vi.spyOn(app, "do").mockImplementationOnce(() => parked);
+      const store = new InMemoryIdempotencyStore();
+      const a = hono(app as never, {
+        ...default_options(),
+        idempotency: { store },
+      });
+      const b = hono(app as never, {
+        ...default_options(),
+        idempotency: { store },
+      });
+      const send = (api: typeof a) =>
+        api.request("/api/actions/PressKey", {
+          method: "POST",
+          headers: make_headers({ "idempotency-key": "shared-1" }),
+          body: JSON.stringify({ key: "5" }),
+        });
+      const original = send(a);
+      expect((await send(b)).status).toBe(503);
+      finish();
+      await original;
+    });
+
     test("a duplicate of a still-running request gets a retryable 503, and is not lost when the original fails", async ({
       app,
     }) => {
