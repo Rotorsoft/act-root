@@ -1,15 +1,18 @@
-version: "3"
 services:
   postgres:
     container_name: act-pg
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     volumes:
-      - .postgres:/var/lib/postgresql/data
+      # Postgres 18+ images keep data in a versioned subdirectory
+      # (/var/lib/postgresql/18/docker) and refuse a mount at the old
+      # .../data path, so mount the parent. A fresh host directory, since
+      # 17's data files can't be opened by 18.
+      - .postgres18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -26,7 +29,7 @@ services:
   # postgres` still starts only the primary.
   postgres-subs:
     container_name: act-pg-subs
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: always
     profiles: ["bench"]
     environment:

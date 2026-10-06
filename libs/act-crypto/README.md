@@ -94,7 +94,7 @@ Composes with TDE / `pgcrypto` / SQLite SEE / OS-level FDE. The adapter encrypts
 
 ## Compatibility
 
-- **Node**: >=22.23.2
+- **Node**: >=22.23.3
 - **Bundled deps**: none. Pure `node:crypto`.
 - **Module formats**: ESM (`import`) and CJS (`require`). No side effects.
 

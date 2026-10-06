@@ -69,6 +69,11 @@
       "groupName": "{{{depName}}}"
     },
     {
+      "description": "@types/node tracks the oldest Node the libraries support (the engines floor, currently 22), not the newest runtime CI uses. Types newer than the floor let code call APIs a Node 22 user doesn't have, and typecheck would never notice; the node-compat CI job runs the tests on the floor, but only for paths that are exercised. Raise this together with the engines floor.",
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<23"
+    },
+    {
       "description": "react and react-dom must always be the exact same version: React checks this at runtime, and the docs build (Docusaurus server render) throws 'Incompatible React versions' when they differ. They used to sit in the per-package rule above, which split them into two PRs that each bumped one and failed CI on their own (#1735/#1736). One PR moves both, with every peer and dev entry of each.",
       "matchPackageNames": ["react", "react-dom"],
       "groupName": "react"

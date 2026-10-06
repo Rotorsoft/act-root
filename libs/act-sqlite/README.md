@@ -139,7 +139,7 @@ Both adapters pass the same `runStoreTck` suite. Application code doesn't change
 
 ## Compatibility
 
-- **Node**: >=22.23.2
+- **Node**: >=22.23.3
 - **Peer**: `@rotorsoft/act` >=0.39.0, `zod` ^4.4.3
 - **Bundled deps**: `@libsql/client` ^0.17.3 (no native bindings)
 - **Module formats**: ESM + CJS

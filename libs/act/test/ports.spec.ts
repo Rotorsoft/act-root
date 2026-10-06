@@ -32,12 +32,12 @@ describe("exit signal handlers", () => {
   });
 
   it("should exit on uncaughtException", () => {
-    process.emit("uncaughtException");
+    process.emit("uncaughtException", new Error("boom"));
     expect(disposeAndExitSpy).toHaveBeenCalledWith("ERROR");
   });
 
   it("should exit on unhandledRejection", () => {
-    process.emit("unhandledRejection");
+    process.emit("unhandledRejection", new Error("boom"), Promise.resolve());
     expect(disposeAndExitSpy).toHaveBeenCalledWith("ERROR");
   });
 
