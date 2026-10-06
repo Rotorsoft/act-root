@@ -51752,6 +51752,13 @@ export function trpc<
   }
 
   if (options.sse) {
+    // SSE subscriptions mount under the \`subscribe\` key of the same router
+    // as the action mutations, so an action named \`subscribe\` would be
+    // silently replaced. Refuse it at generation instead.
+    if ("subscribe" in app.registry.actions)
+      throw new Error(
+        'trpc: an action named "subscribe" collides with the SSE subscription router (router.subscribe.<stateName>); rename the action or generate the router without \`sse\`.'
+      );
     const sse_config = resolveSseConfig(options.sse);
     const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
     const state_names = new Set<string>();

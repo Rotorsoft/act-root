@@ -432,3 +432,30 @@ describe("trpc(app, { sse }) — the actor extractor gates the open (#1620)", ()
     expect(frames).toMatchObject([{ kind: "state", data: { display: "9" } }]);
   });
 });
+
+describe("trpc(app, { sse }) — an action named subscribe", () => {
+  const Feed = state({ Feed: z.object({ on: z.boolean() }) })
+    .init(() => ({ on: false }))
+    .emits({ Subscribed: ZodEmpty })
+    .on({ subscribe: ZodEmpty })
+    .emit(() => ["Subscribed", {}])
+    .build();
+  const feed_test = fixture(act().withState(Feed));
+
+  feed_test(
+    "is refused when sse is on, instead of being silently dropped",
+    ({ app }) => {
+      expect(() =>
+        trpc<Ctx>(app as never, default_options(new BroadcastChannel()))
+      ).toThrow(/action named "subscribe" collides/);
+    }
+  );
+
+  feed_test("is generated normally when sse is off", ({ app }) => {
+    const { sse: _, ...no_sse } = default_options(new BroadcastChannel());
+    const router = trpc<Ctx>(app as never, no_sse);
+    const procs = (router as { _def: { procedures: Record<string, unknown> } })
+      ._def.procedures;
+    expect(Object.keys(procs)).toContain("subscribe");
+  });
+});

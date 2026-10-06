@@ -307,7 +307,7 @@ Behavior: fresh claim → handler runs, response normal. Duplicate of a committe
 
 ## Real-time subscriptions
 
-Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option.
+Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option. On tRPC the subscriptions mount at `router.subscribe.<stateName>`, beside the action mutations, so `subscribe` is a reserved action name there: generating a router with `sse` for an app that has an action called `subscribe` throws instead of silently dropping the action ([#1747](https://github.com/Rotorsoft/act-root/issues/1747)).
 
 ```ts no-check
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
