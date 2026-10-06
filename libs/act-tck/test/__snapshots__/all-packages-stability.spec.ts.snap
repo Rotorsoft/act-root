@@ -16265,6 +16265,11 @@ export interface Store extends Disposable, EventSource {
    * in-process backoff, this is durable, shared store state — every
    * competing worker honors the skip.
    *
+   * {@link claim} treats a deferred stream as due once the **claiming
+   * caller's** clock reaches \`deferred_at\`, not a clock of the store's own
+   * (such as a database \`NOW()\`): the orchestrator's defer timer wakes on
+   * the caller's clock, and the claim it triggers must agree with it.
+   *
    * The schedule is cleared whenever the watermark moves or the stream is
    * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
    * all reset \`deferred_at\`. Re-deferring simply overwrites it.
@@ -35528,6 +35533,11 @@ export interface Store extends Disposable, EventSource {
    * in-process backoff, this is durable, shared store state — every
    * competing worker honors the skip.
    *
+   * {@link claim} treats a deferred stream as due once the **claiming
+   * caller's** clock reaches \`deferred_at\`, not a clock of the store's own
+   * (such as a database \`NOW()\`): the orchestrator's defer timer wakes on
+   * the caller's clock, and the claim it triggers must agree with it.
+   *
    * The schedule is cleared whenever the watermark moves or the stream is
    * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
    * all reset \`deferred_at\`. Re-deferring simply overwrites it.
@@ -41794,6 +41804,11 @@ export interface Store extends Disposable, EventSource {
    * passes, at which point the same pending events are re-delivered. Unlike
    * in-process backoff, this is durable, shared store state — every
    * competing worker honors the skip.
+   *
+   * {@link claim} treats a deferred stream as due once the **claiming
+   * caller's** clock reaches \`deferred_at\`, not a clock of the store's own
+   * (such as a database \`NOW()\`): the orchestrator's defer timer wakes on
+   * the caller's clock, and the claim it triggers must agree with it.
    *
    * The schedule is cleared whenever the watermark moves or the stream is
    * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
@@ -55731,16 +55746,24 @@ export class PostgresStore implements Store {
     const client = await this._client("claim");
     try {
       await client.query("BEGIN");
-      const lane_clause = lane !== undefined ? \`AND s.lane = $6\` : "";
+      const lane_clause = lane !== undefined ? \`AND s.lane = $7\` : "";
       // Fairness reserve (ACT-1223): carve \`fair\` slots off the lagging
       // budget for pure watermark-order claims so a default-priority
       // lagging stream is never starved out by sustained higher-priority
-      // load. \`fair\` is always $5; the optional \`lane\` bind is last ($6).
+      // load. \`fair\` is always $5; the optional \`lane\` bind is last ($7).
       const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      // A defer is due by THIS worker's clock ($6), not the database's
+      // \`NOW()\`: the worker's process-local timer wakes the drain on its own
+      // clock, so judging \`deferred_at\` on a second clock made a worker
+      // running ahead of the database wake early, claim nothing, and lose
+      // the wake (#1753). InMemory and SQLite already compare against the
+      // caller's clock. Leases stay on \`NOW()\`: their expiry is a duration
+      // set and checked by the database, and judging it per worker would
+      // let a fast clock take a lease another worker still holds.
       const params: unknown[] =
         lane !== undefined
-          ? [lagging, leading, by, millis, fair, lane]
-          : [lagging, leading, by, millis, fair];
+          ? [lagging, leading, by, millis, fair, Date.now(), lane]
+          : [lagging, leading, by, millis, fair, Date.now()];
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -55795,7 +55818,7 @@ export class PostgresStore implements Store {
             AND s.at < s.correlated_at
             \${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
-            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= to_timestamp($6 / 1000.0))
           ORDER BY s.priority DESC, s.at ASC
           LIMIT ($1::int - $5::int)
         ),
@@ -55806,7 +55829,7 @@ export class PostgresStore implements Store {
             AND s.at < s.correlated_at
             \${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
-            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= to_timestamp($6 / 1000.0))
             AND s.stream NOT IN (SELECT stream FROM prio)
           ORDER BY s.at ASC
           LIMIT $5
@@ -55821,7 +55844,7 @@ export class PostgresStore implements Store {
             AND s.at < s.correlated_at
             \${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
-            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= to_timestamp($6 / 1000.0))
           ORDER BY s.at DESC
           LIMIT $2
         ),
@@ -55841,7 +55864,7 @@ export class PostgresStore implements Store {
           WHERE s2.stream IN (SELECT stream FROM combined)
             AND s2.blocked = false
             AND (s2.leased_by IS NULL OR s2.leased_until <= NOW())
-            AND (s2.deferred_at IS NULL OR s2.deferred_at <= NOW())
+            AND (s2.deferred_at IS NULL OR s2.deferred_at <= to_timestamp($6 / 1000.0))
           FOR UPDATE OF s2 SKIP LOCKED
         )
         UPDATE \${this._fqs} s
@@ -56154,7 +56177,8 @@ export class PostgresStore implements Store {
    * Hold the matched streams out of {@link claim} until \`deferred_at\`
    * (ms since epoch) — see {@link Store.defer}. Persists \`deferred_at\`
    * (as a \`timestamptz\`) so the skip is honored by every competing
-   * worker; \`claim\` filters on \`deferred_at <= NOW()\`. Accepts an
+   * worker; \`claim\` filters on \`deferred_at\` against the claiming worker's
+   * clock, the same clock its defer timer runs on. Accepts an
    * explicit list of names or a {@link StreamFilter}, mirroring
    * {@link reset}/{@link prioritize}. Cleared by ack/block/reset/unblock.
    *
@@ -61439,7 +61463,7 @@ import type {
   StreamPosition,
   SubscribeInput,
 } from "@rotorsoft/act/types";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
 import {
   type CommittedCounterEvent,
@@ -63634,6 +63658,36 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
         expect(leased.find((l) => l.stream === ctl)).toBeDefined();
         expect(leased.find((l) => l.stream === s)).toBeUndefined();
+      });
+
+      it("judges deferred_at by the claiming worker's clock", async () => {
+        // The orchestrator's defer timer wakes on the worker's clock, so a
+        // stream must be claimable as soon as THAT clock passes its
+        // deferred_at. A store that judged it by another clock (a database's
+        // NOW()) would answer "not yet" to a worker running ahead, and the
+        // wake would be lost. Only the claimer's Date moves here.
+        const s = \`defer-clock-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        expect(await store.defer([s], Date.now() + 60_000)).toBe(1);
+        await correlate();
+        vi.useFakeTimers({
+          toFake: ["Date"],
+          shouldAdvanceTime: true,
+          now: Date.now() + 120_000,
+        });
+        try {
+          const leased = await store.claim(100, 100, \`w-\${uid()}\`, 1);
+          const mine = leased.find((l) => l.stream === s);
+          expect(mine).toBeDefined();
+          await store.ack(leased);
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it("makes a stream claimable once the deferred_at is in the past", async () => {

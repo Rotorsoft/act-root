@@ -20,7 +20,7 @@ import type {
   StreamPosition,
   SubscribeInput,
 } from "@rotorsoft/act/types";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { CounterEvents } from "./fixtures/events.js";
 import {
   type CommittedCounterEvent,
@@ -2215,6 +2215,36 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
         expect(leased.find((l) => l.stream === ctl)).toBeDefined();
         expect(leased.find((l) => l.stream === s)).toBeUndefined();
+      });
+
+      it("judges deferred_at by the claiming worker's clock", async () => {
+        // The orchestrator's defer timer wakes on the worker's clock, so a
+        // stream must be claimable as soon as THAT clock passes its
+        // deferred_at. A store that judged it by another clock (a database's
+        // NOW()) would answer "not yet" to a worker running ahead, and the
+        // wake would be lost. Only the claimer's Date moves here.
+        const s = `defer-clock-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        expect(await store.defer([s], Date.now() + 60_000)).toBe(1);
+        await correlate();
+        vi.useFakeTimers({
+          toFake: ["Date"],
+          shouldAdvanceTime: true,
+          now: Date.now() + 120_000,
+        });
+        try {
+          const leased = await store.claim(100, 100, `w-${uid()}`, 1);
+          const mine = leased.find((l) => l.stream === s);
+          expect(mine).toBeDefined();
+          await store.ack(leased);
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it("makes a stream claimable once the deferred_at is in the past", async () => {
