@@ -26,7 +26,9 @@ export default defineConfig([
     define,
   },
   {
-    // Node-only CLI bundle. ESM, banner-stamped with shebang.
+    // Node-only CLI bundle, ESM. The shebang comes from the first line of
+    // src/cli/index.ts, which esbuild keeps; a tsup `banner` would add a
+    // second one, and Node only strips a hashbang on line 1 (#1775).
     entry: { "cli/act": "src/cli/index.ts" },
     format: ["esm"],
     dts: false,
@@ -38,7 +40,6 @@ export default defineConfig([
     platform: "node",
     tsconfig: "tsconfig.build.json",
     external: ["react", "react-dom", "lucide-react"],
-    banner: { js: "#!/usr/bin/env node" },
     define,
   },
 ]);
