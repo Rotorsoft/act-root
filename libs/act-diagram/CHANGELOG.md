@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.1.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.1.4...@rotorsoft/act-diagram-v1.1.5) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act-diagram:** stop emitting the CLI shebang twice ([#1789](https://github.com/Rotorsoft/act-root/issues/1789)) ([3d86638](https://github.com/Rotorsoft/act-root/commit/3d86638e2834109285859614b8bbc138d2e2eb98)), closes [#1775](https://github.com/Rotorsoft/act-root/issues/1775)
+
 # [@rotorsoft/act-diagram-v1.1.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.1.3...@rotorsoft/act-diagram-v1.1.4) (2026-10-05)
 
 
