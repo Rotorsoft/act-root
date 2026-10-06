@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.20.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.4...@rotorsoft/act-pg-v1.20.5) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act:** keep reactions working after restore ([#1791](https://github.com/Rotorsoft/act-root/issues/1791)) ([3c8a09b](https://github.com/Rotorsoft/act-root/commit/3c8a09b5209652b978728a7defea6f81eda6ea9c)), closes [#1772](https://github.com/Rotorsoft/act-root/issues/1772)
+
 # [@rotorsoft/act-pg-v1.20.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.3...@rotorsoft/act-pg-v1.20.4) (2026-10-06)
 
 
