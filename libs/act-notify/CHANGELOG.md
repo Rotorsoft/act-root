@@ -1,3 +1,11 @@
+# [@rotorsoft/act-notify-v0.2.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.2.2...@rotorsoft/act-notify-v0.2.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act-notify:** never let a stalled broker hold up build or shutdown ([#1757](https://github.com/Rotorsoft/act-root/issues/1757)) ([f6d99fb](https://github.com/Rotorsoft/act-root/commit/f6d99fb0615a08d48b03d75899eef4c9dbcca1b0)), closes [#1743](https://github.com/Rotorsoft/act-root/issues/1743)
+* **act-notify:** validate and contain broker notifications like Postgres does ([#1763](https://github.com/Rotorsoft/act-root/issues/1763)) ([9f87512](https://github.com/Rotorsoft/act-root/commit/9f87512c5074cf03b799aa15f0d7185365130ad4)), closes [#1748](https://github.com/Rotorsoft/act-root/issues/1748) [#1749](https://github.com/Rotorsoft/act-root/issues/1749) [#1748](https://github.com/Rotorsoft/act-root/issues/1748) [#1749](https://github.com/Rotorsoft/act-root/issues/1749)
+
 # [@rotorsoft/act-notify-v0.2.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-notify-v0.2.1...@rotorsoft/act-notify-v0.2.2) (2026-09-29)
 
 
