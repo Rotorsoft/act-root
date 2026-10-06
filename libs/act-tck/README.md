@@ -181,7 +181,7 @@ New / changed methods on `Store`, `Cache`, or `Logger` are added to `libs/act-tc
 
 ## Compatibility
 
-- **Node**: >=22.23.2
+- **Node**: >=22.23.3
 - **Peer**: `@rotorsoft/act` (workspace version), `vitest` >=3.0.9, `zod` ^4.4.3
 - **Runtime deps**: none — pure test code
 

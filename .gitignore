@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .postgres/
+.postgres18/
 *.env
 .npmrc
 local.db*

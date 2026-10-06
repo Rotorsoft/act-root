@@ -99,7 +99,7 @@ Coming from Axon, Marten, MassTransit, or Temporal? Some patterns those framewor
 
 ## Requirements
 
-- Node.js >= 22.23.2
+- Node.js >= 22.23.3
 - pnpm >= 12.3.3
 
 ## Stability and support
