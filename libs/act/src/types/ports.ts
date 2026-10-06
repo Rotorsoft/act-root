@@ -1158,6 +1158,15 @@ export interface Store extends Disposable, EventSource {
    * via the orchestrator's normal `correlate()` path on the next
    * settle cycle.
    *
+   * **Correlate checkpoints reset.** Every correlate checkpoint (the shared
+   * one and each keyed correlator's) is an event id, so restore sets them
+   * back to -1 in the same transaction; left at their old values they would
+   * sit above every renumbered event and correlate would never resolve the
+   * restored events' reactions (#1772). Correlator leases are kept. The
+   * `Act` that ran the restore restarts its own correlation; any other
+   * process running against the same store must be restarted, as for any
+   * offline restore.
+   *
    * **Cache.** Restore does not touch the {@link Cache} port —
    * callers must `cache().clear()` after restore to avoid serving
    * stale snapshots. Documented; not enforced.

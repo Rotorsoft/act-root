@@ -2774,6 +2774,15 @@ export class Act<
         migrated = partial.migrated;
         dropped = partial.dropped;
       });
+      // Restoring into this app's own store replaced the log it correlates:
+      // ids start over and the subscription rows are gone. Restart
+      // correlation from cold so the restored events (and new commits, whose
+      // ids now sit below the old scan position) reach their reactions, and
+      // arm the drain so they run without waiting for a commit (#1772).
+      if (!sink) {
+        this._correlate.restart();
+        this._arm_all();
+      }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
     });
   }
@@ -8821,6 +8830,25 @@ export class CorrelateCycle<
    * \`_static_subscriptions\`, which this never touches, so they stay pinned
    * at +Infinity and the dynamic path never re-opens them.
    */
+  /**
+   * Start correlation over after the event log was replaced wholesale
+   * (\`restore\`). The restored log is renumbered from the start and its
+   * subscription rows are gone, so the in-memory scan position and both
+   * subscription records describe a log that no longer exists. Dropping them
+   * and the init latch makes the next pass run cold-start again: static
+   * targets are re-subscribed, the checkpoint is re-read from the store
+   * (which \`restore\` reset), and dynamic targets are rediscovered by the
+   * scan (#1772).
+   */
+  restart(): void {
+    this._initialized = false;
+    this._init_promise = undefined;
+    this._checkpoint = -1;
+    this._dynamic_subscriptions.clear();
+    this._static_subscriptions.clear();
+    this._armed = true;
+  }
+
   forget_subscribed(streams: Iterable<string>): void {
     for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }
@@ -14282,6 +14310,16 @@ export class InMemoryStore implements Store {
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     const prev_pii = this._pii;
+    const prev_correlated_at = this._correlated_at;
+    const prev_correlators = new Map(
+      [...this._correlators].map(([k, v]) => [k, { ...v }])
+    );
+    // The restored log is renumbered from 0, so every correlate checkpoint
+    // (an event id) must start over too, or correlate would resume above the
+    // restored events and never resolve their reactions (#1772). Correlator
+    // leases are kept: they say who may correlate, not how far.
+    this._correlated_at = -1;
+    for (const c of this._correlators.values()) c.at = -1;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
     this._next_id = 0;
@@ -14330,6 +14368,8 @@ export class InMemoryStore implements Store {
       this._max_event_id_by_stream = prev_max_event_id_by_stream;
       this._max_non_snap_event_id = prev_max_non_snap_event_id;
       this._pii = prev_pii;
+      this._correlated_at = prev_correlated_at;
+      this._correlators = prev_correlators;
       throw err;
     }
   }
@@ -16535,6 +16575,15 @@ export interface Store extends Disposable, EventSource {
    * streams/subscriptions tables are wiped. Reactions re-subscribe
    * via the orchestrator's normal \`correlate()\` path on the next
    * settle cycle.
+   *
+   * **Correlate checkpoints reset.** Every correlate checkpoint (the shared
+   * one and each keyed correlator's) is an event id, so restore sets them
+   * back to -1 in the same transaction; left at their old values they would
+   * sit above every renumbered event and correlate would never resolve the
+   * restored events' reactions (#1772). Correlator leases are kept. The
+   * \`Act\` that ran the restore restarts its own correlation; any other
+   * process running against the same store must be restarted, as for any
+   * offline restore.
    *
    * **Cache.** Restore does not touch the {@link Cache} port —
    * callers must \`cache().clear()\` after restore to avoid serving
@@ -23255,6 +23304,15 @@ export class Act<
         migrated = partial.migrated;
         dropped = partial.dropped;
       });
+      // Restoring into this app's own store replaced the log it correlates:
+      // ids start over and the subscription rows are gone. Restart
+      // correlation from cold so the restored events (and new commits, whose
+      // ids now sit below the old scan position) reach their reactions, and
+      // arm the drain so they run without waiting for a commit (#1772).
+      if (!sink) {
+        this._correlate.restart();
+        this._arm_all();
+      }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
     });
   }
@@ -29061,6 +29119,25 @@ export class CorrelateCycle<
    * \`_static_subscriptions\`, which this never touches, so they stay pinned
    * at +Infinity and the dynamic path never re-opens them.
    */
+  /**
+   * Start correlation over after the event log was replaced wholesale
+   * (\`restore\`). The restored log is renumbered from the start and its
+   * subscription rows are gone, so the in-memory scan position and both
+   * subscription records describe a log that no longer exists. Dropping them
+   * and the init latch makes the next pass run cold-start again: static
+   * targets are re-subscribed, the checkpoint is re-read from the store
+   * (which \`restore\` reset), and dynamic targets are rediscovered by the
+   * scan (#1772).
+   */
+  restart(): void {
+    this._initialized = false;
+    this._init_promise = undefined;
+    this._checkpoint = -1;
+    this._dynamic_subscriptions.clear();
+    this._static_subscriptions.clear();
+    this._armed = true;
+  }
+
   forget_subscribed(streams: Iterable<string>): void {
     for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }
@@ -33964,6 +34041,16 @@ export class InMemoryStore implements Store {
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     const prev_pii = this._pii;
+    const prev_correlated_at = this._correlated_at;
+    const prev_correlators = new Map(
+      [...this._correlators].map(([k, v]) => [k, { ...v }])
+    );
+    // The restored log is renumbered from 0, so every correlate checkpoint
+    // (an event id) must start over too, or correlate would resume above the
+    // restored events and never resolve their reactions (#1772). Correlator
+    // leases are kept: they say who may correlate, not how far.
+    this._correlated_at = -1;
+    for (const c of this._correlators.values()) c.at = -1;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
     this._next_id = 0;
@@ -34012,6 +34099,8 @@ export class InMemoryStore implements Store {
       this._max_event_id_by_stream = prev_max_event_id_by_stream;
       this._max_non_snap_event_id = prev_max_non_snap_event_id;
       this._pii = prev_pii;
+      this._correlated_at = prev_correlated_at;
+      this._correlators = prev_correlators;
       throw err;
     }
   }
@@ -35803,6 +35892,15 @@ export interface Store extends Disposable, EventSource {
    * streams/subscriptions tables are wiped. Reactions re-subscribe
    * via the orchestrator's normal \`correlate()\` path on the next
    * settle cycle.
+   *
+   * **Correlate checkpoints reset.** Every correlate checkpoint (the shared
+   * one and each keyed correlator's) is an event id, so restore sets them
+   * back to -1 in the same transaction; left at their old values they would
+   * sit above every renumbered event and correlate would never resolve the
+   * restored events' reactions (#1772). Correlator leases are kept. The
+   * \`Act\` that ran the restore restarts its own correlation; any other
+   * process running against the same store must be restarted, as for any
+   * offline restore.
    *
    * **Cache.** Restore does not touch the {@link Cache} port —
    * callers must \`cache().clear()\` after restore to avoid serving
@@ -42075,6 +42173,15 @@ export interface Store extends Disposable, EventSource {
    * streams/subscriptions tables are wiped. Reactions re-subscribe
    * via the orchestrator's normal \`correlate()\` path on the next
    * settle cycle.
+   *
+   * **Correlate checkpoints reset.** Every correlate checkpoint (the shared
+   * one and each keyed correlator's) is an event id, so restore sets them
+   * back to -1 in the same transaction; left at their old values they would
+   * sit above every renumbered event and correlate would never resolve the
+   * restored events' reactions (#1772). Correlator leases are kept. The
+   * \`Act\` that ran the restore restarts its own correlation; any other
+   * process running against the same store must be restarted, as for any
+   * offline restore.
    *
    * **Cache.** Restore does not touch the {@link Cache} port —
    * callers must \`cache().clear()\` after restore to avoid serving
@@ -57092,6 +57199,11 @@ export class PostgresStore implements Store {
         \`TRUNCATE TABLE \${this._fqt} RESTART IDENTITY CASCADE\`
       );
       await client.query(\`TRUNCATE TABLE \${this._fqs}\`);
+      // The restored log is renumbered from 1, so every correlate checkpoint
+      // (an event id) starts over in the same transaction, or correlate
+      // would resume above the restored events and never resolve their
+      // reactions (#1772). Correlator leases are kept.
+      await client.query(\`UPDATE \${this._fqc} SET at = -1\`);
       await driver(async (event) => {
         // Restore mirrors commit: encrypt the pii payload when
         // encryption is configured. The source iterator yields
@@ -59122,6 +59234,11 @@ export class SqliteStore implements Store {
     try {
       await tx.execute("DELETE FROM events");
       await tx.execute("DELETE FROM streams");
+      // The restored log is renumbered from 1, so every correlate checkpoint
+      // (an event id) starts over in the same transaction, or correlate
+      // would resume above the restored events and never resolve their
+      // reactions (#1772). Correlator leases are kept.
+      await tx.execute("UPDATE correlated SET at = -1");
       // Reset the autoincrement counter so the new sequence is dense
       // from 1. \`DELETE FROM sqlite_sequence WHERE name = '?'\` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
@@ -66029,6 +66146,40 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await cache.dispose();
         }
       };
+
+      it("resets every correlate checkpoint, since the restored log is renumbered", async () => {
+        // A correlate checkpoint is an event id. Restore renumbers the log
+        // from the start, so a checkpoint left at its old value would sit
+        // above every restored event and correlate would never resolve
+        // their reactions (#1772). Both the shared checkpoint and a keyed
+        // correlator's must start over.
+        const correlator = {
+          key: \`k-\${uid()}\`,
+          by: \`w-\${uid()}\`,
+          millis: 60_000,
+        };
+        await store.subscribe([], 50);
+        await store.subscribe([], 50, correlator);
+        expect((await store.subscribe([])).correlated_at).toBe(50);
+
+        const s = \`restore-cp-\${uid()}\`;
+        const t = new Date("2020-01-01T00:00:00.000Z");
+        const result = await restore(
+          as_source([
+            event(1, s, 0, "Incremented", t, { amount: 1 }),
+            event(2, s, 1, "Incremented", t, { amount: 1 }),
+          ])
+        );
+        expect(result.kept).toBe(2);
+        const restored = await collect(store, { limit: 10 });
+        const min_id = Math.min(...restored.map((e) => e.id));
+
+        const shared = (await store.subscribe([])).correlated_at;
+        const keyed = (await store.subscribe([], undefined, correlator))
+          .correlated_at;
+        expect(shared).toBeLessThan(min_id);
+        expect(keyed).toBeLessThan(min_id);
+      });
 
       it("returns kept=0 on an empty source", async () => {
         const result = await restore(as_source([]));

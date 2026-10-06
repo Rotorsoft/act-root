@@ -431,6 +431,8 @@ The inversion exists for a reason: validation, dry-run, `drop_snapshots`, `on_pr
 
 ### Atomicity is the invariant
 
+Restore must also reset every **correlate checkpoint** (the shared row and each keyed correlator's) to `-1` in the same transaction, keeping their lease columns. The checkpoints are event ids, and the restored log is renumbered from the start: left alone they would point above every restored event, and correlate would never resolve those events' reactions ([#1772](https://github.com/Rotorsoft/act-root/issues/1772)). The store-TCK case "resets every correlate checkpoint, since the restored log is renumbered" pins it.
+
 The single non-negotiable rule: on any throw from inside `driver(callback)`, the entire restore must roll back. The store reverts byte-for-byte to its pre-call state. The TCK's `atomic rollback on mid-iteration throw` case fault-injects an exception in the middle of the restore and asserts every event is unchanged afterwards.
 
 Per-dialect notes:

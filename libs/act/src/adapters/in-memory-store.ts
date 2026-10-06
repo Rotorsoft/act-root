@@ -1368,6 +1368,16 @@ export class InMemoryStore implements Store {
     const prev_max_event_id_by_stream = this._max_event_id_by_stream;
     const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     const prev_pii = this._pii;
+    const prev_correlated_at = this._correlated_at;
+    const prev_correlators = new Map(
+      [...this._correlators].map(([k, v]) => [k, { ...v }])
+    );
+    // The restored log is renumbered from 0, so every correlate checkpoint
+    // (an event id) must start over too, or correlate would resume above the
+    // restored events and never resolve their reactions (#1772). Correlator
+    // leases are kept: they say who may correlate, not how far.
+    this._correlated_at = -1;
+    for (const c of this._correlators.values()) c.at = -1;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
     this._next_id = 0;
@@ -1416,6 +1426,8 @@ export class InMemoryStore implements Store {
       this._max_event_id_by_stream = prev_max_event_id_by_stream;
       this._max_non_snap_event_id = prev_max_non_snap_event_id;
       this._pii = prev_pii;
+      this._correlated_at = prev_correlated_at;
+      this._correlators = prev_correlators;
       throw err;
     }
   }

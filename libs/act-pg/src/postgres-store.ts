@@ -2540,6 +2540,11 @@ export class PostgresStore implements Store {
         `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
+      // The restored log is renumbered from 1, so every correlate checkpoint
+      // (an event id) starts over in the same transaction, or correlate
+      // would resume above the restored events and never resolve their
+      // reactions (#1772). Correlator leases are kept.
+      await client.query(`UPDATE ${this._fqc} SET at = -1`);
       await driver(async (event) => {
         // Restore mirrors commit: encrypt the pii payload when
         // encryption is configured. The source iterator yields
