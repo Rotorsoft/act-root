@@ -534,8 +534,8 @@ export type ActionBuilder<
    * `app.close({ stream, archive })` already uses — the cycle holds
    * the stream's guard while the archiver runs, and a thrown
    * archiver leaves the stream guarded but un-truncated. No partial
-   * truncate state, no data loss; the cycle retries the candidate
-   * on the next tick.
+   * truncate state, no data loss. It is not retried automatically;
+   * `app.close([{ stream, archive }])` resumes the guarded stream.
    *
    * One archiver per state. A second `.archives(...)` call replaces
    * the first (same shape as `.snap` / `.discloses` /

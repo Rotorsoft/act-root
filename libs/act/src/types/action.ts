@@ -628,8 +628,8 @@ export type AutoclosePredicate<TEvents extends Schemas> = (
  * {@link CloseTarget.archive} so the existing close-cycle's
  * archive-while-guarded invariant carries over: the stream is locked
  * against new writes while the archiver runs, and a thrown archiver
- * leaves the stream guarded but un-truncated (no data loss, the
- * cycle retries the candidate next tick).
+ * leaves the stream guarded but un-truncated (no data loss). It is not
+ * retried automatically; `app.close([{ stream, archive }])` resumes it.
  *
  * State-level (one per state, last-write-wins). Hosts with per-stream
  * archiving differences branch inside the function. Absent →
