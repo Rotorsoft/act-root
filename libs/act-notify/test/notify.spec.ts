@@ -196,7 +196,10 @@ describe("withBroker", () => {
       // a message already in the broker's pipeline arrives after disposal
       broker.publish({
         origin: "remote",
-        notification: { stream: "late", events: [] },
+        notification: {
+          stream: "late",
+          events: [{ id: 1, name: "Incremented" }],
+        },
       });
       expect(seen).toEqual([]);
     });
@@ -262,6 +265,71 @@ describe("withBroker", () => {
         ).toBe(true);
       });
       warn.mockRestore();
+    });
+  });
+
+  describe("delivery to notify handlers", () => {
+    const valid = { stream: "s9", events: [{ id: 7, name: "Incremented" }] };
+
+    it("contains a throwing handler so other subscribers still receive, and the commit is unaffected", async () => {
+      const broker = new LoopbackBroker();
+      const base = new InMemoryStore();
+      const listener = withBroker(base, broker);
+      const seen: string[] = [];
+      await listener.notify(() => seen.push("a"));
+      await listener.notify(() => {
+        throw new Error("handler bug");
+      });
+      await listener.notify(() => seen.push("c"));
+      const errors = vi.spyOn(log(), "error");
+      const warns = vi.spyOn(log(), "warn");
+
+      const remote = withBroker(base, broker);
+      const committed = await remote.commit(
+        "s9",
+        [{ name: "Incremented", data: { by: 1 } }],
+        meta
+      );
+      expect(committed).toHaveLength(1);
+      expect(seen).toEqual(["a", "c"]);
+      expect(errors).toHaveBeenCalledWith(
+        expect.any(Error),
+        "Broker notification handler threw"
+      );
+      // nothing reached the committer as a publish failure
+      expect(
+        warns.mock.calls.some((c) => String(c[0]).includes("publish failed"))
+      ).toBe(false);
+      errors.mockRestore();
+      warns.mockRestore();
+    });
+
+    it("skips malformed notifications and keeps only well-formed events", async () => {
+      const broker = new LoopbackBroker();
+      const seen: StoreNotification[] = [];
+      await withBroker(new InMemoryStore(), broker).notify((n) => seen.push(n));
+      const warns = vi.spyOn(log(), "warn");
+      const send = (notification: unknown) =>
+        broker.publish({ origin: "other", notification } as never);
+
+      send({ stream: 42, events: valid.events });
+      send({ stream: "s9" });
+      send({ stream: "s9", events: [{ id: "1", name: "X" }, null] });
+      send(undefined);
+      broker.publish(null as never);
+      send({
+        stream: "s9",
+        events: [
+          { id: 7, name: "Incremented", extra: true },
+          { name: "no-id" },
+        ],
+      });
+
+      expect(seen).toEqual([valid]);
+      expect(
+        warns.mock.calls.filter((c) => String(c[0]).includes("malformed"))
+      ).toHaveLength(5);
+      warns.mockRestore();
     });
   });
 
