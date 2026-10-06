@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.11...@rotorsoft/act-tck-v1.38.12) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act:** block a stream whose fetch keeps failing once its budget is spent ([#1792](https://github.com/Rotorsoft/act-root/issues/1792)) ([9cfa187](https://github.com/Rotorsoft/act-root/commit/9cfa1875ed8cfcb82a01a929705c6f6b02f9007e)), closes [#1675](https://github.com/Rotorsoft/act-root/issues/1675) [#1774](https://github.com/Rotorsoft/act-root/issues/1774)
+* **act:** keep reactions working after restore ([#1791](https://github.com/Rotorsoft/act-root/issues/1791)) ([3c8a09b](https://github.com/Rotorsoft/act-root/commit/3c8a09b5209652b978728a7defea6f81eda6ea9c)), closes [#1772](https://github.com/Rotorsoft/act-root/issues/1772)
+
 # [@rotorsoft/act-tck-v1.38.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.10...@rotorsoft/act-tck-v1.38.11) (2026-10-06)
 
 
