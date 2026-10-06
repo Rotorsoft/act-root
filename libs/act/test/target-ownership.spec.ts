@@ -11,7 +11,7 @@
  * duplicate. Both sibling paths already treated it that way; the fold path
  * threw.
  */
-import { act, dispose, projection, state } from "@rotorsoft/act";
+import { act, dispose, projection, slice, state } from "@rotorsoft/act";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -108,6 +108,65 @@ describe("a reaction may not target a projection's target (#1467)", () => {
         .on("Pinged")
         .do(async function onPinged() {})
         .to({ target: "elsewhere" })
+        .build()
+    ).not.toThrow();
+  });
+});
+
+describe("a per-event projection may not share a served target (#1773)", () => {
+  const per_event = (target: string) =>
+    projection(target)
+      .on({ Pinged: z.object({}) })
+      .do(async function onPingedProj() {})
+      .build();
+
+  it("rejects a per-event projection on a fold's target", () => {
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withState(Other)
+        .withProjection(fold_projection("counters"))
+        .withProjection(per_event("counters"))
+        .build()
+    ).toThrow(/conflicts with the projection that already serves it/);
+  });
+
+  it("rejects a per-event projection on a batch projection's target", () => {
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withState(Other)
+        .withProjection(batch_projection("sink"))
+        .withProjection(per_event("sink"))
+        .build()
+    ).toThrow(/conflicts with the projection that already serves it/);
+  });
+
+  it("rejects it when the two arrive through different slices", () => {
+    const folds = slice()
+      .withState(Counter)
+      .withProjection(fold_projection("counters"))
+      .build();
+    const pings = slice()
+      .withState(Other)
+      .withProjection(per_event("counters"))
+      .build();
+    expect(() => act().withSlice(folds).withSlice(pings).build()).toThrow(
+      /conflicts with the projection that already serves it/
+    );
+  });
+
+  it("still allows per-event projections to share a target nobody serves", () => {
+    const counted = projection("feed")
+      .on({ Incremented: z.object({}) })
+      .do(async function onIncrementedProj() {})
+      .build();
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withState(Other)
+        .withProjection(counted)
+        .withProjection(per_event("feed"))
         .build()
     ).not.toThrow();
   });
