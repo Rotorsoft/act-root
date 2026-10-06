@@ -20,6 +20,7 @@ import { log } from "../ports.js";
 import type {
   BatchHandler,
   BlockedLease,
+  CloseResult,
   CloseTarget,
   Drain,
   DrainOptions,
@@ -38,6 +39,11 @@ import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
+
+/** First retry of a reaction-requested close that did not land (#1776). @internal */
+const CLOSE_RETRY_BASE_MS = 60_000;
+/** Ceiling for the doubling close-retry delay. @internal */
+const CLOSE_RETRY_MAX_MS = 3_600_000;
 
 /**
  * Outcome of processing a single leased stream — produced by Act's `handle`
@@ -519,7 +525,11 @@ export type DrainControllerDeps<
    * it to its `run_close_cycle` machinery (same path as `app.close`). Awaited so
    * a slow close doesn't overlap the next cycle's claim on the controller.
    */
-  readonly on_close: (targets: CloseTarget[]) => Promise<void>;
+  /**
+   * Runs the reaction-requested closes and returns the close result, so the
+   * controller can retry the full closes that did not land (#1776).
+   */
+  readonly on_close: (targets: CloseTarget[]) => Promise<CloseResult>;
   /**
    * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
    * repeated store failures so the drain loop stops hammering a down
@@ -575,6 +585,11 @@ export class DrainController<
    * for the multi-worker trade-off). Its wake re-arms drain at the earliest
    * pending visit.
    */
+  /**
+   * Consecutive missed closes per requesting subscription, for the retry
+   * delay in {@link _close}. Cleared when its close lands.
+   */
+  private readonly _close_misses = new Map<string, number>();
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
   });
@@ -625,6 +640,57 @@ export class DrainController<
    * collapses many seeds into one timer, so callers may seed in a loop and
    * let the earliest due-time win.
    */
+  /**
+   * Run the reaction-requested closes, and retry the full closes that did
+   * not land: an archiver threw (the stream is left guarded) or the close
+   * was skipped (a sibling reaction still lagging). The requesting reaction
+   * was acked past its trigger before the close ran, and a tombstone head
+   * re-triggers nothing, so without this nothing would ever ask again
+   * (#1776). The retry rewinds the requesting subscription and defers it,
+   * doubling the delay per consecutive miss; the redelivered event
+   * re-evaluates the live head and the close cycle resumes the guarded
+   * stream (#1389). Windowed prunes are left alone: a skipped prune just
+   * means nothing qualifies yet, and the reaction schedules its own next
+   * visit.
+   */
+  private async _close(
+    handled: HandleResult[],
+    closeable: CloseTarget[]
+  ): Promise<void> {
+    let closed = new Set<string>();
+    try {
+      const result = await this._deps.on_close(closeable);
+      closed = new Set(result.truncated.keys());
+    } finally {
+      const missed = handled
+        .filter(
+          (h) =>
+            h.close !== undefined &&
+            h.close.before === undefined &&
+            !closed.has(h.close.stream)
+        )
+        .map((h) => h.lease.stream);
+      for (const h of handled)
+        if (h.close && closed.has(h.close.stream))
+          this._close_misses.delete(h.lease.stream);
+      if (missed.length) {
+        const attempts = Math.max(
+          ...missed.map((s) => (this._close_misses.get(s) ?? 0) + 1)
+        );
+        for (const s of missed) this._close_misses.set(s, attempts);
+        const at =
+          Date.now() +
+          Math.min(
+            CLOSE_RETRY_BASE_MS * 2 ** (attempts - 1),
+            CLOSE_RETRY_MAX_MS
+          );
+        await this._deps.ops.revisit(missed, at);
+        for (const s of missed) this._defer.set(s, at);
+        this._defer.schedule();
+      }
+    }
+  }
+
   seed_defer(stream: string, at: number): void {
     this._defer.set(stream, at);
     this._defer.schedule();
@@ -817,7 +883,7 @@ export class DrainController<
       // catch below, or an outage silently bricks streams while the
       // breaker records a success (#1388). The `closed` EMIT is contained
       // on the Act side, which is the only listener risk on this path.
-      if (closeable.length) await this._deps.on_close(closeable);
+      if (closeable.length) await this._close(handled, closeable);
 
       // Recorded after `on_close` so a cycle whose close failed is never
       // counted as a store success (#1388).

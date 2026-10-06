@@ -22,6 +22,7 @@ import type {
   Schema,
   State,
 } from "../types/index.js";
+import { AUTOCLOSE_TARGET_PREFIX } from "./autoclose-reaction.js";
 import type { EsOps } from "./event-sourcing.js";
 
 /**
@@ -606,6 +607,13 @@ async function partition_by_safety(
           position.correlated_at !== undefined &&
           position.at < position.correlated_at;
         if (!has_work) return;
+        // The synthetic autoclose subscription is not a consumer whose work a
+        // truncate could lose: its reaction reads only the live head, to
+        // decide whether to request this very close. When a requested close
+        // did not land, the drain rewinds it to retry later (#1776), and
+        // counting it as lagging would then refuse every close of the stream,
+        // the retry's and an operator's alike, until the retry ran.
+        if (position.stream.startsWith(AUTOCLOSE_TARGET_PREFIX)) return;
         for (const [stream, info] of stream_info) {
           if (
             (!source_re || source_re.test(stream)) &&

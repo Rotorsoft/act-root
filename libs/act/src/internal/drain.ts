@@ -38,6 +38,7 @@ export interface DrainOps<TEvents extends Schemas> {
   ack: typeof ack;
   block: typeof block;
   subscribe: typeof subscribe;
+  revisit: typeof revisit;
 }
 
 export const claim = (
@@ -100,6 +101,19 @@ export const ack = (leases: Lease[]): Promise<Lease[]> => store().ack(leases);
 
 export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
+
+/**
+ * Redeliver the given subscriptions' events from the start, no sooner than
+ * `at` (ms since epoch). Used to retry a reaction-requested close that did
+ * not land: the requesting reaction was already acked past its trigger, so
+ * its watermark is rewound and the stream held back until the retry is due
+ * (#1776). Two store calls, reset then defer: a claim landing between them
+ * only retries early.
+ */
+export async function revisit(streams: string[], at: number): Promise<void> {
+  await store().reset(streams);
+  await store().defer(streams, at);
+}
 
 export const subscribe = (
   streams: SubscribeInput[],

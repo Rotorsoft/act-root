@@ -137,6 +137,73 @@ describe("autoclose as a synthesized reaction", () => {
   // retry. Phase 1 used to drop every tombstone-headed stream, so the
   // retry found nothing: an empty, error-free CloseResult, and a stream
   // that was write-dead, unarchived and untruncated forever.
+  describe("retries a requested close that did not land (#1776)", () => {
+    const T0 = new Date("2026-03-01T00:00:00Z");
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(T0);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const at = (ms: number) => vi.setSystemTime(new Date(T0.getTime() + ms));
+    const names = async (stream: string) => {
+      const out: string[] = [];
+      await store().query((e) => out.push(String(e.name)), {
+        stream,
+        stream_exact: true,
+        with_snaps: true,
+      });
+      return out;
+    };
+
+    it("re-runs a close whose archiver threw, backing off between misses", async () => {
+      let failures = 2;
+      const archived: string[] = [];
+      const app = act()
+        .withState(
+          base()
+            .autocloses({ is: "Resolved" })
+            .archives(async (stream) => {
+              if (failures-- > 0) throw new Error("s3 down");
+              archived.push(stream);
+            })
+            .build()
+        )
+        .build();
+      const pass = async () => {
+        // Any commit arms the drain, as live traffic would.
+        await app.do("open", { stream: `other-${Date.now()}`, actor }, {});
+        await app.correlate();
+        await app.drain({ leaseMillis: 1 });
+      };
+
+      await app.do("open", { stream: "t-retry", actor }, {});
+      await app.do("resolve", { stream: "t-retry", actor }, {});
+      await app.correlate();
+      await expect(app.drain({ leaseMillis: 1 })).resolves.toBeDefined();
+      expect(await names("t-retry")).toEqual([
+        "Opened",
+        "Resolved",
+        "__tombstone__",
+      ]);
+
+      // First retry after a minute: the archiver fails again.
+      at(61_000);
+      await pass();
+      expect(archived).toEqual([]);
+      // The second miss waits twice as long: nothing at +2 minutes...
+      at(120_000);
+      await pass();
+      expect(archived).toEqual([]);
+      // ...and the close lands once it is due.
+      at(185_000);
+      await pass();
+      expect(archived).toEqual(["t-retry"]);
+      expect(await names("t-retry")).toEqual(["__tombstone__"]);
+    });
+  });
+
   it("resumes a close whose archive callback threw", async () => {
     const archived: string[] = [];
     let failed = false;

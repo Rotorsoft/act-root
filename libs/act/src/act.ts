@@ -825,6 +825,7 @@ export class Act<
           // real StoreError reaches the breaker (#1388). The emit needs no
           // guard here: `Act.emit` contains each listener (#1437).
           this.emit("closed", result);
+          return result;
         },
         breaker: this._breaker,
         // Re-scope the per-lane worker's auto-start ticks so their drain
