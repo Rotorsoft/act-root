@@ -1194,16 +1194,24 @@ export class PostgresStore implements Store {
     const client = await this._client("claim");
     try {
       await client.query("BEGIN");
-      const lane_clause = lane !== undefined ? `AND s.lane = $6` : "";
+      const lane_clause = lane !== undefined ? `AND s.lane = $7` : "";
       // Fairness reserve (ACT-1223): carve `fair` slots off the lagging
       // budget for pure watermark-order claims so a default-priority
       // lagging stream is never starved out by sustained higher-priority
-      // load. `fair` is always $5; the optional `lane` bind is last ($6).
+      // load. `fair` is always $5; the optional `lane` bind is last ($7).
       const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
+      // A defer is due by THIS worker's clock ($6), not the database's
+      // `NOW()`: the worker's process-local timer wakes the drain on its own
+      // clock, so judging `deferred_at` on a second clock made a worker
+      // running ahead of the database wake early, claim nothing, and lose
+      // the wake (#1753). InMemory and SQLite already compare against the
+      // caller's clock. Leases stay on `NOW()`: their expiry is a duration
+      // set and checked by the database, and judging it per worker would
+      // let a fast clock take a lease another worker still holds.
       const params: unknown[] =
         lane !== undefined
-          ? [lagging, leading, by, millis, fair, lane]
-          : [lagging, leading, by, millis, fair];
+          ? [lagging, leading, by, millis, fair, Date.now(), lane]
+          : [lagging, leading, by, millis, fair, Date.now()];
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -1258,7 +1266,7 @@ export class PostgresStore implements Store {
             AND s.at < s.correlated_at
             ${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
-            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= to_timestamp($6 / 1000.0))
           ORDER BY s.priority DESC, s.at ASC
           LIMIT ($1::int - $5::int)
         ),
@@ -1269,7 +1277,7 @@ export class PostgresStore implements Store {
             AND s.at < s.correlated_at
             ${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
-            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= to_timestamp($6 / 1000.0))
             AND s.stream NOT IN (SELECT stream FROM prio)
           ORDER BY s.at ASC
           LIMIT $5
@@ -1284,7 +1292,7 @@ export class PostgresStore implements Store {
             AND s.at < s.correlated_at
             ${lane_clause}
             AND (s.leased_by IS NULL OR s.leased_until <= NOW())
-            AND (s.deferred_at IS NULL OR s.deferred_at <= NOW())
+            AND (s.deferred_at IS NULL OR s.deferred_at <= to_timestamp($6 / 1000.0))
           ORDER BY s.at DESC
           LIMIT $2
         ),
@@ -1304,7 +1312,7 @@ export class PostgresStore implements Store {
           WHERE s2.stream IN (SELECT stream FROM combined)
             AND s2.blocked = false
             AND (s2.leased_by IS NULL OR s2.leased_until <= NOW())
-            AND (s2.deferred_at IS NULL OR s2.deferred_at <= NOW())
+            AND (s2.deferred_at IS NULL OR s2.deferred_at <= to_timestamp($6 / 1000.0))
           FOR UPDATE OF s2 SKIP LOCKED
         )
         UPDATE ${this._fqs} s
@@ -1617,7 +1625,8 @@ export class PostgresStore implements Store {
    * Hold the matched streams out of {@link claim} until `deferred_at`
    * (ms since epoch) — see {@link Store.defer}. Persists `deferred_at`
    * (as a `timestamptz`) so the skip is honored by every competing
-   * worker; `claim` filters on `deferred_at <= NOW()`. Accepts an
+   * worker; `claim` filters on `deferred_at` against the claiming worker's
+   * clock, the same clock its defer timer runs on. Accepts an
    * explicit list of names or a {@link StreamFilter}, mirroring
    * {@link reset}/{@link prioritize}. Cleared by ack/block/reset/unblock.
    *

@@ -887,6 +887,11 @@ export interface Store extends Disposable, EventSource {
    * in-process backoff, this is durable, shared store state — every
    * competing worker honors the skip.
    *
+   * {@link claim} treats a deferred stream as due once the **claiming
+   * caller's** clock reaches `deferred_at`, not a clock of the store's own
+   * (such as a database `NOW()`): the orchestrator's defer timer wakes on
+   * the caller's clock, and the claim it triggers must agree with it.
+   *
    * The schedule is cleared whenever the watermark moves or the stream is
    * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
    * all reset `deferred_at`. Re-deferring simply overwrites it.
