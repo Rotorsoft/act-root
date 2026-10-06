@@ -52,6 +52,10 @@ Each of these was found red-first and filed. Future waves should confirm they st
 - **#1740** — a defer wake is lost when the drain it triggers claims nothing: the timer GCs the came-due entry, and `drain-cycle.ts`'s `!cycle` early return skips `_defer.schedule()`. #1669/#1670's empty-result shape, third instance.
 - **#1741** / **#1742** — #1700's tentative-vs-committed confusion survives in `withIdempotency` (generated API answers an in-flight dup 409), and #1726's own fix marks in-flight only when the winner's claim *reply* lands, which an async store can deliver after the loser's.
 - **#1743** — `app.shutdown()` awaits the notify disposer unbounded (`act.ts:1051`), so a stalled broker hangs shutdown before the grace budget is ever consulted.
+- **#1772** — `restore` renumbers the log but leaves the correlate checkpoint (#1484) where it was, on all three adapters, so restored events and new live commits below the stale checkpoint never reach their reactions. *Sibling:* any other path that rewrites or renumbers the log (truncate restart seeds, archival tools) must account for every cursor keyed to event ids.
+- **#1773** — the #1467 target-ownership guard exempts every projection's reactions on any target (one global set), so a per-event projection can share a fold's or batch's target. *Sibling:* any exemption keyed by "kind" rather than by owner.
+- **#1774** — the drain's fetch-error branch never consults the retry budget, so a stream whose fetch keeps failing is never blocked (five doc sites claim otherwise). *Sibling:* every early-return in the drain finalize that skips `budget_exhausted`.
+- **#1776** — a failed or skipped autoclose terminal close is acked anyway, and a tombstone head re-triggers nothing, so it's never retried; audit's close-candidate still reads a guarded stream as closed (pre-#1389).
 
 ### Wave 8 (2026-07-25 — lenses: receiver finalization, versioned events, fold engine, act-ops idempotency)
 
@@ -556,4 +560,33 @@ Filed:
 **Follow-up from the fix work (2026-10-06):** every ticket was fixed (PRs #1752-#1769). #1740's second scenario (app clock ahead of the Postgres clock) was split into **#1753**. Its first fix (#1760, a re-park retry floor) was closed in favour of removing the mismatch: Postgres now judges `deferred_at` by the claiming worker's clock, like InMemory and SQLite (#1769, with a store-TCK case on every adapter). The same skew also lost **backoff** retries, which persist an absolute `deferred_at`. A suspected third instance, the no-backoff retry park at `Date.now() + leaseMillis`, was proven NOT a bug: see the new invariants line on absolute instants vs durations.
 
 **Leads not finished:** a close racing `app.do` between Phase 1's scan and the Phase 3 tombstone (needs a hook); live node-redis queue-vs-reject while disconnected (no Redis container); app clock BEHIND the DB clock turning `make_deferred`'s re-defer into a past due (hot claim loop for the duration of the skew); `{ after }` beyond the Date range (SQLite `toISOString` throws); webhook 2xx path never reads/cancels the body; `PinoLogger.dispose()` does not await `flush()`.
+
+### Wave 27 (2026-10-06 — lenses: post-wave-26 fix siblings, store divergence, projections, toolchain blast radius (Node 26 / PG 18), audit & lifecycle events)
+
+**Sixteen tickets filed (#1772-#1787). Seven reproduced independently in the main loop (#1772, #1773's build half, #1774, #1775, #1776 scenario A, #1777, #1778's run history); the rest are labelled hunter-verified.** All five hunters delivered complete reports. Two findings are regressions in fixes the lead shipped the previous day (#1777 from #1752, #1783 from #1764), and #1778 is the lead's own #1770 merging without the CI job it added ever running.
+
+Filed:
+
+- **#1772** (HIGH) — restore leaves the correlate checkpoint past the renumbered log. Not a divergence: all three adapters are wrong the same way, which is why the differential TCK couldn't see it.
+- **#1773** (HIGH) — per-event projection sharing a fold/batch target passes the ownership guard; the fold writes another aggregate's state into its read table.
+- **#1774** (HIGH) — a stream whose fetch keeps failing retries forever, never blocked; `reaction-health` audit says "near-block"; no `error` event, `act_streams_blocked` stays 0.
+- **#1775** (HIGH) — the published `act` CLI bin crashes: shebang emitted twice (source + tsup banner), since 1.0.0. CI's smoke step runs `src/` via tsx, never `dist/`.
+- **#1776** (MED-HIGH) — failed/skipped autoclose terminal close never retried; audit hides it.
+- **#1777** (MED) — generated Hono route re-reads the body ignoring Content-Type (regression from #1752).
+- **#1778** (MED) — CI-CD only treats `libs/*/src` as source, so dependency/toolchain/lockfile changes merge and publish untested; `node-compat` never ran; `cd` doesn't need it.
+- **#1779** (MED, docs) — per-event and batch projections can't be rebuilt after a windowed prune; only `.of()` folds survive (snapshot-anchored). Docs and the close recipe imply otherwise.
+- **#1780** (MED) — batch handler receives an event once per reaction (`[0, 0]`).
+- **#1781-#1787** (LOW) — InMemory empty-string filter TypeError; in-flight tracking per generator; receiver listen on a busy port hangs close; PG empty commit skips the version check; duplicate ack/block entries diverge; no explicit tsconfig `lib` (DOM globals typecheck under @types/node 22) plus stale pnpm/PG docs; routing-health findings don't name the event (needs an RFC).
+
+**Swept clean / ruled out this wave:**
+- **`claim` across adapters, 84 combinations** (lagging 0..8 x leading 0..3 x lane none/default/fast, mixed priorities): identical leased sets on InMemory, Postgres and SQLite, including the fairness reserve at small budgets and the new `$6`/`$7` binds. Only the known `DISTINCT ON` `lagging`-flag tie-break differs (awareness-only).
+- **The #1756 close lock is deadlock-free** for duplicate targets (target_map dedupes), windowed+full on one stream (later entry wins, pre-existing), and the correlate catch-up inside the lock. A snapshot can't land after the guard (`snap` commits with an expected version).
+- **#1754/#1769 are complete:** all four PG `deferred_at` predicates use `$6`, lane `$7`, no `NOW()` left on `deferred_at`.
+- **Published packages run on a real Node 22.23.3** (packed tarballs installed with `npm --engine-strict`, smoke app on PG 18). No `libs/*/src` API newer than Node 22 / ES2022. All 8 workflows pass action-validator.
+- **PG 18:** act-pg suite and conformance green; nothing relies on 17-only behavior.
+- **`acked` excludes deferred leases; `committed` excludes `__snapshot__` commits (documented); `notified` self-filters per store instance; `unblock` filter forms agree across adapters** (the InMemory doc-comment contradicts its code; the comment is wrong).
+- **`app.reset` during an in-flight batch converges** (reset clears `leased_by`); restore + warm fold cache is covered by the documented `cache().clear()` + `app.reset` flow.
+- **Not filed, by design:** `validateFoldedState` + a `sensitive()` field folded into a required key blocks the fold (opt-in, loud, #1320 strip is deliberate); noted in #1779 for a docs sentence.
+
+**Leads not finished:** hono malformed JSON with a JSON content type returns a plain 400, not the ApiError 422 envelope (pre-existing, noted in #1777); Express/Fastify/tRPC receiver middlewares don't track in-flight claims (doc check); the `stuck-backoff` audit can't see a stream parked on a far `deferred_at` since backoff became persisted; the cast-only reverse-order `merge_projection` PII path; a `MaxListenersExceededWarning` (>10 `uncaughtException` listeners) in the test run on Node 22 and 26.
 
