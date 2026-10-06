@@ -6,13 +6,36 @@ permissions:
   issues: write
 
 on:
+  # Anything that can change what typecheck, build or the tests produce
+  # triggers the workflow: lib code and tests, the example apps and recipes
+  # (`pnpm test` runs them), dependency manifests and the lockfile, and the
+  # root toolchain config. A dependency-only PR used to skip CI entirely
+  # (#1778).
   pull_request:
     paths:
       - 'libs/**'
+      - 'packages/**'
+      - 'recipes/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig*.json'
+      - 'vite.config.ts'
+      - 'biome.json'
+      - '.github/workflows/ci-cd.yml'
   push:
     branches: [master]
     paths:
       - 'libs/**'
+      - 'packages/**'
+      - 'recipes/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig*.json'
+      - 'vite.config.ts'
+      - 'biome.json'
+      - '.github/workflows/ci-cd.yml'
   workflow_dispatch:
 
 env:
@@ -21,8 +44,10 @@ env:
 
 jobs:
   # One paths-filter pass produces three signals:
-  #   - `src-changed`: any `libs/*/src/**` touched → run unit tests.
-  #     Pure docs/CHANGELOG/PERFORMANCE updates inside a lib don't trip this.
+  #   - `src-changed`: anything that can change typecheck/build/test results
+  #     → run `ci` and `node-compat`. Pure docs/CHANGELOG/PERFORMANCE updates
+  #     inside a lib don't trip this; dependency, lockfile, test and
+  #     toolchain changes do (#1778).
   #   - `perf-changed`: a perf-critical hot path or a benchmark file changed
   #     → run benches on top of unit tests. Most PRs and most master pushes
   #     skip this. A perf-affecting change that doesn't touch the filter's
@@ -44,6 +69,20 @@ jobs:
           filters: |
             src:
               - 'libs/*/src/**'
+              - 'libs/*/test/**'
+              - 'libs/*/package.json'
+              - 'libs/*/tsconfig*.json'
+              - 'libs/*/tsup.config.ts'
+              - 'libs/tsconfig*.json'
+              - 'packages/**'
+              - 'recipes/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+              - 'vite.config.ts'
+              - 'biome.json'
+              - '.github/workflows/ci-cd.yml'
       - uses: dorny/paths-filter@v4
         id: perf
         with:
@@ -432,8 +471,9 @@ jobs:
       github.ref == 'refs/heads/master' &&
       needs.changes.outputs.libs != '[]' &&
       (needs.ci.result == 'success' || needs.ci.result == 'skipped') &&
+      (needs.node-compat.result == 'success' || needs.node-compat.result == 'skipped') &&
       (needs.bench.result == 'success' || needs.bench.result == 'skipped')
-    needs: [changes, ci, bench]
+    needs: [changes, ci, node-compat, bench]
     runs-on: ubuntu-latest
     # Job-level permissions REPLACE the workflow-level block, so the existing
     # grants are restated here alongside the new one. `id-token: write` lets
