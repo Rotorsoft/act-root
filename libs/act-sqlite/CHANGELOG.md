@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.20.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.20.0...@rotorsoft/act-sqlite-v1.20.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act:** keep reactions working after restore ([#1791](https://github.com/Rotorsoft/act-root/issues/1791)) ([3c8a09b](https://github.com/Rotorsoft/act-root/commit/3c8a09b5209652b978728a7defea6f81eda6ea9c)), closes [#1772](https://github.com/Rotorsoft/act-root/issues/1772)
+
 # [@rotorsoft/act-sqlite-v1.20.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.19.7...@rotorsoft/act-sqlite-v1.20.0) (2026-10-01)
 
 
