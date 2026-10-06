@@ -1009,7 +1009,9 @@ export class PostgresStore implements Store {
     meta: EventMeta,
     expectedVersion?: number
   ) {
-    if (msgs.length === 0) return [];
+    // An empty commit writes nothing, but an expectedVersion still has to be
+    // checked, as InMemory and SQLite do (#1784).
+    if (msgs.length === 0 && expectedVersion === undefined) return [];
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the claim has-work
@@ -1046,6 +1048,7 @@ export class PostgresStore implements Store {
           msgs as unknown as Message<Schemas, string>[],
           expectedVersion
         );
+      if (msgs.length === 0) return [];
 
       // Encrypt the pii payloads when encryption is configured and
       // there's anything to encrypt — `null` passes through verbatim so

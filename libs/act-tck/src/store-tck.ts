@@ -405,6 +405,23 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ).rejects.toBeInstanceOf(ConcurrencyError);
       });
 
+      it("checks expectedVersion even when committing no events", async () => {
+        // An empty commit writes nothing, but a stale expectedVersion is
+        // still a conflict the caller must hear about (#1784).
+        const s = `commit-empty-cc-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await expect(
+          store.commit<CounterEvents>(s, [], make_meta({ stream: s }), 5)
+        ).rejects.toBeInstanceOf(ConcurrencyError);
+        expect(
+          await store.commit<CounterEvents>(s, [], make_meta({ stream: s }), 0)
+        ).toEqual([]);
+      });
+
       it("preserves prior events when a concurrent commit is rejected", async () => {
         const s = `commit-cc-preserve-${uid()}`;
         await store.commit<CounterEvents>(
@@ -936,6 +953,27 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
         else expect(matched).toEqual(expected.sort());
       };
+
+      it("treats an empty-string stream filter as a regex that matches everything", async () => {
+        // An empty regex matches any string, so `{ stream: "" }` is
+        // match-all on every adapter, never a crash (#1781).
+        const tag = uid();
+        const a = `empty-${tag}-a`;
+        const source = `empty-src-${tag}`;
+        await store.subscribe([{ stream: a, source }]);
+        const seen: string[] = [];
+        await store.query_streams((p) => seen.push(p.stream), {
+          stream: "",
+          source,
+          source_exact: true,
+        });
+        expect(seen).toEqual([a]);
+        // The same filter on a mutator, scoped the same way so it touches only
+        // this test's row.
+        expect(
+          await store.reset({ stream: "", source, source_exact: true })
+        ).toBe(1);
+      });
 
       it("portable subset: anchors, `.`, and `.*` match identically", async () => {
         const tag = uid();

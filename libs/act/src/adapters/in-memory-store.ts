@@ -889,11 +889,11 @@ export class InMemoryStore implements Store {
     filter: StreamFilter
   ): (s: InMemoryStream) => boolean {
     const stream_re =
-      filter.stream && !filter.stream_exact
+      filter.stream !== undefined && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
     const source_re =
-      filter.source && !filter.source_exact
+      filter.source !== undefined && !filter.source_exact
         ? new RegExp(filter.source)
         : undefined;
     return (s) => {
@@ -1039,11 +1039,11 @@ export class InMemoryStore implements Store {
     const blocked = query?.blocked;
     const source_matches = query?.source_matches;
     const stream_re =
-      query?.stream && !query.stream_exact
+      query?.stream !== undefined && !query.stream_exact
         ? new RegExp(query.stream)
         : undefined;
     const source_re =
-      query?.source && !query.source_exact
+      query?.source !== undefined && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
     // Reverse-match: a stream qualifies when its stored `source` pattern
@@ -1158,7 +1158,7 @@ export class InMemoryStore implements Store {
     const array_targets = Array.isArray(input) ? new Set(input) : null;
     const filter = Array.isArray(input) ? null : input;
     const stream_re =
-      filter?.stream && !filter.stream_exact
+      filter?.stream !== undefined && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
 
