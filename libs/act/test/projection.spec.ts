@@ -296,6 +296,34 @@ describe("projection", () => {
     await dispose();
   });
 
+  it("hands the batch handler each event once, however many reactions it has (#1780)", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockResolvedValue(undefined);
+    const TwoHandlers = projection("batch-two")
+      .on({ Incremented })
+      .do(async function first() {})
+      .on({ Incremented })
+      .do(async function second() {})
+      .batch(batchFn)
+      .build();
+
+    const { app, dispose } = await sandbox(
+      act().withState(Counter).withProjection(TwoHandlers)
+    );
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.do("increment", { stream, actor }, { by: 2 });
+    await app.correlate();
+    await app.drain({ eventLimit: 100 });
+
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    const [events] = batchFn.mock.calls[0];
+    expect(events.map((e: { data: unknown }) => e.data)).toEqual([
+      { by: 1 },
+      { by: 2 },
+    ]);
+    await dispose();
+  });
+
   it("should call batch handler even for a single event", async () => {
     const stream = nextStream();
     const batchFn = vi.fn().mockResolvedValue(undefined);
