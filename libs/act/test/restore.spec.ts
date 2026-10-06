@@ -741,3 +741,54 @@ describe("restore from a real Store source (#1671)", () => {
     }
   });
 });
+
+describe("restore into a store that already correlated (#1772)", () => {
+  const Tick = state({ RTick: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Ticked: z.object({}) })
+    .patch({ Ticked: (_e, s) => ({ n: s.n + 1 }) })
+    .on({ tick: z.object({}) })
+    .emit(() => ["Ticked", {}])
+    .build();
+  const who = { id: "r", name: "r" };
+
+  async function backup() {
+    const src = new InMemoryStore();
+    for (let i = 0; i < 3; i++)
+      await src.commit("restored", [{ name: "Ticked", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+    return src;
+  }
+
+  it("delivers restored events and new commits to their reactions", async () => {
+    let seen = 0;
+    const { app, dispose: done } = await sandbox(
+      act()
+        .withState(Tick)
+        .on("Ticked")
+        .do(async function count() {
+          seen++;
+        })
+        .to((e) => ({ target: `count-${e.stream}` }))
+    );
+    // Correlate well past where the restored log will end.
+    for (let i = 0; i < 10; i++)
+      await app.do("tick", { stream: "before", actor: who }, {});
+    await app.correlate();
+    await app.drain({ leaseMillis: 1 });
+    seen = 0;
+
+    await app.restore(await backup(), {});
+    for (let i = 0; i < 3; i++)
+      await app.do("tick", { stream: "after", actor: who }, {});
+    for (let i = 0; i < 4; i++) {
+      await app.correlate();
+      await app.drain({ leaseMillis: 1 });
+    }
+    await done();
+    // 3 restored + 3 new, all reached their reaction
+    expect(seen).toBe(6);
+  });
+});

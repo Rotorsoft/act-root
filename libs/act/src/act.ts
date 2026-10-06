@@ -2030,6 +2030,15 @@ export class Act<
         migrated = partial.migrated;
         dropped = partial.dropped;
       });
+      // Restoring into this app's own store replaced the log it correlates:
+      // ids start over and the subscription rows are gone. Restart
+      // correlation from cold so the restored events (and new commits, whose
+      // ids now sit below the old scan position) reach their reactions, and
+      // arm the drain so they run without waiting for a commit (#1772).
+      if (!sink) {
+        this._correlate.restart();
+        this._arm_all();
+      }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
     });
   }

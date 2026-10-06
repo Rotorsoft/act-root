@@ -1804,6 +1804,11 @@ export class SqliteStore implements Store {
     try {
       await tx.execute("DELETE FROM events");
       await tx.execute("DELETE FROM streams");
+      // The restored log is renumbered from 1, so every correlate checkpoint
+      // (an event id) starts over in the same transaction, or correlate
+      // would resume above the restored events and never resolve their
+      // reactions (#1772). Correlator leases are kept.
+      await tx.execute("UPDATE correlated SET at = -1");
       // Reset the autoincrement counter so the new sequence is dense
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.

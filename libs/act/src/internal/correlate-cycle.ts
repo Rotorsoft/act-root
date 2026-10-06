@@ -528,6 +528,25 @@ export class CorrelateCycle<
    * `_static_subscriptions`, which this never touches, so they stay pinned
    * at +Infinity and the dynamic path never re-opens them.
    */
+  /**
+   * Start correlation over after the event log was replaced wholesale
+   * (`restore`). The restored log is renumbered from the start and its
+   * subscription rows are gone, so the in-memory scan position and both
+   * subscription records describe a log that no longer exists. Dropping them
+   * and the init latch makes the next pass run cold-start again: static
+   * targets are re-subscribed, the checkpoint is re-read from the store
+   * (which `restore` reset), and dynamic targets are rediscovered by the
+   * scan (#1772).
+   */
+  restart(): void {
+    this._initialized = false;
+    this._init_promise = undefined;
+    this._checkpoint = -1;
+    this._dynamic_subscriptions.clear();
+    this._static_subscriptions.clear();
+    this._armed = true;
+  }
+
   forget_subscribed(streams: Iterable<string>): void {
     for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }

@@ -4587,6 +4587,40 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       };
 
+      it("resets every correlate checkpoint, since the restored log is renumbered", async () => {
+        // A correlate checkpoint is an event id. Restore renumbers the log
+        // from the start, so a checkpoint left at its old value would sit
+        // above every restored event and correlate would never resolve
+        // their reactions (#1772). Both the shared checkpoint and a keyed
+        // correlator's must start over.
+        const correlator = {
+          key: `k-${uid()}`,
+          by: `w-${uid()}`,
+          millis: 60_000,
+        };
+        await store.subscribe([], 50);
+        await store.subscribe([], 50, correlator);
+        expect((await store.subscribe([])).correlated_at).toBe(50);
+
+        const s = `restore-cp-${uid()}`;
+        const t = new Date("2020-01-01T00:00:00.000Z");
+        const result = await restore(
+          as_source([
+            event(1, s, 0, "Incremented", t, { amount: 1 }),
+            event(2, s, 1, "Incremented", t, { amount: 1 }),
+          ])
+        );
+        expect(result.kept).toBe(2);
+        const restored = await collect(store, { limit: 10 });
+        const min_id = Math.min(...restored.map((e) => e.id));
+
+        const shared = (await store.subscribe([])).correlated_at;
+        const keyed = (await store.subscribe([], undefined, correlator))
+          .correlated_at;
+        expect(shared).toBeLessThan(min_id);
+        expect(keyed).toBeLessThan(min_id);
+      });
+
       it("returns kept=0 on an empty source", async () => {
         const result = await restore(as_source([]));
         expect(result.kept).toBe(0);
