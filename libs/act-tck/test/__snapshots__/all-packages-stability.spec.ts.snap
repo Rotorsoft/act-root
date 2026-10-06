@@ -10137,6 +10137,7 @@ import type {
   Fetch,
   Lease,
   Logger,
+  ReactionOptions,
   ReactionPayload,
   Registry,
   SchemaRegister,
@@ -10293,6 +10294,33 @@ function budget_exhausted<TEvents extends Schemas>(
 }
 
 /**
+ * The retry policy for a stream whose fetch failed (#1774). Retry options
+ * belong to reactions and are normally read from the fetched payloads, but
+ * a failed fetch has none, so there is no way to tell which reaction the
+ * events were for. Take the most conservative policy across every
+ * registered reaction: block only if all of them block on error (an
+ * operator who opted any reaction out chose "retry forever", and this
+ * stream might be its), and only once the largest budget is spent (so no
+ * reaction's budget is cut short).
+ *
+ * @internal
+ */
+function fetch_failure_policy<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(registry: Registry<TSchemaReg, TEvents, TActions>): ReactionOptions {
+  let blockOnError = true;
+  let maxRetries = 0;
+  for (const register of Object.values(registry.events))
+    for (const reaction of register.reactions.values()) {
+      blockOnError &&= reaction.options.blockOnError;
+      maxRetries = Math.max(maxRetries, reaction.options.maxRetries);
+    }
+  return { blockOnError, maxRetries };
+}
+
+/**
  * Report a misrouted resolution once per offending declaration.
  *
  * All three key parts are declared, not resolved — which is the rule
@@ -10440,18 +10468,27 @@ export async function run_drain_cycle<
       const entry = fetch_map.get(lease.stream)!;
       // This stream's read failed and was contained there (#1675). Report it
       // as a no-progress failure for this stream alone: no ack is submitted,
-      // so the watermark holds and the lease stays held until it lapses, and
-      // \`retry\` keeps accruing until \`budget_exhausted\` quarantines the
-      // stream the usual way. Healthy streams leased in the same cycle are
-      // untouched, which is the whole point of containing it.
+      // so the watermark holds and the lease stays held until it lapses.
+      // Healthy streams leased in the same cycle are untouched, which is the
+      // whole point of containing it. A read that keeps failing must still
+      // end the way a handler that keeps failing does, blocked once the retry
+      // budget is spent, or the stream retries forever without ever showing
+      // up in \`blocked_streams()\` (#1774). Not while the store is failing as
+      // a whole: that is the breaker's to handle, not this stream's.
       if (entry.fetch.error !== undefined) {
         const error = \`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`;
         log().error(error);
+        const policy = fetch_failure_policy(registry);
+        const block =
+          !store_failing &&
+          policy.blockOnError &&
+          lease.retry >= policy.maxRetries;
         const failed: HandleResult = {
           lease,
           handled: 0,
           acked_at: lease.at,
           error,
+          ...(block ? { block: true } : {}),
         };
         return Promise.resolve(failed);
       }
@@ -30150,6 +30187,7 @@ import type {
   Fetch,
   Lease,
   Logger,
+  ReactionOptions,
   ReactionPayload,
   Registry,
   SchemaRegister,
@@ -30306,6 +30344,33 @@ function budget_exhausted<TEvents extends Schemas>(
 }
 
 /**
+ * The retry policy for a stream whose fetch failed (#1774). Retry options
+ * belong to reactions and are normally read from the fetched payloads, but
+ * a failed fetch has none, so there is no way to tell which reaction the
+ * events were for. Take the most conservative policy across every
+ * registered reaction: block only if all of them block on error (an
+ * operator who opted any reaction out chose "retry forever", and this
+ * stream might be its), and only once the largest budget is spent (so no
+ * reaction's budget is cut short).
+ *
+ * @internal
+ */
+function fetch_failure_policy<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(registry: Registry<TSchemaReg, TEvents, TActions>): ReactionOptions {
+  let blockOnError = true;
+  let maxRetries = 0;
+  for (const register of Object.values(registry.events))
+    for (const reaction of register.reactions.values()) {
+      blockOnError &&= reaction.options.blockOnError;
+      maxRetries = Math.max(maxRetries, reaction.options.maxRetries);
+    }
+  return { blockOnError, maxRetries };
+}
+
+/**
  * Report a misrouted resolution once per offending declaration.
  *
  * All three key parts are declared, not resolved — which is the rule
@@ -30453,18 +30518,27 @@ export async function run_drain_cycle<
       const entry = fetch_map.get(lease.stream)!;
       // This stream's read failed and was contained there (#1675). Report it
       // as a no-progress failure for this stream alone: no ack is submitted,
-      // so the watermark holds and the lease stays held until it lapses, and
-      // \`retry\` keeps accruing until \`budget_exhausted\` quarantines the
-      // stream the usual way. Healthy streams leased in the same cycle are
-      // untouched, which is the whole point of containing it.
+      // so the watermark holds and the lease stays held until it lapses.
+      // Healthy streams leased in the same cycle are untouched, which is the
+      // whole point of containing it. A read that keeps failing must still
+      // end the way a handler that keeps failing does, blocked once the retry
+      // budget is spent, or the stream retries forever without ever showing
+      // up in \`blocked_streams()\` (#1774). Not while the store is failing as
+      // a whole: that is the breaker's to handle, not this stream's.
       if (entry.fetch.error !== undefined) {
         const error = \`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`;
         log().error(error);
+        const policy = fetch_failure_policy(registry);
+        const block =
+          !store_failing &&
+          policy.blockOnError &&
+          lease.retry >= policy.maxRetries;
         const failed: HandleResult = {
           lease,
           handled: 0,
           acked_at: lease.at,
           error,
+          ...(block ? { block: true } : {}),
         };
         return Promise.resolve(failed);
       }

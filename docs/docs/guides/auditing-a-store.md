@@ -128,7 +128,7 @@ for await (const f of app.audit(["unreadable-events"])) {
 
 **Remediation:** restore the row from a backup taken under the key that wrote it, re-key it, or `app.forget()` the stream's sensitive payload if it is genuinely unrecoverable.
 
-Reactions are not blocked by such a row — the correlate scan declines the payload it does not need, so it reads past a corrupt one ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)). Handlers that *do* read the payload will still fail on the affected stream, and that stream will block normally and show up in `blocked_streams()`, which is the right blast radius.
+Reactions are not blocked by such a row — the correlate scan declines the payload it does not need, so it reads past a corrupt one ([#1675](https://github.com/Rotorsoft/act-root/issues/1675)). Handlers that *do* read the payload will still fail on the affected stream, and that stream will block once the retry budget is spent and show up in `blocked_streams()` with the fetch error, which is the right blast radius. Because a failed read has no payload to say which reaction it was for, the budget used is the most conservative one across the app's reactions: the largest `maxRetries`, and no block at all if any reaction opted out with `blockOnError: false` ([#1774](https://github.com/Rotorsoft/act-root/issues/1774)).
 
 ## Recipes
 
