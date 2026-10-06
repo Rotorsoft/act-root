@@ -346,10 +346,16 @@ export function hono<TApp extends ActSurface = ActSurface>(
         try {
           // The resolvers get the validated value; `app.do` gets the raw
           // body, because it parses again itself and a second parse of the
-          // validator's output would run every `.transform()` twice. Hono
-          // caches the body, so reading it again here is free.
+          // validator's output would run every `.transform()` twice. The
+          // json validator only reads a JSON body (no or non-JSON
+          // Content-Type validates `{}`), so take the raw value from the same
+          // place it did: re-reading the body regardless would throw on an
+          // empty request and hand `app.do` a body the resolvers never saw
+          // (#1777). Hono caches the body, so reading it again is free.
           const input = c.req.valid("json" as never) as unknown;
-          const raw: unknown = await c.req.json();
+          const raw: unknown = is_json(c.req.header("content-type"))
+            ? await c.req.json()
+            : {};
           const actor = c.get("actor");
           const stream = await options.stream(action_name, input, c);
           const expected_version = options.expectedVersion
@@ -413,4 +419,16 @@ export function hono<TApp extends ActSurface = ActSurface>(
   }
 
   return api;
+}
+
+/**
+ * Hono's json validator reads the body only for a JSON Content-Type
+ * (`application/json`, or a `+json` suffix, optionally with parameters);
+ * anything else validates `{}`. Same test, so the route reads the raw body
+ * exactly when the validator did.
+ */
+const JSON_CONTENT_TYPE =
+  /^application\/([a-z-.]+\+)?json(;\s*[a-zA-Z0-9-]+=([^;]+))*$/i;
+function is_json(content_type: string | undefined): boolean {
+  return !!content_type && JSON_CONTENT_TYPE.test(content_type);
 }

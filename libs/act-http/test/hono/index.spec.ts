@@ -531,3 +531,66 @@ describe("action input is parsed once", () => {
     }
   );
 });
+
+describe("the action body follows the request's Content-Type (#1777)", () => {
+  const Note = state({ Note: z.object({ note: z.string() }) })
+    .init(() => ({ note: "none" }))
+    .emits({ Noted: z.object({ note: z.string().optional() }) })
+    .patch({ Noted: ({ data }) => ({ note: data.note ?? "none" }) })
+    .on({ jot: z.object({ note: z.string().optional() }) })
+    .emit((a) => ["Noted", a])
+    .build();
+  const note_test = fixture(act().withState(Note).withState(Calculator));
+  const seen: unknown[] = [];
+  const opts = (): HonoOptions => ({
+    ...default_options(),
+    stream: (_action, input) => {
+      seen.push(input);
+      return "note-1";
+    },
+  });
+
+  note_test(
+    "an empty request with no Content-Type is accepted",
+    async ({ app }) => {
+      const res = await hono(app as never, opts()).request(
+        "/api/actions/Clear",
+        {
+          method: "POST",
+          headers: { "x-user-id": "u-1", "x-user-name": "alice" },
+        }
+      );
+      expect(res.status).toBe(200);
+    }
+  );
+
+  note_test(
+    "a non-JSON body is ignored by the resolvers and app.do alike",
+    async ({ app }) => {
+      seen.length = 0;
+      const res = await hono(app as never, opts()).request("/api/actions/jot", {
+        method: "POST",
+        headers: { "content-type": "text/plain", "x-user-id": "u-1" },
+        body: JSON.stringify({ note: "hello" }),
+      });
+      const body = (await res.json()) as Array<{ state: { note: string } }>;
+      expect(seen).toEqual([{}]);
+      expect(body[0].state.note).toBe("none");
+    }
+  );
+
+  note_test("a JSON body with parameters reaches both", async ({ app }) => {
+    seen.length = 0;
+    const res = await hono(app as never, opts()).request("/api/actions/jot", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-user-id": "u-1",
+      },
+      body: JSON.stringify({ note: "hello" }),
+    });
+    const body = (await res.json()) as Array<{ state: { note: string } }>;
+    expect(seen).toEqual([{ note: "hello" }]);
+    expect(body[0].state.note).toBe("hello");
+  });
+});
