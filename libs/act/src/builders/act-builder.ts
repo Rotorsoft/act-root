@@ -335,6 +335,11 @@ export function act<
    */
   const projection_reactions = new Set<unknown>();
   const record_projection_reactions = (proj: Projection<any>) => {
+    // Only a projection that SERVES its target (a batch handler or a fold)
+    // owns it. A per-event projection naming the same target is just another
+    // claimant: exempting it let it share a fold's or batch's target, where
+    // its handler never ran and the fold wrote foreign rows (#1773).
+    if (!proj.batchHandler && !proj.fold) return;
     for (const register of Object.values(
       proj.events as Record<string, { reactions: Map<string, unknown> }>
     ))
