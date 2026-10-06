@@ -1,3 +1,13 @@
+# [@rotorsoft/act-tck-v1.38.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.9...@rotorsoft/act-tck-v1.38.10) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act-http:** describe request bodies with the schema's input side ([#1761](https://github.com/Rotorsoft/act-root/issues/1761)) ([2c66d26](https://github.com/Rotorsoft/act-root/commit/2c66d264d5b87d409462c24ad61c0a950ccd71f9)), closes [#1746](https://github.com/Rotorsoft/act-root/issues/1746)
+* **act-http:** let receiver close() wait for a pending listen() ([#1764](https://github.com/Rotorsoft/act-root/issues/1764)) ([711a80a](https://github.com/Rotorsoft/act-root/commit/711a80a85b6b818b6effc0a20870eafae4eb71b8)), closes [#1750](https://github.com/Rotorsoft/act-root/issues/1750)
+* **act-http:** refuse an action named subscribe when tRPC sse is on ([#1762](https://github.com/Rotorsoft/act-root/issues/1762)) ([8be3a4d](https://github.com/Rotorsoft/act-root/commit/8be3a4d92bf0f0ef1ff052da34f287284fd4c48e)), closes [#1747](https://github.com/Rotorsoft/act-root/issues/1747)
+* **act-notify:** validate and contain broker notifications like Postgres does ([#1763](https://github.com/Rotorsoft/act-root/issues/1763)) ([9f87512](https://github.com/Rotorsoft/act-root/commit/9f87512c5074cf03b799aa15f0d7185365130ad4)), closes [#1748](https://github.com/Rotorsoft/act-root/issues/1748) [#1749](https://github.com/Rotorsoft/act-root/issues/1749) [#1748](https://github.com/Rotorsoft/act-root/issues/1748) [#1749](https://github.com/Rotorsoft/act-root/issues/1749)
+
 # [@rotorsoft/act-tck-v1.38.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.8...@rotorsoft/act-tck-v1.38.9) (2026-10-04)
 
 
