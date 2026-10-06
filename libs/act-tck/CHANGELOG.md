@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.38.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.10...@rotorsoft/act-tck-v1.38.11) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act-pg:** judge deferred_at by the claiming worker's clock ([#1769](https://github.com/Rotorsoft/act-root/issues/1769)) ([6468281](https://github.com/Rotorsoft/act-root/commit/64682813d258b682b3f3c783fd73c158cd077ccd)), closes [#1753](https://github.com/Rotorsoft/act-root/issues/1753)
+
 # [@rotorsoft/act-tck-v1.38.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.9...@rotorsoft/act-tck-v1.38.10) (2026-10-06)
 
 
