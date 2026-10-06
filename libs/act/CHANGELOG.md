@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.8...@rotorsoft/act-v1.32.9) (2026-10-06)
+
+
+### Bug Fixes
+
+* **act:** refuse a per-event projection on a target another projection serves ([#1793](https://github.com/Rotorsoft/act-root/issues/1793)) ([893c784](https://github.com/Rotorsoft/act-root/commit/893c78422d414e12a0417521e7daf227a6e82242)), closes [#1467](https://github.com/Rotorsoft/act-root/issues/1467) [#1773](https://github.com/Rotorsoft/act-root/issues/1773)
+
 # [@rotorsoft/act-v1.32.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.7...@rotorsoft/act-v1.32.8) (2026-10-06)
 
 
