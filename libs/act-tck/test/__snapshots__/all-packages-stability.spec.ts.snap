@@ -17872,9 +17872,18 @@ export function build_handle_batch<TEvents extends Schemas>(
     batchHandler: BatchHandler<TEvents>
   ) => {
     const stream = lease.stream;
-    const events = payloads.map(
-      (p) => p.event as Committed<TEvents, keyof TEvents & string>
-    );
+    // One payload per (event, reaction) pair: an event with several
+    // reactions on this target arrives several times in a row. The batch
+    // handler gets each event once, in order — handing it the duplicates
+    // made a non-idempotent batch count every event once per reaction
+    // (#1780). The per-event path groups by id for the same reason (#1179).
+    const events: Committed<TEvents, keyof TEvents & string>[] = [];
+    const seen = new Set<number>();
+    for (const p of payloads) {
+      if (seen.has(p.event.id)) continue;
+      seen.add(p.event.id);
+      events.push(p.event as Committed<TEvents, keyof TEvents & string>);
+    }
     const options = payloads[0].options;
 
     if (lease.retry > 0)
@@ -36752,9 +36761,18 @@ export function build_handle_batch<TEvents extends Schemas>(
     batchHandler: BatchHandler<TEvents>
   ) => {
     const stream = lease.stream;
-    const events = payloads.map(
-      (p) => p.event as Committed<TEvents, keyof TEvents & string>
-    );
+    // One payload per (event, reaction) pair: an event with several
+    // reactions on this target arrives several times in a row. The batch
+    // handler gets each event once, in order — handing it the duplicates
+    // made a non-idempotent batch count every event once per reaction
+    // (#1780). The per-event path groups by id for the same reason (#1179).
+    const events: Committed<TEvents, keyof TEvents & string>[] = [];
+    const seen = new Set<number>();
+    for (const p of payloads) {
+      if (seen.has(p.event.id)) continue;
+      seen.add(p.event.id);
+      events.push(p.event as Committed<TEvents, keyof TEvents & string>);
+    }
     const options = payloads[0].options;
 
     if (lease.retry > 0)
