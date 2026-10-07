@@ -462,17 +462,49 @@ export class InMemoryStore implements Store {
     this._streams = new Map();
   }
 
-  private in_query<E extends Schemas>(query: Query, e: Committed<E, keyof E>) {
-    if (query.stream) {
-      if (query.stream_exact) {
-        if (e.stream !== query.stream) return false;
-      } else if (!RegExp(query.stream).test(e.stream)) return false;
-    }
+  private in_query<E extends Schemas>(
+    query: Query,
+    e: Committed<E, keyof E>
+  ): boolean {
+    if (query.stream && !this._stream_matches(query.stream, query, e.stream))
+      return false;
     if (query.names && !query.names.includes(e.name as string)) return false;
     if (query.correlation && e.meta?.correlation !== query.correlation)
       return false;
     if (e.name === SNAP_EVENT && !query.with_snaps) return false;
+    // `created` is not monotonic with `id` (restore keeps source timestamps),
+    // so time bounds filter events like PG/SQLite's WHERE; they never end
+    // the scan.
+    if (query.created_after && e.created <= query.created_after) return false;
+    if (query.created_before && e.created >= query.created_before) return false;
     return true;
+  }
+
+  private _stream_matches(pattern: string, query: Query, stream: string) {
+    return query.stream_exact
+      ? stream === pattern
+      : RegExp(pattern).test(stream);
+  }
+
+  /**
+   * Index of the latest snapshot of the queried stream, or -1. `with_snaps`
+   * on an exact single stream resumes there, so earlier events aren't read.
+   * The orchestrator asks only for unbounded current-state loads, so the
+   * floor applies whenever asked; an explicit `after` wins over it.
+   */
+  private _snap_floor(query: Query | undefined): number {
+    if (
+      !query?.with_snaps ||
+      !query.stream_exact ||
+      query.stream === undefined ||
+      query.after !== undefined
+    )
+      return -1;
+    for (let j = this._events.length - 1; j >= 0; j--) {
+      const e = this._events[j];
+      if (e.stream === query.stream && e.name === SNAP_EVENT) return j;
+    }
+    return -1;
   }
 
   /**
@@ -486,88 +518,24 @@ export class InMemoryStore implements Store {
     query?: Query
   ) {
     await sleep();
+    // The id bounds (`after`, `before`, the snapshot floor) are one index
+    // window over the id-ordered log; every other filter is per event.
+    const floor = this._snap_floor(query);
+    const lo = floor >= 0 ? floor : this._first_index_after(query?.after ?? -1);
+    const hi =
+      query?.before !== undefined
+        ? this._first_index_after(query.before - 1)
+        : this._events.length;
+    const with_pii = query?.with_pii !== false;
     let count = 0;
-    // Snapshot resume floor: `with_snaps` requests a resume at the latest
-    // snapshot for an exact single stream, so pre-snapshot events aren't read.
-    // The orchestrator sets `with_snaps` only for an unbounded current-state
-    // load — it suppresses the flag under any `asOf` bound (RFC 1274) — so the
-    // store applies the floor whenever asked and never re-checks bounds. An
-    // explicit `after` is a separate resume point that wins. No snapshot → -1,
-    // i.e. a full scan. Forward starts at the snapshot; backward stops at it.
-    let floor_index = -1;
-    if (
-      query?.with_snaps &&
-      query.stream_exact &&
-      query.stream !== undefined &&
-      query.after === undefined
-    ) {
-      for (let j = this._events.length - 1; j >= 0; j--) {
-        const e = this._events[j];
-        if (e.stream === query.stream && e.name === SNAP_EVENT) {
-          floor_index = j;
-          break;
-        }
-      }
-    }
-    if (query?.backward) {
-      const floor_id = floor_index >= 0 ? this._events[floor_index].id : -1;
-      let i =
-        (query?.before !== undefined
-          ? this._first_index_after(query.before - 1)
-          : this._events.length) - 1;
-      while (i >= 0) {
-        const e = this._events[i--];
-        if (query && !this.in_query(query, e)) continue;
-        if (query?.created_before && e.created >= query.created_before)
-          continue;
-        if (query.after !== undefined && e.id <= query.after) break;
-        // Below the resume floor → every remaining (lower-id) event is too,
-        // so stop the DESC scan.
-        if (floor_id >= 0 && e.id < floor_id) break;
-        // `created` is not monotonic with `id` (restore preserves the
-        // source timestamps verbatim), so a failing time bound skips the
-        // event rather than terminating the scan — matching PG/SQLite,
-        // which treat `created` bounds as pure WHERE filters. Only the
-        // id-ordered `after` bound above may short-circuit.
-        if (query.created_after && e.created <= query.created_after) continue;
-        await Promise.resolve(
-          callback(
-            this._with_pii(
-              e as Committed<E, keyof E>,
-              query?.with_pii !== false
-            )
-          )
-        );
-        count++;
-        if (query?.limit && count >= query.limit) break;
-      }
-    } else {
-      let i =
-        floor_index >= 0
-          ? floor_index
-          : this._first_index_after(query?.after ?? -1);
-      while (i < this._events.length) {
-        const e = this._events[i++];
-        if (query && !this.in_query(query, e)) continue;
-        if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before !== undefined && e.id >= query.before) break;
-        // `created` is not monotonic with `id`, so a failing time bound
-        // skips the event rather than terminating the scan — matching
-        // PG/SQLite. Only the id-ordered `before` bound above may
-        // short-circuit.
-        if (query?.created_before && e.created >= query.created_before)
-          continue;
-        await Promise.resolve(
-          callback(
-            this._with_pii(
-              e as Committed<E, keyof E>,
-              query?.with_pii !== false
-            )
-          )
-        );
-        count++;
-        if (query?.limit && count >= query.limit) break;
-      }
+    for (let k = 0; k < hi - lo; k++) {
+      const e = this._events[query?.backward ? hi - 1 - k : lo + k];
+      if (query && !this.in_query(query, e)) continue;
+      await Promise.resolve(
+        callback(this._with_pii(e as Committed<E, keyof E>, with_pii))
+      );
+      count++;
+      if (query?.limit && count >= query.limit) break;
     }
     return count;
   }

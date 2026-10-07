@@ -20,6 +20,8 @@ import {
   type CircuitState,
   CorrelateCycle,
   close_correlation,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
@@ -124,12 +126,6 @@ import type {
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
  */
-/**
- * Default LRU cap for the subscribed-streams cache. Apps that mint many
- * dynamic targets (one per aggregate) should override via
- * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
- */
-export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
  * Scan window and pass cap for the correlation catch-up the close-cycle
@@ -144,14 +140,6 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-/**
- * Default debounce window (ms) for `settle()` when neither the per-call
- * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
- * Coalesces commits in the same tick and small bursts; sub-perceptible
- * latency on the `"settled"` signal.
- */
-export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
-
 // Re-export the autoclose config surface so operators can
 // `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"`. The implementation lives in
@@ -163,6 +151,8 @@ export {
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   resolveAutocloseConfig,
 } from "./internal/index.js";
 

@@ -33,6 +33,11 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import {
+  DEFAULT_EVENT_LIMIT,
+  DEFAULT_LEASE_MILLIS,
+  DEFAULT_STREAM_LIMIT,
+} from "./config.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
@@ -716,9 +721,12 @@ export class DrainController<
     // lane its own budget — a caller-level drain({leaseMillis}) would
     // erase it. Caller options apply only when the lane didn't pin a
     // value.
-    const streamLimit = d.streamLimit ?? options.streamLimit ?? 10;
-    const eventLimit = d.eventLimit ?? options.eventLimit ?? 10;
-    const leaseMillis = d.leaseMillis ?? options.leaseMillis ?? 10_000;
+    const streamLimit =
+      d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
+    const eventLimit =
+      d.eventLimit ?? options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+    const leaseMillis =
+      d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
     try {
       this._locked = true;

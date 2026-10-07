@@ -769,6 +769,8 @@ import {
   type CircuitState,
   CorrelateCycle,
   close_correlation,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
@@ -873,12 +875,6 @@ import type {
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
  */
-/**
- * Default LRU cap for the subscribed-streams cache. Apps that mint many
- * dynamic targets (one per aggregate) should override via
- * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
- */
-export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
  * Scan window and pass cap for the correlation catch-up the close-cycle
@@ -893,14 +889,6 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-/**
- * Default debounce window (ms) for \`settle()\` when neither the per-call
- * \`SettleOptions.debounceMs\` nor \`ActOptions.settleDebounceMs\` is set.
- * Coalesces commits in the same tick and small bursts; sub-perceptible
- * latency on the \`"settled"\` signal.
- */
-export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
-
 // Re-export the autoclose config surface so operators can
 // \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"\`. The implementation lives in
@@ -912,6 +900,8 @@ export {
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   resolveAutocloseConfig,
 } from "./internal/index.js";
 
@@ -5732,7 +5722,7 @@ import type {
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { CloseSignal } from "./close-signal.js";
-import type { AutocloseConfig } from "./config.js";
+import { type AutocloseConfig, DEFAULT_MAX_RETRIES } from "./config.js";
 import { DeferSignal } from "./defer-signal.js";
 
 /**
@@ -5789,7 +5779,7 @@ export function synthesize_autoclose_reactions<
       }),
       // Never block on autoclose: a transient query/store error should retry,
       // not quarantine the synthetic stream.
-      options: { blockOnError: false, maxRetries: 3 },
+      options: { blockOnError: false, maxRetries: DEFAULT_MAX_RETRIES },
       handler: async (event) => {
         const aggregate = event.stream;
         // Off-hours gating: outside the window, park until the window
@@ -6386,6 +6376,8 @@ export interface BuilderBase<
 
 import {
   assert_defer_when,
+  DEFAULT_BLOCK_ON_ERROR,
+  DEFAULT_MAX_RETRIES,
   type DeferSchedule,
   make_deferred,
   resolveReactionConfig,
@@ -6459,8 +6451,8 @@ export function reaction_on<
       // \`maxRetries\`/\`backoff\`/\`blockOnError\` throws ZodError at build,
       // not a NaN gate on the first retry.
       options: resolveReactionConfig({
-        blockOnError: options?.blockOnError ?? true,
-        maxRetries: options?.maxRetries ?? 3,
+        blockOnError: options?.blockOnError ?? DEFAULT_BLOCK_ON_ERROR,
+        maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
         backoff: options?.backoff,
       }),
     };
@@ -7790,6 +7782,11 @@ export function resolveBackoffConfig(
 // \`blockOnError\` (a poison message retries forever). Validate the whole bag.
 // ---------------------------------------------------------------------------
 
+/** Retries a reaction gets before it blocks, unless \`.do()\` says otherwise. */
+export const DEFAULT_MAX_RETRIES = 3;
+/** Whether a reaction blocks its stream once retries run out. */
+export const DEFAULT_BLOCK_ON_ERROR = true;
+
 const ReactionOptionsSchema = z.object({
   blockOnError: z.boolean(),
   maxRetries: z.number().int().min(0),
@@ -7852,6 +7849,25 @@ export function resolveLaneConfig<TName extends string>(
 // pass-through query filter (validated by the store), so it is not reshaped.
 // ---------------------------------------------------------------------------
 
+/** Streams a drain claims per cycle. */
+export const DEFAULT_STREAM_LIMIT = 10;
+/** Events a drain reads per stream per cycle. */
+export const DEFAULT_EVENT_LIMIT = 10;
+/** How long a drain holds a stream's lease (ms). */
+export const DEFAULT_LEASE_MILLIS = 10_000;
+/**
+ * Default debounce window (ms) for \`settle()\` when neither the per-call
+ * \`SettleOptions.debounceMs\` nor \`ActOptions.settleDebounceMs\` is set.
+ * Coalesces commits in the same tick and small bursts.
+ */
+export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+/**
+ * Default LRU cap for the subscribed-streams cache. Apps that mint many
+ * dynamic targets (one per aggregate) should override it with
+ * \`ActOptions.maxSubscribedStreams\`.
+ */
+export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+
 const DrainOptionsSchema = z.object({
   streamLimit: z.number().int().min(0).optional(),
   eventLimit: z.number().int().min(0).optional(),
@@ -7910,12 +7926,11 @@ export function resolveSettleConfig(
 export const MAX_SHUTDOWN_GRACE_MS = 30_000;
 
 /**
- * Grace budget used when no lane pinned a \`leaseMillis\` — matches \`drain()\`'s
- * own \`leaseMillis\` fallback, so the default deployment gets a budget
- * consistent with how long its handlers were already allowed to hold a
- * stream.
+ * Grace budget used when no lane pinned a \`leaseMillis\`: the drain's own
+ * lease, so the default deployment waits as long as its handlers were
+ * already allowed to hold a stream.
  */
-export const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
+export const DEFAULT_SHUTDOWN_GRACE_MS = DEFAULT_LEASE_MILLIS;
 
 const ShutdownOptionsSchema = z
   .object({
@@ -10096,6 +10111,11 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import {
+  DEFAULT_EVENT_LIMIT,
+  DEFAULT_LEASE_MILLIS,
+  DEFAULT_STREAM_LIMIT,
+} from "./config.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
@@ -10779,9 +10799,12 @@ export class DrainController<
     // lane its own budget — a caller-level drain({leaseMillis}) would
     // erase it. Caller options apply only when the lane didn't pin a
     // value.
-    const streamLimit = d.streamLimit ?? options.streamLimit ?? 10;
-    const eventLimit = d.eventLimit ?? options.eventLimit ?? 10;
-    const leaseMillis = d.leaseMillis ?? options.leaseMillis ?? 10_000;
+    const streamLimit =
+      d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
+    const eventLimit =
+      d.eventLimit ?? options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+    const leaseMillis =
+      d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
     try {
       this._locked = true;
@@ -13365,17 +13388,49 @@ export class InMemoryStore implements Store {
     this._streams = new Map();
   }
 
-  private in_query<E extends Schemas>(query: Query, e: Committed<E, keyof E>) {
-    if (query.stream) {
-      if (query.stream_exact) {
-        if (e.stream !== query.stream) return false;
-      } else if (!RegExp(query.stream).test(e.stream)) return false;
-    }
+  private in_query<E extends Schemas>(
+    query: Query,
+    e: Committed<E, keyof E>
+  ): boolean {
+    if (query.stream && !this._stream_matches(query.stream, query, e.stream))
+      return false;
     if (query.names && !query.names.includes(e.name as string)) return false;
     if (query.correlation && e.meta?.correlation !== query.correlation)
       return false;
     if (e.name === SNAP_EVENT && !query.with_snaps) return false;
+    // \`created\` is not monotonic with \`id\` (restore keeps source timestamps),
+    // so time bounds filter events like PG/SQLite's WHERE; they never end
+    // the scan.
+    if (query.created_after && e.created <= query.created_after) return false;
+    if (query.created_before && e.created >= query.created_before) return false;
     return true;
+  }
+
+  private _stream_matches(pattern: string, query: Query, stream: string) {
+    return query.stream_exact
+      ? stream === pattern
+      : RegExp(pattern).test(stream);
+  }
+
+  /**
+   * Index of the latest snapshot of the queried stream, or -1. \`with_snaps\`
+   * on an exact single stream resumes there, so earlier events aren't read.
+   * The orchestrator asks only for unbounded current-state loads, so the
+   * floor applies whenever asked; an explicit \`after\` wins over it.
+   */
+  private _snap_floor(query: Query | undefined): number {
+    if (
+      !query?.with_snaps ||
+      !query.stream_exact ||
+      query.stream === undefined ||
+      query.after !== undefined
+    )
+      return -1;
+    for (let j = this._events.length - 1; j >= 0; j--) {
+      const e = this._events[j];
+      if (e.stream === query.stream && e.name === SNAP_EVENT) return j;
+    }
+    return -1;
   }
 
   /**
@@ -13389,88 +13444,24 @@ export class InMemoryStore implements Store {
     query?: Query
   ) {
     await sleep();
+    // The id bounds (\`after\`, \`before\`, the snapshot floor) are one index
+    // window over the id-ordered log; every other filter is per event.
+    const floor = this._snap_floor(query);
+    const lo = floor >= 0 ? floor : this._first_index_after(query?.after ?? -1);
+    const hi =
+      query?.before !== undefined
+        ? this._first_index_after(query.before - 1)
+        : this._events.length;
+    const with_pii = query?.with_pii !== false;
     let count = 0;
-    // Snapshot resume floor: \`with_snaps\` requests a resume at the latest
-    // snapshot for an exact single stream, so pre-snapshot events aren't read.
-    // The orchestrator sets \`with_snaps\` only for an unbounded current-state
-    // load — it suppresses the flag under any \`asOf\` bound (RFC 1274) — so the
-    // store applies the floor whenever asked and never re-checks bounds. An
-    // explicit \`after\` is a separate resume point that wins. No snapshot → -1,
-    // i.e. a full scan. Forward starts at the snapshot; backward stops at it.
-    let floor_index = -1;
-    if (
-      query?.with_snaps &&
-      query.stream_exact &&
-      query.stream !== undefined &&
-      query.after === undefined
-    ) {
-      for (let j = this._events.length - 1; j >= 0; j--) {
-        const e = this._events[j];
-        if (e.stream === query.stream && e.name === SNAP_EVENT) {
-          floor_index = j;
-          break;
-        }
-      }
-    }
-    if (query?.backward) {
-      const floor_id = floor_index >= 0 ? this._events[floor_index].id : -1;
-      let i =
-        (query?.before !== undefined
-          ? this._first_index_after(query.before - 1)
-          : this._events.length) - 1;
-      while (i >= 0) {
-        const e = this._events[i--];
-        if (query && !this.in_query(query, e)) continue;
-        if (query?.created_before && e.created >= query.created_before)
-          continue;
-        if (query.after !== undefined && e.id <= query.after) break;
-        // Below the resume floor → every remaining (lower-id) event is too,
-        // so stop the DESC scan.
-        if (floor_id >= 0 && e.id < floor_id) break;
-        // \`created\` is not monotonic with \`id\` (restore preserves the
-        // source timestamps verbatim), so a failing time bound skips the
-        // event rather than terminating the scan — matching PG/SQLite,
-        // which treat \`created\` bounds as pure WHERE filters. Only the
-        // id-ordered \`after\` bound above may short-circuit.
-        if (query.created_after && e.created <= query.created_after) continue;
-        await Promise.resolve(
-          callback(
-            this._with_pii(
-              e as Committed<E, keyof E>,
-              query?.with_pii !== false
-            )
-          )
-        );
-        count++;
-        if (query?.limit && count >= query.limit) break;
-      }
-    } else {
-      let i =
-        floor_index >= 0
-          ? floor_index
-          : this._first_index_after(query?.after ?? -1);
-      while (i < this._events.length) {
-        const e = this._events[i++];
-        if (query && !this.in_query(query, e)) continue;
-        if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before !== undefined && e.id >= query.before) break;
-        // \`created\` is not monotonic with \`id\`, so a failing time bound
-        // skips the event rather than terminating the scan — matching
-        // PG/SQLite. Only the id-ordered \`before\` bound above may
-        // short-circuit.
-        if (query?.created_before && e.created >= query.created_before)
-          continue;
-        await Promise.resolve(
-          callback(
-            this._with_pii(
-              e as Committed<E, keyof E>,
-              query?.with_pii !== false
-            )
-          )
-        );
-        count++;
-        if (query?.limit && count >= query.limit) break;
-      }
+    for (let k = 0; k < hi - lo; k++) {
+      const e = this._events[query?.backward ? hi - 1 - k : lo + k];
+      if (query && !this.in_query(query, e)) continue;
+      await Promise.resolve(
+        callback(this._with_pii(e as Committed<E, keyof E>, with_pii))
+      );
+      count++;
+      if (query?.limit && count >= query.limit) break;
     }
     return count;
   }
@@ -14407,11 +14398,18 @@ export {
   type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_EVENT_LIMIT,
   DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_STREAM_LIMIT,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
   type ReactionConfig,
@@ -16873,7 +16871,12 @@ export interface Cache extends Disposable {
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import { type FoldConfig, resolveFoldConfig } from "../internal/index.js";
+import {
+  DEFAULT_BLOCK_ON_ERROR,
+  DEFAULT_MAX_RETRIES,
+  type FoldConfig,
+  resolveFoldConfig,
+} from "../internal/index.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -17186,8 +17189,8 @@ function _projection<
             handler,
             resolver: default_resolver ?? _this_,
             options: {
-              blockOnError: true,
-              maxRetries: 3,
+              blockOnError: DEFAULT_BLOCK_ON_ERROR,
+              maxRetries: DEFAULT_MAX_RETRIES,
             },
           };
           const register = (events as Record<string, any>)[event];
@@ -17285,7 +17288,10 @@ function _projection<
                   {
                     handler: noop,
                     resolver: { target },
-                    options: { blockOnError: true, maxRetries: 3 },
+                    options: {
+                      blockOnError: DEFAULT_BLOCK_ON_ERROR,
+                      maxRetries: DEFAULT_MAX_RETRIES,
+                    },
                   },
                 ],
               ]),
@@ -21271,6 +21277,8 @@ import {
   type CircuitState,
   CorrelateCycle,
   close_correlation,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
@@ -21375,12 +21383,6 @@ import type {
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
  */
-/**
- * Default LRU cap for the subscribed-streams cache. Apps that mint many
- * dynamic targets (one per aggregate) should override via
- * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
- */
-export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
  * Scan window and pass cap for the correlation catch-up the close-cycle
@@ -21395,14 +21397,6 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-/**
- * Default debounce window (ms) for \`settle()\` when neither the per-call
- * \`SettleOptions.debounceMs\` nor \`ActOptions.settleDebounceMs\` is set.
- * Coalesces commits in the same tick and small bursts; sub-perceptible
- * latency on the \`"settled"\` signal.
- */
-export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
-
 // Re-export the autoclose config surface so operators can
 // \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"\`. The implementation lives in
@@ -21414,6 +21408,8 @@ export {
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   resolveAutocloseConfig,
 } from "./internal/index.js";
 
@@ -26234,7 +26230,7 @@ import type {
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { CloseSignal } from "./close-signal.js";
-import type { AutocloseConfig } from "./config.js";
+import { type AutocloseConfig, DEFAULT_MAX_RETRIES } from "./config.js";
 import { DeferSignal } from "./defer-signal.js";
 
 /**
@@ -26291,7 +26287,7 @@ export function synthesize_autoclose_reactions<
       }),
       // Never block on autoclose: a transient query/store error should retry,
       // not quarantine the synthetic stream.
-      options: { blockOnError: false, maxRetries: 3 },
+      options: { blockOnError: false, maxRetries: DEFAULT_MAX_RETRIES },
       handler: async (event) => {
         const aggregate = event.stream;
         // Off-hours gating: outside the window, park until the window
@@ -28051,6 +28047,11 @@ export function resolveBackoffConfig(
 // \`blockOnError\` (a poison message retries forever). Validate the whole bag.
 // ---------------------------------------------------------------------------
 
+/** Retries a reaction gets before it blocks, unless \`.do()\` says otherwise. */
+export const DEFAULT_MAX_RETRIES = 3;
+/** Whether a reaction blocks its stream once retries run out. */
+export const DEFAULT_BLOCK_ON_ERROR = true;
+
 const ReactionOptionsSchema = z.object({
   blockOnError: z.boolean(),
   maxRetries: z.number().int().min(0),
@@ -28113,6 +28114,25 @@ export function resolveLaneConfig<TName extends string>(
 // pass-through query filter (validated by the store), so it is not reshaped.
 // ---------------------------------------------------------------------------
 
+/** Streams a drain claims per cycle. */
+export const DEFAULT_STREAM_LIMIT = 10;
+/** Events a drain reads per stream per cycle. */
+export const DEFAULT_EVENT_LIMIT = 10;
+/** How long a drain holds a stream's lease (ms). */
+export const DEFAULT_LEASE_MILLIS = 10_000;
+/**
+ * Default debounce window (ms) for \`settle()\` when neither the per-call
+ * \`SettleOptions.debounceMs\` nor \`ActOptions.settleDebounceMs\` is set.
+ * Coalesces commits in the same tick and small bursts.
+ */
+export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+/**
+ * Default LRU cap for the subscribed-streams cache. Apps that mint many
+ * dynamic targets (one per aggregate) should override it with
+ * \`ActOptions.maxSubscribedStreams\`.
+ */
+export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+
 const DrainOptionsSchema = z.object({
   streamLimit: z.number().int().min(0).optional(),
   eventLimit: z.number().int().min(0).optional(),
@@ -28171,12 +28191,11 @@ export function resolveSettleConfig(
 export const MAX_SHUTDOWN_GRACE_MS = 30_000;
 
 /**
- * Grace budget used when no lane pinned a \`leaseMillis\` — matches \`drain()\`'s
- * own \`leaseMillis\` fallback, so the default deployment gets a budget
- * consistent with how long its handlers were already allowed to hold a
- * stream.
+ * Grace budget used when no lane pinned a \`leaseMillis\`: the drain's own
+ * lease, so the default deployment waits as long as its handlers were
+ * already allowed to hold a stream.
  */
-export const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
+export const DEFAULT_SHUTDOWN_GRACE_MS = DEFAULT_LEASE_MILLIS;
 
 const ShutdownOptionsSchema = z
   .object({
@@ -30130,6 +30149,11 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import {
+  DEFAULT_EVENT_LIMIT,
+  DEFAULT_LEASE_MILLIS,
+  DEFAULT_STREAM_LIMIT,
+} from "./config.js";
 import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
@@ -30813,9 +30837,12 @@ export class DrainController<
     // lane its own budget — a caller-level drain({leaseMillis}) would
     // erase it. Caller options apply only when the lane didn't pin a
     // value.
-    const streamLimit = d.streamLimit ?? options.streamLimit ?? 10;
-    const eventLimit = d.eventLimit ?? options.eventLimit ?? 10;
-    const leaseMillis = d.leaseMillis ?? options.leaseMillis ?? 10_000;
+    const streamLimit =
+      d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
+    const eventLimit =
+      d.eventLimit ?? options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+    const leaseMillis =
+      d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
     try {
       this._locked = true;
@@ -33068,17 +33095,49 @@ export class InMemoryStore implements Store {
     this._streams = new Map();
   }
 
-  private in_query<E extends Schemas>(query: Query, e: Committed<E, keyof E>) {
-    if (query.stream) {
-      if (query.stream_exact) {
-        if (e.stream !== query.stream) return false;
-      } else if (!RegExp(query.stream).test(e.stream)) return false;
-    }
+  private in_query<E extends Schemas>(
+    query: Query,
+    e: Committed<E, keyof E>
+  ): boolean {
+    if (query.stream && !this._stream_matches(query.stream, query, e.stream))
+      return false;
     if (query.names && !query.names.includes(e.name as string)) return false;
     if (query.correlation && e.meta?.correlation !== query.correlation)
       return false;
     if (e.name === SNAP_EVENT && !query.with_snaps) return false;
+    // \`created\` is not monotonic with \`id\` (restore keeps source timestamps),
+    // so time bounds filter events like PG/SQLite's WHERE; they never end
+    // the scan.
+    if (query.created_after && e.created <= query.created_after) return false;
+    if (query.created_before && e.created >= query.created_before) return false;
     return true;
+  }
+
+  private _stream_matches(pattern: string, query: Query, stream: string) {
+    return query.stream_exact
+      ? stream === pattern
+      : RegExp(pattern).test(stream);
+  }
+
+  /**
+   * Index of the latest snapshot of the queried stream, or -1. \`with_snaps\`
+   * on an exact single stream resumes there, so earlier events aren't read.
+   * The orchestrator asks only for unbounded current-state loads, so the
+   * floor applies whenever asked; an explicit \`after\` wins over it.
+   */
+  private _snap_floor(query: Query | undefined): number {
+    if (
+      !query?.with_snaps ||
+      !query.stream_exact ||
+      query.stream === undefined ||
+      query.after !== undefined
+    )
+      return -1;
+    for (let j = this._events.length - 1; j >= 0; j--) {
+      const e = this._events[j];
+      if (e.stream === query.stream && e.name === SNAP_EVENT) return j;
+    }
+    return -1;
   }
 
   /**
@@ -33092,88 +33151,24 @@ export class InMemoryStore implements Store {
     query?: Query
   ) {
     await sleep();
+    // The id bounds (\`after\`, \`before\`, the snapshot floor) are one index
+    // window over the id-ordered log; every other filter is per event.
+    const floor = this._snap_floor(query);
+    const lo = floor >= 0 ? floor : this._first_index_after(query?.after ?? -1);
+    const hi =
+      query?.before !== undefined
+        ? this._first_index_after(query.before - 1)
+        : this._events.length;
+    const with_pii = query?.with_pii !== false;
     let count = 0;
-    // Snapshot resume floor: \`with_snaps\` requests a resume at the latest
-    // snapshot for an exact single stream, so pre-snapshot events aren't read.
-    // The orchestrator sets \`with_snaps\` only for an unbounded current-state
-    // load — it suppresses the flag under any \`asOf\` bound (RFC 1274) — so the
-    // store applies the floor whenever asked and never re-checks bounds. An
-    // explicit \`after\` is a separate resume point that wins. No snapshot → -1,
-    // i.e. a full scan. Forward starts at the snapshot; backward stops at it.
-    let floor_index = -1;
-    if (
-      query?.with_snaps &&
-      query.stream_exact &&
-      query.stream !== undefined &&
-      query.after === undefined
-    ) {
-      for (let j = this._events.length - 1; j >= 0; j--) {
-        const e = this._events[j];
-        if (e.stream === query.stream && e.name === SNAP_EVENT) {
-          floor_index = j;
-          break;
-        }
-      }
-    }
-    if (query?.backward) {
-      const floor_id = floor_index >= 0 ? this._events[floor_index].id : -1;
-      let i =
-        (query?.before !== undefined
-          ? this._first_index_after(query.before - 1)
-          : this._events.length) - 1;
-      while (i >= 0) {
-        const e = this._events[i--];
-        if (query && !this.in_query(query, e)) continue;
-        if (query?.created_before && e.created >= query.created_before)
-          continue;
-        if (query.after !== undefined && e.id <= query.after) break;
-        // Below the resume floor → every remaining (lower-id) event is too,
-        // so stop the DESC scan.
-        if (floor_id >= 0 && e.id < floor_id) break;
-        // \`created\` is not monotonic with \`id\` (restore preserves the
-        // source timestamps verbatim), so a failing time bound skips the
-        // event rather than terminating the scan — matching PG/SQLite,
-        // which treat \`created\` bounds as pure WHERE filters. Only the
-        // id-ordered \`after\` bound above may short-circuit.
-        if (query.created_after && e.created <= query.created_after) continue;
-        await Promise.resolve(
-          callback(
-            this._with_pii(
-              e as Committed<E, keyof E>,
-              query?.with_pii !== false
-            )
-          )
-        );
-        count++;
-        if (query?.limit && count >= query.limit) break;
-      }
-    } else {
-      let i =
-        floor_index >= 0
-          ? floor_index
-          : this._first_index_after(query?.after ?? -1);
-      while (i < this._events.length) {
-        const e = this._events[i++];
-        if (query && !this.in_query(query, e)) continue;
-        if (query?.created_after && e.created <= query.created_after) continue;
-        if (query?.before !== undefined && e.id >= query.before) break;
-        // \`created\` is not monotonic with \`id\`, so a failing time bound
-        // skips the event rather than terminating the scan — matching
-        // PG/SQLite. Only the id-ordered \`before\` bound above may
-        // short-circuit.
-        if (query?.created_before && e.created >= query.created_before)
-          continue;
-        await Promise.resolve(
-          callback(
-            this._with_pii(
-              e as Committed<E, keyof E>,
-              query?.with_pii !== false
-            )
-          )
-        );
-        count++;
-        if (query?.limit && count >= query.limit) break;
-      }
+    for (let k = 0; k < hi - lo; k++) {
+      const e = this._events[query?.backward ? hi - 1 - k : lo + k];
+      if (query && !this.in_query(query, e)) continue;
+      await Promise.resolve(
+        callback(this._with_pii(e as Committed<E, keyof E>, with_pii))
+      );
+      count++;
+      if (query?.limit && count >= query.limit) break;
     }
     return count;
   }
@@ -34092,11 +34087,18 @@ export {
   type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
+  DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_EVENT_LIMIT,
   DEFAULT_FOLD_FLUSH_EVERY,
+  DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_CACHED_STATES,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
+  DEFAULT_STREAM_LIMIT,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
   type ReactionConfig,
