@@ -11,20 +11,20 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | Public surface | 2026-10-07 | 1 | 0 | active (its deprecations were rejected; scope narrowed by rule 2) |
 | Dead code (tool) | 2026-10-07 | 1 | 2 | active |
 | Hotspots (tool) | 2026-10-07 | 1 | 1 | active |
-| File budget | 2026-10-07 | 1 | 0 | active |
+| File budget | 2026-10-08 | 2 | 0 | active |
 | Comment noise | 2026-10-07 | 1 | 1 | active |
 | Concepts and options | 2026-10-07 | 1 | 1 | active |
 | Core or decorator? | 2026-10-08 | 1 | 0 | active (PII examined: stays in core) |
 | DRY across adapters and builders | 2026-10-07 | 1 | 1 | active |
-| Reading path | never | 0 | 0 | active |
+| Reading path | 2026-10-08 | 1 | 0 | active |
 | Newcomer test (quarterly) | never | 0 | 0 | active |
 | Tests by concept | 2026-10-07 | 1 | 1 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
-| Packages earn their place | 2026-10-07 | 1 | 0 | active |
+| Packages earn their place | 2026-10-08 | 2 | 0 | active (no removals possible; found no subtraction) |
 | Infra | 2026-10-07 | 1 | 1 | active |
-| One source of truth | 2026-10-07 | 1 | 0 | active |
-| Examples | never | 0 | 0 | active |
-| Process | never | 0 | 0 | active |
+| One source of truth | 2026-10-08 | 2 | 0 | active |
+| Examples | 2026-10-08 | 1 | 0 | active |
+| Process | 2026-10-08 | 1 | 0 | active |
 
 ## Mutation baselines
 
@@ -50,6 +50,9 @@ _(promoted to proposals P2026-10-08-1..5; the `KafkaBroker` removal was dropped:
 ## Self-changes
 
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
+
+- 2026-10-08 (third run): a proposal with no decision stays pending and counts toward the next report's 5–7. The user asked for a new run before deciding on the previous five; without this rule the list would only grow.
+- 2026-10-08 (third run): the Examples lens now covers the `scaffold-act-app` skill (two of its calls crash and nothing compiles it); the Process lens says how to count from PR and run history; two smells added (a pass-through layer kept for one decorated call; a gate most PRs declare away).
 
 - 2026-10-08: ground rule 2 no longer allows deprecating or removing public surface, and the next-major list is gone. The user rejected the 17 deprecations in P2026-10-07-6 ("dont deprecate anything"): they rested on a grep of this repo, which can't see who uses a published package. The bar's "around 30 exports" became "exports don't grow"; the proposal template's kinds no longer include public/next-major; the Public surface and Core-or-decorator lenses were reworded to match.
 - 2026-10-08: `metrics.sh` exited silently once ticket references reached zero: two `grep`s with no match fail under `set -euo pipefail`. Both now tolerate an empty match.
@@ -149,4 +152,25 @@ Proposals (decisions due next run), from the backlog:
 - P2026-10-08-3. One home for blocked-stream recovery in the docs (`error-handling.md`); the ~12 other places link to it; trim the CLAUDE.md bullet; fix the 3 stale code paths in CLAUDE.md.
 - P2026-10-08-4. Move the close lock and close catch-up out of `act.ts` (2,098 lines) into the close module.
 - P2026-10-08-5. Trim rationale from the public type docs in `types/ports.ts`, `types/action.ts`, `types/reaction.ts` (doc text only; signatures untouched).
+
+### 2026-10-08 — full run (four specialists: reading path + file budget, examples, process, source of truth + packages)
+
+Metrics: unchanged from the weekly run earlier today (only the skill record merged since). No PRs to audit.
+
+Decisions on the weekly run's P2026-10-08-1..5: none yet; pending.
+
+Verified in the main loop before ranking: the scaffold skill's two crashing calls (`stop()` on a boolean, `leased` on a correlate result); the backoff docs' "exactly maxRetries attempts" against `backoff.spec.ts` (maxRetries 2 → 3 attempts); the close-the-books recipe's removed predicate form; the guide's metric names (1 of 7 matches act-otel); `build_drain` returning bare ops except `subscribe`; the `IAct.forget` "throws at build time" claim (it throws on call; the specialist's probe had a control); the stability walk following imports; 175 of 300 PRs carrying an rfc-gate exemption; CLAUDE.md's nonexistent per-package `stability.spec.ts`.
+
+Packages: 12 published; act-http has the highest fix rate (34 of 42 commits in 90 days are fixes) and should not grow new transports; no subtraction found (removal is ruled out).
+
+Proposals (pending), ranked:
+- P2026-10-08b-1. Fix the broken promises in docs and skills: backoff attempt count (error-handling.md:331, CLAUDE.md, `ReactionOptions` doc), the recipe's predicate form, `IAct.forget`'s build-time claim, event-sourcing.md's "correlate is skipped", the scaffold skill's crashing calls, CLAUDE.md's stability-spec claim, ~15 stale paths and names (`PostgresStore.ts`, `_drainAll`, `classifyRegistry`, `ACT_ONLY_LANES`, `internal/build-classify.ts`).
+- P2026-10-08b-2. Make the stability snapshot record each entry point's exported names and declared types instead of copying all source (internal spec only; `runStabilityTck` unchanged). Shrinks a 65,390-line file that changed in 289 commits.
+- P2026-10-08b-3. Once b-2 lands, drop the rfc-gate CI job and its 191-line script (0 true catches, 175/300 PRs exempt); keep RFCs as a review convention.
+- P2026-10-08b-4. Delete the `DrainOps` / `build_drain` / `internal/drain.ts` layer (~120 lines, 1 file, 3 names) and pass `run_drain_cycle` its deps object instead of 13 positional arguments.
+- P2026-10-08b-5. Examples: strip the calculator hello-world to ~11 concepts (no lanes, no explicit `reactingTo`, settle instead of bare drains), drop the redundant `reactingTo` from wolfdesk and the docs, make wolfdesk's `committed` listener settle, take ticket history out of example comments.
+- P2026-10-08b-6. Make act-otel the one home for metric names: replace the guide's hand-wired walkthrough (~90 lines) with the bridge's table, fixing the alert table.
+- P2026-10-08b-7. Move conformance.yml and stress.yml to one weekly workflow plus dispatch (0 code catches in ~870 runs).
+
+Backlog (sound, missed the cut): drop the behavior-contracts row rule (53 of 479 cited names don't resolve; nothing checks it — the user's call); trim CLAUDE.md to an index and fold `/coverage` and `/charter-diff` into `/release-check`; dedupe the two `run_close_cycle` deps bags in act.ts and reattach `close()`'s orphaned doc; shrink the close-the-books recipe to a link; move the mirrored autoclose adapter specs into the TCK.
 

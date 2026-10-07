@@ -42,11 +42,11 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **One source of truth.** Find behaviors described in several places (docs pages, package READMEs, recipes, `CLAUDE.md`, code comments) with differing wording. One page owns each; the rest link to it. `CLAUDE.md` should be the short index it says it is.
 
-**Examples.** Do the examples in `packages/` and the docs show the simple path first, compile against today's API, and use the fewest concepts they can? An example that needs a paragraph of caveats means the API is too complicated.
+**Examples.** Do the examples in `packages/` and the docs show the simple path first, compile against today's API, and use the fewest concepts they can? An example that needs a paragraph of caveats means the API is too complicated. Include the code the `scaffold-act-app` skill writes into new apps: no check compiles it, so it drifts unseen.
 
 ## Process
 
-**Process.** The contribution workflow (RFC gate, release-check, learnings entries, behavior-contract rows, doc audit, the hooks) is a cost on every change. For each step: what did it catch in the last quarter? A step that caught nothing is a candidate to drop or merge.
+**Process.** The contribution workflow (RFC gate, release-check, learnings entries, behavior-contract rows, doc audit, the hooks) is a cost on every change. For each step: what did it catch in the last quarter? A step that caught nothing is a candidate to drop or merge. Count from evidence: `gh pr list --state merged --json body` (how often a gate is declared away) and `gh run list` per workflow (failures, and on whose PRs).
 
 ## Smells
 
@@ -60,3 +60,5 @@ Check for these by name; the retrospective adds recurring rejection reasons here
 - Adapter code re-implementing orchestrator logic, or the orchestrator doing a store's job.
 - The same behavior documented in four places, each slightly different.
 - A test file per ticket instead of per concept.
+- A layer that passes calls through unchanged, kept for one decorated call.
+- A gate most PRs have to declare away.
