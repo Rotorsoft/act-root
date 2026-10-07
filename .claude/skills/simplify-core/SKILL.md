@@ -25,7 +25,7 @@ Targets the retrospective tracks (adjust them only with the user):
 
 - comments under 25% of core lines; no ticket numbers in source or test names
 - no core file over 300 lines; one concept per file
-- runtime exports of `@rotorsoft/act` around 30; `IAct` and the `Act` class expose the same methods
+- runtime exports of `@rotorsoft/act` around 30; `IAct` stays the small surface handlers see, and each `Act` method beyond it is documented as operator surface
 - one implementation per idea: adapter logic shared through the orchestrator or the TCK, config validated once in `internal/config.ts`
 - one spec per concept, not per ticket; adapter suites don't repeat the TCK
 - each behavior documented in one place and linked elsewhere
@@ -43,7 +43,7 @@ Targets the retrospective tracks (adjust them only with the user):
 2. **Audit what changed** since the last run: `git log --since=<last run> --stat`. For each PR ask: did it add a concept, option, export, package, workflow or special case? Was a smaller fix available? Is it a fix on a recent fix in the same file? Fix-on-fix chains are where accidental complexity concentrates.
 3. **Run lenses.** Pick the lenses due by the rotation in `history.md` (least recently run first, skipping retired ones). Each lens is defined in `lenses.md`.
 4. **Check the field** (monthly, or when a lens raises a design question): how KurrentDB/EventStoreDB, Marten, Equinox, Emmett, Axon or the decider pattern answer that specific question. Look for the simpler answer, not missing features. Cite sources.
-5. **Propose** at most 5–7 items, ranked by simplicity gained per unit of risk, in the template below.
+5. **Propose** at most 5–7 items, ranked by simplicity gained per unit of risk, in the template below. Sound proposals that miss the cut go to the backlog in `history.md`; the next run ranks the backlog before looking for new ones.
 6. **Report and stop.** Present the ranked list and the metrics delta. Don't open tickets or branches until the user picks.
 7. **Retrospective and self-update** (before the report is recorded):
    - **Decisions:** record the user's answers to the *previous* run's proposals (accepted / rejected + reason / deferred).
@@ -72,4 +72,4 @@ The id lets the next retrospective find it.
 
 When the month's lenses are independent, fan them out instead of running them in sequence: at most four agents, one message, read-only. Suggested owners: `act-code-reviewer` for code lenses, `act-test-author` for the tests lens, `act-doc-writer` for docs, general-purpose for infra, packages and the field. Every specialist gets ground rules 1–5, its lens text from `lenses.md`, the proposal template, a cap of five proposals, and this instruction first: *create your notes file at `<scratchpad>/simplify/<lens>.md` and append to it as you go*. No edits, no tickets.
 
-Then synthesize in the main loop: merge duplicates, drop anything that adds more than it removes or conflicts with another proposal, check the strongest claims yourself, and rank one list. Specialists optimize their corner; the main loop decides.
+Then synthesize in the main loop: merge duplicates, drop anything that adds more than it removes or conflicts with another proposal, check the strongest claims yourself, and rank one list. A behavior claim (a bug, a broken promise) ranks only after the main loop reproduces it with an asserting test and a control. Specialists optimize their corner; the main loop decides.
