@@ -338,7 +338,7 @@ describe("SqliteStore pii_encryption", () => {
     expect(seen[1]!.pii).toBeNull();
   });
 
-  it("never carries pii on query_stats head/tail — the operator-introspection surface is pii-safe (#1294)", async () => {
+  it("never carries pii on query_stats head/tail — the operator-introspection surface is pii-safe", async () => {
     const key = randomBytes(32);
     const { store, raw, path } = await freshStore(key);
     track(store, raw, path);
@@ -390,7 +390,7 @@ describe("SqliteStore pii_encryption", () => {
     expect(typeof raw_rows.rows[0]!.pii).toBe("string");
   });
 
-  it("round-trips a Date in pii losslessly under encryption (#1370/#1556)", async () => {
+  it("round-trips a Date in pii losslessly under encryption", async () => {
     // Encryption is an at-rest concern: a Date must survive it as a Date,
     // exactly as it does on the plaintext path. `data.at` is the in-row
     // control — it never travels through the envelope.

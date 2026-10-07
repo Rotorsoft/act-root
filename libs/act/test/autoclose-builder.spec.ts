@@ -105,7 +105,7 @@ describe(".autocloses(policy) — declarator", () => {
   });
 });
 
-describe(".autocloses({ keep }) — rolling window (#1011)", () => {
+describe(".autocloses({ keep }) — rolling window", () => {
   const snapping = () => make_ticket().snap((s) => s.patches >= 2);
 
   it("caches the window width on the built state", () => {
@@ -437,7 +437,7 @@ describe("autoclose window membership", () => {
   });
 });
 
-describe("next_window_open — the derived off-window re-check (#1175)", () => {
+describe("next_window_open — the derived off-window re-check", () => {
   it("parks until the window opens later the same day", () => {
     const w = { start: 22, end: 6, timeZone: "UTC" };
     const noon = new Date("2024-06-01T12:15:00Z");
@@ -462,7 +462,7 @@ describe("next_window_open — the derived off-window re-check (#1175)", () => {
     expect(open.toISOString()).toBe("2024-06-02T02:00:00.000Z");
   });
 
-  it("opens ~1h out on a DST spring-forward day whose start hour is in the gap (#1233)", () => {
+  it("opens ~1h out on a DST spring-forward day whose start hour is in the gap", () => {
     // 2026-03-08 in America/New_York: 02:00 local does not exist (spring
     // forward jumps 01:59:59 → 03:00:00). A window whose start hour is the
     // skipped 02:00 must not defer ~24h — it opens at the gap's replacement
@@ -493,7 +493,7 @@ describe("next_window_open — the derived off-window re-check (#1175)", () => {
     expect(in_autoclose_window(w, open)).toBe(true);
   });
 
-  it("in_autoclose_window is true at the DST gap replacement instant (#1233)", () => {
+  it("in_autoclose_window is true at the DST gap replacement instant", () => {
     const w = { start: 2, end: 3, timeZone: "America/New_York" };
     // 07:00Z presents as local hour 3 (the gap replacement); the empty
     // [2,3) window must still admit this instant so autoclose isn't

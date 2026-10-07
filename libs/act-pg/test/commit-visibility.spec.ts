@@ -61,7 +61,7 @@ const META: EventMeta = { correlation: "vis", causation: {} };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe("pg commit visibility — append serialization (#1178)", () => {
+describe("pg commit visibility — append serialization", () => {
   let store: PostgresStore;
   let pool: Pool;
 
@@ -156,7 +156,7 @@ describe("pg commit visibility — append serialization (#1178)", () => {
   });
 });
 
-describe("pg commit visibility — end-to-end no-loss (#1178)", () => {
+describe("pg commit visibility — end-to-end no-loss", () => {
   let store: PostgresStore;
   let pool: Pool;
 

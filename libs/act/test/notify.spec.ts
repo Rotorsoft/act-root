@@ -198,7 +198,7 @@ describe("Act ↔ Store.notify auto-wiring", () => {
 // `_settle.schedule`), and that is the part worth pinning: a malformed
 // notification from a third-party adapter must not kill the store's
 // listener, which would silently end cross-process wake-ups for the process.
-describe("notify handler contains its own bookkeeping (#1437)", () => {
+describe("notify handler contains its own bookkeeping", () => {
   it("survives a malformed notification without killing the subscription", async () => {
     const { app, capturedHandler } = await buildAppWithNotifyStore();
     const seen: unknown[] = [];

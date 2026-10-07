@@ -110,7 +110,7 @@ describe("sqlite store (adapter-specific)", () => {
   // asserted that `claim` matched a subscription's source against the event
   // log, which it stopped doing in #1488: eligibility is the row's mark, and
   // the source window is applied by correlate when it decides what to mark.
-  // Coverage moved to `libs/act/test/correlate-work-mark.spec.ts`.
+  // Coverage moved to `libs/act/test/correlate.spec.ts`.
 
   // The TCK keyset-pagination case exercises only the cheap heads-only
   // path (no count/names). This drives the *full-scan* path (#1010) so

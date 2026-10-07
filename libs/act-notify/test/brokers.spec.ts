@@ -98,7 +98,7 @@ describe("RedisBroker", () => {
     expect(seen).toEqual([]);
   });
 
-  it("disposing one subscriber leaves co-subscribers on a shared broker intact (#1279)", async () => {
+  it("disposing one subscriber leaves co-subscribers on a shared broker intact", async () => {
     // The sidecar+worker / one-broker-N-workers topology: two orchestrators
     // share a single RedisBroker. Disposing one must remove only its own
     // listener — a channel-wide unsubscribe would silence the other, dropping

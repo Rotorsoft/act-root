@@ -67,7 +67,7 @@ describe("compute_backoff_delay", () => {
     expect(compute_backoff_delay(-99, opts)).toBe(100);
   });
 
-  it("throws on an off-union strategy instead of returning NaN (#1269)", () => {
+  it("throws on an off-union strategy instead of returning NaN", () => {
     // Defensive default: reachable only via an unvalidated direct call — the
     // builder validates at declaration. Must never silently emit NaN.
     expect(() =>
@@ -79,7 +79,7 @@ describe("compute_backoff_delay", () => {
   });
 });
 
-describe("resolveBackoffConfig (#1269)", () => {
+describe("resolveBackoffConfig", () => {
   it("passes undefined through untouched", () => {
     expect(resolveBackoffConfig(undefined)).toBeUndefined();
   });
@@ -112,7 +112,7 @@ describe("resolveBackoffConfig (#1269)", () => {
   });
 });
 
-describe("backoff config is validated at build (#1269)", () => {
+describe("backoff config is validated at build", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ ticked: ZodEmpty })
@@ -204,7 +204,7 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts).toBe(2);
   });
 
-  it("retries a no-backoff failure once its own lease lapses (#1670)", async () => {
+  it("retries a no-backoff failure once its own lease lapses", async () => {
     // A failed no-progress cycle submits no ack, so the lease stays held —
     // and `claim` excludes a live-leased stream even from its holder. Any
     // drain inside that window therefore claims nothing, which used to be
@@ -238,7 +238,7 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts).toBe(2);
   });
 
-  it("spends the whole retry budget and blocks, with no backoff configured (#1670)", async () => {
+  it("spends the whole retry budget and blocks, with no backoff configured", async () => {
     const LEASE = 60;
     let attempts = 0;
     const blocked: string[] = [];
@@ -270,7 +270,7 @@ describe("per-reaction backoff (integration)", () => {
     expect(blocked).toEqual(["s1"]);
   });
 
-  it("advances the watermark past the succeeded prefix AND persists the window on partial progress (#1278)", async () => {
+  it("advances the watermark past the succeeded prefix AND persists the window on partial progress", async () => {
     // Two `ticked` events land on one stream for a single backoff reaction.
     // The handler succeeds on the first event and throws on the second —
     // partial progress (handled > 0 AND error AND next_attempt_at set). The
@@ -447,7 +447,7 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts.late).toBe(1);
   });
 
-  it("backoff window is honored precisely via persisted deferred_at, not the lease duration (#1262)", async () => {
+  it("backoff window is honored precisely via persisted deferred_at, not the lease duration", async () => {
     // A retry-with-backoff persists `deferred_at = now + backoff` and
     // releases the lease, so the store gates the next attempt on the backoff
     // window — independent of `leaseMillis`. A backoff far shorter than the

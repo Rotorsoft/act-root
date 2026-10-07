@@ -49,7 +49,7 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("a")).toBe(true);
   });
 
-  it("eviction never drops a committed entry, even over budget (#1335)", () => {
+  it("eviction never drops a committed entry, even over budget", () => {
     const store = new InMemoryIdempotencyStore({ maxEntries: 2 });
     store.claim("a");
     store.commit("a"); // durable
@@ -64,7 +64,7 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("c")).toBe(false);
   });
 
-  it("eviction targets the oldest tentative entry, skipping committed (#1335)", () => {
+  it("eviction targets the oldest tentative entry, skipping committed", () => {
     const store = new InMemoryIdempotencyStore({ maxEntries: 2 });
     const t0 = 1_000_000;
     store.claim("committed", t0);
@@ -79,7 +79,7 @@ describe("InMemoryIdempotencyStore", () => {
   // `claim` and `size` both gc before observing, so a lingering expired
   // entry is invisible through the public API — these read the internal map
   // directly to prove `commit`/`release` reclaim promptly on their own.
-  it("commit runs gc so expired entries don't linger (#1336)", () => {
+  it("commit runs gc so expired entries don't linger", () => {
     const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
     const seen = (store as unknown as { _seen: Map<string, unknown> })._seen;
     const t0 = 1_000_000;
@@ -93,7 +93,7 @@ describe("InMemoryIdempotencyStore", () => {
     expect(seen.has("expired")).toBe(false);
   });
 
-  it("release runs gc so expired entries don't linger (#1336)", () => {
+  it("release runs gc so expired entries don't linger", () => {
     const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
     const seen = (store as unknown as { _seen: Map<string, unknown> })._seen;
     const t0 = 1_000_000;
@@ -184,7 +184,7 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("fresh", t0 + 1_500)).toBe(false);
   });
 
-  describe("commit must not corrupt iteration order (#1268)", () => {
+  describe("commit must not corrupt iteration order", () => {
     it("a commit-refreshed entry does not shield an expired one from gc", () => {
       const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
       store.claim("a", 0); // expires 1_000

@@ -22,7 +22,7 @@ import { PostgresStore } from "../src/postgres-store.js";
 const pool_config = () =>
   (pg.Pool as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
 
-describe("pool defaults (#1119)", () => {
+describe("pool defaults", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });

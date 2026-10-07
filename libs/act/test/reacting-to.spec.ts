@@ -9,7 +9,7 @@ import { sandbox } from "../src/test/index.js";
  * the framework auto-injects the triggering event, maintaining the
  * correlation chain by default.
  */
-describe("auto-inject reactingTo (#587)", () => {
+describe("auto-inject reactingTo", () => {
   const actor = { id: "a", name: "a" };
 
   it("should auto-inject reactingTo when handler omits it", async () => {
@@ -202,7 +202,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should auto-inject when the handler dispatches through a captured app (#1541)", async () => {
+  it("should auto-inject when the handler dispatches through a captured app", async () => {
     const Source = state({ Source3: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ Triggered3: z.object({ val: z.number() }) })
@@ -267,7 +267,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should mint a fresh correlation for dispatches outside any reaction (#1541)", async () => {
+  it("should mint a fresh correlation for dispatches outside any reaction", async () => {
     const Counter = state({ AmbientCounter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ AmbientCounted: z.object({ n: z.number() }) })
@@ -298,7 +298,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should NOT treat work the handler did not await as a reaction (#1562)", async () => {
+  it("should NOT treat work the handler did not await as a reaction", async () => {
     const Source = state({ Source5: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ Triggered5: z.object({ val: z.number() }) })
@@ -369,7 +369,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should not leak the ambient event across sequential handler runs (#1541)", async () => {
+  it("should not leak the ambient event across sequential handler runs", async () => {
     const Source = state({ Source4: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ Triggered4: z.object({ val: z.number() }) })
@@ -434,7 +434,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should honor an explicit expectedVersion inside a reaction (#1543)", async () => {
+  it("should honor an explicit expectedVersion inside a reaction", async () => {
     const Source = state({ Source6: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ Triggered6: z.object({ val: z.number() }) })
@@ -499,7 +499,7 @@ describe("auto-inject reactingTo (#587)", () => {
     await dispose();
   });
 
-  it("should restore the inferred guard for work that outlived the handler (#1562)", async () => {
+  it("should restore the inferred guard for work that outlived the handler", async () => {
     const Ledger = state({ Ledger6: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
       .emits({ Spent6: z.object({}), Fired6: z.object({}) })

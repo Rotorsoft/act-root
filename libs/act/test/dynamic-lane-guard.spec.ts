@@ -48,7 +48,7 @@ const captured = async (fn: () => Promise<void>): Promise<string[]> => {
   return errors;
 };
 
-describe("a dynamic resolution onto an undeclared lane (#1564)", () => {
+describe("a dynamic resolution onto an undeclared lane", () => {
   it("CONTROL — the static form is still rejected at build", () => {
     expect(() =>
       act()
@@ -136,7 +136,7 @@ describe("a dynamic resolution onto an undeclared lane (#1564)", () => {
   });
 });
 
-describe("two dynamic resolutions disagreeing on a target's lane (#1567)", () => {
+describe("two dynamic resolutions disagreeing on a target's lane", () => {
   it("CONTROL — the static form is still rejected at build", () => {
     expect(() =>
       act()
@@ -196,7 +196,7 @@ describe("two dynamic resolutions disagreeing on a target's lane (#1567)", () =>
  * it. What varies per aggregate goes in the message as an example; what the
  * operator has to edit goes in the key.
  */
-describe("reporting once per declaration, not once per aggregate (#1584)", () => {
+describe("reporting once per declaration, not once per aggregate", () => {
   /** Enough aggregates that per-target keying is unmistakable in the count. */
   const AGGREGATES = 25;
 
@@ -215,7 +215,7 @@ describe("reporting once per declaration, not once per aggregate (#1584)", () =>
     }
   };
 
-  describe("an undeclared lane (#1564)", () => {
+  describe("an undeclared lane", () => {
     it("CONTROL — one aggregate, one bad declaration: one report", async () => {
       const errors = await captured(async () => {
         const { app, dispose } = await sandbox(
@@ -284,7 +284,7 @@ describe("reporting once per declaration, not once per aggregate (#1584)", () =>
     });
   });
 
-  describe("conflicting lanes (#1567)", () => {
+  describe("conflicting lanes", () => {
     it("CONTROL — one aggregate, one bad declaration pair: one report", async () => {
       const errors = await captured(async () => {
         const { app, dispose } = await sandbox(
@@ -382,7 +382,7 @@ describe("reporting once per declaration, not once per aggregate (#1584)", () =>
  * lane was discovered first, and a worker sharded `onlyLanes: ["slow"]`
  * never runs the reaction that asked for "slow".
  */
-describe("an omitted lane disagreeing with a declared one (#1598)", () => {
+describe("an omitted lane disagreeing with a declared one", () => {
   it("CONTROL — the static form is still rejected at build", () => {
     expect(() =>
       act()

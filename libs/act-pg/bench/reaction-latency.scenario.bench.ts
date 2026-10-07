@@ -193,7 +193,7 @@ const SCENARIOS: ReadonlyArray<{
   { name: "high (1000/s)", rate: 1000, durationMs: 3000 },
 ];
 
-describe("ACT-103 commit→reaction latency (PostgresStore single-process)", () => {
+describe("commit→reaction latency (PostgresStore single-process)", () => {
   it("p50/p95/p99 across idle / low / high steady-state rates", async () => {
     const results: Record<string, Record<string, string>> = {};
 
@@ -208,7 +208,7 @@ describe("ACT-103 commit→reaction latency (PostgresStore single-process)", () 
 
     // eslint-disable-next-line no-console
     console.log(
-      "\n=== ACT-103 commit→reaction latency (PostgresStore single-process) ===" +
+      "\n=== commit→reaction latency (PostgresStore single-process) ===" +
         "\nProves:  PG adapter overhead keeps the same order of magnitude as InMemory" +
         "\n         at idle; high-rate tail reveals when PG round-trips dominate." +
         "\nAsserts: idle p50 < 50 ms — p50 over p99 because small idle sample is" +

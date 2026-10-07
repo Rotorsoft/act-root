@@ -190,7 +190,7 @@ async function runScenario(
   }
 }
 
-describe("ACT-101 cross-process commit→reaction latency", () => {
+describe("cross-process commit→reaction latency", () => {
   it("p50/p95/p99 — notify vs polling", async () => {
     const notifySamples = await runScenario("notify", true);
     const pollSamples = await runScenario("poll", false);
@@ -199,7 +199,7 @@ describe("ACT-101 cross-process commit→reaction latency", () => {
     const pollKey = `polling (n=${pollSamples.length})`;
     // eslint-disable-next-line no-console
     console.log(
-      "\n=== ACT-101 cross-process commit→reaction latency ===" +
+      "\n=== cross-process commit→reaction latency ===" +
         "\nProves:  LISTEN/NOTIFY wake-up beats polling on tail latency when" +
         "\n         writer and reader are in separate processes." +
         "\nAsserts: notify p99 < polling p99 (lower ms = faster on every column)"

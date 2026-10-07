@@ -268,7 +268,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     expect(attempts).toBe(2);
   });
 
-  it("finalizes a successful delivery exactly once — no double commit (#1293)", async () => {
+  it("finalizes a successful delivery exactly once — no double commit", async () => {
     const { store, commits, releases } = countingStore(
       new InMemoryIdempotencyStore()
     );
@@ -294,7 +294,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     expect(releases).toEqual([]);
   });
 
-  it("finalizes a failed delivery exactly once — no double release (#1293)", async () => {
+  it("finalizes a failed delivery exactly once — no double release", async () => {
     const { store, commits, releases } = countingStore(
       new InMemoryIdempotencyStore()
     );
@@ -618,7 +618,7 @@ describe("receiver — listen mode (long-running Node server)", () => {
       () => false
     );
 
-  it("listen() on a busy port rejects, and close() still resolves (#1783)", async () => {
+  it("listen() on a busy port rejects, and close() still resolves", async () => {
     const { createServer } = await import("node:net");
     const blocker = createServer();
     await new Promise<void>((r) => blocker.listen(14_007, () => r()));

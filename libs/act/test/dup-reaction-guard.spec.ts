@@ -11,7 +11,7 @@ import { act, projection, slice, state } from "../src/index.js";
  * That silent data loss is now a build-time throw, consistent with the
  * existing "Duplicate action" / "Duplicate batch handler" guards.
  */
-describe("ACT-979 duplicate reaction names", () => {
+describe("duplicate reaction names", () => {
   const schema = z.object({ count: z.number() });
 
   const Thing = state({ Thing: schema })

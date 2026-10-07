@@ -354,7 +354,7 @@ describe("PostgresStore.notify", () => {
  * every checked-out client and a stranded one keeps a graceful shutdown
  * pending forever.
  */
-describe("PostgresStore.dispose racing an in-flight re-LISTEN (#1616)", () => {
+describe("PostgresStore.dispose racing an in-flight re-LISTEN", () => {
   const DISPOSE_SCHEMA = schema("schema_dispose_race");
 
   const mk = () =>

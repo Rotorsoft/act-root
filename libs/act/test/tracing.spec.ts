@@ -83,7 +83,7 @@ describe("tracing", () => {
       expect(ops.subscribe).toBe(drain.subscribe);
     });
 
-    it("at trace level only subscribe is decorated; cycle ops stay bare (ACT-1103)", () => {
+    it("at trace level only subscribe is decorated; cycle ops stay bare", () => {
       // Per-op claim/fetch/ack/block decorators were folded into a
       // single cycle trace emitted from `DrainController.drain()` via
       // `trace_cycle`. Subscribe stays decorated because it's driven
@@ -475,7 +475,7 @@ describe("tracing", () => {
       );
     });
 
-    it("subscribe trace puts lane in caption when the batch is uniform (ACT-1103)", async () => {
+    it("subscribe trace puts lane in caption when the batch is uniform", async () => {
       // Uniform-lane batches: lane in the caption, streams bare. Mirrors
       // the `>> drained` cycle caption convention so the operator sees
       // the lane once per line.

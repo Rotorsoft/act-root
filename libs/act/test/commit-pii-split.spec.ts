@@ -53,7 +53,7 @@ async function collect(): Promise<Committed<Schemas, keyof Schemas>[]> {
   return out;
 }
 
-describe("commit-path PII split (#855 slice 3)", () => {
+describe("commit-path PII split", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -137,7 +137,7 @@ describe("commit-path PII split (#855 slice 3)", () => {
 // its marker: plaintext into events.data, plaintext out of the default-deny
 // read surface, and forget() reporting eventCount 0 while wiping nothing.
 // One paren from the documented form, with no signal anywhere.
-describe("sensitive() marker survival (#1417)", () => {
+describe("sensitive() marker survival", () => {
   const marker_actor = { id: "a", name: "a" };
 
   const build = (email: z.ZodType<string>) => {

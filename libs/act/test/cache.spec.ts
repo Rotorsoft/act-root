@@ -179,7 +179,7 @@ describe("cache integration", () => {
  * window from the latest snapshot onward — so it reports that window's count
  * whatever the stream's history.
  */
-describe("snaps is window-relative, not cumulative (#1678)", () => {
+describe("snaps is window-relative, not cumulative", () => {
   const Snapping = state({ Snapping: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ Ticked: z.object({ by: z.number() }) })

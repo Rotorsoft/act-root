@@ -296,7 +296,7 @@ describe("projection", () => {
     await dispose();
   });
 
-  it("hands the batch handler each event once, however many reactions it has (#1780)", async () => {
+  it("hands the batch handler each event once, however many reactions it has", async () => {
     const stream = nextStream();
     const batchFn = vi.fn().mockResolvedValue(undefined);
     const TwoHandlers = projection("batch-two")

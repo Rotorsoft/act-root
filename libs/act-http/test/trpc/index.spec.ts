@@ -314,7 +314,7 @@ describe("trpc(app, options) — generated router", () => {
     );
   });
 
-  test("actor 'throw to deny' surfaces as UNAUTHORIZED (401), matching Hono (#1286)", async ({
+  test("actor 'throw to deny' surfaces as UNAUTHORIZED (401), matching Hono", async ({
     app,
   }) => {
     // The extractor denies with a plain Error. Before the fix this fell through
@@ -363,7 +363,7 @@ describe("trpc(app, options) — generated router", () => {
   // produce through the shared `toApiError` table — the one unavoidable
   // exception is StreamClosedError (410 Gone), which tRPC has no code for and
   // surfaces as 404 Not Found.
-  describe("cross-transport wire-status parity (#1280)", () => {
+  describe("cross-transport wire-status parity", () => {
     const parity: ReadonlyArray<{
       label: string;
       throws: () => Error;

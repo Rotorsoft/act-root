@@ -42,7 +42,7 @@ async function buildRelativeSqlite(name: string, n: number): Promise<string> {
   return relPath;
 }
 
-describe("#1194 write-mode gate — transfer refused when read-only", () => {
+describe("write-mode gate — transfer refused when read-only", () => {
   it("refuses an in-cwd transfer that writes to a persistent target", async () => {
     const src = await buildRelativeSqlite("wg-src.sqlite", 2);
     await expect(
@@ -74,7 +74,7 @@ describe("#1194 write-mode gate — transfer refused when read-only", () => {
   });
 });
 
-describe("#1195 mutation origin guard", () => {
+describe("mutation origin guard", () => {
   it("refuses an origin-less HTTP mutation (viaHttp, no allowlist)", async () => {
     const httpCaller = inspectorRouter.createCaller({ viaHttp: true });
     await expect(httpCaller.connect({ adapter: "inmemory" })).rejects.toThrow(

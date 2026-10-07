@@ -26,7 +26,7 @@ const empty_drain = (): Drain<Schemas> => ({
   blocked: [],
 });
 
-describe("settle loop wake-up during a running cycle (ACT-1205)", () => {
+describe("settle loop wake-up during a running cycle", () => {
   it("runs a cycle for a schedule() that fires while a cycle is in flight", async () => {
     const breaker = new CircuitBreaker({
       failureThreshold: 5,
@@ -97,7 +97,7 @@ describe("settle loop wake-up during a running cycle (ACT-1205)", () => {
  * event — was ever scanned. Counting `last_id > after_before` as progress
  * fixes it; it terminates because ids are monotonic and finite.
  */
-describe("settle loop paginates past inert windows (ACT-1309)", () => {
+describe("settle loop paginates past inert windows", () => {
   it("keeps correlating while last_id advances, though nothing subscribes or drains", async () => {
     const breaker = new CircuitBreaker({
       failureThreshold: 5,
@@ -150,7 +150,7 @@ describe("settle loop paginates past inert windows (ACT-1309)", () => {
  * mid-outage and let the drain hammer the down store) is now a real store
  * query that fails when the store is down.
  */
-describe("settle breaker success rides a real correlate probe (#1329)", () => {
+describe("settle breaker success rides a real correlate probe", () => {
   const open_breaker = () => {
     const breaker = new CircuitBreaker({
       failureThreshold: 1,
@@ -232,7 +232,7 @@ describe("settle breaker success rides a real correlate probe (#1329)", () => {
   });
 });
 
-describe("settled payload (#1383)", () => {
+describe("settled payload", () => {
   const Counter = state({ Counter: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
     .emits({ Ticked: ZodEmpty })
@@ -301,7 +301,7 @@ describe("settled payload (#1383)", () => {
 // at `failureThreshold: 1` an OPEN breaker that returned EMPTY_DRAIN for the
 // whole cooldown, re-tripping on each half-open recovery. A broken metrics
 // bridge stalled the reaction pipeline indefinitely.
-describe("a throwing settled listener is contained (#1436)", () => {
+describe("a throwing settled listener is contained", () => {
   const Counter = state({ Counter: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
     .emits({ Ticked: ZodEmpty })

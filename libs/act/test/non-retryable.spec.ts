@@ -307,7 +307,7 @@ describe("NonRetryableError (drain integration)", () => {
     expect((await app.blocked_streams()).length).toBe(0);
   });
 
-  it("blocks in the SAME cycle after partial progress — ack must not drop the block (#1296)", async () => {
+  it("blocks in the SAME cycle after partial progress — ack must not drop the block", async () => {
     // A batch that succeeds on the first event and throws NonRetryable on the
     // second finalizes with `handled > 0` AND `block: true`. Because `ack`
     // releases the lease that `block`'s WHERE clause requires, acking before
@@ -482,7 +482,7 @@ describe("lifecycle listener containment (drain finalize)", () => {
 // the claims, the rejected ack and the block are all the adapter's own.
 // The same sequence runs against a real Postgres store in
 // `libs/act-pg/test/lease-loss.spec.ts`.
-describe("a handler that only ever loses its lease (#1418)", () => {
+describe("a handler that only ever loses its lease", () => {
   const lease_actor = { id: "a", name: "a" };
 
   afterEach(async () => {

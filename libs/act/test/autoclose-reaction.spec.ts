@@ -232,7 +232,7 @@ describe("autoclose as a synthesized reaction", () => {
     );
   });
 
-  it("does not defer to a PAST due-time when `after` has elapsed but the predicate is unmet (#1330)", async () => {
+  it("does not defer to a PAST due-time when `after` has elapsed but the predicate is unmet", async () => {
     const app = act()
       .withState(ticket({ is: "Resolved", after: { days: 1 } }))
       .build();
@@ -291,7 +291,7 @@ describe("autoclose as a synthesized reaction", () => {
   // event that tripped the snap predicate. The terminate-only path must key
   // on the domain head/count, not the trailing snapshot — otherwise `is`
   // never matches and `reaches` counts snapshot events toward the threshold.
-  it("closes on the terminal event even when a snapshot trails it (`is`, #1356)", async () => {
+  it("closes on the terminal event even when a snapshot trails it", async () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(
@@ -313,7 +313,7 @@ describe("autoclose as a synthesized reaction", () => {
     expect(closed[0].truncated.has("ts1")).toBe(true);
   });
 
-  it("counts only domain events toward `reaches` when snapshots trail (#1356)", async () => {
+  it("counts only domain events toward `reaches` when snapshots trail", async () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(
@@ -403,7 +403,7 @@ describe("autoclose as a synthesized reaction", () => {
    * closing to a maintenance window gets its streams tombstoned and
    * truncated mid-business-day because another tenant built first.
    */
-  describe("the off-hours window is per-Act, not per-builder (#1615)", () => {
+  describe("the off-hours window is per-Act, not per-builder", () => {
     /** A UTC window that cannot contain "now", whatever the wall clock says. */
     const shut = () => {
       const h = new Date().getUTCHours();
@@ -477,7 +477,7 @@ describe("autoclose as a synthesized reaction", () => {
     });
   });
 
-  it("parks an off-window tick until the window opens, then closes (#1175)", async () => {
+  it("parks an off-window tick until the window opens, then closes", async () => {
     // The re-check is derived from the window itself — no polling
     // cadence. At 00:00 the {2, 6} window is closed and the reaction
     // defers to exactly 02:00; once the clock passes it, the next

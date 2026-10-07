@@ -175,7 +175,7 @@ describe("webhook", () => {
     });
   });
 
-  describe("response body timeout (#1701)", () => {
+  describe("response body timeout", () => {
     /**
      * `fetch` resolves on response HEADERS, so a timer cleared when the
      * fetch settles stops bounding the error-path body read. A receiver that

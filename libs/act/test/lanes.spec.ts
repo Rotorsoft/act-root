@@ -11,7 +11,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit(() => ["Incremented", {}])
   .build();
 
-describe("lanes (ACT-1103, slice 1)", () => {
+describe("lanes", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -79,7 +79,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
   // different sources with different lanes escaped it and the store silently
   // re-laned the stream (starving an onlyLanes worker of the high-priority
   // reaction).
-  it("rejects same-target reactions with different lanes across sources (#1325)", () => {
+  it("rejects same-target reactions with different lanes across sources", () => {
     expect(() =>
       act()
         .withState(Counter)
@@ -99,7 +99,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     ).toThrow(/conflicting lane assignments/);
   });
 
-  it("accepts same-target reactions on the SAME lane across sources (#1325)", () => {
+  it("accepts same-target reactions on the SAME lane across sources", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast" })
@@ -123,7 +123,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
   // `undefined` and `"default"` read as a disagreement and the build threw
   // the self-refuting `("default" vs "default")`. Both sides now normalize
   // through the same `lane ?? "default"` the classifier already computes.
-  it("accepts same-target reactions when both omit the lane (#1583)", () => {
+  it("accepts same-target reactions when both omit the lane", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")
@@ -140,7 +140,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(app.lanes).toEqual([]);
   });
 
-  it("accepts same-target reactions when both declare 'default' (#1583)", () => {
+  it("accepts same-target reactions when both declare 'default'", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")
@@ -157,7 +157,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(app.lanes).toEqual([]);
   });
 
-  it("accepts an explicit 'default' followed by an omitted lane (#1583)", () => {
+  it("accepts an explicit 'default' followed by an omitted lane", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")
@@ -174,7 +174,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(app.lanes).toEqual([]);
   });
 
-  it("accepts an omitted lane followed by an explicit 'default' (#1583)", () => {
+  it("accepts an omitted lane followed by an explicit 'default'", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")
@@ -191,7 +191,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(app.lanes).toEqual([]);
   });
 
-  it("still rejects a declared lane against an omitted one (#1583)", () => {
+  it("still rejects a declared lane against an omitted one", () => {
     expect(() =>
       act()
         .withState(Counter)
@@ -212,7 +212,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     );
   });
 
-  it("builds the failure scenario from #1583 with no cast anywhere", () => {
+  it("builds the lane-conflict failure scenario with no cast anywhere", () => {
     // The reported repro verbatim: a lane declared elsewhere, one call site
     // spelling the default lane out and another omitting it. `"default"` is
     // a legal member of TLanes, so this compiles without a `as never`.
@@ -508,7 +508,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect([...controllers.keys()]).toEqual(["slow"]);
   });
 
-  it("logs an orphaned-lane advisory when onlyLanes excludes a declared lane (#1220)", () => {
+  it("logs an orphaned-lane advisory when onlyLanes excludes a declared lane", () => {
     const infoSpy = vi.spyOn(log(), "info");
     act()
       .withState(Counter)
@@ -526,7 +526,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     infoSpy.mockRestore();
   });
 
-  it("does not log the orphaned-lane advisory when onlyLanes covers every declared lane (#1220)", () => {
+  it("does not log the orphaned-lane advisory when onlyLanes covers every declared lane", () => {
     const infoSpy = vi.spyOn(log(), "info");
     act()
       .withState(Counter)
@@ -541,7 +541,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
     infoSpy.mockRestore();
   });
 
-  it("does not log the orphaned-lane advisory when onlyLanes is unset (#1220)", () => {
+  it("does not log the orphaned-lane advisory when onlyLanes is unset", () => {
     const infoSpy = vi.spyOn(log(), "info");
     act()
       .withState(Counter)
@@ -907,7 +907,7 @@ describe("lanes (ACT-1103, slice 1)", () => {
   // claimed every other lane's streams — running their handlers on the
   // wrong (default) lease budget while the worker that owns the lane found
   // nothing to do. The collapse now applies only when no lane was declared.
-  describe("onlyLanes keeps the claim lane filter (#1545)", () => {
+  describe("onlyLanes keeps the claim lane filter", () => {
     const TwoTicks = state({ TwoTicks: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ SlowTick: ZodEmpty, DefaultTick: ZodEmpty })

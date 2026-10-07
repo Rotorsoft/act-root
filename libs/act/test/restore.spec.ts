@@ -115,7 +115,7 @@ describe("scan (pre-flight, no committer)", () => {
     expect(calls).toEqual([1, 2]);
   });
 
-  it("paginates source.query across the 500-row internal batch (ACT-1133)", async () => {
+  it("paginates source.query across the 500-row internal batch", async () => {
     // Force scan's pagination loop to fire by feeding it 600 events —
     // batch 1 returns exactly 500 (continue, bump `at`), batch 2
     // returns 100 (got < BATCH → exit). Verifies every event is
@@ -170,7 +170,7 @@ describe("scan (pre-flight, no committer)", () => {
     ]);
   });
 
-  it("event_migrations rewrites name + data with schema validation (ACT-1126)", async () => {
+  it("event_migrations rewrites name + data with schema validation", async () => {
     // Three events of two types; only the first type has a migration.
     // Migrated events get the new name + transformed data. Untouched
     // events flow through verbatim.
@@ -208,7 +208,7 @@ describe("scan (pre-flight, no committer)", () => {
     ]);
   });
 
-  it("event_migrations aborts the scan when from_schema rejects (ACT-1126)", async () => {
+  it("event_migrations aborts the scan when from_schema rejects", async () => {
     // The first OrderPaid row has the documented shape; the second
     // does not. from_schema.parse throws → scan throws → in a real
     // restore the sink transaction rolls back. Operator finds out
@@ -244,7 +244,7 @@ describe("scan (pre-flight, no committer)", () => {
     ).rejects.toThrow(/missing amount/);
   });
 
-  it("stream_rename rewrites the stream per event (ACT-1126)", async () => {
+  it("stream_rename rewrites the stream per event", async () => {
     const events: E[] = [
       baseEvent({ id: 1, stream: "tenant-old-acme" }),
       baseEvent({ id: 2, stream: "tenant-old-globex" }),
@@ -269,7 +269,7 @@ describe("scan (pre-flight, no committer)", () => {
     ]);
   });
 
-  it("event_migrations + stream_rename compose, migration runs first (ACT-1126)", async () => {
+  it("event_migrations + stream_rename compose, migration runs first", async () => {
     // The migration's `migrate(...)` sees the ORIGINAL stream name
     // because stream_rename runs after. Important for migrations that
     // key off the source stream (e.g., per-tenant transforms).
@@ -306,7 +306,7 @@ describe("scan (pre-flight, no committer)", () => {
     expect(seen_at_sink).toEqual([{ name: "X_v2", stream: "new-a" }]);
   });
 
-  it("drop_closed_streams drops pre-close events but keeps the tombstone (ACT-1126)", async () => {
+  it("drop_closed_streams drops pre-close events but keeps the tombstone", async () => {
     // stream-a is closed (tombstone at id 4); stream-b is live.
     // With drop_closed_streams:
     //   - stream-a's two pre-close events are dropped (compaction)
@@ -345,7 +345,7 @@ describe("scan (pre-flight, no committer)", () => {
     ]);
   });
 
-  it("drop_closed_streams + drop_snapshots compose (ACT-1126)", async () => {
+  it("drop_closed_streams + drop_snapshots compose", async () => {
     // Same stream-a close, plus a snapshot on stream-b. With both flags:
     //   - stream-a pre-close events dropped under closed_streams
     //   - stream-a tombstone kept (the close gate)
@@ -456,7 +456,7 @@ describe("scan (with committer)", () => {
     expect(seen[1]).toEqual({ id: 7, causationId: 1000 });
   });
 
-  it("keeps migrations applied when an id shift triggers the causation remap (ACT-1192)", async () => {
+  it("keeps migrations applied when an id shift triggers the causation remap", async () => {
     // A dropped snapshot renumbers the id space, so committed events land
     // at fresh ids and the causation remap branch fires for anything that
     // referenced an earlier kept event. Pre-fix, that branch rebuilt the
@@ -663,7 +663,7 @@ describe("Act.restore (orchestrator)", () => {
   });
 });
 
-describe("restore from a real Store source (#1671)", () => {
+describe("restore from a real Store source", () => {
   // `fromArray` above ignores `with_snaps`, so snapshots always reach the
   // walk from a synthetic source. A real Store filters them out unless the
   // scan asks — which is the gap this block covers.
@@ -742,7 +742,7 @@ describe("restore from a real Store source (#1671)", () => {
   });
 });
 
-describe("restore into a store that already correlated (#1772)", () => {
+describe("restore into a store that already correlated", () => {
   const Tick = state({ RTick: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
     .emits({ Ticked: z.object({}) })

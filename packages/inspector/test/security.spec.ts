@@ -71,7 +71,7 @@ async function buildRelativeSqlite(name: string, n: number): Promise<string> {
   return relPath;
 }
 
-describe("#1194 path guard — transfer rejects out-of-cwd file paths", () => {
+describe("path guard — transfer rejects out-of-cwd file paths", () => {
   it("rejects an absolute source path outside cwd (arbitrary read)", async () => {
     await expect(
       caller.transfer({
@@ -125,7 +125,7 @@ describe("#1194 path guard — transfer rejects out-of-cwd file paths", () => {
   });
 });
 
-describe("#1194 resolveUnderCwd", () => {
+describe("resolveUnderCwd", () => {
   it("resolves an in-cwd relative path to an absolute path", () => {
     expect(resolveUnderCwd("sub/file.csv", "csv file")).toBe(
       path.join(process.cwd(), "sub/file.csv")
@@ -145,7 +145,7 @@ describe("#1194 resolveUnderCwd", () => {
   });
 });
 
-describe("#1195 ssl-option mapping", () => {
+describe("ssl-option mapping", () => {
   it("maps ssl:true to verified TLS (rejectUnauthorized:true)", () => {
     expect(resolveSslConfig(true, false)).toEqual({ rejectUnauthorized: true });
   });
@@ -165,7 +165,7 @@ describe("#1195 ssl-option mapping", () => {
   });
 });
 
-describe("#1195 resolveBindHost", () => {
+describe("resolveBindHost", () => {
   it("defaults to loopback and does not warn", () => {
     const warn = vi.fn();
     expect(resolveBindHost(undefined, warn)).toBe(DEFAULT_BIND_HOST);
@@ -196,7 +196,7 @@ describe("#1195 resolveBindHost", () => {
   });
 });
 
-describe("#1195 CORS origin decisions", () => {
+describe("CORS origin decisions", () => {
   it("echoes only the exact origin when an allowlist is configured", () => {
     expect(isOriginAllowed("https://app.example", "https://app.example")).toBe(
       true

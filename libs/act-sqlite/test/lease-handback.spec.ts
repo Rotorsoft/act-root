@@ -44,7 +44,7 @@ const cleanup = () => {
   }
 };
 
-describe("correlation lease handback under a contended file (#1577)", () => {
+describe("correlation lease handback under a contended file", () => {
   beforeAll(cleanup);
   afterAll(cleanup);
 

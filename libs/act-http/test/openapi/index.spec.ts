@@ -313,7 +313,7 @@ const Account = state({
 const sensitive_builder = act().withState(Account);
 const sensitive_test = fixture(sensitive_builder);
 
-describe("openapi — sensitive() request-field marking (#1228)", () => {
+describe("openapi — sensitive() request-field marking", () => {
   sensitive_test(
     "annotates sensitive input fields writeOnly:true + format:password",
     ({ app }) => {
@@ -344,7 +344,7 @@ const Scheduler = state({ Scheduler: z.object({ at: z.string() }) })
 
 const scheduler_test = fixture(act().withState(Scheduler));
 
-describe("openapi — unrepresentable Zod types (#1328)", () => {
+describe("openapi — unrepresentable Zod types", () => {
   scheduler_test(
     "emits an open schema for a z.date() field instead of aborting the doc",
     ({ app }) => {

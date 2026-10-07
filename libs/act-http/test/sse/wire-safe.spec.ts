@@ -138,7 +138,7 @@ describe("broadcast frames are wire-safe", () => {
   });
 });
 
-describe("presence sets survive the wire (#1472)", () => {
+describe("presence sets survive the wire", () => {
   it("delivers a Set-valued overlay as an array to a live client", () => {
     const ch = new BroadcastChannel<Calc>();
     ch.publish("g1", { _v: 5, result: 1 } as Calc);
@@ -207,7 +207,7 @@ describe("presence sets survive the wire (#1472)", () => {
   });
 });
 
-describe("overlay state survives a commit (#1473)", () => {
+describe("overlay state survives a commit", () => {
   it("gives a reconnecting client what a live one holds after a publish", () => {
     const ch = new BroadcastChannel<Calc>();
     const frames: unknown[] = [];
@@ -284,7 +284,7 @@ describe("overlay state survives a commit (#1473)", () => {
   });
 });
 
-describe("publish() normalizes its cache entry too (#1646)", () => {
+describe("publish() normalizes its cache entry too", () => {
   it("gives a reconnecting client the same Set-valued field a live one holds", () => {
     const ch = new BroadcastChannel<Calc>();
     const frame = ch.publish(
@@ -311,7 +311,7 @@ describe("publish() normalizes its cache entry too (#1646)", () => {
     });
   });
 
-  it("leaves a cleared key ABSENT in the cache, not null (#1471 still holds)", () => {
+  it("leaves a cleared key ABSENT in the cache, not null", () => {
     // The cache must not adopt the wire's delete encoding: `undefined` is
     // the one conversion `cache_safe` deliberately does not make.
     const ch = new BroadcastChannel<Calc>();
@@ -320,7 +320,7 @@ describe("publish() normalizes its cache entry too (#1646)", () => {
     expect(ch.state("s")).not.toHaveProperty("left");
   });
 
-  it("still carries overlay keys across a commit (#1473 still holds)", () => {
+  it("still carries overlay keys across a commit", () => {
     // Normalizing before the carry must not clobber the OVERLAY_KEYS marker.
     const ch = new BroadcastChannel<Calc>();
     ch.publish("g", { _v: 0 } as Calc);

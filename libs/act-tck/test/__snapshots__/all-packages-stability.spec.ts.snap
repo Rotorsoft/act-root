@@ -63167,7 +63167,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(second.find((l) => l.stream === s)).toBeDefined();
       });
 
-      it("does not starve a default-priority lagging stream under sustained high-priority load (ACT-1223)", async () => {
+      it("does not starve a default-priority lagging stream under sustained high-priority load", async () => {
         // A fresh adapter so only these streams compete for the frontier.
         // Six priority-100 streams that always have fresh work plus one
         // never-processed priority-0 stream. The lagging selection orders
@@ -63461,7 +63461,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // (\`_in_fetch_window\`, #1487), and the cases that used to live here —
     // exact names never overmatching a sibling prefix (ACT-1182), pattern
     // sources claiming only on a real match (ACT-1220) — are now in
-    // \`libs/act/test/correlate-work-mark.spec.ts\`. What remains here is
+    // \`libs/act/test/correlate.spec.ts\`. What remains here is
     // what the store still owns: the fetch window, source portability, and
     // lease exclusivity.
     describe("source windows and lease exclusivity", () => {
@@ -63538,7 +63538,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     // calculator's \`^(A|B)$\`) is still matched as a full RegExp — but by
     // correlate, when it decides which events may raise a target's mark,
     // not by \`claim\`, which no longer reads the event log. The cases now
-    // live in \`libs/act/test/correlate-work-mark.spec.ts\`.
+    // live in \`libs/act/test/correlate.spec.ts\`.
 
     // ACT-1220: adapters that cannot faithfully run an arbitrary regex in
     // claim reject a non-portable claim source loudly at subscribe() —
@@ -63704,7 +63704,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(again.find((l) => l.stream === s)).toBeUndefined();
       });
 
-      it("returns the post-block row, not the caller's lease (#1382)", async () => {
+      it("returns the post-block row, not the caller's lease", async () => {
         // \`run_drain_cycle\` hands \`block()\` a lease whose \`at\` has been
         // fast-forwarded to the fetch ceiling, but a block deliberately
         // leaves the watermark alone — the failing event must be retried,
@@ -63761,7 +63761,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(blocked).toHaveLength(0);
       });
 
-      it("re-blocking an already-blocked stream is a no-op (#1263)", async () => {
+      it("re-blocking an already-blocked stream is a no-op", async () => {
         const s = \`block-twice-\${uid()}\`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -63901,7 +63901,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(leased.find((l) => l.stream === s)).toBeDefined();
       });
 
-      it("exposes a future deferred_at via query_streams (#1221)", async () => {
+      it("exposes a future deferred_at via query_streams", async () => {
         // The cold-start defer re-seed reads the persisted schedule back
         // through query_streams: a stream with a future deferred_at must
         // surface the ms-since-epoch value so the orchestrator can re-arm
@@ -63969,7 +63969,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await store.defer([], Date.now())).toBe(0);
       });
 
-      it("counts a duplicated stream name once (#1360)", async () => {
+      it("counts a duplicated stream name once", async () => {
         const s = \`defer-dup-\${uid()}\`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -64052,7 +64052,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.ack([{ ...re!, at: 1_000_000 }]);
       });
 
-      it("persists the lease's retry on a backoff-style due lease (#1262)", async () => {
+      it("persists the lease's retry on a backoff-style due lease", async () => {
         // A retry-with-backoff passes the climbing counter (not -1) on the
         // due-marked lease, so the retry budget survives the defer window —
         // the persisted value plus the next claim's bump keep it accruing
@@ -64079,7 +64079,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.ack([{ ...re!, at: 1_000_000 }]);
       });
 
-      it("advances the watermark to \`at\` while persisting the schedule on a partial-progress due lease (#1278)", async () => {
+      it("advances the watermark to \`at\` while persisting the schedule on a partial-progress due lease", async () => {
         // Advance and defer are independent ack legs: a partial-progress
         // backoff/defer moves the watermark past the events handled this cycle
         // (\`at\`) AND persists the window in one call, so the handled prefix
@@ -64185,7 +64185,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await store.reset([])).toBe(0);
       });
 
-      it("counts a duplicated stream name once (#1360)", async () => {
+      it("counts a duplicated stream name once", async () => {
         const s = \`reset-dup-\${uid()}\`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -64766,7 +64766,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("long identifiers", () => {
-      it("accepts a stream name well past 100 characters (#1420)", async () => {
+      it("accepts a stream name well past 100 characters", async () => {
         // The framework DERIVES identifiers from stream names — \`.autocloses\`
         // synthesizes \`"__autoclose__:" + stream\` — so a cap here is not a
         // user-input limit, it silently breaks framework-generated targets.
@@ -64795,7 +64795,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("truncate", () => {
-      it("leaves subscriptions untouched for restart and retire alike (#1527)", async () => {
+      it("leaves subscriptions untouched for restart and retire alike", async () => {
         // \`truncate\` is purely event-log work. It used to remove the
         // subscription row for a retire, and that single step was the only
         // one spanning both the event log and the subscription table — which
@@ -64838,7 +64838,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(rows).toContain(retired);
       });
 
-      it("leaves a retired stream's surviving subscription unclaimable (#1527)", async () => {
+      it("leaves a retired stream's surviving subscription unclaimable", async () => {
         // The property that makes leaving the row safe, and the reason the
         // framework can stop removing it. If this ever fails, retired streams
         // start handing work back to the drain.
@@ -64917,7 +64917,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(remaining[0].data).toEqual({ count: 7 });
       });
 
-      it("leaves exactly one seed when a stream is listed twice (#1677)", async () => {
+      it("leaves exactly one seed when a stream is listed twice", async () => {
         // The delete and the insert must be paired per target. Deleting once
         // from a deduped set and then inserting once per entry leaves two
         // \`version: 0\` seeds — a state the SQL adapters' unique
@@ -64951,7 +64951,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(result.get(s)?.deleted).toBe(1);
       });
 
-      it("applies windowed targets before full ones (#1677)", async () => {
+      it("applies windowed targets before full ones", async () => {
         // A stream listed as both is not something the framework produces —
         // \`close-cycle\` dedups by stream first — but \`Store\` is a public port
         // and the three adapters used to disagree on which entry survived in
@@ -65189,7 +65189,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     describe("query_streams", () => {
-      it("keyset pagination visits every stream regardless of name case (#1375)", async () => {
+      it("keyset pagination visits every stream regardless of name case", async () => {
         // The \`query_streams\` twin of #1357. Mixed-case suffixes so the
         // sort comparator and the \`after\` cursor must agree: code-unit
         // order is B,C,a,d; a locale sort (a,B,C,d) paired with a
@@ -65418,7 +65418,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(stats.size).toBe(0);
       });
 
-      it("keyset pagination visits every stream regardless of name case (#1357)", async () => {
+      it("keyset pagination visits every stream regardless of name case", async () => {
         // Mixed-case suffixes so the sort comparator and the \`after\` cursor
         // must agree: code-unit order is B,C,a,d; a locale sort (a,B,C,d)
         // paired with a code-unit \`<=\` cursor silently skips Bravo/Charlie.
@@ -66760,7 +66760,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
        * (#1675). Before this, one corrupt row stopped every stream's
        * reactions, because the correlate scan tripped on it.
        */
-      describe("with_pii (#1675)", () => {
+      describe("with_pii", () => {
         const seed_pii = async (s: string) =>
           await store.commit<CounterEvents>(
             s,
@@ -66843,7 +66843,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
       });
 
-      it("round-trips a Date losslessly in pii, like data/meta (#1365/#1370/#1556)", async () => {
+      it("round-trips a Date losslessly in pii, like data/meta", async () => {
         // A store persists bytes; it does not type them. JSON has no date
         // type, so a \`Date\` is stored as its ISO form and read back as that
         // same string — identically in \`data\` and \`pii\`, and whether or not
@@ -66894,7 +66894,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(typeof at).toBe(typeof born);
       });
 
-      it("query_stats head/tail never carry pii — introspection surface is pii-safe (#1294)", async () => {
+      it("query_stats head/tail never carry pii — introspection surface is pii-safe", async () => {
         const s = \`pii-stats-\${uid()}\`;
         await store.commit<CounterEvents>(
           s,

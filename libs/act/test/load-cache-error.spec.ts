@@ -30,7 +30,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 const actor = { id: "a", name: "a" };
 
-describe("load() cache-write error (ACT-1206)", () => {
+describe("load() cache-write error", () => {
   it("returns the correct state and swallows a failing cache.set", async () => {
     // A cache whose `set` fails once — the transient remote blip. `get`
     // stays cold so load() takes the replay-and-cache path that writes.

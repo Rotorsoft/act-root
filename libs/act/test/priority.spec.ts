@@ -49,7 +49,7 @@ const mark_all = async (s: Store) => {
   if (marks.length) await s.subscribe(marks);
 };
 
-describe("ACT-102 priority lanes — framework", () => {
+describe("priority lanes — framework", () => {
   beforeEach(() => {
     // Each test gets a fresh adapter so subscriptions / priorities
     // don't bleed across cases.
@@ -105,7 +105,7 @@ describe("ACT-102 priority lanes — framework", () => {
       expect(leases.map((l) => l.stream).sort()).toEqual(["earlier", "later"]);
     });
 
-    it("does not starve a default-priority lagging stream under sustained high-priority load (ACT-1223)", async () => {
+    it("does not starve a default-priority lagging stream under sustained high-priority load", async () => {
       // Many priority-100 lagging streams that always have work, plus one
       // priority-0 lagging stream. The pre-fix lagging selection orders by
       // `priority DESC, at ASC`, so the four lagging slots are always taken

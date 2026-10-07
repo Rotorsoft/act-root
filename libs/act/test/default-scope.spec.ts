@@ -48,7 +48,7 @@ afterEach(async () => {
   await dispose()().catch(() => {});
 });
 
-describe("an Act's ports are its own (#1597)", () => {
+describe("an Act's ports are its own", () => {
   it("a shared Act called from inside a tenant's handler writes to the shared store", async () => {
     const global_store = new InMemoryStore();
     store(global_store);

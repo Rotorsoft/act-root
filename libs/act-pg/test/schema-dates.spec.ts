@@ -28,7 +28,7 @@ const Doc = state({
   .emit("Stamped")
   .build();
 
-describe("schema-driven dates over a serializing store (#1556)", () => {
+describe("schema-driven dates over a serializing store", () => {
   it("types z.date() and leaves an ISO-shaped z.string() alone", async () => {
     const at = new Date("2026-01-01T00:00:00.000Z");
     const { app, store, cache, dispose } = await sandbox(act().withState(Doc), {

@@ -202,7 +202,7 @@ describe("BroadcastChannel", () => {
 });
 
 // #1423 — two delivery defects on the same fan-out path.
-describe("subscriber containment and overlay cache misses (#1423)", () => {
+describe("subscriber containment and overlay cache misses", () => {
   const st = (v: number, name = "n"): TestState =>
     ({ _v: v, name, count: 1 }) as TestState;
 
@@ -334,7 +334,7 @@ describe("subscriber containment and overlay cache misses (#1423)", () => {
  * reads the marker off the entry being dropped rather than keeping the
  * parallel bookkeeping structure the OVERLAY_KEYS design rejected.
  */
-describe("evicting overlay state is reported (#1648)", () => {
+describe("evicting overlay state is reported", () => {
   const st = (v: number, name = "n"): TestState =>
     ({ _v: v, name, count: 1 }) as TestState;
 

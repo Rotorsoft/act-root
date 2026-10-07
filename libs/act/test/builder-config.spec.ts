@@ -95,7 +95,7 @@ describe("resolveLaneConfig", () => {
    * drained nothing for the life of the process — silently, with nothing in
    * `blocked_streams()` to find it by (#1703).
    */
-  describe("both declaration paths validate (#1703)", () => {
+  describe("both declaration paths validate", () => {
     const S = state({ Box: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
       .emits({ Filled: ZodEmpty })
@@ -164,7 +164,7 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
    * was the one value the schema refused (#1711). Reached by wrapper code
    * normalizing an optional cap: `settle({ maxPasses: opts.maxPasses ?? Infinity })`.
    */
-  it("accepts maxPasses: Infinity, the documented default (#1711)", () => {
+  it("accepts maxPasses: Infinity, the documented default", () => {
     const s = { maxPasses: Number.POSITIVE_INFINITY };
     expect(resolveSettleConfig(s)).toBe(s);
   });
@@ -212,7 +212,7 @@ describe("config is validated at the declaration/runtime site", () => {
     .emit(() => ["ticked", {}])
     .build();
 
-  it("reaction with a NaN maxRetries throws at build (#1269 sibling)", () => {
+  it("reaction with a NaN maxRetries throws at build", () => {
     async function react() {}
     expect(() =>
       act()
@@ -223,7 +223,7 @@ describe("config is validated at the declaration/runtime site", () => {
     ).toThrow();
   });
 
-  it("action with a NaN maxRetries throws at build (#1269 sibling)", () => {
+  it("action with a NaN maxRetries throws at build", () => {
     expect(() =>
       state({ S: z.object({ n: z.number() }) })
         .init(() => ({ n: 0 }))

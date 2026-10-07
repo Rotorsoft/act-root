@@ -61,7 +61,7 @@ describe("applyPatchMessage", () => {
     });
   });
 
-  describe("genesis event (version 0) — #1346", () => {
+  describe("genesis event (version 0)", () => {
     it("applies the genesis patch from init for a fresh client (no baseline)", () => {
       const msg: PatchMessage<TestState> = {
         0: { name: "born", count: 1 },
@@ -136,7 +136,7 @@ describe("applyPatchMessage", () => {
     });
   });
 
-  describe("overlay patches (ACT-1312)", () => {
+  describe("overlay patches", () => {
     it("merges a marked overlay at the current version, keeping _v", () => {
       const cached: TestState = { _v: 5, name: "original", count: 3 };
       const msg: PatchMessage<TestState> = {
@@ -287,7 +287,7 @@ describe("applyPatchMessage", () => {
   // clients), #1346 (genesis version-0 treated as stale), #1419 (overlay at
   // cachedV + 1 folded as that version's domain patch). They are corners of
   // one state space, so pin the whole matrix rather than a case per bug.
-  describe("frame kind × version position (#1312/#1346/#1419)", () => {
+  describe("frame kind × version position", () => {
     const cached = { _v: 4, name: "n", count: 1 } as TestState;
 
     const overlay = (v: number): PatchMessage<TestState> =>
@@ -369,7 +369,7 @@ describe("applyPatchMessage", () => {
   });
 });
 
-describe("a fresh client is never stale (#1474)", () => {
+describe("a fresh client is never stale", () => {
   it("reports behind, not stale, for an empty frame with no baseline", () => {
     // `stale` is the one answer that does NOT refetch, so returning it to a
     // client with no baseline strands it. Both this module's doc-comment and

@@ -841,7 +841,7 @@ describe("audit", () => {
       });
     });
 
-    it("does not flag a legitimately-excluded lane on an onlyLanes instance (#1224)", async () => {
+    it("does not flag a legitimately-excluded lane on an onlyLanes instance", async () => {
       // A worker deployed with onlyLanes:['fast'] builds no controller
       // for the 'slow' lane — but 'slow' is still a DECLARED lane of the
       // app (another worker drains it). A stream correctly assigned
@@ -1420,7 +1420,7 @@ describe("audit", () => {
   // full declared schema reported EVERY healthy sensitive event as
   // `schema_validation_failed` — one false positive per event, which buries
   // the real ones the category exists to surface.
-  describe("schema pass vs sensitive events (#1424)", () => {
+  describe("schema pass vs sensitive events", () => {
     const sens_actor = { id: "a", name: "a" };
 
     const build = (mark: boolean) => {
@@ -1511,7 +1511,7 @@ describe("audit", () => {
  * row with `with_pii: false`, which cannot fail on the same cause and returns
  * the row's stream and id. No adapter reports anything.
  */
-describe("unreadable-events category (#1675)", () => {
+describe("unreadable-events category", () => {
   const gadget = state({ Gadget: z.object({ name: z.string() }) })
     .init(() => ({ name: "" }))
     .emits({ Renamed: z.object({ name: z.string() }) })

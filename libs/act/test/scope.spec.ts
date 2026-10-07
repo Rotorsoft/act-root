@@ -20,7 +20,7 @@ const counterBuilder = act().withState(Counter);
 
 const counterTest = fixture(counterBuilder);
 
-describe("scoped ports (ACT-501)", () => {
+describe("scoped ports", () => {
   it("two Acts with their own scoped ports — no cross-talk", async () => {
     const a = await sandbox(counterBuilder);
     const b = await sandbox(counterBuilder);
@@ -56,7 +56,7 @@ describe("scoped ports (ACT-501)", () => {
     await b.dispose();
   });
 
-  it("audit() queries the scoped store, not the singleton (#1317)", async () => {
+  it("audit() queries the scoped store, not the singleton", async () => {
     const s = await sandbox(counterBuilder);
     // A schema-violating (unknown-name) event written straight into the
     // SCOPED store — the default singleton store never sees it.
@@ -242,7 +242,7 @@ describe("scoped ports (ACT-501)", () => {
     await dispose();
   });
 
-  it("settle() subscribes static targets on the scoped store, not the singleton (ACT-1191)", async () => {
+  it("settle() subscribes static targets on the scoped store, not the singleton", async () => {
     // A static `.to("stream")` target is subscribed during correlate
     // init. That init ran outside `_scoped`, so `store().subscribe(...)`
     // resolved to the singleton — the scoped store never learned about
@@ -289,7 +289,7 @@ describe("scoped ports (ACT-501)", () => {
     await dispose();
   });
 
-  it("start_correlations polls against the scoped store, not the singleton (ACT-1191)", async () => {
+  it("start_correlations polls against the scoped store, not the singleton", async () => {
     // The periodic correlation worker fires its correlate outside any
     // caller frame. Pre-fix it resolved `store()` to the singleton, so a
     // scoped Act's static targets were subscribed on the wrong store.
@@ -327,7 +327,7 @@ describe("scoped ports (ACT-501)", () => {
     await dispose();
   });
 
-  it("lane worker ticks drain against the scoped store, not the singleton (ACT-1191)", async () => {
+  it("lane worker ticks drain against the scoped store, not the singleton", async () => {
     // A `withLane({cycleMs})` auto-starts a per-lane worker whose tick
     // calls drain() outside any caller frame. Pre-fix that drain claimed
     // on the singleton, so a scoped commit was never picked up and the
@@ -445,7 +445,7 @@ describe("scoped ports (ACT-501)", () => {
   });
 });
 
-describe("ACT-501 singleton backward compat", () => {
+describe("singleton backward compat", () => {
   // Intentionally touches the singleton — verifies the unscoped path
   // still routes through `store()` / `cache()` and that the
   // `store(adapter)` injection flow remains valid for existing apps.

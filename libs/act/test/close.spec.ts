@@ -486,7 +486,7 @@ describe("close", () => {
     expect(result.truncated.size).toBe(0);
   });
 
-  it("skips a stream when correlation cannot catch up to its head (#1487)", async () => {
+  it("skips a stream when correlation cannot catch up to its head", async () => {
     // The bounded catch-up gives up — an enormous backlog, or a log being
     // written faster than the scan reads it. Everything still above the read
     // cursor is held back rather than trusted, because an unread event raises
@@ -525,7 +525,7 @@ describe("close", () => {
     expect(result.truncated.size).toBe(0);
   });
 
-  it("skips rather than loops when correlation cannot advance at all (#1487)", async () => {
+  it("skips rather than loops when correlation cannot advance at all", async () => {
     // A writer-only instance (`drain: false`) has no local correlation, so
     // the cursor never moves however many passes it is given. The catch-up
     // has to notice the lack of progress and stop, and the close then holds
@@ -698,7 +698,7 @@ describe("close restart on a sensitive-bearing state", () => {
   });
 });
 
-describe("close and reaction subscriptions (#1398)", () => {
+describe("close and reaction subscriptions", () => {
   const sub_actor = { id: "a", name: "a" };
   let seen: string[] = [];
 
@@ -816,7 +816,7 @@ describe("close and reaction subscriptions (#1398)", () => {
   });
 });
 
-describe("overlapping full closes (#1738)", () => {
+describe("overlapping full closes", () => {
   const tally = state({ Tally: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
     .emits({ added: z.object({ by: z.number() }) })

@@ -10,7 +10,7 @@ import { schema } from "./schema.js";
 // must NOT inherit the Date-coercing JSONB parser, or act-pg silently
 // mutates how the host app's other pg usage (Drizzle projections,
 // ad-hoc queries) reads jsonb.
-describe("pg Date round-trip + per-Pool parser isolation (#1198)", () => {
+describe("pg Date round-trip + per-Pool parser isolation", () => {
   const store = new PostgresStore({
     port: 5431,
     schema: schema("date_rt_1198"),

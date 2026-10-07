@@ -595,7 +595,7 @@ describe("partial-state", () => {
  * fields that were missing: per-action `options`, and the single-declaration
  * policies `disclose` / `autoclose` (+ its day fields) / `archive`.
  */
-describe("partial-state — policies declared on a later partial (#1645)", () => {
+describe("partial-state — policies declared on a later partial", () => {
   const actor = { id: "a", name: "a" };
   const Ticket = z.object({ open: z.boolean() });
   const Opened = ZodEmpty;

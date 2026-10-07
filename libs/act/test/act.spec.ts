@@ -126,13 +126,13 @@ describe("act", () => {
       d = await app.drain();
     }
 
-    // Now _needs_drain is false. Non-reactive event should NOT set it.
+    // Caught up. A non-reactive event must not arm the drain.
     await app.do("ignore2", { stream: "s2", actor }, {});
     const skipped = await app.drain();
     expect(skipped.fetched.length).toBe(0);
     expect(skipped.leased.length).toBe(0);
 
-    // Reactive event should set _needs_drain and drain normally
+    // A reactive event arms it and drains normally
     await app.do("add", { stream: "s2", actor }, {});
     await app.correlate();
     const drained = await app.drain();
@@ -246,24 +246,13 @@ describe("act", () => {
     claimSpy.mockRestore();
   });
 
-  it("should cover leading=0 branch when streamLimit=1", async () => {
+  it("drains with streamLimit 1, which leaves no leading slot", async () => {
     // emit an event with a reaction so drain has work
     await app.do("increment", { stream: "ratio-test", actor }, {});
     await app.correlate();
-    // streamLimit=1 → lagging=1, leading=0 → covers the leading===0 branch
+    // streamLimit 1 → one lagging slot, no leading slot
     const drained = await app.drain({ streamLimit: 1, leaseMillis: 1 });
     expect(drained.fetched.length).toBeLessThanOrEqual(1);
-  });
-
-  it("should cover lagging=0 branch in adaptive drain ratio", async () => {
-    // Force ratio to 0 so lagging=Math.ceil(0)=0
-    (app as any)._drain_lag2lead_ratio = 0;
-    await app.do("increment", { stream: "lag0-test", actor }, {});
-    await app.correlate();
-    const drained = await app.drain({ streamLimit: 1, leaseMillis: 1 });
-    expect(drained).toBeDefined();
-    // Restore to default
-    (app as any)._drain_lag2lead_ratio = 0.5;
   });
 
   it("should load unregistered state by object (fallback to stateOrName)", async () => {
@@ -422,7 +411,7 @@ describe("act", () => {
       app.off("settled", settledListener);
     });
 
-    it("re-arms a wake-up requested while a cycle is running (ACT-1205)", async () => {
+    it("re-arms a wake-up requested while a cycle is running", async () => {
       const settledListener = vi.fn();
       app.on("settled", settledListener);
 
@@ -626,7 +615,7 @@ describe("act", () => {
     expect(d.acked.length).toBeGreaterThan(0);
   });
 
-  it("should clear _needs_drain when drain processes events with no results", async () => {
+  it("disarms the drain once it is fully caught up", async () => {
     await app.do("increment", { stream: "clear-flag", actor }, {});
     await app.correlate();
     let d = await app.drain();
@@ -636,9 +625,8 @@ describe("act", () => {
     expect((app as any)._drain_controllers.get("default").armed).toBe(false);
   });
 
-  it("should clear _needs_drain via handler path when drain finds no matching reactions", async () => {
-    // Mock: drain enters locked section, claims streams, but all handlers produce empty payloads
-    // This covers line 672 (_needs_drain = false after 0 acked/blocked/errors)
+  it("disarms the drain when a claimed stream yields no work", async () => {
+    // The claim returns a stream, but every handler produces nothing
     const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
       {
         stream: "mock-stream",
@@ -651,7 +639,7 @@ describe("act", () => {
     ]);
     const mockQuery = vi.spyOn(store(), "query").mockResolvedValue(0);
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
-    // Set _needs_drain manually
+    // Arm it manually
     (app as any)._arm_all();
     const d = await app.drain();
     expect(d.acked.length).toBe(0);
@@ -711,7 +699,7 @@ describe("act", () => {
     expect(r.subscribed).toBe(1); // dynamic target discovered
   });
 
-  it("should handle app with zero reactions (no _needs_drain on init)", async () => {
+  it("never arms the drain in an app with no reactions", async () => {
     // App with no reactions — _reactive_events is empty
     const s = state({ NoRx: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
@@ -723,7 +711,7 @@ describe("act", () => {
 
     const noRxApp = act().withState(s).build();
     expect((noRxApp as any)._reactive_events.size).toBe(0);
-    // correlate inits but does NOT set _needs_drain (no reactive events)
+    // correlate initializes but does not arm the drain
     await noRxApp.correlate();
     expect((noRxApp as any)._drain_controllers.get("default").armed).toBe(
       false

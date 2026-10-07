@@ -48,7 +48,7 @@ const boom = () => {
   throw new Error("metrics bridge exploded");
 };
 
-describe("lifecycle emits are contained per listener (#1437)", () => {
+describe("lifecycle emits are contained per listener", () => {
   afterEach(async () => {
     await dispose()();
   });

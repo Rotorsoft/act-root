@@ -35,7 +35,7 @@ const Doc = state({
   .emit("Stamped")
   .build();
 
-describe("schema-driven dates over sqlite (#1556)", () => {
+describe("schema-driven dates over sqlite", () => {
   afterAll(() => {
     for (const ext of ["", "-wal", "-shm"]) {
       try {

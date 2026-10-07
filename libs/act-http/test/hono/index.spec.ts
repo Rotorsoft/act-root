@@ -369,7 +369,7 @@ describe("hono(app, options) — generated REST surface", () => {
       expect(body.code).toBe("CONFLICT");
     });
 
-    test("sees an in-flight original through another generator on the same store (#1782)", async ({
+    test("sees an in-flight original through another generator on the same store", async ({
       app,
     }) => {
       let finish!: () => void;
@@ -561,7 +561,7 @@ describe("action input is parsed once", () => {
   );
 });
 
-describe("the action body follows the request's Content-Type (#1777)", () => {
+describe("the action body follows the request's Content-Type", () => {
   const Note = state({ Note: z.object({ note: z.string() }) })
     .init(() => ({ note: "none" }))
     .emits({ Noted: z.object({ note: z.string().optional() }) })

@@ -80,7 +80,7 @@ describe("classify_registry", () => {
     expect(c.reactive_events.has("Decremented")).toBe(true);
   });
 
-  it("collapses same-target reactions from different sources, keeping the max priority (#1672)", () => {
+  it("collapses same-target reactions from different sources, keeping the max priority", () => {
     // A subscription row is keyed by stream, so the batch must carry one
     // entry per target. Two entries would leave the priority merge to the
     // adapter, and a single batched UPDATE cannot do it.
@@ -107,7 +107,7 @@ describe("classify_registry", () => {
     ]);
   });
 
-  it("keeps the max priority regardless of declaration order (#1672)", () => {
+  it("keeps the max priority regardless of declaration order", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")

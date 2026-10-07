@@ -31,7 +31,7 @@ const FQT = `"${SCHEMA}"."${TABLE}"`;
 const SNAPSHOT_IX = `${TABLE}_snapshot_ix`;
 const TARGET = "stream-with-snaps";
 
-describe("PostgresStore #1024 partial snapshot index (EXPLAIN)", () => {
+describe("PostgresStore partial snapshot index (EXPLAIN)", () => {
   let store: PostgresStore;
   // `_pool` is private; the test reaches in to run raw EXPLAIN / seed SQL.
   let pool: { query: (sql: string, params?: unknown[]) => Promise<any> };

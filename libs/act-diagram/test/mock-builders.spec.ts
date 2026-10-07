@@ -721,7 +721,7 @@ describe("MODULES", () => {
  * that made `act -q tickets` exit 1 and left the worked example in
  * contracts-cli.md unreproducible on the package it documents.
  */
-describe("builder-surface coverage (#1394)", () => {
+describe("builder-surface coverage", () => {
   it("mock_state survives .discloses()", () => {
     let built: any;
     const st = mock_state({ Thing: {} }, (i) => {

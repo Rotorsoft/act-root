@@ -8,7 +8,7 @@ import { SqliteStore } from "../src/index.js";
 // call `.getTime()`.
 const DB_PATH = join(import.meta.dirname, "date-roundtrip.db");
 
-describe("sqlite Date round-trip parity (#1198)", () => {
+describe("sqlite Date round-trip parity", () => {
   const store = new SqliteStore({ url: `file:${DB_PATH}` });
 
   beforeAll(async () => {

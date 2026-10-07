@@ -163,7 +163,7 @@ describe("streams", () => {
       expect(row.isPruned).toBe(false);
     });
 
-    it("flags a stream whose only remaining event is a tombstone as retired (#1535)", async () => {
+    it("flags a stream whose only remaining event is a tombstone as retired", async () => {
       await seedSequence(store, "lc-retired", [
         { name: "Opened" },
         { name: "Closed" },
@@ -342,7 +342,7 @@ describe("streamsForEvent", () => {
     expect(result.totalEventsOfName).toBe(0);
   });
 
-  it("fails the read rather than substituting default lane + priority (#1566)", async () => {
+  it("fails the read rather than substituting default lane + priority", async () => {
     await seedFixture();
     // Control: the join answers with the subscription's real priority.
     const control = await caller.streamsForEvent({ name: "Opened" });

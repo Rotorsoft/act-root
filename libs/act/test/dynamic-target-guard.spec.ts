@@ -37,7 +37,7 @@ const fold = (rows: unknown[]) =>
     })
     .build();
 
-describe("a dynamic resolution onto a projection's target (#1563)", () => {
+describe("a dynamic resolution onto a projection's target", () => {
   it("CONTROL — the static form is still rejected at build", () => {
     expect(() =>
       act()
@@ -114,7 +114,7 @@ describe("a dynamic resolution onto a projection's target (#1563)", () => {
     await dispose();
   });
 
-  it("does not stall correlation for everything else (#1420)", async () => {
+  it("does not stall correlation for everything else", async () => {
     const rows: unknown[] = [];
     let healthy = 0;
     const { app, dispose } = await sandbox(

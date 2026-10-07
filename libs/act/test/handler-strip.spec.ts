@@ -33,7 +33,7 @@ const User = state({ User: userSchema })
 
 const actor: Actor = { id: "u-1", name: "Tester" };
 
-describe("handler-side PII strip (#855 slice 5)", () => {
+describe("handler-side PII strip", () => {
   afterEach(async () => {
     await dispose()();
   });

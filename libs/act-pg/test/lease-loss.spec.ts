@@ -56,7 +56,7 @@ const latch = () => {
   return { held, open };
 };
 
-describe("a handler that only ever loses its lease (#1418)", () => {
+describe("a handler that only ever loses its lease", () => {
   beforeEach(async () => {
     store(new PostgresStore({ ...PG }));
     await store().drop();

@@ -35,7 +35,7 @@ afterEach(async () => {
   }
 });
 
-describe("read schema converts dates without validating (#1594)", () => {
+describe("read schema converts dates without validating", () => {
   it("a required sensitive field lives in `pii`, and reading still works", async () => {
     await open_store("a");
     const Happened = z.object({ at: z.date(), email: sensitive(z.string()) });
@@ -252,7 +252,7 @@ describe("read schema converts dates without validating (#1594)", () => {
     expect(data.at).toBe("not a date");
   });
 
-  it("leaves an ISO-shaped z.string() a string (#1556 stays fixed)", async () => {
+  it("leaves an ISO-shaped z.string() a string", async () => {
     await open_store("e");
     const Happened = z.object({ at: z.date(), created_at: z.string() });
     const S = state({ E: z.object({ n: z.number() }) })

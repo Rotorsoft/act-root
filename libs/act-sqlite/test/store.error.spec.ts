@@ -153,7 +153,7 @@ describe("SqliteStore error paths", () => {
     }
   );
 
-  it("commit: rolls back and wraps INSERT failure in StoreError (#1202)", async () => {
+  it("commit: rolls back and wraps INSERT failure in StoreError", async () => {
     const client = mockClientFailOn("INSERT INTO events");
     (db as unknown as { client: unknown }).client = client;
     // Parity with PG: a non-unique-violation driver error is wrapped in
@@ -170,7 +170,7 @@ describe("SqliteStore error paths", () => {
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
-  it("commit: maps a (stream,version) unique collision to ConcurrencyError (#1202)", async () => {
+  it("commit: maps a (stream,version) unique collision to ConcurrencyError", async () => {
     // A real DB with a v0 row already present. We stub ONLY the
     // version-probe SELECT to return a stale MAX(version)=-1, so commit
     // recomputes version=0 and the INSERT genuinely collides on the
