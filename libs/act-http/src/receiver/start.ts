@@ -161,9 +161,20 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
             const { serve } = await import("@hono/node-server");
             const launched = serve({ fetch: app.fetch, port: options.port });
             server = launched;
-            await new Promise<void>((resolve) => {
-              launched.once("listening", () => resolve());
-            });
+            try {
+              // A server that can't bind (EADDRINUSE, EACCES) emits `error`
+              // and never `listening`: reject with it instead of hanging, so
+              // the caller sees the failure and `close()` isn't left waiting
+              // on a start that never finishes (#1783).
+              await new Promise<void>((resolve, reject) => {
+                launched.once("listening", () => resolve());
+                launched.once("error", reject);
+              });
+            } catch (error) {
+              server = undefined;
+              starting = undefined;
+              throw error;
+            }
           })();
           return starting;
         },
@@ -172,7 +183,8 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
           if (starting) {
             const pending = starting;
             starting = undefined;
-            await pending;
+            // A start that failed has nothing to close.
+            await pending.catch(() => {});
           }
           if (!server) return;
           const s = server;

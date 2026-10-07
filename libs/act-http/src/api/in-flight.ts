@@ -40,6 +40,21 @@ export type InFlightTracker = {
  * @internal
  */
 export function track_in_flight(store: IdempotencyStore): InFlightTracker {
+  // One tracker per store, shared by every generator and receiver built on
+  // it: a duplicate arriving through one generator while the original runs
+  // in another must still read as in flight, which separate counts can't
+  // see (#1782).
+  let tracker = trackers.get(store);
+  if (!tracker) {
+    tracker = make_tracker(store);
+    trackers.set(store, tracker);
+  }
+  return tracker;
+}
+
+const trackers = new WeakMap<IdempotencyStore, InFlightTracker>();
+
+function make_tracker(store: IdempotencyStore): InFlightTracker {
   const pending = new Map<string, number>();
   const up = (key: string) => pending.set(key, (pending.get(key) ?? 0) + 1);
   const down = (key: string) => {
