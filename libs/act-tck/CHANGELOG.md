@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.14...@rotorsoft/act-tck-v1.38.15) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act-http:** share in-flight tracking per store; fail a receiver listen on a busy port ([#1799](https://github.com/Rotorsoft/act-root/issues/1799)) ([5d0aa44](https://github.com/Rotorsoft/act-root/commit/5d0aa445c9859e1b8cf203510a9b42183e04606a)), closes [#1782](https://github.com/Rotorsoft/act-root/issues/1782) [#1783](https://github.com/Rotorsoft/act-root/issues/1783) [#1782](https://github.com/Rotorsoft/act-root/issues/1782) [#1783](https://github.com/Rotorsoft/act-root/issues/1783)
+* **act:** align adapters on empty filters, empty commits and duplicate acks ([#1798](https://github.com/Rotorsoft/act-root/issues/1798)) ([dda5a8d](https://github.com/Rotorsoft/act-root/commit/dda5a8decd00ce2f9cacb7bca3a086fa177645c5)), closes [#1781](https://github.com/Rotorsoft/act-root/issues/1781) [#1784](https://github.com/Rotorsoft/act-root/issues/1784) [#1785](https://github.com/Rotorsoft/act-root/issues/1785) [#1781](https://github.com/Rotorsoft/act-root/issues/1781) [#1784](https://github.com/Rotorsoft/act-root/issues/1784) [#1785](https://github.com/Rotorsoft/act-root/issues/1785)
+
 # [@rotorsoft/act-tck-v1.38.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.13...@rotorsoft/act-tck-v1.38.14) (2026-10-07)
 
 
