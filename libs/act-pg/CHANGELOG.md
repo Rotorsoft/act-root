@@ -1,3 +1,11 @@
+# [@rotorsoft/act-pg-v1.20.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.5...@rotorsoft/act-pg-v1.20.6) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act:** align adapters on empty filters, empty commits and duplicate acks ([#1798](https://github.com/Rotorsoft/act-root/issues/1798)) ([dda5a8d](https://github.com/Rotorsoft/act-root/commit/dda5a8decd00ce2f9cacb7bca3a086fa177645c5)), closes [#1781](https://github.com/Rotorsoft/act-root/issues/1781) [#1784](https://github.com/Rotorsoft/act-root/issues/1784) [#1785](https://github.com/Rotorsoft/act-root/issues/1785) [#1781](https://github.com/Rotorsoft/act-root/issues/1781) [#1784](https://github.com/Rotorsoft/act-root/issues/1784) [#1785](https://github.com/Rotorsoft/act-root/issues/1785)
+* **act:** make start_correlations drain what it finds ([#1811](https://github.com/Rotorsoft/act-root/issues/1811)) ([b12519e](https://github.com/Rotorsoft/act-root/commit/b12519e47da96f727a6770e46324027e11e73de6)), closes [#1804](https://github.com/Rotorsoft/act-root/issues/1804)
+
 # [@rotorsoft/act-pg-v1.20.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.4...@rotorsoft/act-pg-v1.20.5) (2026-10-06)
 
 
