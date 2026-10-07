@@ -1780,7 +1780,7 @@ export class Act<
       this._shutdown_promise = (async () => {
         this.stop_correlations();
         // Unsubscribe BEFORE stopping the settle loop. A notification
-        // arriving after \`stop_settling()\` reaches the handler below and
+        // arriving after the settle loop stops reaches the handler below and
         // schedules a fresh cycle that nothing is left to cancel, so a
         // worker that has already shut down takes a new lease — and with a
         // grace budget in play that window is seconds wide (#1596). Stopping
@@ -1790,7 +1790,7 @@ export class Act<
         // \`undefined\`, so this promise never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
-        this.stop_settling();
+        this._settle.stop();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
@@ -6728,7 +6728,7 @@ export type CloseCycleDeps = {
  *
  * @internal
  */
-export const SAFETY_PROBE_PAGE_SIZE = 1000;
+const SAFETY_PROBE_PAGE_SIZE = 1000;
 
 /**
  * Per-stream scan result: latest non-tombstone domain event metadata.
@@ -11643,7 +11643,7 @@ export type Disclosure = "redact" | "strip";
  *
  * @internal
  */
-export function make_event_reader(
+function make_event_reader(
   tags: EventTags,
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null
@@ -14372,20 +14372,10 @@ export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  days_after,
-  days_before_now,
   policy_keep_days,
   policy_min_after_days,
 } from "./autoclose-policy.js";
-export {
-  AUTOCLOSE_TARGET_PREFIX,
-  synthesize_autoclose_reactions,
-} from "./autoclose-reaction.js";
-export {
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-window.js";
+export { synthesize_autoclose_reactions } from "./autoclose-reaction.js";
 export { compute_backoff_delay } from "./backoff.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -14393,18 +14383,14 @@ export { CloseSignal } from "./close-signal.js";
 // Every builder-facing config bag (schemas + resolvers + defaults) lives in
 // one place — see ./config.js.
 export {
-  type ActionConfig,
   type AutocloseConfig,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_EVENT_LIMIT,
-  DEFAULT_FOLD_FLUSH_EVERY,
   DEFAULT_LEASE_MILLIS,
-  DEFAULT_MAX_CACHED_STATES,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
@@ -14412,11 +14398,9 @@ export {
   DEFAULT_STREAM_LIMIT,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
-  type ReactionConfig,
   resolveActConfig,
   resolveActionConfig,
   resolveAutocloseConfig,
-  resolveBackoffConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveFoldConfig,
@@ -14455,16 +14439,11 @@ export {
   type ResettableBatchHandler,
 } from "./projection-fold.js";
 export {
-  _registry,
   type EventGate,
   IDENTITY_GATE,
-  is_pii,
-  make_gate,
-  REDACTED,
-  SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { build_drain, build_es } from "./tracing.js";
 export { walk_streams } from "./walk-streams.js";
 
 // === index.ts ===
@@ -18853,7 +18832,7 @@ export function current_ports(): Scoped | undefined {
  *
  * @internal
  */
-export function run_reacting<T>(
+function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {
@@ -18987,7 +18966,7 @@ export const _registry = z.registry<{ sensitive: true }>();
  *
  * @internal
  */
-export const _SENSITIVE = Symbol.for("act.sensitive");
+const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
@@ -19015,7 +18994,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-export function is_pii(schema: z.ZodType): boolean {
+function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -21204,7 +21183,7 @@ export const dateReviver = (_key: string, value: unknown): unknown =>
 import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
 
 /** Streams read per page when walking the whole table. */
-export const DEFAULT_STREAM_PAGE = 500;
+const DEFAULT_STREAM_PAGE = 500;
 
 /**
  * Walks EVERY stream matching \`query\`, paging with the keyset cursor.
@@ -22288,7 +22267,7 @@ export class Act<
       this._shutdown_promise = (async () => {
         this.stop_correlations();
         // Unsubscribe BEFORE stopping the settle loop. A notification
-        // arriving after \`stop_settling()\` reaches the handler below and
+        // arriving after the settle loop stops reaches the handler below and
         // schedules a fresh cycle that nothing is left to cancel, so a
         // worker that has already shut down takes a new lease — and with a
         // grace budget in play that window is seconds wide (#1596). Stopping
@@ -22298,7 +22277,7 @@ export class Act<
         // \`undefined\`, so this promise never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
-        this.stop_settling();
+        this._settle.stop();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
@@ -26993,7 +26972,7 @@ export type CloseCycleDeps = {
  *
  * @internal
  */
-export const SAFETY_PROBE_PAGE_SIZE = 1000;
+const SAFETY_PROBE_PAGE_SIZE = 1000;
 
 /**
  * Per-stream scan result: latest non-tombstone domain event metadata.
@@ -34061,20 +34040,10 @@ export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  days_after,
-  days_before_now,
   policy_keep_days,
   policy_min_after_days,
 } from "./autoclose-policy.js";
-export {
-  AUTOCLOSE_TARGET_PREFIX,
-  synthesize_autoclose_reactions,
-} from "./autoclose-reaction.js";
-export {
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-window.js";
+export { synthesize_autoclose_reactions } from "./autoclose-reaction.js";
 export { compute_backoff_delay } from "./backoff.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -34082,18 +34051,14 @@ export { CloseSignal } from "./close-signal.js";
 // Every builder-facing config bag (schemas + resolvers + defaults) lives in
 // one place — see ./config.js.
 export {
-  type ActionConfig,
   type AutocloseConfig,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_EVENT_LIMIT,
-  DEFAULT_FOLD_FLUSH_EVERY,
   DEFAULT_LEASE_MILLIS,
-  DEFAULT_MAX_CACHED_STATES,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
@@ -34101,11 +34066,9 @@ export {
   DEFAULT_STREAM_LIMIT,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
-  type ReactionConfig,
   resolveActConfig,
   resolveActionConfig,
   resolveAutocloseConfig,
-  resolveBackoffConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveFoldConfig,
@@ -34144,16 +34107,11 @@ export {
   type ResettableBatchHandler,
 } from "./projection-fold.js";
 export {
-  _registry,
   type EventGate,
   IDENTITY_GATE,
-  is_pii,
-  make_gate,
-  REDACTED,
-  SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { build_drain, build_es } from "./tracing.js";
 export { walk_streams } from "./walk-streams.js";
 
 // === index.ts ===
@@ -37833,7 +37791,7 @@ export function current_ports(): Scoped | undefined {
  *
  * @internal
  */
-export function run_reacting<T>(
+function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {
@@ -37967,7 +37925,7 @@ export const _registry = z.registry<{ sensitive: true }>();
  *
  * @internal
  */
-export const _SENSITIVE = Symbol.for("act.sensitive");
+const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
@@ -37995,7 +37953,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-export function is_pii(schema: z.ZodType): boolean {
+function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;
@@ -39037,7 +38995,7 @@ export const dateReviver = (_key: string, value: unknown): unknown =>
 import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
 
 /** Streams read per page when walking the whole table. */
-export const DEFAULT_STREAM_PAGE = 500;
+const DEFAULT_STREAM_PAGE = 500;
 
 /**
  * Walks EVERY stream matching \`query\`, paging with the keyset cursor.
@@ -43327,7 +43285,7 @@ export const _registry = z.registry<{ sensitive: true }>();
  *
  * @internal
  */
-export const _SENSITIVE = Symbol.for("act.sensitive");
+const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
@@ -43355,7 +43313,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-export function is_pii(schema: z.ZodType): boolean {
+function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;

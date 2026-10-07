@@ -1,7 +1,7 @@
 import type { QueryStreams, Store, StreamPosition } from "../types/index.js";
 
 /** Streams read per page when walking the whole table. */
-export const DEFAULT_STREAM_PAGE = 500;
+const DEFAULT_STREAM_PAGE = 500;
 
 /**
  * Walks EVERY stream matching `query`, paging with the keyset cursor.

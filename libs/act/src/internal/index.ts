@@ -21,20 +21,10 @@ export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,
   compile_autoclose_policy,
-  days_after,
-  days_before_now,
   policy_keep_days,
   policy_min_after_days,
 } from "./autoclose-policy.js";
-export {
-  AUTOCLOSE_TARGET_PREFIX,
-  synthesize_autoclose_reactions,
-} from "./autoclose-reaction.js";
-export {
-  hour_in_zone,
-  in_autoclose_window,
-  next_window_open,
-} from "./autoclose-window.js";
+export { synthesize_autoclose_reactions } from "./autoclose-reaction.js";
 export { compute_backoff_delay } from "./backoff.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -42,18 +32,14 @@ export { CloseSignal } from "./close-signal.js";
 // Every builder-facing config bag (schemas + resolvers + defaults) lives in
 // one place — see ./config.js.
 export {
-  type ActionConfig,
   type AutocloseConfig,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_EVENT_LIMIT,
-  DEFAULT_FOLD_FLUSH_EVERY,
   DEFAULT_LEASE_MILLIS,
-  DEFAULT_MAX_CACHED_STATES,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
@@ -61,11 +47,9 @@ export {
   DEFAULT_STREAM_LIMIT,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
-  type ReactionConfig,
   resolveActConfig,
   resolveActionConfig,
   resolveAutocloseConfig,
-  resolveBackoffConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveFoldConfig,
@@ -104,14 +88,9 @@ export {
   type ResettableBatchHandler,
 } from "./projection-fold.js";
 export {
-  _registry,
   type EventGate,
   IDENTITY_GATE,
-  is_pii,
-  make_gate,
-  REDACTED,
-  SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export { build_drain, build_es, trace_cycle } from "./tracing.js";
+export { build_drain, build_es } from "./tracing.js";
 export { walk_streams } from "./walk-streams.js";

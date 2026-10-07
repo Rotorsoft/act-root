@@ -1031,7 +1031,7 @@ export class Act<
       this._shutdown_promise = (async () => {
         this.stop_correlations();
         // Unsubscribe BEFORE stopping the settle loop. A notification
-        // arriving after `stop_settling()` reaches the handler below and
+        // arriving after the settle loop stops reaches the handler below and
         // schedules a fresh cycle that nothing is left to cancel, so a
         // worker that has already shut down takes a new lease — and with a
         // grace budget in play that window is seconds wide (#1596). Stopping
@@ -1041,7 +1041,7 @@ export class Act<
         // `undefined`, so this promise never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
-        this.stop_settling();
+        this._settle.stop();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);

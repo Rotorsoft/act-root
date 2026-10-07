@@ -145,7 +145,7 @@ export function current_ports(): Scoped | undefined {
  *
  * @internal
  */
-export function run_reacting<T>(
+function run_reacting<T>(
   event: Committed<Schemas, string>,
   fn: () => Promise<T>
 ): Promise<T> {

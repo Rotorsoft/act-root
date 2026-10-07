@@ -100,7 +100,7 @@ export type CloseCycleDeps = {
  *
  * @internal
  */
-export const SAFETY_PROBE_PAGE_SIZE = 1000;
+const SAFETY_PROBE_PAGE_SIZE = 1000;
 
 /**
  * Per-stream scan result: latest non-tombstone domain event metadata.
