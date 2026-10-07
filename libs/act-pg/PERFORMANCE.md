@@ -711,7 +711,7 @@ It is explicitly **not** a claim that the log is unchanged. A remote writer on a
 store with no `notify` support leaves this process disarmed and stale, so the
 paths that exist to discover exactly that arm themselves:
 
-- **`start_polling`** arms on every tick. Polling is the "I have no signal, go
+- **The poller** (`start_correlations`) arms on every tick. Polling is the "I have no signal, go
   and look anyway" path, and parking the scan would otherwise silently strand
   every remote write on a store without notify.
 - **The close cycle's catch-up** arms before scanning, because "is there an

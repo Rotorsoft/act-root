@@ -7,7 +7,7 @@
  * the final pass whose only job is to confirm nothing changed, and every pass
  * on a system where nothing is happening at all.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, state, store, ZodEmpty } from "../src/index.js";
@@ -223,7 +223,7 @@ describe("correlate sits still when nothing has happened", () => {
     expect(queries.n).toBe(0);
   });
 
-  it("polling still discovers a commit this process never saw", async () => {
+  it("polling discovers and drains a commit this process never saw", async () => {
     // The flag means "a local signal says there may be work" — a commit here,
     // or a notify from elsewhere. It is NOT a claim that the log is unchanged:
     // a remote writer on a store without notify leaves this process disarmed
@@ -232,7 +232,15 @@ describe("correlate sits still when nothing has happened", () => {
     const raw = new InMemoryStore();
     store(raw);
     await store().seed();
-    const app = build();
+    const seen: string[] = [];
+    const app = act()
+      .withState(Ticker)
+      .on("Ticked")
+      .do(async function record(e) {
+        seen.push(e.stream);
+      })
+      .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+      .build();
 
     await app.do("tick", { stream: "s1", actor }, {});
     await quiesce(app);
@@ -247,10 +255,9 @@ describe("correlate sits still when nothing has happened", () => {
     await app.correlate();
     expect(idle.n).toBe(0); // still parked — no local signal
 
-    // One poll tick arms and finds it.
-    await new Promise<void>((done) => {
-      app.start_correlations({ limit: 100 }, 5, () => done());
-    });
-    await app.stop_correlations();
+    // Polling alone arms, finds it, and runs its reaction.
+    app.start_correlations({ limit: 100 }, 5);
+    await vi.waitFor(() => expect(seen).toContain("remote-1"));
+    app.stop_correlations();
   });
 });

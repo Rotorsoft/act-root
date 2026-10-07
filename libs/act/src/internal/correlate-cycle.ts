@@ -207,7 +207,6 @@ export type CorrelateCycleDeps<
    * claimant, so correlate reroutes it here (#1564).
    */
   declared_lanes: ReadonlySet<string>;
-  run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
@@ -340,7 +339,6 @@ export class CorrelateCycle<
   private _armed = true;
   /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
-  private _timer: ReturnType<typeof setInterval> | undefined = undefined;
   // Dynamically discovered targets → what each was last subscribed at,
   // bounded by `maxSubscribedStreams`. The static half lives in
   // `_static_subscriptions` below, which is deliberately not evictable.
@@ -385,14 +383,6 @@ export class CorrelateCycle<
    */
   private readonly _on_init_async: (() => Promise<void>) | undefined;
   /**
-   * Scope runner (#1191). The periodic `start_polling` timer fires
-   * outside any caller frame, so its `correlate()` must be re-wrapped in
-   * the Act's `_scoped` bag or `store()`/`cache()` resolve to the
-   * singleton for a scoped Act. The orchestrator always threads its
-   * `_scoped` (identity for a non-scoped Act), so it's required.
-   */
-  private readonly _run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
-  /**
    * Tail re-scan window applied to the cold-start checkpoint (ACT-1207).
    * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
    * public option) so tests can shrink it; defaults otherwise.
@@ -413,7 +403,6 @@ export class CorrelateCycle<
     cd,
     max_subscribed_streams,
     declared_lanes,
-    run_scoped,
     on_init,
     on_init_async,
     cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
@@ -427,7 +416,6 @@ export class CorrelateCycle<
     this._static_targets = static_targets;
     this._cd = cd;
     this._on_init = on_init;
-    this._run_scoped = run_scoped;
     this._on_init_async = on_init_async;
     this._cold_start_back_scan = cold_start_back_scan;
   }
@@ -615,8 +603,8 @@ export class CorrelateCycle<
     // commit through `do()`, or a `notify` from another process. It is
     // deliberately NOT a claim that the log is unchanged: a remote writer on a
     // store with no notify support leaves this process disarmed and stale.
-    // `start_polling` exists for exactly that case and arms on every tick, so
-    // the poller keeps its meaning ("I have no signal, go and look anyway").
+    // The poller exists for exactly that case and arms on every tick ("I have
+    // no signal, go and look anyway").
     if (!this._armed)
       return {
         subscribed: 0,
@@ -862,47 +850,6 @@ export class CorrelateCycle<
   }
 
   /**
-   * Start a periodic correlation worker. Returns false if one is already
-   * running. Errors from `correlate()` are routed through `log()` so they
-   * land in the configured logger (the timer keeps running on failure).
-   */
-  start_polling(
-    query: Query = {},
-    frequency = 10_000,
-    callback?: (subscribed: number) => void
-  ): boolean {
-    if (this._timer) return false;
-
-    const limit = query.limit || 100;
-    this._timer = setInterval(
-      () =>
-        this._run_scoped(() => {
-          // Polling is the discovery path for commits this process never saw —
-          // a remote writer on a store without `notify`. Arming each tick is
-          // what keeps that true now that a scan can park itself (#1510).
-          this.arm();
-          // The poller is an automatic path, so it honours the lease: one
-          // worker scanning on each tick serves every worker.
-          return this.correlate(
-            {
-              ...query,
-              after: this._checkpoint,
-              limit,
-            },
-            true
-          );
-        })
-          .then((result) => {
-            if (callback && result.subscribed) callback(result.subscribed);
-          })
-          .catch((err) => log().error(err)),
-      frequency
-    );
-    return true;
-  }
-
-  /** Stop the periodic correlation worker. Idempotent. */
-  /**
    * Hand the correlation lease back early.
    *
    * There is no release verb on the port, deliberately — expiry is the only
@@ -949,13 +896,6 @@ export class CorrelateCycle<
           "On a single-writer store this usually means another connection holds the database. " +
           `Cause: ${String(error)}`
       );
-    }
-  }
-
-  stop_polling(): void {
-    if (this._timer) {
-      clearInterval(this._timer);
-      this._timer = undefined;
     }
   }
 }
