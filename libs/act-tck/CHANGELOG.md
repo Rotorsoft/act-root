@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.13...@rotorsoft/act-tck-v1.38.14) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act-http:** read the hono action body only when the validator did ([#1794](https://github.com/Rotorsoft/act-root/issues/1794)) ([ccdc778](https://github.com/Rotorsoft/act-root/commit/ccdc77862f7725b082cf57aad4c6403818e3d5d2)), closes [#1752](https://github.com/Rotorsoft/act-root/issues/1752) [#1777](https://github.com/Rotorsoft/act-root/issues/1777)
+* **act:** hand a batch projection each event once ([#1796](https://github.com/Rotorsoft/act-root/issues/1796)) ([72c304a](https://github.com/Rotorsoft/act-root/commit/72c304aa946ff1a36985db16785c211253f13f71)), closes [#1780](https://github.com/Rotorsoft/act-root/issues/1780)
+
 # [@rotorsoft/act-tck-v1.38.13](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.12...@rotorsoft/act-tck-v1.38.13) (2026-10-06)
 
 
