@@ -8,31 +8,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-07 | 1 | 0 | active |
-| Dead code (tool) | 2026-10-07 | 1 | 0 | active |
-| Hotspots (tool) | 2026-10-07 | 1 | 0 | active |
+| Public surface | 2026-10-07 | 1 | 0 | active (its deprecations were rejected; scope narrowed by rule 2) |
+| Dead code (tool) | 2026-10-07 | 1 | 2 | active |
+| Hotspots (tool) | 2026-10-07 | 1 | 1 | active |
 | File budget | 2026-10-07 | 1 | 0 | active |
-| Comment noise | 2026-10-07 | 1 | 0 | active |
-| Concepts and options | 2026-10-07 | 1 | 0 | active |
-| Core or decorator? | never | 0 | 0 | active |
-| DRY across adapters and builders | 2026-10-07 | 1 | 0 | active |
+| Comment noise | 2026-10-07 | 1 | 1 | active |
+| Concepts and options | 2026-10-07 | 1 | 1 | active |
+| Core or decorator? | 2026-10-08 | 1 | 0 | active (PII examined: stays in core) |
+| DRY across adapters and builders | 2026-10-07 | 1 | 1 | active |
 | Reading path | never | 0 | 0 | active |
 | Newcomer test (quarterly) | never | 0 | 0 | active |
-| Tests by concept | 2026-10-07 | 1 | 0 | active |
+| Tests by concept | 2026-10-07 | 1 | 1 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-07 | 1 | 0 | active |
-| Infra | 2026-10-07 | 1 | 0 | active |
+| Infra | 2026-10-07 | 1 | 1 | active |
 | One source of truth | 2026-10-07 | 1 | 0 | active |
 | Examples | never | 0 | 0 | active |
 | Process | never | 0 | 0 | active |
-
-## Next-major list
-
-Approved breaking simplifications, each with its deprecation already shipped. They land together in one major with one migration guide.
-
-_(empty)_
-
-Candidates waiting on a deprecation (P2026-10-07-6): the four autoclose `ActOptions` fields with no reader, and their three `DEFAULT_*` exports.
 
 ## Mutation baselines
 
@@ -53,17 +45,14 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-- Trim rationale from public type JSDoc in `types/ports.ts`, `types/action.ts`, `types/reaction.ts` (~450 lines); the reasoning belongs in docs/docs.
-- Move the close lock and catch-up out of `act.ts` into one close module (act.ts is 2,369 lines).
-- Fold the duplicated Postgres fault-injection cases into `store.error.spec.ts`.
-- Move adapter tests that repeat a contract (priority, Date revival, stream patterns, notify, `query_stats` paging) into the TCK, and fix the stale Date-revival claim in behavior-contracts row 149.
-- One home for blocked-stream recovery in the docs; trim the CLAUDE.md bullets that repeat it; fix 3 stale doc paths.
-- Remove the `KafkaBroker` placeholder from act-notify (it only throws; public, needs a deprecation).
+_(promoted to proposals P2026-10-08-1..5; the `KafkaBroker` removal was dropped: it is public, and rule 2 no longer allows deprecations)_
 
 ## Self-changes
 
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
 
+- 2026-10-08: ground rule 2 no longer allows deprecating or removing public surface, and the next-major list is gone. The user rejected the 17 deprecations in P2026-10-07-6 ("dont deprecate anything"): they rested on a grep of this repo, which can't see who uses a published package. The bar's "around 30 exports" became "exports don't grow"; the proposal template's kinds no longer include public/next-major; the Public surface and Core-or-decorator lenses were reworded to match.
+- 2026-10-08: `metrics.sh` exited silently once ticket references reached zero: two `grep`s with no match fail under `set -euo pipefail`. Both now tolerate an empty match.
 - 2026-10-07: the bar said `IAct` and `Act` should expose the same methods. `IAct` is deliberately the narrow surface reaction handlers receive; matching them would grow the handler surface. Reworded: `IAct` stays small, extra `Act` methods are documented as operator surface. (Evidence: surface specialist, `types/action.ts` IAct doc.)
 - 2026-10-07: added the backlog. Four specialists returned 20 proposals and the 5–7 cap dropped sound ones; without a backlog the next run would rediscover them.
 - 2026-10-07: a behavior claim ranks only after the main loop reproduces it with an asserting test and a control. The specialist's `start_correlations` probe only logged; it turned out right, but an unasserted probe is not evidence.
@@ -127,3 +116,37 @@ Proposals (decisions due next run):
 - P2026-10-07-5. CI and repo cleanup: fix the docs deploy filter (misses 6 packages), build docs once, delete `npm_migration.md`, the stale root CHANGELOG and 4 copied tsup configs.
 - P2026-10-07-6. Deprecate 16 unused public exports and `Act.stop_settling`; knip cleanup of internal dead code; queue the dead autoclose options for the next major.
 - P2026-10-07-7. Rewrite `InMemoryStore.query` as one loop (complexity 65 → ~15); move drain defaults into `internal/config.ts`.
+
+Decisions on the 2026-10-07 proposals:
+- P1 accepted, shipped #1811 (polling now drains; separate polling path deleted).
+- P2 accepted, shipped #1812. Promised ~690 lines; removed 1,623 (lockfile included).
+- P3 accepted, shipped #1820. Ticket refs 407 → 0 (520 incl. adapters). Promised comments under 40%; got 52% → 49%: most comment volume is explanation and public docs, not history. Estimate by sampling before promising a percentage.
+- P4 accepted, shipped #1821 (+ flake fix #1818). 7 correlate specs → 1; 257 test names cleaned. Test lines barely moved (60,995 → 60,970): merging files without a shared fixture saves files, not lines.
+- P5 accepted, shipped #1813. Workflows 8 → 7, lines 1,132 → 986; deploy filter bug fixed.
+- P6 partly rejected: the 17 public deprecations were dropped ("dont deprecate anything"); the internal dead-code half shipped as #1817.
+- P7 accepted, shipped #1814 (`InMemoryStore.query` complexity 65 → under 15; defaults in config.ts).
+Also from the run: #1489 (split Store) closed as not needed; `book/` replaced by `learnings.md` (#1815, #1819); rule 5 opened past decisions to challenge (#1816).
+
+### 2026-10-08 — weekly (one lens: Core or decorator?)
+
+| metric | 2026-10-07 | now | why |
+|---|---|---|---|
+| core lines | 21396 | 20339 | #1811, #1814, #1817, #1820 |
+| comments | 52% | 49% | #1820 |
+| ticket refs in source / test names | 407 / 202 | 0 / 0 | #1820, #1821 |
+| files over 300 lines | 21 | 21 | unchanged |
+| runtime exports | 54 | 54 | deprecations rejected |
+| spec files / test lines | 241 / 60995 | 235 / 60970 | #1821, #1812 |
+| CI workflows / lines | 8 / 1132 | 7 / 986 | #1812, #1813 |
+
+Audit: 7 PRs since the run, all simplifications from it; none added a concept, option, export or workflow.
+
+Lens, Core or decorator? (PII): PII touches 21 core files (370 lines) but is concentrated in `internal/sensitive.ts` and `builders/event-builder.ts`; the pipelines touch it in 3–10 lines each. The Store carries a `pii` column, a `with_pii` read flag and an optional `forget_pii`. Actor-gated reads (`.discloses`) and handler stripping need the registry's schema markers and the actor, which a `Store` decorator never sees, so a decorator cannot carry the feature; moving it to a leaf package would be breaking for little gain. Finding: keep it in core. No proposal.
+
+Proposals (decisions due next run), from the backlog:
+- P2026-10-08-1. Move adapter tests that repeat a contract (priority, Date revival, stream patterns, notify, `query_stats` paging) into the TCK; fix the stale Date-revival claim in behavior-contracts row 149.
+- P2026-10-08-2. Fold the duplicated Postgres fault-injection cases (`store.spec.ts` error block, `commit.error.spec.ts`) into `store.error.spec.ts`.
+- P2026-10-08-3. One home for blocked-stream recovery in the docs (`error-handling.md`); the ~12 other places link to it; trim the CLAUDE.md bullet; fix the 3 stale code paths in CLAUDE.md.
+- P2026-10-08-4. Move the close lock and close catch-up out of `act.ts` (2,098 lines) into the close module.
+- P2026-10-08-5. Trim rationale from the public type docs in `types/ports.ts`, `types/action.ts`, `types/reaction.ts` (doc text only; signatures untouched).
+

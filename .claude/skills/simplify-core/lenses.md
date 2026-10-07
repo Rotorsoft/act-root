@@ -4,7 +4,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 ## Code
 
-**Public surface.** List every runtime export of each published package and every `Act` public method. For each: who uses it (`packages/`, docs, other libs)? Is it a second path to something else? Could it be internal, folded into another call, or an option instead of a method? `IAct` and the `Act` class should expose the same methods; decide which side is right. Removals go through a deprecation, then the next-major list.
+**Public surface.** List every runtime export of each published package and every `Act` public method. For each: who uses it (`packages/`, docs, other libs)? Is it a second path to something else? Could it be internal, folded into another call, or an option instead of a method? Nothing public is deprecated or removed (ground rule 2); the useful findings are internal callers that should use internal code, public docs that over-explain, and new surface a PR is about to add.
 
 **Dead code (tool).** `npx knip` (or `npx ts-prune`) across the workspace: exports nothing imports, files nothing reaches, dependencies nothing uses. Objective, cheap, run first when this lens is due.
 
@@ -28,11 +28,11 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Mutation evidence (monthly, CI only).** Retired: the Stryker setup was removed because its vitest runner can't run on vitest 5. Revive it only once upstream supports vitest 5, as one root config run in CI, and compare with the baselines in `history.md`. Surviving mutants are code no test pins down: either behavior that needs one assertion, or code that can go.
 
-**Core or decorator?** For each feature in `@rotorsoft/act` (PII and `forget`, close and autoclose, archives, audit, restore and transfer, lanes, priority, the breaker), ask whether it could be a `Store` decorator, a builder add-on or a leaf package, the way `act-notify`'s `withBroker` and `act-otel`'s `instrument` are. What does every app pay for it (port methods, `Store` columns, `IAct` methods, options, TCK cases) whether or not it uses it? A feature most apps never use belongs outside the core. Moving it out is a next-major item with a migration path.
+**Core or decorator?** For each feature in `@rotorsoft/act` (close and autoclose, archives, audit, restore and transfer, lanes, priority, the breaker), ask whether it could be a `Store` decorator, a builder add-on or a leaf package, the way `act-notify`'s `withBroker` and `act-otel`'s `instrument` are. What does every app pay for it (port methods, `Store` columns, `IAct` methods, options, TCK cases) whether or not it uses it? Moving a shipped feature out is breaking, so the output is a finding and a design question for the user, not a deprecation. PII was examined 2026-10-08 (see `learnings.md`).
 
 ## Packages
 
-**Packages earn their place.** For each of the published `libs/`: who uses it, how often it changes, whether it could fold into a sibling, whether it is still maintained. A published package is public surface: it carries a release, a stability snapshot and docs. Removal is a next-major item with a migration note.
+**Packages earn their place.** For each of the published `libs/`: who uses it, how often it changes, whether it could fold into a sibling, whether it is still maintained. A published package is public surface (rule 2): the finding is a package that should stop growing or a new one that shouldn't be added, not a removal.
 
 ## Infra
 
