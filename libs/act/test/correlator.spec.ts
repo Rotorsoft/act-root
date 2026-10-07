@@ -41,9 +41,11 @@ describe("default_correlator (pure)", () => {
   it("generates distinct ids back-to-back at the same ms", () => {
     const ids = new Set<string>();
     for (let i = 0; i < 1000; i++) ids.add(default_correlator(baseCtx));
-    // 1000 generations against 1.68M random tail → collision rate
-    // ~1000²/(2·1.68M) ≈ 0.03%. Allow up to one collision.
-    expect(ids.size).toBeGreaterThanOrEqual(999);
+    // 1000 draws from a 36^4 (1.68M) random tail expect about
+    // 1000²/(2·1.68M) ≈ 0.3 colliding pairs, so one or two collisions are
+    // normal. More than five happens about once in 1.4M runs, while a broken
+    // generator collides constantly.
+    expect(ids.size).toBeGreaterThanOrEqual(995);
   });
 
   it("encodes timestamp in the first 4 chars of the suffix", () => {
