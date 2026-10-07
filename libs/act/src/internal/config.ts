@@ -60,7 +60,7 @@ import type {
 
 /**
  * Rejects an off-union `strategy`, a non-finite/negative `baseMs`, or a
- * non-finite/non-positive `maxMs` (ACT-1269). Zod 4's `z.number()` rejects
+ * non-finite/non-positive `maxMs`. Zod 4's `z.number()` rejects
  * `NaN`/`±Infinity` by default, so `.min(0)` / `.gt(0)` also close the
  * non-finite gap. No `maxMs >= baseMs` constraint — a sub-`baseMs` cap on
  * `exponential` is documented behavior, not an error.
@@ -201,7 +201,7 @@ const SettleOptionsSchema = DrainOptionsSchema.extend({
   // rejects `±Infinity`, and an integer check cannot pass it either. Wrapper
   // code normalizing an optional cap (`maxPasses: opts.maxPasses ?? Infinity`)
   // is the natural way to hit it. Accepting it also honors this module's own
-  // rule that a value which works today is never newly rejected (#1711).
+  // rule that a value which works today is never newly rejected.
   maxPasses: z
     .union([z.number().int().min(0), z.literal(Number.POSITIVE_INFINITY)])
     .optional(),
@@ -217,8 +217,7 @@ export function resolveSettleConfig(
 }
 
 // ---------------------------------------------------------------------------
-// Shutdown — the grace budget `shutdown(...)` gives in-flight drain cycles
-// (#1442).
+// Shutdown — the grace budget `shutdown(...)` gives in-flight drain cycles.
 // ---------------------------------------------------------------------------
 
 /**
@@ -285,13 +284,13 @@ export function resolveActConfig(
 // ---------------------------------------------------------------------------
 
 /**
- * @deprecated The cadence knob is derived from `autocloseWindow` now (#1175);
+ * @deprecated The cadence knob is derived from `autocloseWindow` now;
  * nothing consumes it. Kept for compat; removed in the next major.
  */
 export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-/** @deprecated Dead since #1090 removed the autoclose sweep. */
+/** @deprecated Unused since the autoclose sweep was removed. */
 export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-/** @deprecated Dead since #1090 removed the autoclose sweep. */
+/** @deprecated Unused since the autoclose sweep was removed. */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
 /** Default IANA zone for `autocloseWindow` when the operator omits one. */
 export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";

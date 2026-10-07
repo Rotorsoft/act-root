@@ -47,7 +47,7 @@ export type Slice<
   readonly events: EventRegister<TEvents>;
   readonly projections: ReadonlyArray<Projection<any>>;
   /**
-   * Drain lanes declared on this slice via `.withLane(...)` (ACT-1103).
+   * Drain lanes declared on this slice via `.withLane(...)`.
    * `act().withSlice(slice)` merges these into the Act's lane set so
    * `.to({lane})` is statically checked at the slice's call site against
    * the lanes the slice itself declared.
@@ -113,7 +113,7 @@ export interface SliceBuilder<
     TLanes
   >;
   /**
-   * Declares a drain lane on this slice (ACT-1103). Merged into the
+   * Declares a drain lane on this slice. Merged into the
    * parent Act's lane set by `act().withSlice(slice)`.
    */
   withLane: <const TConfig extends LaneConfig>(
@@ -205,7 +205,7 @@ export function slice<
       // this the slice path accepted a bag the act() path rejects — and a
       // lane carrying a bad streamLimit/leaseMillis/cycleMs drains nothing
       // for the life of the process, silently: no error, no log, and nothing
-      // in `blocked_streams()` to find it by (#1703).
+      // in `blocked_streams()` to find it by.
       register_lane(resolveLaneConfig(config), lanes);
       return builder as never;
     },

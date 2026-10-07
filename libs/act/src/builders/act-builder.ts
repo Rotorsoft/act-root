@@ -45,14 +45,8 @@ import type { Slice } from "./slice-builder.js";
 
 /**
  * Registers a projection's batch handler against its target stream, throwing
- * if a different handler is already registered for the same target. Two
- * projections silently overwriting each other's batch handlers used to be a
- * latent footgun.
- *
- * This half covers batch x batch only. A fold projection (`.of(...)`) has a
- * target but no batch handler, so it early-returns here — the fold side of
- * the guard lives at the `fold_specs.push` site in `build()`, which sees a
- * fully-populated `batch_handlers` and so catches both orders (#1440).
+ * if a different handler already serves it. Folds (`.of(...)`) have no
+ * batch handler; their side of the check is in `build()`.
  */
 function register_batch_handler(
   proj: Projection<any>,
@@ -76,7 +70,7 @@ function register_batch_handler(
  * - Registering slices via `.withSlice()`
  * - Registering projections via `.withProjection()`
  * - Locking a custom actor type via `.withActor<TActor>()`
- * - Declaring drain lanes via `.withLane({name, ...})` (ACT-1103)
+ * - Declaring drain lanes via `.withLane({name, ...})`
  * - Defining event reactions via `.on()` → `.do()` → `.to()`
  * - Building the orchestrator via `.build()`
  *
@@ -85,7 +79,7 @@ function register_batch_handler(
  * @template TActions - Action schemas (maps action names to action payload schemas)
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
- * @template TLanes - Union of declared lane names (ACT-1103). Narrowed by
+ * @template TLanes - Union of declared lane names. Narrowed by
  *   `.withLane({name})` calls so `.to({lane})` and `ActOptions.onlyLanes`
  *   reject typos at compile time. Starts at `"default"`.
  *
@@ -197,7 +191,7 @@ export interface ActBuilder<
     TLanes
   >;
   /**
-   * Declares a drain lane (ACT-1103). Lane name narrows `TLanes` so
+   * Declares a drain lane. Lane name narrows `TLanes` so
    * `.to({lane})` and `ActOptions.onlyLanes` type-check against it.
    *
    * @example
@@ -292,13 +286,8 @@ export function act<
   // same builder cast to the widened generic; type fanout is preserved
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
-  // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
-  // registry.deprecated_events / registry.autoclose_policy. Populated
-  // on the first .build() call.
-  // One pass over each event's schema, and the single source for everything
-  // derived from it: the sensitive-field list the write path splits on, and
-  // the per-surface readers (query, per-state view, handler strip) composed
-  // below. Nothing walks a schema twice.
+  // Caches behind the registry's derived lookups, populated on the first
+  // `.build()`. Each event schema is walked once.
   const _sf = new Map<string, readonly string[]>();
   // Prebuilt handler readers — sensitive keys removed, payload typed. Absent
   // when the event needs neither.
@@ -326,19 +315,15 @@ export function act<
   };
   const pending_projections: Projection<any>[] = [];
   /**
-   * Reaction objects contributed BY projections. A projection's own
-   * reactions legitimately target it; anything else pointed at a target a
-   * projection serves is the #1467 collision. Recorded at registration
-   * because projections arrive through two doors (`withProjection` merges
-   * immediately, `withSlice` defers to build) and neither retains them.
-   * Identity is the same test `merge_projection` uses.
+   * Reactions contributed by projections, recorded at registration. Only
+   * these may target a projection's stream; anything else is a collision.
    */
   const projection_reactions = new Set<unknown>();
   const record_projection_reactions = (proj: Projection<any>) => {
     // Only a projection that SERVES its target (a batch handler or a fold)
     // owns it. A per-event projection naming the same target is just another
     // claimant: exempting it let it share a fold's or batch's target, where
-    // its handler never ran and the fold wrote foreign rows (#1773).
+    // its handler never ran and the fold wrote foreign rows.
     if (!proj.batchHandler && !proj.fold) return;
     for (const register of Object.values(
       proj.events as Record<string, { reactions: Map<string, unknown> }>
@@ -355,7 +340,7 @@ export function act<
   const fold_specs: {
     target: string;
     /** Identity of the registering projection, so a repeat registration of
-     *  the same object is recognized as one claim rather than two (#1469). */
+     *  the same object is recognized as one claim rather than two. */
     projection: Projection<any>;
     merged: any;
     flush: any;
@@ -381,7 +366,7 @@ export function act<
       const read = events.map((e) => _hr.get(e.name as string)?.(e) ?? e);
       return original(read as never, stream);
     };
-    // Carry the fold's cache-reset handle through the wrapper (#1466). The
+    // Carry the fold's cache-reset handle through the wrapper. The
     // orchestrator only ever sees what this map holds, so a handle left on
     // the inner handler is a handle nobody can reach.
     const reset = (original as ResettableBatchHandler<any>)[FOLD_RESET];
@@ -390,23 +375,9 @@ export function act<
   };
 
   /**
-   * Per-Act batch-handler map. Stateless projection handlers are shared
-   * with the builder (they carry no state, and `register_batch_handler`
-   * already rejects duplicate targets); state-projection FOLD handlers
-   * are constructed fresh for every `.build()`.
-   *
-   * A fold handler owns a mutable per-stream cache of folded state
-   * (`projection-fold.ts`), keyed on stream name alone. Sharing one
-   * instance across Acts built from the same builder — the documented
-   * multi-tenant pattern, and every `fixture(builder)` test — let one
-   * Act's folded rows surface in another Act's sink, and made the
-   * frontier guard compare event ids originating in different stores.
-   * The cache still spans drain cycles within one Act, so the warm-fold
-   * performance property is unchanged.
-   *
-   * Building here also means each Act's fold handlers observe that
-   * build's own `patch_fn` (`validateFoldedState` is a per-build
-   * option), instead of freezing the first build's choice.
+   * Per-Act batch-handler map. Stateless handlers are shared; fold
+   * handlers own a per-stream cache, so each `.build()` gets fresh ones
+   * (and its own `patch_fn`).
    */
   const make_batch_handlers = (patch_fn: PatchFn) => {
     const handlers = new Map(batch_handlers);
@@ -419,7 +390,7 @@ export function act<
             spec.flush,
             spec.config,
             patch_fn,
-            // Head loads strip sensitive keys like the warm path (#1320).
+            // Head loads strip sensitive keys like the warm path.
             registry.sensitive_fields
           )
         ) as never
@@ -428,16 +399,10 @@ export function act<
     return handlers;
   };
 
-  // ACT-403: auto-deprecation enforcement. Groups each state's events
-  // by base name + `_v<digits>`; the highest version is current, all
-  // lower ones are deprecated. Stashes the deprecation set on the
-  // registry (`registry.deprecated_events(state_name)`) so the
-  // orchestrator can warn post-commit when an action emits one.
-  // Scans static `.emit("X")` markers across every state and throws
-  // if any target a deprecated event — the only legitimate use of a
-  // deprecated event is on the reduce path. Finally, surfaces a
-  // one-line startup advisory so operators can see "your app has
-  // legacy events kept for the read path, here's where they live."
+  // Versioned events: per state, the highest `_v<n>` is current and lower
+  // ones are deprecated (`registry.deprecated_events`). A static
+  // `.emit("X")` of a deprecated event throws; a one-line advisory lists
+  // the legacy events kept for replay.
   const finalize_deprecations = () => {
     const deprecation_summary: Array<{
       state_name: string;
@@ -490,25 +455,11 @@ export function act<
     }
   };
 
-  // The `as` chain on `self` is the type fanout: each fluent method
-  // mutates state and returns `self` cast to its post-call generic
   /**
-   * Registration is closed once `build()` has classified the registry.
-   *
-   * `Object.freeze` guards the registry's object *shape*, so a post-build
-   * `withState` already threw — but a reaction map is a `Map`, which freezing
-   * the containing object does not seal, so `withProjection` quietly mutated
-   * an already-classified registry. The injected reaction then never ran (its
-   * target is absent from `static_targets` and its event from
-   * `reactive_events`) **and** never went through `build_events`, so it was
-   * not wrapped with the `handler_reader` that strips `sensitive()` keys.
-   *
-   * Guarding every mutating method on the latch makes the freeze comment's
-   * claim — "any later registration throws" — true uniformly, and gives a
-   * clear message instead of a `TypeError` from a frozen object (#1710).
-   *
-   * `build()` itself stays callable repeatedly: the multi-tenant pattern
-   * calls `.build({scoped})` per tenant, which registers nothing.
+   * Registration is closed once `build()` has classified the registry: every
+   * mutating method throws a clear error after it. `build()` itself stays
+   * callable repeatedly, since the multi-tenant pattern calls
+   * `.build({scoped})` per tenant and registers nothing.
    */
   const closed = (method: string): never => {
     throw new Error(
@@ -516,6 +467,8 @@ export function act<
     );
   };
 
+  // The `as` chain on `self` is the type fanout: each fluent method
+  // mutates state and returns `self` cast to its post-call generic
   // signature. Internal-only — public types stay narrow.
   const builder: ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> =
     {
@@ -582,23 +535,11 @@ export function act<
         // circuitBreaker bags are validated by their own resolvers). A bad
         // maxSubscribedStreams / settleDebounceMs throws ZodError here.
         resolveActConfig(options);
-        // ACT-1238: select the per-event patch step ONCE here — the
-        // single selection site. `bare_patch` (the literal pre-#1238
-        // `patch()` merge) when `validateFoldedState` is off, else
-        // `validating_patch`. The same selected value feeds BOTH the
-        // projection-fold handlers below and `build_es` (via the Act
-        // constructor), so the command/load paths and the projection
-        // path share one choice and neither branches per event.
+        // The one place the patch step is chosen; folds and `build_es` share
+        // it.
         const patch_fn: PatchFn =
           options?.validateFoldedState === true ? validating_patch : bare_patch;
-        // One-time finalize: merge pending projections and run the
-        // deprecation scan + advisory log exactly once. Calling
-        // `.build({scoped: ...})` repeatedly (e.g., per tenant) is
-        // supported — see extension-points.md § Scoped ports. Without
-        // this guard, `merge_projection` would re-add reactions to the
-        // shared registry on every call (accumulating `_p`/`_p_p`
-        // dedupe suffixes), and the deprecation advisory would log on
-        // every tenant.
+        // Finalize once: repeated builds (per tenant) share the registry.
         if (!_built) {
           for (const proj of pending_projections) {
             record_projection_reactions(proj);
@@ -611,7 +552,7 @@ export function act<
           // partial has merged, and refuse silently-partial folds: the
           // projection's register must cover the state's whole register.
           // The `patch_fn` selected once at the top of `build()` feeds the
-          // fold handlers, matching the command/load paths (ACT-1238).
+          // fold handlers, matching the command/load paths.
           for (const proj of fold_projections) {
             const fold = proj.fold!;
             const merged = states.get(fold.name);
@@ -626,28 +567,9 @@ export function act<
               throw new Error(
                 `State projection "${proj.target}" of "${fold.name}" is missing events ${missing.join(", ")} — pass every partial of the state to .of()`
               );
-            // A target may be claimed exactly once, by a batch handler OR by
-            // a fold — `make_batch_handlers` does an unconditional
-            // `handlers.set(spec.target, …)`, so without this the last
-            // registration silently won (#1440).
-            //
-            // `register_batch_handler` cannot catch these: it early-returns
-            // on `!proj.batchHandler`, and a fold projection has a target but
-            // no batch handler, so the fold path bypassed the guard in both
-            // directions. The damage was worse than a dead projection — the
-            // fold cold-loads the losing target's streams through the
-            // stream-keyed cache, so it received the OTHER projection's
-            // aggregates and wrote them into its own read table.
-            //
-            // With this check all four {batch, fold}² pairings throw;
-            // previously only batch × batch did.
-            // Re-registering the SAME projection object is a no-op, not a
-            // duplicate (#1469) — a projection exported from a module and
-            // embedded by two slices, or a `.withProjection(p)` written
-            // twice, is a legitimate pattern that both sibling paths
-            // (`merge_projection`, `register_batch_handler`) already treat
-            // as idempotent. Only two DIFFERENT claimants on one target are
-            // an error.
+            // A target is claimed once, by a batch handler or a fold; two
+            // different projections on one target throw. The same projection
+            // registered twice is fine.
             const claimed = fold_specs.find((s) => s.target === proj.target);
             if (claimed?.projection === proj) continue;
             if (batch_handlers.has(proj.target!) || claimed)
@@ -666,20 +588,10 @@ export function act<
               config: fold.config,
             });
           }
-          // A target is served by ONE thing (#1467). The guard above covers
-          // projection-vs-projection; this covers the third claimant a
-          // projection has no way to see: an ordinary reaction pointed at a
-          // target a batch handler or fold already owns.
+          // An ordinary reaction on a projection's target would never run and
+          // would feed the fold another aggregate, so `build_events` rejects
+          // it (the projection's own reactions are exempt).
           //
-          // The drain dispatches a stream with a batch handler through that
-          // handler and nothing else (`drain-cycle.ts`), so the foreign
-          // reaction never runs — silently, with no error, retry or block —
-          // and the fold cold-loads the foreign event's stream as ITS state,
-          // writing another aggregate's row into its read table. Exactly the
-          // #1440 damage through the seam that fix did not reach.
-          //
-          // A projection's OWN reactions legitimately target it, so they are
-          // excluded by object identity — the same test `merge_projection`
           // One walk over the registered events: validate every static
           // reaction, resolve each schema once, and compose the per-surface
           // readers from it. See `event-builder.ts`.
@@ -705,23 +617,15 @@ export function act<
           // fully merged — their dynamic resolvers must be present before
           // the orchestrator classifies the registry.
           //
-          // Repeat builds (per-tenant scoped Acts) share the registry and
-          // these reactions with it, so nothing per-Act may be captured
-          // here. The off-hours window is read from the running Act's
-          // frame instead, which each Act installs for itself (#1615).
+          // Nothing per-Act is captured: repeat builds share these reactions,
+          // and the off-hours window comes from the running Act's frame.
           synthesize_autoclose_reactions(
             registry,
             states,
             current_autoclose_window
           );
-          // The registry is complete: freeze the containers so an
-          // orchestrator-side mutation throws instead of silently diverging
-          // from what was classified. The freeze guards the object *shape*
-          // only — a reaction map is a `Map`, which freezing the containing
-          // object does not seal — so later *registration* is stopped by the
-          // `_built` latch on each registration method rather than by this
-          // (#1710). Both halves are needed: the latch covers the API, the
-          // freeze covers anything reaching past it.
+          // Freeze the registry shape; the `_built` latch on each method stops
+          // later registration (freezing doesn't seal the reaction `Map`s).
           Object.freeze(registry.actions);
           Object.freeze(registry.events);
           Object.freeze(registry);

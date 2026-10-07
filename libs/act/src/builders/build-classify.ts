@@ -44,7 +44,7 @@ import type {
 export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
 
 /**
- * Per-event lane fan-in (ACT-1103). For events whose every reaction
+ * Per-event lane fan-in. For events whose every reaction
  * has a static resolver, the value is the union of those reactions'
  * declared lanes — `do()` arms only those controllers on commit. For
  * events with at least one dynamic resolver, the value is
@@ -79,7 +79,7 @@ export function classify_registry<
 ): Classification {
   const statics = new Map<string, StaticTarget>();
   // Per-target lane, checked across EVERY reaction to a target regardless of
-  // source (#1325). A stream drains on exactly one lane, and `subscribe`
+  // source. A stream drains on exactly one lane, and `subscribe`
   // keys lane per-target, so lane must agree target-wide — the
   // `(target, source)` scoping of `statics` is too narrow to catch a
   // same-target/different-source lane disagreement.
@@ -105,11 +105,11 @@ export function classify_registry<
           set.add(lane_name);
           event_to_lanes.set(name, set);
         }
-        // ACT-1103 / #1325: lanes don't merge — any two reactions to the
+        // Lanes don't merge — any two reactions to the
         // same target must declare the same lane, regardless of source.
         // First reaction to a target records its lane; every later one must
         // match or it's a config error caught at build time. Both sides
-        // compare the NORMALIZED name (#1583), so an omitted lane and an
+        // compare the NORMALIZED name, so an omitted lane and an
         // explicit "default" — the same lane — agree.
         const recorded_lane = target_lanes.get(target);
         if (recorded_lane === undefined) {
@@ -125,7 +125,7 @@ export function classify_registry<
         // it thereafter, so a second entry for one target could only ever
         // contribute its priority — and a batch carrying two would leave
         // the merge to the adapter, which a single batched SQL statement
-        // cannot do (#1672). One entry per stream, max priority, so the
+        // cannot do. One entry per stream, max priority, so the
         // highest-priority registrant sets the scheduling priority.
         const existing = statics.get(target);
         if (!existing) {

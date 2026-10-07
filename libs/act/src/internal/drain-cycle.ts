@@ -9,8 +9,7 @@
  *   Reusable for property tests and standalone benchmarks.
  *
  * - {@link DrainController} — stateful driver that owns the armed flag,
- *   the concurrency lock, and the adaptive lag/lead ratio. Wraps
- *   `run_drain_cycle` with the lifecycle decisions Act used to make inline.
+ *   the concurrency lock, and the adaptive lag/lead ratio.
  *
  * @internal
  */
@@ -54,11 +53,8 @@ export type HandleResult = Readonly<{
   lease: Lease;
   handled: number;
   /**
-   * Event id at which the ack would land — the last *successful* event
-   * id, or `lease.at` when the batch had no work (empty payloads). Named
-   * `acked_at` to pair symmetrically with {@link failed_at} and to keep
-   * it visually distinct from `Lease.at` (the pre-cycle watermark — same
-   * field name across types but a different semantic).
+   * Event id at which the ack would land: the last *successful* event id,
+   * or `lease.at` when the batch had no work.
    */
   acked_at: number;
   error?: string;
@@ -71,25 +67,16 @@ export type HandleResult = Readonly<{
    */
   next_attempt_at?: number;
   /**
-   * Wall-clock timestamp (ms since epoch) at which this stream should be
-   * re-visited. Set by a handler that *defers* instead of acking or
-   * failing: the triggering events stay pending (watermark not advanced),
-   * `retry` is not bumped (a defer is not a failure), and the drain holds
-   * the stream until `defer` elapses, then redelivers so the handler can
-   * re-evaluate. This is the timing primitive autoclose rides (#1090);
-   * unlike {@link next_attempt_at} (a retry-only backoff), a defer carries
-   * no error and never blocks. When present, the result is excluded from
-   * ack and block — it neither advances nor terminates the watermark.
+   * Wall-clock timestamp (ms since epoch) at which to re-visit a stream
+   * whose handler *deferred*: the triggering events stay pending, `retry`
+   * is not bumped, and the drain redelivers once `defer` elapses. Unlike
+   * {@link next_attempt_at}, a defer carries no error and never blocks.
    */
   defer?: number;
   /**
-   * Close request (#1090). Set when a handler throws `CloseSignal` to retire
-   * its stream: the triggering event is acked (so the closing reaction isn't
-   * seen as an in-flight consumer by the close-cycle safety guard) and the
-   * drain hands this {@link CloseTarget} to the orchestrator's `on_close`,
-   * which runs `run_close_cycle`. Carries the optional archiver from the
-   * signal. Distinct from {@link defer} (hold for later) — a close advances
-   * and retires.
+   * Close request from a handler that threw `CloseSignal`. The triggering
+   * event is acked (so the close guard doesn't see the reaction as in
+   * flight), then the drain hands this {@link CloseTarget} to `on_close`.
    */
   close?: CloseTarget;
   /**
@@ -134,7 +121,7 @@ export type DrainCycle<TEvents extends Schemas> = {
   readonly handled: HandleResult[];
   readonly acked: Lease[];
   readonly blocked: BlockedLease[];
-  /** Streams a handler asked to close this cycle (#1090) — handed to `on_close`. */
+  /** Streams a handler asked to close this cycle — handed to `on_close`. */
   readonly closeable: CloseTarget[];
 };
 
@@ -143,31 +130,14 @@ export type DrainCycle<TEvents extends Schemas> = {
  * attempt ever reaching the block decision — or `undefined` when the stream
  * still has budget.
  *
- * The budget is consulted on the *error* path (`finalize` returns early when
- * a handler didn't throw), so it only terminates handlers that fail loudly. A
- * handler that fails by overrunning its lease never throws: it completes,
- * submits an ack the store drops (`WHERE leased_by = by`), and the next claim
- * bumps `retry` again. `retry` climbs without bound, the watermark never
- * advances, and the side effect re-runs forever — the one outcome
- * `blockOnError` exists to prevent (#1418).
+ * Catches a handler that loses its lease every round: it never throws, its
+ * ack is dropped, and `retry` climbs while the watermark never moves. The
+ * threshold is strictly `> maxRetries` because a stream legitimately reaches
+ * `retry === maxRetries` on its final attempt, which `finalize` may still run.
  *
- * The threshold is strictly greater than `maxRetries`, not `>=`, and that is
- * load-bearing. A stream legitimately reaches `retry === maxRetries` on its
- * final attempt, which `finalize` is entitled to run and block only if it
- * fails again. Blocking here at `>=` would take that attempt away and change
- * every error-driven path. At `>` the only way to arrive is with the budget
- * already spent and no attempt having produced an error — a lease lost every
- * single round, which is the stuck stream and nothing else.
- *
- * Gated on `blockOnError` for the same reason `finalize` is: an operator who
- * opted out of blocking chose "retry forever," and that choice holds here too.
- *
- * Skipped entirely while the store is failing. `claim` writes the counter up
- * before a handler runs, and only a completed pass resets it, so a pass that
- * dies on a store call leaves a count behind that no handler earned. A few of
- * those in a row look exactly like a lost lease from here, and quarantining a
- * healthy stream over a database hiccup is the worse mistake — the store
- * recovering resets the counter on its own.
+ * Honors `blockOnError: false` like `finalize`, and stands down while the
+ * store is failing: `claim` raises `retry` before any handler runs, so a
+ * pass that dies on a store call leaves a count no handler earned.
  *
  * @internal
  */
@@ -188,7 +158,7 @@ function budget_exhausted<TEvents extends Schemas>(
 }
 
 /**
- * The retry policy for a stream whose fetch failed (#1774). Retry options
+ * The retry policy for a stream whose fetch failed. Retry options
  * belong to reactions and are normally read from the fetched payloads, but
  * a failed fetch has none, so there is no way to tell which reaction the
  * events were for. Take the most conservative policy across every
@@ -215,15 +185,9 @@ function fetch_failure_policy<
 }
 
 /**
- * Report a misrouted resolution once per offending declaration.
- *
- * All three key parts are declared, not resolved — which is the rule
- * `report-once` states and the one #1584 caught the lane reporters breaking.
- * `stream` looks like the runtime target that trap is about, but it is only
- * ever a key of `batch_handlers`, and those are the projections' *static*
- * targets: one per projection declaration, bounded by the build, never one
- * per aggregate. A handler registered on several events misroutes once per
- * event, and each of those is its own `.on(E).do(h).to(fn)` to fix.
+ * Report a misrouted resolution once per offending declaration. Every key
+ * part is declared, not resolved (`stream` is a projection's static target),
+ * so the report count stays bounded by the build.
  */
 function warn_misrouted(
   seen: Set<string>,
@@ -271,11 +235,9 @@ export async function run_drain_cycle<
   eventLimit: number,
   leaseMillis: number,
   /**
-   * Emitted as soon as `block` confirms, BEFORE the `ack` that follows.
-   * A block is terminal: every adapter gates `block` on `blocked = false`
-   * and excludes a blocked stream from `claim`, so it never runs again for
-   * that stream. If the emit waited until the end of the cycle, an `ack`
-   * failure in between would lose the `blocked` event permanently (#1390).
+   * Emitted as soon as `block` confirms, before the `ack`: a block is
+   * terminal, so an `ack` failure in between would otherwise lose the
+   * `blocked` event for good.
    */
   on_blocked: (blocked: BlockedLease[]) => void,
   lane?: string
@@ -290,14 +252,9 @@ export async function run_drain_cycle<
   );
   if (!leased.length) return undefined;
 
-  // Fetch events for each leased stream. Streams in a backoff window are
-  // already excluded here: the store persists `deferred_at` on a due-marked
-  // ack and `claim` skips streams whose schedule hasn't elapsed (#1262), so
-  // a paced retry never reaches dispatch and no local skip-gate is needed.
+  // Streams in a backoff or defer window were already excluded by `claim`.
   const fetched = await ops.fetch(leased, eventLimit);
 
-  // Build a single index keyed by stream — collapses two passes
-  // (payloads_map build + per-lease fetched.find) into one Map lookup.
   type FetchEntry = (typeof fetched)[number];
   const fetch_map = new Map<
     string,
@@ -321,27 +278,12 @@ export async function run_drain_cycle<
           const dynamic = typeof resolver === "function";
           const resolved = dynamic ? resolver(event) : resolver;
           if (!resolved || resolved.target !== stream) return false;
-          // A stream a projection serves is served by that projection alone:
-          // every payload here goes to its batch handler, so a reaction
-          // resolving onto it would never run AND would hand the projection
-          // an aggregate it knows nothing about (#1563).
-          //
-          // `dynamic` is an exact discriminator, not a heuristic: a STATIC
-          // reaction onto a projection's target is rejected at build, and a
-          // projection's own consumption is synthesized static. So a dynamic
-          // resolution landing here is by definition the misrouting the build
-          // guard could not see, because the target was a function until now.
+          // A projection's target is served by its batch handler alone. A
+          // static reaction onto it is rejected at build, so a dynamic one
+          // landing here is the misrouting the build couldn't see: skip it
+          // and report once. Not a throw: anything thrown in the cycle reads
+          // as a store failure and would stall the drain on the breaker.
           if (!dynamic || !batch_handlers.has(stream)) return true;
-          // Say so. The build guard REFUSES this configuration, and dropping
-          // its dynamic twin without a word would leave an operator with a
-          // reaction that silently never runs — the half of #1563 that has no
-          // error, no retry and nothing in `blocked_streams()`.
-          //
-          // A throw is not available here: `:693` hands anything thrown to
-          // the circuit breaker as a store failure, so a config error that
-          // never resolves itself would stall the whole drain on a cooldown
-          // loop. Once per distinct misrouting, because a resolver returning
-          // a bad target does so for every matching event.
           warn_misrouted(
             misrouted,
             stream,
@@ -357,18 +299,11 @@ export async function run_drain_cycle<
 
   const handled = await Promise.all(
     leased.map((lease) => {
-      // fetch() returns one entry per leased stream — fetch_map.get is
-      // always defined here (asserted with `!`).
       const entry = fetch_map.get(lease.stream)!;
-      // This stream's read failed and was contained there (#1675). Report it
-      // as a no-progress failure for this stream alone: no ack is submitted,
-      // so the watermark holds and the lease stays held until it lapses.
-      // Healthy streams leased in the same cycle are untouched, which is the
-      // whole point of containing it. A read that keeps failing must still
-      // end the way a handler that keeps failing does, blocked once the retry
-      // budget is spent, or the stream retries forever without ever showing
-      // up in `blocked_streams()` (#1774). Not while the store is failing as
-      // a whole: that is the breaker's to handle, not this stream's.
+      // This stream's read failed: a no-progress failure for this stream
+      // alone (no ack, the lease lapses). It blocks once the retry budget is
+      // spent, like a failing handler, except while the whole store is
+      // failing, which is the breaker's job.
       if (entry.fetch.error !== undefined) {
         const error = `Fetch failed for ${lease.stream}: ${entry.fetch.error}`;
         log().error(error);
@@ -403,37 +338,15 @@ export async function run_drain_cycle<
     })
   );
 
-  // Finalize the cycle in one atomic store call. Every entry advances the
-  // watermark to the last event fully handled this cycle, and a deferred or
-  // backing-off entry rides the same batch marked with `due` so the store
-  // ALSO persists the schedule — advance and defer are independent legs of
-  // one ack (#1278). A failed finalize lands nothing — the catch in the
-  // controller covers every outcome uniformly. Partial-success-then-block
-  // still lands in both `acked` and `blocked` for the same stream — by design.
+  // Finalize in one atomic `ack`: each entry advances to its last fully
+  // handled event (`acked_at`), or stays at the claim watermark when it made
+  // no progress. Deferred and backing-off entries carry `due`, so the same
+  // call persists the schedule; a backoff keeps the climbing `retry`, a defer
+  // passes `retry: -1`.
   //
-  // The advance target is `acked_at` (the last fully-handled event) when the
-  // batch made progress, and the pre-fetch watermark `floor` (`leased[i].at`,
-  // a no-op advance) when it did not — because on a no-progress failure
-  // `acked_at` is initialized to the fetch ceiling and would skip the failed
-  // event. `leased[i]` pairs with `handled[i]` (Promise.all preserves order),
-  // so `floor` is the untouched claim watermark.
-  //
-  // Deferring past the succeeded prefix (rather than holding the whole batch)
-  // is the point: the handled events never re-run on redelivery. A backoff
-  // retry carries the climbing `retry` so the budget keeps accruing toward
-  // `blockOnError` and the durable cross-worker window (#1262) survives; an
-  // explicit defer passes `retry: -1` because a defer is not a failure.
-  //
-  // `block` runs BEFORE `ack` (#1296). Both stores gate `block` on the lease
-  // still being held (`WHERE leased_by = by AND blocked = false`), but `ack`
-  // releases the lease (`leased_by = NULL`). A partial-progress-then-block
-  // entry (`handled > 0` AND `block: true` — e.g. a `NonRetryableError` on the
-  // second event of a batch) is passed to BOTH: `block` marks it poison
-  // without touching the watermark, then `ack` advances past the handled
-  // prefix and releases the lease. Acking first would release the lease out
-  // from under `block`, silently dropping it — the stream would re-run its
-  // permanently-failed tail next cycle. Neither store clears the watermark on
-  // `block`, so the ordering leaves both legs intact.
+  // `block` runs before `ack`, because `block` requires the lease and `ack`
+  // releases it. A partial-progress-then-block entry goes to both: `block`
+  // marks it poison, then `ack` advances past the handled prefix.
   const blocked = await ops.block(
     handled
       .filter(({ block }) => block)
@@ -454,29 +367,18 @@ export async function run_drain_cycle<
   });
   const acked = await ops.ack(submitted);
 
-  // Every adapter gates `ack` on the lease still being held
-  // (`WHERE leased_by = by`) — correctly, since that is what stops an
-  // evicted holder from regressing a watermark a competitor advanced. But
-  // the loss came back as a SHORT RETURN with no error, and nothing compared
-  // the two, so a worker whose lease was stolen mid-handler discarded a full
-  // round of work with no signal anywhere (#1418).
-  //
-  // Deferred entries are excluded from ack's return by contract, so they are
-  // not "missing" — only non-due submissions are counted here.
+  // `ack` silently drops entries whose lease another worker took, so compare
+  // what was submitted with what landed (deferred entries are never
+  // returned). `warn`: the work is redelivered, but persistent drops mean
+  // the lease is too short.
   const expected = submitted.filter((l) => l.due === undefined).length;
-  // `warn`, not `error`: the work is redelivered, so nothing is lost and no
-  // operator action is required for this occurrence. Persistent drops are a
-  // sizing problem worth investigating, which is what `warn` is for (#1579).
   if (acked.length < expected)
     log().warn(
       `drain: ${expected - acked.length} of ${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.`
     );
 
-  // Collect close requests (#1090). A close result was already acked above
-  // (its event made progress, `defer === undefined`), which advances the
-  // requesting reaction past the terminal event so the close-cycle safety
-  // guard doesn't count it as an in-flight consumer. The orchestrator's
-  // `on_close` runs the actual `run_close_cycle`.
+  // Close requests, already acked above so the close guard sees the
+  // requesting reaction as caught up.
   const closeable = handled
     .filter((h) => h.close !== undefined)
     .map((h) => h.close!);
@@ -519,29 +421,21 @@ export type DrainControllerDeps<
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
   /**
-   * Close requested by a reaction (#1090). The controller calls this with the
-   * cycle's {@link CloseTarget}s after acks/blocks land; the orchestrator wires
-   * it to its `run_close_cycle` machinery (same path as `app.close`). Awaited so
-   * a slow close doesn't overlap the next cycle's claim on the controller.
+   * Runs the cycle's reaction-requested closes after acks/blocks land.
+   * Awaited so a slow close doesn't overlap the next claim.
    */
   readonly on_close: (targets: CloseTarget[]) => Promise<void>;
   /**
-   * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
-   * repeated store failures so the drain loop stops hammering a down
-   * backend; closed/half-open let attempts through. It also surfaces each
-   * failure (via its own `on_error`, wired by the orchestrator to the
-   * `error` lifecycle event), so callers just `failed(now, error)`.
+   * Shared circuit breaker. Opens after repeated store failures so the
+   * drain stops hammering a down backend, and surfaces each failure.
    */
   readonly breaker: CircuitBreaker;
   /**
-   * Scope runner (#1191). The per-lane worker (`start`) ticks outside
-   * any caller frame, so its `drain()` must be re-wrapped in the Act's
-   * `_scoped` bag or `store()`/`cache()` resolve to the singleton for a
-   * scoped Act. The orchestrator always threads its `_scoped` (identity
-   * for a non-scoped Act), so it's required.
+   * Runs a body in the Act's ports frame. The per-lane worker ticks outside
+   * any caller frame, so its drain must be re-scoped.
    */
   readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
-  /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
+  /** Lane this controller drains. Undefined spans all lanes. */
   readonly lane?: string;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
   readonly defaults?: {
@@ -573,32 +467,25 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Per-stream re-visit schedule (#1090): `stream → next visit` (ms since
-   * epoch). Holds both retry backoff (`HandleResult.next_attempt_at`) and the
-   * `defer` outcome; cleared on successful ack or terminal block. Lives in
-   * process memory — per-worker pacing by design (see {@link BackoffOptions}
-   * for the multi-worker trade-off). Its wake re-arms drain at the earliest
-   * pending visit.
+   * Local wake for streams this worker parked (backoff or defer). The
+   * schedule itself is persisted in the store; this only re-arms the drain
+   * at the earliest pending visit.
    */
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
   });
-  /** Worker timer (ACT-1103). Set when `start()` is active, undefined otherwise. */
+  /** Worker timer. Set when `start()` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   /**
-   * Misroutings this controller has reported (#1563). A resolver returning a
+   * Misroutings this controller has reported. A resolver returning a
    * projection's target does so for every matching event; one line per event
    * would bury the signal it exists to raise.
    */
   private readonly _misrouted = new Set<string>();
   private _stopped = false;
   /**
-   * Resolves when the cycle currently in flight finishes; `undefined` when
-   * no cycle is running (#1442). `_locked` answers "is a cycle running?" for
-   * the overlap guard; this answers "tell me when it is done" for a graceful
-   * shutdown, which needs to await the handler rather than abandon it
-   * mid-`await` with the stream still leased. Never rejects — `drain()`
-   * contains its own errors — so awaiting it is always safe.
+   * Resolves when the cycle in flight finishes, so a graceful shutdown can
+   * wait for it. Never rejects.
    */
   private _inflight: Promise<void> | undefined;
   private _inflight_done: (() => void) | undefined;
@@ -619,16 +506,9 @@ export class DrainController<
   }
 
   /**
-   * Re-seed a persisted defer schedule into the process-local timer at cold
-   * start (#1221). The `_defer` map lives in worker memory and is empty
-   * after a restart; a stream deferred to a future due-time (e.g. an idle
-   * autoclose aggregate) is durable in the store's `deferred_at` but has
-   * nothing in memory to re-arm the drain at the due-time. The orchestrator
-   * reads the persisted `deferred_at` for this controller's lane and calls
-   * this to park the stream + (re)schedule the shared wake — so the drain
-   * re-arms at the due-time with no intervening commit. `schedule()`
-   * collapses many seeds into one timer, so callers may seed in a loop and
-   * let the earliest due-time win.
+   * Re-seed a persisted `deferred_at` into the local wake at cold start, so
+   * an idle deferred stream re-arms at its due-time with no new commit.
+   * Seeds collapse into one timer; the earliest wins.
    */
   seed_defer(stream: string, at: number): void {
     this._defer.set(stream, at);
@@ -640,34 +520,24 @@ export class DrainController<
     return this._armed;
   }
 
-  /**
-   * The cycle currently in flight, or `undefined` when idle (#1442). A
-   * graceful shutdown awaits this so an in-flight handler reaches its `ack`
-   * — which releases the stream's lease — instead of being abandoned with
-   * the lease held until it expires.
-   */
+  /** The cycle in flight, or `undefined` when idle. */
   get inflight(): Promise<void> | undefined {
     return this._inflight;
   }
 
-  /**
-   * This lane's configured lease budget, or `undefined` when the lane didn't
-   * pin one. It is the operator's own statement of how long a handler may
-   * legitimately hold a stream, which makes it the right basis for a
-   * shutdown grace budget (#1442).
-   */
+  /** This lane's configured lease, or `undefined`; the shutdown grace basis. */
   get lease_millis(): number | undefined {
     return this._deps.defaults?.leaseMillis;
   }
 
-  /** Lane this controller drains (undefined = legacy single-lane span). */
+  /** Lane this controller drains (undefined spans all lanes). */
   get lane(): string | undefined {
     return this._deps.lane;
   }
 
   /**
    * Start a per-lane worker that drains at the lane's `cycleMs`
-   * cadence (ACT-1103). When armed, the worker calls `drain()` on every
+   * cadence. When armed, the worker calls `drain()` on every
    * tick and re-schedules; when not armed, it still re-schedules at
    * `cycleMs` so a future `arm()` is picked up on the next tick.
    *
@@ -676,12 +546,8 @@ export class DrainController<
    */
   start(cycleMs: number): void {
     if (this._worker || this._stopped) return;
-    // `drain()` swallows its own errors and returns EMPTY_DRAIN, so the
-    // tick is exception-free by contract. The post-drain `_stopped`
-    // check prevents re-scheduling after `stop()` was called mid-tick;
-    // an already-queued timer that fires before `clearTimeout()` lands
-    // will run at most one extra drain (drain is idempotent against
-    // a non-armed controller and self-disarms when settled).
+    // `drain()` never throws. The `_stopped` check stops re-scheduling after
+    // a mid-tick `stop()`.
     const run = this._deps.run_scoped;
     const tick = async () => {
       if (this._armed) await run(() => this.drain());
@@ -700,8 +566,6 @@ export class DrainController<
       clearTimeout(this._worker);
       this._worker = undefined;
     }
-    // Drop any pending re-visit wake — the parked set is process-local and
-    // rebuilt from the log on the next start (#1090).
     this._defer.stop();
   }
 
@@ -716,11 +580,8 @@ export class DrainController<
       return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
-    // Per-lane config wins over caller options (ACT-1103). The whole
-    // point of `withLane({leaseMillis: 30_000})` is to give the slow
-    // lane its own budget — a caller-level drain({leaseMillis}) would
-    // erase it. Caller options apply only when the lane didn't pin a
-    // value.
+    // Per-lane config wins over caller options: a lane's own budget is the
+    // point of `withLane({leaseMillis})`.
     const streamLimit =
       d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
     const eventLimit =
@@ -752,49 +613,30 @@ export class DrainController<
         this._deps.lane
       );
 
-      // The store responded (claim/fetch/ack+defer/block all succeeded) —
-      // reset the breaker even when there was no work to do. A failed
-      // finalize never reaches here: `Store.ack` applies watermarks and
-      // defer schedules atomically, so it either all landed or the
-      // whole cycle threw into the catch below and nothing did.
       if (!cycle) {
-        // claim() returned no leases — fully caught up
+        // Nothing claimed: caught up, and the store answered.
         this._deps.breaker.passed();
         this._armed = false;
-        // A defer wake GCs the entry that came due and leaves re-arming to
-        // this pass. If that stream was already handled (a competing worker
-        // got to it first), the claim is empty, and returning without
-        // rescheduling would drop the wake for every stream still parked —
-        // on an idle aggregate nothing else re-arms the drain.
+        // Keep the wake for streams still parked; on an idle aggregate
+        // nothing else re-arms the drain.
         if (this._defer.size > 0) this._defer.schedule();
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
       const { leased, fetched, handled, acked, blocked, closeable } = cycle;
 
-      // Cycle-level trace (ACT-1103) — one log line per drain pass:
-      // claim + fetch + outcomes folded together so the operator sees
-      // a single atomic narrative for each cycle. No-op when the
-      // logger isn't at trace level.
+      // One trace line per cycle (no-op unless the logger is at trace).
       trace_cycle(this._deps.logger, leased, fetched, handled, acked, blocked);
 
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = compute_lag_lead_ratio(handled, lagging, leading);
 
-      // Refresh per-stream re-visit state from this cycle's outcomes.
-      // Successful acks and terminal blocks both clear the window;
-      // retry-not-block results carry a `next_attempt_at` set by `_finalize`,
-      // and deferred results carry a `defer` due-time (#1090). Both park the
-      // stream in `_defer` so the shared wake timer re-arms drain at the
-      // earliest pending visit. `handle` already reconciles a stream's
-      // reactions into a single result per cycle, so the value written here
-      // is authoritative for the stream — a plain overwrite, not a merge.
+      // Refresh the local wake: acks and blocks clear a stream; a retry
+      // (`next_attempt_at`) or defer parks it until its next visit.
       for (const lease of acked) this._defer.delete(lease.stream);
       for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
-        // A no-progress failure submits no ack, so its lease is still held
-        // and `claim` excludes the stream even from this worker — park until
-        // the lease lapses or nothing re-arms us (#1670).
+        // A no-progress failure keeps its lease, so park until it lapses.
         const retry_at =
           h.error && !h.block
             ? (h.next_attempt_at ?? Date.now() + leaseMillis)
@@ -804,31 +646,15 @@ export class DrainController<
       }
       if (this._defer.size > 0) this._defer.schedule();
 
-      // Lifecycle sinks are contained individually, mirroring the
-      // `notified` handler in `act.ts`. The durable work is already
-      // committed by this point, so a throwing listener must not unwind
-      // into the store-error `catch` below: that would report a store
-      // failure that never happened, return an empty Drain, and — because
-      // `block` is guarded on `blocked = false` and a blocked stream is
-      // excluded from `claim` — permanently lose the `blocked` event and
-      // any reaction-requested close. Listener containment itself lives in
-      // `Act.emit`, which guards each listener individually (#1437) — the
-      // sinks here are plain calls.
+      // Listener throws are contained in `Act.emit`, so they never reach the
+      // store-error catch below.
       if (acked.length) this._deps.on_acked(acked);
-      // Run reaction-requested closes after acks land (#1090) — the close
-      // targets were acked above, so the close-cycle guard sees the requesting
-      // reaction as caught up. Awaited so a slow close doesn't overlap the
-      // next claim.
-      // NOT contained: `on_close` runs the close machinery (load,
-      // tombstone, archive, truncate), not an emit. A StoreError raised in
-      // there is a real store failure and must reach the breaker via the
-      // catch below, or an outage silently bricks streams while the
-      // breaker records a success (#1388). The `closed` EMIT is contained
-      // on the Act side, which is the only listener risk on this path.
+      // Not contained: a store error inside the close machinery is a real
+      // store failure and must reach the breaker.
       if (closeable.length) await this._deps.on_close(closeable);
 
       // Recorded after `on_close` so a cycle whose close failed is never
-      // counted as a store success (#1388).
+      // counted as a store success.
       this._deps.breaker.passed();
 
       // Disarm only when fully caught up. Errors keep the flag set so
@@ -838,16 +664,12 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      // A store op threw (StoreError, or any failure mid-cycle). Record it
-      // on the breaker, which logs it and surfaces the `error` lifecycle
-      // event. `_armed` stays set so the breaker's retry re-attempts after
-      // the cooldown. EMPTY_DRAIN keeps the worker tick exception-free.
+      // A store op threw. The breaker logs and surfaces it; `_armed` stays
+      // set so the next pass retries after the cooldown.
       this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;
-      // Release anyone awaiting this cycle (a graceful shutdown) before the
-      // next one can start.
       this._inflight = undefined;
       this._inflight_done?.();
       this._inflight_done = undefined;

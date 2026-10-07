@@ -3,7 +3,7 @@
  *
  * `CsvFile` — a single class implementing both {@link EventSource}
  * and {@link EventSink} so a CSV file on disk can be either side of
- * a transfer pipeline (ACT-1128 / #788).
+ * a transfer pipeline.
  *
  * - As a source: streams one row at a time off a line interface;
  *   the awaited per-event callback gives 1-event-in-flight
@@ -92,7 +92,7 @@ export class CsvFile implements EventSource, EventSink {
         name: fields[1]! as keyof E,
         // Revive dates like every Store adapter does — a Date in an event
         // payload must not depend on whether it came back through a store or
-        // through a CSV restore (#1399). The `created` column below has
+        // through a CSV restore. The `created` column below has
         // always been parsed explicitly; the JSON columns were missed.
         data: JSON.parse(fields[2]!),
         stream: fields[3]!,

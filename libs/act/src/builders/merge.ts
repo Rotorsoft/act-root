@@ -131,7 +131,7 @@ function register_new_state(
  *
  * Without this, a spread of `existing` keeps the FIRST partial's value and
  * silently discards the incoming one, so a policy declared on a later slice
- * never runs (#1645).
+ * never runs.
  */
 function pick_declared<T>(
   existing: T | undefined,
@@ -306,7 +306,7 @@ function merge_patches(
  * (e.g., act-builder's `.withSlice()` registers the slice's states first,
  * which seeds the target events). Reactions are keyed by `handler.name`;
  * two distinct handlers sharing a name on the same event throw rather than
- * silently overwriting (ACT-979). Re-merging the identical reaction object
+ * silently overwriting. Re-merging the identical reaction object
  * is idempotent — mirrors {@link register_batch_handler}.
  */
 export function merge_event_register(
@@ -352,7 +352,7 @@ export function merge_projection(
         // paths (exported from a module and embedded by two slices, or a
         // `.withProjection(p)` written twice) — and renaming it registered a
         // second copy under `name_p`, so the handler ran twice per event,
-        // forever, frozen into the registry at build (#1439).
+        // forever, frozen into the registry at build.
         //
         // Not the at-least-once redelivery contract: a structural duplicate,
         // deterministic on every event, with no signal anywhere. Both

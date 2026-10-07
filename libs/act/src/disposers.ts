@@ -29,8 +29,7 @@ const entries: Entry[] = [];
  * Called on every registration so the registry stays proportional to the
  * live objects rather than to every object ever built. That matters for apps
  * that mint short-lived Acts — one per tenant, per request, per test — where
- * the registry would otherwise grow without bound for the process lifetime
- * (#1441).
+ * the registry would otherwise grow without bound for the process lifetime.
  */
 const prune = (): void => {
   for (let i = entries.length - 1; i >= 0; i--) {

@@ -51,41 +51,20 @@ export type CloseCycleDeps = {
   readonly probe_page_size?: number;
   /**
    * Advance correlation to at least `until` (an event id) and return how
-   * far it actually got (#1487).
+   * far it actually got.
    *
-   * The safety probe asks each subscription whether it has unconsumed
-   * work, which is only a fair question about events correlate has already
-   * resolved. An event past the read cursor has raised no mark yet, so
-   * every reader answers "caught up" about it — including a reader that
-   * does not exist yet, because the subscription a dynamic resolver would
-   * create is itself a product of correlating that event.
-   *
-   * Refusing to close is the wrong answer: the autoclose path fires *from*
-   * the event that reaches the terminal state, so its own trigger is
-   * routinely uncorrelated, and a retired stream gets no further commits to
-   * retry with. So the cycle makes the precondition true instead — it
-   * correlates the tail, then decides. Whatever remains above the cursor
-   * afterwards is held back as pending.
+   * The safety probe can only judge events correlate has resolved (an
+   * uncorrelated event has raised no mark and may not even have created its
+   * subscription yet). An autoclose fires from its own, often uncorrelated,
+   * trigger, so the cycle correlates the tail first; anything still above
+   * the cursor is held back as pending.
    */
   readonly catch_up_correlation: (until: number) => Promise<number>;
   /**
-   * Per-stream critical section (#1222). The windowed branch is
-   * deliberately guard-free at the store level — a past cutoff makes the
-   * boundary immutable, so a concurrent append can never race the prune.
-   * But that assumes a *single* closer per stream. A manual
-   * `app.close([{stream, before}])` runs `run_close_cycle` directly,
-   * bypassing the `__autoclose__:X` lease that would otherwise exclude a
-   * concurrent autoclose windowed close, so both closers can archive the
-   * same prefix — a double S3 upload / double JSONL append. This runs the
-   * given work under a process-local per-stream lock so the two closers
-   * serialize; the second sees the already-pruned prefix and skips its
-   * archive. The full (tombstone/restart) path takes the same lock for
-   * every stream it closes: without it, a second full closer that arrives
-   * while the first is archiving mistakes the first closer's tombstone for
-   * an interrupted close, resumes it, and both archive and truncate (#1738).
-   * Provided by the Act orchestrator (shared across `app.close` and the
-   * drain's `on_close`); defaults to identity (no serialization) when the
-   * cycle is exercised in isolation.
+   * Per-stream critical section, so two closers of one stream (a manual
+   * close has no drain lease to exclude an autoclose) never archive the same
+   * prefix, and a second full closer never mistakes the first one's
+   * tombstone for an interrupted close. Identity when run in isolation.
    */
   readonly with_stream_lock?: <T>(
     stream: string,
@@ -118,7 +97,7 @@ type StreamHead = {
    * truncating (a throwing archive callback, or a `truncate` that failed).
    * Carries the existing guard's event id so the retry resumes at Phase 4
    * instead of re-tombstoning (which would fail the version guard) or being
-   * dropped from the scan entirely (#1389).
+   * dropped from the scan entirely.
    */
   readonly resumed_guard?: { readonly id: number };
 };
@@ -201,18 +180,10 @@ async function run_full_closes(
   // 1. Scan: find the latest non-tombstone event per stream
   const stream_info = await scan_stream_heads(streams);
 
-  // 1b. Reject restart targets whose owning state carries sensitive
-  // fields, BEFORE anything is written. The seed load in phase 4 is
-  // actorless, so every `sensitive()` field would fold to the redaction
-  // sentinel and the truncate would then delete the originals — and
-  // loading privileged instead would persist plaintext into
-  // `__snapshot__.data`, which `forget_pii` cannot reach (the reason
-  // `.snap()` is rejected at build time for these states). Such a stream
-  // cannot be restarted at all, so it must not be closed either: the
-  // caller asked to keep the aggregate alive, and tombstoning it instead
-  // would be a strictly more destructive outcome than the one requested.
-  // It lands in `skipped`, the established channel for "couldn't do this
-  // one", with nothing mutated.
+  // 1b. A restart target whose state has sensitive fields can't be seeded
+  // (an actorless load would redact them; a privileged one would put
+  // plaintext where `forget` can't reach), so it is skipped, untouched,
+  // before anything is written.
   for (const target of full) {
     if (!target.restart) continue;
     const info = stream_info.get(target.stream);
@@ -239,7 +210,7 @@ async function run_full_closes(
 
   // 3. Guard: commit a tombstone with expectedVersion per safe stream.
   // Correlation comes from the orchestrator's configured correlator so
-  // close commits share the app's id scheme — see ACT-404.
+  // close commits share the app's id scheme.
   const { guarded, guard_events } = await guard_with_tombstones(
     safe,
     stream_info,
@@ -266,7 +237,7 @@ async function run_full_closes(
   // guard. The lock above serializes closers in this process; a closer in
   // another process can still resume our guard, finish first, and reseed
   // the stream, after which a commit can land on it. Truncating then would
-  // delete that accepted commit (#1738).
+  // delete that accepted commit.
   const still_guarded = await heads_still_guarded(
     guarded,
     guard_events,
@@ -308,22 +279,11 @@ async function run_windowed_closes(
   deps: CloseCycleDeps,
   skipped: string[]
 ): Promise<CloseResult["truncated"]> {
-  // 1. Safety probe: min consumer watermark per stream. Skipped entirely
-  // when the app has no reactions — nothing can lag.
-  //
-  // The cap asks each consumer "how far is it safe to prune?", and a
-  // watermark alone stopped answering that when correlate became the producer
-  // of the work mark (#1520). A subscription advances only over events that
-  // resolve to it, so a reaction covering a subset of a state's events sits
-  // permanently below the head with nothing pending — and capped the prune at
-  // its frozen watermark, which for a retention window means pruning almost
-  // nothing, every time, with no error and no `skipped` entry to explain it.
-  //
-  // A caught-up consumer is instead capped at the correlate checkpoint. Not
-  // at infinity: events above the checkpoint have not been resolved yet, so a
-  // mark for them may still be coming, and pruning past it could delete work
-  // a consumer is about to be told about. Catching up first makes that bound
-  // as generous as it can honestly be.
+  // 1. Safety probe: how far may each stream be pruned (skipped when the
+  // app has no reactions). A consumer with pending work caps at its
+  // watermark; a caught-up one caps at the correlate checkpoint, since a
+  // reaction to only some event types sits below the head with nothing
+  // pending. Catching up first makes that cap as high as it can be.
   const checkpoint =
     deps.reactive_events_size > 0
       ? await deps.catch_up_correlation(Number.MAX_SAFE_INTEGER)
@@ -337,16 +297,9 @@ async function run_windowed_closes(
         )
       : new Map<string, number>();
 
-  // 2 + 3. Per stream, under a process-local lock (#1222): probe the
-  // boundary, archive against intact history only when the prune would
-  // actually delete a prefix, then truncate. Serialization + the
-  // "prune is non-empty" gate together make the archive fire at most
-  // once per pruned range when a manual `app.close` races an autoclose
-  // windowed close for the same stream — the second closer, run behind
-  // the lock, sees the already-pruned prefix (boundary is now the
-  // earliest event) and skips its archive. Each stream is independent,
-  // so `truncate` is called per stream inside its own lock rather than
-  // once for the batch; a windowed truncate touches only its own stream.
+  // 2 + 3. Per stream, under its lock: archive only when the prune would
+  // delete a prefix, then truncate. The lock plus that check make the
+  // archive fire at most once per pruned range.
   const with_lock = deps.with_stream_lock ?? ((_stream, work) => work());
   const truncated: CloseResult["truncated"] = new Map();
   for (const t of windowed) {
@@ -383,7 +336,7 @@ async function run_windowed_closes(
  * strictly below that boundary. False when no snapshot qualifies (a
  * no-op truncate) or when the boundary is already the earliest event
  * (the prefix was pruned by a prior closer). This is the guard that
- * makes the windowed archive fire at most once per pruned range (#1222).
+ * makes the windowed archive fire at most once per pruned range.
  *
  * @internal
  */
@@ -446,13 +399,8 @@ async function probe_min_watermarks(
         const source_re = position.source
           ? get_regex(position.source)
           : undefined;
-        // How far this consumer permits a prune. A row with unconsumed work
-        // caps at its watermark, as it always did. A row that has consumed
-        // everything marked for it caps at the correlate checkpoint instead —
-        // its watermark says nothing about safety, only about which event
-        // types it happens to handle. An unmarked row keeps the conservative
-        // watermark cap, matching how it is read everywhere else until every
-        // install has converted.
+        // Pending work caps at the watermark; caught up caps at the
+        // checkpoint; an unmarked row keeps the conservative watermark.
         const pending =
           position.correlated_at === undefined ||
           position.at < position.correlated_at;
@@ -490,21 +438,15 @@ async function scan_stream_heads(
   // Domain head, markers excluded. A stream absent here has no domain
   // events left, so a previous close ran to completion and there is
   // nothing to do. A stream present here whose `stats` head is a tombstone
-  // was guarded and then interrupted — it must be resumed, not skipped
-  // (#1389). `last_event_name` also has to come from this pass: the
+  // was guarded and then interrupted — it must be resumed, not skipped.
+  // `last_event_name` also has to come from this pass: the
   // restart-seed owner lookup needs the domain event, not the marker.
   const domain_heads = await store().query_stats(streams, {
     exclude: [SNAP_EVENT, TOMBSTONE_EVENT],
   });
-  // The tombstone's optimistic lock must expect the stream's ACTUAL current
-  // version, which is one higher when a `__snapshot__` trails the domain head
-  // — `snap()` commits it into the next version slot (event-sourcing.ts). The
-  // domain head above still drives `max_id` (the safety probe: a subscription
-  // advances its watermark on domain events, never snapshots) and
-  // `last_event_name` (the restart-seed owner lookup). Only the guard version
-  // needs the true head, so a second heads-only pass reads it with snapshots
-  // included. Without this, a terminal commit that crossed a `.snap()`
-  // boundary makes the guard expect a stale version and skip the close (#1356).
+  // The tombstone must expect the stream's real head version, which a
+  // trailing `__snapshot__` raises by one. Everything else uses the domain
+  // head, so the true head gets its own heads-only read.
   const true_heads = await store().query_stats(streams, {});
   const out = new Map<string, StreamHead>();
   for (const [stream, { head }] of domain_heads) {
@@ -533,12 +475,8 @@ async function partition_by_safety(
 ): Promise<string[]> {
   if (reactive_events_size === 0) return [...stream_info.keys()];
 
-  // Correlate the tail first (#1487). A head past the read cursor has
-  // raised no mark, so the probe below would read every reader as caught
-  // up on it — and the reader that needs it may not even be subscribed
-  // yet. Catching up both raises the marks and creates those subscriptions,
-  // so the probe answers about the real state of the log. Anything still
-  // above the cursor afterwards (the log outran us) is held back.
+  // Correlate the tail first (see `catch_up_correlation`); anything still
+  // above the cursor afterwards is held back.
   let needed = -1;
   for (const info of stream_info.values())
     needed = Math.max(needed, info.max_id);
@@ -548,17 +486,9 @@ async function partition_by_safety(
     if (checkpoint < info.max_id) uncorrelated.add(stream);
   }
 
-  // Read-only probe: query_streams returns subscription positions without
-  // leasing or mutating retry state.
-  //
-  // The stored `source` on a subscription may be a literal stream name or
-  // a pattern (e.g. `^(A|B)$`); this probe matches it as a regex against
-  // close-target names either way — a literal regex-matches itself, and a
-  // pattern matches the streams it claims for. Any metacharacter
-  // over-match only widens the pending set — the conservative direction
-  // for a safety probe. Compiled patterns are cached because dynamic
-  // reactions commonly produce many subscriptions sharing one source, so
-  // the callback fires repeatedly with the same `source`.
+  // Read-only. A subscription's `source` is matched as a regex either way
+  // (a literal matches itself); over-matching only widens the pending set,
+  // the safe direction. Compiled patterns are cached.
   const pending_set = new Set<string>();
   const source_regex = new Map<string, RegExp>();
   const get_regex = (source: string): RegExp => {
@@ -590,18 +520,9 @@ async function partition_by_safety(
         const source_re = position.source
           ? get_regex(position.source)
           : undefined;
-        // "Behind the head" stopped meaning "has work to do" when correlate
-        // became the producer of the work mark (#1487): a subscription's
-        // watermark advances only over events that resolve to it, so a
-        // consumer of two of a state's ten event types sits permanently below
-        // a head it has no reaction for. Asking the row the same question
-        // `claim` asks keeps the guard honest — and keeps close from skipping
-        // every such stream forever.
-        //
-        // An unmarked row is not pending, and that is now definitional rather
-        // than conservative (#1488): `claim` will never serve it either, so
-        // there is no consumer to wait for. The catch-up above is what makes
-        // the reading safe — any mark that was owed has landed by here.
+        // Pending means what `claim` means: a mark above the watermark. An
+        // unmarked row has nothing to wait for; the catch-up above has landed
+        // every mark that was owed.
         const has_work =
           position.correlated_at !== undefined &&
           position.at < position.correlated_at;

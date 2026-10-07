@@ -62,7 +62,7 @@ const es_caption = (caption: string, color: string, body: string): string =>
  * spotting in mixed log streams, plus a `caption` (past tense — every drain
  * trace fires on exit). All drain ops share one color (gray) so the pipeline
  * reads as a single channel; the caption disambiguates the phase. Lane
- * (ACT-1103) is appended in lilac, unwrapped, when set and non-default,
+ * is appended in lilac, unwrapped, when set and non-default,
  * so the operator's eye lands on the lane name without parsing per-stream
  * detail. Per-stream `@at/retry` and fetched event lists are muted via
  * {@link dim} so the stream name itself reads loudest.
@@ -176,13 +176,13 @@ export function build_es(
   // `options.correlator` still wins — the orchestrator default fills in
   // only when the caller didn't supply one.
   //
-  // ACT-1238: the per-event patch step is selected ONCE by the builder
+  // The per-event patch step is selected ONCE by the builder
   // (`act-builder.ts`) — bare vs validating — and passed in here already
   // bound, so this factory stays agnostic to `validateFoldedState`. It
   // just bakes the given `patch_fn` into the load/action closures, so
   // the projection-fold engine and close-cycle callers inherit the same
   // choice without threading anything through their own signatures. The
-  // default (`bare_patch`) keeps direct callers on the pre-#1238 path.
+  // default (`bare_patch`) keeps direct callers on the plain path.
   const bound_action: EsOps["action"] = (
     me,
     action_name,

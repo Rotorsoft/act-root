@@ -74,8 +74,7 @@ export type SubscribeResult = {
   subscribed: number;
   watermark: number;
   /**
-   * Whether the caller holds the correlation lease and should scan
-   * (#1532).
+   * Whether the caller holds the correlation lease and should scan.
    *
    * `undefined` when no `correlator` was supplied — no lease was requested,
    * so there is no answer and the caller scans as it always has.
@@ -90,7 +89,7 @@ export type SubscribeResult = {
    */
   correlating?: boolean;
   /**
-   * The correlate checkpoint (#1484): how far `correlate` has **read** the
+   * The correlate checkpoint: how far `correlate` has **read** the
    * event log, or `-1` when it has never advanced.
    *
    * Distinct from a subscription's `at` (how far a *target* has been
@@ -104,7 +103,7 @@ export type SubscribeResult = {
    * stream-scoped surface (`prioritize`, `reset`, `unblock`,
    * `query_streams`, `blocked_streams`) ever counts it.
    *
-   * **Keyed per correlator** when a `correlator` is supplied (#1532), and
+   * **Keyed per correlator** when a `correlator` is supplied, and
    * shared otherwise. Correlators that look for different things read the
    * log for different reasons, so one inheriting another's position at cold
    * start could skip events it needed — previously survivable only because
@@ -183,12 +182,12 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property leased_until - Lease expiration timestamp (when leased)
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier `claim()` ordering — see {@link Store.prioritize}.
- * @property lane - Drain lane bound to the stream (ACT-1103)
+ * @property lane - Drain lane bound to the stream
  * @property deferred_at - Persisted next-visit time (ms since epoch) when
  *   the stream is held out of {@link claim} by a `defer` outcome; omitted
  *   when the stream carries no active defer schedule. Read at cold start to
  *   re-seed the in-process defer timer so an idle deferred stream re-arms
- *   its drain across a restart (#1221) — the schedule outlives the process
+ *   its drain across a restart — the schedule outlives the process
  *   memory it was derived from.
  */
 export type StreamPosition = {
@@ -269,7 +268,7 @@ export type StreamPosition = {
  *   flag, only the row count fetched.
  * @property blocked - Restrict to blocked (`true`) or unblocked (`false`)
  *   streams. Omit for all.
- * @property lane - Restrict to streams in this drain lane (ACT-1103). Exact match.
+ * @property lane - Restrict to streams in this drain lane. Exact match.
  * @property after - Keyset pagination cursor: returns only streams with
  *   `stream > after` (lexicographic). Pass the last seen `stream` to fetch
  *   the next page.
@@ -380,7 +379,7 @@ export type EventName<E extends Schemas = Schemas> =
  *
  * `head`/`tail` never carry `pii`. `query_stats` is an operator-introspection
  * surface with no actor context and no disclosure gate, so — like any
- * un-gated read — it omits the pii sidecar on every adapter (#1294). Route
+ * un-gated read — it omits the pii sidecar on every adapter. Route
  * pii through `load` (gated) instead.
  *
  * @template E - Event schemas; defaults to {@link Schemas} when the caller
@@ -471,7 +470,7 @@ export type SubscribeInput = {
    */
   readonly priority?: number;
   /**
-   * Drain lane (ACT-1103). Default `"default"`.
+   * Drain lane. Default `"default"`.
    *
    * Written on the same rule as {@link priority}: the lane rides the max,
    * so a subscribe whose priority is **at or above** the stored priority
@@ -479,8 +478,7 @@ export type SubscribeInput = {
    * priority registered for a stream therefore owns its lane, durably —
    * the same outcome the correlate scan applies within one pass, made a
    * property of the row so a caller that has forgotten what a stream
-   * carries cannot re-lane it by resolving to it at a lower priority
-   * (#1599).
+   * carries cannot re-lane it by resolving to it at a lower priority.
    *
    * Re-laning stays restart-driven: a restart re-subscribes at the same
    * declared priority, and equal priority writes the lane. A stream whose
@@ -490,7 +488,7 @@ export type SubscribeInput = {
   readonly lane?: string;
   /**
    * Highest event id observed to resolve to this target — the stream's
-   * **work mark** (#1485). Applied as `correlated_at = GREATEST(correlated_at, N)`
+   * **work mark**. Applied as `correlated_at = GREATEST(correlated_at, N)`
    * for every value including zero and negatives; omitted leaves the stored
    * value untouched.
    *
@@ -689,7 +687,7 @@ export interface Store extends Disposable, EventSource {
    *   {@link ack} still lands. A store that skipped recording the holder
    *   would hand out a lease whose every ack is dropped, parking the
    *   watermark and redelivering every event on every drain.
-   * @param lane - Optional lane filter (ACT-1103)
+   * @param lane - Optional lane filter
    * @returns Array of successfully leased streams with metadata
    *
    * @example
@@ -732,7 +730,7 @@ export interface Store extends Disposable, EventSource {
    *   an adapter that merges the batch in one statement cannot do even
    *   that (`UPDATE ... FROM` may touch a target row only once, so
    *   Postgres picks an arbitrary source row). Callers de-duplicate
-   *   before calling; adapters may assume uniqueness (#1672).
+   *   before calling; adapters may assume uniqueness.
    * @returns `subscribed` count of newly registered streams, `watermark` max `at` across all streams
    *
    * @example
@@ -750,7 +748,7 @@ export interface Store extends Disposable, EventSource {
     streams: SubscribeInput[],
     /**
      * Advance the correlate checkpoint to this event id — correlate's own
-     * watermark, in the same id space as a subscription's `at` (#1484).
+     * watermark, in the same id space as a subscription's `at`.
      *
      * `correlate` is the only component that knows how far it has read, and
      * it already calls `subscribe` with the targets a scan discovered, so the
@@ -765,8 +763,7 @@ export interface Store extends Disposable, EventSource {
      */
     correlated_at?: number,
     /**
-     * Identifies the calling correlator, and asks for the correlation lease
-     * (#1532).
+     * Identifies the calling correlator, and asks for the correlation lease.
      *
      * Correlation is duplicated work without it: every worker keeps its own
      * in-memory scan position, so N workers wake on the same commit and each
@@ -791,8 +788,8 @@ export interface Store extends Disposable, EventSource {
      * - `millis` is how long the lease is held from now.
      *
      * Omitted entirely, no lease is taken and the caller reads and advances
-     * the shared legacy checkpoint — which is what every pre-#1532 caller
-     * does, and why this is additive.
+     * the shared legacy checkpoint — which is what callers that predate
+     * the lease do, and why this is additive.
      */
     correlator?: { key: string; by: string; millis: number }
   ) => Promise<SubscribeResult>;
@@ -824,8 +821,7 @@ export interface Store extends Disposable, EventSource {
    * stream, and an adapter that applies the batch in one statement cannot
    * apply two entries to the same row (`UPDATE … FROM` may touch a target
    * row once, so Postgres keeps an arbitrary one). Callers de-duplicate
-   * before calling, as the drain does; adapters may assume uniqueness
-   * (#1672, #1785).
+   * before calling, as the drain does; adapters may assume uniqueness.
    * @returns The acknowledged leases (deferred entries are not returned)
    *
    * @example
@@ -857,7 +853,7 @@ export interface Store extends Disposable, EventSource {
    *
    * @param leases - Leases to block with error messages. **At most one entry
    *   per stream**, for the same reason as {@link ack}; adapters may assume
-   *   uniqueness (#1785).
+   *   uniqueness.
    * @returns Blocked leases
    *
    * @example
@@ -1064,7 +1060,7 @@ export interface Store extends Disposable, EventSource {
    * **Subscriptions are not touched.** This is purely event-log work, and
    * that is what lets a store keep its event log and its subscriptions on
    * different systems: every method belongs cleanly to one half, so a hybrid
-   * routes rather than reimplements (#1527). Removing the subscription row
+   * routes rather than reimplements. Removing the subscription row
    * here was the one step that spanned both, and it forced such a store into
    * a distributed transaction it could not have.
    *
@@ -1096,7 +1092,7 @@ export interface Store extends Disposable, EventSource {
    * pairs its own delete with its own seed. Both only matter for inputs the
    * framework never produces — `close-cycle` dedups by stream before calling
    * — but `Store` is a public port, so the order is contract rather than
-   * accident (#1677): a stream listed as both windowed and full ends with its
+   * accident: a stream listed as both windowed and full ends with its
    * FULL entry in the result, and a stream listed twice as full leaves
    * exactly one seed carrying the last target's snapshot, reporting only that
    * pass's own delete count. Deleting once for a deduped set and seeding once
@@ -1169,7 +1165,7 @@ export interface Store extends Disposable, EventSource {
    * one and each keyed correlator's) is an event id, so restore sets them
    * back to -1 in the same transaction; left at their old values they would
    * sit above every renumbered event and correlate would never resolve the
-   * restored events' reactions (#1772). Correlator leases are kept. The
+   * restored events' reactions. Correlator leases are kept. The
    * `Act` that ran the restore restarts its own correlation; any other
    * process running against the same store must be restarted, as for any
    * offline restore.
@@ -1410,7 +1406,7 @@ export interface Store extends Disposable, EventSource {
 
   /**
    * Wipe the sensitive-data payload for every event on the stream — the
-   * physical-erasure side of the sensitive-data epic (#566). Sets the
+   * physical-erasure side of the sensitive-data epic. Sets the
    * adapter's PII column (or equivalent) to `NULL` for the stream's
    * events; `events.data` and the rest of the row are never touched.
    *

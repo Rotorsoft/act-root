@@ -67,7 +67,7 @@ export type EventTags = {
  * (`sensitive.ts`), since the write path splits whole top-level keys. A union
  * event has no top-level shape, so its variants are walked and unioned: a key
  * sensitive in any variant must be split, because the stored payload could be
- * that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ * that variant.
  *
  * @internal
  */

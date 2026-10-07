@@ -73,7 +73,7 @@ export async function fetch<TEvents extends Schemas>(
         // shared one `Promise.all`, so one stream's failure rejected the whole
         // cycle and every healthy stream leased beside it got nothing —
         // an unreadable `pii` payload on one aggregate stalled unrelated
-        // reactions (#1675). The cycle turns this into a no-progress failure
+        // reactions. The cycle turns this into a no-progress failure
         // for THIS stream only, which the retry budget then escalates.
         //
         // Unlike correlate, this read cannot simply decline the payload:

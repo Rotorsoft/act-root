@@ -140,7 +140,7 @@ export type ReactionResolver<
  *   than the worker can claim per cycle); idle systems are unaffected.
  *   See `libs/act-pg/PERFORMANCE.md` for the benchmark that motivated this
  *   knob.
- * @property lane - Optional drain lane (ACT-1103). Defaults to `"default"`.
+ * @property lane - Optional drain lane. Defaults to `"default"`.
  */
 export type Resolved<TLane extends string = string> = {
   readonly target: string;
@@ -150,7 +150,7 @@ export type Resolved<TLane extends string = string> = {
 };
 
 /**
- * Build-time configuration for a drain lane (ACT-1103).
+ * Build-time configuration for a drain lane.
  *
  * @property name - Lane name (`"default"` is reserved for the implicit lane)
  * @property leaseMillis - Lease window for `claim()` calls in this lane
@@ -314,7 +314,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
    * Reads are per-stream but ran under one `Promise.all`, so a single
    * stream's failure rejected the whole cycle and every healthy stream
    * leased alongside it got nothing — a corrupt `pii` payload on one
-   * aggregate stalled unrelated reactions (#1675). Isolating the failure
+   * aggregate stalled unrelated reactions. Isolating the failure
    * here keeps the blast radius on the stream that caused it: the cycle
    * records the error, submits no ack (so the watermark holds), and the
    * stream accrues `retry` until `blockOnError` quarantines it the usual
@@ -342,7 +342,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
  * @property lagging - Whether this stream is behind (lagging frontier)
- * @property lane - Drain lane the stream is bound to (ACT-1103)
+ * @property lane - Drain lane the stream is bound to
  *
  * @example
  * ```typescript
@@ -377,8 +377,8 @@ export type Lease = {
    * stream's `deferred_at`, setting `retry` to the entry's own value —
    * atomically with the other entries' acks. Advance and defer are
    * independent legs, so a partial-progress defer keeps the handled prefix
-   * (it never re-runs on redelivery) while the remainder waits for `due`
-   * (#1278). Deferred entries are not part of ack's return value. Never set
+   * (it never re-runs on redelivery) while the remainder waits for `due`.
+   * Deferred entries are not part of ack's return value. Never set
    * on leases returned by `claim` or carried by lifecycle events.
    */
   readonly due?: number;
@@ -446,14 +446,14 @@ export type SettleOptions = DrainOptions & {
  *   abandoning it means the replacement worker cannot claim that stream
  *   until the lease expires — up to `leaseMillis` of dead time per in-flight
  *   stream on every rolling deploy, with the completing handler's round of
- *   work discarded and redelivered (#1442).
+ *   work discarded and redelivered.
  *
  *   Defaults to the largest `leaseMillis` configured across the Act's lanes
  *   (capped at 30s), because a lane's lease is already the operator's
  *   statement of how long a handler may legitimately hold a stream. Lanes
  *   that pinned no lease contribute the same 10s default `drain()` uses.
  *
- *   `0` restores the pre-#1442 behavior: stop scheduling and return without
+ *   `0` means: stop scheduling and return without
  *   waiting. Whatever the budget, it is a ceiling and not a delay — teardown
  *   proceeds the moment the last in-flight cycle finishes.
  */

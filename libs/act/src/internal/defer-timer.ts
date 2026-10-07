@@ -2,7 +2,7 @@
  * @module defer-timer
  * @category Internal
  *
- * The shared "next visit time" primitive (#1090). A `DeferTimer` holds a
+ * The shared "next visit time" primitive. A `DeferTimer` holds a
  * `stream → due-time` map and a single collapsed wake timer: it parks
  * streams that should be re-visited later and fires one `on_wake` callback
  * at the earliest pending due-time, garbage-collecting the entries that have
@@ -23,8 +23,8 @@
  * *derived* from (an un-advanced watermark, an event's `created` timestamp),
  * not from the map. A restart empties the map, so the cold-start rebuild is
  * explicit: `CorrelateCycle.init` seeds each still-future `deferred_at` back
- * onto the owning lane's timer via {@link "drain-cycle".DrainController.seed_defer}
- * (#1221), so an idle deferred stream re-arms at its due-time with no
+ * onto the owning lane's timer via {@link "drain-cycle".DrainController.seed_defer},
+ * so an idle deferred stream re-arms at its due-time with no
  * intervening commit.
  *
  * @internal
@@ -133,7 +133,7 @@ export class DeferTimer {
       // wake fired early. The consumer's `on_wake` won't re-arm (the drain's
       // just sets its armed flag, and its next pass early-returns while the
       // stream is still store-excluded), so the primitive must self-re-arm or
-      // a >ceiling defer/cooldown loses its precise wake (#1288). A normal wake
+      // a >ceiling defer/cooldown loses its precise wake. A normal wake
       // (something came due) leaves re-arming to the consumer, preserving the
       // fire-once-per-schedule model.
       if (!came_due && this._due.size > 0) this.schedule();

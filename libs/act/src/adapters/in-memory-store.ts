@@ -46,12 +46,12 @@ class InMemoryStream {
   private _leased_until: Date | undefined = undefined;
   private _priority = 0;
   private _lane: string = DEFAULT_LANE;
-  // Persisted next-visit time (#1090). When set and still in the future, the
+  // Persisted next-visit time. When set and still in the future, the
   // stream is held out of `claim` entirely — so a deferred reaction is not
   // re-claimed (and `retry` is never bumped) until its due-time passes. Unlike
   // in-process backoff, this is durable store state shared across workers.
   private _deferred_at: number | undefined = undefined;
-  // Work mark (#1485): highest event id observed to resolve to this target.
+  // Work mark: highest event id observed to resolve to this target.
   // `undefined` means UNKNOWN — the row predates the mark, so `claim` falls
   // back to the legacy has-work probe rather than treating it as "no work".
   private _correlated_at: number | undefined = undefined;
@@ -117,7 +117,7 @@ class InMemoryStream {
     return (
       !this._blocked &&
       (!this._leased_until || this._leased_until <= new Date()) &&
-      // A stream deferred to a future time is not claimable until due (#1090).
+      // A stream deferred to a future time is not claimable until due.
       (!this._deferred_at || this._deferred_at <= Date.now())
     );
   }
@@ -158,7 +158,7 @@ class InMemoryStream {
     return this._leased_until;
   }
 
-  /** Persisted next-visit time (#1090/#1221), or undefined when no active defer. */
+  /** Persisted next-visit time, or undefined when no active defer. */
   get deferred_at() {
     return this._deferred_at;
   }
@@ -203,11 +203,11 @@ class InMemoryStream {
       if (lease.due !== undefined) {
         // Due marker: advance the watermark past the events handled this cycle
         // (`lease.at`) AND schedule the re-visit, persisting the caller's
-        // retry — advance and defer are independent legs (#1278). Advancing
+        // retry — advance and defer are independent legs. Advancing
         // means the succeeded prefix never re-runs on redelivery. An explicit
         // defer passes `retry: -1` (a defer is not a failure); a backoff retry
         // passes the climbing counter so it keeps accruing toward the block
-        // threshold across windows (#1262). Deferred entries are not part of
+        // threshold across windows. Deferred entries are not part of
         // ack's return value.
         this._at = lease.at;
         this._retry = lease.retry;
@@ -237,13 +237,13 @@ class InMemoryStream {
    */
   block(lease: Lease, error: string) {
     // Skip already-blocked streams so a redundant block is a no-op, mirroring
-    // the SQL adapters' `WHERE ... AND blocked = false` guard (#1263). Without
+    // the SQL adapters' `WHERE ... AND blocked = false` guard. Without
     // this, re-blocking returns the lease again and emits a spurious duplicate
     // `blocked` lifecycle event that the durable stores suppress.
     if (this._leased_by === lease.by && !this._blocked) {
       this._blocked = true;
       this._error = error;
-      // A blocked stream is poison; clear any pending defer (#1090).
+      // A blocked stream is poison; clear any pending defer.
       this._deferred_at = undefined;
       return {
         stream: this.stream,
@@ -369,16 +369,16 @@ export class InMemoryStore implements Store {
   private _next_id = 0;
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
-  /** Correlate checkpoint (#1484): how far the log has been READ. */
+  /** Correlate checkpoint: how far the log has been READ. */
   private _correlated_at = -1;
   /**
-   * Per-correlator checkpoint and lease (#1532), keyed by correlator.
+   * Per-correlator checkpoint and lease, keyed by correlator.
    *
    * Keyed rather than singular because correlators that look for different
    * things read the log for different reasons: sharing one position lets a
    * partial-behaviour worker inherit another's, and sharing one lease lets
    * one starve the other. Callers that supply no correlator use
-   * `_correlated_at` instead, which is the pre-#1532 behaviour.
+   * `_correlated_at` instead, the shared checkpoint.
    */
   private _correlators = new Map<
     string,
@@ -624,14 +624,14 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // Eligibility is a pure subscription-row predicate (#1488). `claim`
+    // Eligibility is a pure subscription-row predicate. `claim`
     // never looks at the event log: `correlate` records the highest event id
     // that resolves to a target, and `at < correlated_at` is the whole
     // question. The probe this replaced walked the event index once per
     // eligible subscription, matching `source` literally or as a pattern —
     // matching that now happens in correlate, when it decides what to mark.
     //
-    // An unmarked row is not claimable, by definition (#1446): `undefined`
+    // An unmarked row is not claimable, by definition: `undefined`
     // means the row has never been correlated, not that it has no work.
     const has_work = (s: InMemoryStream): boolean =>
       s.correlated_at !== undefined && s.at < s.correlated_at;
@@ -642,7 +642,7 @@ export class InMemoryStore implements Store {
     // Lagging frontier orders by priority DESC (higher first), then by
     // watermark ASC (most-behind first). Mirrors the PG `claim()` SQL
     // — see `libs/act-pg/PERFORMANCE.md` for the benchmark that
-    // motivated the priority dimension. A fairness reserve (ACT-1223)
+    // motivated the priority dimension. A fairness reserve
     // carves `fair` slots off the budget and fills them by pure watermark
     // order (priority ignored) so a default-priority lagging stream can
     // never be starved out of the frontier by sustained higher-priority
@@ -705,9 +705,9 @@ export class InMemoryStore implements Store {
     await sleep();
 
     // The correlate checkpoint is written by its own producer, in the call
-    // correlate already makes (#1484). Monotonic: a lower value is ignored.
+    // correlate already makes. Monotonic: a lower value is ignored.
     //
-    // With a correlator the position and the lease are per-key (#1532); a key
+    // With a correlator the position and the lease are per-key; a key
     // with no row yet inherits the shared value, so an upgrade does not
     // re-read history.
     let correlating: boolean | undefined;
@@ -759,7 +759,7 @@ export class InMemoryStore implements Store {
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
-        // The lane rides the priority max (#1599): compared before the
+        // The lane rides the priority max: compared before the
         // bump, so a subscribe at or above the stored priority sets the
         // lane and one below leaves it alone. A caller that has forgotten
         // what a stream carries — an evicted LRU record, a fresh process —
@@ -828,7 +828,7 @@ export class InMemoryStore implements Store {
     let count = 0;
     if (Array.isArray(input)) {
       // De-dup the array so a repeated name counts once, matching PG's
-      // set-based `WHERE stream = ANY(...)` (#1360).
+      // set-based `WHERE stream = ANY(...)`.
       for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
@@ -902,7 +902,7 @@ export class InMemoryStore implements Store {
     let count = 0;
     if (Array.isArray(input)) {
       // De-dup the array so a repeated name counts once, matching PG's
-      // set-based `WHERE stream = ANY(...)` (#1360).
+      // set-based `WHERE stream = ANY(...)`.
       for (const name of new Set(input)) {
         const s = this._streams.get(name);
         if (s) {
@@ -1032,7 +1032,7 @@ export class InMemoryStore implements Store {
     // (JS `<=`, i.e. UTF-16 code-unit order) — `localeCompare` disagrees
     // with `<=` on mixed-case/accented names (`B`=66 < `a`=97 by code unit,
     // but `a` < `B` by locale), which let the cursor skip streams the sort
-    // placed after it (#1375, the `query_streams` twin of #1357).
+    // placed after it (the `query_streams` twin of the `query` fix).
     // The default `Array.sort()` comparator IS code-unit order, so it
     // matches `<=` exactly — and PG/SQLite, which paginate under their
     // binary collation. Sorting the keys (rather than comparing values)
@@ -1179,7 +1179,7 @@ export class InMemoryStore implements Store {
     // (JS `<=`, i.e. UTF-16 code-unit order) — `localeCompare` disagrees with
     // `<=` on mixed-case/accented names (`B`=66 < `a`=97 by code unit, but
     // `a` < `B` by locale), which would let the cursor skip streams the sort
-    // placed after it (#1357). The default `Array.sort()` comparator IS
+    // placed after it. The default `Array.sort()` comparator IS
     // code-unit order, so it matches `<=` exactly — and PG/SQLite, which
     // paginate `query_stats` under their binary collation.
     const ordered = [...acc.keys()].sort();
@@ -1268,7 +1268,7 @@ export class InMemoryStore implements Store {
     // `(stream, version)` constraint makes the alternative impossible there.
     // Deleting once from a deduped Set and then inserting once per array
     // entry left this store with two `version: 0` seeds for a stream listed
-    // twice, both reporting the pre-delete count (#1677).
+    // twice, both reporting the pre-delete count.
     for (const { stream, snapshot, meta } of full) {
       let deleted = 0;
       this._events = this._events.filter((e) => {
@@ -1279,7 +1279,7 @@ export class InMemoryStore implements Store {
       // Subscriptions are deliberately untouched, for restart *and* retire
       // targets alike — see the note in truncate's contract. A tombstoned
       // stream's subscription is inert, and reaping it is maintenance that
-      // `seed()` performs (#1527).
+      // `seed()` performs.
       this._stream_versions.delete(stream);
       this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
@@ -1342,7 +1342,7 @@ export class InMemoryStore implements Store {
     );
     // The restored log is renumbered from 0, so every correlate checkpoint
     // (an event id) must start over too, or correlate would resume above the
-    // restored events and never resolve their reactions (#1772). Correlator
+    // restored events and never resolve their reactions. Correlator
     // leases are kept: they say who may correlate, not how far.
     this._correlated_at = -1;
     for (const c of this._correlators.values()) c.at = -1;

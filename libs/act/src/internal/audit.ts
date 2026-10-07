@@ -2,7 +2,7 @@
  * @module audit
  * @category Internal
  *
- * Operator-driven store audit (#723).
+ * Operator-driven store audit.
  *
  * Walks the connected store and yields per-category {@link AuditFinding}s.
  * Each category answers a different "what should I do with this store?"
@@ -18,34 +18,16 @@
  *   - `correlation-gaps` → fix upstream correlator misconfig
  *   - `clock-anomalies` → infra remediation (clock skew)
  *
- * ## Single-scan multiplex (efficiency contract)
+ * ## Single-scan multiplex
  *
- * Earlier draft had each category run its own `store.query(...)`,
- * which meant N requested categories → N table walks. Bad for large
- * stores. Refactored to a pass-based design: each category is a
- * factory that returns an {@link AuditPass} with optional per-row
- * callbacks (`on_event` / `on_stream` / `on_stat`) and a `finalize` hook
- * for any second-pass work. The dispatcher determines the UNION of
- * required data sources, runs each *once*, and broadcasts each row
- * to all interested passes. Worst case: three scans total (events,
- * streams, stats) regardless of how many categories the operator
- * requested. Most categories also share state — close-candidate and
- * restart-candidate both consume the same `on_stat` stream; schema,
- * correlation-gaps, and clock-anomalies all hang off the same
- * `on_event` broadcast.
+ * Each category is an {@link AuditPass} with optional per-row callbacks
+ * (`on_event` / `on_stream` / `on_stat`) and a `finalize` hook. The
+ * dispatcher runs each needed scan once and broadcasts rows to every pass,
+ * so an audit costs at most three scans however many categories run.
+ * Follow-up lookups happen in `finalize`.
  *
- * Categories that need follow-up work (snapshot-drift's per-stream
- * snapshot lookup, correlation-gaps' orphan-id check after collecting
- * ids) do that in their `finalize` hook with their own targeted store
- * calls — keeps the shared scan path minimal.
- *
- * Isolated from orchestration internals — `act.ts` builds the
- * {@link AuditDeps} bag at `.build()` time and hands it here via
- * a one-liner. The audit module never reaches into
- * `internal/{event-sourcing,drain-cycle,settle,close-cycle}.ts`; it
- * only reads through the deps interface and the public `Store`
- * surface. Same shape as `act-tck` within the workspace — a peer of
- * orchestration, not entangled with its private mechanics.
+ * Reads only the {@link AuditDeps} bag and the public `Store`; never the
+ * orchestration internals.
  *
  * @internal
  */
@@ -71,14 +53,7 @@ import {
 import { pii_fields } from "./sensitive.js";
 import { walk_streams } from "./walk-streams.js";
 
-/**
- * Snapshot of orchestrator state the audit reads. Built once at
- * `app.build()`; the audit treats it as immutable for the duration
- * of a call. The orchestrator never passes its own private maps in
- * directly — this bag is the abstraction boundary so a future
- * orchestration refactor can't accidentally entangle with audit
- * logic.
- */
+/** The orchestrator state the audit reads, built once at `build()`. */
 export type AuditDeps = {
   readonly store: () => Store;
   readonly logger: Logger;
@@ -154,13 +129,8 @@ type PassFactory = (deps: AuditDeps, options: AuditOptions) => AuditPass;
  * union of required data sources (events / streams / stats), runs
  * each once, broadcasts rows, and yields per-category findings in
  * the order the categories were requested.
- *
- * Callers can `break` the iteration early — the underlying scan
- * loops have already completed by the time yield starts, so early
- * break only saves the iteration over already-collected findings.
- * (Per-row early termination during a scan isn't feasible without
- * coordination across passes; the audit is bounded by `options.query`
- * scoping rather than mid-scan cancellation.)
+ * Scans finish before the first yield; bound the work with
+ * `options.query`.
  */
 export async function* audit(
   deps: AuditDeps,
@@ -187,15 +157,8 @@ export async function* audit(
   );
 
   if (need_stats) {
-    // Exclude `__snapshot__` so `head` and `count` are DOMAIN figures.
-    // A snapshot is committed right after the domain event that triggered
-    // it, so without this the head of any snapshotting stream is
-    // `__snapshot__` — and every pass that gates on the head name
-    // (`startsWith("__")` → "already closed") silently skips the stream.
-    // Same reasoning as `scan_stream_heads` in the close cycle.
-    //
-    // `__tombstone__` is deliberately NOT excluded: a tombstoned stream
-    // really is closed, and the head-name gates are what recognize it.
+    // Exclude `__snapshot__` so head and count are domain figures; keep
+    // `__tombstone__`, which is how a closed stream is recognized.
     const stats = await deps
       .store()
       .query_stats<Schemas>(
@@ -241,13 +204,8 @@ export async function* audit(
 }
 
 /**
- * A row the store refused to hand back, located by the engine itself.
- *
- * Nothing in an adapter reports this. When a scan trips, the audit re-reads
- * the single next row with `with_pii: false` — a read that declines the
- * payload cannot fail on it — and that read returns the row's `stream` and
- * `id`. So the locating, the reporting and the resume all live here, and the
- * adapters carry no decryption error handling at all (#1675).
+ * A row the store couldn't hand back, located by re-reading it without its
+ * payload (`with_pii: false`), which can't fail.
  */
 type UnreadableRow = {
   stream: string;
@@ -256,19 +214,9 @@ type UnreadableRow = {
 };
 
 /**
- * Run the audit's event scan so that one unreadable row does not end it.
- *
- * A store that trips on a row throws out of `query`, abandoning the rest of
- * the scan — so a single corrupt `pii` payload used to take `app.audit()`
- * down with it, and the audit is the tool an operator reaches for precisely
- * when something is corrupt. The recovery is to ask again for the one row
- * the scan stopped at, declining the payload, which both identifies it and
- * cannot fail; then report it and resume past it.
- *
- * Only forward scans are resumable — `after` is meaningless walking backward
- * — so a backward scan rethrows untouched rather than quietly returning a
- * partial answer. A `limit` is spent against rows already delivered, so the
- * resume carries the remaining budget.
+ * Run the event scan so one unreadable row doesn't end it: locate the row
+ * it stopped at, report it, and resume past it with the remaining `limit`.
+ * Backward scans can't resume, so they rethrow.
  */
 async function scan_events_resiliently(
   deps: AuditDeps,
@@ -319,14 +267,8 @@ async function scan_events_resiliently(
 
 // =================== Pass factories ===================
 //
-// Each category is implemented as a closure-bound `AuditPass`. The
-// factory captures `deps` + relevant options + a `findings` array;
-// the returned pass exposes the per-row hooks the dispatcher calls.
-//
-// All findings are accumulated in a per-pass `findings` buffer and
-// returned from `drain()`. No yield-during-scan — that would couple
-// the pass to async iteration semantics and prevent the shared-scan
-// multiplexing.
+// Each factory returns an `AuditPass` that buffers its findings and
+// returns them from `drain()`.
 
 /**
  * `schema` — every event in the audit window is parsed against the
@@ -359,7 +301,7 @@ const make_schema_pass: PassFactory = (deps) => {
       // commit — their absence from `data` is correct, not corruption. The
       // pass reads raw stored rows, so parsing against the full schema
       // reported every healthy sensitive event as invalid, one finding per
-      // event, burying the real ones (#1424). Omit those keys instead; the
+      // event, burying the real ones. Omit those keys instead; the
       // rest of the payload is still validated.
       const sensitive = pii_fields(schema);
       let parse_schema = schema;
@@ -397,20 +339,8 @@ const make_schema_pass: PassFactory = (deps) => {
 };
 
 /**
- * `deprecated-load` — workspace-wide event-name histogram classified
- * by the framework's `_v<digits>` rule. Built from the shared `on_stat`
- * stream — accumulates per-name + per-stream totals in memory, then
- * emits one finding per deprecated event above the threshold during
- * `drain`.
- */
-/**
- * Per-state deprecation classification — mirrors the builder/registry
- * (`registry.deprecated_events(state_name)`), which group `_v<n>` families
- * strictly within one state's own event set. Classifying over the global
- * event-name union instead would conflate same-stem events across
- * unrelated states (a false-positive migration finding) and even throw on
- * a cross-state leading-zero version collision the builder accepted (#1310).
- * Returns a map of deprecated event name → its current (highest) sibling.
+ * Deprecated event name → its current sibling, grouped per state like
+ * `registry.deprecated_events` (never across unrelated states).
  */
 const classify_deprecated_by_state = (
   deps: AuditDeps
@@ -435,6 +365,13 @@ const classify_deprecated_by_state = (
   return deprecated_to_current;
 };
 
+/**
+ * `deprecated-load` — workspace-wide event-name histogram classified
+ * by the framework's `_v<digits>` rule. Built from the shared `on_stat`
+ * stream — accumulates per-name + per-stream totals in memory, then
+ * emits one finding per deprecated event above the threshold during
+ * `drain`.
+ */
 const make_deprecated_load_pass: PassFactory = (deps, options) => {
   const share_min =
     options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
@@ -461,7 +398,7 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
       // Per-state deprecation classification (not on-disk-driven, and not
-      // over the global event-name union — see #1310).
+      // over the global event-name union).
       const deprecated = classify_deprecated_by_state(deps);
       const sorted = [...deprecated.keys()]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))

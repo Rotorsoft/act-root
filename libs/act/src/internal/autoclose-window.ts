@@ -93,7 +93,7 @@ export function in_autoclose_window(
  * The next instant the off-hours window opens at or after `now`. The
  * synthesized autoclose reaction defers to this when a tick lands
  * outside the window — parking until the window actually opens instead
- * of blind-polling on a configured cadence (the pre-#1175 behavior,
+ * of blind-polling on a configured cadence (the old behavior,
  * where a poll interval longer than the window could oscillate around
  * it and miss it repeatedly).
  *

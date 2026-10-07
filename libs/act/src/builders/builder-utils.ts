@@ -34,7 +34,7 @@ import type {
 import { _this_ } from "./merge.js";
 
 /**
- * Validate and register a drain lane (ACT-1103): the `"default"` name is
+ * Validate and register a drain lane: the `"default"` name is
  * reserved and each lane name must be unique. Mutates `lanes` in place; the
  * caller returns its own builder for chaining.
  *
@@ -85,7 +85,7 @@ export function reaction_on<
     const reaction: Reaction<TEvents, TKey> = {
       handler: schedule ? make_deferred(handler, schedule) : handler,
       resolver: _this_,
-      // #1269: validate the whole bag at the declaration site so a bad
+      // Validate the whole bag at the declaration site so a bad
       // `maxRetries`/`backoff`/`blockOnError` throws ZodError at build,
       // not a NaN gate on the first retry.
       options: resolveReactionConfig({

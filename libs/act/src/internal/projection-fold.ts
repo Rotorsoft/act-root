@@ -20,7 +20,7 @@
  *   The loaded snapshot carries its own head position (`version` and the
  *   global event `id`), captured atomically with `state`, so the engine
  *   never pairs a stale state with a newer head id read separately from
- *   the cache (ACT-1204). Fetched events at or below the loaded id are
+ *   the cache. Fetched events at or below the loaded id are
  *   skipped, later ones fold through the state's own patch reducers.
  * - Eviction under `maxCachedStates` pressure flushes the evictee first
  *   (flush-before-evict) — eviction never loses folded work.
@@ -54,7 +54,7 @@ type Fold<TState extends Schema> = {
 
 /**
  * Internal handle a fold handler exposes so the orchestrator can drop its
- * process-local state (#1466).
+ * process-local state.
  *
  * A rebuild must not trust a per-Act cache: `reset` rewinds the watermark and
  * replays from the beginning, and every replayed event is at or below the
@@ -97,7 +97,7 @@ export function make_fold_handler<
   // sensitive keys removed entirely, not gated to `[REDACTED]`. `load()`
   // folds over `me.view`, so compose the view with `pii_strip` for sensitive
   // events — otherwise an actorless head load would gate to `[REDACTED]` and
-  // the projected row would differ from the warm path by cache warmth (#1320).
+  // the projected row would differ from the warm path by cache warmth.
   // For a non-PII projection every lookup is empty, so `load_me === me`
   // behaviorally.
   const load_me: State<TState, TEvents, TActions> = {
@@ -136,7 +136,7 @@ export function make_fold_handler<
    * The loaded state and its head position (`version`, global `id`,
    * `patches`, `snaps`) are captured atomically inside `load()` — even on a
    * warm cache hit where `snapshot.event` is undefined. Reading the head id
-   * back from the cache separately (ACT-1204) opened a TOCTOU window: a
+   * back from the cache separately opened a TOCTOU window: a
    * concurrent `action()` committing between the two awaits pairs this
    * OLDER state with a NEWER event_id, and the frontier guard below then
    * permanently skips the intervening events. Dirty from the start: the row
@@ -177,7 +177,7 @@ export function make_fold_handler<
       } else {
         fold = await first_sight(stream);
       }
-      // Fold forward only across a CONTIGUOUS version step (#1465). The
+      // Fold forward only across a CONTIGUOUS version step. The
       // cache is per-Act but the subscription watermark is shared, so a
       // worker can be handed an event whose predecessors were drained by a
       // sibling worker — its cached state is then stale, and folding onto

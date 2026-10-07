@@ -38,7 +38,7 @@ export type SettleDeps<TEvents extends Schemas> = {
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
   /**
-   * Shared orchestrator circuit breaker (ACT-984). The settle loop's
+   * Shared orchestrator circuit breaker. The settle loop's
    * `correlate` (subscribe + query) is a store consumer too: a successful
    * pass records `passed()`, a failed one `failed(now, err)` — feeding the
    * same breaker that paces the drain loop, which also surfaces the failure
@@ -57,26 +57,13 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
   /**
-   * Resolves when the cycle currently in flight finishes; `undefined` when
-   * idle (#1468). `_running` answers "is a cycle running?" for the
-   * re-arm bookkeeping; this answers "tell me when it is done" for a
-   * graceful shutdown.
-   *
-   * `stop()` only cancels *scheduling* — a cycle already inside its
-   * correlate → drain loop keeps going, and because `DrainController.drain`
-   * does not consult `_stopped`, it can claim a stream after teardown
-   * returned and after the store adapter was disposed. Never rejects: the
-   * cycle's own `catch` contains its errors, so awaiting this is safe.
+   * Resolves when the cycle in flight finishes, so shutdown can wait for
+   * it (`stop()` cancels scheduling only). Never rejects.
    */
   private _inflight: Promise<void> | undefined;
   /**
-   * Set when a `schedule()` timer fires while a cycle is still running
-   * (ACT-1205). The in-flight cycle's `finally` re-arms one more pass so
-   * the wake-up isn't dropped — a commit landing during the final
-   * no-progress drain pass would otherwise leave armed controllers with
-   * nothing to re-drain on an instance with no lane `cycleMs` and no
-   * polling. Carries the options of the dropped call so the re-armed
-   * pass honors its `debounceMs`/`maxPasses`/drain overrides.
+   * A wake-up that fired while a cycle was running. The running cycle's
+   * `finally` schedules one more pass with these options, so it isn't lost.
    */
   private _pending: SettleOptions | undefined = undefined;
   private readonly _deps: SettleDeps<TEvents>;
@@ -107,7 +94,7 @@ export class SettleLoop<TEvents extends Schemas> {
     this._timer = setTimeout(() => {
       this._timer = undefined;
       // A cycle is already running. Record this wake-up as pending rather
-      // than dropping it (ACT-1205) — the running cycle's `finally`
+      // than dropping it — the running cycle's `finally`
       // re-schedules it so armed controllers always get one more drain.
       if (this._running) {
         this._pending = options;
@@ -126,7 +113,7 @@ export class SettleLoop<TEvents extends Schemas> {
         // SETTLE did rather than what its last pass did. The loop only
         // exits on a pass that made no progress, so emitting that pass
         // alone meant the payload was always empty — while the guide tells
-        // operators to sum `drain.fetched` for throughput (#1383).
+        // operators to sum `drain.fetched` for throughput.
         let settled_drain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
@@ -141,10 +128,8 @@ export class SettleLoop<TEvents extends Schemas> {
           // A scan that reached the store and came back is a real health
           // signal; a disarmed pass that returned without touching it is not.
           // Recording the latter would re-close an OPEN breaker mid-outage and
-          // let the drain below hammer a store nobody has heard from — the
-          // #1329 bug, which #1487 closed by making correlate always scan and
-          // #1510 reopened by letting it skip. So the question is asked per
-          // pass now, which is more accurate than either static answer.
+          // let the drain below hammer a store nobody has heard from — so the
+          // question is asked per pass.
           if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           settled_drain = settled_drain
@@ -155,12 +140,9 @@ export class SettleLoop<TEvents extends Schemas> {
                 blocked: [...settled_drain.blocked, ...drain.blocked],
               }
             : drain;
-          // `last_id > after_before` counts correlate consuming events as
-          // progress even when nothing subscribed or drained this pass — a
-          // bounded correlate window (`limit`) full of inert events would
-          // otherwise break the loop before a reactive event just past the
-          // window is ever scanned. Terminates: ids are monotonic and
-          // finite, so once no events remain `last_id === after_before`.
+          // Reading events counts as progress even when nothing reacted, so a
+          // window of inert events can't stop the loop short. It still ends:
+          // ids are finite.
           const made_progress =
             subscribed > 0 ||
             drain.acked.length > 0 ||
@@ -168,16 +150,8 @@ export class SettleLoop<TEvents extends Schemas> {
             last_id > after_before;
           if (!made_progress) break;
         }
-        // The `.catch` below treats anything it sees as a store failure,
-        // because everything else in this block is one. An uncontained
-        // listener throw was therefore recorded via `breaker.failed()` —
-        // surfacing a spurious `error` event on every settle, and, at
-        // `failureThreshold: 1`, opening the breaker so `drain` returned
-        // EMPTY_DRAIN for the whole cooldown. Each half-open recovery
-        // re-tripped it, so a broken metrics bridge stalled the reaction
-        // pipeline indefinitely (#1436). Containment now lives in
-        // `Act.emit`, which guards each listener individually (#1437), so
-        // no throw escapes `on_settled` to reach that catch.
+        // `Act.emit` contains listener throws, so the store-failure catch
+        // below never sees one.
         if (settled_drain) this._deps.on_settled(settled_drain);
       })()
         .catch((err) => {
@@ -191,7 +165,7 @@ export class SettleLoop<TEvents extends Schemas> {
           this._inflight = undefined;
           settle_done();
           // A wake-up arrived mid-cycle. Re-arm one more pass with its
-          // options so the requested drain actually happens (ACT-1205).
+          // options so the requested drain actually happens.
           const pending = this._pending;
           if (pending !== undefined) {
             this._pending = undefined;
@@ -202,7 +176,7 @@ export class SettleLoop<TEvents extends Schemas> {
   }
 
   /**
-   * The cycle currently in flight, or `undefined` when idle (#1468). A
+   * The cycle currently in flight, or `undefined` when idle. A
    * graceful shutdown awaits this alongside the drain controllers so a
    * settle parked in `correlate` does not resume after teardown.
    */
@@ -213,7 +187,7 @@ export class SettleLoop<TEvents extends Schemas> {
   /** Cancel any pending or active settle cycle. Idempotent. */
   stop(): void {
     // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
-    // the running cycle's `finally` (ACT-1205).
+    // the running cycle's `finally`.
     this._pending = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
