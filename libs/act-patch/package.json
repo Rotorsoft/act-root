@@ -45,12 +45,8 @@
   "scripts": {
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
-    "build": "pnpm clean && tsup && pnpm types",
-    "mutation": "stryker run"
+    "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {},
-  "devDependencies": {
-    "@stryker-mutator/core": "^10.0.0",
-    "@stryker-mutator/vitest-runner": "^10.0.0"
-  }
+  "devDependencies": {}
 }

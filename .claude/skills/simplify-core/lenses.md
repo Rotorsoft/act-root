@@ -26,7 +26,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Tests by concept.** Specs named after a fix rather than a concept (`correlate-arm`, `correlate-armed`, `correlate-checkpoint`, …) merge into one spec per concept that describes behavior. Ticket numbers leave test names. Adapter suites (`libs/act-pg/test`, `libs/act-sqlite/test`, `libs/act-notify/test`) that repeat a TCK case move into the TCK or go. Flag tests that mutate private state where a public assertion would do, and flaky tests. **Guard:** no row of `behavior-contracts.md` and no coverage may be lost; cite the rows each merged spec still pins.
 
-**Mutation evidence (monthly, CI only).** Dispatch the existing mutation workflow (`gh workflow run mutation.yml`), never locally. Surviving mutants are code no test pins down: either behavior that needs one assertion, or code that can go. Blocked while Stryker's vitest runner can't run on vitest 5 (every mutant survives); skip it until upstream fixes that.
+**Mutation evidence (monthly, CI only).** Retired: the Stryker setup was removed because its vitest runner can't run on vitest 5. Revive it only once upstream supports vitest 5, as one root config run in CI, and compare with the baselines in `history.md`. Surviving mutants are code no test pins down: either behavior that needs one assertion, or code that can go.
 
 ## Packages
 
