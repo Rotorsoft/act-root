@@ -296,7 +296,7 @@ Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `a
 
 **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
 
-**The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. One spec, `libs/act-tck/test/all-packages-stability.spec.ts`, discovers every `@rotorsoft/*` package under `libs/` and snapshots the source text of each entry point declared in its `exports` (and the relative files it imports). Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR. New packages and subpaths are picked up automatically.
+**The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. One spec, `libs/act-tck/test/all-packages-stability.spec.ts`, discovers every `@rotorsoft/*` package under `libs/` and snapshots the source text of each entry point declared in its `exports`, following its relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR. New packages and subpaths are picked up automatically.
 
 ### Config-validation schemas
 
