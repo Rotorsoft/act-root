@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.17](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.16...@rotorsoft/act-http-v1.10.17) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act-http:** share in-flight tracking per store; fail a receiver listen on a busy port ([#1799](https://github.com/Rotorsoft/act-root/issues/1799)) ([5d0aa44](https://github.com/Rotorsoft/act-root/commit/5d0aa445c9859e1b8cf203510a9b42183e04606a)), closes [#1782](https://github.com/Rotorsoft/act-root/issues/1782) [#1783](https://github.com/Rotorsoft/act-root/issues/1783) [#1782](https://github.com/Rotorsoft/act-root/issues/1782) [#1783](https://github.com/Rotorsoft/act-root/issues/1783)
+
 # [@rotorsoft/act-http-v1.10.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.15...@rotorsoft/act-http-v1.10.16) (2026-10-07)
 
 
