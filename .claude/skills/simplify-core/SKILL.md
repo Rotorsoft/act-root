@@ -14,7 +14,7 @@ Files: `lenses.md` (what to look at), `metrics.sh` (how to measure), `history.md
 ## Ground rules
 
 1. **Subtract.** A proposal must make the repo smaller or plainer: fewer exports, methods, options, concepts, packages, files over budget, test files, workflows or lines. If it adds anything it must remove more, in numbers.
-2. **The framework is published.** Internal code changes freely. Public surface ([STABILITY.md](../../../STABILITY.md)), including each published package, changes only with a deprecation path, and breaking removals wait in the **next-major list** in `history.md` so they land together with one migration guide.
+2. **The framework is published.** Internal code changes freely. Public surface ([STABILITY.md](../../../STABILITY.md)) is not deprecated or removed: a grep of this repo can't see who uses a published package. Simplify it by not adding to it, by routing internal callers to internal implementations, and by documenting it well. Say exactly what was searched ("no caller in this repo"), never "unused".
 3. **I am a source of the complexity.** Review my own recent changes with the most suspicion. My typical mistakes: a fix that needs a second mechanism to undo its own side effect, and machinery for a narrow failure when a recovery path or a doc correction would do.
 4. **Behavior stays.** A simplification changes nothing an app observes, except to remove a bug. The suite (100% coverage), the TCK, and the rows in `docs/docs/architecture/behavior-contracts.md` are the proof; consolidating tests may never drop a row or coverage.
 5. **Question past decisions, not past rejections.** Any shipped design is open to challenge, including ones recorded in `learnings.md`, memory or docs as settled: a feature built into core that could be a decorator or a leaf package is exactly what this review exists to find. A challenge names the original reasons and shows why they no longer hold. A proposal the user rejected in an earlier run stays rejected unless something material changed, and the proposal says what.
@@ -25,7 +25,7 @@ Targets the retrospective tracks (adjust them only with the user):
 
 - comments under 25% of core lines; no ticket numbers in source or test names
 - no core file over 300 lines; one concept per file
-- runtime exports of `@rotorsoft/act` around 30; `IAct` stays the small surface handlers see, and each `Act` method beyond it is documented as operator surface
+- runtime exports of `@rotorsoft/act` don't grow (54 today); `IAct` stays the small surface handlers see, and each `Act` method beyond it is documented as operator surface
 - one implementation per idea: adapter logic shared through the orchestrator or the TCK, config validated once in `internal/config.ts`
 - one spec per concept, not per ticket; adapter suites don't repeat the TCK
 - each behavior documented in one place and linked elsewhere
@@ -60,7 +60,7 @@ Targets the retrospective tracks (adjust them only with the user):
 
 ```
 ### P<run date>-<n>. <one-line title>
-Kind: internal | public (deprecation path: …) | next-major
+Kind: internal | docs | tests | infra
 Removes: <exports / methods / options / concepts / files / tests / ~lines, with numbers>
 Evidence: <file:line, usage counts, what a reader must hold in their head today>
 Proposal: <the change, concretely; a before/after sketch if it helps>

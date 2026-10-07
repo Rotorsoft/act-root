@@ -9,7 +9,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A background path that repeats a foreground path drifts, because nothing exercises it. Make it trigger the foreground path. (#1804: polling marked work and never drained)
 - When a capability is buried in one feature, re-express the feature as a use of a general primitive and delete the special machinery. (#1090: autoclose became a deferred reaction; its controller and ticker went away)
 - Several features that look different can be one operation; find the shared verb before building separate guardrails. (#1128: backup, restore and transfer are all source → sink)
-- Prefer declarations read by the orchestrator over new ports, columns or caller-side helpers. (#566: PII is a column plus `.sensitive`, three heavier designs rejected. Open question: that design still put a column, `forget_pii` and TCK cases in core for every adapter; a `Store` decorator might carry it outside the core.)
+- Prefer declarations read by the orchestrator over new ports, columns or caller-side helpers. (#566: PII is a column plus `.sensitive`, three heavier designs rejected. Re-examined 2026-10-08: a `Store` decorator can't carry it, because gated reads and handler stripping need the schema markers and the actor; it stays in core.)
 - Put the policy where the knowledge is: the author of a unit of work declares its retry profile; callers shouldn't. (#1111, #601)
 - The call site is the spec. If the line doesn't read as plain English, the API isn't done, even when the types are right. (#1134)
 - Packaging is a distribution choice, not a discipline. An expensive operator call can be an `IAct` method if it is never auto-invoked. (#723)
@@ -73,6 +73,12 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A toolchain migration is usually blocked downstream of the thing migrated. (TS7: typedoc)
 
 ## Process
+
+- A grep of this repo can't show who uses a published export. Never call an export "unused"; say what was searched, and don't deprecate public surface. (#1817)
+- Estimate a comment cut by sampling first: stripping all history moved comments only 52% → 49%, because most comment volume is explanation. (#1820)
+- Merging spec files without a shared fixture saves files, not lines. (#1821)
+- A commit pushed after its PR merged is lost; check the PR is still open before pushing a follow-up. (#1816, #1819)
+- A scripted comment rewrite can swallow code; diff the non-comment lines before trusting it. (#1820)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
 - Ticket numbers belong in git and here, not in code comments or test names.
