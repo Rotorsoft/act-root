@@ -38,8 +38,6 @@ export type { Scoped } from "./scoped.js";
  * and {@link disposeAndExit}; not part of the user-facing surface.
  *
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -227,8 +225,6 @@ export const cache = ((adapter?: Cache): Cache => {
  * frame this bag *is* and would recurse.
  *
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const default_scope = (): Scoped => DEFAULT_SCOPE;
 
@@ -348,7 +344,5 @@ export const TOMBSTONE_EVENT = "__tombstone__";
  *
  * Persisted on `streams.lane` and threaded as the strict-typed default in
  * builder generics — `lane?: TLanes` always includes `"default"`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_LANE = "default";

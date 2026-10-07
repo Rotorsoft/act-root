@@ -140,9 +140,11 @@ import type {
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-// The autoclose types are public; the constants and the resolver are
-// deprecated and leave the public exports in the next major. All live in
-// `internal/config.ts`.
+// Re-export the autoclose config surface so operators can
+// `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
+// from "@rotorsoft/act"`. The implementation lives in
+// `internal/config.ts` (the single home for builder-facing config bags)
+// to keep this orchestrator file focused on the `Act` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -1831,8 +1833,6 @@ export class Act<
    * Cancels any pending or active settle cycle.
    *
    * @see {@link settle}
-   *
-   * @deprecated Use {@link shutdown}, which stops settling along with everything else. Removed in the next major.
    */
   stop_settling() {
     this._settle.stop();

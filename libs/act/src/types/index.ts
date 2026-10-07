@@ -23,8 +23,6 @@ export * from "./schemas.js";
  * - `test`: Automated testing
  * - `staging`: Pre-production
  * - `production`: Live/production
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const Environments = [
   "development",
@@ -41,8 +39,6 @@ export type Environment = (typeof Environments)[number];
 /**
  * Supported log levels for framework logging.
  * - `fatal`, `error`, `warn`, `info`, `debug`, `trace`
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const LogLevels = [
   "fatal",

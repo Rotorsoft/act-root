@@ -889,9 +889,11 @@ import type {
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-// The autoclose types are public; the constants and the resolver are
-// deprecated and leave the public exports in the next major. All live in
-// \`internal/config.ts\`.
+// Re-export the autoclose config surface so operators can
+// \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
+// from "@rotorsoft/act"\`. The implementation lives in
+// \`internal/config.ts\` (the single home for builder-facing config bags)
+// to keep this orchestrator file focused on the \`Act\` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -2580,8 +2582,6 @@ export class Act<
    * Cancels any pending or active settle cycle.
    *
    * @see {@link settle}
-   *
-   * @deprecated Use {@link shutdown}, which stops settling along with everything else. Removed in the next major.
    */
   stop_settling() {
     this._settle.stop();
@@ -7509,8 +7509,6 @@ import { extend } from "./utils.js";
 /**
  * Zod schema for validating package.json metadata.
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const PackageSchema = z.object({
   name: z.string().min(1),
@@ -7861,16 +7859,12 @@ export const DEFAULT_LEASE_MILLIS = 10_000;
  * Default debounce window (ms) for \`settle()\` when neither the per-call
  * \`SettleOptions.debounceMs\` nor \`ActOptions.settleDebounceMs\` is set.
  * Coalesces commits in the same tick and small bursts.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 /**
  * Default LRU cap for the subscribed-streams cache. Apps that mint many
  * dynamic targets (one per aggregate) should override it with
  * \`ActOptions.maxSubscribedStreams\`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
@@ -8051,11 +8045,7 @@ const AutocloseOptionsSchema = z.object({
 /** Resolved autoclose configuration after validation + default expansion. */
 export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
 
-/**
- * Validate + default the autoclose knobs on \`ActOptions\`. Throws \`ZodError\`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
- */
+/** Validate + default the autoclose knobs on \`ActOptions\`. Throws \`ZodError\`. */
 export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
@@ -14482,8 +14472,6 @@ export * from "./schemas.js";
  * - \`test\`: Automated testing
  * - \`staging\`: Pre-production
  * - \`production\`: Live/production
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const Environments = [
   "development",
@@ -14500,8 +14488,6 @@ export type Environment = (typeof Environments)[number];
 /**
  * Supported log levels for framework logging.
  * - \`fatal\`, \`error\`, \`warn\`, \`info\`, \`debug\`, \`trace\`
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const LogLevels = [
   "fatal",
@@ -15058,8 +15044,6 @@ export type { Scoped } from "./scoped.js";
  * and {@link disposeAndExit}; not part of the user-facing surface.
  *
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -15247,8 +15231,6 @@ export const cache = ((adapter?: Cache): Cache => {
  * frame this bag *is* and would recurse.
  *
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const default_scope = (): Scoped => DEFAULT_SCOPE;
 
@@ -15368,8 +15350,6 @@ export const TOMBSTONE_EVENT = "__tombstone__";
  *
  * Persisted on \`streams.lane\` and threaded as the strict-typed default in
  * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_LANE = "default";
 
@@ -18616,8 +18596,6 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
 
 /**
  * Zod schema for an actor (user, system, etc.).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ActorSchema = z
   .object({
@@ -18629,8 +18607,6 @@ export const ActorSchema = z
 
 /**
  * Zod schema for a target (stream and actor info).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const TargetSchema = z
   .object({
@@ -18643,8 +18619,6 @@ export const TargetSchema = z
 
 /**
  * Zod schema for causation event metadata.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CausationEventSchema = z.object({
   id: z.number(),
@@ -18654,8 +18628,6 @@ export const CausationEventSchema = z.object({
 
 /**
  * Zod schema for event metadata (correlation and causation).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const EventMetaSchema = z
   .object({
@@ -18669,8 +18641,6 @@ export const EventMetaSchema = z
 
 /**
  * Zod schema for committed event metadata (id, stream, version, created, meta).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CommittedMetaSchema = z
   .object({
@@ -18696,8 +18666,6 @@ export type StateSchema = Readonly<{
 
 /**
  * Query options for event store queries.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const QuerySchema = z
   .object({
@@ -21207,8 +21175,6 @@ const ISO_8601 =
  * Kept exported for host applications that parse Act JSON themselves and want
  * the old shape-based behaviour. New code should let the schema decide.
  *
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
@@ -21410,9 +21376,11 @@ import type {
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-// The autoclose types are public; the constants and the resolver are
-// deprecated and leave the public exports in the next major. All live in
-// \`internal/config.ts\`.
+// Re-export the autoclose config surface so operators can
+// \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
+// from "@rotorsoft/act"\`. The implementation lives in
+// \`internal/config.ts\` (the single home for builder-facing config bags)
+// to keep this orchestrator file focused on the \`Act\` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -23101,8 +23069,6 @@ export class Act<
    * Cancels any pending or active settle cycle.
    *
    * @see {@link settle}
-   *
-   * @deprecated Use {@link shutdown}, which stops settling along with everything else. Removed in the next major.
    */
   stop_settling() {
     this._settle.stop();
@@ -27787,8 +27753,6 @@ import { extend } from "./utils.js";
 /**
  * Zod schema for validating package.json metadata.
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const PackageSchema = z.object({
   name: z.string().min(1),
@@ -28139,16 +28103,12 @@ export const DEFAULT_LEASE_MILLIS = 10_000;
  * Default debounce window (ms) for \`settle()\` when neither the per-call
  * \`SettleOptions.debounceMs\` nor \`ActOptions.settleDebounceMs\` is set.
  * Coalesces commits in the same tick and small bursts.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 /**
  * Default LRU cap for the subscribed-streams cache. Apps that mint many
  * dynamic targets (one per aggregate) should override it with
  * \`ActOptions.maxSubscribedStreams\`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
@@ -28329,11 +28289,7 @@ const AutocloseOptionsSchema = z.object({
 /** Resolved autoclose configuration after validation + default expansion. */
 export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
 
-/**
- * Validate + default the autoclose knobs on \`ActOptions\`. Throws \`ZodError\`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
- */
+/** Validate + default the autoclose knobs on \`ActOptions\`. Throws \`ZodError\`. */
 export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
@@ -34184,8 +34140,6 @@ export * from "./schemas.js";
  * - \`test\`: Automated testing
  * - \`staging\`: Pre-production
  * - \`production\`: Live/production
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const Environments = [
   "development",
@@ -34202,8 +34156,6 @@ export type Environment = (typeof Environments)[number];
 /**
  * Supported log levels for framework logging.
  * - \`fatal\`, \`error\`, \`warn\`, \`info\`, \`debug\`, \`trace\`
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const LogLevels = [
   "fatal",
@@ -34364,8 +34316,6 @@ export type { Scoped } from "./scoped.js";
  * and {@link disposeAndExit}; not part of the user-facing surface.
  *
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -34553,8 +34503,6 @@ export const cache = ((adapter?: Cache): Cache => {
  * frame this bag *is* and would recurse.
  *
  * @internal
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const default_scope = (): Scoped => DEFAULT_SCOPE;
 
@@ -34674,8 +34622,6 @@ export const TOMBSTONE_EVENT = "__tombstone__";
  *
  * Persisted on \`streams.lane\` and threaded as the strict-typed default in
  * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_LANE = "default";
 
@@ -37609,8 +37555,6 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
 
 /**
  * Zod schema for an actor (user, system, etc.).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ActorSchema = z
   .object({
@@ -37622,8 +37566,6 @@ export const ActorSchema = z
 
 /**
  * Zod schema for a target (stream and actor info).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const TargetSchema = z
   .object({
@@ -37636,8 +37578,6 @@ export const TargetSchema = z
 
 /**
  * Zod schema for causation event metadata.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CausationEventSchema = z.object({
   id: z.number(),
@@ -37647,8 +37587,6 @@ export const CausationEventSchema = z.object({
 
 /**
  * Zod schema for event metadata (correlation and causation).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const EventMetaSchema = z
   .object({
@@ -37662,8 +37600,6 @@ export const EventMetaSchema = z
 
 /**
  * Zod schema for committed event metadata (id, stream, version, created, meta).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CommittedMetaSchema = z
   .object({
@@ -37689,8 +37625,6 @@ export type StateSchema = Readonly<{
 
 /**
  * Query options for event store queries.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const QuerySchema = z
   .object({
@@ -39053,8 +38987,6 @@ const ISO_8601 =
  * Kept exported for host applications that parse Act JSON themselves and want
  * the old shape-based behaviour. New code should let the schema decide.
  *
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;
@@ -40959,8 +40891,6 @@ export * from "./schemas.js";
  * - \`test\`: Automated testing
  * - \`staging\`: Pre-production
  * - \`production\`: Live/production
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const Environments = [
   "development",
@@ -40977,8 +40907,6 @@ export type Environment = (typeof Environments)[number];
 /**
  * Supported log levels for framework logging.
  * - \`fatal\`, \`error\`, \`warn\`, \`info\`, \`debug\`, \`trace\`
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const LogLevels = [
   "fatal",
@@ -43197,8 +43125,6 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
 
 /**
  * Zod schema for an actor (user, system, etc.).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ActorSchema = z
   .object({
@@ -43210,8 +43136,6 @@ export const ActorSchema = z
 
 /**
  * Zod schema for a target (stream and actor info).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const TargetSchema = z
   .object({
@@ -43224,8 +43148,6 @@ export const TargetSchema = z
 
 /**
  * Zod schema for causation event metadata.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CausationEventSchema = z.object({
   id: z.number(),
@@ -43235,8 +43157,6 @@ export const CausationEventSchema = z.object({
 
 /**
  * Zod schema for event metadata (correlation and causation).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const EventMetaSchema = z
   .object({
@@ -43250,8 +43170,6 @@ export const EventMetaSchema = z
 
 /**
  * Zod schema for committed event metadata (id, stream, version, created, meta).
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CommittedMetaSchema = z
   .object({
@@ -43277,8 +43195,6 @@ export type StateSchema = Readonly<{
 
 /**
  * Query options for event store queries.
- *
- * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const QuerySchema = z
   .object({

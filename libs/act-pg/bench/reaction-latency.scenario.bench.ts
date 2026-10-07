@@ -177,7 +177,8 @@ async function runScenario(
     }
     return { samples: rec.drain(), commits };
   } finally {
-    await app.shutdown();
+    app.stop_correlations();
+    app.stop_settling();
     await dispose()("EXIT").catch(() => {});
   }
 }

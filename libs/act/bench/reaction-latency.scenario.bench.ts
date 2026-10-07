@@ -183,7 +183,8 @@ async function runScenario(
       capturedFraction: samples.length / Math.max(1, commits),
     };
   } finally {
-    await app.shutdown();
+    app.stop_correlations();
+    app.stop_settling();
     await dispose()("EXIT").catch(() => {});
   }
 }
