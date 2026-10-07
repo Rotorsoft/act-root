@@ -1,7 +1,7 @@
 /**
  * @module act/types/audit
  *
- * Operator-driven store audit (#723).
+ * Operator-driven store audit.
  *
  * The `app.audit(...)` method walks the connected store and yields
  * per-category findings — each tagged with the remediation it

@@ -404,8 +404,7 @@ export type ActionBuilder<
    * The predicate receives the full event including merged PII so it can
    * branch on the payload itself (e.g.
    * `event.data.ownerId === actor.id`). Reducers, projections, and
-   * reactions are unaffected — they follow separate visibility rules
-   * documented in #855.
+   * reactions are unaffected — they follow separate visibility rules.
    *
    * @param disclose - Predicate `(event, actor) => boolean`. `true` =
    *   plaintext, `false` = `"[REDACTED]"` substitution.
@@ -444,12 +443,12 @@ export type ActionBuilder<
    * alternative OR path. Validated via Zod at build time; misconfiguration
    * throws before `act().build()` completes.
    *
-   * Under the hood this compiles to a synthesized reaction (#1090) that runs
+   * Under the hood this compiles to a synthesized reaction that runs
    * on a per-aggregate synthetic stream: it defers to `head.created + the
    * policy's min after` while the cooldown holds and closes the stream once
    * the policy matches. There is no background sweep.
    *
-   * **The function-predicate form was removed (#1090).** `.autocloses` no
+   * **The function-predicate form was removed.** `.autocloses` no
    * longer accepts `(stream, head, count) => boolean`; an opaque predicate has
    * no derivable due-time or terminal event to react to. For conditions the
    * declarative form can't express, call `app.close(...)` from your own logic.
@@ -791,7 +790,7 @@ function action_builder<
       type MergedActions = TActions & { [P in TKey]: TNewActions };
       (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
       if (options) {
-        // #1269: validate the whole action bag at declaration so a bad
+        // Validate the whole action bag at declaration so a bad
         // `maxRetries`/`backoff` throws ZodError at build, not a NaN gate.
         resolveActionConfig(options);
         internal.options ??= {};
@@ -813,7 +812,7 @@ function action_builder<
           const event_name = handler;
           // Tag the synthetic function with the static event name so
           // the act-builder can detect emissions of deprecated events
-          // at build time (ACT-403). Dynamic forms — where the
+          // at build time. Dynamic forms — where the
           // returned event name is computed inside the user's
           // function — can't be inspected statically; they're caught
           // by the runtime warning in event-sourcing.ts.
@@ -864,7 +863,7 @@ function action_builder<
     },
 
     autocloses(policy: AutoclosePolicy) {
-      // Declarative policy only (#1090). The online path is a synthesized
+      // Declarative policy only. The online path is a synthesized
       // reaction that defers to a derivable due-time and closes — an opaque
       // function predicate has no terminal event to react to nor a window to
       // derive, so it's no longer accepted online. Operators who need custom

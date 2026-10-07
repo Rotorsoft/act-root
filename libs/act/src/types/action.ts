@@ -137,7 +137,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   caller owns that eligibility: `load()` requests `with_snaps` only
  *   for a current-state read and drops it under any `asOf` bound, so a
  *   time-travel read full-scans under its filter rather than jumping to
- *   a snapshot outside the window (RFC 1274). Do not combine `with_snaps`
+ *   a snapshot outside the window. Do not combine `with_snaps`
  *   with `before`/`created_*`/`limit` in a direct `query()` call.
  * @property `with_pii?` - Whether the store should produce the sensitive
  *   payload. Defaults to **true**, which is today's behavior: the store
@@ -253,12 +253,12 @@ export type Message<TEvents extends Schemas, TKey extends keyof TEvents> = {
   /** The event or action payload */
   readonly data: Readonly<TEvents[TKey]>;
   /**
-   * Sensitive-data payload (#566). Carries fields the framework extracted
+   * Sensitive-data payload. Carries fields the framework extracted
    * from `data` at commit-interception time, routed to a separate
    * `events.pii` column by adapters that declare the `pii_isolation`
    * capability.
    *
-   * Populated by the framework's commit interception (foundation #855) —
+   * Populated by the framework's commit interception (foundation) —
    * action handlers do not set this. On commit input it carries the
    * extracted sensitive fields; on load output it carries the merged
    * fields read from the adapter's pii column (or `null` after
@@ -530,7 +530,7 @@ export type BackoffStrategy = "fixed" | "linear" | "exponential";
  * Validated at its declaration site (reaction `.do(...)` / action
  * `.on(...)`): an off-union `strategy`, a non-finite/negative `baseMs`, or a
  * non-finite/non-positive `maxMs` throws `ZodError` at `act().build()` rather
- * than producing a `NaN` delay that silently disables pacing (ACT-1269).
+ * than producing a `NaN` delay that silently disables pacing.
  *
  * @property strategy - {@link BackoffStrategy}
  * @property baseMs - Base delay (must be finite and ≥ 0)
@@ -680,7 +680,7 @@ export type State<
    * reads of `sensitive(...)`-marked fields — returning `true` allows the
    * actor to see plaintext, `false` redacts. When absent, the framework
    * default-denies on every external read (sensitive fields are always
-   * substituted with `"[REDACTED]"`). See #855 / epic #566.
+   * substituted with `"[REDACTED]"`).
    */
   // Method-shorthand syntax — bivariant on parameters under
   // `strictFunctionTypes`, so a narrow `State<{count: number},
@@ -708,8 +708,8 @@ export type State<
   ): boolean;
   /**
    * The smallest `after` window (in days) of the `.autocloses({...})`
-   * policy, or `undefined` when the policy has no time component
-   * (#1090). The synthesized autoclose reaction uses it to defer its
+   * policy, or `undefined` when the policy has no time component.
+   * The synthesized autoclose reaction uses it to defer its
    * re-check to `head.created` plus this many days; a policy without an
    * `after` waits for the next event instead of parking on a due-time.
    * Set alongside `autoclose` by the builder. Day-denominated — the
@@ -718,8 +718,8 @@ export type State<
   autoclose_after_days?: number;
   /**
    * The rolling-window width (in days) of the `.autocloses({ keep })`
-   * policy, or `undefined` when the policy declares no rolling window
-   * (#1011). The synthesized autoclose reaction stages a windowed close
+   * policy, or `undefined` when the policy declares no rolling window.
+   * The synthesized autoclose reaction stages a windowed close
    * (prune the prefix older than the window behind the closest safe
    * snapshot) when the oldest surviving domain event ages out, and
    * defers until the tail ages out otherwise. Set alongside `autoclose`
@@ -757,7 +757,7 @@ export type State<
    *
    * `pii_aware` is `true` when any of the state's events declare
    * `sensitive(...)` fields. Drives the cache-write gate in `load()` /
-   * `action()` (#861): pii-aware states never populate the snapshot
+   * `action()`: pii-aware states never populate the snapshot
    * cache because state evolves from the actor-gated event view, so
    * the cached state would vary by caller. Pure states cache normally.
    *
@@ -951,7 +951,7 @@ export type ScanOptions = {
   }) => void;
 
   /**
-   * Per-batch row count for the scan pagination loop (ACT-1133). Each
+   * Per-batch row count for the scan pagination loop. Each
    * call to `source.query` requests `limit: batch_size` and `after:
    * <last id seen>`. Default `500`. Lower values trade round trips for
    * memory; higher values approach the cost of an unbounded query.
@@ -973,7 +973,7 @@ export type ScanOptions = {
 
   /**
    * Compact streams that have been closed (tombstoned) via
-   * {@link IAct.close} (ACT-1126). The scan walks the source once
+   * {@link IAct.close}. The scan walks the source once
    * upfront to collect streams with a `__tombstone__` event, then
    * the main loop drops every **pre-close event** whose stream is in
    * that set. The tombstone itself is **kept** — it's the gate that
@@ -991,7 +991,7 @@ export type ScanOptions = {
   readonly drop_closed_streams?: boolean;
 
   /**
-   * Per-event migrations applied during scan (ACT-1126). Keys are
+   * Per-event migrations applied during scan. Keys are
    * source event names; values describe how to rewrite the event into
    * its current-version form before the sink writes it.
    *
@@ -1014,7 +1014,7 @@ export type ScanOptions = {
   readonly event_migrations?: Record<string, EventMigration<any, any>>;
 
   /**
-   * Per-stream rename applied during scan (ACT-1126). Called once per
+   * Per-stream rename applied during scan. Called once per
    * event; the returned string replaces `event.stream`. Useful for
    * tenant relocation (`s => s.replace(/^old-tenant-/, "new-tenant-")`)
    * or prefix cleanup.
@@ -1029,7 +1029,7 @@ export type ScanOptions = {
 /**
  * Per-event migration definition for {@link ScanOptions.event_migrations}.
  * Carries both the rename target and the schema-guarded transform that
- * rewrites the event's `data` payload (ACT-1126).
+ * rewrites the event's `data` payload.
  */
 export type EventMigration<TOld, TNew> = {
   /** Target event name (the current version). */
@@ -1066,7 +1066,7 @@ export type ScanResult = {
 };
 
 /**
- * Read end of the transfer pipeline (ACT-1128 / #788). Anything
+ * Read end of the transfer pipeline. Anything
  * that exposes a `Store.query`-shaped reader plus `dispose` can be
  * used as a source for {@link IAct.restore}.
  *
@@ -1093,7 +1093,7 @@ export interface EventSource extends Disposable {
 }
 
 /**
- * Write end of the transfer pipeline (ACT-1128 / #788). Anything
+ * Write end of the transfer pipeline. Anything
  * that can host the destructive driver-pattern `restore` HOF (atomic
  * wipe + per-event commit) is an `EventSink` — `Store` adapters
  * that ship the optional `restore` method, plus the framework's
@@ -1112,7 +1112,7 @@ export interface EventSink extends Disposable {
 }
 
 /**
- * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * The schedule for a deferred reaction, used by both the
  * declarative `.defer(when)` builder step and the imperative `DeferSignal`
  * escape hatch. Exactly one form:
  *
@@ -1209,7 +1209,7 @@ export interface IAct<
 
   /**
    * Wipe the sensitive-data payload for every event on the stream — the
-   * application-level half of the sensitive-data epic (#566). Delegates to
+   * application-level half of the sensitive-data epic. Delegates to
    * the Store's `forget_pii(stream)`, invalidates the cache entry for the
    * stream, then emits the `forgotten` lifecycle event.
    *

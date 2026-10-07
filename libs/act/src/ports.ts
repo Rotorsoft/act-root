@@ -215,7 +215,7 @@ export const cache = ((adapter?: Cache): Cache => {
  *
  * Every Act entering a frame is what keeps its ports its own. Without one, a
  * shared Act called from inside a tenant's handler inherited that tenant's
- * frame and committed to the tenant's store (#1597).
+ * frame and committed to the tenant's store.
  *
  * The properties are getters on purpose. The adapters are resolved lazily and
  * injected after `act().build()` in the normal case — `store(new PgStore())`
@@ -244,7 +244,7 @@ const DEFAULT_SCOPE: Scoped = {
 /**
  * Registered cleanup functions live in `disposers.ts`, which holds
  * lifetime-bound entries weakly so registering never pins its target for the
- * process lifetime (#1441). The public surface here is unchanged.
+ * process lifetime. The public surface here is unchanged.
  */
 
 /**
@@ -338,7 +338,7 @@ export const TOMBSTONE_EVENT = "__tombstone__";
 
 /**
  * Name of the implicit lane every reaction lands in unless its `.to({lane})`
- * declaration says otherwise (ACT-1103). Acts that don't call
+ * declaration says otherwise. Acts that don't call
  * `.withLane(...)` see only this lane, and behavior is identical to
  * pre-1103 single-controller drain.
  *

@@ -131,7 +131,7 @@ const ISO_8601 =
  * **The framework no longer uses this.** Dates are resolved from the declared
  * `z.date()` paths at build time and converted on read, so a field declared
  * `z.string()` keeps its string even when the value looks like a timestamp
- * ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)). Adapters
+ *. Adapters
  * return what they stored; typing is the orchestrator's job.
  *
  * Kept exported for host applications that parse Act JSON themselves and want

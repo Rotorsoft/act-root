@@ -3,7 +3,7 @@
  * @category Internal
  *
  * Auto-deprecation of legacy event versions via the `_v<digits>` naming
- * convention (ACT-403).
+ * convention.
  *
  * Act's schema-evolution pattern keeps the old and new event names alive
  * forever — the old name on the read path (reducers), the new on the write

@@ -2,7 +2,7 @@
  * @module defer-config
  * @category Internal
  *
- * The `when` options for the public `defer` surface (#1091, RFC 0001). A
+ * The `when` options for the public `defer` surface. A
  * reaction defers itself to a future time either declaratively (the
  * `.defer(when)` builder step) or imperatively (`throw new DeferSignal(when)`
  * inside a handler); both resolve `when` through here.
@@ -17,7 +17,7 @@
  *
  * Validation follows the config-schema standard (CLAUDE.md): an internal
  * `*OptionsSchema` const, a public inferred type, and a resolver. Slice 2
- * ships `after` / `at`; recurrence (`every`) extends this in Slice 3 (#1092).
+ * ships `after` / `at`; recurrence (`every`) extends this in Slice 3.
  *
  * @internal
  */

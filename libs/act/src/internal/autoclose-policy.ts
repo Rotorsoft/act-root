@@ -3,7 +3,7 @@
  * @category Internal
  *
  * Declarative close-policy options consumed by `.autocloses({...})`
- * (#838 / epic #802). Three optional fields cover the three
+ * Three optional fields cover the three
  * operational pressure points every real close policy traces back to:
  *
  *   - `after`   — time / compliance ("autocloses **after** N days")
@@ -196,7 +196,7 @@ const AutoclosePolicySchema = z
  *   `or` matches. Used for safety-net backstops layered onto a
  *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
  *   10k"*). Nested `or` inside `or` rejects at build time.
- * @property keep - Rolling-window retention (#1011), **independent** of
+ * @property keep - Rolling-window retention, **independent** of
  *   the terminate fields: while the stream stays open, prune events
  *   older than `now − keep` behind the closest safe snapshot via a
  *   windowed close. Does not participate in the AND group or the `or`
@@ -262,7 +262,7 @@ function compile_reaches(
  * the top-level `after` and the `or.after` block — or `undefined` when
  * the policy has no time component.
  *
- * The synthesized autoclose reaction (#1090) uses this to decide how to
+ * The synthesized autoclose reaction uses this to decide how to
  * wait: a policy with an `after` defers its re-check to `head.created`
  * plus this many days (the earliest its time gate could open); a policy
  * without one (`is` / `reaches` only) has no time gate, so the reaction

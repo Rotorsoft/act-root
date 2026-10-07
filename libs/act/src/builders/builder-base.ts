@@ -17,7 +17,7 @@
  * *widen* the generics (return a different instantiation), which a shared
  * signature could only express with HKT emulation, and that degrades the public
  * builder's hover and error output. That trade isn't worth deduping two
- * declarative signatures, so they stay declared per-builder (#1110).
+ * declarative signatures, so they stay declared per-builder.
  */
 
 import type {
@@ -105,8 +105,8 @@ export interface BuilderBase<
   ) => Self;
   /**
    * Begins defining a reaction. Chain `.do(...)` to run immediately, or
-   * `.defer(when).do(...)` to hold the reaction until a schedule is due
-   * (#1091). `.to(...)` follows `.do(...)` in both cases and, for a deferred
+   * `.defer(when).do(...)` to hold the reaction until a schedule is due.
+   * `.to(...)` follows `.do(...)` in both cases and, for a deferred
    * reaction, routes it onto its own target so the hold doesn't stall the
    * stream's other reactions.
    */

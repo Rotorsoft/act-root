@@ -2,7 +2,7 @@
  * @module correlator
  * @category Internal
  *
- * Correlation-id generator and the default implementation (ACT-404).
+ * Correlation-id generator and the default implementation.
  *
  * The default produces a readable, time-monotonic-within-window, lowercase
  * id like `coun-incr-lwxk9p3a` — short enough to scan in logs, structured

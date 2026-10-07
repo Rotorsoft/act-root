@@ -22,12 +22,12 @@
  * A resolved target is the trap: the documented per-aggregate shape is
  * `.to(e => ({target: e.stream}))`, so a target-keyed report dedups nothing
  * across aggregates and one typo scales into one line per aggregate — the
- * unbounded volume this module exists to prevent (#1584). Runtime values
+ * unbounded volume this module exists to prevent. Runtime values
  * still belong in the *message*, as the concrete example that turns "a
  * reaction misdeclared its lane" into something an operator can go look at.
  *
- * Never throws. A throw inside correlate pins the checkpoint for the whole app
- * (#1420); inside drain it reaches the circuit breaker as a store failure and
+ * Never throws. A throw inside correlate pins the checkpoint for the whole app;
+ * inside drain it reaches the circuit breaker as a store failure and
  * stalls every stream.
  *
  * @internal

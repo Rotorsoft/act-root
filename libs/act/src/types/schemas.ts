@@ -18,7 +18,7 @@ import { _mark_sensitive, _registry } from "../internal/sensitive.js";
 export const ZodEmpty = z.record(z.string(), z.never());
 
 /**
- * Sensitive-data foundation re-exports (#855 / epic #566).
+ * Sensitive-data foundation re-exports.
  *
  * - `REDACTED` / `SHREDDED` — sentinels placed in `event.data[field]`
  *   when the caller isn't authorized to see a sensitive field
@@ -46,7 +46,7 @@ export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
  *
  * The marker is what the orchestrator inspects to split event payloads into
  * `data` + `pii` on commit, gate reads via `.discloses`, and strip handler
- * payloads. Part of the sensitive-data foundation (#855 / epic #566).
+ * payloads. Part of the sensitive-data foundation.
  *
  * @example
  * ```ts
@@ -67,7 +67,7 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
   _registry.add(schema, { sensitive: true });
   // Also stamp the def, so the marker survives the clone Zod produces for
   // any refinement chained AFTER this call — `sensitive(z.string()).min(1)`
-  // used to lose it silently and write plaintext into `events.data` (#1417).
+  // used to lose it silently and write plaintext into `events.data`.
   _mark_sensitive(schema);
   return schema;
 }

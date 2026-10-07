@@ -141,7 +141,7 @@ const resolve_url = (url: unknown): string => {
 
 /**
  * Parse a JSON-encoded TEXT column, reviving ISO-date strings to `Date`
- * for cross-adapter payload parity (#1198).
+ * for cross-adapter payload parity.
  * @internal
  */
 const parse_json = (raw: string): unknown => JSON.parse(raw);
@@ -156,7 +156,7 @@ const SQLITE_CONSTRAINT_UNIQUE = 2067;
 
 /**
  * Recognize a `(stream, version)` unique-constraint violation from a
- * libsql commit error (#1202). Detects via the extended result code when
+ * libsql commit error. Detects via the extended result code when
  * present, falling back to the message text (`UNIQUE constraint failed`)
  * for drivers that surface only the message.
  * @internal
@@ -182,7 +182,7 @@ const PORTABLE_BODY = /^(?:\.\*|\.|[^\\^$.()[\]{}|+?*])*$/;
 /** Translate a stream filter (regex-shaped or plain substring) into a
  *  SQLite `GLOB` pattern.
  *
- *  #1197: `GLOB` — not `LIKE` — because `GLOB` is **case-sensitive**,
+ *  `GLOB` — not `LIKE` — because `GLOB` is **case-sensitive**,
  *  matching PG's `~` and InMemory's `RegExp`. SQLite's `LIKE` is ASCII
  *  case-insensitive, and its per-connection `PRAGMA case_sensitive_like`
  *  override is unreliable under libsql's pooled connections (a
@@ -241,7 +241,7 @@ export function streamPatternToGlob(input: string): string {
   if (!end) tokens.push("*");
   // Collapse adjacent `*` wildcards — e.g. `^a.*` would otherwise yield
   // `a**`. GLOB treats `**` as `*`, but collapsing keeps the output
-  // minimal and matches the pre-#1197 LIKE behavior.
+  // minimal and matches the old LIKE behavior.
   let out = "";
   let prev = "";
   for (const t of tokens) {
@@ -332,7 +332,7 @@ export class SqliteStore implements Store {
     raw: unknown
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
-    // Revive dates like `data`/`meta` do (#1198/#1365). Base64 ciphertext
+    // Revive dates like `data`/`meta` do. Base64 ciphertext
     // Dates are resolved from the declared schema by the framework, so the
     // store returns exactly what it stored — plaintext or decrypted alike.
     const parsed = parse_json(raw as string);
@@ -360,7 +360,7 @@ export class SqliteStore implements Store {
         UNIQUE(stream, version)
       )
     `);
-    // Migration for tables created before pii_isolation (#871).
+    // Migration for tables created before pii_isolation.
     // libSQL surfaces "duplicate column" as an error, hence the
     // try/swallow — mirrors PG's `ADD COLUMN IF NOT EXISTS`. SQLite's
     // row format skips NULL columns, so events without sensitive
@@ -385,7 +385,7 @@ export class SqliteStore implements Store {
     );
     // Complement of the snapshot index, and the one claim's has-work probe
     // seeks on: "does this source stream have a non-snapshot event past the
-    // watermark?" (#1448). SQLite already probes per candidate with a
+    // watermark?". SQLite already probes per candidate with a
     // sargable `stream = ? AND id > ?`, so it only lacked the index — the
     // existing idx_events_stream is stream-only and still has to walk every
     // event of that stream. Partial over non-snapshot rows so the two
@@ -409,7 +409,7 @@ export class SqliteStore implements Store {
         correlated_at INTEGER
       )
     `);
-    // Migration for tables created before priority lanes (ACT-102).
+    // Migration for tables created before priority lanes.
     // libSQL surfaces "duplicate column" as an error, hence the
     // try/swallow — this mirrors PG's `ADD COLUMN IF NOT EXISTS`.
     try {
@@ -419,7 +419,7 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
-    // Migration for tables created before deferred reactions (#1090).
+    // Migration for tables created before deferred reactions.
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN deferred_at TEXT"
@@ -427,7 +427,7 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
-    // Migration for tables created before drain lanes (ACT-1103).
+    // Migration for tables created before drain lanes.
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN lane TEXT NOT NULL DEFAULT 'default'"
@@ -435,7 +435,7 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
-    // Migration for tables created before the work set (#1485).
+    // Migration for tables created before the work set.
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN correlated_at INTEGER"
@@ -443,7 +443,7 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
-    // Rows that predate the mark get one, at the log's head (#1488).
+    // Rows that predate the mark get one, at the log's head.
     // `claim` is mark-only now, so a row left at NULL would silently stop
     // being served, and correlate cannot rescue it — its checkpoint is long
     // past those events.
@@ -459,7 +459,7 @@ export class SqliteStore implements Store {
        SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM events)
        WHERE correlated_at IS NULL`
     );
-    // Correlate checkpoint (#1484), keyed per correlator (#1532).
+    // Correlate checkpoint, keyed per correlator.
     //
     // Its own table rather than a reserved subscription: a subscription row is
     // counted by every stream-scoped operator surface (prioritize / reset /
@@ -472,7 +472,7 @@ export class SqliteStore implements Store {
     // needs. The empty key is the shared row a caller with no correlator
     // reads, and the floor a brand-new key inherits.
     //
-    // SQLite cannot drop a primary key, so migrating the pre-#1532 shape
+    // SQLite cannot drop a primary key, so migrating the older single-row shape
     // means rebuilding: copy the single row's checkpoint across as the shared
     // row, then swap the tables. Guarded on the old `id` column, so a seed
     // against either shape converges and the checkpoint survives.
@@ -512,7 +512,7 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
-    // The correlated set IS the index (#1485): it holds only streams with
+    // The correlated set IS the index: it holds only streams with
     // work, so `claim` scans candidates instead of every subscription. A
     // stream leaves when `ack` advances `at` to `correlated_at`, and re-enters
     // when correlate raises the mark.
@@ -527,7 +527,7 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_correlated_at_any_lane ON streams(priority DESC, at) WHERE blocked = 0 AND at < correlated_at"
     );
-    // Lane filter index (ACT-1103).
+    // Lane filter index.
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_lane ON streams(lane)"
     );
@@ -553,7 +553,7 @@ export class SqliteStore implements Store {
   ): Promise<Committed<E, keyof E>[]> {
     const tx = await this.client.transaction("write");
     // Hoisted so the catch can build a ConcurrencyError with the head
-    // version on a (stream, version) unique collision (#1202).
+    // version on a (stream, version) unique collision.
     let current_version = -1;
     try {
       const version_row = await tx.execute({
@@ -609,7 +609,7 @@ export class SqliteStore implements Store {
       return committed;
     } catch (e) {
       await tx.rollback();
-      // #1202: map the (stream, version) unique collision to
+      // Map the (stream, version) unique collision to
       // ConcurrencyError — the same signal PG raises from 23505 — so a
       // caller retries on the framework contract, not a raw libsql error.
       // This is the race where the version probe passed but a concurrent
@@ -646,7 +646,7 @@ export class SqliteStore implements Store {
       }
     }
     if (query?.names !== undefined) {
-      // #1199: `names: []` means "match no event names". An empty
+      // `names: []` means "match no event names". An empty
       // placeholder list yields `name IN ()` which SQLite evaluates as
       // always-false — matching the PG (`= ANY('{}')`) / InMemory
       // semantics. `!== undefined` (not truthiness) keeps that explicit.
@@ -665,7 +665,7 @@ export class SqliteStore implements Store {
       // events aren't scanned. No snapshot → MAX is NULL → -1 → full
       // stream. An explicit `after` (above) wins. The orchestrator only sets
       // `with_snaps` for an unbounded current-state load — it suppresses the
-      // flag under any `asOf` bound (RFC 1274) — so the floor never needs to
+      // flag under any `asOf` bound — so the floor never needs to
       // re-check `before`/`created_*`/`limit` here.
       sql +=
         " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
@@ -701,7 +701,7 @@ export class SqliteStore implements Store {
       // The caller declined the payload, so never decrypt it — an unreadable
       // row cannot fail a read that did not ask for it. `null` rather than
       // the stored ciphertext: `pii_gate` treats any non-null `pii` as
-      // discloseable and would merge base64 into `data` (#1675).
+      // discloseable and would merge base64 into `data`.
       const pii_value =
         query?.with_pii === false
           ? null
@@ -726,7 +726,7 @@ export class SqliteStore implements Store {
 
   // --- subscribe: idempotent INSERT OR IGNORE (= PG ON CONFLICT DO NOTHING)
   //     plus a UPDATE pass to keep the *max* priority across reactions
-  //     targeting the same stream (ACT-102). Operator overrides go
+  //     targeting the same stream. Operator overrides go
   //     through `prioritize()` instead.
   async subscribe(
     streams: SubscribeInput[],
@@ -766,12 +766,12 @@ export class SqliteStore implements Store {
           // skip the merge for non-positive priorities, which made a stored
           // negative priority unraisable: an operator's `prioritize(-5)`
           // survived every subsequent boot instead of being restored to the
-          // declared priority by the restart-driven re-subscribe (#1445).
+          // declared priority by the restart-driven re-subscribe.
           await tx.execute({
             sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
             args: [priority, stream, priority],
           });
-          // ACT-1103 / #1599: the lane rides the priority max. `priority <=
+          // The lane rides the priority max. `priority <=
           // ?` reads the row after the merge above, which is the same test
           // as "at or above the stored priority" — the merge only fires when
           // the incoming value is higher. A subscribe below the stored
@@ -783,7 +783,7 @@ export class SqliteStore implements Store {
             args: [lane, stream, lane, priority],
           });
         }
-        // The work mark never regresses (#1485). `WHERE correlated_at IS
+        // The work mark never regresses. `WHERE correlated_at IS
         // NULL OR correlated_at < ?` is the whole rule: the NULL arm is first
         // mark (a comparison against NULL is unknown, so the predicate alone
         // would skip it), and it holds for every value including zero and
@@ -800,8 +800,8 @@ export class SqliteStore implements Store {
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
       );
       // The correlate checkpoint is written by its own producer, in the call
-      // correlate already makes (#1484). MAX keeps it monotonic.
-      // With a correlator the position and the lease are per-key (#1532),
+      // correlate already makes. MAX keeps it monotonic.
+      // With a correlator the position and the lease are per-key,
       // both in one conditional upsert: a read then a write would let two
       // workers that both saw an expired lease believe they hold it, which is
       // the duplication the lease removes. A key with no row yet seeds from
@@ -892,7 +892,7 @@ export class SqliteStore implements Store {
       const now = new Date().toISOString();
 
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
-      // Eligibility is a pure subscription-table predicate (#1488). `claim`
+      // Eligibility is a pure subscription-table predicate. `claim`
       // does not read the events table at all: correlate records the highest
       // event id that resolves to a target, and `at < correlated_at` is the
       // whole question, answered by the partial index built for it.
@@ -905,7 +905,7 @@ export class SqliteStore implements Store {
       // index fix available for it, because the probe was in JS rather than
       // in SQL.
       //
-      // A row with no mark is not claimable, by definition (#1446): NULL
+      // A row with no mark is not claimable, by definition: NULL
       // means the row has never been correlated, not that it has no work.
       // An install upgrading from before the column needs one correlate pass
       // from a rewound checkpoint — see the runbook in
@@ -953,10 +953,10 @@ export class SqliteStore implements Store {
         }))
         .sort((a, b) => b.priority - a.priority || a.at - b.at);
 
-      // Dual frontier: lagging (priority DESC, watermark ASC — ACT-102)
+      // Dual frontier: lagging (priority DESC, watermark ASC)
       // + leading (newest first). The candidates list arrives sorted
       // by `priority DESC, at ASC` from the SELECT above. The lagging
-      // budget is split (ACT-1223): the priority portion takes the first
+      // budget is split: the priority portion takes the first
       // `lagging - fair` candidates in that order; a fairness reserve then
       // fills `fair` more by pure `at ASC` (priority ignored), excluding
       // the ones already picked, so a default-priority lagging stream is
@@ -1019,19 +1019,19 @@ export class SqliteStore implements Store {
       // entry advances the watermark to its `at` (the last event handled
       // this cycle); an entry without `due` also clears retry + schedule,
       // while an entry with `due` additionally sets the schedule and the
-      // entry's own `retry` — advance and defer are independent legs
-      // (#1278), so a partial-progress defer keeps the handled prefix. The
+      // entry's own `retry` — advance and defer are independent legs,
+      // so a partial-progress defer keeps the handled prefix. The
       // bound schedule doubles as the ack-vs-defer discriminator — NULL
       // means ack. An explicit defer passes retry -1 (not a failure); a
       // backoff retry passes the climbing counter so the budget keeps
-      // accruing across windows (#1262). Only acked entries are returned.
+      // accruing across windows. Only acked entries are returned.
       const result: Lease[] = [];
       for (const l of leases) {
         const due = l.due !== undefined ? new Date(l.due).toISOString() : null;
         const r = await tx.execute({
           // RETURNING the post-ack `retry`/`source`/`lane` from the row so the
           // returned lease reflects the authoritative state, not the caller's
-          // pre-ack echo (#1347). A non-due ack sets `retry = -1`; pushing the
+          // pre-ack echo. A non-due ack sets `retry = -1`; pushing the
           // input lease verbatim leaked the claim-incremented value and
           // diverged from PG (RETURNING s.retry) and InMemory (which return the
           // reset -1). `at`/`by`/`lagging` still come from the input lease,
@@ -1074,8 +1074,8 @@ export class SqliteStore implements Store {
       for (const l of leases) {
         const r = await tx.execute({
           // RETURNING the post-block row so the returned lease reflects the
-          // authoritative state, not the caller's echo (#1382, the `block`
-          // twin of #1347). A block leaves the watermark alone — the failing
+          // authoritative state, not the caller's echo (the `block` twin of the
+          // same fix). A block leaves the watermark alone — the failing
           // event must be retried, not skipped — but `run_drain_cycle` hands
           // us a lease whose `at` was fast-forwarded to the fetch ceiling, so
           // pushing the input verbatim reported a position the row never
@@ -1108,7 +1108,7 @@ export class SqliteStore implements Store {
     }
   }
 
-  // --- defer: hold streams out of claim until deferred_at (#1090) ---
+  // --- defer: hold streams out of claim until deferred_at ---
   // Persisted as an ISO string (like leased_until) so claim's
   // `deferred_at <= now` comparison is a lexicographic string compare.
   // Cleared by ack/block/reset/unblock. See {@link Store.defer}.
@@ -1119,7 +1119,7 @@ export class SqliteStore implements Store {
       let count = 0;
       if (Array.isArray(input)) {
         // De-dup so a repeated name counts once, matching PG's set-based
-        // `WHERE stream = ANY(...)` (#1360).
+        // `WHERE stream = ANY(...)`.
         for (const stream of new Set(input)) {
           const r = await tx.execute({
             sql: `UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?`,
@@ -1193,7 +1193,7 @@ export class SqliteStore implements Store {
       let count = 0;
       if (Array.isArray(input)) {
         // De-dup so a repeated name counts once, matching PG's set-based
-        // `WHERE stream = ANY(...)` (#1360).
+        // `WHERE stream = ANY(...)`.
         for (const stream of new Set(input)) {
           const r = await tx.execute({
             sql: `UPDATE streams ${set_clause} WHERE stream = ?`,
@@ -1309,9 +1309,9 @@ export class SqliteStore implements Store {
     for (const row of streamsResult.rows) {
       const leased_until = row.leased_until as string | null;
       // Persisted as an ISO string (like leased_until); surface as ms since
-      // epoch (#1221) so the cold-start re-seed re-arms at the due-time.
+      // epoch so the cold-start re-seed re-arms at the due-time.
       const deferred_at = row.deferred_at as string | null;
-      // NULL means "no mark yet" — unknown, not "no work" (#1485).
+      // NULL means "no mark yet" — unknown, not "no work".
       const correlated_at = row.correlated_at as number | null;
       callback({
         stream: row.stream as string,
@@ -1404,7 +1404,7 @@ export class SqliteStore implements Store {
       where.push(`e.id < ?`);
       args.push(before);
     }
-    // Keyset pagination cursor (#1010): exclusive — return only streams
+    // Keyset pagination cursor: exclusive — return only streams
     // whose name sorts strictly after `after`. Applied at the event level
     // so the per-stream head/agg rows downstream only cover the page.
     if (after !== undefined) {
@@ -1451,9 +1451,9 @@ export class SqliteStore implements Store {
     // `query_stats` is an operator-introspection surface with no actor
     // context and no disclosure gate, so it never carries pii — heads/tails
     // return the event shape without the pii sidecar, matching PostgresStore
-    // and InMemoryStore (#1294).
+    // and InMemoryStore.
     const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta`;
-    // Keyset pagination (#1010): order heads by stream ascending so the
+    // Keyset pagination: order heads by stream ascending so the
     // caller can use the last key as the next `after` cursor; cap with
     // LIMIT when set (unbounded otherwise).
     const limit_clause = limit !== undefined ? " LIMIT ?" : "";
@@ -1553,7 +1553,7 @@ export class SqliteStore implements Store {
            t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta`
       : "";
 
-    // No pii column: `query_stats` heads/tails are pii-free (#1294 — see
+    // No pii column: `query_stats` heads/tails are pii-free (see
     // `_query_stats_heads_only`).
     const sql = `
       WITH ef AS (
@@ -1590,7 +1590,7 @@ export class SqliteStore implements Store {
       ORDER BY h.stream
     `;
 
-    // Keyset pagination (#1010): the `heads` CTE is ordered by stream and
+    // Keyset pagination: the `heads` CTE is ordered by stream and
     // capped with LIMIT (when set); the final SELECT re-asserts stream
     // order so the returned Map's key order is the next cursor. The LIMIT
     // arg binds last when present (unbounded otherwise).
@@ -1657,7 +1657,7 @@ export class SqliteStore implements Store {
     return out;
   }
 
-  // --- prioritize: bulk priority update with filter (ACT-102) ---
+  // --- prioritize: bulk priority update with filter ---
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
     const { clause, args: filterArgs } = this._filter_clause(filter);
     // libSQL `?` placeholders are positional and NOT reusable, so we
@@ -1745,7 +1745,7 @@ export class SqliteStore implements Store {
         // Subscriptions are deliberately untouched, for restart *and* retire
         // targets alike — see the note in truncate's contract. A tombstoned
         // stream's subscription is inert, and reaping it is maintenance that
-        // `seed()` performs (#1527).
+        // `seed()` performs.
 
         const event_name =
           snapshot !== undefined ? "__snapshot__" : "__tombstone__";
@@ -1807,7 +1807,7 @@ export class SqliteStore implements Store {
       // The restored log is renumbered from 1, so every correlate checkpoint
       // (an event id) starts over in the same transaction, or correlate
       // would resume above the restored events and never resolve their
-      // reactions (#1772). Correlator leases are kept.
+      // reactions. Correlator leases are kept.
       await tx.execute("UPDATE correlated SET at = -1");
       // Reset the autoincrement counter so the new sequence is dense
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
@@ -1838,7 +1838,7 @@ export class SqliteStore implements Store {
 
   /**
    * Wipe the sensitive-data payload for every event on the stream — the
-   * physical-erasure side of the sensitive-data epic (#566). Sets
+   * physical-erasure side of the sensitive-data epic. Sets
    * `events.pii` to `NULL` for the stream's events; `events.data` and
    * the rest of the row are never touched.
    *

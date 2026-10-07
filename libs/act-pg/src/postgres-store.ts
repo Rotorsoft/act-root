@@ -42,7 +42,7 @@ const logger: Logger = log();
 const { Pool, types } = pg;
 
 /**
- * Per-Pool type parser (#1198). Overrides ONLY the JSONB parser to revive
+ * Per-Pool type parser. Overrides ONLY the JSONB parser to revive
  * ISO-date strings in event payloads to `Date`, delegating every other
  * OID to pg's global default. Passed as the Pool's `types` option so the
  * Date coercion is scoped to this store's connections — it never mutates
@@ -156,7 +156,7 @@ const NOTIFY_MAX_PAYLOAD_BYTES = 8000;
 
 // Capped exponential backoff for re-establishing the LISTEN subscription
 // after the dedicated client emits `error` (backend restart, failover,
-// network drop — #1189). Between attempts the store degrades to the poll
+// network drop). Between attempts the store degrades to the poll
 // path, so callers never miss events — they just fall back to the next
 // drain cycle for cross-process wakeups until the LISTEN client is back.
 const NOTIFY_RECONNECT_BASE_MS = 250;
@@ -164,7 +164,7 @@ const NOTIFY_RECONNECT_MAX_MS = 30_000;
 
 // Keeps a destroyed LISTEN client from re-raising a late socket `error` as an
 // uncaught exception. Attached to the dead client through `release(true)` so it
-// is never listener-less during the reconnect backoff window (#1231).
+// is never listener-less during the reconnect backoff window.
 const swallow_error = (): void => {};
 
 function notify_channel(schema: string, table: string): string {
@@ -184,7 +184,7 @@ const DEFAULT_CONFIG: Config = {
   schema: "public",
   table: "events",
   notify: false,
-  // Opinionated pool defaults (#1119). node-postgres ships `max: 10`
+  // Opinionated pool defaults. node-postgres ships `max: 10`
   // with no acquisition timeout and no statement timeout — a saturated
   // pool makes every caller hang indefinitely instead of failing with
   // a diagnosable error. Nearly every store method holds a client for
@@ -327,7 +327,7 @@ export class PostgresStore implements Store {
   readonly config: Config;
   private _fqt: string;
   private _fqs: string;
-  /** Correlate checkpoint table (#1484) — one row, id 0. */
+  /** Correlate checkpoint table — one row, id 0. */
   private _fqc: string;
   /**
    * Per-instance writer identifier embedded in every NOTIFY payload. The
@@ -355,13 +355,13 @@ export class PostgresStore implements Store {
    * Error listener attached to the active LISTEN client. node-postgres
    * removes its idle-error guard on checkout, so a checked-out client
    * that emits `error` (backend restart, failover, network drop) with no
-   * listener is an uncaught exception — a process crash (#1189). Tracked
+   * listener is an uncaught exception — a process crash. Tracked
    * alongside `_listen_handler` so teardown detaches it in lockstep.
    */
   private _listen_error_handler: ((err: Error) => void) | undefined;
   /**
    * The caller's notification handler for the active subscription, kept
-   * so the self-healing reconnect path (#1189) can re-establish LISTEN
+   * so the self-healing reconnect path can re-establish LISTEN
    * on a fresh client after the dedicated one emits `error`. Cleared by
    * `_teardown_listen`, which is what makes disposal cancel any pending
    * reconnect.
@@ -418,7 +418,7 @@ export class PostgresStore implements Store {
       pii_encryption: ___,
       ...poolConfig
     } = this.config;
-    // Per-Pool JSONB reviver (#1198): scoped here, never global.
+    // Per-Pool JSONB reviver: scoped here, never global.
     this._pool = new Pool({ ...poolConfig, types: scopedTypes });
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
@@ -471,14 +471,14 @@ export class PostgresStore implements Store {
    * re-issue a half-clean client).
    *
    * Clearing `_notify_handler` and the reconnect timer here is what makes
-   * `dispose()` safe during a pending reconnect (#1189): a scheduled
+   * `dispose()` safe during a pending reconnect: a scheduled
    * `_reconnect` bails the moment it finds no handler.
    *
    * A pending reconnect has two states, and that covers one of them. An
    * open already *in flight* has passed every handler check, and it holds
    * no `_listen_client` yet — so the early return above fires and this
    * releases nothing, leaving `pool.end()` waiting on the client that open
-   * is about to take (#1616). The other half of the guard therefore lives
+   * is about to take. The other half of the guard therefore lives
    * at the end of `_open_listen`, which re-reads `_notify_handler` before
    * assigning and hands the client back when disposal won the race.
    */
@@ -530,7 +530,7 @@ export class PostgresStore implements Store {
       // names hash to different keys, so their CREATE SCHEMA calls raced the
       // catalog and all but one failed with a duplicate-key error on
       // pg_namespace — `IF NOT EXISTS` is not atomic against a concurrent
-      // creator (#1421). The table-scoped one keeps the per-table DDL below
+      // creator. The table-scoped one keeps the per-table DDL below
       // concurrent across tables in the same schema.
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
         this.config.schema,
@@ -557,7 +557,7 @@ export class PostgresStore implements Store {
           pii jsonb
         ) TABLESPACE pg_default;`
       );
-      // Migration for tables created before pii_isolation (#870).
+      // Migration for tables created before pii_isolation.
       // Variable-length encoding skips NULL columns entirely, so events
       // without sensitive declarations pay zero extra bytes on disk.
       await client.query(
@@ -592,7 +592,7 @@ export class PostgresStore implements Store {
       );
       // The complement of the snapshot index, and the one `claim`'s has-work
       // probe seeks on: "does this source stream have a non-snapshot event
-      // past the watermark?" (#1448). Partial over non-snapshot rows so the
+      // past the watermark?". Partial over non-snapshot rows so the
       // two indexes partition the table rather than overlapping.
       //
       // Without it the probe fell back to the pk and scanned forward from
@@ -623,7 +623,7 @@ export class PostgresStore implements Store {
           correlated_at int
         ) TABLESPACE pg_default;`
       );
-      // Correlate checkpoint (#1484), keyed per correlator (#1532).
+      // Correlate checkpoint, keyed per correlator.
       //
       // Its own relation rather than a reserved subscription: a subscription
       // row is counted by every stream-scoped operator surface
@@ -643,7 +643,7 @@ export class PostgresStore implements Store {
           leased_until timestamptz
         ) TABLESPACE pg_default;`
       );
-      // Migration from the pre-#1532 single-row shape. Every step is guarded,
+      // Migration from the older single-row shape. Every step is guarded,
       // so a seed against either shape converges on the keyed one and the
       // existing checkpoint survives as the shared row.
       await client.query(`
@@ -672,29 +672,29 @@ export class PostgresStore implements Store {
         `INSERT INTO ${this._fqc} (key) VALUES ('') ON CONFLICT (key) DO NOTHING;`
       );
 
-      // Migration for tables created before priority lanes (ACT-102).
+      // Migration for tables created before priority lanes.
       // `ADD COLUMN IF NOT EXISTS` is a no-op when the column is
       // already present, so this is safe on every seed call.
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS priority int NOT NULL DEFAULT 0;`
       );
-      // Migration for tables created before drain lanes (ACT-1103).
+      // Migration for tables created before drain lanes.
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS lane text NOT NULL DEFAULT 'default';`
       );
-      // Migration for tables created before deferred reactions (#1090).
+      // Migration for tables created before deferred reactions.
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS deferred_at timestamptz;`
       );
-      // Migration for tables created before the work set (#1485).
+      // Migration for tables created before the work set.
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS correlated_at int;`
       );
-      // Rows that predate the mark get one, at the log's head (#1488).
+      // Rows that predate the mark get one, at the log's head.
       // `claim` is mark-only now, so a row left at NULL would silently stop
       // being served, and correlate cannot rescue it — its checkpoint is
       // long past those events.
@@ -716,7 +716,7 @@ export class PostgresStore implements Store {
          SET correlated_at = (SELECT COALESCE(MAX(id), -1) FROM ${this._fqt})
          WHERE correlated_at IS NULL;`
       );
-      // Migration for tables created before the retry widening (#1190).
+      // Migration for tables created before the retry widening.
       // `claim()` increments `retry` on every acquisition and never
       // resets it for a zero-progress `blockOnError: false` stream, so a
       // poison stream marches the counter up without bound. The original
@@ -742,7 +742,7 @@ export class PostgresStore implements Store {
          $$;`
       );
 
-      // Migration for tables created before the identifier widening (#1420).
+      // Migration for tables created before the identifier widening.
       // `stream` / `source` / `name` were `varchar(100)`, while InMemory is
       // unbounded and SQLite uses TEXT. The framework DERIVES identifiers that
       // can exceed the cap — `.autocloses` synthesizes a target of
@@ -789,12 +789,12 @@ export class PostgresStore implements Store {
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_claim_ix"
         ON ${this._fqs} (blocked, priority DESC, at);`
       );
-      // Lane filter index (ACT-1103).
+      // Lane filter index.
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_lane_ix"
         ON ${this._fqs} (lane);`
       );
-      // The correlated set IS the index (#1485). `at < correlated_at` is a legal
+      // The correlated set IS the index. `at < correlated_at` is a legal
       // partial-index predicate — immutable, single-row, no cross-row
       // reference — so the index holds only streams with work: `LIMIT` pushes
       // into it, a stream leaves when `ack` advances `at` to `correlated_at`,
@@ -806,7 +806,7 @@ export class PostgresStore implements Store {
         ON ${this._fqs} (lane, priority DESC, at)
         WHERE blocked = false AND at < correlated_at;`
       );
-      // The same set ordered by watermark alone (#1510). `claim`'s fairness
+      // The same set ordered by watermark alone. `claim`'s fairness
       // reserve and its leading frontier both order by `at` with the priority
       // column ignored, which the index above cannot serve — its leading key
       // is `lane`, and `priority` sits between that and `at`. Without this,
@@ -901,7 +901,7 @@ export class PostgresStore implements Store {
         // events aren't scanned. No snapshot → MAX is NULL → -1 → full
         // stream. An explicit `after` (above) wins. The orchestrator only
         // sets `with_snaps` for an unbounded current-state load — it
-        // suppresses the flag under any `asOf` bound (RFC 1274) — so the
+        // suppresses the flag under any `asOf` bound — so the
         // floor never needs to re-check `before`/`created_*`/`limit` here.
         values.push(stream);
         conditions.push(
@@ -919,7 +919,7 @@ export class PostgresStore implements Store {
         );
       }
       if (names !== undefined) {
-        // #1199: `names: []` means "match no event names" — an empty
+        // `names: []` means "match no event names" — an empty
         // allow-list. `name = ANY('{}')` is always false, matching the
         // InMemory/SQLite semantics. Historically a truthy `names?.length`
         // guard dropped the empty filter and returned ALL — the opposite.
@@ -927,7 +927,7 @@ export class PostgresStore implements Store {
         conditions.push(`name = ANY($${values.length})`);
       }
       if (before !== undefined) {
-        // #1199: `!== undefined` so a falsy-zero `before: 0` (strictly
+        // `!== undefined` so a falsy-zero `before: 0` (strictly
         // "id < 0", i.e. match nothing) is honored, not dropped.
         values.push(before);
         conditions.push(`id<$${values.length}`);
@@ -936,7 +936,7 @@ export class PostgresStore implements Store {
         // `created` is stored at microsecond resolution, but a caller only
         // ever sees the millisecond a JS `Date` can hold — a row stamped
         // ...976999 reads back as ...976, so `created > '...976'` matched the
-        // row against its own timestamp and returned it (#1595). Millisecond
+        // row against its own timestamp and returned it. Millisecond
         // is the resolution the whole contract is expressed in, so
         // strictly-after means "at least the next millisecond", which is what
         // InMemory and SQLite already do. Advancing the bound rather than
@@ -981,7 +981,7 @@ export class PostgresStore implements Store {
         // The caller declined the payload, so never decrypt it — an
         // unreadable row cannot fail a read that did not ask for it. `null`
         // rather than the stored ciphertext: `pii_gate` treats any non-null
-        // `pii` as discloseable and would merge base64 into `data` (#1675).
+        // `pii` as discloseable and would merge base64 into `data`.
         (row as { pii: unknown }).pii = null;
       } else if (this._resolve_pii_key && typeof row.pii === "string") {
         const decrypted = await decrypt(row.pii, this._resolve_pii_key);
@@ -1010,7 +1010,7 @@ export class PostgresStore implements Store {
     expectedVersion?: number
   ) {
     // An empty commit writes nothing, but an expectedVersion still has to be
-    // checked, as InMemory and SQLite do (#1784).
+    // checked, as InMemory and SQLite do.
     if (msgs.length === 0 && expectedVersion === undefined) return [];
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
@@ -1031,8 +1031,8 @@ export class PostgresStore implements Store {
     // (when enabled) raises the NOTIFY — the lock is held only for
     // server-side execution plus the implicit COMMIT, never across a
     // client round trip. The pooled client is checked out through
-    // `_client` so acquisition failures keep their StoreError context
-    // (#1119); checkout itself is in-process, not a round trip.
+    // `_client` so acquisition failures keep their StoreError context;
+    // checkout itself is in-process, not a round trip.
     const client = await this._client("commit");
     try {
       const last = await client.query<{ version: number }>(
@@ -1198,7 +1198,7 @@ export class PostgresStore implements Store {
     try {
       await client.query("BEGIN");
       const lane_clause = lane !== undefined ? `AND s.lane = $7` : "";
-      // Fairness reserve (ACT-1223): carve `fair` slots off the lagging
+      // Fairness reserve: carve `fair` slots off the lagging
       // budget for pure watermark-order claims so a default-priority
       // lagging stream is never starved out by sustained higher-priority
       // load. `fair` is always $5; the optional `lane` bind is last ($7).
@@ -1207,7 +1207,7 @@ export class PostgresStore implements Store {
       // `NOW()`: the worker's process-local timer wakes the drain on its own
       // clock, so judging `deferred_at` on a second clock made a worker
       // running ahead of the database wake early, claim nothing, and lose
-      // the wake (#1753). InMemory and SQLite already compare against the
+      // the wake. InMemory and SQLite already compare against the
       // caller's clock. Leases stay on `NOW()`: their expiry is a duration
       // set and checked by the database, and judging it per worker would
       // let a fast clock take a lease another worker still holds.
@@ -1231,7 +1231,7 @@ export class PostgresStore implements Store {
         -- overlapping competing consumers. We only lock the small
         -- lagging+leading candidate slice, down in the "locked" CTE.
         --
-        -- Eligibility is a pure subscription-table predicate (#1488).
+        -- Eligibility is a pure subscription-table predicate.
         -- claim does not read the event log at all: correlate marks the
         -- highest event id that resolves to a target, and at <
         -- correlated_at is the whole question. The probe this replaced ran
@@ -1240,7 +1240,7 @@ export class PostgresStore implements Store {
         -- little work was pending.
         --
         -- The predicate is repeated in each arm below rather than factored
-        -- into a shared CTE, and that repetition is load-bearing (#1510). A
+        -- into a shared CTE, and that repetition is load-bearing. A
         -- CTE referenced more than once is materialized, so LIMIT 8 was
         -- applied to a fully-built 100,000-row result instead of pushing into
         -- the index: measured at 75.6 ms for a claim that returns 8 rows.
@@ -1249,14 +1249,14 @@ export class PostgresStore implements Store {
         -- at-ordered partial index below serves the two watermark arms.
         --
         -- A row with no mark compares unknown and is excluded by SQL's own
-        -- rules. That is definitional (#1446): a subscription is claimable iff
+        -- rules. That is definitional: a subscription is claimable iff
         -- a mark says so. seed() marks rows that predate the column.
         --
-        -- Priority lanes (ACT-102): higher priority first, then
+        -- Priority lanes: higher priority first, then
         -- lagging-watermark order. With everyone at priority=0 the ORDER BY
         -- collapses to plain at ASC, so existing workloads see no change.
         --
-        -- The lagging frontier is a UNION of two portions (ACT-1223): the
+        -- The lagging frontier is a UNION of two portions: the
         -- priority portion takes the first (lagging - fair) slots by
         -- priority DESC, at ASC; a fairness reserve then fills fair more
         -- by pure at ASC (priority ignored), excluding the ones already
@@ -1371,7 +1371,7 @@ export class PostgresStore implements Store {
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
         //  2. One UPDATE over the existing rows, carrying all three
         //     mutable columns. Correlate re-subscribes every target it
-        //     marks (#1487), so this is a per-scan round trip on the
+        //     marks, so this is a per-scan round trip on the
         //     steady-state path — worth one statement rather than three.
         const { rowCount: inserted } = await client.query(
           `
@@ -1387,14 +1387,14 @@ export class PostgresStore implements Store {
           [JSON.stringify(streams)]
         );
         subscribed = inserted ?? 0;
-        // Priority keeps the max (ACT-102: the highest-priority registered
+        // Priority keeps the max (the highest-priority registered
         // reaction wins; operator overrides, which may *decrease*, go through
-        // `prioritize()`), the lane rides that same max (ACT-1103 / #1599:
-        // a subscribe at or above the stored priority sets the lane, one
+        // `prioritize()`), the lane rides that same max (a
+        // subscribe at or above the stored priority sets the lane, one
         // below leaves it alone, so a caller that has forgotten what a
         // stream carries cannot re-lane it from underneath the
         // highest-priority reaction that owns it), and the work mark never
-        // regresses (#1485) — `GREATEST` reads through a NULL on either
+        // regresses — `GREATEST` reads through a NULL on either
         // side, so a first mark lands and an omitted one leaves the stored
         // value alone. The WHERE keeps the no-op case free of dead tuples:
         // a row is rewritten only when one of the three would change.
@@ -1419,9 +1419,9 @@ export class PostgresStore implements Store {
         );
       }
       // The correlate checkpoint is written by its own producer, in the call
-      // correlate already makes (#1484). GREATEST keeps it monotonic.
+      // correlate already makes. GREATEST keeps it monotonic.
       //
-      // With a correlator the position and the lease are per-key (#1532), and
+      // With a correlator the position and the lease are per-key, and
       // both ride this one statement. It is a conditional upsert rather than
       // a read then a write: two workers that both saw an expired lease
       // before either wrote would both believe they hold it, which is exactly
@@ -1464,7 +1464,7 @@ export class PostgresStore implements Store {
             [correlated_at, correlator.key]
           );
         // The shared row tracks how far *any* correlator has read. It is the
-        // floor a brand-new key inherits — which is the pre-#1532 behaviour,
+        // floor a brand-new key inherits — the original behaviour,
         // where one checkpoint was shared and a fresh worker resumed from it
         // behind the cold-start back-scan window — and it is what a caller
         // reading without a correlator still sees.
@@ -1517,11 +1517,11 @@ export class PostgresStore implements Store {
       // entry advances the watermark to its `at` (the last event handled
       // this cycle); an entry without `due` also clears retry + schedule,
       // while an entry with `due` additionally sets the schedule and the
-      // entry's own `retry` — advance and defer are independent legs
-      // (#1278), so a partial-progress defer keeps the handled prefix.
+      // entry's own `retry` — advance and defer are independent legs,
+      // so a partial-progress defer keeps the handled prefix.
       // An explicit defer passes retry -1 (not a failure); a backoff retry
       // passes the climbing counter so the budget keeps accruing across
-      // windows (#1262). Deferred rows are filtered out of the returned acks.
+      // windows. Deferred rows are filtered out of the returned acks.
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
@@ -1768,7 +1768,7 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Bulk-update priority of streams matching `filter` (ACT-102).
+   * Bulk-update priority of streams matching `filter`.
    *
    * Filter semantics mirror {@link query_streams}: regex on `stream` /
    * `source` by default, exact match with the `_exact` flags,
@@ -1889,10 +1889,10 @@ export class PostgresStore implements Store {
           leased_by: row.leased_by ?? undefined,
           leased_until: row.leased_until ?? undefined,
           lane: row.lane,
-          // Persisted as timestamptz; surface as ms since epoch (#1221) so
+          // Persisted as timestamptz; surface as ms since epoch so
           // the cold-start re-seed can re-arm the drain at the due-time.
           deferred_at: row.deferred_at ? row.deferred_at.getTime() : undefined,
-          // NULL means "no mark yet" — unknown, not "no work" (#1485).
+          // NULL means "no mark yet" — unknown, not "no work".
           correlated_at: row.correlated_at ?? undefined,
         });
         count++;
@@ -2189,7 +2189,7 @@ export class PostgresStore implements Store {
    * client; pool disposal also tears the subscription down as a safety
    * net.
    *
-   * The subscription is **self-healing** (#1189): the dedicated client
+   * The subscription is **self-healing**: the dedicated client
    * has an `error` listener that, on a connection blip (backend restart,
    * failover, network drop), tears the dead client down and re-LISTENs
    * on a fresh one with capped exponential backoff — degrading to the
@@ -2206,7 +2206,7 @@ export class PostgresStore implements Store {
     await this._teardown_listen();
 
     // Remember the caller's handler so the self-healing reconnect path
-    // (#1189) can re-establish LISTEN on a fresh client after a
+    // can re-establish LISTEN on a fresh client after a
     // connection blip without the caller re-subscribing.
     this._notify_handler = handler;
     try {
@@ -2229,7 +2229,7 @@ export class PostgresStore implements Store {
   /**
    * Check out a dedicated client, attach the notification + error
    * listeners, and run `LISTEN`. Shared by the initial subscription and
-   * every reconnect (#1189). On any failure before `LISTEN` succeeds the
+   * every reconnect. On any failure before `LISTEN` succeeds the
    * client is detached and destroyed so nothing leaks — the caller
    * decides whether to propagate (initial subscribe) or reschedule
    * (reconnect).
@@ -2301,7 +2301,7 @@ export class PostgresStore implements Store {
     };
     // The dedicated LISTEN client loses node-postgres's idle-error guard
     // on checkout, so an unhandled `error` (backend restart, failover,
-    // network drop) would crash the process (#1189). Handle it: log,
+    // network drop) would crash the process. Handle it: log,
     // tear the dead client down, and schedule a re-LISTEN with capped
     // backoff. Between attempts the store degrades to the poll path.
     const on_error = (err: Error) => {
@@ -2318,8 +2318,8 @@ export class PostgresStore implements Store {
       client.release(true);
       throw err;
     }
-    // Disposal may have won the race while this open was in flight
-    // (#1616). `_teardown_listen` answers "is there a subscription?" by
+    // Disposal may have won the race while this open was in flight.
+    // `_teardown_listen` answers "is there a subscription?" by
     // looking at `_listen_client`, which is undefined for the whole
     // duration of an open — so a teardown landing in this window returned
     // early, and `pool.end()` is now waiting on the very client held here.
@@ -2344,7 +2344,7 @@ export class PostgresStore implements Store {
 
   /**
    * Self-heal the LISTEN subscription after the dedicated client emitted
-   * `error` (#1189). Detaches and destroys the dead client, then
+   * `error`. Detaches and destroys the dead client, then
    * reconnects on a fresh one with capped exponential backoff. Bails
    * immediately if the subscription was disposed while a reconnect was
    * pending (`_notify_handler` cleared by `_teardown_listen`), so no
@@ -2367,7 +2367,7 @@ export class PostgresStore implements Store {
       // follows). `release(true)` destroys the connection but does not
       // synchronously silence the socket, so the client must never be
       // listener-less: an unhandled second `error` re-raises as an uncaught
-      // exception — the exact process crash #1189 fixed (#1231). Attach a
+      // exception — a process crash. Attach a
       // swallow listener that lives until the destroyed client is GC'd.
       dead.on("error", swallow_error);
       this._listen_handler = undefined;
@@ -2449,7 +2449,7 @@ export class PostgresStore implements Store {
       // Windowed targets run BEFORE full ones, matching InMemory and SQLite.
       // A stream listed as both used to land its windowed entry in the result
       // on this adapter and its full entry on the other two — same on-disk
-      // state, different returned map (#1677). The framework never produces
+      // state, different returned map. The framework never produces
       // that input (`close-cycle` dedups by stream first), but `Store` is a
       // public port that third-party adapters validate against the TCK, so
       // the three must agree.
@@ -2484,8 +2484,8 @@ export class PostgresStore implements Store {
       // mark and `at < correlated_at` never becomes true again. Removing it
       // here bought nothing and cost a coupling: it is the one step that
       // spans the event log and the subscription table, which is what forced
-      // a store whose halves live apart into a distributed transaction
-      // (#1527). Reaping the inert rows is maintenance, and `seed()` does it.
+      // a store whose halves live apart into a distributed transaction.
+      // Reaping the inert rows is maintenance, and `seed()` does it.
       for (const { stream, snapshot, meta } of full) {
         const { rowCount } = await client.query(
           `DELETE FROM ${this._fqt} WHERE stream = $1`,
@@ -2546,7 +2546,7 @@ export class PostgresStore implements Store {
       // The restored log is renumbered from 1, so every correlate checkpoint
       // (an event id) starts over in the same transaction, or correlate
       // would resume above the restored events and never resolve their
-      // reactions (#1772). Correlator leases are kept.
+      // reactions. Correlator leases are kept.
       await client.query(`UPDATE ${this._fqc} SET at = -1`);
       await driver(async (event) => {
         // Restore mirrors commit: encrypt the pii payload when
@@ -2586,7 +2586,7 @@ export class PostgresStore implements Store {
 
   /**
    * Wipe the sensitive-data payload for every event on the stream — the
-   * physical-erasure side of the sensitive-data epic (#566). Sets
+   * physical-erasure side of the sensitive-data epic. Sets
    * `events.pii` to `NULL` for the stream's events; `events.data` and
    * the rest of the row are never touched.
    *

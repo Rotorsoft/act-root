@@ -47,7 +47,7 @@ export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
  * time (`store()`), so the reaction is orchestrator-agnostic; the resolved
  * The reactions are synthesized once into the shared registry, so nothing
  * per-Act is captured here — the off-hours window is read from the running
- * Act at resolution time via the injected `read_window` (#1615).
+ * Act at resolution time via the injected `read_window`.
  *
  * @internal
  */
@@ -63,7 +63,7 @@ export function synthesize_autoclose_reactions<
    * imported: these reactions are synthesized once into the shared
    * registry and run by every Act built from that builder, so the window
    * has to be resolved per call, and `internal/` never reaches for
-   * ambient state itself (#1615).
+   * ambient state itself.
    */
   read_window: () => AutocloseConfig["autocloseWindow"]
 ): void {
@@ -97,12 +97,12 @@ export function synthesize_autoclose_reactions<
         // handed by reference to every Act built from the same builder, so
         // a captured window would be the first-built Act's for all of them
         // — and the documented multi-tenant shape is one builder built per
-        // tenant (#1615).
+        // tenant.
         const window = read_window();
         if (!in_autoclose_window(window, new Date()))
           throw new DeferSignal({ at: next_window_open(window!, new Date()) });
         // Every policy keys on the *domain* head/count, so snapshots are
-        // excluded unconditionally (#1356) — matching `scan_stream_heads` in
+        // excluded unconditionally — matching `scan_stream_heads` in
         // close-cycle.ts. `snap()` commits a `__snapshot__` at a higher id
         // right after the triggering domain event, so a terminal commit that
         // crosses a `.snap()` boundary would otherwise make the snapshot the
@@ -162,7 +162,7 @@ export function synthesize_autoclose_reactions<
         // stream idled longer than the cooldown while the AND-combined
         // predicate stayed unmet) can never be excluded by `claim`, which
         // skips only future `deferred_at` — so a past defer would be
-        // re-claimed every cycle (perpetual query_stats burn, #1330). When
+        // re-claimed every cycle (perpetual query_stats burn). When
         // nothing is future, fall through and return: advance the watermark
         // and wait for the next event to re-trigger.
         const future = dues

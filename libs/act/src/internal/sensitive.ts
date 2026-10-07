@@ -2,7 +2,7 @@
  * @module sensitive
  * @category Internal
  *
- * Internal mechanics for the sensitive-data foundation (#855 / epic #566).
+ * Internal mechanics for the sensitive-data foundation.
  * The public surface (`sensitive(zodType)`) lives at `libs/act/src/sensitive.ts`
  * and re-exports `REDACTED` / `SHREDDED` from here; this module holds the
  * registry plus the helpers the orchestrator calls during commit, load, and
@@ -61,7 +61,7 @@ export const _registry = z.registry<{ sensitive: true }>();
  * refinement (`.min()`, `.email()`, `.trim()`, `.describe()`, `.refine()`,
  * `.transform()`, …) via `{...def}`, which copies own symbol keys — so a
  * marker on the def survives the whole chain, while the `_registry` WeakMap
- * (keyed on the *instance*) does not (#1417).
+ * (keyed on the *instance*) does not.
  *
  * The registry is still populated and still consulted: it covers schemas
  * marked before this key existed, and it is the mechanism the public
@@ -102,7 +102,7 @@ function is_pii(schema: z.ZodType): boolean {
   while (true) {
     if (_registry.has(cur)) return true;
     // Def-level marker: survives the clone a refinement produces, which the
-    // instance-keyed registry above cannot (#1417).
+    // instance-keyed registry above cannot.
     const def = (
       cur as unknown as {
         _zod?: { def?: Record<PropertyKey, unknown> };
@@ -129,7 +129,7 @@ function is_pii(schema: z.ZodType): boolean {
  *
  * A union event has no top-level shape, so the options are walked and merged:
  * a key sensitive in any variant must be split, because the stored payload
- * could be that variant ([#1417](https://github.com/Rotorsoft/act-root/issues/1417)).
+ * could be that variant.
  * The first variant to declare a key wins, which only matters to a caller that
  * wants the schema rather than the name.
  *
@@ -228,7 +228,7 @@ export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   // The external view NEVER carries the isolated `pii` sidecar — dropping it
   // is the whole point of the gate. Keeping it (an earlier `...event` spread)
   // leaked plaintext PII on every gated read surface (`load`, `query`,
-  // `query_array`) even while `data` was correctly redacted (#1277). Strip it
+  // `query_array`) even while `data` was correctly redacted. Strip it
   // once here; the plaintext lives in `data` only on the authorized path.
   const { pii, ...rest } = event as Committed<TEvents, TKey> & {
     pii?: Record<string, unknown> | null;

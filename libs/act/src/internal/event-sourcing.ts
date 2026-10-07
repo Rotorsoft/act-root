@@ -59,7 +59,7 @@ import { default_correlator } from "./correlator.js";
  * {@link "tracing".build_es}) — never branched per event:
  *
  * - {@link bare_patch} — the default. Literally `patch(state, partial)`,
- *   no wrapper. This is the pre-ACT-1238 hot path, byte-for-byte.
+ *   no wrapper. No validation cost on the hot path.
  * - {@link validating_patch} — the opt-in `ActOptions.validateFoldedState`
  *   path. Merges, then parses the merged full state against the state's
  *   declared Zod schema.
@@ -84,7 +84,7 @@ export type PatchFn = <
 
 /**
  * The default patch step: a bare `patch()` merge with no wrapper and no
- * branch. The off-path is byte-for-byte the pre-ACT-1238 reduction, so an
+ * branch. The off-path is a plain reduction, so an
  * app that leaves `validateFoldedState` off pays nothing — not even a
  * comparison.
  *
@@ -94,10 +94,10 @@ export const bare_patch: PatchFn = (_me, state, partial) =>
   patch(state, partial) as typeof state;
 
 /**
- * The opt-in patch step (ACT-1238): merge the partial into state, then
+ * The opt-in patch step: merge the partial into state, then
  * parse the merged full state against the owning state's declared Zod
  * schema. A reducer that produces schema-violating state (the calculator
- * divide-by-zero NaN class, #1230) fails here, at the triggering event,
+ * divide-by-zero NaN class) fails here, at the triggering event,
  * instead of propagating and surfacing hops later as a confusing
  * downstream error.
  *
@@ -119,8 +119,8 @@ export const validating_patch: PatchFn = (me, state, partial, event) => {
 };
 
 /**
- * Default per-batch row count for the {@link scan} pagination loop
- * (ACT-1133). Callers override via {@link ScanOptions.batch_size}.
+ * Default per-batch row count for the {@link scan} pagination loop.
+ * Callers override via {@link ScanOptions.batch_size}.
  *
  * @internal
  */
@@ -237,16 +237,8 @@ export async function tombstone(
  *   instance. Restore sources stream parsed events; the orchestrator
  *   trusts the caller's iterator did the parsing.
  *
- * Cross-event invariants (duplicate ids, per-stream version gaps) are
- * not the validator's job — DB `UNIQUE(stream, version)` catches
- * duplicates at commit time, and gap detection is a caller-specific
- * policy (partial backups intentionally have gaps).
- *
- * Extension point: per-event Zod schema validation against the active
- * registry will land here — the source-side check is the right layer
- * for it (catches malformed payloads before the sink transaction
- * opens), and adding it keeps the per-event blocker contract in one
- * place.
+ * Cross-event invariants (duplicate ids, version gaps) are left to the
+ * sink's unique constraint and to the caller (partial backups have gaps).
  *
  * @internal
  */
@@ -263,21 +255,10 @@ function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {
  * causation remap; adapters supply only the per-event insert
  * `callback` via the driver pattern (see {@link Store.restore}).
  *
- * Walks the source in chunks of {@link BATCH} via the existing
- * `EventSource.query` interface — `limit: BATCH` and `after: <last
- * id seen>` per batch (ACT-1133). Stores that respect `limit`
- * (`PostgresStore`) return at most `BATCH` rows per call; sources
- * that ignore the filter (`CsvFile`) stream everything in one call
- * and the loop exits after the first batch when `got > BATCH`. The
- * source's own per-event `await Promise.resolve(callback(event))`
- * provides backpressure — no separate mailbox needed.
- *
- * Throws on the first invalid event (negative version, malformed
- * `created`) with the running index in the message.
- *
- * Returns the partial {@link ScanResult} (without `duration_ms`)
- * — {@link Act.restore} wraps the call with its own timing so the
- * duration covers transaction setup and commit, not just iteration.
+ * Pages the source with `limit`/`after`; a source that ignores the
+ * filter (`CsvFile`) returns everything at once and the loop ends. Throws
+ * on the first invalid event. Returns the result without `duration_ms`,
+ * which {@link Act.restore} adds.
  *
  * @internal
  */
@@ -302,12 +283,7 @@ export async function scan(
   let processed = 0;
   let at: number | undefined;
 
-  // Pre-pass for `drop_closed_streams` (ACT-1126). Walk the source
-  // once with a tombstone-name filter to collect closed streams. PG
-  // honors the filter and only the tombstone events come back; sources
-  // that ignore the filter (CsvFile) stream all events but we cheaply
-  // pick out the tombstones in the callback. Either way the cost is
-  // one extra walk, paid only when the operator opts in.
+  // `drop_closed_streams`: one extra walk to collect tombstoned streams.
   const closed_streams = new Set<string>();
   if (drop_closed_streams) {
     await source.query<Schemas>(
@@ -318,12 +294,8 @@ export async function scan(
     );
   }
 
-  // Probe the source for the highest id once up front. On indexed
-  // stores (PostgresStore, SqliteStore) `{ backward: true, limit: 1 }`
-  // is an index-only seek — O(1) on the (id) index. Sources that
-  // ignore the filter (CsvFile) stream every event from this one
-  // call; we detect that via the returned count and leave max_id
-  // undefined rather than reporting an unreliable value.
+  // Probe the highest id (an index seek on SQL stores). A source that
+  // ignores the filter returns more than one row; leave max_id unknown.
   let max_id: number | undefined;
   const probed = await source.query<Schemas>(
     (e) => {
@@ -360,7 +332,7 @@ export async function scan(
           dropped_closed++;
           return;
         }
-        // Migration overlay (ACT-1126): rename + schema-guarded data
+        // Migration overlay: rename + schema-guarded data
         // transform, then optional stream rename. Applied BEFORE the
         // causation remap so the id_map (keyed by source id) stays
         // valid and migrated events land at the new name/data with
@@ -395,7 +367,7 @@ export async function scan(
         if (caused_by !== undefined) {
           const new_caused_by = id_map.get(caused_by);
           if (new_caused_by !== undefined && new_caused_by !== caused_by) {
-            // Spread `migrated`, not the original `event` (ACT-1192).
+            // Spread `migrated`, not the original `event`.
             // Migration + stream_rename already ran above; rebuilding from
             // `event` here would revert the new name/data/stream for any
             // event whose causation id shifted — silently undoing the
@@ -422,12 +394,8 @@ export async function scan(
       { after: at, limit, with_snaps: true }
     );
 
-    // Termination:
-    //   - got < batch: source honored limit but ran out (also covers
-    //     got === 0 — past-the-end on a paginating source).
-    //   - got > batch: source ignored the filter (CsvFile-style). It
-    //     streamed everything in one call; nothing left to ask for.
-    //   Otherwise (got === batch): more events may exist; bump and continue.
+    // Stop on a short page, or on an oversized one (the source ignored the
+    // limit and already returned everything).
     if (got !== limit) break;
     at = id;
   }
@@ -524,53 +492,24 @@ export async function load<
     {
       stream,
       stream_exact: true,
-      // The snapshot resume floor is a current-state optimization: it only
-      // holds when the load has no window of its own. `time_travel` already
-      // captures that (any `asOf` bound set), so request `with_snaps` only for
-      // a non-time-travel cold load — a bounded load full-scans real events
-      // under its `asOf` filter. This is the single floor-eligibility decision
-      // for the whole system; the stores apply the floor whenever asked and
-      // never re-derive it (RFC 1274).
-      //
-      // The warm path resumes from `after`, and MUST also carry `with_snaps`
-      // (#1345): `after` and `with_snaps` are independent store conditions —
-      // `after` bounds the scan (id > cached.event_id), `with_snaps` keeps
-      // `__snapshot__` rows in the result. A stale (lagging/cross-process)
-      // cache checkpoint can sit below a newer `__snapshot__` boundary, and a
-      // windowed close (`app.close`/`.autocloses({keep})`) may have pruned the
-      // domain events between the checkpoint and that snapshot. Without
-      // `with_snaps` the rebaselining snapshot is filtered out and the fold
-      // silently applies the surviving tail on top of stale state (wrong
-      // count, yet `version` still reports the true head — the concurrency
-      // guard passes). With it, the snapshot in the after-window rebaselines
-      // the fold; when no snapshot falls in the window it is a no-op.
+      // `with_snaps` on every non-time-travel load. Cold, it resumes from the
+      // latest snapshot (this is the only place that decides it; stores just
+      // apply it). Warm, it keeps a snapshot above a stale checkpoint in the
+      // result, so a windowed close that pruned the events in between can't
+      // make the fold apply the tail onto stale state.
       ...(cached
         ? { after: cached.event_id, with_snaps: true }
         : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
 
-  // Populate the cache when this load actually processed events. Without
-  // this, read-heavy paths (UI loops calling load() many times between
-  // commits) miss the cache forever — only action() would ever warm it.
-  // No race-protection re-check needed: the cache is a state checkpoint
-  // at (version, event_id), and any subsequent load queries past
-  // event_id (with `with_snaps`, so a rebaselining snapshot above the
-  // checkpoint is still folded even after a windowed close pruned the
-  // events between them — #1345), picks up missed events, and replays — so
-  // an "older" cache write from a concurrent slower load is self-correcting
-  // on next access. Time-travel loads bypass cache entirely and skip this too.
+  // Warm the cache when this load replayed events, so read-heavy paths
+  // benefit too. A stale write from a slower concurrent load self-corrects:
+  // the next load replays past its `event_id`. Time-travel loads skip it.
   //
-  // Skip the write when the replayed head is the tombstone (ACT-1188).
-  // During the close guard window (tombstone committed, truncate pending)
-  // a cold load replays real events + the tombstone, so `replayed > 0`.
-  // Caching here would store a checkpoint at the tombstone's (version,
-  // event_id) with no `event` on the entry — the next `action()` would
-  // then get a warm hit where `snapshot.event` is undefined, its
-  // cold-path tombstone check (`snapshot.event?.name === TOMBSTONE_EVENT`)
-  // would go vacuously false, and a commit could land past the tombstone
-  // that the eventual truncate deletes. Leaving the cache cold keeps that
-  // check live on every subsequent load.
+  // Not when the head is the tombstone (a close in progress): the cached
+  // entry would carry no event, and `action()`'s tombstone check would
+  // pass vacuously.
   const head_is_tombstone = event?.name === TOMBSTONE_EVENT;
   if (
     replayed > 0 &&
@@ -579,12 +518,7 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    // Fire-and-forget the checkpoint write, mirroring action() (ACT-1206):
-    // the state is already correctly computed, so a transient failure in a
-    // remote-backed Cache (e.g. a Redis blip) must not fail the read — that
-    // would break plain reads, reaction bound_load dispatches, and the fold
-    // engine's first-sight load. The cache is self-correcting: a subsequent
-    // load queries past `event_id`, replays what it missed, and re-warms.
+    // Fire-and-forget: a cache failure must not fail the read.
     await cache()
       .set(stream, {
         stream,
@@ -609,7 +543,7 @@ export async function load<
     // Head event id, captured atomically with `state`: the last replayed
     // event's id on a cache miss, or the cached checkpoint's event_id on a
     // warm hit with no new events. Consumers read this instead of a
-    // separate cache lookup that could race a concurrent commit (ACT-1204).
+    // separate cache lookup that could race a concurrent commit.
     id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
@@ -757,32 +691,13 @@ export async function action<
           stream,
           emitted,
           meta,
-          // Reactions skip the INFERRED guard: they always append against the
-          // current head. Stream leasing already serializes concurrent reactions,
-          // and forcing version checks here would turn ordinary catch-up into
-          // spurious retries. An expectedVersion the caller passed explicitly is
-          // still honored — dropping a guard the caller asked for is silent data
-          // loss, and the reaction context can reach further than the handler
-          // (detached timers, settle cycles) where the caller never intended a
-          // reaction's semantics at all.
+          // Reactions skip the inferred version guard (leases already
+          // serialize them); an explicit expectedVersion is still honored.
           reactingTo ? expectedVersion : expected
         );
       } catch (error) {
-        // Invalidate cache on concurrency errors — cached state is stale.
-        //
-        // Contained and NOT awaited, matching every other cache write on this
-        // path (the load checkpoint, the action checkpoint, the gapped-commit
-        // invalidate): a transient failure in a remote-backed Cache must not
-        // fail the operation. Awaiting it unguarded here did two kinds of
-        // damage (#1438). The caller got the cache's error instead of the
-        // `ConcurrencyError`, so transports mapped a Redis blip to 500 rather
-        // than 412. Worse, the substituted error failed the
-        // `instanceof ConcurrencyError` test in the retry loop below, so a
-        // conflict that would have resolved on reload+retry became a
-        // permanent failure with the work lost.
-        //
-        // The invalidate is defensive anyway: the cache is self-correcting,
-        // since a stale checkpoint is re-folded from `after: event_id`.
+        // Invalidate the stale cache entry, fire-and-forget: a cache failure
+        // must not replace the `ConcurrencyError` the retry loop expects.
         if (error instanceof ConcurrencyError) {
           cache()
             .invalidate(stream)
@@ -830,22 +745,13 @@ export async function action<
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
-      // Persist the snapshot before caching. Awaited on purpose: the
-      // snapshot event occupies the next version slot, so a follow-up
-      // action loading a pre-snap checkpoint from the cache would collide
-      // with the framework's own bookkeeping. Caching the snap checkpoint
-      // before the action returns keeps sequential callers from ever
-      // seeing a conflict they didn't cause. Failures are still
-      // swallowed inside snap() — the action never fails on it, and the
-      // cache then keeps the pre-snap checkpoint, which stays correct.
+      // Awaited: the snapshot takes the next version, so the cache must hold
+      // the post-snap checkpoint before a sequential caller loads it.
+      // `snap()` swallows its own failures.
       const snap_event = snapped ? await snap(last) : undefined;
 
-      // #861: pii-aware states (any event declaring `sensitive(...)`
-      // fields) never populate the snapshot cache — state evolves from
-      // the actor-gated event view, so the cached state would vary by
-      // caller. Pure states cache normally.
-      // Fire-and-forget — log but don't fail the action on cache write errors
-      // (e.g., transient network failures in a custom Cache adapter).
+      // States with sensitive fields aren't cached (their state depends on
+      // the actor). Fire-and-forget otherwise.
       if (!me.pii_aware) {
         if (contiguous)
           cache()
@@ -880,14 +786,8 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
-      // A caller-pinned expectedVersion is a fixed target: every retry
-      // reloads and re-commits against the SAME pinned version, so the
-      // conflict is guaranteed to recur — retrying only burns the budget
-      // and sleeps out the backoff before surfacing the same terminal
-      // error. Rethrow immediately (ACT-1208). The retry loop exists to
-      // absorb races on framework-derived versions (a concurrent writer
-      // advanced the head), where the reload picks up the new head
-      // version and the next attempt can succeed.
+      // A caller-pinned expectedVersion would conflict again on every
+      // retry, so rethrow; retries are for framework-derived versions.
       if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {

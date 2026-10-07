@@ -18,7 +18,7 @@
  *
  * The shape-based {@link dateReviver} in `utils.ts` is the predecessor this
  * replaced — it revived anything ISO-8601-looking, including fields declared
- * `z.string()` ([#1556](https://github.com/Rotorsoft/act-root/issues/1556)).
+ * `z.string()`.
  *
  * @internal
  */

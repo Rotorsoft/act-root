@@ -101,35 +101,8 @@ import type {
 } from "./types/index.js";
 
 /**
- * @category Orchestrator
- * @see Store
- *
- * Main orchestrator for event-sourced state machines and workflows.
- *
- * It manages the lifecycle of actions, reactions, and event streams, providing APIs for loading state, executing actions, querying events, and draining reactions.
- *
- * ## Usage
- *
- * ```typescript
- * const app = new Act(registry, 100);
- * await app.do("increment", { stream: "counter1", actor }, { by: 1 });
- * const snapshot = await app.load(Counter, "counter1");
- * await app.drain();
- * ```
- *
- * - Register event listeners with `.on("committed", ...)` and `.on("acked", ...)` to react to lifecycle events.
- * - Use `.query()` to analyze event streams for analytics or debugging.
- *
- * @template TSchemaReg SchemaRegister for state
- * @template TEvents Schemas for events
- * @template TActions Schemas for actions
- * @template TStateMap Map of state names to state schemas
- * @template TActor Actor type extending base Actor
- */
-
-/**
  * Scan window and pass cap for the correlation catch-up the close-cycle
- * safety probe runs (#1487). The probe cannot judge pending work over
+ * safety probe runs. The probe cannot judge pending work over
  * events correlate has not resolved, so it advances the cursor to the head
  * of the streams being closed first — bounded, so a close behind a large
  * backlog skips the stream (the documented retryable outcome) rather than
@@ -203,7 +176,7 @@ export type ActLifecycleEvents<
    */
   forgotten: { stream: string; at: Date; eventCount: number };
   /**
-   * A store operation failed during the drain loop (ACT-984). Fires on
+   * A store operation failed during the drain loop. Fires on
    * every failed drain cycle — typically a {@link StoreError} from a
    * degraded backend — carrying the orchestrator circuit breaker's state
    * after the failure (`open` means the drain loop has backed off and will
@@ -220,7 +193,7 @@ export type ActLifecycleEvents<
  * @property maxSubscribedStreams - Cap for the LRU tracking what each
  *   dynamically resolved reaction target was last subscribed at. Statically
  *   declared targets are held outside it and never evicted, so their lane
- *   and priority stay owned by the build-time subscribe (#1582).
+ *   and priority stay owned by the build-time subscribe.
  *   Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
  * @property settleDebounceMs - Debounce window (ms) used by `settle()` when
  *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
@@ -231,7 +204,7 @@ export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
   readonly settleDebounceMs?: number;
   /**
-   * Per-Act ports (ACT-501). When set, this Act runs against the
+   * Per-Act ports. When set, this Act runs against the
    * provided store + cache instead of the singletons — threaded via
    * AsyncLocalStorage so internals are unchanged. Both are required
    * together (a shared cache across distinct stores would collide on
@@ -239,7 +212,7 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly scoped?: Scoped;
   /**
-   * Correlation-id generator for originating actions (ACT-404). When
+   * Correlation-id generator for originating actions. When
    * omitted, Act uses {@link default_correlator}, which produces a
    * readable, time-monotonic-within-window, lowercase id of the form
    * `{state[:4]}-{action[:4]}-{ts}{rnd}` (18 chars).
@@ -249,10 +222,10 @@ export type ActOptions<TLanes extends string = string> = {
    * for the close-the-books transaction.
    */
   readonly correlator?: Correlator;
-  /** Restrict this process to a subset of declared lanes (ACT-1103). */
+  /** Restrict this process to a subset of declared lanes. */
   readonly onlyLanes?: ReadonlyArray<TLanes>;
   /**
-   * Subscribe to {@link Store.notify} on this instance (#803). Defaults
+   * Subscribe to {@link Store.notify} on this instance. Defaults
    * to `true`. Set `false` on instances that only commit and never
    * react — the subscriber-connection budget is the practical scaling
    * ceiling for the notify/listen pattern, and writer-only fleets
@@ -262,7 +235,7 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly listen?: boolean;
   /**
-   * Run the local reaction pipeline on this instance (#803). Defaults
+   * Run the local reaction pipeline on this instance. Defaults
    * to `true`. Set `false` on writer-only or sidecar instances: drain
    * controllers' auto-cycle workers don't start, `correlate()` /
    * `drain()` / `settle()` become no-ops, and the notify handler
@@ -271,7 +244,7 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly drain?: boolean;
   /**
-   * Orchestrator circuit breaker for the drain loop (ACT-984). After
+   * Orchestrator circuit breaker for the drain loop. After
    * `failureThreshold` consecutive store failures the breaker opens and
    * the drain loop skips `claim()` for `cooldownMs` instead of hammering a
    * down backend, then allows a half-open trial. Out-of-range values throw
@@ -279,9 +252,8 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
   /**
-   * @deprecated Since #1175 this knob is accepted, validated, and
-   * ignored. It paced the off-hours re-check of the pre-#1090 autoclose
-   * sweep; the synthesized autoclose reaction now derives its re-check
+   * @deprecated Accepted, validated, and ignored. It paced the off-hours
+   * re-check of the old autoclose sweep; the synthesized autoclose reaction now derives its re-check
    * directly from `autocloseWindow` — a tick landing outside the window
    * parks until the exact instant the window opens, so there is no
    * polling cadence to configure (and nothing minute-denominated on the
@@ -291,21 +263,21 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly autocloseCycleMinutes?: number;
   /**
-   * @deprecated Dead since #1090 replaced the autoclose sweep with a
+   * @deprecated Unused since the autoclose sweep was replaced by a
    * synthesized per-aggregate reaction — nothing pages the store in
    * batches anymore, so nothing reads this. Accepted and validated
    * (`[1, 1024]`) for compatibility; will be removed in the next major.
    */
   readonly closeBatchSize?: number;
   /**
-   * @deprecated Dead since #1090 — the sweep that yielded between
+   * @deprecated Unused: the sweep that yielded between
    * successive `Store.truncate` calls no longer exists; closes are
    * staged per stream by the autoclose reaction. Accepted and validated
    * (`[0, 1000]`) for compatibility; will be removed in the next major.
    */
   readonly closeYieldMs?: number;
   /**
-   * @deprecated Dead since #1090 — the sweep-side predicate try/catch
+   * @deprecated Unused: the sweep-side predicate try/catch
    * this flag steered no longer exists; a throwing policy predicate now
    * follows the reaction retry path (`blockOnError: false`, three
    * retries). Accepted for compatibility; will be removed in the next
@@ -328,14 +300,14 @@ export type ActOptions<TLanes extends string = string> = {
   };
   /**
    * Validate folded state against its declared Zod schema after every
-   * reduction (ACT-1238). Off by default.
+   * reduction. Off by default.
    *
    * When `true`, each time an event is folded into state — on the
    * command path (`do`), on `load`/replay, and inside projection-fold
    * projections — the merged full state is parsed against the owning
    * state's `state({ Name: schema })` schema. A reducer that produces
-   * schema-violating state (the calculator divide-by-zero NaN class,
-   * #1230) throws a {@link ValidationError} at the triggering event,
+   * schema-violating state (the calculator divide-by-zero NaN
+   * class) throws a {@link ValidationError} at the triggering event,
    * whose `target` names the state and the event (`<state>.<event>#<id>`)
    * — instead of the bad value propagating and surfacing hops later as a
    * confusing downstream error.
@@ -369,6 +341,32 @@ function validate_only_lanes(
     );
 }
 
+/**
+ * @category Orchestrator
+ * @see Store
+ *
+ * Main orchestrator for event-sourced state machines and workflows.
+ *
+ * It manages the lifecycle of actions, reactions, and event streams, providing APIs for loading state, executing actions, querying events, and draining reactions.
+ *
+ * ## Usage
+ *
+ * ```typescript
+ * const app = act().withState(Counter).build();
+ * await app.do("increment", { stream: "counter1", actor }, { by: 1 });
+ * const snapshot = await app.load(Counter, "counter1");
+ * await app.drain();
+ * ```
+ *
+ * - Register event listeners with `.on("committed", ...)` and `.on("acked", ...)` to react to lifecycle events.
+ * - Use `.query()` to analyze event streams for analytics or debugging.
+ *
+ * @template TSchemaReg SchemaRegister for state
+ * @template TEvents Schemas for events
+ * @template TActions Schemas for actions
+ * @template TStateMap Map of state names to state schemas
+ * @template TActor Actor type extending base Actor
+ */
 export class Act<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -378,11 +376,11 @@ export class Act<
 > implements IAct<TEvents, TActions, TActor, TSchemaReg>
 {
   private _emitter = new EventEmitter();
-  /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
+  /** Circuit breaker shared by all drain lanes. */
   private readonly _breaker: CircuitBreaker;
-  /** #803: gate the `Store.notify` subscription side. */
+  /** Whether this instance subscribes to `Store.notify`. */
   private readonly _listen: boolean;
-  /** #803: gate the local reaction pipeline (drain controllers, settle, correlate). */
+  /** Whether this instance runs reactions (drain, settle, correlate). */
   private readonly _drain: boolean;
   /** Event names with at least one registered reaction (computed at build time) */
   private readonly _reactive_events: ReadonlySet<string>;
@@ -391,7 +389,7 @@ export class Act<
     string,
     DrainController<TEvents, TActions, TSchemaReg>
   >;
-  /** Correlation state machine: lazy init, dynamic-resolver scan, periodic worker. */
+  /** Correlation: lazy init and the scan that marks work. */
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   /** Debounced correlate→drain catch-up loop. */
   private readonly _settle: SettleLoop<TEvents>;
@@ -428,26 +426,10 @@ export class Act<
    * Emit a lifecycle event. The payload type is inferred from the event name
    * via {@link ActLifecycleEvents}.
    *
-   * **Every listener is contained individually.** Lifecycle listeners are
-   * observers — `observability.md` promises that a throwing one is "contained,
-   * not fatal" — and containment belongs here rather than at each call site,
-   * for two reasons the previous arrangement got wrong (#1437):
-   *
-   * - Wrapping the *emit* rather than each *listener* still let the first
-   *   thrower abort the rest: `EventEmitter.emit` stops dispatching on the
-   *   first exception, so a second `app.on("acked", …)` never ran. The
-   *   documented "the remaining sinks still fire" was false whenever an event
-   *   had more than one listener. Same lesson as #1423, where guarding the
-   *   loop instead of each callback left every later SSE subscriber unserved.
-   * - Only *some* call sites wrapped at all. The drain contained `acked` and
-   *   `blocked`; `committed`, `forgotten` and `close()`'s `closed` did not, so
-   *   a throwing listener rejected `do()`, `forget()` and `close()` **after**
-   *   their durable work had already landed. A caller retrying a "failed"
-   *   `do()` writes the event twice, since the framework has no dedup by
-   *   design.
-   *
-   * Containing here makes it a property of emitting, so a new lifecycle event
-   * cannot reintroduce the gap by omission.
+   * Each listener is contained on its own: a throwing listener is logged,
+   * the remaining listeners still run, and the caller (`do()`, `forget()`,
+   * `close()`, the drain) never sees the throw, since its durable work has
+   * already landed.
    *
    * Uses `rawListeners` so `once` wrappers still de-register themselves, and
    * returns "had listeners" to preserve the `EventEmitter.emit` contract.
@@ -525,29 +507,23 @@ export class Act<
    */
   private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /**
-   * Event-name → lane fan-in for selective arming (ACT-1103). Built by
+   * Event-name → lane fan-in for selective arming. Built by
    * `classify_registry` once per build. `"all"` means at least one of
    * the event's reactions is a dynamic resolver (lane opaque until
    * runtime); a `Set<string>` lists the static lanes only that event's
    * reactions target.
    */
   private readonly _event_to_lanes: ReadonlyMap<string, EventLaneSet>;
-  /**
-   * Audit dependency bag (#723). Built once at construction; held as
-   * an immutable snapshot of the registry state the audit module
-   * needs. Lives in `internal/audit.ts` — this orchestrator never
-   * carries audit logic, only the deps + a one-liner that hands them
-   * over.
-   */
+  /** What `internal/audit.ts` needs, built once at construction. */
   private readonly _audit_deps: AuditDeps;
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
-  /** Wraps a public-method body so internal `store()`/`cache()` resolve to the
-   * per-Act ports (ACT-501). No-op when the Act is unscoped — so the singleton
-   * path keeps reading fresh `store()`/`cache()` per call, which matters for
-   * tests that dispose and re-seed mid-suite. */
   /** This Act's ports: its own bag, or the singleton adapters. */
   private readonly _ports: Scoped;
+  /**
+   * Runs a body inside this Act's ports frame, so internal
+   * `store()`/`cache()` calls resolve to `_ports`.
+   */
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   /**
@@ -567,40 +543,31 @@ export class Act<
   /** Reaction dispatchers built once and handed to run_drain_cycle each cycle. */
   private readonly _handle: Handle<TEvents>;
   private readonly _handle_batch: HandleBatch<TEvents>;
-  /** Declared drain lanes (ACT-1103). */
+  /** Declared drain lanes. */
   private readonly _lanes: ReadonlyArray<LaneConfig>;
 
   /**
-   * Per-stream close serialization tails (#1222). Chains each stream's
-   * windowed-close work behind the previous one so a manual
-   * `app.close([{stream, before}])` and an autoclose windowed close for
-   * the same stream never run their guard-free prune concurrently — the
-   * manual path bypasses the `__autoclose__:X` drain lease that would
-   * otherwise exclude them, so without this both closers archive the
-   * same prefix. Process-local: both racers run on the same Act
-   * instance. Entries are dropped once their tail resolves so the map
-   * doesn't grow with distinct stream names.
+   * Per-stream close serialization tails, so a manual close and an
+   * autoclose of the same stream never prune concurrently (the manual path
+   * has no drain lease to exclude it). Entries are dropped once settled.
    */
   private readonly _close_locks = new Map<string, Promise<unknown>>();
 
   /**
-   * Run `work` under the per-stream close lock (#1222). Serializes close
-   * critical sections for the same stream (windowed prunes, and full closes
-   * since #1738) while letting different streams proceed in parallel.
+   * Run `work` under the per-stream close lock. Serializes close
+   * critical sections for the same stream (windowed prunes and full
+   * closes) while letting different streams proceed in parallel.
    */
   private _with_close_lock<T>(
     stream: string,
     work: () => Promise<T>
   ): Promise<T> {
     const prev = this._close_locks.get(stream) ?? Promise.resolve();
-    // Chain after the previous holder regardless of how it settled — a
-    // failed close must not wedge the stream's lock forever. The next
-    // waiter chains off `next` (the work), so its start is gated on this
-    // work completing.
+    // Chain after the previous holder however it settled, so a failed close
+    // can't wedge the lock.
     const next = prev.then(work, work);
     this._close_locks.set(stream, next);
-    // Drop the tail once it settles, but only if it's still the current
-    // one — a later waiter that already replaced it owns the entry now.
+    // Drop the tail once settled, unless a later waiter replaced it.
     const cleanup = () => {
       if (this._close_locks.get(stream) === next)
         this._close_locks.delete(stream);
@@ -624,11 +591,11 @@ export class Act<
    * @param states    Merged map of state name → state definition
    * @param batch_handlers Static-target projection batch handlers (target → handler)
    * @param options   Tuning knobs — see {@link ActOptions}
-   * @param lanes     Declared drain lanes (ACT-1103). The builder collects
-   *   these from `.withLane(...)` calls. Slice 1 records them on the
-   *   instance; later slices fan out one `DrainController` per lane.
+   * @param lanes     Declared drain lanes. The builder collects
+   *   these from `.withLane(...)` calls; one `DrainController` runs
+   *   per lane, plus the implicit `"default"`.
    * @param patch_fn  The per-event patch step selected once by the builder
-   *   from `ActOptions.validateFoldedState` (ACT-1238) — `bare_patch` by
+   *   from `ActOptions.validateFoldedState` — `bare_patch` by
    *   default, `validating_patch` when the flag is on. The builder uses
    *   the same value for its projection-fold handlers, so there is a
    *   single selection site. Defaults to `bare_patch` for direct
@@ -647,40 +614,29 @@ export class Act<
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     validate_only_lanes(options, lanes);
-    // Every Act runs in its own ports frame. Without `scoped` that frame
-    // carries the singleton adapters, which is what stops a shared Act
-    // inheriting the frame of whoever called it (#1597).
+    // Every Act runs in its own ports frame (the singletons when unscoped),
+    // so a shared Act never inherits its caller's frame.
     this._ports = options.scoped ?? default_scope();
-    // Resolved here rather than at reaction synthesis, so it is this Act's
-    // window and not the first-built Act's (#1615). Parsing on every
-    // construction is also what restores the startup-validation contract:
-    // an out-of-range window throws where it was declared, on every build,
-    // not only the first.
     const ports = this._ports;
     this._scoped = make_run_scoped({
-      // Delegating getters, NOT a spread: `default_scope()` resolves the
-      // process singletons lazily, so copying its properties would freeze
-      // whichever adapters happened to be installed at construction and
-      // ignore a later `store(...)` / `cache(...)`.
+      // Getters, not a spread: the singletons resolve lazily, so a later
+      // `store(...)` / `cache(...)` still takes effect.
       get store() {
         return ports.store;
       },
       get cache() {
         return ports.cache;
       },
+      // Parsed per build, so a bad window throws on every build.
       autoclose_window: resolveAutocloseConfig(options).autocloseWindow,
     });
     this._correlator = options.correlator ?? default_correlator;
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
-    // Reaction-level PII wrapping happens at build time inside `act-builder`:
-    // reactions registered against an event with `sensitive(...)` fields get
-    // a stripping handler closure; reactions against non-PII events keep
-    // their original handler reference. So the dispatcher is PII-unaware.
+    // PII stripping is wrapped around handlers at build time, so the
+    // dispatcher is PII-unaware.
     this._handle = build_handle<TEvents, TActions, TActor>({
       logger: this._logger,
-      // The orchestrator owns ambient context; `build_handle` only asks for
-      // the triggering event to be in scope while the handler runs.
       reaction_scope: make_reaction_scope({
         do: this._bound_do,
         load: this._bound_load,
@@ -691,9 +647,6 @@ export class Act<
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
-    // The registry arrives complete and frozen from the builder — the
-    // autoclose reactions were synthesized there, so classification sees
-    // the finished shape and nothing here mutates it.
     const classification = classify_registry(this.registry, this._states);
     this._reactive_events = classification.reactive_events;
     this._event_to_state = classification.event_to_state;
@@ -701,10 +654,8 @@ export class Act<
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
 
-    // Composition sequence — each step builds one runtime subsystem from
-    // the pieces above. Order matters: controllers read the breaker, the
-    // audit bag reads the finalized controller set, settle reads the
-    // correlate cycle.
+    // Order matters: controllers read the breaker, the audit bag reads the
+    // controller set, settle reads the correlate cycle.
     this._breaker = this._build_breaker(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
     this._advise_orphaned_lanes(options, lanes);
@@ -712,19 +663,11 @@ export class Act<
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
 
-    // Auto-wire cross-process notify when the store supports it. Bound at
-    // construction time — late `store(adapter)` injection after build won't
-    // take effect. Scoped Acts bind against their own store.
+    // Wire cross-process notify against the store current at construction.
     this._notify_disposer = this._wire_notify(this._ports.store);
 
-    // Registered weakly (#1441). A plain `dispose(() => this.shutdown())`
-    // closure captures `this` in a module-level array that is never emptied,
-    // so every Act ever built — with its registry, drain controllers, and for
-    // a scoped Act its own store and cache, connection pools included —
-    // survives for the process lifetime. Apps that mint short-lived Acts (one
-    // per tenant, per request, per test) leak one apiece. Holding the
-    // reference weakly keeps process-wide `dispose()()` working for a live
-    // Act while letting an unreachable one be collected, shut down or not.
+    // Registered weakly, so `dispose()()` reaches a live Act while an
+    // unreachable one (per tenant, per test) can still be collected.
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
@@ -738,16 +681,8 @@ export class Act<
       resolveCircuitBreakerConfig(options.circuitBreaker),
       {
         on_error: (error, circuit) => this._emit_error(error, circuit),
-        // Re-probe the store when the cooldown elapses, so recovery is
-        // automatic even on the default lane (which has no periodic poller).
-        // The wake fires `settle()`, which (in half-open) runs a real store
-        // probe: for a dynamic-resolver app the probe is settle's correlate
-        // (a store scan); for a static-reaction app correlate is a no-op that
-        // records no health, so the probe is settle's DRAIN claim — either
-        // way one success closes the breaker and every loop resumes, a
-        // failure re-opens it and reschedules the wake. Settle does NOT close
-        // the breaker off a no-op correlate (#1329) — only a real store op
-        // (correlate scan or drain claim) records `passed()`.
+        // When the cooldown elapses, settle once: its scan or claim is the
+        // half-open probe that closes or re-opens the breaker.
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
@@ -756,12 +691,9 @@ export class Act<
   }
 
   /**
-   * One DrainController per active lane. The implicit "default" lane is
-   * always present unless onlyLanes excludes it. Each controller filters
-   * its claim() by its lane name; the legacy single-controller path is the
-   * no-lane-declared case with `lane: undefined` deps so claim() doesn't
-   * filter (preserves the single-lane SQL planner shape for apps that never
-   * call withLane).
+   * One DrainController per active lane, plus the implicit "default" unless
+   * `onlyLanes` excludes it. Apps that declare no lanes pass no lane filter
+   * to `claim`.
    */
   private _build_drain_controllers(
     options: ActOptions,
@@ -775,11 +707,8 @@ export class Act<
     const active_lanes = only_set
       ? all_lanes.filter((n) => only_set.has(n))
       : all_lanes;
-    // Keyed on the DECLARED universe, not the active slice: a worker
-    // narrowed to `onlyLanes: ["default"]` still shares the store with
-    // peers draining other lanes, and `claim`'s lane argument is an
-    // optional filter — dropping it there would claim every lane's
-    // streams (#1545).
+    // Decided by the declared lanes, not the active ones: a worker narrowed
+    // to "default" must still filter, or it would claim every lane.
     const single_default_lane = lanes.length === 0;
     const controllers = new Map<
       string,
@@ -796,11 +725,7 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
-        // Reaction-requested close. Runs the same close machinery as
-        // `app.close` (tombstone guard + archive + atomic truncate) for the
-        // targets a handler signalled via `CloseSignal`. No `correlate()`
-        // here — the drain that produced these targets has already
-        // correlated.
+        // Reaction-requested close: the same machinery as `app.close`.
         on_close: async (targets) => {
           const close_actor = { id: "$close", name: "close" };
           const result = await run_close_cycle(targets, {
@@ -815,30 +740,18 @@ export class Act<
               this._with_close_lock(stream, work),
           });
           this._forget_closed_subscriptions(result);
-          // The close machinery above is deliberately NOT wrapped, so a
-          // real StoreError reaches the breaker (#1388). The emit needs no
-          // guard here: `Act.emit` contains each listener (#1437).
           this.emit("closed", result);
         },
         breaker: this._breaker,
-        // Re-scope the per-lane worker's auto-start ticks so their drain
-        // resolves the scoped ports, not the singleton (#1191).
         run_scoped: this._scoped,
-        // Pass lane only when a true per-lane controller is active.
-        // The all-lanes (single default) case keeps lane=undefined so
-        // adapter SQL collapses to the single-lane shape.
         lane: single_default_lane ? undefined : name,
         defaults: cfg && {
           streamLimit: cfg.streamLimit,
           leaseMillis: cfg.leaseMillis,
         },
       });
-      // Auto-start a per-lane worker when the operator declared a
-      // cycleMs — the intent of `withLane({cycleMs: 100})` is "drive
-      // this lane every 100 ms," independent of the Act-level settle
-      // loop. unref()'d so the timer doesn't keep the process alive.
-      // Writer-only instances (`drain: false`) construct the controller
-      // but never run reactions locally, so the auto-start is skipped.
+      // A lane with `cycleMs` drives itself on that timer (not on
+      // writer-only instances).
       if (cfg?.cycleMs !== undefined && options.drain !== false)
         controller.start(cfg.cycleMs);
       controllers.set(name, controller);
@@ -847,17 +760,9 @@ export class Act<
   }
 
   /**
-   * Orphaned-lane startup advisory (#1220). When `onlyLanes` is set, this
-   * instance builds a controller only for its slice of the declared lane
-   * universe — every OTHER declared lane's stream is persisted (correlate
-   * subscribes all static targets regardless of `onlyLanes`) but never
-   * claimed here. If no peer worker deploys with those lanes in ITS
-   * `onlyLanes`, their reactions accumulate forever, silently. A single
-   * process can't verify the cluster invariant `∪ onlyLanes ⊇ declared
-   * lanes`, so we surface the per-instance signal — "these declared lanes
-   * have no controller here" — the same way the deprecated-event advisory
-   * surfaces legacy events. No advisory when `onlyLanes` is unset (every
-   * lane gets a controller) or covers every declared lane.
+   * Startup advisory naming declared lanes that `onlyLanes` leaves without a
+   * controller here. One process can't check that the cluster covers every
+   * lane, so it reports its own gaps.
    */
   private _advise_orphaned_lanes(
     options: ActOptions,
@@ -880,25 +785,15 @@ export class Act<
     );
   }
 
-  /**
-   * Audit deps bag. Snapshotted after registry classification and
-   * drain-controller build so the audit module sees the finalized lane
-   * set. Held as an immutable bag — the orchestrator never carries audit
-   * logic itself, only this typed contract.
-   */
+  /** Audit deps, built after the controllers so the lane set is final. */
   private _build_audit_deps(): AuditDeps {
     return {
       store,
       logger: this._logger,
       event_to_state: this._event_to_state,
       states: this._states,
-      // The DECLARED lane universe — the implicit "default" plus every
-      // `.withLane(...)` name — NOT `_drain_controllers.keys()` (#1224).
-      // An `onlyLanes`-filtered instance builds a controller only for its
-      // slice of lanes, so keying off the active controller set would flag
-      // a stream correctly assigned to an excluded-but-declared lane (one
-      // another worker drains) as `unknown-lane`. The audit reports what's
-      // structurally routable across the cluster, not what this process runs.
+      // Declared lanes, not this process's controllers: a lane another
+      // worker drains is not `unknown-lane`.
       declared_lanes: new Set(["default", ...this._lanes.map((l) => l.name)]),
       routed_events: new Set(this._event_to_lanes.keys()),
     };
@@ -921,10 +816,8 @@ export class Act<
       cd: this._cd,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      // Every lane a controller can exist for, so correlate can reroute a
-      // dynamic resolution that names one that doesn't (#1564). Declared,
-      // not active: `onlyLanes` shrinks this process's controllers, but a
-      // lane another process claims is still a valid destination.
+      // Declared lanes (not active ones): a lane another process claims is
+      // still a valid destination.
       declared_lanes: new Set<string>([
         "default",
         ...this._lanes.map((l) => l.name),
@@ -932,8 +825,6 @@ export class Act<
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
-      // Cold-start defer re-seed (#1221). Skipped on writer-only instances
-      // (`drain: false`) — they run no local controllers to re-arm.
       on_init_async: this._drain
         ? () => this._seed_persisted_defers()
         : undefined,
@@ -941,35 +832,16 @@ export class Act<
   }
 
   /**
-   * Re-seed every active lane controller's process-local defer timer from
-   * the store's persisted `deferred_at` (#1221). Runs once at cold start,
-   * inside `CorrelateCycle.init`, after static targets are subscribed.
-   *
-   * The defer timer is worker memory: empty after a restart. A stream
-   * deferred to a future due-time (the classic case: an idle autoclose
-   * aggregate that deferred its terminal close) is durable in the store but
-   * has nothing in memory to re-arm the drain — the controller disarms on
-   * the first empty claim and, since the aggregate is idle, no commit ever
-   * re-arms it. Reading the persisted schedule and seeding the owning lane's
-   * timer restores the wake, so the close fires at the due-time.
-   *
-   * Streams whose lane has no controller on this instance (excluded by
-   * `onlyLanes`) are skipped — a peer worker owns that lane's timer.
+   * At cold start, re-seed each lane controller's local wake from the
+   * persisted future `deferred_at`, so an idle deferred stream (an
+   * autoclose waiting out its window) still fires on time. Streams on lanes
+   * this instance doesn't run are skipped.
    */
   private async _seed_persisted_defers(): Promise<void> {
     const now = Date.now();
-    // Paged — `query_streams` defaults to 100, and a stream sorting past
-    // the first page would never get its timer re-armed. The failing case
-    // is exactly the one described above: an idle aggregate no commit
-    // ever re-arms.
     await walk_streams(store(), (pos) => {
-      // Only future defers matter — a past-due schedule is claimable
-      // already, so the ordinary armed drain picks it up.
+      // A past-due schedule is already claimable.
       if (pos.deferred_at === undefined || pos.deferred_at <= now) return;
-      // Route to the controller that owns the stream's lane. A missing
-      // controller means the lane is excluded on this instance (onlyLanes) —
-      // skip it, a peer worker owns that timer. The default lane's
-      // controller is keyed "default" and matches an undefined stored lane.
       const controller = this._drain_controllers.get(pos.lane ?? "default");
       controller?.seed_defer(pos.stream, pos.deferred_at);
     });
@@ -979,10 +851,6 @@ export class Act<
   private _build_settle(options: ActOptions): SettleLoop<TEvents> {
     return new SettleLoop<TEvents>(
       {
-        // Scope the init like every other store-touching path — a bare
-        // `this._correlate.init()` runs `store().subscribe(...)` against
-        // the singleton for a scoped Act, so static targets never land on
-        // the scoped store and `_initialized` then blocks a retry (#1191).
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
         correlate: (q) => this._correlate_scanned(q, true),
@@ -1002,19 +870,11 @@ export class Act<
    * already in flight a bounded chance to finish, then remove lifecycle
    * listeners and tear down the cross-process notify subscription.
    *
-   * The order is deliberate (#1442). Scheduling stops first, so nothing new
-   * is claimed while teardown runs. Then in-flight cycles are awaited up to
-   * `graceMs`: a reaction handler parked on an `await` holds its stream's
-   * lease until it acks, so abandoning it costs the replacement worker up to
-   * `leaseMillis` of dead time on that stream and discards the round of work
-   * (which #1418 then redelivers). Listeners come off *after* that wait, not
-   * before, so an `acked` / `blocked` subscriber still observes the work
-   * that completed during the grace window.
-   *
-   * The budget is a ceiling, not a delay — teardown continues the moment the
-   * last in-flight cycle finishes. When it is exhausted, teardown proceeds
-   * anyway: one stuck handler must not hang a deploy, which is the failure
-   * mode an unbounded wait would trade for.
+   * Scheduling stops first, then in-flight cycles get up to `graceMs` to
+   * reach their `ack` (an abandoned handler holds its lease until it
+   * expires). Listeners come off after the wait, so they still see work that
+   * finished during it. The budget is a ceiling, not a delay; when it runs
+   * out, teardown proceeds anyway.
    *
    * Idempotent — repeated calls return the same promise, and the first
    * call's `graceMs` is the one that applies. Registered automatically with
@@ -1030,36 +890,17 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         this.stop_correlations();
-        // Unsubscribe BEFORE stopping the settle loop. A notification
-        // arriving after the settle loop stops reaches the handler below and
-        // schedules a fresh cycle that nothing is left to cancel, so a
-        // worker that has already shut down takes a new lease — and with a
-        // grace budget in play that window is seconds wide (#1596). Stopping
-        // the source first leaves nothing able to arm.
-        //
-        // `_wire_notify` swallows subscription errors and resolves to
-        // `undefined`, so this promise never rejects.
+        // Unsubscribe from notify before stopping settle, or a late
+        // notification would schedule a cycle nothing cancels. Never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
         this._settle.stop();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
-        // Hand the correlation lease back rather than making the next worker
-        // wait out its expiry (#1532), and *await* it: a fire-and-forget
-        // release can land after the process that replaces this one has
-        // already asked, which reads as the successor being denied.
-        //
-        // After the wait, not before it (#1618). `stop_correlations()`
-        // cancels the polling timer, not a correlate already running inside
-        // a settle cycle — and that cycle re-takes the lease on its ordinary
-        // path. Released first, it was re-acquired seconds later and then
-        // held to expiry by a worker that had already shut down, which is
-        // the delay the release exists to remove.
-        //
-        // Wrapped in `_scoped` because it resolves the store through the
-        // port — a scoped Act would otherwise release against the singleton
-        // and leave its real lease held.
+        // Hand the correlation lease back last, after the wait (a settle
+        // cycle still running would re-take it), and await it so a
+        // successor isn't refused.
         await this._scoped(() => this._correlate.release_correlation());
         this._emitter.removeAllListeners();
       })();
@@ -1072,26 +913,10 @@ export class Act<
    * whichever comes first. Cycle promises never reject (`drain()` contains
    * its own errors), so this never throws.
    *
-   * An omitted budget is derived from the lanes that actually have a cycle
-   * in flight: their `leaseMillis` is the operator's own statement of how
-   * long one of their handlers may hold a stream, which makes it the honest
-   * ceiling for how long teardown should wait for that handler. A parked
-   * lane that pinned no lease contributes `drain()`'s own fallback, and the
-   * whole thing is capped so a long-leased lane cannot hold a deploy open.
-   * Idle lanes do not count — nothing is running on them to wait for.
-   *
-   * An in-flight settle counts the same way, on the same fallback (#1617).
-   * It is waited on like any cycle, and deriving from the lanes alone gave
-   * it a budget of `0` whenever it was the only thing running — which
-   * returned before the wait it was about to be added to.
-   *
-   * A lane configured `leaseMillis: 0` takes the fallback rather than its
-   * own value, which is why this coalesces on falsy and not just on absent
-   * (#1647). A zero-length lease expires the instant it is granted, so it
-   * has no answer to offer for "how long may a handler hold this stream" —
-   * it is the pinned-no-lease case spelled with a number, and #1617 already
-   * settled what that case is worth. Taking it literally derived a budget
-   * of `0` and abandoned the very cycle this had just found running.
+   * An omitted budget is the largest `leaseMillis` among lanes with a cycle
+   * in flight (the drain's fallback for lanes that pinned none, or pinned
+   * 0, which is the same as none), with an in-flight settle counting on the
+   * fallback, capped at the maximum. Idle lanes don't count.
    */
   private _derive_grace_ms(
     running: { readonly lease_millis: number | undefined }[],
@@ -1107,19 +932,14 @@ export class Act<
     const running = [...this._drain_controllers.values()].filter(
       (c) => c.inflight !== undefined
     );
-    // The settle loop drives the drain, so it has to be waited on too
-    // (#1468). `SettleLoop.stop()` cancels scheduling only: a cycle already
-    // inside its correlate → drain loop keeps running, and would otherwise
-    // claim a stream after teardown returned — and, under `disposeAndExit`,
-    // after the store adapter was disposed.
+    // A settle cycle already running keeps going after `stop()`, so wait
+    // for it too.
     const settling = this._settle.inflight;
     if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running, !!settling);
     if (grace <= 0) return;
     const inflight = running.map((c) => c.inflight);
     if (settling) inflight.push(settling);
-    // Assigned synchronously by the executor below, before the race is
-    // awaited — so the `finally` never has to test for it.
     let timer!: ReturnType<typeof setTimeout>;
     const budget = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, grace);
@@ -1144,27 +964,17 @@ export class Act<
   ): Promise<(() => void | Promise<void>) | undefined> {
     if (this._reactive_events.size === 0) return undefined;
     if (!s.notify) return undefined;
-    // #803: writer-only / single-instance deployments opt out of the
+    // Writer-only / single-instance deployments opt out of the
     // subscriber-connection cost. Commits still notify (that's the
     // store's commit protocol); only the subscriber side is gated.
     if (!this._listen) return undefined;
     try {
       return await s.notify((notification) => {
-        // Generic concerns (lifecycle emit, drain wakeup, listener
-        // error containment) live here so adapters only have to
-        // handle their own wire format. Errors in user-registered
-        // `notified` listeners or in our own bookkeeping are logged
-        // and swallowed — the store's listener stays alive.
+        // Errors are logged and swallowed so the store's listener survives.
         try {
           this.emit("notified", notification);
-          // Wake once per commit when at least one event has a local
-          // reaction. Avoids spurious wake-ups for remote commits
-          // belonging to bounded contexts this process doesn't react to.
-          // ACT-1103: selective arming via the shared helper — only the
-          // lanes whose reactions match the notified events.
-          // #803: the sidecar pattern (listen: true, drain: false)
-          // wants the `notified` lifecycle event for observability
-          // without engaging the local reaction pipeline.
+          // Arm only the lanes whose reactions match the notified events.
+          // A sidecar (`drain: false`) still gets the `notified` event.
           if (this._drain) {
             const armed = this._arm_for_event_names(
               notification.events.map((e) => e.name)
@@ -1269,11 +1079,8 @@ export class Act<
     payload: Readonly<TActions[TKey]>,
     options?: DoOptions<TEvents>
   ) {
-    // Resolve the ambient reaction context HERE, at the orchestrator
-    // boundary, and hand `action()` an explicit value — a dispatch made
-    // anywhere inside a reaction handler threads the chain whichever `IAct`
-    // reference made the call (#1541), while `internal/` stays free of
-    // ambient reads. An explicitly-passed `reactingTo` still wins.
+    // Resolve the ambient reaction context here so `internal/` never reads
+    // ambient state. An explicit `reactingTo` wins.
     const reacting_to = options?.reactingTo ?? current_reacting();
     const do_options =
       reacting_to === options?.reactingTo
@@ -1287,11 +1094,7 @@ export class Act<
         payload,
         do_options
       );
-      // Arm the drain when any committed event has reactions (ACT-1103:
-      // arm only the lanes whose reactions match — events whose reactions
-      // are all statically lane-resolved arm a subset; events with at
-      // least one dynamic resolver fall back to _arm_all via the "all"
-      // sentinel).
+      // Arm only the lanes whose reactions match the committed events.
       if (this._reactive_events.size > 0)
         // Snapshots produced by `action()` always carry their committed
         // event — the optional `event?` on the type is for load()
@@ -1514,7 +1317,7 @@ export class Act<
 
   /**
    * Wipe the sensitive-data payload for every event on the stream — see
-   * {@link IAct.forget}. Application-level half of #566.
+   * {@link IAct.forget}.
    *
    * Throws on adapters without `Store.forget_pii`, invalidates the cache
    * entry for the stream, emits the `forgotten` lifecycle event with the
@@ -1557,7 +1360,7 @@ export class Act<
    *
    * Call `correlate()` before `drain()`. It is not only how dynamic targets
    * are discovered: a stream is claimable while `at < correlated_at`, and
-   * `correlate` is the only component that raises that mark (#1487), so a
+   * `correlate` is the only component that raises that mark, so a
    * commit no correlate has seen is not drainable — including for static
    * targets, which were served by a probe of the event log before. For a
    * higher-level API that handles debouncing, correlation, and signaling
@@ -1588,26 +1391,22 @@ export class Act<
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
     // streamLimit / eventLimit throws ZodError here, not on the first cycle).
     resolveDrainConfig(options);
-    // #803: writer-only instances skip the local reaction pipeline.
-    // Return an empty Drain result so call sites that aggregate (e.g.,
-    // `settle` listeners) keep working without special-casing.
+    // Writer-only instances run no reactions.
     if (!this._drain)
       return { fetched: [], leased: [], acked: [], blocked: [] };
     return this._scoped(() => this._drain_all(options));
   }
 
-  /** Arm every active lane controller (ACT-1103). */
+  /** Arm every active lane controller. */
   private _arm_all(): void {
-    // Correlate is armed alongside the drain (#1510): a commit is exactly the
-    // event that might give a scan something to find, and without this the
-    // scan runs on every settle pass whether or not anything happened.
+    // A commit may also give the next correlate scan something to find.
     this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
   /**
    * Arm only the lane controllers whose reactions match the supplied
-   * event names (ACT-1103 selective arming). Events with any dynamic
+   * event names (selective arming). Events with any dynamic
    * resolver fall back to `_arm_all()` via the `"all"` sentinel — the
    * resolver's lane isn't known until correlate runs the function.
    * Events with no reactions are skipped; `_event_to_lanes` doesn't
@@ -1648,7 +1447,7 @@ export class Act<
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
     for (const r of results) {
-      // Actor-less like `query`/`query_array`, so default-deny (#1673).
+      // Actor-less like `query`/`query_array`, so default-deny.
       // Handlers are unaffected — they read through their own strip.
       fetched.push(
         ...r.fetched.map((f) => ({
@@ -1718,7 +1517,7 @@ export class Act<
   }
 
   /**
-   * `correlate` plus whether the pass actually read the store (#1510).
+   * `correlate` plus whether the pass actually read the store.
    *
    * The settle loop needs that extra bit to decide whether the pass carries a
    * circuit-breaker health signal, and a disarmed pass carries none. It stays
@@ -1727,32 +1526,18 @@ export class Act<
    */
   private async _correlate_scanned(
     query: Query,
-    /** Honour the correlation lease — settle and the poller only (#1532). */
+    /** Honour the correlation lease — settle and the poller only. */
     lease = false
   ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
-    // Writer-only instances skip dynamic stream discovery. The
-    // {subscribed, last_id} pair returns the no-op result; the
-    // checkpoint stays where it was.
+    // Writer-only instances don't correlate.
     if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
     return this._scoped(async () => {
       const { subscribed, last_id, marked, scanned } =
         await this._correlate.correlate(query, lease);
-      // Newly-subscribed streams must arm their lane controllers, same
-      // as reset/unblock: a lane worker's tick can disarm on an empty
-      // claim in the window before the subscription lands, and nothing
-      // re-arms until an unrelated commit — starving the fresh stream
-      // on an otherwise idle system.
-      //
-      // A raised mark arms for the same reason (#1488). Eligibility comes
-      // from the mark now, so a target that was already subscribed goes from
-      // "nothing to do" to "claimable" without its row being new — and a
-      // worker that disarmed on an empty claim moments earlier would sleep
-      // through it.
-      //
-      // Arming here also re-arms CORRELATE itself, which is what keeps a
-      // backlog moving: a scan that found something leaves the flag up so the
-      // next pass continues, while the scan that finds nothing takes the
-      // disarm branch and stops the loop (#1510).
+      // New subscriptions and raised marks make work claimable, so arm the
+      // controllers (one may have just disarmed on an empty claim). This also
+      // re-arms correlate, which keeps a backlog scan going until a pass
+      // finds nothing.
       if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
         this._arm_all();
       if (subscribed > 0) this._on_discovered?.(subscribed);
@@ -1819,13 +1604,8 @@ export class Act<
       this._poll = undefined;
     }
     this._on_discovered = undefined;
-    // Hand the correlation lease back rather than making the next worker
-    // wait out its expiry (#1532). Best-effort and deliberately not awaited:
-    // stopping correlations is synchronous by contract, and the fallback is
-    // the expiry that would have applied anyway.
-    // Wrapped in `_scoped` because it resolves the store through the port: a
-    // scoped Act would otherwise release against the singleton and leave its
-    // real lease held until expiry.
+    // Hand the correlation lease back, best-effort and not awaited (this
+    // method is synchronous; the lease would expire anyway).
     void this._scoped(() => this._correlate.release_correlation());
   }
 
@@ -1874,14 +1654,9 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
-      // Drop every fold cache before the replay reaches a handler (#1466).
-      // A rebuild replays from the beginning, so every event lands at or
-      // below a warm fold's head and takes its already-folded branch, which
-      // re-flushes whatever that cache holds — writing a stale row straight
-      // back out. Cleared unconditionally rather than per target: `input`
-      // may be a filter, resolving it costs a query, and the only cost of
-      // clearing a cache that did not need it is one head load per stream
-      // on the next batch.
+      // Drop every fold cache before the replay, or a warm cache would
+      // re-flush stale rows. Cleared for all targets: resolving `input`
+      // costs a query, and an extra clear costs one head load per stream.
       for (const handler of this._batch_handlers.values())
         (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0 && this._reactive_events.size > 0) this._arm_all();
@@ -1973,16 +1748,12 @@ export class Act<
   ): Promise<ScanResult> {
     return this._scoped(async () => {
       const started = Date.now();
-      // Dry-run: walk the source via scan without touching any sink
-      // — same scan loop, no callback, no transaction, no capability
-      // check. Returns the counts a destructive restore would land.
+      // Dry-run: count what a restore would land, touching no sink.
       if (opts.dry_run) {
         const partial = await scan(source, opts);
         return { ...partial, duration_ms: Date.now() - started };
       }
-      // Default sink is the singleton store. Explicit `sink` lets
-      // callers route to a different EventSink (another adapter, a
-      // CsvFile, etc.) without binding the singleton.
+      // Default sink is this Act's store.
       const target: EventSink =
         sink ??
         (() => {
@@ -1999,11 +1770,8 @@ export class Act<
         migrated = partial.migrated;
         dropped = partial.dropped;
       });
-      // Restoring into this app's own store replaced the log it correlates:
-      // ids start over and the subscription rows are gone. Restart
-      // correlation from cold so the restored events (and new commits, whose
-      // ids now sit below the old scan position) reach their reactions, and
-      // arm the drain so they run without waiting for a commit (#1772).
+      // Restoring into this app's own store replaced its log (new ids, no
+      // subscription rows): restart correlation from cold and arm the drain.
       if (!sink) {
         this._correlate.restart();
         this._arm_all();
@@ -2051,7 +1819,7 @@ export class Act<
   }
 
   /**
-   * Operator-driven store audit (#723).
+   * Operator-driven store audit.
    *
    * Walks the connected store and yields per-category findings —
    * each tagged with the remediation it suggests. Same operator-
@@ -2095,12 +1863,8 @@ export class Act<
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
-    // Drive the audit generator one step at a time INSIDE `_scoped`, so the
-    // `store()` calls in its body resolve the scoped bag during lazy
-    // iteration. A plain `return audit(...)` would run the generator body in
-    // the consumer's `for await` frame, outside any scope — resolving the
-    // singleton store and auditing the wrong tenant (#1317). For a
-    // non-scoped Act `_scoped(fn)` is just `fn()`, so this is a no-op.
+    // Step the generator inside `_scoped`: its body runs lazily in the
+    // consumer's frame, which would otherwise resolve the wrong store.
     const it = audit(this._audit_deps, categories, options)[
       Symbol.asyncIterator
     ]();
@@ -2115,7 +1879,7 @@ export class Act<
    * Bulk-update scheduling priority for streams matching `filter`.
    *
    * Operator-grade override of the `claim()` lagging-frontier
-   * ordering (ACT-102). Useful when a long-running replay needs to
+   * ordering. Useful when a long-running replay needs to
    * jump ahead of other lagging streams, or when a no-longer-urgent
    * job should yield slots back to the rest. Build-time priorities
    * (set via the resolver's `priority` field) are subject to a
@@ -2213,12 +1977,12 @@ export class Act<
    */
   /**
    * After a close, forget any target whose subscription row the truncate
-   * removed, so a later correlate can re-subscribe it (#1398). Restart
+   * removed, so a later correlate can re-subscribe it. Restart
    * targets keep their row, so only fully-retired streams are forgotten.
    */
   /**
    * Advance correlation until the read cursor reaches `until`, and report
-   * where it landed (#1487). Used by the close cycle's safety probe, which
+   * where it landed. Used by the close cycle's safety probe, which
    * cannot judge a subscription's pending work over events correlate has
    * not resolved yet.
    *
@@ -2235,8 +1999,7 @@ export class Act<
       pass++
     ) {
       const before = this._correlate.checkpoint;
-      // Force the look: close is asking whether a tail exists, which is
-      // exactly the question the armed flag cannot answer (#1510).
+      // Force the scan: the armed flag can't say whether a tail exists.
       this._correlate.arm();
       await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
       if (this._correlate.checkpoint <= before) break;
@@ -2251,13 +2014,12 @@ export class Act<
    * A tombstone seed means the stream was retired; a snapshot seed means it
    * was restarted and is still consuming.
    *
-   * `truncate` no longer removes the subscription row (#1527), so this is no
+   * `truncate` no longer removes the subscription row, so this is no
    * longer repairing damage the close itself did. It still matters, because
    * the row can disappear later: reclaiming retired subscriptions is an
    * operator job now, and that `DELETE` can land while this process is
    * running. Forgetting here keeps the in-process view from outliving a row
-   * an operator removed, which is the same silent-no-delivery failure #1398
-   * described — a reaction whose target is named after the stream would never
+   * an operator removed, which is a silent-no-delivery failure — a reaction whose target is named after the stream would never
    * be re-registered.
    */
   private _forget_closed_subscriptions(result: CloseResult): void {
@@ -2329,9 +2091,7 @@ export class Act<
     // Validate the runtime knobs before anything runs (a bad debounceMs /
     // leaseMillis / maxPasses throws ZodError here, not on the first pass).
     resolveSettleConfig(options);
-    // #803: writer-only instances skip settle entirely. The bootstrap
-    // pattern `app.on("committed", () => app.settle())` keeps working —
-    // it just runs zero work on writers.
+    // Writer-only instances skip settle.
     if (!this._drain) return;
     this._settle.schedule(options);
   }

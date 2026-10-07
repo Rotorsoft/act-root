@@ -2,8 +2,8 @@
  * @module close-signal
  * @category Internal
  *
- * The control-flow signal a reaction handler throws to *close* a stream
- * (#1090). Like {@link "defer-signal".DeferSignal} it rides the dispatcher's
+ * The control-flow signal a reaction handler throws to *close* a stream.
+ * Like {@link "defer-signal".DeferSignal} it rides the dispatcher's
  * `try/catch`, but where a defer holds the stream for later, a close asks the
  * orchestrator to retire it: `build_handle` turns the signal into a
  * `HandleResult.close` (a {@link CloseTarget}), `run_drain_cycle` acks the
@@ -43,7 +43,7 @@ export class CloseSignal extends Error {
    */
   readonly at?: number;
   /**
-   * Windowed close (#1011): prune events older than this cutoff behind
+   * Windowed close: prune events older than this cutoff behind
    * the closest safe snapshot instead of retiring the stream. Thrown by
    * the autoclose reaction of a `.autocloses({ keep })` state; flows
    * into {@link CloseTarget.before}. Omitted → a full close.

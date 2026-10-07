@@ -113,7 +113,7 @@ function finalize(
  * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.
  *
  * The triggering event is installed as ambient context around each handler
- * call, so `action()` resolves it as `reactingTo` (#587, #1541). Ambient
+ * call, so `action()` resolves it as `reactingTo`. Ambient
  * rather than bound to the `IAct` argument, so a handler that dispatches
  * through a captured `app` inherits the chain too.
  *
@@ -132,7 +132,7 @@ export function build_handle<
     // One event fans out to one payload per matching reaction, and the
     // watermark may only advance past an event once EVERY reaction on it
     // has handled it — acking mid-group would silently drop the remaining
-    // reactions on redelivery (#1179). Track the last payload index per
+    // reactions on redelivery. Track the last payload index per
     // event id (payloads arrive in event order) so `at` advances exactly
     // when a group completes; `handled` counts completed events, not
     // payloads, so a mid-group failure with no completed events is a
@@ -167,7 +167,7 @@ export function build_handle<
       } catch (error) {
         // A defer is not a failure: hold the triggering events pending
         // (exclude from ack via `defer`), don't bump `retry`, and re-visit
-        // the stream at the carried due-time (#1090). `acked_at` is unused on
+        // the stream at the carried due-time. `acked_at` is unused on
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
           return {
@@ -178,7 +178,7 @@ export function build_handle<
           };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
-        // guard) and hands the target to the orchestrator's on_close (#1090).
+        // guard) and hands the target to the orchestrator's on_close.
         if (error instanceof CloseSignal)
           return {
             lease,
@@ -230,8 +230,8 @@ export function build_handle_batch<TEvents extends Schemas>(
     // One payload per (event, reaction) pair: an event with several
     // reactions on this target arrives several times in a row. The batch
     // handler gets each event once, in order — handing it the duplicates
-    // made a non-idempotent batch count every event once per reaction
-    // (#1780). The per-event path groups by id for the same reason (#1179).
+    // made a non-idempotent batch count every event once per reaction.
+    // The per-event path groups by id for the same reason.
     const events: Committed<TEvents, keyof TEvents & string>[] = [];
     const seen = new Set<number>();
     for (const p of payloads) {

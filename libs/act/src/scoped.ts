@@ -10,12 +10,12 @@
  * Two contexts:
  *
  * - **ports** — the active Act's store/cache bag, so `store()` / `cache()`
- *   resolve per-Act rather than per-process (ACT-501). Installed by the
+ *   resolve per-Act rather than per-process. Installed by the
  *   orchestrator via {@link make_run_scoped}, read by the port singletons
  *   via {@link current_ports}.
  * - **reaction** — the event a handler is processing, so a dispatch made
  *   anywhere inside that handler can thread `reactingTo` whichever `IAct`
- *   reference made the call (#1541). Installed via {@link run_reacting},
+ *   reference made the call. Installed via {@link run_reacting},
  *   read at the orchestrator boundary via {@link current_reacting}.
  *
  * Keeping the mechanics here keeps ambient state out of `internal/`, whose
@@ -34,7 +34,7 @@ import type {
   Store,
 } from "./types/index.js";
 
-/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
+/** Per-Act ports bag. Both required together — a shared cache across stores would collide on stream keys. */
 export type Scoped = {
   readonly store: Store;
   readonly cache: Cache;
@@ -48,7 +48,7 @@ export type Scoped = {
  * `autoclose_window` is here because the autoclose reactions are
  * synthesized once into the shared registry and handed by reference to
  * every Act built from that builder, so a window captured at synthesis is
- * the first tenant's window for everyone (#1615). The frame is per-Act, so
+ * the first tenant's window for everyone. The frame is per-Act, so
  * reading it here is what makes the setting per-Act too.
  *
  * Wider than {@link Scoped} on purpose: `Scoped` types what a caller
@@ -82,7 +82,7 @@ export const scoped = new AsyncLocalStorage<ActFrame>();
  * handler and can never be unbound. The *frame* is unreclaimable, but the
  * *box inside it* is not: clearing `event` as the handler settles turns every
  * later read through that frame into "no reaction", without anyone having to
- * ask a second question (#1562).
+ * ask a second question.
  *
  * Not reachable from `index.ts`.
  */
@@ -99,7 +99,7 @@ const reacting = new AsyncLocalStorage<Reacting>();
  * collapsed to `fn()` for a singleton Act did not leave whatever frame it was
  * called from, so dispatching into a shared Act from inside a tenant's handler
  * resolved `store()` to that tenant and wrote the shared Act's events into the
- * tenant's log ([#1597](https://github.com/Rotorsoft/act-root/issues/1597)).
+ * tenant's log.
  *
  * @internal
  */
@@ -115,7 +115,7 @@ export function make_run_scoped(
  *
  * Read at resolution time rather than captured at synthesis: the autoclose
  * reactions belong to the shared registry, and only the frame knows which
- * Act is running them (#1615).
+ * Act is running them.
  *
  * @internal
  */
