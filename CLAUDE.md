@@ -135,7 +135,7 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 
 ### Operator recipes
 
-When an Act application hits the edges (events table growing without bound, cooldowns after terminal state, regulated retention windows, partition-drop archival), the playbook lives in [`recipes/`](recipes/README.md) at the repo root — separate from `libs/` (framework code), `docs/` (framework reference), and `book/` (design-history essays).
+When an Act application hits the edges (events table growing without bound, cooldowns after terminal state, regulated retention windows, partition-drop archival), the playbook lives in [`recipes/`](recipes/README.md) at the repo root — separate from `libs/` (framework code) and `docs/` (framework reference).
 
 | Topic | File |
 |---|---|
@@ -232,10 +232,10 @@ Sequence at the end of a feature branch:
 
 1. `/release-check` — runs typecheck + tests + 100% coverage + lint + build + charter-diff in parallel. See [.claude/commands/release-check.md](.claude/commands/release-check.md).
 2. If coverage < 100% on any metric: run `/coverage` to see the uncovered lines, then write the fault-injection test or restructure the code to remove the branch. See `feedback_full_coverage.md` in memory and the patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`.
-3. **For substantive tickets** (anything that touched `libs/act/src/`, added a new public method, changed semantics, or migrated a callsite to a new primitive): run `/book-note <ticket-slug>` and write the narrative essay. See [.claude/commands/book-note.md](.claude/commands/book-note.md) and `book/README.md`. Skip only for pure chore/deps/docs PRs. The essay captures the *why* and the *rejected designs* — the part that won't be visible from the diff once it's merged. **Do this BEFORE opening the PR**, so the book entry lands with the code.
+3. **Learnings.** If the change taught something that `.claude/skills/simplify-core/learnings.md` doesn't already say, add one entry there: the rule in one line, then the ticket as evidence. Most PRs add nothing.
 4. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** Run the stale-reference grep:
    ```bash
-   grep -rln "<old-name-or-shape>" docs/docs book CLAUDE.md STABILITY.md libs/*/README.md
+   grep -rln "<old-name-or-shape>" docs/docs CLAUDE.md STABILITY.md libs/*/README.md
    ```
    Hits get fixed inline; **do not** leave them for a "follow-up PR." Specifically:
    - **Port changes** (`Store` / `Cache` / `Logger`) → check `docs/docs/architecture/extension-points.md` and the matching `docs/docs/guides/writing-a-{store,cache,logger}.md`. The method-list snippet in extension-points goes stale every time the interface gains, loses, or renames a method.
@@ -249,7 +249,7 @@ Sequence at the end of a feature branch:
 
 **Don't invent ad-hoc gates.** Running `pnpm typecheck` or eyeballing `pnpm test` output once doesn't substitute for the gate. Reach for the slash command first; narrow to ad-hoc tooling only for targeted debugging mid-development.
 
-Why this exists: each step closes a failure mode that has actually shipped. The gate (step 1) caught zero issues during development of ACT-639's eight slices because per-slice tests were run ad-hoc — the merge gate verifies the full matrix (typecheck against the workspace, lint across changed files, build of every adapter, 100% coverage including newly-added defensive branches). The book-note step (step 3) exists in narrative form for the same reason: ACT-639's PR almost shipped without one because the workflow didn't enforce it, and once a PR merges the reasoning behind rejected designs lives only in the author's head until it's lost. The doc-audit step (step 4) exists because the same #639 PR shipped without updating `docs/docs/architecture/close-cycle.md` (which still described the old per-stream query pattern) and `docs/docs/guides/writing-a-store.md` (which still referred to an earlier "planned" name for the same primitive) — both required follow-up PRs that should have been part of the original change.
+Why this exists: each step closes a failure mode that has actually shipped. The gate (step 1) caught zero issues during development of ACT-639's eight slices because per-slice tests were run ad-hoc — the merge gate verifies the full matrix (typecheck against the workspace, lint across changed files, build of every adapter, 100% coverage including newly-added defensive branches). The doc-audit step (step 4) exists because the same #639 PR shipped without updating `docs/docs/architecture/close-cycle.md` (which still described the old per-stream query pattern) and `docs/docs/guides/writing-a-store.md` (which still referred to an earlier "planned" name for the same primitive) — both required follow-up PRs that should have been part of the original change.
 
 ### Documentation discipline
 
@@ -326,7 +326,7 @@ This repo uses Claude Code's hooks, slash commands, and subagents. See [`.claude
 Quick reference:
 
 - **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
-- **Slash commands**: `/pr`, `/release-check`, `/charter-diff`, `/coverage`, `/book-note`, `/scaffold-package`.
+- **Slash commands**: `/pr`, `/release-check`, `/charter-diff`, `/coverage`, `/scaffold-package`.
 - **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
 - **Skill**: `scaffold-act-app` for translating specs into a working monorepo.
 

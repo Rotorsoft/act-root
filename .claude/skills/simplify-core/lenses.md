@@ -12,7 +12,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **File budget.** The largest files: what concepts does each hold? Propose the split (by concept, not by size) or the shrink (dead branches, duplicated helpers, comment noise).
 
-**Comment noise.** Sample a large file and rewrite its comments: keep the *why*, cut ticket numbers, history ("before #1234 this…"), restated code and essays. The reasoning behind rejected designs belongs in `book/` or the PR. Internal and low-risk; batch by file.
+**Comment noise.** Sample a large file and rewrite its comments: keep the *why*, cut ticket numbers, history ("before #1234 this…"), restated code and essays. The reasoning behind rejected designs belongs in the PR, and a lasting lesson in `learnings.md`. Internal and low-risk; batch by file.
 
 **Concepts and options.** List the named mechanisms (lanes, priority, fairness reserve, correlation lease, work mark, defer, backoff, breaker, close lock, …) and every option bag (`ActOptions`, reaction, lane, drain/settle, autoclose). For each: the problem it solves, how many apps need it, options nobody sets or with one sensible value, mechanisms that overlap. Propose folds and removals.
 
@@ -38,13 +38,13 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 ## Docs
 
-**One source of truth.** Find behaviors described in several places (docs pages, package READMEs, recipes, `CLAUDE.md`, code comments) with differing wording. One page owns each; the rest link to it. `CLAUDE.md` should be the short index it says it is. Book essays stay as history, and nothing else repeats them.
+**One source of truth.** Find behaviors described in several places (docs pages, package READMEs, recipes, `CLAUDE.md`, code comments) with differing wording. One page owns each; the rest link to it. `CLAUDE.md` should be the short index it says it is.
 
 **Examples.** Do the examples in `packages/` and the docs show the simple path first, compile against today's API, and use the fewest concepts they can? An example that needs a paragraph of caveats means the API is too complicated.
 
 ## Process
 
-**Process.** The contribution workflow (RFC gate, release-check, book notes, behavior-contract rows, doc audit, the hooks) is a cost on every change. For each step: what did it catch in the last quarter? A step that caught nothing is a candidate to drop or merge.
+**Process.** The contribution workflow (RFC gate, release-check, learnings entries, behavior-contract rows, doc audit, the hooks) is a cost on every change. For each step: what did it catch in the last quarter? A step that caught nothing is a candidate to drop or merge.
 
 ## Smells
 

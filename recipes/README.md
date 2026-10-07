@@ -1,6 +1,6 @@
 # Act recipes
 
-Operator-facing playbook for running an Act application in production. This folder is for the moments where you've stopped writing domain code and started thinking about indexes, maintenance windows, and weekly cron jobs. Framework reference lives in `docs/docs/` and the design history is in `book/`; this tree is the operations handbook.
+Operator-facing playbook for running an Act application in production. This folder is for the moments where you've stopped writing domain code and started thinking about indexes, maintenance windows, and weekly cron jobs. Framework reference lives in `docs/docs/`; this tree is the operations handbook.
 
 ## Act is for business apps
 

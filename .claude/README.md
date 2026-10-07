@@ -68,7 +68,6 @@ Trigger with `/<name>` in chat. Each is a Markdown file with frontmatter declari
 | `/release-check` | Run every pre-merge gate (typecheck, tests, coverage, lint, build, charter-diff) in parallel; emit a single punch-list. |
 | `/charter-diff` | List every change on the branch that touches a `STABILITY.md`-covered file. Demand additive vs. breaking categorization. |
 | `/coverage` | Run tests and verify 100% across statements/branches/functions/lines. Surface uncovered lines if any. |
-| `/book-note` | Scaffold a book essay for a ticket in the project's narrative voice. |
 | `/scaffold-package` | Walk through the contributing-new-package.md workflow, including the easily-forgotten baseline-tag step. |
 
 ## `agents/` — subagents
@@ -79,7 +78,7 @@ Specialized agents invoked via the `Agent` tool. Each is a Markdown file with fr
 |---|---|
 | `act-code-reviewer` | Before opening a PR that touches charter-covered surface. Reviews against `STABILITY.md`, naming conventions, TCK alignment, coverage, doc debt. |
 | `act-test-author` | When writing tests. Knows `fixture` vs. `sandbox`, the TCK extension pattern, fault-injection patterns for adapter defensive branches, the 100% coverage gate. |
-| `act-doc-writer` | When writing or revising docs/READMEs/book essays. Knows the project's narrative voice and the surface map (concepts vs. architecture vs. guides vs. book). |
+| `act-doc-writer` | When writing or revising docs and READMEs. Knows the project's voice and the surface map (concepts vs. architecture vs. guides). |
 
 ## `hooks/` — hook scripts
 
@@ -183,8 +182,8 @@ Claude:
 | About to open a PR | `/pr [issue#]` |
 | Pre-PR self-review on charter-covered work | `act-code-reviewer` subagent |
 | Adding tests with TCK / fault-injection patterns | `act-test-author` subagent |
-| Writing a guide or book essay | `act-doc-writer` subagent |
-| Starting a book essay for a ticket | `/book-note act-XXX <slug>` |
+| Writing a guide | `act-doc-writer` subagent |
+| A change taught something new | one entry in `.claude/skills/simplify-core/learnings.md` |
 | Adding a new `@rotorsoft/act-*` package | `/scaffold-package <name>` |
 | Building a brand-new app on the framework | `scaffold-act-app` skill (auto-triggers) |
 
