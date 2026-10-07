@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.12](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.11...@rotorsoft/act-v1.32.12) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act:** make start_correlations drain what it finds ([#1811](https://github.com/Rotorsoft/act-root/issues/1811)) ([b12519e](https://github.com/Rotorsoft/act-root/commit/b12519e47da96f727a6770e46324027e11e73de6)), closes [#1804](https://github.com/Rotorsoft/act-root/issues/1804)
+
 # [@rotorsoft/act-v1.32.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.10...@rotorsoft/act-v1.32.11) (2026-10-07)
 
 
