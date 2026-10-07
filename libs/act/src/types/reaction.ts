@@ -170,20 +170,15 @@ export type LaneConfig<TName extends string = string> = {
  * For the shared retry-pacing shape see {@link BackoffOptions} and
  * {@link BackoffStrategy} in `./action.js`.
  *
- * Reaction-side note on `backoff`: backoff state lives in process memory
- * on the {@link DrainController}. With N competing workers (each running
- * its own controller), retries escalate at most N× faster than configured
- * — the shared `retry` counter on the stream watermark climbs across
- * workers, reaching the `blockOnError` threshold sooner. This is
- * intentional: per-worker pacing speeds up recovery on transient
- * per-worker faults, and poison messages still get quarantined.
+ * The backoff schedule is persisted on the stream, so every competing
+ * worker honors it and `retry` advances once per real attempt.
  *
  * @property blockOnError - Whether to block on error.
- * @property maxRetries - Maximum number of retries.
- * @property backoff - Optional retry pacing. When omitted, retries run as
- *   soon as the lease expires (current behavior — implicit backoff bounded
- *   by `leaseMillis`). When set, the drain controller waits at least the
- *   computed delay before re-attempting on this worker.
+ * @property maxRetries - Retries after the first attempt: a failing stream
+ *   is attempted `maxRetries + 1` times before it blocks.
+ * @property backoff - Optional retry pacing. When omitted, a retry runs as
+ *   soon as the lease expires. When set, no worker re-attempts the stream
+ *   before the computed delay.
  */
 export type ReactionOptions = {
   readonly blockOnError: boolean;

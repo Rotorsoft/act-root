@@ -300,7 +300,7 @@ To catch a half-configured rollout early, each instance logs a one-line startup 
 - [ ] Slow lane's `leaseMillis` ≥ the longest expected handler runtime in that lane
 - [ ] Fast lane's `cycleMs` matches the responsiveness target (e.g., 10 ms for sub-100 ms acks)
 - [ ] No reaction targets the same stream via two reactions with different lanes (the build-time scan throws on this)
-- [ ] If running process-per-lane, `ACT_ONLY_LANES` / `ActOptions.onlyLanes` is wired from env so the same image deploys to every lane
+- [ ] If running process-per-lane, `ActOptions.onlyLanes` is wired from an environment variable of your choosing so the same image deploys to every lane
 - [ ] Across the whole cluster, the union of every worker's `onlyLanes` covers every declared lane (`∪ onlyLanes ⊇ declared lanes`) — reconcile the per-instance orphaned-lane advisories to confirm
 - [ ] Inspector / dashboards filter by `lease.lane` and `position.lane` — every lifecycle event now carries it
 

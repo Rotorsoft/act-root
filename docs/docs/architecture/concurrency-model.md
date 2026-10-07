@@ -206,6 +206,6 @@ A "use the action's correlation id as a dedup key" hook was evaluated and reject
 ## Pointers
 
 - `libs/act/src/internal/event-sourcing.ts` — `action()` and the `expectedVersion` check
-- `libs/act-pg/src/PostgresStore.ts` — `commit()` (with the `PG_UNIQUE_VIOLATION` translation), `claim()` (with `FOR UPDATE SKIP LOCKED`)
+- `libs/act-pg/src/postgres-store.ts` — `commit()` (with the `PG_UNIQUE_VIOLATION` translation), `claim()` (with `FOR UPDATE SKIP LOCKED`)
 - `libs/act/src/internal/drain-cycle.ts` — `runDrainCycle` orchestration and `DrainController` lifecycle
 - `libs/act-pg/test/stress/` — multi-process exercise of both primitives under contention

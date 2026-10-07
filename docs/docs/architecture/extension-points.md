@@ -199,8 +199,8 @@ All transforms run inside scan's existing pagination loop and atomic-rollback co
 | Adapter | Where | Use case |
 |---|---|---|
 | `InMemoryStore` | `libs/act/src/adapters/in-memory-store.ts` | Tests, single-process dev |
-| `PostgresStore` | `libs/act-pg/src/PostgresStore.ts` | Production multi-process |
-| `SqliteStore` | `libs/act-sqlite/src/SqliteStore.ts` | Embedded, single-node |
+| `PostgresStore` | `libs/act-pg/src/postgres-store.ts` | Production multi-process |
+| `SqliteStore` | `libs/act-sqlite/src/sqlite-store.ts` | Embedded, single-node |
 
 ### What the framework does NOT promise the adapter
 
@@ -416,5 +416,5 @@ That makes `IAct` part of the public surface for the package as much as the port
 - `libs/act/src/ports.ts` — `port()` factory and the three default ports
 - `libs/act/src/types/ports.ts` — `Store`, `Cache`, `Logger`, `Disposable` contracts
 - `libs/act/src/adapters/` — default in-memory implementations of all three
-- `libs/act-pg/src/PostgresStore.ts`, `libs/act-sqlite/src/SqliteStore.ts`, `libs/act-pino/src/index.ts` — production adapters
+- `libs/act-pg/src/postgres-store.ts`, `libs/act-sqlite/src/sqlite-store.ts`, `libs/act-pino/src/index.ts` — production adapters
 - `libs/act-pg/test/stress/` — multi-process stress harness exercising the Store contract under contention; useful as a worked example of which invariants the framework actually depends on

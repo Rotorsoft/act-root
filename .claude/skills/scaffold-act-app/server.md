@@ -33,9 +33,9 @@ async function seed() {
 
   // Drain reactions + projections
   for (let i = 0; i < 3; i++) {
-    const { leased } = await app.correlate({ after: -1, limit: 500 });
-    if (leased.length === 0) break;
-    await app.drain({ streamLimit: 100, eventLimit: 500 });
+    await app.correlate({ after: -1, limit: 500 });
+    const { acked } = await app.drain({ streamLimit: 100, eventLimit: 500 });
+    if (acked.length === 0) break;
   }
 
   console.log("Seeded dev data");
@@ -161,12 +161,12 @@ For high-throughput deployments, use periodic background correlation instead of 
 ```typescript
 import { dispose } from "@rotorsoft/act";
 
-// Periodic correlation resolution — discovers new reaction streams every 3s
-const stop = app.start_correlations({ after: 0, limit: 10 }, 3000);
+// Periodic settle — picks up work committed by other processes every 3s
+app.start_correlations({ limit: 10 }, 3000);
 
-// Graceful shutdown — dispose() cleans up all adapters (store, cache, etc.)
+// Graceful shutdown — dispose() shuts the app down (stopping the poll) and
+// cleans up all adapters (store, cache, etc.)
 process.on("SIGTERM", async () => {
-  stop();
   await dispose()();
 });
 ```

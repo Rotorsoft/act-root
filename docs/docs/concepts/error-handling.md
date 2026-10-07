@@ -222,7 +222,7 @@ CreateItem: authedProcedure
 
 Streams block on three paths:
 
-1. A reaction handler fails repeatedly and `lease.retry` exceeds `maxRetries`. The lease is committed with `blocked = true` and stays out of `claim()` results.
+1. A reaction handler fails repeatedly and `lease.retry` reaches `maxRetries` (after `maxRetries + 1` failed attempts). The lease is committed with `blocked = true` and stays out of `claim()` results.
 2. A reaction handler throws `NonRetryableError` (or a subclass like `NonRetryableWebhookError`) — the drain finalizer blocks the stream on the first failed attempt without consuming the retry budget. See [Non-retryable errors](#non-retryable-errors).
 3. A reaction handler never fails but never finishes inside its lease. Each attempt completes, submits an ack the store drops (the lease is gone), and the next claim bumps `retry` again — the budget is spent without a single error, so paths 1 and 2 can't fire. The drain blocks such a stream at claim time, before dispatching, once `retry` is **strictly greater** than `maxRetries`. The fix is `leaseMillis`, not `maxRetries`: size the lease above the handler's real duration, then `app.unblock`. See [When every attempt loses its lease](../architecture/concurrency-model#when-every-attempt-loses-its-lease).
 
@@ -293,7 +293,7 @@ Each reaction handler accepts options that control retry and blocking behaviour:
 ```
 
 - **`maxRetries`** (default `3`) — how many times the framework re-claims a stream after a handler throws. Each failed cycle increments `retry_count`; the next `claim()` picks the stream up again with the same events.
-- **`blockOnError`** (default `true`) — once `retry_count` exceeds `maxRetries`, the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
+- **`blockOnError`** (default `true`) — once a failure happens with `retry_count` at `maxRetries` (the `maxRetries + 1`th attempt), the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
 - **`backoff`** (default omitted — retry as soon as the lease expires) — paces inter-attempt timing so flaky receivers aren't hammered.
 
 Set `maxRetries: 0` for handlers that should never retry — typically those that already implement their own dead-letter strategy.
@@ -328,7 +328,7 @@ A retry-with-backoff persists `deferred_at = now + delay` on the stream through 
 Because the schedule lives in the store rather than in worker memory:
 
 - **Every** competing worker honors the window — the stream is excluded from `claim` until `deferred_at`, so no worker re-attempts or re-dispatches during the delay.
-- No worker re-claims the stream mid-window, so `retry` advances exactly once per real attempt. A stream blocks after exactly `maxRetries` attempts, independent of worker count.
+- No worker re-claims the stream mid-window, so `retry` advances exactly once per real attempt. A stream blocks after `maxRetries + 1` attempts (the first, then `maxRetries` retries), independent of worker count.
 - The schedule is durable: a worker that restarts re-arms its drain at the persisted `deferred_at`.
 
 On a **partial-progress** drain — a claimed stream carries several events and the handler succeeds on an earlier one before a later one fails — the due-ack advances the watermark to the last successfully-handled event *and* persists the window in one atomic entry (advance and defer are independent legs of `ack`). The succeeded prefix is never re-run when the stream is re-claimed after the window; only the failing tail is retried (#1278).
