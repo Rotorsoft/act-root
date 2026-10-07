@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.10...@rotorsoft/act-v1.32.11) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act:** align adapters on empty filters, empty commits and duplicate acks ([#1798](https://github.com/Rotorsoft/act-root/issues/1798)) ([dda5a8d](https://github.com/Rotorsoft/act-root/commit/dda5a8decd00ce2f9cacb7bca3a086fa177645c5)), closes [#1781](https://github.com/Rotorsoft/act-root/issues/1781) [#1784](https://github.com/Rotorsoft/act-root/issues/1784) [#1785](https://github.com/Rotorsoft/act-root/issues/1785) [#1781](https://github.com/Rotorsoft/act-root/issues/1781) [#1784](https://github.com/Rotorsoft/act-root/issues/1784) [#1785](https://github.com/Rotorsoft/act-root/issues/1785)
+
 # [@rotorsoft/act-v1.32.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.9...@rotorsoft/act-v1.32.10) (2026-10-07)
 
 
