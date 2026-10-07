@@ -61,7 +61,7 @@ const app = act()
     autocloseWindow: { start: 22, end: 6, timeZone: "America/New_York" },
   });
 
-app.start_correlations();   // runs the drain (and therefore the autoclose reaction)
+app.start_correlations();   // settles on a timer: correlate + drain, so the autoclose reaction runs
 // … run the app …
 await app.shutdown();
 ```

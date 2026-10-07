@@ -405,6 +405,10 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   /** Debounced correlate→drain catch-up loop. */
   private readonly _settle: SettleLoop<TEvents>;
+  /** Timer behind {@link start_correlations}. */
+  private _poll: ReturnType<typeof setInterval> | undefined;
+  /** The deprecated `start_correlations` callback, while the poll runs. */
+  private _on_discovered: ((subscribed: number) => void) | undefined;
   /**
    * Disposer for the cross-process notify subscription, set up eagerly
    * during construction. Held as a promise because the subscription
@@ -938,9 +942,6 @@ export class Act<
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
-      // Re-scope the background `start_correlations` timer so its
-      // correlate resolves the scoped ports, not the singleton (#1191).
-      run_scoped: this._scoped,
       // Cold-start defer re-seed (#1221). Skipped on writer-only instances
       // (`drain: false`) — they run no local controllers to re-arm.
       on_init_async: this._drain
@@ -1764,92 +1765,70 @@ export class Act<
       // disarm branch and stops the loop (#1510).
       if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
         this._arm_all();
+      if (subscribed > 0) this._on_discovered?.(subscribed);
       return { subscribed, last_id, scanned };
     });
   }
 
   /**
-   * Starts automatic periodic correlation worker for discovering new streams.
+   * Starts a background poll that settles on a timer: each tick looks for
+   * new events, subscribes the streams their reactions target, and drains
+   * them.
    *
-   * The correlation worker runs in the background, scanning for new events and identifying
-   * new target streams based on reaction resolvers. It maintains a sliding window that
-   * advances with each scan, ensuring all events are eventually correlated.
+   * Use it when this process can miss commits — another process writes to a
+   * store without `notify`, or a notification is lost. It is the safety net
+   * under `notify`: a missed wakeup costs at most one `frequency` of latency.
    *
-   * This is useful for dynamic stream creation patterns where you don't know all streams
-   * upfront - they're discovered as events arrive.
+   * Only one poll runs per Act instance. On a writer-only instance
+   * (`drain: false`) each tick is a no-op, like `settle()`.
    *
-   * **Note:** Only one correlation worker can run at a time per Act instance.
+   * @param query - Only `limit` is used: the most events each correlate pass
+   *   reads (default 100). The scan always starts at the correlation
+   *   checkpoint, so `after` is ignored.
+   * @param frequency - Milliseconds between ticks (default: 10000)
+   * @param callback - Called with the number of newly subscribed streams
+   *   after each correlate pass that found some.
+   *   @deprecated Listen to the `"settled"` lifecycle event instead.
+   * @returns `true` if the poll started, `false` if one is already running
    *
-   * @param query - Query filter for correlation scans — see {@link Query}
-   *   (typically `{ after: -1, limit: 100 }`)
-   * @param frequency - Correlation frequency in milliseconds (default: 10000)
-   * @param callback - Optional callback invoked with newly discovered streams
-   * @returns `true` if worker started, `false` if already running
-   *
-   * @example Start automatic correlation
+   * @example
    * ```typescript
-   * // Start correlation worker scanning every 5 seconds
-   * app.start_correlations(
-   *   { after: 0, limit: 100 },
-   *   5000,
-   *   (leased) => {
-   *     console.log(`Discovered ${leased.length} new streams`);
-   *   }
-   * );
-   *
-   * // Later, stop it
+   * app.start_correlations({ limit: 100 }, 5000);
+   * // later
    * app.stop_correlations();
    * ```
    *
-   * @example With checkpoint persistence
-   * ```typescript
-   * // Load last checkpoint
-   * const lastId = await loadCheckpoint();
-   *
-   * app.start_correlations(
-   *   { after: lastId, limit: 100 },
-   *   10000,
-   *   async (leased) => {
-   *     // Save checkpoint for next restart
-   *     if (leased.length) {
-   *       const maxId = Math.max(...leased.map(l => l.at));
-   *       await saveCheckpoint(maxId);
-   *     }
-   *   }
-   * );
-   * ```
-   *
-   * @see {@link correlate} for manual one-time correlation
-   * @see {@link stop_correlations} to stop the worker
+   * @see {@link settle} for what each tick runs
+   * @see {@link stop_correlations} to stop the poll
    */
   start_correlations(
     query: Query = {},
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    const started = this._correlate.start_polling(query, frequency, callback);
-    return started;
+    if (this._poll) return false;
+    this._on_discovered = callback;
+    const correlate = { limit: query.limit || 100 };
+    this._poll = setInterval(() => {
+      // No local signal says there is work, so look anyway.
+      this._correlate.arm();
+      this.settle({ debounceMs: 0, correlate });
+    }, frequency);
+    return true;
   }
 
   /**
-   * Stops the automatic correlation worker.
-   *
-   * Call this to stop the background correlation worker started by {@link start_correlations}.
-   * This is automatically called when the Act instance is disposed.
-   *
-   * @example
-   * ```typescript
-   * // Start correlation
-   * app.start_correlations();
-   *
-   * // Later, stop it
-   * app.stop_correlations();
-   * ```
+   * Stops the poll started by {@link start_correlations}. Idempotent, and
+   * called by `shutdown()`.
    *
    * @see {@link start_correlations}
    */
   stop_correlations() {
-    this._correlate.stop_polling();
+    if (this._poll) {
+      clearInterval(this._poll);
+      this._poll = undefined;
+    }
+    this._on_discovered = undefined;
     // Hand the correlation lease back rather than making the next worker
     // wait out its expiry (#1532). Best-effort and deliberately not awaited:
     // stopping correlations is synchronous by contract, and the fallback is
