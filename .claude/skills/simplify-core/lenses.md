@@ -28,6 +28,8 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Mutation evidence (monthly, CI only).** Retired: the Stryker setup was removed because its vitest runner can't run on vitest 5. Revive it only once upstream supports vitest 5, as one root config run in CI, and compare with the baselines in `history.md`. Surviving mutants are code no test pins down: either behavior that needs one assertion, or code that can go.
 
+**Core or decorator?** For each feature in `@rotorsoft/act` (PII and `forget`, close and autoclose, archives, audit, restore and transfer, lanes, priority, the breaker), ask whether it could be a `Store` decorator, a builder add-on or a leaf package, the way `act-notify`'s `withBroker` and `act-otel`'s `instrument` are. What does every app pay for it (port methods, `Store` columns, `IAct` methods, options, TCK cases) whether or not it uses it? A feature most apps never use belongs outside the core. Moving it out is a next-major item with a migration path.
+
 ## Packages
 
 **Packages earn their place.** For each of the published `libs/`: who uses it, how often it changes, whether it could fold into a sibling, whether it is still maintained. A published package is public surface: it carries a release, a stability snapshot and docs. Removal is a next-major item with a migration note.
