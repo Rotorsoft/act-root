@@ -109,3 +109,7 @@ Proposals (decisions due next run):
 - P2026-10-07-5. CI and repo cleanup: fix the docs deploy filter (misses 6 packages), build docs once, delete `npm_migration.md`, the stale root CHANGELOG and 4 copied tsup configs.
 - P2026-10-07-6. Deprecate 16 unused public exports and `Act.stop_settling`; knip cleanup of internal dead code; queue the dead autoclose options for the next major.
 - P2026-10-07-7. Rewrite `InMemoryStore.query` as one loop (complexity 65 → ~15); move drain defaults into `internal/config.ts`.
+
+Tickets: #1804–#1810, in proposal order.
+
+Considered on request: #1489 (split `Store` into `EventStore` + `SubscriptionStore`). It fails ground rule 1: it adds a port, a TCK, a capability matrix and an adapter-by-adapter test surface, and renames charter-covered surface. Its only gain, a deployment option, already exists without the split: the single `Store` divides cleanly since `claim` reads only the subscription row, and `recipes/scaling/hybrid-store` shows a hybrid adapter behind one interface. Recommendation: close as not needed. Reopen only on the evidence its own comment names: hybrid implementors repeating the same delegation boilerplate, or `truncate`'s two-phase protocol proving awkward behind one interface.
