@@ -69,7 +69,7 @@
       "groupName": "{{{depName}}}"
     },
     {
-      "description": "@types/node tracks the oldest Node the libraries support (the engines floor, currently 22), not the newest runtime CI uses. Types newer than the floor let code call APIs a Node 22 user doesn't have, and typecheck would never notice; the node-compat CI job runs the tests on the floor, but only for paths that are exercised. Raise this together with the engines floor.",
+      "description": "@types/node tracks the oldest Node the libraries support (the engines floor, currently 22), not the newest runtime CI uses. Types newer than the floor let code call APIs a Node 22 user doesn't have, and typecheck would never notice; the node-compat CI job runs the tests on the floor, but only for paths that are exercised. Browser globals are kept out separately, by `lib: [\"ES2022\"]` in libs/tsconfig.base.json (#1786). Raise this together with the engines floor.",
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "<23"
     },
