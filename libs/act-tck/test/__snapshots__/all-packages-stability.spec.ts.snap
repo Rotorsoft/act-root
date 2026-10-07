@@ -13873,11 +13873,11 @@ export class InMemoryStore implements Store {
     filter: StreamFilter
   ): (s: InMemoryStream) => boolean {
     const stream_re =
-      filter.stream && !filter.stream_exact
+      filter.stream !== undefined && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
     const source_re =
-      filter.source && !filter.source_exact
+      filter.source !== undefined && !filter.source_exact
         ? new RegExp(filter.source)
         : undefined;
     return (s) => {
@@ -14023,11 +14023,11 @@ export class InMemoryStore implements Store {
     const blocked = query?.blocked;
     const source_matches = query?.source_matches;
     const stream_re =
-      query?.stream && !query.stream_exact
+      query?.stream !== undefined && !query.stream_exact
         ? new RegExp(query.stream)
         : undefined;
     const source_re =
-      query?.source && !query.source_exact
+      query?.source !== undefined && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
     // Reverse-match: a stream qualifies when its stored \`source\` pattern
@@ -14142,7 +14142,7 @@ export class InMemoryStore implements Store {
     const array_targets = Array.isArray(input) ? new Set(input) : null;
     const filter = Array.isArray(input) ? null : input;
     const stream_re =
-      filter?.stream && !filter.stream_exact
+      filter?.stream !== undefined && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
 
@@ -16280,7 +16280,12 @@ export interface Store extends Disposable, EventSource {
    * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; \`due\`-carrying entries defer, the
-   * rest ack
+   * rest ack. **At most one entry per stream.** Each lease is for one
+   * stream, and an adapter that applies the batch in one statement cannot
+   * apply two entries to the same row (\`UPDATE … FROM\` may touch a target
+   * row once, so Postgres keeps an arbitrary one). Callers de-duplicate
+   * before calling, as the drain does; adapters may assume uniqueness
+   * (#1672, #1785).
    * @returns The acknowledged leases (deferred entries are not returned)
    *
    * @example
@@ -16310,7 +16315,9 @@ export interface Store extends Disposable, EventSource {
    * - \`blockOnError\` option is true
    * - Handler throws an error
    *
-   * @param leases - Leases to block with error messages
+   * @param leases - Leases to block with error messages. **At most one entry
+   *   per stream**, for the same reason as {@link ack}; adapters may assume
+   *   uniqueness (#1785).
    * @returns Blocked leases
    *
    * @example
@@ -33650,11 +33657,11 @@ export class InMemoryStore implements Store {
     filter: StreamFilter
   ): (s: InMemoryStream) => boolean {
     const stream_re =
-      filter.stream && !filter.stream_exact
+      filter.stream !== undefined && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
     const source_re =
-      filter.source && !filter.source_exact
+      filter.source !== undefined && !filter.source_exact
         ? new RegExp(filter.source)
         : undefined;
     return (s) => {
@@ -33800,11 +33807,11 @@ export class InMemoryStore implements Store {
     const blocked = query?.blocked;
     const source_matches = query?.source_matches;
     const stream_re =
-      query?.stream && !query.stream_exact
+      query?.stream !== undefined && !query.stream_exact
         ? new RegExp(query.stream)
         : undefined;
     const source_re =
-      query?.source && !query.source_exact
+      query?.source !== undefined && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
     // Reverse-match: a stream qualifies when its stored \`source\` pattern
@@ -33919,7 +33926,7 @@ export class InMemoryStore implements Store {
     const array_targets = Array.isArray(input) ? new Set(input) : null;
     const filter = Array.isArray(input) ? null : input;
     const stream_re =
-      filter?.stream && !filter.stream_exact
+      filter?.stream !== undefined && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
 
@@ -35643,7 +35650,12 @@ export interface Store extends Disposable, EventSource {
    * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; \`due\`-carrying entries defer, the
-   * rest ack
+   * rest ack. **At most one entry per stream.** Each lease is for one
+   * stream, and an adapter that applies the batch in one statement cannot
+   * apply two entries to the same row (\`UPDATE … FROM\` may touch a target
+   * row once, so Postgres keeps an arbitrary one). Callers de-duplicate
+   * before calling, as the drain does; adapters may assume uniqueness
+   * (#1672, #1785).
    * @returns The acknowledged leases (deferred entries are not returned)
    *
    * @example
@@ -35673,7 +35685,9 @@ export interface Store extends Disposable, EventSource {
    * - \`blockOnError\` option is true
    * - Handler throws an error
    *
-   * @param leases - Leases to block with error messages
+   * @param leases - Leases to block with error messages. **At most one entry
+   *   per stream**, for the same reason as {@link ack}; adapters may assume
+   *   uniqueness (#1785).
    * @returns Blocked leases
    *
    * @example
@@ -41933,7 +41947,12 @@ export interface Store extends Disposable, EventSource {
    * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; \`due\`-carrying entries defer, the
-   * rest ack
+   * rest ack. **At most one entry per stream.** Each lease is for one
+   * stream, and an adapter that applies the batch in one statement cannot
+   * apply two entries to the same row (\`UPDATE … FROM\` may touch a target
+   * row once, so Postgres keeps an arbitrary one). Callers de-duplicate
+   * before calling, as the drain does; adapters may assume uniqueness
+   * (#1672, #1785).
    * @returns The acknowledged leases (deferred entries are not returned)
    *
    * @example
@@ -41963,7 +41982,9 @@ export interface Store extends Disposable, EventSource {
    * - \`blockOnError\` option is true
    * - Handler throws an error
    *
-   * @param leases - Leases to block with error messages
+   * @param leases - Leases to block with error messages. **At most one entry
+   *   per stream**, for the same reason as {@link ack}; adapters may assume
+   *   uniqueness (#1785).
    * @returns Blocked leases
    *
    * @example
@@ -55783,7 +55804,9 @@ export class PostgresStore implements Store {
     meta: EventMeta,
     expectedVersion?: number
   ) {
-    if (msgs.length === 0) return [];
+    // An empty commit writes nothing, but an expectedVersion still has to be
+    // checked, as InMemory and SQLite do (#1784).
+    if (msgs.length === 0 && expectedVersion === undefined) return [];
     // Serialize commit VISIBILITY, not just id assignment. \`id\` is a
     // serial: it is assigned at INSERT time but the row appears at
     // COMMIT time, and every watermark consumer (the claim has-work
@@ -55820,6 +55843,7 @@ export class PostgresStore implements Store {
           msgs as unknown as Message<Schemas, string>[],
           expectedVersion
         );
+      if (msgs.length === 0) return [];
 
       // Encrypt the pii payloads when encryption is configured and
       // there's anything to encrypt — \`null\` passes through verbatim so
@@ -62080,6 +62104,23 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ).rejects.toBeInstanceOf(ConcurrencyError);
       });
 
+      it("checks expectedVersion even when committing no events", async () => {
+        // An empty commit writes nothing, but a stale expectedVersion is
+        // still a conflict the caller must hear about (#1784).
+        const s = \`commit-empty-cc-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await expect(
+          store.commit<CounterEvents>(s, [], make_meta({ stream: s }), 5)
+        ).rejects.toBeInstanceOf(ConcurrencyError);
+        expect(
+          await store.commit<CounterEvents>(s, [], make_meta({ stream: s }), 0)
+        ).toEqual([]);
+      });
+
       it("preserves prior events when a concurrent commit is rejected", async () => {
         const s = \`commit-cc-preserve-\${uid()}\`;
         await store.commit<CounterEvents>(
@@ -62611,6 +62652,27 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
         else expect(matched).toEqual(expected.sort());
       };
+
+      it("treats an empty-string stream filter as a regex that matches everything", async () => {
+        // An empty regex matches any string, so \`{ stream: "" }\` is
+        // match-all on every adapter, never a crash (#1781).
+        const tag = uid();
+        const a = \`empty-\${tag}-a\`;
+        const source = \`empty-src-\${tag}\`;
+        await store.subscribe([{ stream: a, source }]);
+        const seen: string[] = [];
+        await store.query_streams((p) => seen.push(p.stream), {
+          stream: "",
+          source,
+          source_exact: true,
+        });
+        expect(seen).toEqual([a]);
+        // The same filter on a mutator, scoped the same way so it touches only
+        // this test's row.
+        expect(
+          await store.reset({ stream: "", source, source_exact: true })
+        ).toBe(1);
+      });
 
       it("portable subset: anchors, \`.\`, and \`.*\` match identically", async () => {
         const tag = uid();

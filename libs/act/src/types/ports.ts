@@ -820,7 +820,12 @@ export interface Store extends Disposable, EventSource {
    * survive a lost defer, and vice versa).
    *
    * @param leases - Leases to finalize; `due`-carrying entries defer, the
-   * rest ack
+   * rest ack. **At most one entry per stream.** Each lease is for one
+   * stream, and an adapter that applies the batch in one statement cannot
+   * apply two entries to the same row (`UPDATE … FROM` may touch a target
+   * row once, so Postgres keeps an arbitrary one). Callers de-duplicate
+   * before calling, as the drain does; adapters may assume uniqueness
+   * (#1672, #1785).
    * @returns The acknowledged leases (deferred entries are not returned)
    *
    * @example
@@ -850,7 +855,9 @@ export interface Store extends Disposable, EventSource {
    * - `blockOnError` option is true
    * - Handler throws an error
    *
-   * @param leases - Leases to block with error messages
+   * @param leases - Leases to block with error messages. **At most one entry
+   *   per stream**, for the same reason as {@link ack}; adapters may assume
+   *   uniqueness (#1785).
    * @returns Blocked leases
    *
    * @example
