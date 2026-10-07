@@ -63,7 +63,7 @@ const makeStore = () => {
   return { store, pool };
 };
 
-describe("PostgresStore LISTEN client resilience (#1189)", () => {
+describe("PostgresStore LISTEN client resilience", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -343,7 +343,7 @@ describe("PostgresStore LISTEN client resilience (#1189)", () => {
  * The #1189 guards cover the other half of the race — a reconnect still
  * *scheduled* when disposal lands — which is why this one survived.
  */
-describe("PostgresStore disposal racing an in-flight re-LISTEN (#1616)", () => {
+describe("PostgresStore disposal racing an in-flight re-LISTEN", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

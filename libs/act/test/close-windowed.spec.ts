@@ -108,7 +108,7 @@ describe("windowed close", () => {
     expect(again.state.count).toBe(8);
   });
 
-  it("warm reload after a prune folds through the rebaselining snapshot (#1345)", async () => {
+  it("warm reload after a prune folds through the rebaselining snapshot", async () => {
     // A lagging/cross-process cache checkpoint sits below a newer snapshot,
     // and a windowed close prunes the events between them. The warm reload
     // must NOT silently fold the surviving tail on top of the stale state.
@@ -312,7 +312,7 @@ describe("windowed close", () => {
   // permanently below the head with nothing pending, and used to cap the
   // prune at its frozen watermark — which for a retention window meant
   // pruning almost nothing, every time, silently.
-  describe("prune cap reads pending work, not watermark lag (#1520)", () => {
+  describe("prune cap reads pending work, not watermark lag", () => {
     const ledger = state({ WLedger: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
       .emits({ WPosted: ZodEmpty, WShut: ZodEmpty })

@@ -57,7 +57,7 @@ describe("registry freeze", () => {
    * and had never been wrapped with the handler reader that strips
    * `sensitive()` keys (#1710). The latch closes registration at the API.
    */
-  describe("registration is closed after build (#1710)", () => {
+  describe("registration is closed after build", () => {
     const proj = projection("late")
       .on({ ticked: ZodEmpty })
       .do(function projectLate() {

@@ -204,7 +204,7 @@ describe("per-action retry policy", () => {
     });
   });
 
-  describe("caller-pinned expectedVersion (ACT-1208)", () => {
+  describe("caller-pinned expectedVersion", () => {
     it("rethrows immediately without consuming the retry budget or sleeping", async () => {
       // A caller-pinned expectedVersion is a fixed target: reloading and
       // re-committing against the same pinned version is guaranteed to
@@ -282,7 +282,7 @@ describe("per-action retry policy", () => {
 // that would have resolved on reload+retry became permanent, with the work
 // lost. The invalidate is defensive anyway: a stale checkpoint is re-folded
 // from `after: event_id`.
-describe("a failing cache never changes the caller's error (#1438)", () => {
+describe("a failing cache never changes the caller's error", () => {
   /** A Cache whose invalidate always rejects — the documented Redis blip. */
   class BlipCache extends InMemoryCache {
     override async invalidate(_stream: string): Promise<void> {

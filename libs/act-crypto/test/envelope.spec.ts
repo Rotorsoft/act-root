@@ -35,7 +35,7 @@ describe("makeKeyResolver", () => {
     expect(provider).toHaveBeenCalledTimes(1);
   });
 
-  it("calls keyProvider once for N CONCURRENT callers (#1704)", async () => {
+  it("calls keyProvider once for N CONCURRENT callers", async () => {
     // Caching the resolved key left an `await` between the cache miss and the
     // cache write, so every caller arriving before the first provider call
     // settled missed too. On a cold process that is one KMS round-trip per

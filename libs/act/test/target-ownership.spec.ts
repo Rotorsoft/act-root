@@ -46,7 +46,7 @@ afterEach(async () => {
   await dispose()("EXIT").catch(() => {});
 });
 
-describe("a reaction may not target a projection's target (#1467)", () => {
+describe("a reaction may not target a projection's target", () => {
   it("rejects a reaction pointed at a fold's target", () => {
     expect(() =>
       act()
@@ -113,7 +113,7 @@ describe("a reaction may not target a projection's target (#1467)", () => {
   });
 });
 
-describe("a per-event projection may not share a served target (#1773)", () => {
+describe("a per-event projection may not share a served target", () => {
   const per_event = (target: string) =>
     projection(target)
       .on({ Pinged: z.object({}) })
@@ -172,7 +172,7 @@ describe("a per-event projection may not share a served target (#1773)", () => {
   });
 });
 
-describe("re-registering one projection is idempotent (#1469)", () => {
+describe("re-registering one projection is idempotent", () => {
   it("accepts the same fold projection registered twice", () => {
     const p = fold_projection("counters");
     expect(() =>

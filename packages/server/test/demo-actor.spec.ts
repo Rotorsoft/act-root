@@ -6,7 +6,7 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("resolveDemoActor (#1225 — demo-only actor)", () => {
+describe("resolveDemoActor", () => {
   it("returns the fake constant demo actor", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(resolveDemoActor()).toEqual({ id: "1", name: "Calculator" });

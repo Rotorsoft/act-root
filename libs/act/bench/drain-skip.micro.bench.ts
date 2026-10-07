@@ -2,7 +2,7 @@
  * Benchmark: drain skip optimization for non-reactive events.
  *
  * Measures the cost of drain() when committed events have no registered
- * reactions vs events that do. With the _needs_drain optimization,
+ * reactions vs events that do. With the armed-flag optimization,
  * non-reactive drains return immediately without touching the store.
  */
 import { afterAll, beforeAll, describe, it } from "vitest";

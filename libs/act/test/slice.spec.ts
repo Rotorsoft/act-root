@@ -228,7 +228,7 @@ describe("slice", () => {
     );
   });
 
-  describe("cross-slice event contract (ACT-401)", () => {
+  describe("cross-slice event contract", () => {
     it("allows same-name state partials that share the schema reference", () => {
       const Counted = z.object({ n: z.number() });
 

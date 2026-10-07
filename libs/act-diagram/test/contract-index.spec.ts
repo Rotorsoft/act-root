@@ -120,7 +120,7 @@ describe("event_status", () => {
   it("marks an isolated bare name active", () => {
     expect(event_status("Bar", all)).toEqual({ status: "active" });
   });
-  it("does not deprecate _v1 in favour of _v2 (#1395)", () => {
+  it("does not deprecate _v1 in favour of _v2", () => {
     // To the framework these are two unrelated base names, both current;
     // a static .emit("Shipped_v1") is legal and the app builds.
     const names = new Set(["Shipped_v1", "Shipped_v2"]);
@@ -238,7 +238,7 @@ describe("CATEGORY_KEYWORDS", () => {
 // only rejects identical names across differently-named states). Pooling
 // them into one global set reported one state's current event as
 // superseded by an unrelated state's.
-describe("per-state deprecation scoping (#1393)", () => {
+describe("per-state deprecation scoping", () => {
   const model: DomainModel = {
     entries: [],
     states: [

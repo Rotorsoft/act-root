@@ -117,7 +117,7 @@ describe("discover", () => {
   });
 });
 
-describe("transfer (unified backup / restore / cross-adapter) — ACT-1128", () => {
+describe("transfer (unified backup / restore / cross-adapter)", () => {
   it("refuses `current` source before any connect", async () => {
     await expect(
       caller.transfer({

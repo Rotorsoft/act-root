@@ -56,7 +56,7 @@ async function drain_to_quiescence(app: {
   }
 }
 
-describe("fold first-sight frontier TOCTOU (ACT-1204)", () => {
+describe("fold first-sight frontier TOCTOU", () => {
   it("does not skip events when the cache frontier moves during first-sight load", async () => {
     const table = new Map<string, CacheEntry<{ count: number }>>();
     const counters = projection("counters")

@@ -283,7 +283,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
     expect(drained.map((l) => l.stream)).not.toContain(stream);
   });
 
-  it("locks only the claimed candidates, not the whole eligible frontier (ACT-1201)", async () => {
+  it("locks only the claimed candidates, not the whole eligible frontier", async () => {
     // Two workers whose candidate frontiers are DISJOINT must each claim their
     // own slice concurrently. The buggy `available` CTE applies
     // `FOR UPDATE SKIP LOCKED` with no LIMIT, so it materializes and row-locks

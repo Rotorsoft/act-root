@@ -68,7 +68,7 @@ const admin: Actor = {
   roles: ["admin"],
 } as Actor;
 
-describe("read-path PII gate (#855 slice 4)", () => {
+describe("read-path PII gate", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -103,7 +103,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
     });
   });
 
-  it("do() returns plaintext to the emitter regardless of .discloses — actor IS the source (#861)", async () => {
+  it("do() returns plaintext to the emitter regardless of .discloses — actor IS the source", async () => {
     // The action handler runs against payload the caller just sent.
     // No view gate on the return path — the caller already has the
     // plaintext they submitted. .discloses governs reads (load/query),
@@ -186,7 +186,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
     });
   });
 
-  it("the gated load event drops the pii sidecar — plaintext never rides in event.pii (#1277)", async () => {
+  it("the gated load event drops the pii sidecar — plaintext never rides in event.pii", async () => {
     const app = act().withState(User).build();
     await app.do(
       "register",
@@ -238,7 +238,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
   //     whose names match a sensitive event field when the caller isn't
   //     authorized. Best-effort name-match — see `pii_mask_state`.
 
-  it("reducer sees plaintext; load-path mask redacts state for unauthorized actors (#861)", async () => {
+  it("reducer sees plaintext; load-path mask redacts state for unauthorized actors", async () => {
     const app = act().withState(User).build();
     await app.do(
       "register",
@@ -338,7 +338,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
 //     bare-string load. The store returns the raw pii column; the gate
 //     lives in the orchestrator (#1277). ---
 
-describe("query / query_array default-deny PII gate (#1277)", () => {
+describe("query / query_array default-deny PII gate", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -487,7 +487,7 @@ describe("query / query_array default-deny PII gate (#1277)", () => {
   });
 });
 
-describe("drain() default-deny PII gate (#1673)", () => {
+describe("drain() default-deny PII gate", () => {
   afterEach(async () => {
     await dispose()();
   });

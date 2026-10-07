@@ -12,7 +12,7 @@ const PIIEvent = z.object({
 
 const NonPIIEvent = z.object({ by: z.number() });
 
-describe("build-time snapshot validator (#855 slice 6)", () => {
+describe("build-time snapshot validator", () => {
   it("throws when a state declares both sensitive events and .snap()", () => {
     const Offender = state({ Offender: userSchema })
       .init(() => ({}))

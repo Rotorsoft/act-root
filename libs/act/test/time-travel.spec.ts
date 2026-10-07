@@ -203,7 +203,7 @@ describe("time-travel load", () => {
       return app.query_array({ stream, stream_exact: true });
     };
 
-    it("`before` id cutoff — folds only pre-cutoff events (#1267)", async () => {
+    it("`before` id cutoff — folds only pre-cutoff events", async () => {
       const { app, dispose } = await makeApp();
       const stream = nextStream();
       const events = await seed(app, stream, [1, 2, 3]);
@@ -214,7 +214,7 @@ describe("time-travel load", () => {
       await dispose();
     });
 
-    it("`limit` — folds the first N events, not N from the snapshot (#1274)", async () => {
+    it("`limit` — folds the first N events, not N from the snapshot", async () => {
       const { app, dispose } = await makeApp();
       const stream = nextStream();
       await seed(app, stream, [1, 2, 3, 4]);
@@ -223,7 +223,7 @@ describe("time-travel load", () => {
       await dispose();
     });
 
-    it("`created_before` timestamp cutoff — folds only pre-cutoff events (#1261)", async () => {
+    it("`created_before` timestamp cutoff — folds only pre-cutoff events", async () => {
       const { app, dispose } = await makeApp();
       const stream = nextStream();
       const events = await seed(app, stream, [1, 2, 3]);
@@ -237,7 +237,7 @@ describe("time-travel load", () => {
       await dispose();
     });
 
-    it("`created_after` timestamp cutoff — folds only post-cutoff events (#1261)", async () => {
+    it("`created_after` timestamp cutoff — folds only post-cutoff events", async () => {
       const { app, dispose } = await makeApp();
       const stream = nextStream();
       const events = await seed(app, stream, [1, 2, 3]);

@@ -39,7 +39,7 @@ async function drain_all(app: {
   }
 }
 
-describe("fold PII treatment is path-independent (#1320)", () => {
+describe("fold PII treatment is path-independent", () => {
   it("cold-loaded and warm-folded rows of an identical history match", async () => {
     const table = new Map<string, CacheEntry<{ seen?: string }>>();
     const secrets = projection("secrets")

@@ -52,7 +52,7 @@ describe("circuit breaker config validation", () => {
   });
 });
 
-describe("drain circuit breaker (ACT-984)", () => {
+describe("drain circuit breaker", () => {
   const setup = async () => {
     const s = new InMemoryStore();
     store(s);
@@ -134,7 +134,7 @@ describe("drain circuit breaker (ACT-984)", () => {
   });
 });
 
-describe("settle loop store-error handling (ACT-984)", () => {
+describe("settle loop store-error handling", () => {
   it("records a failing correlate on the breaker, which surfaces the error", async () => {
     const errored = new Promise<{ error: unknown; circuit: string }>(
       (resolve) => {

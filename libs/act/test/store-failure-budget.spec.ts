@@ -31,7 +31,7 @@ const counter = state({ Counter: z.object({ count: z.number() }) })
 
 const actor = { id: "a", name: "a" };
 
-describe("a failing store does not quarantine a healthy stream (#1592)", () => {
+describe("a failing store does not quarantine a healthy stream", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -140,7 +140,7 @@ describe("a failing store does not quarantine a healthy stream (#1592)", () => {
  * event. Containing the failure per stream is what keeps the blast radius on
  * the stream that caused it.
  */
-describe("a stream whose fetch fails does not stall the streams beside it (#1675)", () => {
+describe("a stream whose fetch fails does not stall the streams beside it", () => {
   const armed = { on: false };
 
   /**
@@ -202,7 +202,7 @@ describe("a stream whose fetch fails does not stall the streams beside it (#1675
     expect(seen).toEqual(["healthy"]);
   });
 
-  describe("a read that keeps failing spends the retry budget (#1774)", () => {
+  describe("a read that keeps failing spends the retry budget", () => {
     afterEach(() => {
       armed.on = false;
     });

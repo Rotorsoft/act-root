@@ -353,7 +353,7 @@ describe("runSseSubscription", () => {
  * `_overlay` and `_resync`: they carry no versions, so a dropped one leaves no
  * gap for `applyPatchMessage` to report as `behind` and is lost silently.
  */
-describe("runSseSubscription backlog keeps version-neutral frames (#1649)", () => {
+describe("runSseSubscription backlog keeps version-neutral frames", () => {
   type S = { _v: number; n: number; typing?: string[] };
 
   /** Yield to the generator without consuming, so the backlog fills. */

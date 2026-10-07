@@ -40,7 +40,7 @@ const Tagger = state({ Tagger: z.object({ label: z.string() }) })
 
 const actor = { id: "a", name: "a" };
 
-describe("the same projection registered twice (#1439)", () => {
+describe("the same projection registered twice", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -131,7 +131,7 @@ describe("the same projection registered twice (#1439)", () => {
   });
 });
 
-describe("one target, one owner (#1440)", () => {
+describe("one target, one owner", () => {
   afterEach(async () => {
     await dispose()();
   });

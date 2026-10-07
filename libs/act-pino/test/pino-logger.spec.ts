@@ -61,7 +61,7 @@ describe("PinoLogger", () => {
     expect(parsed.key).toBe("val");
   });
 
-  it("keeps the context message when the payload is a string (#1319)", () => {
+  it("keeps the context message when the payload is a string", () => {
     const logger = new PinoLogger({ level: "trace", pretty: false });
     logger.error("db connection lost", "Unhandled Rejection");
     const parsed = JSON.parse(output[0]);
@@ -94,7 +94,7 @@ describe("PinoLogger", () => {
     expect(parsed.msg).toBe("from child");
   });
 
-  it("child() spawns no transport worker (#1705)", async () => {
+  it("child() spawns no transport worker", async () => {
     // `child()` used to run the whole constructor, which builds a pino
     // instance — and a pino-pretty thread-stream Worker when `pretty` is on,
     // the default outside production — then discarded it. Since `child()` is
@@ -113,7 +113,7 @@ describe("PinoLogger", () => {
     expect(worker_count()).toBe(before);
   });
 
-  it("a child built without the constructor still logs and nests (#1705)", () => {
+  it("a child built without the constructor still logs and nests", () => {
     // `Object.create(prototype)` skips field initialization, so prove the
     // instance is still whole: it logs, carries its bindings, and a
     // grandchild works — i.e. `child()` is callable on a child.

@@ -36,7 +36,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit((a) => ["Incremented", { by: a.by }])
   .build();
 
-describe("ACT-1032 optimization guards", () => {
+describe("optimization guards", () => {
   describe("(a) snapshot cadence triggers a __snapshot__ write at the interval", () => {
     // Snapshot every 5 patches. `patches` is the snap-distance accumulator
     // and resets to 0 each time a snapshot is written, so the predicate

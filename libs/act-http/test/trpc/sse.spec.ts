@@ -302,7 +302,7 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
  * middleware across the whole API; tRPC resolves the actor inline, and the
  * subscription path simply had no copy of that block.
  */
-describe("trpc(app, { sse }) — the actor extractor gates the open (#1620)", () => {
+describe("trpc(app, { sse }) — the actor extractor gates the open", () => {
   const denying = (
     // `any`: same wide channel shape the helper above uses
     channel: BroadcastChannel<any>,

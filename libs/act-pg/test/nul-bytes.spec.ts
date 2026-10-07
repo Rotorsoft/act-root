@@ -17,7 +17,7 @@ import { schema } from "./schema.js";
  * message ("unsupported Unicode escape sequence") names neither the stream
  * nor the event, which is what made this expensive to diagnose.
  */
-describe("NUL bytes are refused by Postgres, legibly (#1422)", () => {
+describe("NUL bytes are refused by Postgres, legibly", () => {
   const NUL = String.fromCharCode(0);
   const store = new PostgresStore({
     port: 5431,

@@ -28,7 +28,7 @@ const User = state({ User: userSchema })
 
 const actor: Actor = { id: "u-1", name: "Tester" };
 
-describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
+describe("app.forget(stream) + forgotten lifecycle", () => {
   afterEach(async () => {
     await dispose()();
   });
@@ -120,7 +120,7 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     expect(seen).toHaveLength(0);
   });
 
-  it("pii-aware states never populate the snapshot cache (#861)", async () => {
+  it("pii-aware states never populate the snapshot cache", async () => {
     const app = act().withState(User).build();
     await app.do(
       "register",
@@ -138,7 +138,7 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     expect(await cache().get("user-1")).toBeUndefined();
   });
 
-  it("cache.invalidate failure short-circuits forget and suppresses `forgotten` (#861)", async () => {
+  it("cache.invalidate failure short-circuits forget and suppresses `forgotten`", async () => {
     const app = act().withState(User).build();
     const seen: unknown[] = [];
     app.on("forgotten", (p) => {

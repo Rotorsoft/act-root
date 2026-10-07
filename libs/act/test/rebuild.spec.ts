@@ -223,7 +223,7 @@ describe("Store.reset", () => {
     await app.do("increment", { stream, actor }, { by: 2 });
     await app.correlate();
     // First drain processes events; second drain leaves the orchestrator
-    // fully settled (_needs_drain cleared because nothing left to do).
+    // fully settled (the drain disarmed because nothing is left to do).
     await app.drain({ eventLimit: 100 });
     await app.drain({ eventLimit: 100 });
 
@@ -267,7 +267,7 @@ describe("Store.reset", () => {
       app.settle();
     });
     expect(projected).toEqual([7, 8]);
-    // Second settle drives _needs_drain to false (no work left).
+    // Second settle disarms the drain (no work left).
     await app.drain({ eventLimit: 100 });
 
     projected.length = 0;
@@ -304,8 +304,8 @@ describe("Store.reset", () => {
 
   it("app.reset does not arm the drain flag when the app has no reactions", async () => {
     // Static target subscription happens via withProjection, so we can reset
-    // a real stream — but with no reactive events, _needs_drain should stay
-    // false (drain would be a no-op anyway).
+    // a real stream — but with no reactive events, the drain should stay
+    // disarmed (drain would be a no-op anyway).
     const app = act().withState(Counter).build();
     await store().subscribe([{ stream: "no-reactions-proj" }]);
     const count = await app.reset(["no-reactions-proj"]);

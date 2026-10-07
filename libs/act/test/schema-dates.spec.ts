@@ -53,7 +53,7 @@ const payload = {
   meta: { born: new Date("1990-02-03T00:00:00.000Z"), tag: "x" },
 };
 
-describe("schema-driven date revival (#1556)", () => {
+describe("schema-driven date revival", () => {
   it("resolves sensitive fields and a read parser in one pass", () => {
     const tags = event_tags(
       z.object({

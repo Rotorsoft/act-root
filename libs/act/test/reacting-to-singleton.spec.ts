@@ -49,7 +49,7 @@ const app = act()
   .to({ target: "book-income" })
   .build();
 
-describe("ambient reactingTo on the singleton-port path (#1541)", () => {
+describe("ambient reactingTo on the singleton-port path", () => {
   beforeEach(async () => {
     await store().seed();
   });

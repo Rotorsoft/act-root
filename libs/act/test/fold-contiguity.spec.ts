@@ -60,7 +60,7 @@ afterEach(async () => {
   await dispose()("EXIT").catch(() => {});
 });
 
-describe("fold frontier contiguity (#1465)", () => {
+describe("fold frontier contiguity", () => {
   it("does not fold onto stale state when a sibling worker drained the gap", async () => {
     store(new InMemoryStore());
     await store().seed();
@@ -121,7 +121,7 @@ describe("fold frontier contiguity (#1465)", () => {
   });
 });
 
-describe("rebuild does not trust the fold cache (#1466)", () => {
+describe("rebuild does not trust the fold cache", () => {
   it("re-derives the row from the store instead of re-flushing the cache", async () => {
     // Asserting the row value alone would pass whether or not the cache was
     // cleared, because a warm cache usually holds the right answer. What

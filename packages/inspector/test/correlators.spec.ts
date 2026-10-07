@@ -62,7 +62,7 @@ describe("readCorrelators", () => {
     );
   });
 
-  it("surfaces an unreachable server instead of naming a benign cause (#1554)", async () => {
+  it("surfaces an unreachable server instead of naming a benign cause", async () => {
     // An empty list is rendered as "this store keeps it in memory, or
     // predates the change that records it" — a specific cause, stated
     // with confidence and never verified. An outage is not that, so it

@@ -24,7 +24,7 @@ describe("correlated table migration", () => {
     }
   });
 
-  it("rebuilds the pre-#1532 single-row table and keeps its checkpoint", async () => {
+  it("rebuilds the older single-row table and keeps its checkpoint", async () => {
     const store = new SqliteStore({ url: `file:${DB_PATH}` });
     await store.drop();
     await store.seed();

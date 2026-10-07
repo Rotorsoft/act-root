@@ -226,7 +226,7 @@ describe("error class inheritance", () => {
  * This asserts the entry point, not the module: importing from the same
  * specifier a reader would type after following the README.
  */
-describe("the /webhook subpath exports what its README documents (#1621)", () => {
+describe("the /webhook subpath exports what its README documents", () => {
   it("exports tryOk and classifyHttpResponse as values", async () => {
     const entry = await import("../../src/webhook/index.js");
     expect(typeof entry.tryOk).toBe("function");

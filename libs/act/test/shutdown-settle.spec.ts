@@ -71,7 +71,7 @@ afterEach(async () => {
   await dispose()("EXIT").catch(() => {});
 });
 
-describe("shutdown waits for an in-flight settle cycle (#1468)", () => {
+describe("shutdown waits for an in-flight settle cycle", () => {
   it("issues no store operations after teardown resolves", async () => {
     const h = harness("query");
     store(h.wrapped);
@@ -136,7 +136,7 @@ describe("shutdown waits for an in-flight settle cycle (#1468)", () => {
     h.release();
   });
 
-  it("graceMs: 0 keeps the pre-#1442 immediate return", async () => {
+  it("graceMs: 0 returns immediately", async () => {
     const h = harness("query");
     store(h.wrapped);
     const app = build();
@@ -162,7 +162,7 @@ describe("shutdown waits for an in-flight settle cycle (#1468)", () => {
   });
 });
 
-describe("a notification during shutdown cannot arm a new cycle (#1596)", () => {
+describe("a notification during shutdown cannot arm a new cycle", () => {
   /** The harness above, plus a `notify` capability the test fires by hand. */
   const notifiable = (after_shutdown: string[], flags: { shut: boolean }) => {
     const raw = new InMemoryStore();
@@ -258,7 +258,7 @@ describe("a notification during shutdown cannot arm a new cycle (#1596)", () => 
  * still re-take it on its ordinary path — leaving a dead worker holding the
  * lease to expiry, which is the delay handing it back exists to remove.
  */
-describe("teardown budget and lease ordering (#1617, #1618)", () => {
+describe("teardown budget and lease ordering", () => {
   /** Records the correlator argument of every `subscribe`, in order. */
   const lease_harness = (park_on: string) => {
     const raw = new InMemoryStore();

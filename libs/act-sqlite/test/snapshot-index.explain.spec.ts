@@ -34,7 +34,7 @@ type Client = {
   }>;
 };
 
-describe("SqliteStore #1024 partial snapshot index (EXPLAIN QUERY PLAN)", () => {
+describe("SqliteStore partial snapshot index (EXPLAIN QUERY PLAN)", () => {
   let store: SqliteStore;
   let client: Client;
 

@@ -115,7 +115,7 @@ describe("transfer → current (write-mode enabled)", () => {
     }
   });
 
-  it("supports transfer on a SQLite-backed connection (ACT-1128)", async () => {
+  it("supports transfer on a SQLite-backed connection", async () => {
     const file = await buildActFile();
     await caller.connect({ adapter: "sqlite", file });
     const store = getActiveStore()!;

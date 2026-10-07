@@ -54,7 +54,7 @@ describe("InMemoryStore (adapter-specific)", () => {
   // lived here until #1488. `claim` no longer reads the event log, so it has
   // no source to match — correlate applies the source window when it decides
   // which events may raise a mark, and the coverage moved with it to
-  // `correlate-work-mark.spec.ts`.
+  // `correlate.spec.ts`.
 
   it("binary-searches id bounds on backward scans across truncation holes", async () => {
     const s = store();

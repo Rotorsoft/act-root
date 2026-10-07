@@ -588,7 +588,7 @@ describe("event-sourcing", () => {
 // `snapshot.event` was undefined — the cold-path tombstone check went
 // vacuously false and a commit landed past the tombstone. The eventual
 // truncate then deleted the acknowledged commit: silent data loss.
-describe("event-sourcing — close guard cache poisoning (ACT-1188)", () => {
+describe("event-sourcing — close guard cache poisoning", () => {
   const actor = { id: "a", name: "a" };
   const guarded = { ...me, given: undefined };
 

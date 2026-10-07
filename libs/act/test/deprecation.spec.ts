@@ -14,7 +14,7 @@ import {
   deprecated_event_names,
 } from "../src/internal/event-versions.js";
 
-describe("deprecation (ACT-403)", () => {
+describe("deprecation", () => {
   beforeEach(async () => {
     await store().drop();
   });
@@ -58,7 +58,7 @@ describe("deprecation (ACT-403)", () => {
       expect([...d]).toEqual(["Foo_v2"]);
     });
 
-    it("rejects a leading-zero version colliding with its canonical form regardless of order (#1234)", () => {
+    it("rejects a leading-zero version colliding with its canonical form regardless of order", () => {
       // `Foo_v02` and `Foo_v2` both parse to numeric version 2. Without a
       // guard, whichever sorts second is flagged deprecated — so declaration
       // order decides whether the real current `Foo_v2` gets marked

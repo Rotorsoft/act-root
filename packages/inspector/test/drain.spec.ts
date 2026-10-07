@@ -197,7 +197,7 @@ describe("drainStatus", () => {
     expect(status.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  it("reports pending work, not distance to the head (#1521)", async () => {
+  it("reports pending work, not distance to the head", async () => {
     // A reader that has consumed everything marked for it is healthy, however
     // far its watermark sits below the log's head. That is the ordinary shape
     // of a reaction handling a subset of a state's events: its watermark only
@@ -284,7 +284,7 @@ describe("drainStatus", () => {
       expect(status.laneCounts.find((l) => l.lane === "premium")).toBeFalsy();
     });
 
-    it("never files a subscription with pending work as retired (#1553)", async () => {
+    it("never files a subscription with pending work as retired", async () => {
       // Two namespaces, one string. A reaction targeting `order-1` and
       // reading from `src` blocks on a poison event; separately, the
       // *aggregate* stream `order-1` is closed for good. Matching the

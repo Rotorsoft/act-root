@@ -341,7 +341,7 @@ function summarize(perStreamAcked: Map<string, number>, exclude: string) {
   return { median, p10, total, count: others.length };
 }
 
-describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
+describe("priority-aware claim vs dual-frontier baseline", () => {
   it("priority arm finishes the marked stream faster", async () => {
     const pool = new Pool({
       port: PORT,
@@ -396,7 +396,7 @@ describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
 
       // eslint-disable-next-line no-console
       console.log(
-        "\n=== ACT-102 priority-aware claim vs dual-frontier baseline ===" +
+        "\n=== priority-aware claim vs dual-frontier baseline ===" +
           "\nProves:   priority-tagged streams reach time-to-first-event much sooner" +
           "\n          without starving others or ballooning total drain." +
           `\nWorkload: ${SOURCE_EVENTS} events × ${TARGET_STREAMS} targets, ` +

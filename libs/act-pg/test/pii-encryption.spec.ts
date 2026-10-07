@@ -237,7 +237,7 @@ describe("PostgresStore pii_encryption", () => {
     await store.dispose();
   });
 
-  it("a declined payload survives a row the default read cannot decrypt (#1675)", async () => {
+  it("a declined payload survives a row the default read cannot decrypt", async () => {
     // The whole point of the flag. A corrupt row fails any read that asks
     // for the payload, and used to take the correlate scan — and therefore
     // every stream's reactions — down with it. A read that declines the
@@ -384,7 +384,7 @@ describe("PostgresStore pii_encryption", () => {
     await store.dispose();
   });
 
-  it("round-trips a Date in pii losslessly under encryption (#1370/#1556)", async () => {
+  it("round-trips a Date in pii losslessly under encryption", async () => {
     // Encryption is an at-rest concern: a Date must survive it as a Date,
     // exactly as it does on the plaintext path. `data.at` is the in-row
     // control — it never travels through the envelope.

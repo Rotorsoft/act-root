@@ -109,7 +109,7 @@ describe("defer durability", () => {
     expect(defer_spy).not.toHaveBeenCalled();
   });
 
-  it("re-seeds the DeferTimer from persisted deferred_at at cold start (#1221)", async () => {
+  it("re-seeds the DeferTimer from persisted deferred_at at cold start", async () => {
     // A stream is deferred to a future due-time and persisted (subscribe
     // registers it, defer sets deferred_at). Then the process "restarts":
     // a fresh Act builds new controllers with an EMPTY in-memory
@@ -146,7 +146,7 @@ describe("defer durability", () => {
     expect(defer_timer.is_deferred("idle-agg")).toBe(true);
   });
 
-  it("re-seeds a deferred stream sorting past the first stream page (#1371)", async () => {
+  it("re-seeds a deferred stream sorting past the first stream page", async () => {
     // The cold-start walk used `query_streams` with no query, which
     // defaults to `limit: 100`. A deferred stream sorting past that page
     // never got its timer re-armed — and the failing case is exactly the
@@ -180,7 +180,7 @@ describe("defer durability", () => {
     await app.shutdown();
   });
 
-  it("re-arms the drain at the persisted due-time with no intervening commit (#1221)", async () => {
+  it("re-arms the drain at the persisted due-time with no intervening commit", async () => {
     // A near-future due-time so a real-time wait is short. The store's own
     // async ops use real setTimeout, so fake timers can't drive the wake
     // without deadlocking the store — a short real delay is the honest test.
@@ -210,7 +210,7 @@ describe("defer durability", () => {
     expect(controller.armed).toBe(true);
   });
 
-  it("seeds a non-default lane's controller from persisted deferred_at (#1221)", async () => {
+  it("seeds a non-default lane's controller from persisted deferred_at", async () => {
     const due = Date.now() + 60_000;
     // A deferred stream stored on the "slow" lane.
     await store().subscribe([
@@ -240,7 +240,7 @@ describe("defer durability", () => {
     expect(controllers.get("default")!._defer.size).toBe(0);
   });
 
-  it("skips a deferred stream whose lane is excluded by onlyLanes (#1221)", async () => {
+  it("skips a deferred stream whose lane is excluded by onlyLanes", async () => {
     const due = Date.now() + 60_000;
     // A deferred stream on the "slow" lane, but this instance runs only
     // "fast" — no controller owns "slow", so the seed must skip it (a peer
@@ -270,7 +270,7 @@ describe("defer durability", () => {
     expect(controllers.get("fast")!._defer.size).toBe(0);
   });
 
-  it("routes a lane-less persisted defer to the default controller (#1221)", async () => {
+  it("routes a lane-less persisted defer to the default controller", async () => {
     // A StreamPosition may omit `lane` (the field is optional on the port).
     // An adapter that returns no lane must route to the default controller.
     // Stub query_streams to hand back exactly that shape.
@@ -307,7 +307,7 @@ describe("defer durability", () => {
     );
   });
 
-  it("does not seed a past-due deferred_at at cold start (#1221)", async () => {
+  it("does not seed a past-due deferred_at at cold start", async () => {
     // A past-due schedule is already claimable — the ordinary armed drain
     // handles it, so the cold-start seed skips it. Covers the
     // `deferred_at <= now` branch.

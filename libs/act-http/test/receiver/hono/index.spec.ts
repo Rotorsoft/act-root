@@ -80,7 +80,7 @@ describe("webhookMiddleware (Hono)", () => {
     expect(sideEffects).toBe(2);
   });
 
-  it("auto-releases on a 4xx response — a corrected same-key retry re-processes (#1364)", async () => {
+  it("auto-releases on a 4xx response — a corrected same-key retry re-processes", async () => {
     const store = freshStore();
     let sideEffects = 0;
     let hits = 0;

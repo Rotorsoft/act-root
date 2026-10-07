@@ -199,7 +199,7 @@ const SCENARIOS: ReadonlyArray<{
   { name: "high (1000/s)", rate: 1000, durationMs: 3000 },
 ];
 
-describe("ACT-103 commit→reaction latency (InMemoryStore)", () => {
+describe("commit→reaction latency (InMemoryStore)", () => {
   it("p50/p95/p99 across idle / low / high steady-state rates", async () => {
     const results: Record<string, Record<string, string>> = {};
 
@@ -214,7 +214,7 @@ describe("ACT-103 commit→reaction latency (InMemoryStore)", () => {
 
     // eslint-disable-next-line no-console
     console.log(
-      "\n=== ACT-103 commit→reaction latency (InMemoryStore) ===" +
+      "\n=== commit→reaction latency (InMemoryStore) ===" +
         "\nProves:  the do→settle→drain hot path stays under a millisecond-grade" +
         "\n         ceiling at idle; queuing under saturation is observable, not silent." +
         "\nAsserts: idle p99 < 50 ms (lower ms = faster on every column)"

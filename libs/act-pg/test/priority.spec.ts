@@ -218,7 +218,7 @@ describe("PostgresStore priority lanes", () => {
  * sources"), `classify_registry` keys them separately, and correlate's init
  * passes the whole list to one `subscribe` call.
  */
-describe("static-target batch after a lower stored priority (#1672)", () => {
+describe("static-target batch after a lower stored priority", () => {
   const Counter = state({ Counter: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
     .emits({ Incremented: ZodEmpty })

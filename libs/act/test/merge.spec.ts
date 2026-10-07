@@ -33,7 +33,7 @@ describe("merge_event_register", () => {
     expect("Unknown" in target).toBe(false);
   });
 
-  it("throws on two distinct reactions sharing a name on the same event (ACT-979)", () => {
+  it("throws on two distinct reactions sharing a name on the same event", () => {
     const target = {
       E: { reactions: new Map<string, unknown>([["dup", "old"]]) },
     };
@@ -66,7 +66,7 @@ describe("merge_event_register", () => {
  * whose two day fields are read off the state by the synthesized reaction and
  * are not exposed on the public registry.
  */
-describe("register_state — single-declaration policies (#1645)", () => {
+describe("register_state — single-declaration policies", () => {
   const Tkt = z.object({ open: z.boolean() });
 
   const plain = () =>
