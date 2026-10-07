@@ -69,7 +69,7 @@ export const _registry = z.registry<{ sensitive: true }>();
  *
  * @internal
  */
-export const _SENSITIVE = Symbol.for("act.sensitive");
+const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public `sensitive()` alongside
@@ -97,7 +97,7 @@ export function _mark_sensitive(schema: z.ZodType): void {
  *
  * @internal
  */
-export function is_pii(schema: z.ZodType): boolean {
+function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
     if (_registry.has(cur)) return true;

@@ -20,6 +20,8 @@ import { extend } from "./utils.js";
 /**
  * Zod schema for validating package.json metadata.
  * @internal
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const PackageSchema = z.object({
   name: z.string().min(1),

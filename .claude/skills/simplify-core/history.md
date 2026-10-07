@@ -29,9 +29,12 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 Approved breaking simplifications, each with its deprecation already shipped. They land together in one major with one migration guide.
 
-_(empty)_
-
-Candidates waiting on a deprecation (P2026-10-07-6): the four autoclose `ActOptions` fields with no reader, and their three `DEFAULT_*` exports.
+Deprecated in #1809; remove in the next major with one migration note:
+- `ActOptions.autocloseCycleMinutes`, `closeBatchSize`, `closeYieldMs`, `closeOnError` (no reader), with `DEFAULT_AUTOCLOSE_CYCLE_MINUTES`, `DEFAULT_CLOSE_BATCH_SIZE`, `DEFAULT_CLOSE_YIELD_MS`
+- `ActorSchema`, `CausationEventSchema`, `CommittedMetaSchema`, `EventMetaSchema`, `QuerySchema`, `TargetSchema`, `PackageSchema`
+- `Environments`, `LogLevels`, `ExitCodes`, `DEFAULT_LANE`, `default_scope`, `dateReviver`
+- `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_SETTLE_DEBOUNCE_MS`, `resolveAutocloseConfig`
+- `Act.stop_settling` (use `shutdown()`)
 
 ## Mutation baselines
 

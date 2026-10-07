@@ -183,8 +183,7 @@ async function runScenario(
     return samples;
   } finally {
     if (pollTimer) clearInterval(pollTimer);
-    reader.stop_correlations();
-    reader.stop_settling();
+    await reader.shutdown();
     await writer.dispose();
     await dispose()();
   }

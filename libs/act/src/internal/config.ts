@@ -165,12 +165,16 @@ export const DEFAULT_LEASE_MILLIS = 10_000;
  * Default debounce window (ms) for `settle()` when neither the per-call
  * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
  * Coalesces commits in the same tick and small bursts.
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 /**
  * Default LRU cap for the subscribed-streams cache. Apps that mint many
  * dynamic targets (one per aggregate) should override it with
  * `ActOptions.maxSubscribedStreams`.
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
@@ -351,7 +355,11 @@ const AutocloseOptionsSchema = z.object({
 /** Resolved autoclose configuration after validation + default expansion. */
 export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
 
-/** Validate + default the autoclose knobs on `ActOptions`. Throws `ZodError`. */
+/**
+ * Validate + default the autoclose knobs on `ActOptions`. Throws `ZodError`.
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
+ */
 export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {

@@ -137,6 +137,8 @@ const ISO_8601 =
  * Kept exported for host applications that parse Act JSON themselves and want
  * the old shape-based behaviour. New code should let the schema decide.
  *
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const dateReviver = (_key: string, value: unknown): unknown =>
   typeof value === "string" && ISO_8601.test(value) ? new Date(value) : value;

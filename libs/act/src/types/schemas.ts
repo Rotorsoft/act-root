@@ -74,6 +74,8 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
 
 /**
  * Zod schema for an actor (user, system, etc.).
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const ActorSchema = z
   .object({
@@ -85,6 +87,8 @@ export const ActorSchema = z
 
 /**
  * Zod schema for a target (stream and actor info).
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const TargetSchema = z
   .object({
@@ -97,6 +101,8 @@ export const TargetSchema = z
 
 /**
  * Zod schema for causation event metadata.
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CausationEventSchema = z.object({
   id: z.number(),
@@ -106,6 +112,8 @@ export const CausationEventSchema = z.object({
 
 /**
  * Zod schema for event metadata (correlation and causation).
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const EventMetaSchema = z
   .object({
@@ -119,6 +127,8 @@ export const EventMetaSchema = z
 
 /**
  * Zod schema for committed event metadata (id, stream, version, created, meta).
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const CommittedMetaSchema = z
   .object({
@@ -144,6 +154,8 @@ export type StateSchema = Readonly<{
 
 /**
  * Query options for event store queries.
+ *
+ * @deprecated Unused outside the framework; removed from the public exports in the next major.
  */
 export const QuerySchema = z
   .object({

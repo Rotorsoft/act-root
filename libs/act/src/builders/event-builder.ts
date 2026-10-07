@@ -123,7 +123,7 @@ export type Disclosure = "redact" | "strip";
  *
  * @internal
  */
-export function make_event_reader(
+function make_event_reader(
   tags: EventTags,
   disclosure: Disclosure,
   predicate: ((event: never, actor: Actor) => boolean) | null = null

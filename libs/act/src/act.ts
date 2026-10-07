@@ -140,11 +140,9 @@ import type {
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
-// Re-export the autoclose config surface so operators can
-// `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
-// from "@rotorsoft/act"`. The implementation lives in
-// `internal/config.ts` (the single home for builder-facing config bags)
-// to keep this orchestrator file focused on the `Act` class.
+// The autoclose types are public; the constants and the resolver are
+// deprecated and leave the public exports in the next major. All live in
+// `internal/config.ts`.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
@@ -1031,7 +1029,7 @@ export class Act<
       this._shutdown_promise = (async () => {
         this.stop_correlations();
         // Unsubscribe BEFORE stopping the settle loop. A notification
-        // arriving after `stop_settling()` reaches the handler below and
+        // arriving after the settle loop stops reaches the handler below and
         // schedules a fresh cycle that nothing is left to cancel, so a
         // worker that has already shut down takes a new lease — and with a
         // grace budget in play that window is seconds wide (#1596). Stopping
@@ -1041,7 +1039,7 @@ export class Act<
         // `undefined`, so this promise never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
-        this.stop_settling();
+        this._settle.stop();
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
@@ -1833,6 +1831,8 @@ export class Act<
    * Cancels any pending or active settle cycle.
    *
    * @see {@link settle}
+   *
+   * @deprecated Use {@link shutdown}, which stops settling along with everything else. Removed in the next major.
    */
   stop_settling() {
     this._settle.stop();
