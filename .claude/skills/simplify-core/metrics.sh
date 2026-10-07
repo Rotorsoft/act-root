@@ -26,6 +26,23 @@ echo "| runtime exports (@rotorsoft/act) | $exports |"
 echo "| IAct methods / Act class public methods | $iact / $act_public |"
 echo "| Store port methods | $store |"
 echo "| ActOptions fields | $act_options |"
+
+# Beyond the core: tests, packages, infra, docs.
+specs=$(git ls-files '*.spec.ts' | wc -l | tr -d ' ')
+test_lines=$(git ls-files '*.spec.ts' | xargs cat | wc -l | tr -d ' ')
+lib_lines=$(git ls-files 'libs/*/src/*.ts' 'libs/*/src/**/*.ts' | xargs cat | wc -l | tr -d ' ')
+ticket_tests=$(git ls-files '*.spec.ts' | xargs grep -hE '(it|describe|test)\(.*#[0-9]{3,4}' | wc -l | tr -d ' ')
+packages=$(git ls-files 'libs/*/package.json' | wc -l | tr -d ' ')
+workflows=$(ls .github/workflows/*.yml | wc -l | tr -d ' ')
+workflow_lines=$(cat .github/workflows/*.yml | wc -l | tr -d ' ')
+doc_lines=$(find docs/docs -name '*.md' -not -path '*/api/*' | xargs cat | wc -l | tr -d ' ')
+claude_md=$(wc -l < CLAUDE.md | tr -d ' ')
+
+echo "| spec files / test lines (all libs: $lib_lines src lines) | $specs / $test_lines |"
+echo "| test names citing tickets | $ticket_tests |"
+echo "| published packages (libs/) | $packages |"
+echo "| CI workflows / lines | $workflows / $workflow_lines |"
+echo "| docs lines (excl. generated API) / CLAUDE.md lines | $doc_lines / $claude_md |"
 echo
 echo "Largest files:"
 files | xargs wc -l | sort -rn | sed -n '2,8p' | awk '{printf "- %s (%s)\n", $2, $1}'
