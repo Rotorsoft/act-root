@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.15...@rotorsoft/act-http-v1.10.16) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act-http:** read the hono action body only when the validator did ([#1794](https://github.com/Rotorsoft/act-root/issues/1794)) ([ccdc778](https://github.com/Rotorsoft/act-root/commit/ccdc77862f7725b082cf57aad4c6403818e3d5d2)), closes [#1752](https://github.com/Rotorsoft/act-root/issues/1752) [#1777](https://github.com/Rotorsoft/act-root/issues/1777)
+
 # [@rotorsoft/act-http-v1.10.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.14...@rotorsoft/act-http-v1.10.15) (2026-10-06)
 
 
