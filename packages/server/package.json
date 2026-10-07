@@ -23,12 +23,9 @@
     "@rotorsoft/act-otel": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
     "@trpc/server": "11.19.0",
-    "cors": "^2.8.6",
     "hono": "^4.13.13",
     "prom-client": "^15.1.3",
     "zod": "^4.6.5"
   },
-  "devDependencies": {
-    "@types/cors": "^2.8.19"
-  }
+  "devDependencies": {}
 }

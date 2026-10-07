@@ -531,7 +531,7 @@ jobs:
       # publish from anywhere else has no identity to trade.
       #
       # `NPM_TOKEN` / `NODE_AUTH_TOKEN` were removed with the migration
-      # (npm_migration.md). Note pnpm attempts the OIDC exchange whether or
+      # (setup for a new package: contributing-new-package.md). Note pnpm attempts the OIDC exchange whether or
       # not a static token is present, so their absence is not what enables
       # this — the Trusted Publisher registration is. Adding a token back
       # would only reinstate a credential that can leak.
