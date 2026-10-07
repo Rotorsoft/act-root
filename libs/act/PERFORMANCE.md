@@ -84,7 +84,7 @@ Run with `pnpm -F @rotorsoft/act bench:realistic`. These exercise the full pipel
 
 Multi-process stress harness against a real Postgres instance. Different from the InMemoryStore guards above: this exercises true OS-level concurrency, real `FOR UPDATE SKIP LOCKED` semantics, and adapter-specific failure modes the in-process tests can't reach.
 
-Runs on every push to `master` (and weekly via cron) via [`.github/workflows/stress.yml`](../../.github/workflows/stress.yml). Results post to the workflow run's Job Summary so they're one click from any GitHub user.
+Runs weekly (and on demand) in [`.github/workflows/conformance.yml`](../../.github/workflows/conformance.yml). Results post to the workflow run's Job Summary so they're one click from any GitHub user.
 
 To run locally:
 
