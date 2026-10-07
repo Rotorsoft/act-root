@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.9...@rotorsoft/act-v1.32.10) (2026-10-07)
+
+
+### Bug Fixes
+
+* **act:** hand a batch projection each event once ([#1796](https://github.com/Rotorsoft/act-root/issues/1796)) ([72c304a](https://github.com/Rotorsoft/act-root/commit/72c304aa946ff1a36985db16785c211253f13f71)), closes [#1780](https://github.com/Rotorsoft/act-root/issues/1780)
+
 # [@rotorsoft/act-v1.32.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.8...@rotorsoft/act-v1.32.9) (2026-10-06)
 
 
