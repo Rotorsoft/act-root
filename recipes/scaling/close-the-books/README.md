@@ -108,7 +108,12 @@ guidance from the workloads we've watched closely:
   no longer crosses that threshold.
 
 - `app.reset()` time scales linearly with events processed.
-  Bounded events table → bounded rebuild window. This is the
+  Bounded events table → bounded rebuild window. The flip side: a
+  rebuild can only replay what is still in the log. A retired stream
+  is gone, and a pruned one keeps only its tail, so only an `.of()`
+  state fold (which starts from a kept snapshot) rebuilds correctly
+  over closed history. Don't rebuild a read model over closing states
+  by truncating it. See [Rebuilding over closed or pruned streams](../../../docs/docs/guides/projections-to-database.md#rebuilding-over-closed-or-pruned-streams). This is the
   cheapest way to bound rebuild — orders of magnitude cheaper
   than partitioning, which is documented at
   [recipes/scaling/partitioning/README.md](../partitioning/README.md)
