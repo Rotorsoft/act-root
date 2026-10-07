@@ -23,11 +23,6 @@ libs/act-sqlite/perf-result.json
 libs/act-sqlite/scripts/perf-bench.db*
 package-lock.json
 
-# StrykerJS mutation testing — per-run reports + sandbox temp dirs.
-reports/
-.stryker-tmp/
-stryker.log
-
 # Claude Code: machine-specific overrides + transient state.
 .claude/settings.local.json
 .claude/.cache/

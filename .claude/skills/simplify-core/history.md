@@ -18,7 +18,7 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | Reading path | never | 0 | 0 | active |
 | Newcomer test (quarterly) | never | 0 | 0 | active |
 | Tests by concept | 2026-10-07 | 1 | 0 | active |
-| Mutation evidence (monthly, CI) | never | 0 | 0 | blocked (Stryker can't run on vitest 5) |
+| Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-07 | 1 | 0 | active |
 | Infra | 2026-10-07 | 1 | 0 | active |
 | One source of truth | 2026-10-07 | 1 | 0 | active |
@@ -32,6 +32,21 @@ Approved breaking simplifications, each with its deprecation already shipped. Th
 _(empty)_
 
 Candidates waiting on a deprecation (P2026-10-07-6): the four autoclose `ActOptions` fields with no reader, and their three `DEFAULT_*` exports.
+
+## Mutation baselines
+
+The last trusted Stryker scores, recorded when the setup was removed (#1805) because it can't run on vitest 5. A revived setup compares against these.
+
+| package | score | old break floor |
+|---|---|---|
+| act | 85.7% | 80 |
+| act-pg | 94.4% | 88 |
+| act-sqlite | 93.0% | 87 |
+| act-http | 92.4% | 86 |
+| act-crypto | 92.9% | 87 |
+| act-ops | 98.4% | 92 |
+| act-patch | 79.1% | 73 |
+| act-tck | 39.7% | 34 |
 
 ## Backlog
 

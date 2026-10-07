@@ -48,5 +48,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/dist", "**/vitest.stryker.config.ts"]
+  "exclude": ["**/node_modules", "**/dist"]
 }

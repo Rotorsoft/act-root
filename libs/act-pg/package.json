@@ -45,7 +45,6 @@
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
-    "mutation": "stryker run",
     "stress": "tsx test/stress/runner.ts",
     "bench:run": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-result.json",
     "bench:check": "tsx scripts/perf-check.ts",
@@ -61,8 +60,6 @@
   },
   "devDependencies": {
     "@rotorsoft/act-tck": "workspace:^",
-    "@stryker-mutator/core": "^10.0.0",
-    "@stryker-mutator/vitest-runner": "^10.0.0",
     "@types/pg": "^8.23.1"
   }
 }
