@@ -9,7 +9,7 @@ Event sourcing is simple: commands decide, events record, state folds, reactions
 
 This skill reverses the drift one approved change at a time, and improves itself as it goes. **It proposes; it never edits product code on its own.** The user picks proposals, and each pick goes through the normal ticket → branch → PR workflow.
 
-Files: `lenses.md` (what to look at), `metrics.sh` (how to measure), `history.md` (every run, proposal, decision and self-change). Read `history.md` before anything else.
+Files: `lenses.md` (what to look at), `metrics.sh` (how to measure), `history.md` (every run, proposal, decision and self-change), `learnings.md` (what building Act has taught, as rules). Read `history.md` and `learnings.md` before anything else, and check every proposal against the learnings.
 
 ## Ground rules
 
@@ -52,6 +52,7 @@ Targets the retrospective tracks (adjust them only with the user):
    - **Rejection patterns:** the same rejection reason twice becomes a ground rule or a smell in `lenses.md`, worded as a check.
    - **Metric value:** a metric that hasn't informed a decision in three runs leaves `metrics.sh`; a question the run couldn't answer with numbers may add one, if it replaces another.
    - **Self-review (quarterly):** run the simplicity lens on this skill itself. Is every step still earning its keep?
+   - **Learnings:** add what this run or the merged PRs taught that `learnings.md` lacks; merge duplicates, drop entries no longer true, keep it under 150 lines.
    - **Write the changes** to `SKILL.md`, `lenses.md` and `metrics.sh` directly, and log each in `history.md` with its evidence. `SKILL.md` stays under 150 lines and `lenses.md` under 200: an addition that would cross the budget must replace something.
    - All of it ships in **one PR** with the history entry, so the user reviews every self-change. Never edit the skill outside a run.
 

@@ -47,11 +47,11 @@ If a Store/Cache/Logger port method changed in `libs/act/src/types/ports.ts`:
 - Types: PascalCase. Options/Result/Config suffixes when applicable (`ActOptions`, `WebhookConfig`, `CloseResult`).
 - Match existing analogs over inventing new patterns — if the project already names something `app.reset(input)`, a new sibling should be `app.unblock(input)`, not `app.recoverStreams(...)`.
 
-## 5. Doc and book debt
+## 5. Doc debt
 
 - Touching `libs/act/src/types/ports.ts` → check whether `docs/architecture/extension-points.md` needs an update.
 - Touching reaction/drain semantics → check `docs/concepts/error-handling.md`.
-- A new public API method → check whether the matching `book/act-XXX-<slug>.md` essay exists.
+- A change that taught something → check for one entry in `.claude/skills/simplify-core/learnings.md`.
 - Verify cross-references from CLAUDE.md "Where to find what" cover any new doc pages.
 
 ## 6. Wolfdesk + calculator + tRPC example

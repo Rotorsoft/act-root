@@ -482,8 +482,7 @@ everything except a sub-millisecond critical section. Sequential
 commits end up *faster* than before the fix because two round trips
 replaced four.
 
-Rejected along the way (decision record in
-`book/act-1178-commit-visibility.md`): a read-side xmin-horizon fence
+Rejected along the way: a read-side xmin-horizon fence
 (planner-hostile predicates on every hot read) and a shared-lock
 writers / exclusive-fence readers scheme (obviated — the shipped shape
 already restores full write parallelism without touching the port).

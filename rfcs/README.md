@@ -52,6 +52,5 @@ than reverse-engineer the intent later.
 4. Mark the RFC `accepted` when the PR merges; `rejected` or `superseded` otherwise.
 
 This complements, not replaces, the rest of the pre-handoff workflow in
-[CLAUDE.md](../CLAUDE.md) — the 100% coverage gate, the book-note essay (which
-captures narrative design history for *substantive* tickets), and the doc audit
+[CLAUDE.md](../CLAUDE.md) — the 100% coverage gate, the learnings entry, and the doc audit
 still apply.

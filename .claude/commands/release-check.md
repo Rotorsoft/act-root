@@ -17,7 +17,7 @@ Verify the current branch is mergeable. Run **every gate in parallel** and surfa
    # Identify renamed/removed identifiers in this PR
    git diff master --diff-filter=D --name-only -- libs/act/src/ libs/act-*/src/
    # For each renamed/removed symbol, grep for it in docs
-   grep -rln "<old-name-or-shape>" docs/docs book CLAUDE.md libs/*/README.md
+   grep -rln "<old-name-or-shape>" docs/docs CLAUDE.md libs/*/README.md
    ```
    When the PR migrates a callsite to a new primitive (e.g., `query` → `query_stats`), also grep for the old behavioral description in `docs/docs/architecture/` ASCII diagrams. Report hits — they must be updated in this PR, not a follow-up. Skip cleanly when this is a no-public-surface PR (deps bump, internal refactor).
 
