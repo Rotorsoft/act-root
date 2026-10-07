@@ -9,7 +9,12 @@
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import { type FoldConfig, resolveFoldConfig } from "../internal/index.js";
+import {
+  DEFAULT_BLOCK_ON_ERROR,
+  DEFAULT_MAX_RETRIES,
+  type FoldConfig,
+  resolveFoldConfig,
+} from "../internal/index.js";
 import type {
   BatchHandler,
   CacheEntry,
@@ -322,8 +327,8 @@ function _projection<
             handler,
             resolver: default_resolver ?? _this_,
             options: {
-              blockOnError: true,
-              maxRetries: 3,
+              blockOnError: DEFAULT_BLOCK_ON_ERROR,
+              maxRetries: DEFAULT_MAX_RETRIES,
             },
           };
           const register = (events as Record<string, any>)[event];
@@ -421,7 +426,10 @@ function _projection<
                   {
                     handler: noop,
                     resolver: { target },
-                    options: { blockOnError: true, maxRetries: 3 },
+                    options: {
+                      blockOnError: DEFAULT_BLOCK_ON_ERROR,
+                      maxRetries: DEFAULT_MAX_RETRIES,
+                    },
                   },
                 ],
               ]),

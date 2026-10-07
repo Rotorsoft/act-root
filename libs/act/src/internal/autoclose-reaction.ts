@@ -29,7 +29,7 @@ import type {
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { CloseSignal } from "./close-signal.js";
-import type { AutocloseConfig } from "./config.js";
+import { type AutocloseConfig, DEFAULT_MAX_RETRIES } from "./config.js";
 import { DeferSignal } from "./defer-signal.js";
 
 /**
@@ -86,7 +86,7 @@ export function synthesize_autoclose_reactions<
       }),
       // Never block on autoclose: a transient query/store error should retry,
       // not quarantine the synthetic stream.
-      options: { blockOnError: false, maxRetries: 3 },
+      options: { blockOnError: false, maxRetries: DEFAULT_MAX_RETRIES },
       handler: async (event) => {
         const aggregate = event.stream;
         // Off-hours gating: outside the window, park until the window

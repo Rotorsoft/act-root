@@ -88,6 +88,11 @@ export function resolveBackoffConfig(
 // `blockOnError` (a poison message retries forever). Validate the whole bag.
 // ---------------------------------------------------------------------------
 
+/** Retries a reaction gets before it blocks, unless `.do()` says otherwise. */
+export const DEFAULT_MAX_RETRIES = 3;
+/** Whether a reaction blocks its stream once retries run out. */
+export const DEFAULT_BLOCK_ON_ERROR = true;
+
 const ReactionOptionsSchema = z.object({
   blockOnError: z.boolean(),
   maxRetries: z.number().int().min(0),
@@ -150,6 +155,25 @@ export function resolveLaneConfig<TName extends string>(
 // pass-through query filter (validated by the store), so it is not reshaped.
 // ---------------------------------------------------------------------------
 
+/** Streams a drain claims per cycle. */
+export const DEFAULT_STREAM_LIMIT = 10;
+/** Events a drain reads per stream per cycle. */
+export const DEFAULT_EVENT_LIMIT = 10;
+/** How long a drain holds a stream's lease (ms). */
+export const DEFAULT_LEASE_MILLIS = 10_000;
+/**
+ * Default debounce window (ms) for `settle()` when neither the per-call
+ * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
+ * Coalesces commits in the same tick and small bursts.
+ */
+export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+/**
+ * Default LRU cap for the subscribed-streams cache. Apps that mint many
+ * dynamic targets (one per aggregate) should override it with
+ * `ActOptions.maxSubscribedStreams`.
+ */
+export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+
 const DrainOptionsSchema = z.object({
   streamLimit: z.number().int().min(0).optional(),
   eventLimit: z.number().int().min(0).optional(),
@@ -208,12 +232,11 @@ export function resolveSettleConfig(
 export const MAX_SHUTDOWN_GRACE_MS = 30_000;
 
 /**
- * Grace budget used when no lane pinned a `leaseMillis` — matches `drain()`'s
- * own `leaseMillis` fallback, so the default deployment gets a budget
- * consistent with how long its handlers were already allowed to hold a
- * stream.
+ * Grace budget used when no lane pinned a `leaseMillis`: the drain's own
+ * lease, so the default deployment waits as long as its handlers were
+ * already allowed to hold a stream.
  */
-export const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
+export const DEFAULT_SHUTDOWN_GRACE_MS = DEFAULT_LEASE_MILLIS;
 
 const ShutdownOptionsSchema = z
   .object({

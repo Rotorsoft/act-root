@@ -14,6 +14,8 @@
 
 import {
   assert_defer_when,
+  DEFAULT_BLOCK_ON_ERROR,
+  DEFAULT_MAX_RETRIES,
   type DeferSchedule,
   make_deferred,
   resolveReactionConfig,
@@ -87,8 +89,8 @@ export function reaction_on<
       // `maxRetries`/`backoff`/`blockOnError` throws ZodError at build,
       // not a NaN gate on the first retry.
       options: resolveReactionConfig({
-        blockOnError: options?.blockOnError ?? true,
-        maxRetries: options?.maxRetries ?? 3,
+        blockOnError: options?.blockOnError ?? DEFAULT_BLOCK_ON_ERROR,
+        maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
         backoff: options?.backoff,
       }),
     };
