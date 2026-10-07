@@ -32,6 +32,12 @@ Pick a commit on `master` (or just before the feature branch diverged). This tag
 | `docs/tsconfig.json` | Add the package path so typedoc can resolve types |
 | `.claude/skills/scaffold-act-app/*.md` | If the new package is part of the recommended app stack (store, cache, broadcast, etc.), reference it from the relevant skill files |
 
+## Register the npm Trusted Publisher
+
+CI publishes with npm Trusted Publishing: there is no npm token in the repo, and npm only accepts a publish from a workflow registered for that package. Before the first release, on npmjs.com open the package's **Settings → Trusted Publisher → GitHub Actions** and enter organization `Rotorsoft`, repository `act-root`, workflow `ci-cd.yml` (basename only), with no environment.
+
+npm also checks `repository.url` in `package.json` against the provenance exactly, including case: it must read `git+https://github.com/Rotorsoft/act-root.git`. Copying a sibling's `package.json` gets this right.
+
 ## Conventional commits and the first release
 
 The `cd` workflow runs semantic-release per package after merge. The first release on `master` uses the seed tag as the comparison base:

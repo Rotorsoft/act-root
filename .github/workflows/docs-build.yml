@@ -1,6 +1,6 @@
 name: Docs Build
 
-# Builds the Docusaurus site (typedoc + docusaurus build) on docs changes,
+# Builds the Docusaurus site (typedoc + docusaurus build) on docs PRs,
 # so MDX parse errors, broken JSX, and fatal build/config failures can't
 # merge (issue #1075). docs-only PRs otherwise run no build at all — the
 # main ci-cd workflow triggers on `libs/**`, and docs-snippets.yml only
@@ -13,10 +13,7 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/docs-build.yml'
-  push:
-    branches: [master]
-    paths:
-      - 'docs/**'
+  # No master push trigger: deploy-docs.yml builds the same site on master.
   workflow_dispatch:
 
 permissions:

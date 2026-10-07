@@ -89,7 +89,6 @@ pressKey.mutate({ key: key as Digits | Operators });
 
 - All mutations target the single shared stream `calculator` (configured in the router). The UI shows the latest snapshot rather than tracking per-user streams.
 - React Query is wired with the default `QueryClient` — no caching strategy beyond the defaults.
-- Devtools are installed (`@tanstack/react-query-devtools`) but not mounted by default.
 
 ## Related
 
