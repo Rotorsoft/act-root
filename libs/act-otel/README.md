@@ -4,7 +4,7 @@ _Prometheus metrics for Act apps — one call, the canonical metric set, zero ch
 
 ## Why this package
 
-Act deliberately ships no metrics in core: the lifecycle events plus the Logger port are the observability seam, and specialized tooling plugs in. The [observability guide](https://rotorsoft.github.io/act-root/docs/guides/observability) shows the canonical hand-wiring from those events to prom-client. This package is that wiring, shipped: `instrument(app)` subscribes to the lifecycle events and maintains the guide's metric set on a registry you own.
+Act deliberately ships no metrics in core: the lifecycle events plus the Logger port are the observability seam, and specialized tooling plugs in. This package wires those events to prom-client: `instrument(app)` subscribes to the lifecycle events and maintains the metric set below on a registry you own. The [observability guide](https://rotorsoft.github.io/act-root/docs/guides/observability) covers the two signals it doesn't (settle latency, concurrency errors) and what to page on.
 
 What it is not, on purpose: there are no spans and no trace propagation — this is metrics only. Log shipping to OpenTelemetry stays the pino adapter's job (`@rotorsoft/act-pino` with an OTel transport). If you prefer to wire metrics by hand, the guide remains the reference; this package saves you the sixty lines and keeps the names consistent.
 
@@ -59,7 +59,7 @@ Options: `registry` (defaults to prom-client's global registry), `prefix` (defau
 
 ## Documentation
 
-- [Observability guide](https://rotorsoft.github.io/act-root/docs/guides/observability) — the seam, the hand-wiring this packages, and the page-vs-dashboard alerting split
+- [Observability guide](https://rotorsoft.github.io/act-root/docs/guides/observability) — the seam, the two hand-wired signals, and the page-vs-dashboard alerting split
 - [Production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist)
 - [API reference](https://rotorsoft.github.io/act-root/docs/api/act-otel/src)
 
