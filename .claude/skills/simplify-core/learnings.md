@@ -1,6 +1,6 @@
 # Learnings
 
-What building Act has taught, as rules to check a design or a fix against. Read it before proposing anything. Each entry is a rule and the evidence (ticket or PR). Keep it under 150 lines: the retrospective merges duplicates, drops what stopped being true, and promotes a rule that keeps recurring into a ground rule or a smell in `lenses.md`. Add an entry only when a change taught something not already here.
+What building Act has taught, as rules to check a design or a fix against. Read it before proposing anything. These are evidence, not law: an entry, or the decision it records, can be challenged when the reasons behind it no longer hold, and a challenge that wins replaces the entry. Each entry is a rule and the evidence (ticket or PR). Keep it under 150 lines: the retrospective merges duplicates, drops what stopped being true, and promotes a rule that keeps recurring into a ground rule or a smell in `lenses.md`. Add an entry only when a change taught something not already here.
 
 ## Design
 
@@ -9,7 +9,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A background path that repeats a foreground path drifts, because nothing exercises it. Make it trigger the foreground path. (#1804: polling marked work and never drained)
 - When a capability is buried in one feature, re-express the feature as a use of a general primitive and delete the special machinery. (#1090: autoclose became a deferred reaction; its controller and ticker went away)
 - Several features that look different can be one operation; find the shared verb before building separate guardrails. (#1128: backup, restore and transfer are all source → sink)
-- Prefer declarations read by the orchestrator over new ports, columns or caller-side helpers. (#566: PII is a column plus `.sensitive`, three heavier designs rejected)
+- Prefer declarations read by the orchestrator over new ports, columns or caller-side helpers. (#566: PII is a column plus `.sensitive`, three heavier designs rejected. Open question: that design still put a column, `forget_pii` and TCK cases in core for every adapter; a `Store` decorator might carry it outside the core.)
 - Put the policy where the knowledge is: the author of a unit of work declares its retry profile; callers shouldn't. (#1111, #601)
 - The call site is the spec. If the line doesn't read as plain English, the API isn't done, even when the types are right. (#1134)
 - Packaging is a distribution choice, not a discipline. An expensive operator call can be an `IAct` method if it is never auto-invoked. (#723)

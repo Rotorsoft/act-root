@@ -17,7 +17,7 @@ Files: `lenses.md` (what to look at), `metrics.sh` (how to measure), `history.md
 2. **The framework is published.** Internal code changes freely. Public surface ([STABILITY.md](../../../STABILITY.md)), including each published package, changes only with a deprecation path, and breaking removals wait in the **next-major list** in `history.md` so they land together with one migration guide.
 3. **I am a source of the complexity.** Review my own recent changes with the most suspicion. My typical mistakes: a fix that needs a second mechanism to undo its own side effect, and machinery for a narrow failure when a recovery path or a doc correction would do.
 4. **Behavior stays.** A simplification changes nothing an app observes, except to remove a bug. The suite (100% coverage), the TCK, and the rows in `docs/docs/architecture/behavior-contracts.md` are the proof; consolidating tests may never drop a row or coverage.
-5. **Don't relitigate.** A rejected proposal stays rejected unless something material changed, and then the proposal says what.
+5. **Question past decisions, not past rejections.** Any shipped design is open to challenge, including ones recorded in `learnings.md`, memory or docs as settled: a feature built into core that could be a decorator or a leaf package is exactly what this review exists to find. A challenge names the original reasons and shows why they no longer hold. A proposal the user rejected in an earlier run stays rejected unless something material changed, and the proposal says what.
 
 ## The bar
 

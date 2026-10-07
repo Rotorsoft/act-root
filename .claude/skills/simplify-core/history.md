@@ -14,6 +14,7 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | File budget | 2026-10-07 | 1 | 0 | active |
 | Comment noise | 2026-10-07 | 1 | 0 | active |
 | Concepts and options | 2026-10-07 | 1 | 0 | active |
+| Core or decorator? | never | 0 | 0 | active |
 | DRY across adapters and builders | 2026-10-07 | 1 | 0 | active |
 | Reading path | never | 0 | 0 | active |
 | Newcomer test (quarterly) | never | 0 | 0 | active |
@@ -67,6 +68,7 @@ Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, 
 - 2026-10-07: added the backlog. Four specialists returned 20 proposals and the 5–7 cap dropped sound ones; without a backlog the next run would rediscover them.
 - 2026-10-07: a behavior claim ranks only after the main loop reproduces it with an asserting test and a control. The specialist's `start_correlations` probe only logged; it turned out right, but an unasserted probe is not evidence.
 - 2026-10-08: added `learnings.md`, read at the start of every run and curated in step 7. It replaces the per-ticket essays in `book/` (76 essays, ~3,500 lines, deleted), which the user won't use; the goal is lessons for the architect, not stories. CLAUDE.md's pre-handoff step 3 now asks for one learnings entry when a change taught something, instead of `/book-note` (deleted).
+- 2026-10-08: ground rule 5 changed from "don't relitigate" to "question past decisions, not past rejections": shipped designs (even ones memory or learnings call settled) are open to challenge with evidence; only proposals the user rejected in a run stay closed. Added the "Core or decorator?" lens. Prompted by the user, citing PII in core rather than as a decorator.
 - 2026-10-07: mutation lens marked blocked. `mutation.yml` documents that Stryker's vitest runner can't match vitest 5 test names, so every mutant survives and the run is meaningless.
 
 ## Runs
