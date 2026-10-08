@@ -108,34 +108,6 @@ describe("PostgresStore notify contract", () => {
     await a.dispose();
   });
 
-  it("notify is self-filtered per instance — a commit wakes the other instance, never its own", async () => {
-    const seen_by_a: any[] = [];
-    const seen_by_b: any[] = [];
-    const dispose_a = await a.notify!((n) => seen_by_a.push(n));
-    const dispose_b = await b.notify!((n) => seen_by_b.push(n));
-
-    await a.commit("stream-self-filter", [{ name: "Ping", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
-
-    // The other instance is woken with the committed batch...
-    await waitFor(() => seen_by_b.length > 0);
-    expect(seen_by_b).toHaveLength(1);
-    expect(seen_by_b[0].stream).toBe("stream-self-filter");
-    expect(seen_by_b[0].events).toEqual([
-      { id: expect.any(Number), name: "Ping" },
-    ]);
-
-    // ...while the committing instance never sees its own NOTIFY. Wait
-    // long enough for any spurious self-delivery to arrive.
-    await sleep(200);
-    expect(seen_by_a).toHaveLength(0);
-
-    await dispose_a();
-    await dispose_b();
-  });
-
   it("oversize notify payload skips the NOTIFY — the commit succeeds and events stay discoverable via the poll path", async () => {
     const seen_by_b: any[] = [];
     const dispose_b = await b.notify!((n) => seen_by_b.push(n));

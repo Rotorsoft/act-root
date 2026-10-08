@@ -4,6 +4,7 @@ import {
   InMemoryCache,
   SNAP_EVENT,
   sleep,
+  state,
   TOMBSTONE_EVENT,
   ValidationError,
 } from "@rotorsoft/act";
@@ -21,6 +22,7 @@ import type {
   SubscribeInput,
 } from "@rotorsoft/act/types";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { CounterEvents } from "./fixtures/events.js";
 import {
   type CommittedCounterEvent,
@@ -2957,6 +2959,112 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(got1.priority).toBe(3);
         expect(got2.priority).toBe(5);
       });
+
+      it("matches a stream pattern", async () => {
+        const tag = uid();
+        await store.subscribe([
+          { stream: `pri-${tag}-proj-a` },
+          { stream: `pri-${tag}-proj-b` },
+          { stream: `pri-${tag}-audit-x` },
+        ]);
+        expect(
+          await store.prioritize({ stream: `^pri-${tag}-proj-.*$` }, 3)
+        ).toBe(2);
+      });
+
+      it("matches by source, skipping rows that have none", async () => {
+        const tag = uid();
+        await store.subscribe([
+          { stream: `pri-${tag}-t1`, source: `pri-src-${tag}-users` },
+          { stream: `pri-${tag}-t2`, source: `pri-src-${tag}-audit` },
+          { stream: `pri-${tag}-t3` },
+        ]);
+        expect(
+          await store.prioritize(
+            { source: `pri-src-${tag}-users`, source_exact: true },
+            4
+          )
+        ).toBe(1);
+        // A source pattern matches too, still skipping rows without a source.
+        expect(
+          await store.prioritize({ source: `^pri-src-${tag}-.*$` }, 6)
+        ).toBe(2);
+      });
+
+      it("matches by blocked state, both ways", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const tag = uid();
+          const src = `pri-src-${tag}`;
+          const ok = `pri-${tag}-ok`;
+          const bad = `pri-${tag}-bad`;
+          await fresh.commit<CounterEvents>(
+            src,
+            [inc(1)],
+            make_meta({ stream: src })
+          );
+          await fresh.subscribe([
+            { stream: ok, source: src },
+            { stream: bad, source: src },
+          ]);
+          await correlate(fresh);
+          const leases = await fresh.claim(2, 0, `w-${uid()}`, 5_000);
+          const lease = leases.find((l) => l.stream === bad) as Lease;
+          await fresh.block([{ ...lease, error: "boom" }]);
+          const scope = `^pri-${tag}-.*$`;
+          expect(
+            await fresh.prioritize({ stream: scope, blocked: true }, 9)
+          ).toBe(1);
+          expect(
+            await fresh.prioritize({ stream: scope, blocked: false }, 9)
+          ).toBe(1);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("an empty filter updates every row, and skips rows already at the value", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const tag = uid();
+          await fresh.subscribe([
+            { stream: `pri-${tag}-a` },
+            { stream: `pri-${tag}-b`, priority: 5 },
+          ]);
+          expect(await fresh.prioritize({}, 5)).toBe(1);
+          expect(await fresh.prioritize({}, 5)).toBe(0);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("claim returns higher-priority streams first under tied watermarks", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const tag = uid();
+          const src = `pri-src-${tag}`;
+          await fresh.commit<CounterEvents>(
+            src,
+            [inc(1), inc(2)],
+            make_meta({ stream: src })
+          );
+          await fresh.subscribe([
+            { stream: `pri-${tag}-low`, source: src, priority: 0 },
+            { stream: `pri-${tag}-high`, source: src, priority: 5 },
+          ]);
+          await correlate(fresh);
+          const leases = await fresh.claim(1, 0, `w-${uid()}`, 5_000);
+          expect(leases.map((l) => l.stream)).toEqual([`pri-${tag}-high`]);
+        } finally {
+          await fresh.dispose();
+        }
+      });
     });
 
     // ACT-1103: drain lanes. The Store contract now carries lane on
@@ -4223,6 +4331,47 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
         expect([...all.keys()].sort()).toEqual([...streams].sort());
       });
+
+      it("pages the count and tail paths by limit + after too", async () => {
+        const tag = uid();
+        // Committed out of name order, so ordering comes from the query.
+        for (const s of [`qsc-${tag}-c`, `qsc-${tag}-a`, `qsc-${tag}-b`])
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1), inc(2)],
+            make_meta({ stream: s })
+          );
+        const pattern = { stream: `qsc-${tag}-.*` };
+
+        const counted = await store.query_stats<CounterEvents>(pattern, {
+          count: true,
+          names: true,
+          limit: 2,
+        });
+        expect([...counted.keys()]).toEqual([`qsc-${tag}-a`, `qsc-${tag}-b`]);
+        expect(counted.get(`qsc-${tag}-a`)?.count).toBe(2);
+        expect(counted.get(`qsc-${tag}-a`)?.names).toEqual({ Incremented: 2 });
+        const counted2 = await store.query_stats<CounterEvents>(pattern, {
+          count: true,
+          limit: 2,
+          after: `qsc-${tag}-b`,
+        });
+        expect([...counted2.keys()]).toEqual([`qsc-${tag}-c`]);
+
+        const tailed = await store.query_stats<CounterEvents>(pattern, {
+          tail: true,
+          limit: 2,
+        });
+        expect([...tailed.keys()]).toEqual([`qsc-${tag}-a`, `qsc-${tag}-b`]);
+        expect(tailed.get(`qsc-${tag}-a`)?.head.version).toBe(1);
+        expect(tailed.get(`qsc-${tag}-a`)?.tail?.version).toBe(0);
+        const tailed2 = await store.query_stats<CounterEvents>(pattern, {
+          tail: true,
+          limit: 2,
+          after: `qsc-${tag}-b`,
+        });
+        expect([...tailed2.keys()]).toEqual([`qsc-${tag}-c`]);
+      });
     });
 
     // Reverse-match probe filter (#1010): restrict to subscriptions whose
@@ -4376,6 +4525,70 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         expect(maxEventId).toBeGreaterThanOrEqual(0);
         expect(positions).toEqual([s]);
+      });
+    });
+
+    // Autoclose end to end: the synthesized reaction defers and closes through
+    // this store's query_stats, truncate and close pipeline.
+    describe("autoclose end-to-end", () => {
+      const Ticket = state({ TckTicket: z.object({ open: z.boolean() }) })
+        .init(() => ({ open: false }))
+        .emits({
+          TckTicketOpened: z.object({ title: z.string() }),
+          TckTicketResolved: z.object({}),
+        })
+        .patch({
+          TckTicketOpened: () => ({ open: true }),
+          TckTicketResolved: () => ({ open: false }),
+        })
+        .on({ OpenTckTicket: z.object({ title: z.string() }) })
+        .emit((a) => ["TckTicketOpened", { title: a.title }])
+        .on({ ResolveTckTicket: z.object({}) })
+        .emit(() => ["TckTicketResolved", {}])
+        .autocloses({ is: "TckTicketResolved" })
+        .build();
+      const actor = { id: "tck", name: "tck" };
+
+      // A fresh store, so only this app's work competes for the drain.
+      const run = async (resolve: boolean) => {
+        const fresh = await options.factory();
+        await fresh.drop();
+        await fresh.seed();
+        const cache = new InMemoryCache();
+        const app = act()
+          .withState(Ticket)
+          .build({ scoped: { store: fresh, cache } });
+        const truncated: string[] = [];
+        app.on("closed", (r) => truncated.push(...r.truncated.keys()));
+        const stream = `ac-${uid()}`;
+        try {
+          await app.do("OpenTckTicket", { stream, actor }, { title: "a" });
+          if (resolve) await app.do("ResolveTckTicket", { stream, actor }, {});
+          await app.correlate();
+          await app.drain();
+          const surviving: string[] = [];
+          await fresh.query((e) => surviving.push(String(e.name)), {
+            stream,
+            stream_exact: true,
+          });
+          return { stream, truncated, surviving };
+        } finally {
+          await app.shutdown();
+          await cache.dispose();
+          await fresh.dispose();
+        }
+      };
+
+      it("closes a stream whose head is the terminal event, leaving a tombstone", async () => {
+        const { stream, truncated, surviving } = await run(true);
+        expect(truncated).toContain(stream);
+        expect(surviving).toEqual([TOMBSTONE_EVENT]);
+      });
+
+      it("leaves a stream whose head is not the terminal event", async () => {
+        const { stream, truncated, surviving } = await run(false);
+        expect(truncated).not.toContain(stream);
+        expect(surviving).toEqual(["TckTicketOpened"]);
       });
     });
 
