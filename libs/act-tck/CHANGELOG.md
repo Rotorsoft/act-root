@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.38.21](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.20...@rotorsoft/act-tck-v1.38.21) (2026-10-08)
+
+
+### Bug Fixes
+
+* **act-tck:** follow re-exports only in the stability walk ([#1839](https://github.com/Rotorsoft/act-root/issues/1839)) ([b23942a](https://github.com/Rotorsoft/act-root/commit/b23942ac67d6e39345f1540cd32ecdee4d0a89f4)), closes [#1825](https://github.com/Rotorsoft/act-root/issues/1825)
+
 # [@rotorsoft/act-tck-v1.38.20](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.19...@rotorsoft/act-tck-v1.38.20) (2026-10-08)
 
 # [@rotorsoft/act-tck-v1.38.19](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.18...@rotorsoft/act-tck-v1.38.19) (2026-10-07)
