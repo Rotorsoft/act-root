@@ -204,6 +204,17 @@ function warn_misrouted(
   );
 }
 
+/** One cycle's sizing and per-pass state, from {@link DrainController}. */
+type CycleInput = {
+  readonly lagging: number;
+  readonly leading: number;
+  readonly eventLimit: number;
+  readonly leaseMillis: number;
+  readonly misrouted: Set<string>;
+  /** The store failed on the previous pass — see {@link budget_exhausted}. */
+  readonly store_failing: boolean;
+};
+
 /**
  * Run one drain cycle: claim streams, fetch their events, dispatch
  * matching reactions, ack the successes, block the retries-exhausted.
@@ -222,27 +233,18 @@ export async function run_drain_cycle<
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,
 >(
-  ops: DrainOps<TEvents>,
-  registry: Registry<TSchemaReg, TEvents, TActions>,
-  batch_handlers: Map<string, BatchHandler<TEvents>>,
-  misrouted: Set<string>,
-  /** The store failed on the previous pass — see {@link budget_exhausted}. */
-  store_failing: boolean,
-  handle: Handle<TEvents>,
-  handle_batch: HandleBatch<TEvents>,
-  lagging: number,
-  leading: number,
-  eventLimit: number,
-  leaseMillis: number,
-  /**
-   * Emitted as soon as `block` confirms, before the `ack`: a block is
-   * terminal, so an `ack` failure in between would otherwise lose the
-   * `blocked` event for good.
-   */
-  on_blocked: (blocked: BlockedLease[]) => void,
-  lane?: string
+  deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>,
+  cycle: CycleInput
 ): Promise<DrainCycle<TEvents> | undefined> {
-  // Atomically discover and lease streams (competing consumer pattern)
+  const { ops, registry, batch_handlers, handle, handle_batch, lane } = deps;
+  const {
+    lagging,
+    leading,
+    eventLimit,
+    leaseMillis,
+    misrouted,
+    store_failing,
+  } = cycle;
   const leased = await ops.claim(
     lagging,
     leading,
@@ -353,7 +355,9 @@ export async function run_drain_cycle<
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
 
-  if (blocked.length) on_blocked(blocked);
+  // Emitted before the `ack`: a block is terminal, so an `ack` failure in
+  // between would otherwise lose the `blocked` event for good.
+  if (blocked.length) deps.on_blocked(blocked);
 
   const submitted = handled.flatMap((h, i) => {
     const advance = h.handled > 0 ? h.acked_at : leased[i].at;
@@ -597,21 +601,14 @@ export class DrainController<
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
-      const cycle = await run_drain_cycle(
-        this._deps.ops,
-        this._deps.registry,
-        this._deps.batch_handlers,
-        this._misrouted,
-        this._deps.breaker.failing,
-        this._deps.handle,
-        this._deps.handle_batch,
+      const cycle = await run_drain_cycle(this._deps, {
         lagging,
         leading,
         eventLimit,
         leaseMillis,
-        (b) => this._deps.on_blocked(b),
-        this._deps.lane
-      );
+        misrouted: this._misrouted,
+        store_failing: this._deps.breaker.failing,
+      });
 
       if (!cycle) {
         // Nothing claimed: caught up, and the store answered.

@@ -400,7 +400,7 @@ export class CorrelateCycle<
   }
 
   private async _run_init(): Promise<void> {
-    const { watermark, correlated_at } = await store().subscribe([
+    const { watermark, correlated_at } = await this._cd.subscribe([
       ...this._static_targets,
     ]);
     // Resume from the durable checkpoint. On a first boot it is -1 and a full
