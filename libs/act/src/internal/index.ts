@@ -27,7 +27,12 @@ export {
 export { synthesize_autoclose_reactions } from "./autoclose-reaction.js";
 export { compute_backoff_delay } from "./backoff.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
-export { run_close_cycle } from "./close-cycle.js";
+export {
+  CLOSE_CATCH_UP_LIMIT,
+  CloseLock,
+  catch_up_correlation,
+  run_close_cycle,
+} from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
 // Every builder-facing config bag (schemas + resolvers + defaults) lives in
 // one place — see ./config.js.
