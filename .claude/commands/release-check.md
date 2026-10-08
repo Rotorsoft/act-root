@@ -37,6 +37,18 @@ Print a single table:
 
 End with a one-line verdict: **READY TO MERGE** or **NOT READY: <reason>**.
 
+## When coverage is below 100%
+
+Print the uncovered-line table (`pnpm test 2>&1 | sed -n '/Uncovered Line/,/Coverage summary/p'`) as the punch-list. Don't tolerate a gap as "defensive": write the fault-injection test or remove the branch. Patterns: pg defensive `rowCount ?? 0` branches in `libs/act-pg/test/store.error.spec.ts` (mock `pg.Pool.prototype.query` to return `{ rowCount: null }`); sqlite rollback paths in `libs/act-sqlite/test/store.error.spec.ts` (`mockClientFailOn(<failing SQL fragment>)`).
+
+## When charter files changed
+
+For each touched charter file, `git diff master -- <file>` and classify every change:
+- **Additive**: new optional method, field, exported type or event name; a widened input (`string[]` → `string[] | Filter`).
+- **Breaking**: rename, removal, narrowed type, changed semantics, removed event name.
+
+A breaking change needs a `BREAKING CHANGE:` footer, a migration note, and a `feat!`/`fix!` title. When ambiguous, ask the user; STABILITY.md is the reference.
+
 ## Conventions
 
 - Run the four pnpm gates with `&` and `wait` for concurrency. Don't serialize.

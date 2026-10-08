@@ -638,20 +638,7 @@ For pagination or source filters, drop to `store().query_streams(callback, { blo
 
 ### Recover after fixing the root cause
 
-`app.unblock(input)` clears the blocked flag and resumes from where the stream stopped — **not** from event 0. Two forms:
-
-```ts no-check
-// Single targeted recovery.
-await app.unblock(["webhooks-out-customer-42"]);
-
-// Bulk recovery — every blocked stream in a family.
-await app.unblock({ stream: "^webhooks-out-" });
-
-// Post-incident: unblock everything that's blocked.
-await app.unblock({});
-```
-
-**Don't use `app.reset()` to recover.** `reset` rebuilds from event 0 and would re-fire every historical webhook. Use it only when you're rebuilding a projection from scratch. See [Recovering a blocked stream](../concepts/error-handling.md#recovering-a-blocked-stream--appunblock) for the comparison table.
+`app.unblock(...)` resumes from where the stream stopped, by name or by filter (`{ stream: "^webhooks-out-" }`). **Don't use `app.reset()` to recover:** it replays from event 0 and would re-fire every historical webhook. See [Blocked streams](../concepts/error-handling.md#blocked-streams) for the forms and the comparison table.
 
 ### Distinguish error classes operationally
 

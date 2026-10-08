@@ -442,14 +442,7 @@ Generic catch sites that don't care about HTTP specifics can match on the base `
 
 ### Recovering a blocked stream
 
-When `webhook` blocks a stream — whether on first attempt (4xx) or after exhausting retries — the operator's recovery path is `app.unblock(input)` from `@rotorsoft/act`. It clears the blocked flag and resumes from where the stream stopped, *not* from the beginning. Don't use `app.reset()` — `reset` rebuilds from event 0 and would re-fire every historical webhook.
-
-```ts
-await app.unblock(["webhooks-out-customer-42"]);     // by name
-await app.unblock({ stream: "^webhooks-out-" });     // bulk by pattern
-```
-
-Use `app.blocked_streams()` to discover what's currently blocked.
+When `webhook` blocks a stream (on a 4xx, or after exhausting retries), recover with `app.unblock(...)`, which resumes from where the stream stopped. Never `app.reset()` it: that replays from event 0 and re-fires every historical webhook. See [Blocked streams](https://rotorsoft.github.io/act-root/docs/concepts/error-handling#blocked-streams).
 
 ### SSE wire format
 
