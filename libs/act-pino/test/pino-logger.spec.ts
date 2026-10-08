@@ -102,9 +102,12 @@ describe("PinoLogger", () => {
     //
     // `pretty: true` is the point: the TCK and every other case here use
     // `pretty: false`, which creates no worker and so cannot see this.
+    const start = worker_count();
     const logger = new PinoLogger({ pretty: true });
-    // Let the base logger's own transport thread come up first.
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for the base logger's own transport thread to appear, rather than
+    // a fixed delay: on a slow runner it can start after any fixed wait.
+    for (let i = 0; i < 150 && worker_count() <= start; i++)
+      await new Promise((r) => setTimeout(r, 20));
     const before = worker_count();
 
     for (let i = 0; i < 5; i++) logger.child({ i });
