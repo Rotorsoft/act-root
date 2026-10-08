@@ -16,8 +16,8 @@
 //      writes can land.
 //   3. The framework awaits this archiver. We read history and ship it to S3.
 //   4. On resolve: `Store.truncate()` — events leave the hot table, S3 has the
-//      cold copy. On throw: the stream stays guarded + un-truncated and the
-//      cycle retries it next tick (no data loss on a transient S3 error).
+//      cold copy. On throw: the stream stays guarded + un-truncated (no data
+//      loss); resume it with `app.close([{ stream }])` once S3 is back.
 //
 // The `@aws-sdk/client-s3` dep is dev-only here; copy this into your own
 // service and add it there.
