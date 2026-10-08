@@ -10,18 +10,18 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 |---|---|---|---|---|
 | Public surface | 2026-10-07 | 1 | 0 | active (its deprecations were rejected; scope narrowed by rule 2) |
 | Dead code (tool) | 2026-10-08 | 2 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
-| Hotspots (tool) | 2026-10-07 | 1 | 1 | active |
+| Hotspots (tool) | 2026-10-08 | 2 | 1 | active |
 | File budget | 2026-10-08 | 2 | 1 | active |
-| Comment noise | 2026-10-07 | 1 | 2 | active (type docs: user chose fix over trim) |
-| Concepts and options | 2026-10-07 | 1 | 1 | active |
+| Comment noise | 2026-10-08 | 2 | 2 | active (25% bar unreachable while public type docs stay; see P2026-10-08d-6) |
+| Concepts and options | 2026-10-08 | 2 | 1 | active (found the defer wake bug) |
 | Core or decorator? | 2026-10-08 | 1 | 0 | active (PII examined: stays in core) |
-| DRY across adapters and builders | 2026-10-07 | 1 | 1 | active |
+| DRY across adapters and builders | 2026-10-08 | 2 | 1 | active |
 | Reading path | 2026-10-08 | 1 | 1 | active (DrainOps half rejected: trace seams stay) |
-| Newcomer test (quarterly) | never | 0 | 0 | active |
-| Tests by concept | 2026-10-07 | 1 | 3 | active |
+| Newcomer test (quarterly) | 2026-10-08 | 1 | 0 | active (baseline: 22 concepts, 3 imports) |
+| Tests by concept | 2026-10-08 | 2 | 3 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-08 | 2 | 0 | active (no removals possible; found no subtraction) |
-| Infra | 2026-10-07 | 1 | 1 | active |
+| Infra | 2026-10-08 | 2 | 1 | active (found the no-op snippet gate) |
 | One source of truth | 2026-10-08 | 2 | 3 | active |
 | Examples | 2026-10-08 | 1 | 1 | active |
 | Process | 2026-10-08 | 1 | 3 | active |
@@ -46,11 +46,18 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
 - `act.ts` is still 1,993 lines and files over 300 haven't moved in three runs (21). The next File budget run starts there.
+- Drop the in-memory core perf gate from CI (0 failures in 400 runs; its baseline was never made on CI hardware; pg and sqlite gates stay): −2 steps, 3 files (~390 lines).
+- Delete `BENCH.md` (lists 25 of 50 bench files; claims scenario benches run on every PR): −85 lines.
+- README quickstart: use `.emit("Incremented")` like `hello.ts`, link `hello.ts` first, replace "dead-lettering" with "blocked streams", cut the 9-term "What it is" paragraph (newcomer count 22 → 20).
+- `ci-cd.yml` comments: ~100 of 158 comment lines are history; one misplaced.
+- act-http tests: drop the tRPC and Hono error tables that repeat the parity table and `api/errors.spec.ts` (~170 lines); `audit.spec.ts` collector helper and shared `meta` (~140 lines).
+- Unverified, worth a probe: with `onlyLanes` sharding, a worker refused the correlation lease may not wake when another worker marks its lane's rows.
 
 ## Self-changes
 
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
 
+- 2026-10-08 (full run): two smells added: a timer that only sets a flag (the #1804 pattern recurred in the defer timer), and a check that has never failed including its self-test (the snippet gate). The comment bar (25%) is left for the user to restate (P2026-10-08d-6); the skill says bars change only with the user.
 - 2026-10-08 (fourth run): `metrics.sh` reports CLAUDE.md in KB, not lines. #1850 cut 3.3 KB and the line count stayed at 333, so the metric hid the change.
 - 2026-10-08 (fourth run): the pass-through-layer smell now excludes the trace seams (`build_es`, `build_drain`). b-4 proposed deleting `DrainOps` under that smell; the user kept it (#1841).
 - 2026-10-08 (fourth run): the Dead code lens lists knip's known false positives (bench scripts, recipe examples, the shared tsup config, release devDependencies, `pino-pretty`), so the next run doesn't re-verify 30 files.
@@ -211,3 +218,24 @@ Proposals (pending), ranked:
 Tickets (user: "open tickets for both"): #1855 (c-1), #1856 (c-2).
 
 Self-changes: see the 2026-10-08 (fourth run) entries above.
+
+### 2026-10-08 — full run (four specialists: hotspots + concepts, DRY + comment noise, tests, infra + newcomer + field)
+
+Metrics: unchanged from the weekly run an hour earlier (master didn't move). No PRs to audit.
+
+Decisions on P2026-10-08c-1..2: accepted, ticketed #1855, #1856.
+
+Verified in the main loop before ranking: the defer wake bug (red probe: one deferred reaction on the default lane, one settle, 600 ms idle → 0 runs; control on a `cycleMs` lane → 1), against the promise in `close-policies.md` ("a per-worker timer … to wake the local worker promptly"); the snippet gate (`ts.createProgram([], { configFilePath })` → 0 root files, 0 diagnostics; parsing the same tsconfig → 229 files); InMemoryStore's two index maps (the only read feeds the other map, which nothing reads); act-pg `lease-loss.spec.ts` repeats 4 core test names. Corrected: `close-race.spec.ts` has one case with no core counterpart ("keeps a commit accepted after another app reseeded the stream"), so only its other case goes.
+
+Newcomer test (first run): the README quickstart needs 22 concepts and 3 imports; `hello.ts` about 28 (it adds a reaction and settle).
+
+Field: Marten compacts a stream with one explicit call (no policy or window); Kurrent trims with stream metadata and models closing the books in the domain; Axon and Kurrent park failed messages per sequence, as Act blocks streams; nobody has per-stream priority inside one processor (they use separate processors, i.e. Act's lanes). Act tracks progress per target stream where the others track it per processor or segment; that is the source of correlate and the subscription cap, a design choice and not a subtraction now.
+
+Proposals (pending), ranked:
+- P2026-10-08d-1. Make the defer/backoff timer run the drain instead of setting a flag (bug); reschedule in `drain`'s `finally` and delete the timer's self-re-arm branch; fix the `cycleMs` docs that promise latency without settle; add a contract row.
+- P2026-10-08d-2. Fix the snippet gate (parse the tsconfig; self-test asserts the planted error) and run it inside the `ci` and `docs-build` jobs; delete `docs-snippets.yml` (−1 workflow, 54 lines).
+- P2026-10-08d-3. Delete dead internal state: InMemoryStore's `_max_event_id_by_stream` / `_max_non_snap_event_id` (~36 lines), never-set `CorrelateCycleDeps.cold_start_back_scan` / `lease_millis`, `defaults.eventLimit`, test-only `DeferTimer.is_deferred`; fix their stale comments (~70 lines).
+- P2026-10-08d-4. Tests: delete act-pg `lease-loss.spec.ts` and the duplicate close-race case (~330 lines), replace the 9 copies of `mark_all` with `subscribe(..., correlated_at)` (~250), drop the duplicate settle and notify cases and assert in the two empty tests (~50). Update rows 58, 59, 77, 237.
+- P2026-10-08d-5. One filter helper per adapter: `query_streams` reuses `_filter_clause` / `_filter_predicate`, and `defer` / `reset` / `unblock` share one selection helper (~190 lines across 3 adapters; `InMemoryStore.query_streams` complexity 45 → ~12); move two misplaced doc blocks.
+- P2026-10-08d-6. Comment pass on `internal/` and `adapters/` by category (keep public docs, shorten the why, cut restated code and essays; ~1,380 lines, 49% → ~46%), per file, non-comment lines byte-identical. With it, restate the bar: 25% for all of core is unreachable while `types/` (3,015 comment lines of public docs, kept by #1851) stays; propose `internal/` and `adapters/` under 30%.
+- P2026-10-08d-7. Hotspot helpers: close-cycle's two hand-written page loops use `walk_streams` (~30 lines), and `event-sourcing.ts` gets `cache_put` / `cache_drop` for its four copies of "update the cache, warn on failure" (~20 lines, in `action()`, the top hotspot: complexity 60, 43 changes in 6 months).

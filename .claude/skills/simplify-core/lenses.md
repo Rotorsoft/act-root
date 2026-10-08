@@ -62,3 +62,5 @@ Check for these by name; the retrospective adds recurring rejection reasons here
 - A test file per ticket instead of per concept.
 - A layer that passes calls through unchanged, kept for one decorated call. Not the trace seams (`build_es`, `build_drain`): they pick bare or traced ops once at build and stay.
 - A gate most PRs have to declare away.
+- A timer or background path that only sets a flag the foreground reads later (#1804 polling, the defer timer). Make it run the foreground path.
+- A check that has never failed, including its self-test: plant the error and assert that exact error comes back.
