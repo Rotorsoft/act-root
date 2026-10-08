@@ -18,6 +18,7 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
+  CloseLock,
   CorrelateCycle,
   close_correlation,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
@@ -546,35 +547,10 @@ export class Act<
   /** Declared drain lanes. */
   private readonly _lanes: ReadonlyArray<LaneConfig>;
 
-  /**
-   * Per-stream close serialization tails, so a manual close and an
-   * autoclose of the same stream never prune concurrently (the manual path
-   * has no drain lease to exclude it). Entries are dropped once settled.
-   */
-  private readonly _close_locks = new Map<string, Promise<unknown>>();
-
-  /**
-   * Run `work` under the per-stream close lock. Serializes close
-   * critical sections for the same stream (windowed prunes and full
-   * closes) while letting different streams proceed in parallel.
-   */
-  private _with_close_lock<T>(
-    stream: string,
-    work: () => Promise<T>
-  ): Promise<T> {
-    const prev = this._close_locks.get(stream) ?? Promise.resolve();
-    // Chain after the previous holder however it settled, so a failed close
-    // can't wedge the lock.
-    const next = prev.then(work, work);
-    this._close_locks.set(stream, next);
-    // Drop the tail once settled, unless a later waiter replaced it.
-    const cleanup = () => {
-      if (this._close_locks.get(stream) === next)
-        this._close_locks.delete(stream);
-    };
-    next.then(cleanup, cleanup);
-    return next;
-  }
+  /** Serializes close critical sections per stream. */
+  private readonly _close_lock = new CloseLock();
+  /** Every lane a controller can exist for: `"default"` plus each declared one. */
+  private readonly _declared_lanes: ReadonlyArray<string>;
 
   /** Drain lanes declared via `.withLane(...)`. Implicit default not included. */
   get lanes(): ReadonlyArray<LaneConfig> {
@@ -613,6 +589,7 @@ export class Act<
     this._states = states;
     this._batch_handlers = batch_handlers;
     this._lanes = lanes;
+    this._declared_lanes = ["default", ...lanes.map((l) => l.name)];
     validate_only_lanes(options, lanes);
     // Every Act runs in its own ports frame (the singletons when unscoped),
     // so a shared Act never inherits its caller's frame.
@@ -658,7 +635,7 @@ export class Act<
     // controller set, settle reads the correlate cycle.
     this._breaker = this._build_breaker(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
-    this._advise_orphaned_lanes(options, lanes);
+    this._advise_orphaned_lanes(options);
     this._audit_deps = this._build_audit_deps();
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
@@ -699,7 +676,7 @@ export class Act<
     options: ActOptions,
     lanes: ReadonlyArray<LaneConfig>
   ): Map<string, DrainController<TEvents, TActions, TSchemaReg>> {
-    const all_lanes = ["default", ...lanes.map((l) => l.name)];
+    const all_lanes = this._declared_lanes;
     const only_set =
       options.onlyLanes && options.onlyLanes.length > 0
         ? new Set<string>(options.onlyLanes as readonly string[])
@@ -727,20 +704,7 @@ export class Act<
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close: the same machinery as `app.close`.
         on_close: async (targets) => {
-          const close_actor = { id: "$close", name: "close" };
-          const result = await run_close_cycle(targets, {
-            reactive_events_size: this._reactive_events.size,
-            catch_up_correlation: (until) => this._catch_up_correlation(until),
-            event_to_state: this._event_to_state,
-            load: this._es.load,
-            tombstone: this._es.tombstone,
-            logger: this._logger,
-            correlation: close_correlation(this._correlator, close_actor),
-            with_stream_lock: (stream, work) =>
-              this._with_close_lock(stream, work),
-          });
-          this._forget_closed_subscriptions(result);
-          this.emit("closed", result);
+          await this._run_close(targets);
         },
         breaker: this._breaker,
         run_scoped: this._scoped,
@@ -764,15 +728,10 @@ export class Act<
    * controller here. One process can't check that the cluster covers every
    * lane, so it reports its own gaps.
    */
-  private _advise_orphaned_lanes(
-    options: ActOptions,
-    lanes: ReadonlyArray<LaneConfig>
-  ): void {
+  private _advise_orphaned_lanes(options: ActOptions): void {
     if (!options.onlyLanes || options.onlyLanes.length === 0) return;
     const active = new Set(this._drain_controllers.keys());
-    const orphaned = ["default", ...lanes.map((l) => l.name)].filter(
-      (name) => !active.has(name)
-    );
+    const orphaned = this._declared_lanes.filter((name) => !active.has(name));
     if (orphaned.length === 0) return;
     const list = orphaned.map((name) => `"${name}"`).join(", ");
     this._logger.info(
@@ -794,7 +753,7 @@ export class Act<
       states: this._states,
       // Declared lanes, not this process's controllers: a lane another
       // worker drains is not `unknown-lane`.
-      declared_lanes: new Set(["default", ...this._lanes.map((l) => l.name)]),
+      declared_lanes: new Set(this._declared_lanes),
       routed_events: new Set(this._event_to_lanes.keys()),
     };
   }
@@ -818,10 +777,7 @@ export class Act<
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
       // Declared lanes (not active ones): a lane another process claims is
       // still a valid destination.
-      declared_lanes: new Set<string>([
-        "default",
-        ...this._lanes.map((l) => l.name),
-      ]),
+      declared_lanes: new Set(this._declared_lanes),
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },
@@ -1918,6 +1874,78 @@ export class Act<
   }
 
   /**
+   * Advance correlation until the read cursor reaches `until`, and report
+   * where it landed. Used by the close cycle's safety probe, which
+   * cannot judge a subscription's pending work over events correlate has
+   * not resolved yet.
+   *
+   * Bounded on both ends: it stops as soon as a pass makes no progress (the
+   * log has no more to give), and after {@link CLOSE_CATCH_UP_PASSES}
+   * windows, so a close behind an enormous backlog degrades to skipping the
+   * stream — the documented retryable outcome — instead of scanning the
+   * whole log inside an operator call.
+   */
+  private async _catch_up_correlation(until: number): Promise<number> {
+    for (
+      let pass = 0;
+      pass < CLOSE_CATCH_UP_PASSES && this._correlate.checkpoint < until;
+      pass++
+    ) {
+      const before = this._correlate.checkpoint;
+      // Force the scan: the armed flag can't say whether a tail exists.
+      this._correlate.arm();
+      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
+      if (this._correlate.checkpoint <= before) break;
+    }
+    return this._correlate.checkpoint;
+  }
+
+  /**
+   * Drop retired streams from correlate's in-process "already subscribed"
+   * set, so a later scan re-issues `subscribe()` for them.
+   *
+   * A tombstone seed means the stream was retired; a snapshot seed means it
+   * was restarted and is still consuming.
+   *
+   * `truncate` no longer removes the subscription row, so this is no
+   * longer repairing damage the close itself did. It still matters, because
+   * the row can disappear later: reclaiming retired subscriptions is an
+   * operator job now, and that `DELETE` can land while this process is
+   * running. Forgetting here keeps the in-process view from outliving a row
+   * an operator removed, which is a silent-no-delivery failure — a reaction whose target is named after the stream would never
+   * be re-registered.
+   */
+  private _forget_closed_subscriptions(result: CloseResult): void {
+    const retired = [...result.truncated.entries()]
+      .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
+      .map(([stream]) => stream);
+    if (retired.length) this._correlate.forget_subscribed(retired);
+  }
+
+  /**
+   * Run one close: the cycle with this Act's ports, then forget retired
+   * subscriptions and emit `closed`. Shared by `close()` and the drain's
+   * reaction-requested closes. The close actor lets a custom correlator
+   * still tag tenant context or trace ids.
+   */
+  private async _run_close(targets: CloseTarget[]): Promise<CloseResult> {
+    const close_actor = { id: "$close", name: "close" };
+    const result = await run_close_cycle(targets, {
+      reactive_events_size: this._reactive_events.size,
+      catch_up_correlation: (until) => this._catch_up_correlation(until),
+      event_to_state: this._event_to_state,
+      load: this._es.load,
+      tombstone: this._es.tombstone,
+      logger: this._logger,
+      correlation: close_correlation(this._correlator, close_actor),
+      with_stream_lock: (stream, work) => this._close_lock.run(stream, work),
+    });
+    this._forget_closed_subscriptions(result);
+    this.emit("closed", result);
+    return result;
+  }
+
+  /**
    * Close the books — guard, archive, truncate, and optionally restart streams.
    *
    * Safely removes historical events from the operational store:
@@ -1975,85 +2003,14 @@ export class Act<
    * ]);
    * ```
    */
-  /**
-   * After a close, forget any target whose subscription row the truncate
-   * removed, so a later correlate can re-subscribe it. Restart
-   * targets keep their row, so only fully-retired streams are forgotten.
-   */
-  /**
-   * Advance correlation until the read cursor reaches `until`, and report
-   * where it landed. Used by the close cycle's safety probe, which
-   * cannot judge a subscription's pending work over events correlate has
-   * not resolved yet.
-   *
-   * Bounded on both ends: it stops as soon as a pass makes no progress (the
-   * log has no more to give), and after {@link CLOSE_CATCH_UP_PASSES}
-   * windows, so a close behind an enormous backlog degrades to skipping the
-   * stream — the documented retryable outcome — instead of scanning the
-   * whole log inside an operator call.
-   */
-  private async _catch_up_correlation(until: number): Promise<number> {
-    for (
-      let pass = 0;
-      pass < CLOSE_CATCH_UP_PASSES && this._correlate.checkpoint < until;
-      pass++
-    ) {
-      const before = this._correlate.checkpoint;
-      // Force the scan: the armed flag can't say whether a tail exists.
-      this._correlate.arm();
-      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
-      if (this._correlate.checkpoint <= before) break;
-    }
-    return this._correlate.checkpoint;
-  }
-
-  /**
-   * Drop retired streams from correlate's in-process "already subscribed"
-   * set, so a later scan re-issues `subscribe()` for them.
-   *
-   * A tombstone seed means the stream was retired; a snapshot seed means it
-   * was restarted and is still consuming.
-   *
-   * `truncate` no longer removes the subscription row, so this is no
-   * longer repairing damage the close itself did. It still matters, because
-   * the row can disappear later: reclaiming retired subscriptions is an
-   * operator job now, and that `DELETE` can land while this process is
-   * running. Forgetting here keeps the in-process view from outliving a row
-   * an operator removed, which is a silent-no-delivery failure — a reaction whose target is named after the stream would never
-   * be re-registered.
-   */
-  private _forget_closed_subscriptions(result: CloseResult): void {
-    const retired = [...result.truncated.entries()]
-      .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
-      .map(([stream]) => stream);
-    if (retired.length) this._correlate.forget_subscribed(retired);
-  }
-
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
     return this._scoped(async () => {
       // Correlate first so dynamic reaction targets are discovered before
       // the safety check examines subscription positions.
-      await this.correlate({ limit: 1000 });
-
-      // Synthesize an actor for the close transaction so user-supplied
-      // correlators can still tag tenant context / trace ids.
-      const close_actor = { id: "$close", name: "close" };
-      const result = await run_close_cycle(targets, {
-        reactive_events_size: this._reactive_events.size,
-        catch_up_correlation: (until) => this._catch_up_correlation(until),
-        event_to_state: this._event_to_state,
-        load: this._es.load,
-        tombstone: this._es.tombstone,
-        logger: this._logger,
-        correlation: close_correlation(this._correlator, close_actor),
-        with_stream_lock: (stream, work) => this._with_close_lock(stream, work),
-      });
-
-      this._forget_closed_subscriptions(result);
-      this.emit("closed", result);
-      return result;
+      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
+      return this._run_close(targets);
     });
   }
 
