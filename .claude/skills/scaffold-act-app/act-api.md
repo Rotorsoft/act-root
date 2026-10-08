@@ -400,9 +400,9 @@ CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
 });
 ```
 
-**For background processing:** Use `app.start_correlations()` for periodic discovery:
+**For background processing:** `app.start_correlations()` settles on a timer (correlate, then drain), which picks up work committed by other processes:
 ```typescript
-const stop = app.start_correlations({ after: 0, limit: 100 }, 5000);
+app.start_correlations({ limit: 100 }, 5000); // stopped by app.shutdown() / dispose()()
 ```
 
 ## 8. Invariant Type

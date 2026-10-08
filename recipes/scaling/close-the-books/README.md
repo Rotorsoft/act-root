@@ -30,11 +30,10 @@ recipe is for the workloads that have outgrown default storage.
 
 ## The two field shapes
 
-The declarator accepts either a predicate function or a declarative
-options object. The function form is the long-tail escape hatch.
-The object form covers ~90% of real policies in one line, with
-verb-shaped fields (`is`, `after`, `reaches`) that compose at the
-call site like a sentence. Full reference lives at
+The declarator takes a declarative options object, with verb-shaped
+fields (`is`, `after`, `reaches`, `keep`) that compose at the call
+site like a sentence. (A predicate function is not accepted; it
+throws at `build()`.) Full reference lives at
 [docs/docs/guides/close-policies.md](../../../docs/docs/guides/close-policies.md);
 this page covers the two shapes that show up most.
 
@@ -171,8 +170,8 @@ is hot and older history is reference-only maps to
 [docs/docs/guides/close-policies.md § keep](../../../docs/docs/guides/close-policies.md)
 and the [archival recipe](../archival/README.md).
 
-**Cross-state coordination.** Each state's predicate sees only
-its own candidates. "Close stream A only after B is closed"
+**Cross-state coordination.** Each state's policy sees only
+its own streams. "Close stream A only after B is closed"
 patterns belong in the host scheduler, not in `.autocloses(...)`.
 
 **Pruning a stream that has gone silent.** `keep: { days: N }`

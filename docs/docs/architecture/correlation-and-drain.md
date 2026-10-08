@@ -32,7 +32,7 @@ The resolver answers "for this event, which target stream processes the reaction
 A dynamic resolver is evaluated **more than once for the same event**: once in `correlate()` to discover and subscribe the target stream, and again in `run_drain_cycle()` to match an event back to the leased stream it belongs to. Those two passes run over separately-fetched event instances and, under competing consumers, often in **different processes** — so the result is never cached or shared between them. A resolver must therefore be a pure function of the event: same event in, same `{ target, source? }` out, with no side effects and no dependence on wall-clock time, external state, or call count. A non-deterministic resolver can subscribe one stream and then match a different one, silently stranding the reaction. Keep resolvers cheap, too — the per-event cost is paid in both phases.
 :::
 
-Build-time classification (`internal/build-classify.ts`) walks the registry, partitions resolvers by kind, and stashes:
+Build-time classification (`builders/build-classify.ts`) walks the registry, partitions resolvers by kind, and stashes:
 
 - `staticTargets[]` — subscribed once at init
 - `reactiveEvents: Set<string>` — events with at least one reaction; drives the drain skip-flag in `do()` and `reset()`
@@ -170,7 +170,7 @@ When `_armed` is false, `drain()` returns immediately without issuing `claim`. T
 
 ### One controller per lane
 
-ACT-1103: the orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drainAll` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
+The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drain_all` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
 
 The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the cold-start path arm every controller via `Act._armAll`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain on the controller that drains at the lane's cadence independent of the Act-level settle loop — useful for "always-on" lanes that need low commit-to-ack latency without callers explicitly driving `settle()`. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
 
@@ -219,5 +219,5 @@ Mixing them is fine — `settle()` doesn't acquire any global lock, just a per-c
 - `libs/act/src/internal/drain-cycle.ts` — `runDrainCycle` (pure cycle), `DrainController` (stateful driver)
 - `libs/act/src/internal/drain-ratio.ts` — adaptive lag/lead ratio
 - `libs/act/src/internal/settle.ts` — `SettleLoop` debounce + progress loop
-- `libs/act/src/internal/build-classify.ts` — registry classification at construction
+- `libs/act/src/builders/build-classify.ts` — registry classification at construction
 - `libs/act/src/builders/reaction-builder.ts` — `build_handle` / `build_handle_batch` — what runs inside a drain cycle for each leased stream
