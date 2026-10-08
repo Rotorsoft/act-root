@@ -15,7 +15,7 @@ vi.mock("pg", () => {
   };
 });
 
-import { StoreError } from "@rotorsoft/act";
+import { ConcurrencyError, StoreError } from "@rotorsoft/act";
 import * as pg from "pg";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -100,6 +100,29 @@ describe("PostgresStore", () => {
           causation: {},
         })
       ).rejects.toThrow("notify fail");
+    });
+
+    it("converts a unique violation on INSERT into ConcurrencyError", async () => {
+      // Without the conversion callers would see a raw pg error and not
+      // know to retry; with it the standard retry path applies.
+      const unique = Object.assign(new Error("duplicate key"), {
+        code: "23505",
+      });
+      const queryMock = vi.fn((sql: string) =>
+        sql.includes("INSERT")
+          ? Promise.reject(unique)
+          : Promise.resolve({ rowCount: 1, rows: [{ version: 4 }] })
+      );
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(queryMock)
+      );
+      await expect(
+        store.commit("stream", [{ name: "E", data: {} }], {
+          correlation: "c",
+          causation: {},
+        })
+      ).rejects.toBeInstanceOf(ConcurrencyError);
     });
   });
 
@@ -444,6 +467,98 @@ describe("PostgresStore", () => {
           throw new Error("driver should not be reached");
         })
       ).rejects.toThrow("truncate fail");
+    });
+  });
+
+  describe("constructor", () => {
+    it("rejects unsafe schema and table names", () => {
+      expect(() => new PostgresStore({ schema: "drop;--" })).toThrow(
+        /Unsafe SQL identifier/
+      );
+      expect(() => new PostgresStore({ table: "x'; DROP TABLE" })).toThrow(
+        /Unsafe SQL identifier/
+      );
+    });
+  });
+
+  describe("reset (array form)", () => {
+    it("returns 0 when rowCount is null (defensive)", async () => {
+      // @ts-expect-error mock
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValueOnce({
+        rows: [],
+        rowCount: null,
+      });
+      expect(await store.reset(["x"])).toBe(0);
+    });
+  });
+
+  describe("truncate (full)", () => {
+    it("surfaces a DELETE error", async () => {
+      const queryMock = vi.fn((sql: string) =>
+        sql.includes("DELETE")
+          ? Promise.reject(new Error("mocked DELETE error"))
+          : Promise.resolve({ rows: [], rowCount: 0 })
+      );
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(queryMock)
+      );
+      await expect(store.truncate([{ stream: "x" }])).rejects.toThrow(
+        "mocked DELETE error"
+      );
+    });
+
+    it("reports 0 deleted when the DELETE rowCount is null (defensive)", async () => {
+      const queryMock = vi.fn((sql: string) =>
+        sql.includes("INSERT")
+          ? Promise.resolve({
+              rows: [
+                {
+                  id: 1,
+                  stream: "x",
+                  version: 0,
+                  name: "__tombstone__",
+                  data: {},
+                  meta: {},
+                  created: new Date(),
+                },
+              ],
+              rowCount: 1,
+            })
+          : Promise.resolve({ rows: [], rowCount: null })
+      );
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(queryMock)
+      );
+      const result = await store.truncate([{ stream: "x" }]);
+      expect(result.get("x")?.deleted).toBe(0);
+    });
+  });
+
+  describe("ROLLBACK failure", () => {
+    it("still surfaces the original error from every transactional op", async () => {
+      // Every query fails, the ROLLBACK included.
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("connection dead")))
+      );
+      const lease = { stream: "x", at: 0, by: "w", retry: 0, lagging: false };
+      await expect(store.ack([lease])).rejects.toThrow(StoreError);
+      await expect(store.claim(1, 0, "w", 1000)).rejects.toThrow(StoreError);
+      await expect(store.subscribe([{ stream: "x" }])).rejects.toThrow(
+        StoreError
+      );
+      await expect(store.block([{ ...lease, error: "e" }])).rejects.toThrow(
+        StoreError
+      );
+      await expect(
+        store.commit("s", [{ name: "A", data: {} }], {
+          correlation: "",
+          causation: {},
+        })
+      ).rejects.toThrow();
+      await expect(store.truncate([{ stream: "x" }])).rejects.toThrow();
     });
   });
 });
