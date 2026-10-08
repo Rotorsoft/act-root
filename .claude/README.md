@@ -66,8 +66,6 @@ Trigger with `/<name>` in chat. Each is a Markdown file with frontmatter declari
 |---|---|
 | `/pr` | Open a pull request with the project's canonical body shape (Closes #, Summary, Sections per concern, Test plan, Charter impact, Follow-ups). |
 | `/release-check` | Run every pre-merge gate (typecheck, tests, coverage, lint, build, charter-diff) in parallel; emit a single punch-list. |
-| `/charter-diff` | List every change on the branch that touches a `STABILITY.md`-covered file. Demand additive vs. breaking categorization. |
-| `/coverage` | Run tests and verify 100% across statements/branches/functions/lines. Surface uncovered lines if any. |
 | `/scaffold-package` | Walk through the contributing-new-package.md workflow, including the easily-forgotten baseline-tag step. |
 
 ## `agents/` — subagents
@@ -122,11 +120,10 @@ Claude:
    ↳ Each Edit/Write triggers typecheck-touched.sh.
      If TS breaks, Claude sees the error in the next turn and fixes
      before doing more work.
-4. Runs /coverage — 100% gate verified before moving on.
+4. Runs /release-check — every gate, including 100% coverage and the charter categorization.
 5. Invokes act-code-reviewer subagent for a pre-PR self-review:
      Agent({ subagent_type: "act-code-reviewer", description: "Pre-PR review of ACT-605" })
-6. Runs /charter-diff — categorize touched charter files.
-7. Runs /pr 605 — opens the PR with the canonical body shape and "Closes #605".
+6. Runs /pr 605 — opens the PR with the canonical body shape and "Closes #605".
 
 [hook: Stop summary surfaces "branch=feat/act-605, 100% coverage, ready"]
 ```
@@ -168,7 +165,7 @@ Claude:
 5. Invokes act-test-author for adapter tests including fault-injection
    for defensive branches:
      Agent({ subagent_type: "act-test-author", ... })
-6. /coverage to confirm 100%.
+6. /release-check to confirm every gate, 100% coverage included.
 7. /pr to open with the standard body.
 ```
 
@@ -177,8 +174,6 @@ Claude:
 | Situation | Tool |
 |---|---|
 | Wrote code; want to ship | `/release-check` |
-| Wrote a test; want to confirm 100% coverage | `/coverage` |
-| Touched anything in `libs/act/src/{builders,types,act.ts,ports.ts}` | `/charter-diff` before commit |
 | About to open a PR | `/pr [issue#]` |
 | Pre-PR self-review on charter-covered work | `act-code-reviewer` subagent |
 | Adding tests with TCK / fault-injection patterns | `act-test-author` subagent |

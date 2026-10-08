@@ -87,9 +87,9 @@ Streams above `restart_min` (default 10,000) **domain** events whose owning stat
 
 Three sub-statuses, evaluated per stream position:
 
-- **`blocked`** — drain has given up on this stream. Remediation: investigate the underlying issue, then `app.unblock(stream)` or `app.reset(stream)` to replay.
-- **`near-block`** — `retry >= near_block` (default 3) without yet being blocked. Heads-up that one more retry will tombstone the stream (if `blockOnError` is set on the reaction).
-- **`stuck-backoff`** — `leased_until` is in the past but `leased_by` is still set. Either a worker crashed mid-attempt or the framework's in-process backoff is holding off the next retry while no other worker has re-claimed. Threshold: `stuck_minutes` (default 30).
+- **`blocked`** — drain has given up on this stream. Remediation: fix the underlying issue, then `app.unblock(stream)` to resume from where it stopped. Use `app.reset` only to rebuild a projection: it replays every event (see [Blocked streams](../concepts/error-handling.md#blocked-streams)).
+- **`near-block`** — `retry >= near_block` (default 3) without yet being blocked. Heads-up that the stream is close to blocking (if `blockOnError` is set on the reaction).
+- **`stuck-backoff`** — `leased_until` is in the past but `leased_by` is still set: a worker took the lease and never released it, typically because it crashed mid-attempt, and no other worker has re-claimed the stream yet. Threshold: `stuck_minutes` (default 30).
 
 ### `snapshot-drift` → `load({snap: true})` or wait
 
