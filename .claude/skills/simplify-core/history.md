@@ -9,22 +9,22 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-10-07 | 1 | 0 | active (its deprecations were rejected; scope narrowed by rule 2) |
-| Dead code (tool) | 2026-10-07 | 1 | 2 | active |
+| Dead code (tool) | 2026-10-08 | 2 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
 | Hotspots (tool) | 2026-10-07 | 1 | 1 | active |
-| File budget | 2026-10-08 | 2 | 0 | active |
-| Comment noise | 2026-10-07 | 1 | 1 | active |
+| File budget | 2026-10-08 | 2 | 1 | active |
+| Comment noise | 2026-10-07 | 1 | 2 | active (type docs: user chose fix over trim) |
 | Concepts and options | 2026-10-07 | 1 | 1 | active |
 | Core or decorator? | 2026-10-08 | 1 | 0 | active (PII examined: stays in core) |
 | DRY across adapters and builders | 2026-10-07 | 1 | 1 | active |
-| Reading path | 2026-10-08 | 1 | 0 | active |
+| Reading path | 2026-10-08 | 1 | 1 | active (DrainOps half rejected: trace seams stay) |
 | Newcomer test (quarterly) | never | 0 | 0 | active |
-| Tests by concept | 2026-10-07 | 1 | 1 | active |
+| Tests by concept | 2026-10-07 | 1 | 3 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-08 | 2 | 0 | active (no removals possible; found no subtraction) |
 | Infra | 2026-10-07 | 1 | 1 | active |
-| One source of truth | 2026-10-08 | 2 | 0 | active |
-| Examples | 2026-10-08 | 1 | 0 | active |
-| Process | 2026-10-08 | 1 | 0 | active |
+| One source of truth | 2026-10-08 | 2 | 3 | active |
+| Examples | 2026-10-08 | 1 | 1 | active |
+| Process | 2026-10-08 | 1 | 3 | active |
 
 ## Mutation baselines
 
@@ -45,12 +45,15 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-_(promoted to proposals P2026-10-08-1..5; the `KafkaBroker` removal was dropped: it is public, and rule 2 no longer allows deprecations)_
+- `act.ts` is still 1,993 lines and files over 300 haven't moved in three runs (21). The next File budget run starts there.
 
 ## Self-changes
 
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
 
+- 2026-10-08 (fourth run): `metrics.sh` reports CLAUDE.md in KB, not lines. #1850 cut 3.3 KB and the line count stayed at 333, so the metric hid the change.
+- 2026-10-08 (fourth run): the pass-through-layer smell now excludes the trace seams (`build_es`, `build_drain`). b-4 proposed deleting `DrainOps` under that smell; the user kept it (#1841).
+- 2026-10-08 (fourth run): the Dead code lens lists knip's known false positives (bench scripts, recipe examples, the shared tsup config, release devDependencies, `pino-pretty`), so the next run doesn't re-verify 30 files.
 - 2026-10-08 (third run): a proposal with no decision stays pending and counts toward the next report's 5–7. The user asked for a new run before deciding on the previous five; without this rule the list would only grow.
 - 2026-10-08 (third run): the Examples lens now covers the `scaffold-act-app` skill (two of its calls crash and nothing compiles it); the Process lens says how to count from PR and run history; two smells added (a pass-through layer kept for one decorated call; a gate most PRs declare away).
 
@@ -176,3 +179,33 @@ Tickets (user: "open tickets for all findings"; overlaps merged): #1824 broken p
 
 Backlog (sound, missed the cut, now ticketed above): drop the behavior-contracts row rule (53 of 479 cited names don't resolve; nothing checks it — the user's call); trim CLAUDE.md to an index and fold `/coverage` and `/charter-diff` into `/release-check`; dedupe the two `run_close_cycle` deps bags in act.ts and reattach `close()`'s orphaned doc; shrink the close-the-books recipe to a link; move the mirrored autoclose adapter specs into the TCK.
 
+
+### 2026-10-08 — weekly (one lens: Dead code)
+
+| metric | morning run | now | why |
+|---|---|---|---|
+| core lines | 20339 | 20283 | #1841, #1852 |
+| comments | 49% | 49% | |
+| files over 300 lines | 21 | 21 | `act.ts` 2,098 → 1,993 (#1852) but still over |
+| runtime exports / IAct / Act methods / Store methods | 54 / 8 / 20 / 18 | unchanged | |
+| spec files / test lines | 235 / 60970 | 231 / 59968 | #1845, #1846 |
+| CI workflows / lines | 7 / 986 | 6 / 919 | #1840, #1844 |
+| docs lines | 9552 | 9402 | #1838, #1843, #1850 |
+| CLAUDE.md | 333 lines, 46.6 KB | 333 lines, 41.6 KB | #1838, #1850 (lines hid the cut; the metric is now KB) |
+| stability snapshot | 65,390 lines | 41,860 | #1839 |
+
+Audit: 16 PRs since the morning run, 14 of them the run's tickets plus two flake fixes (#1847, #1848). One added a gate: #1853 checks behavior-contract citations in CI (the user's call on #1836; it found 54 broken citations, so it earned its place).
+
+Decisions on the earlier 2026-10-08 proposals (all shipped):
+- P2026-10-08-1 → #1845 (−424 lines net). P2026-10-08-2 → #1846 (−159). P2026-10-08-3 → #1850. P2026-10-08-4 → #1852 (act.ts −105; close path shared). P2026-10-08-5 → #1851, changed by the user from "trim" to "fix the docs" (−72).
+- b-1 → #1838. b-2 → #1839, narrowed by the user: the walk follows re-exports only (one regex) instead of snapshotting names and types; 65,390 → 41,860 lines, not the promised names-only file. Don't re-propose the names-only snapshot. b-3 → #1840 (−229). b-4 → #1841, half rejected: the `DrainOps` / `build_drain` trace seam stays; only the 13 positional args and the second subscribe path went (−9 lines, not ~120). b-5 → #1842 (hello example added beside the calculator, +53). b-6 → #1843 (−94). b-7 → #1844 (−44). #1836 → #1853 (table kept, CI check added). #1837 → #1849 (−68).
+
+Promises kept: tests and CI cuts matched or beat the estimates. Two missed: b-4 promised ~120 lines and removed 9 (the layer had a reason the proposal didn't name), and the CLAUDE.md "index" trim cut 9% of a 42 KB file.
+
+Lens, Dead code (knip): almost nothing in core. Unused `export` keywords on ~13 internal names (five `DEFAULT_*` in `internal/config.ts`, three drain defaults re-exported from `internal/index.ts` that nothing imports through the barrel, `run_drain_cycle`, `DrainCycle`, `pii_gate`, `AUTOCLOSE_TARGET_PREFIX`, `BoundAction`, `ReactionOn`), act-tck's 2-line `fixtures/index.ts`, five act-diagram exports. Most of knip's 33 "unused files" are false positives (now listed in the lens).
+
+Proposals (pending), ranked:
+- P2026-10-08c-1. Make CLAUDE.md's "Safety-critical one-liners" one line each with a link (8.4 KB of 41.6 KB today; each is a paragraph repeating the linked doc). Target ~3 KB for the section.
+- P2026-10-08c-2. Drop the unused `export` keywords and barrel re-exports above, and delete `libs/act-tck/src/fixtures/index.ts`. Internal only, ~15 names, 1 file.
+
+Self-changes: see the 2026-10-08 (fourth run) entries above.

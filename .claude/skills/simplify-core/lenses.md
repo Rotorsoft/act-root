@@ -6,7 +6,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Public surface.** List every runtime export of each published package and every `Act` public method. For each: who uses it (`packages/`, docs, other libs)? Is it a second path to something else? Could it be internal, folded into another call, or an option instead of a method? Nothing public is deprecated or removed (ground rule 2); the useful findings are internal callers that should use internal code, public docs that over-explain, and new surface a PR is about to add.
 
-**Dead code (tool).** `npx knip` (or `npx ts-prune`) across the workspace: exports nothing imports, files nothing reaches, dependencies nothing uses. Objective, cheap, run first when this lens is due.
+**Dead code (tool).** `npx knip` (or `npx ts-prune`) across the workspace: exports nothing imports, files nothing reaches, dependencies nothing uses. Objective, cheap, run first when this lens is due. Known false positives, skip them: bench scripts cited from `PERFORMANCE.md`/`BENCH.md`, recipe examples run by `run.sh`, `libs/tsup.config.ts` (tsup finds it by searching up), the semantic-release and `fast-check` root devDependencies, `pino-pretty` (loaded by name).
 
 **Hotspots (tool).** The ten functions with the most branching (Biome's `noExcessiveCognitiveComplexity`, or a count of `if`/`?`/`&&`/`||` per function), crossed with change frequency: `git log --since=6.months --name-only -- libs | sort | uniq -c | sort -rn`. Branchy code that keeps changing is where fix-on-fix chains live.
 
@@ -60,5 +60,5 @@ Check for these by name; the retrospective adds recurring rejection reasons here
 - Adapter code re-implementing orchestrator logic, or the orchestrator doing a store's job.
 - The same behavior documented in four places, each slightly different.
 - A test file per ticket instead of per concept.
-- A layer that passes calls through unchanged, kept for one decorated call.
+- A layer that passes calls through unchanged, kept for one decorated call. Not the trace seams (`build_es`, `build_drain`): they pick bare or traced ops once at build and stay.
 - A gate most PRs have to declare away.
