@@ -6,7 +6,7 @@ import { TicketOperations } from "./ticket-operations.js";
 
 /**
  * Timing automations, expressed as deferred reactions instead of the old
- * `setInterval` polling jobs (#1091). Each ticket's deadlines already ride on
+ * `setInterval` polling jobs. Each ticket's deadlines already ride on
  * its events (`escalateAfter`/`reassignAfter` on `TicketAssigned`, `closeAfter`
  * on `TicketOpened`), so the reaction just `.defer`s to that instant and acts
  * when it wakes, re-checking live state the way the jobs re-queried the

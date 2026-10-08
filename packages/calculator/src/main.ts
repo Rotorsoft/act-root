@@ -61,7 +61,7 @@ async function main() {
   const streams = ["A", "B"];
 
   // Build the app with Calculator and DigitBoard. Two drain lanes
-  // (ACT-1103) make the lane mechanic visible in the logs: every
+  // make the lane mechanic visible in the logs: every
   // DigitPressed routes through the "board" lane, every
   // OperatorPressed routes through the "result" lane. Identical
   // behavior to a single lane in this small demo -- the point is the

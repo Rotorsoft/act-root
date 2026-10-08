@@ -9,7 +9,7 @@ import { TicketOperations } from "./ticket-operations.js";
  * human operator gets paged, an external incident tracker opens a
  * record, etc. `webhook` from `@rotorsoft/act-http/webhook` is the
  * canonical fire-and-forget delivery path: short timeout, auto
- * `Idempotency-Key`, retry with exponential backoff via ACT-601,
+ * `Idempotency-Key`, retry with exponential backoff,
  * optional HMAC-SHA256 signing when `WEBHOOK_SECRET` is set.
  *
  * URL is env-driven so the example runs against a stub by default.
@@ -25,7 +25,7 @@ const ESCALATION_WEBHOOK_URL =
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 /**
- * Webhook delivery rides on its own drain lane (ACT-1103). The lane
+ * Webhook delivery rides on its own drain lane. The lane
  * gets a 30 s `leaseMillis` so a slow external receiver doesn't trip
  * premature re-claim, plus a small `streamLimit` so a stuck endpoint
  * can't tie up a wide pool of leases. Other reactions in the app stay

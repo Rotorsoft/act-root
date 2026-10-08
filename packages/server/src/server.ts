@@ -16,10 +16,9 @@ import { register } from "prom-client";
 import { resolveDemoActor } from "./demo-actor.js";
 
 /**
- * Multi-transport demo (#847, #1123). One Act instance, four
- * transports mounted side-by-side on a single Hono root app — the
- * integration test for the cross-transport-consistency claim made
- * by #843 (tRPC), #844 (Hono REST), #845 (OpenAPI), and #846 (SSE).
+ * Multi-transport demo. One Act instance, four transports (tRPC, Hono
+ * REST, OpenAPI, SSE) mounted side-by-side on a single Hono root app, which
+ * makes it the integration test that the transports agree.
  * Every transport walks the same `calculatorApp` registry; the
  * OpenAPI doc describes the REST routes the Hono adapter actually
  * serves; tRPC consumers use `typeof calculatorRouter` for their
@@ -51,7 +50,7 @@ type CalculatorLiveState = {
   result: number;
 };
 
-// SSE broadcast (#1123). One in-memory channel shared with the
+// SSE broadcast. One in-memory channel shared with the
 // generated Hono surface below, which mounts one streaming
 // `GET /api/sse/<stateName>?stream=<streamId>` per registered state.
 // Publication is host-owned: every local commit — tRPC bridge and
@@ -109,12 +108,9 @@ const apiDoc = openapi(calculatorApp, {
 
 const app = new Hono();
 
-// Shared CORS for every transport. Hono's built-in middleware attaches
-// the headers at the response stage, so it covers both `c.json(...)`
-// returns (REST + openapi) and the tRPC bridge's hand-built
-// `new Response(...)` — the previous `c.header(...)` form set the
-// header on the context only, which the fresh Response from the bridge
-// discarded, breaking tRPC's preflight check.
+// Shared CORS for every transport. Hono's middleware attaches the headers
+// at the response stage, so it also covers the tRPC bridge's hand-built
+// `new Response(...)`.
 app.use(
   "*",
   cors({
@@ -138,9 +134,8 @@ app.get("/metrics", async (c) => c.text(await register.metrics()));
 
 // tRPC bridge — proxy `/trpc/*` to tRPC's fetch adapter. The fetch
 // adapter speaks `Request` / `Response` natively, which is exactly
-// what Hono's `c.req.raw` hands us — no Node `IncomingMessage` /
-// `ServerResponse` shim needed (the previous standalone-adapter
-// shim missed `.once()` and broke at runtime).
+// what Hono's `c.req.raw` hands us, so no Node request/response shim is
+// needed.
 app.all("/trpc/*", (c) =>
   fetchRequestHandler({
     endpoint: "/trpc",
