@@ -23,23 +23,17 @@ GDPR deletion requests have statutory windows. Even apps that
 event somewhere — it's just unused. Adding a close policy after
 the fact is one of the cheapest operational wins in the framework.
 
-Default Act with no `.autocloses(...)` is also fine. The cycle is
-opt-in; absent the declarator the controller doesn't even allocate,
-and a happily-bounded fleet pays nothing for the feature. This
+Default Act with no `.autocloses(...)` is also fine. The policy is
+opt-in: without the declarator no autoclose reaction exists, and a
+happily-bounded fleet pays nothing for the feature. This
 recipe is for the workloads that have outgrown default storage.
 
-## The two field shapes
+## The policy
 
-The declarator takes a declarative options object, with verb-shaped
-fields (`is`, `after`, `reaches`, `keep`) that compose at the call
-site like a sentence. (A predicate function is not accepted; it
-throws at `build()`.) Full reference lives at
-[docs/docs/guides/close-policies.md](../../../docs/docs/guides/close-policies.md);
-this page covers the two shapes that show up most.
-
-The canonical wolfdesk Ticket
-(`packages/wolfdesk/src/ticket-creation.ts`) declares both shapes
-in a single policy:
+The declarator takes an options object whose fields read like a
+sentence. The canonical wolfdesk Ticket
+(`packages/wolfdesk/src/ticket-creation.ts`) closes a ticket 90 days
+after it resolves, and any ticket that has lingered a year:
 
 ```ts
 .autocloses({
@@ -49,39 +43,11 @@ in a single policy:
 })
 ```
 
-### Cooldown after terminal (the AND case)
-
-The cooldown-after-terminal pattern runs through almost every
-business app: close N days after the terminal event. Top-level
-fields combine with AND, so the cycle truncates only when every
-condition holds. In wolfdesk's policy that's the `is` + `after`
-pair: a ticket that closed or resolved stays queryable for a
-90-day return / dispute / customer-success window, then retires
-itself. The same shape works for `Delivered` + 14 days on an
-order workflow, `Cancelled` + 30 days on a subscription, `Paid`
-+ 7 days on an invoice. The runnable example lives at
-[examples/ticket-cooldown.ts](examples/ticket-cooldown.ts).
-
-### Retention-floor backstops (the or-block)
-
-A terminal event might never arrive — an abandoned ticket, a
-forgotten draft — so a retention floor needs to apply regardless.
-The `or` block fires independently of the top-level AND group:
-wolfdesk's `or: { after: { days: 365 } }` retires any ticket that
-has lingered a year, whether or not it ever reached `TicketClosed`
-or `TicketResolved`. The two paths are evaluated separately, so a
-ticket retires on whichever fires first. Mix and match: a pure-OR
-policy with no top-level fields (`{ or: { is, after, reaches } }`)
-closes on any of its triggers independently, and a row-count
-threshold (`reaches: N`) retires a cardinality-bounded stream like
-a rotating audit log without any domain event at all.
-
-The full set of fields (`after: { days }`, `is: "EventName"` or
-`is: string[]`, `reaches: N`, and the independent rolling-window
-`keep: { days }`), the AND/OR composition rules, and where to go
-when the declarative form can't express the condition are
-documented at
-[docs/docs/guides/close-policies.md](../../../docs/docs/guides/close-policies.md).
+Top-level fields combine with AND; the `or` block fires on its own.
+The same cooldown shape fits `Delivered` + 14 days on an order or
+`Paid` + 7 days on an invoice. Every field (`after`, `is`, `reaches`,
+`keep`) and the composition rules are in
+[close-policies.md](../../../docs/docs/guides/close-policies.md).
 
 ## What this buys you
 
@@ -131,67 +97,32 @@ The close cycle truncates events out of primary storage. If you
 need them in cold storage afterwards — for compliance, analytics,
 or just "we might want to look at this in two years" — pair the
 declarator with a `.archives(fn)` declarator on the same state.
-The archiver runs inside the cycle's guard window: tombstone
-committed, archiver awaited, truncate. A throw leaves the stream
-guarded but un-truncated, and the cycle retries the candidate
-next tick, so a transient S3 outage doesn't lose data.
-
-The host owns idempotency, speed (don't hold the guard with
-slow I/O), and storage durability. The framework only knows the
-archiver resolved. See
-[recipes/scaling/archival/README.md](../archival/README.md) for
-the recipe; the architectural contract is at
-[docs/docs/guides/close-policies.md § The archive contract](../../../docs/docs/guides/close-policies.md).
+The archiver runs inside the close's guard window: tombstone
+committed, archiver awaited, truncate. If it throws, nothing is lost:
+the stream stays guarded and un-truncated. The close is not retried
+on its own; once the archiver is fixed, `app.close([{ stream }])`
+resumes it. See
+[recipes/scaling/archival/README.md](../archival/README.md) for the
+recipe and
+[close-policies.md § The archive contract](../../../docs/docs/guides/close-policies.md#the-archive-contract)
+for what the host owns (idempotency, speed, durability).
 
 ## What this recipe is NOT for
 
-**Hard real-time close.** The autoclose reaction closes shortly
-after the policy qualifies, not synchronously with the commit.
-If the close has to happen in the same request that emitted the
-terminal event — regulatory cutoffs measured in seconds, "user
-deleted my account, the data must be gone now" workflows — call
-`app.close([{ stream }])` directly from the action handler. For the in-between case where eventual is too slow but a
-per-request close is overkill, narrow the off-hours
-`autocloseWindow` (or drop it) — the reaction evaluates on the
-aggregate's own commits and parks only while the window is shut.
+- **Closing in the same request** as the terminal event: call
+  `app.close([{ stream }])` from the handler. The policy closes shortly
+  after it qualifies, not synchronously.
+- **Rotating a stream while the entity stays alive:** use
+  `app.close({ stream, restart: true })` once, or `keep: { days }` for a
+  rolling window.
+- **Cross-state coordination** ("close A only after B"): that belongs in
+  the host's scheduler.
+- **Pruning streams that have gone silent:** `keep` rides the stream's
+  own commits, so a dormant stream is never pruned. For a retention
+  obligation, walk `query_stats` and call `app.close([{ stream, before }])`.
 
-**Stream rotation while keeping the entity alive.** An online
-terminate always tombstones. For a long-running business entity
-that needs its history rotated but stays live, two tools exist:
-`app.close({ stream, restart: true })` collapses everything to a
-fresh snapshot in one shot (not available for streams owned by a
-state carrying `sensitive(...)` fields — a restart seed is a
-snapshot, and those states cannot be snapshotted; such streams land
-in `skipped`), and `.autocloses({ keep: { days: N } })`
-maintains a rolling window of real events continuously (a
-multi-year customer relationship where the last year of activity
-is hot and older history is reference-only maps to
-`keep: { days: 365 }` plus `.archives`). See
-[docs/docs/guides/close-policies.md § keep](../../../docs/docs/guides/close-policies.md)
-and the [archival recipe](../archival/README.md).
-
-**Cross-state coordination.** Each state's policy sees only
-its own streams. "Close stream A only after B is closed"
-patterns belong in the host scheduler, not in `.autocloses(...)`.
-
-**Pruning a stream that has gone silent.** `keep: { days: N }`
-rides the aggregate's own commits, so a stream nobody writes to is
-a stream nobody prunes — it keeps whatever history it held when the
-traffic stopped
-([#1619](https://github.com/Rotorsoft/act-root/issues/1619)). For a
-storage budget that is fine: a dormant stream is not growing. For a
-**retention obligation** it is not, because the streams that must
-be pruned are usually the quiet ones — abandoned drafts, sessions
-nobody returned to, audit logs past a statutory window. Prune those on
-demand instead: walk `query_stats` for streams whose head has aged
-past the cutoff, and hand them to `app.close([{ stream, before }])`,
-which prunes through the same path with the same safety probe and
-the same `.archives` call. Nothing new to deploy — the walk pages,
-the prune is idempotent (an already-pruned stream lands in
-`skipped`), and one racing the reaction serializes under the
-per-stream lock. Worked example in
-[docs/docs/guides/close-policies.md § Pruning streams that have
-gone silent](../../../docs/docs/guides/close-policies.md).
+Details and worked examples for each are in
+[close-policies.md](../../../docs/docs/guides/close-policies.md).
 
 ## Examples in this folder
 

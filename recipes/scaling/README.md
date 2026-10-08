@@ -188,7 +188,8 @@ The pattern is `.autocloses` paired with `.archives`. The framework runs the
 archiver inside the close-cycle's guard window — tombstone first, archiver
 second, `Store.truncate` last — so the archived snapshot and the deleted
 events are consistent. If the archiver throws, the truncate is skipped and the
-stream is retried next tick. No events are lost.
+stream stays guarded; no events are lost. Resume it with
+`app.close([{ stream }])` once the archiver is fixed.
 
 ```ts
 .autocloses({ is: "TicketResolved", after: { days: 90 } })

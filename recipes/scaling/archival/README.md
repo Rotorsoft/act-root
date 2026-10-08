@@ -19,7 +19,7 @@ If none of these apply, drop `.archives(...)` and let `.autocloses({...})` trunc
 The `.archives(fn)` declarator is documented in [docs/docs/guides/close-policies.md § The archive contract](../../../docs/docs/guides/close-policies.md). The four invariants the cycle gives you, restated for operators:
 
 1. **The archiver runs inside the guard window.** A tombstone marker has already been committed with `expectedVersion`, so no new writes can land on the stream while the archiver is running. The events you read are the final ones.
-2. **A thrown archiver leaves the stream un-truncated.** The error propagates to the cycle's `closed`-emission path; no events are deleted, the stream stays guarded, and the cycle retries the candidate on the next tick. A network blip on the S3 PUT doesn't lose data — it pushes the close out by one cycle.
+2. **A thrown archiver leaves the stream un-truncated.** The error propagates to the cycle's `closed`-emission path; no events are deleted and the stream stays guarded, refusing new writes. The close is not retried on its own: once the archiver works again, `app.close([{ stream }])` resumes it (archive, then truncate). A network blip on the S3 PUT doesn't lose data.
 3. **The host owns idempotency.** A retry can call the archiver a second time on the same stream. Most archivers achieve idempotency by using the stream name as the destination key: `tickets/${stream}.jsonl` is the same key every retry, so the second PUT overwrites the first cleanly. If your destination is append-only (an analytics warehouse, a Kafka topic), put a dedup key in the payload.
 4. **Resolve only when the data is durable.** The framework doesn't check whether S3 actually accepted the bytes. It only knows the archiver resolved. Don't ack from a queue ("I queued the write, the broker will handle it") and then return — the truncate will fire while the broker is still flushing. Wait for the storage backend to confirm, then resolve.
 
@@ -35,7 +35,7 @@ The shape that fits 80% of cases: dump each stream as one JSONL object per event
 
 **Upload with stable key naming.** `tickets/${stream}.jsonl` (or `audit/${stream}.jsonl`, etc.) — one key per stream. Retries on the same stream overwrite the same key, which is the cheap way to get idempotency. Don't include a timestamp in the key; that turns retries into duplicate uploads.
 
-**Throw on AWS errors.** Catch nothing. If `s3.send(...)` rejects, let it bubble — the framework's safety property turns a thrown archiver into "leave the stream alone, retry next tick." Swallowing the error and resolving would silently truncate the stream with no archive in cold storage.
+**Throw on AWS errors.** Catch nothing. If `s3.send(...)` rejects, let it bubble — the framework's safety property turns a thrown archiver into "leave the stream alone" until you resume it with `app.close([{ stream }])`. Swallowing the error and resolving would silently truncate the stream with no archive in cold storage.
 
 The sample at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts) exports a model-agnostic `archiveStreamToS3(stream)` function: it queries the stream's events by name and uploads them as JSONL, so it works for any state. Copy it into your service and wire it with `.archives(...)`.
 
