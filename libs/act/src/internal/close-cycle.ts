@@ -7,9 +7,9 @@
  * restart state, run user archive callbacks, atomically truncate, and
  * update the cache.
  *
- * The Act orchestrator owns lifecycle (correlate gate, emit("closed")) and
- * the registry-derived inputs (reactive-event count, event→state map). All
- * sequential phase work between those state touches lives here.
+ * Also home to the pieces a closer needs around the cycle: the per-stream
+ * {@link CloseLock} and the bounded {@link catch_up_correlation}. The Act
+ * orchestrator only wires its ports in and emits `"closed"`.
  *
  * @internal
  */
@@ -70,7 +70,80 @@ export type CloseCycleDeps = {
     stream: string,
     work: () => Promise<T>
   ) => Promise<T>;
+  /**
+   * Drop retired streams from correlate's in-process "already subscribed"
+   * set, so a later scan re-issues `subscribe()` for them. An operator may
+   * reclaim a retired subscription row while this process runs; forgetting
+   * keeps the in-process view from outliving it, which would otherwise stop
+   * delivery to a target named after the stream. Skipped in isolation.
+   */
+  readonly forget_subscribed?: (streams: string[]) => void;
 };
+
+/**
+ * Scan window and pass cap for {@link catch_up_correlation}. Bounded, so a
+ * close behind a large backlog skips the stream (the documented retryable
+ * outcome) rather than scanning the whole log inside an operator call.
+ *
+ * @internal
+ */
+export const CLOSE_CATCH_UP_LIMIT = 1000;
+const CLOSE_CATCH_UP_PASSES = 20;
+
+/**
+ * Advance correlation until the read cursor reaches `until`, and report
+ * where it landed. The safety probe cannot judge a subscription's pending
+ * work over events correlate has not resolved yet.
+ *
+ * Stops as soon as a pass makes no progress (the log has no more to give),
+ * and after {@link CLOSE_CATCH_UP_PASSES} windows.
+ *
+ * @internal
+ */
+export async function catch_up_correlation(
+  cursor: { readonly checkpoint: number; arm(): void },
+  correlate: (limit: number) => Promise<unknown>,
+  until: number
+): Promise<number> {
+  for (
+    let pass = 0;
+    pass < CLOSE_CATCH_UP_PASSES && cursor.checkpoint < until;
+    pass++
+  ) {
+    const before = cursor.checkpoint;
+    // Force the scan: the armed flag can't say whether a tail exists.
+    cursor.arm();
+    await correlate(CLOSE_CATCH_UP_LIMIT);
+    if (cursor.checkpoint <= before) break;
+  }
+  return cursor.checkpoint;
+}
+
+/**
+ * Per-stream serialization for close critical sections: two closers of the
+ * same stream never prune or archive concurrently, while different streams
+ * proceed in parallel. One instance per Act.
+ *
+ * @internal
+ */
+export class CloseLock {
+  private readonly _tails = new Map<string, Promise<unknown>>();
+
+  /** Run `work` after every earlier close of `stream` has settled. */
+  run<T>(stream: string, work: () => Promise<T>): Promise<T> {
+    const prev = this._tails.get(stream) ?? Promise.resolve();
+    // Chain after the previous holder however it settled, so a failed close
+    // can't wedge the lock.
+    const next = prev.then(work, work);
+    this._tails.set(stream, next);
+    // Drop the tail once settled, unless a later waiter replaced it.
+    const cleanup = () => {
+      if (this._tails.get(stream) === next) this._tails.delete(stream);
+    };
+    next.then(cleanup, cleanup);
+    return next;
+  }
+}
 
 /**
  * Page size for the safety probe's keyset pagination over the
@@ -140,6 +213,11 @@ export async function run_close_cycle(
     deps,
     () => run_full_closes(full, target_map, deps, skipped)
   );
+  // A tombstone seed retired the stream; a snapshot seed restarted it.
+  const retired = [...truncated.entries()]
+    .filter(([, r]) => r.committed.name === TOMBSTONE_EVENT)
+    .map(([stream]) => stream);
+  if (retired.length) deps.forget_subscribed?.(retired);
   for (const [stream, entry] of windowed_result) truncated.set(stream, entry);
   return { truncated, skipped };
 }
