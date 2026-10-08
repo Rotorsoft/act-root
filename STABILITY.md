@@ -43,7 +43,7 @@ Since 1.0:
 - Adding an **optional** method (with a default fallback in the orchestrator) is not. Optional surface is gated behind a `Capabilities` flag in the TCK so existing adapters keep passing until they opt in. Current capability-gated additions: `notify`, `restore`, `pii_isolation` (sensitive-data epic #566 — adapters supporting the `pii` field on commit/load plus `forget_pii(stream)`).
 - Changing the semantics of an existing method (return shape, error contract, ordering guarantees) is breaking.
 
-In-tree adapters are validated against the TCK across multiple backend versions in [`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) — PostgreSQL 14/15/16/17 and `@libsql/client` pinned + latest. A regression in any cell surfaces before it reaches users.
+In-tree adapters are validated against the TCK on every PR (PostgreSQL 18 and the pinned `@libsql/client`), and weekly across older and newer backends in [`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) — PostgreSQL 14/15/16/17 and the latest `@libsql/client`. A regression on the PR versions is caught before merge; one specific to the other versions surfaces within a week.
 
 We will be explicit in release notes when this surface changes.
 

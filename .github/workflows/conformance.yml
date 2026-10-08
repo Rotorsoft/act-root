@@ -1,32 +1,20 @@
 name: Store Conformance Matrix
 
-# Runs the Store TCK from @rotorsoft/act-tck against every supported
-# version of the in-tree backend adapters. Catches dialect-specific
-# regressions (PG SKIP LOCKED behavior across majors, libSQL release
-# bumps) that the single-version `CI-CD` job can't see.
+# Weekly (and on demand): the Store TCK against every supported backend
+# version, plus the multi-process Postgres stress harness. Catches
+# dialect-specific regressions (PG SKIP LOCKED behavior across majors,
+# libSQL release bumps) and lease/commit/drain races that single-process
+# tests cannot. ci-cd.yml already runs the full TCK against PG 18 and the
+# pinned libSQL on every PR, so this runs on a schedule rather than per PR.
 #
 # Informational, not required for branch protection. A red cell signals
 # "this version slipped" — author owns the call to revert, pin, or
 # document the loss of support.
 
 on:
-  pull_request:
-    paths:
-      - "libs/act-pg/**"
-      - "libs/act-sqlite/**"
-      - "libs/act-notify/**"
-      - "libs/act-tck/**"
-      - "libs/act/src/types/ports.ts"
-      - ".github/workflows/conformance.yml"
-  push:
-    branches: [master]
-    paths:
-      - "libs/act-pg/**"
-      - "libs/act-sqlite/**"
-      - "libs/act-notify/**"
-      - "libs/act-tck/**"
-      - "libs/act/src/types/ports.ts"
-      - ".github/workflows/conformance.yml"
+  schedule:
+    # Sundays at 03:00 UTC
+    - cron: "0 3 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -117,6 +105,57 @@ jobs:
         run: pnpm list --filter @rotorsoft/act-sqlite @libsql/client --depth 0
       - name: Run TCK against the latest libSQL
         run: pnpm vitest run libs/act-sqlite/test/store-tck.spec.ts
+
+  # Multi-process Postgres stress harness: real concurrency, real PG, real
+  # workers. Reports to the run's Job Summary.
+  stress:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.10.0
+          cache: "pnpm"
+
+      - run: pnpm install
+      # Workers import `@rotorsoft/act` and `@rotorsoft/act-pg` via the
+      # workspace symlinks; build them so the published-shape resolution
+      # works (PostgresStore imports `@rotorsoft/act` by package name).
+      - run: pnpm -F @rotorsoft/act-patch build
+      - run: pnpm -F @rotorsoft/act build
+      - run: pnpm -F @rotorsoft/act-pg build
+
+      - name: Run stress suite
+        env:
+          NODE_ENV: test
+          LOG_LEVEL: fatal
+        run: pnpm -F @rotorsoft/act-pg stress | tee stress-report.md
+
+      - name: Post report to Job Summary
+        if: always()
+        run: cat stress-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stress-report
+          path: stress-report.md
 
   summary:
     # Always runs so the workflow summary is populated even when a cell

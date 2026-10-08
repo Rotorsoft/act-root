@@ -148,7 +148,7 @@ The badge is a claim, and the claim is only honest if it's mechanically true. Th
 
 ### A CI job that earns the badge
 
-The kit is just vitest, so the CI job is whatever runs your tests against a real backend. This monorepo's own `Store Conformance Matrix` workflow (`.github/workflows/conformance.yml`) is a worked example: it stands up Postgres and libSQL services across several engine versions and runs the store TCK against each, catching dialect regressions a single-version run can't see. A third-party store adapter can copy the shape directly — swap the service container for your backend, swap the `pnpm -F …` invocation for `npx vitest run`, and matrix over the engine versions you promise to support. That matrix _is_ the evidence behind the badge.
+The kit is just vitest, so the CI job is whatever runs your tests against a real backend. This monorepo's own `Store Conformance Matrix` workflow (`.github/workflows/conformance.yml`, weekly) is a worked example: it stands up Postgres and libSQL services across several engine versions and runs the store TCK against each, catching dialect regressions a single-version run can't see. A third-party store adapter can copy the shape directly — swap the service container for your backend, swap the `pnpm -F …` invocation for `npx vitest run`, and matrix over the engine versions you promise to support. That matrix _is_ the evidence behind the badge.
 
 ## Worked, passing examples
 
