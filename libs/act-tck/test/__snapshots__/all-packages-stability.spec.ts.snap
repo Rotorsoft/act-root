@@ -52217,8 +52217,8 @@ exports[`@rotorsoft/act-otel — public API stability > stable public surface fo
  * is that observability is not a core feature: lifecycle events plus the
  * Logger port are the seam, and specialized tooling plugs in. This
  * package is that plug — \`instrument(app)\` subscribes to the lifecycle
- * events and maintains the canonical metric set from the observability
- * guide on a prom-client registry you own.
+ * events and maintains the metric set listed below on a prom-client
+ * registry you own.
  *
  * Metrics only, deliberately: log shipping is the pino adapter's job
  * (\`@rotorsoft/act-pino\` + an OpenTelemetry transport), and spans/trace
@@ -52345,8 +52345,8 @@ function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
 }
 
 /**
- * Subscribe to a built Act's lifecycle events and maintain the canonical
- * Prometheus metric set:
+ * Subscribe to a built Act's lifecycle events and maintain this Prometheus
+ * metric set:
  *
  * | Metric | Type | Labels | Source event |
  * |---|---|---|---|
