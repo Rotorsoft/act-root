@@ -49,8 +49,12 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
       .build();
     await app.do("ping", { stream: "p", actor }, {});
     await app.correlate();
-    await sleep(4_000);
-    expect(ran).toEqual(["p"]);
+    // Wait for delivery rather than a fixed delay: the defer is 2 s out and a
+    // slow runner can need more than a fixed margin to run the lane cycle.
+    await vi.waitFor(() => expect(ran).toEqual(["p"]), {
+      timeout: 8_000,
+      interval: 100,
+    });
   }, 10_000);
 
   it("retries with backoff", async () => {
