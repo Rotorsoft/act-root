@@ -872,33 +872,6 @@ export type CloseResult = {
 };
 
 /**
- * Public interface for the Act orchestrator, passed to reaction handlers.
- *
- * Provides typed access to action dispatch, state loading, and event querying.
- * Construct with {@link InferActions} and {@link InferEvents} to avoid circular
- * imports between slice files and the bootstrap module.
- *
- * @template TEvents - Event schemas
- * @template TActions - Action schemas (maps action names to payload types)
- * @template TActor - Actor type extending base Actor
- *
- * @example
- * ```typescript
- * import type { IAct, InferActions, InferEvents } from "@rotorsoft/act";
- *
- * type App = IAct<
- *   InferEvents<typeof StateA> & InferEvents<typeof StateB>,
- *   InferActions<typeof StateA> & InferActions<typeof StateB>
- * >;
- *
- * async function myReaction(event: ..., stream: string, app: App) {
- *   await app.do("someAction", target, payload, { reactingTo: event });
- *   const snapshot = await app.load(MyState, "stream-1");
- *   const events = await app.query_array({ stream: "stream-1" });
- * }
- * ```
- */
-/**
  * Options for the orchestrator's restore scan loop, consumed by
  * {@link IAct.restore} (and threaded through to the internal `scan`).
  * Adapters never see these — they're entirely interpreted on the
@@ -1143,6 +1116,21 @@ export type DeferWhen =
  *   {@link Act} so `do` returns snapshots typed to the action's state. The
  *   default collapses to `Schema` per action, so annotations written as
  *   `IAct<TEvents, TActions>` keep compiling unchanged.
+ *
+ * @example Typing a reaction handler without importing the app
+ * ```typescript
+ * import type { IAct, InferActions, InferEvents } from "@rotorsoft/act";
+ *
+ * type App = IAct<
+ *   InferEvents<typeof StateA> & InferEvents<typeof StateB>,
+ *   InferActions<typeof StateA> & InferActions<typeof StateB>
+ * >;
+ *
+ * async function myReaction(event: ..., stream: string, app: App) {
+ *   await app.do("someAction", target, payload); // reactingTo is injected
+ *   const snapshot = await app.load(MyState, "stream-1");
+ * }
+ * ```
  */
 export interface IAct<
   TEvents extends Schemas = Schemas,
