@@ -55,9 +55,12 @@ lines.forEach((line, i) => {
       errors.push(`${i + 1}: no test file named ${file}`);
       continue;
     }
-    for (const [, name] of part.matchAll(/"([^"]+)"/g))
+    // MDX needs `{` and `}` escaped outside code spans.
+    for (const [, cited] of part.matchAll(/"([^"]+)"/g)) {
+      const name = cited.replace(/\\([{}<])/g, "$1");
       if (!known.has(name))
         errors.push(`${i + 1}: ${file ?? "any test file"} has no test "${name}"`);
+    }
   }
 });
 
