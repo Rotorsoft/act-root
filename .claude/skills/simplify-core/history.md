@@ -208,4 +208,6 @@ Proposals (pending), ranked:
 - P2026-10-08c-1. Make CLAUDE.md's "Safety-critical one-liners" one line each with a link (8.4 KB of 41.6 KB today; each is a paragraph repeating the linked doc). Target ~3 KB for the section.
 - P2026-10-08c-2. Drop the unused `export` keywords and barrel re-exports above, and delete `libs/act-tck/src/fixtures/index.ts`. Internal only, ~15 names, 1 file.
 
+Tickets (user: "open tickets for both"): #1855 (c-1), #1856 (c-2).
+
 Self-changes: see the 2026-10-08 (fourth run) entries above.
