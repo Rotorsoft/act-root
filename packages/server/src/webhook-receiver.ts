@@ -29,7 +29,7 @@ const escalations = receiver({
   port,
   store: new InMemoryIdempotencyStore({
     // 24h dedup window — covers any reasonable retry+backoff envelope
-    // from a sender using ACT-601 `exponential` backoff up to maxMs=30s.
+    // from a sender using `exponential` backoff up to maxMs=30s.
     ttlMs: 24 * 60 * 60 * 1000,
     maxEntries: 50_000,
   }),

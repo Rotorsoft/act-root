@@ -12,7 +12,7 @@ A minimal Act example — a calculator state machine built around a single aggre
 - Snapshotting (`.snap((s) => s.patches > 12)`)
 - Reactions across streams — digit presses on calculators `A`/`B` aggregate into a shared `Board` projection state, and operator presses fan out to per-calculator result streams
 - Source-regex resolvers (`source: "^(A|B)$"`) and dynamic resolvers (`(e) => ({ source: e.stream, target: "Calculator" + e.stream })`)
-- Auto-correlation: reaction handlers call `app.do(...)` without an explicit `reactingTo` — the framework injects the triggering event automatically
+- Auto-correlation: inside a reaction handler the framework injects the triggering event as `reactingTo` (`main.ts` also passes it explicitly)
 - A tRPC router exposing `PressKey` / `Clear` for the React client to consume
 
 ## Quickstart
@@ -20,6 +20,9 @@ A minimal Act example — a calculator state machine built around a single aggre
 ```bash
 # From the monorepo root
 pnpm install
+
+# New to Act? Start with the smallest app: two counters and one reaction
+pnpm -F calculator dev:hello
 
 # Run the calculator demo loop (random key presses across two streams)
 pnpm dev:calculator
@@ -37,6 +40,7 @@ The default demo (`pnpm dev:calculator` → `src/main.ts`) loops random `PressKe
 packages/calculator/
 ├── src/
 │   ├── calculator.ts      # Calculator state — events, patches, actions, invariants
+│   ├── hello.ts           # Smallest app: two counters, one reaction, settle
 │   ├── main.ts            # Demo loop with reactions to a Board + per-stream result projection
 │   ├── rebuild-demo.ts    # Demonstrates app.reset() + drain for projection rebuild
 │   ├── close-demo.ts      # Demonstrates app.close() — archive, tombstone, restart
@@ -100,7 +104,7 @@ const app = act()
 
 - The `DigitPressed` reaction uses a **static** target (`"Board"`) with a source regex — the framework subscribes the target stream once at boot.
 - The `OperatorPressed` reaction uses a **dynamic** target — Act re-correlates on each scan to discover new `Calculator{stream}` targets.
-- Neither `app.do(...)` call passes `reactingTo` explicitly — the triggering event is auto-injected so causation chains stay intact.
+- `reactingTo` is injected automatically inside a reaction, so it can be omitted (`main.ts` passes it explicitly; `hello.ts` doesn't).
 
 ## tRPC router (`src/router.ts`)
 
@@ -132,7 +136,7 @@ const resetCount = await app.reset(["sum-proj"]);
 await app.drain({ eventLimit: 100 });
 ```
 
-`app.reset(["sum-proj"])` resets the watermark **and** arms the orchestrator's internal `_needs_drain` flag — calling `store().reset(...)` directly would not. The demo verifies the rebuilt sum matches the live state after each rebuild.
+`app.reset(["sum-proj"])` resets the watermark **and** arms the drain — calling `store().reset(...)` directly would not. The demo verifies the rebuilt sum matches the live state after each rebuild.
 
 ### Close-the-books — `dev:close`
 

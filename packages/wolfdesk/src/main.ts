@@ -30,8 +30,7 @@ async function main() {
   await db.delete(tickets).execute();
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
-  // Timing automations are now deferred reactions wired into the Act app
-  // (see ticket-timers.ts), so there's no polling loop to start here.
+  // Timing automations are deferred reactions (see ticket-timers.ts).
   app.on("acked", async () => {
     const all = await db.select().from(tickets).execute();
     console.table(all);
