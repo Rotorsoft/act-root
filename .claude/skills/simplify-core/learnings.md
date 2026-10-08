@@ -79,6 +79,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Merging spec files without a shared fixture saves files, not lines. (#1821)
 - A commit pushed after its PR merged is lost; check the PR is still open before pushing a follow-up. (#1816, #1819)
 - A scripted comment rewrite can swallow code; diff the non-comment lines before trusting it. (#1820)
+- A gate most PRs declare away protects nothing: the rfc-gate fired on comment edits because the stability snapshot copies all source, and 175 of 300 PRs carried an exemption. Fix what the gate measures before adding exemptions. (2026-10-08 review)
+- Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. (2026-10-08 review)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
 - Ticket numbers belong in git and here, not in code comments or test names.

@@ -46,7 +46,7 @@ Targets the retrospective tracks (adjust them only with the user):
 5. **Propose** at most 5–7 items, ranked by simplicity gained per unit of risk, in the template below. Sound proposals that miss the cut go to the backlog in `history.md`; the next run ranks the backlog before looking for new ones.
 6. **Report and stop.** Present the ranked list and the metrics delta. Don't open tickets or branches until the user picks.
 7. **Retrospective and self-update** (before the report is recorded):
-   - **Decisions:** record the user's answers to the *previous* run's proposals (accepted / rejected + reason / deferred).
+   - **Decisions:** record the user's answers to the *previous* run's proposals (accepted / rejected + reason / deferred). A proposal with no answer stays pending, is listed again, and counts toward the next report's 5–7.
    - **Promises kept:** for proposals shipped since the last run, compare the promised "Removes" with the actual metrics delta. A proposal that removed less than it promised is a lesson about estimating.
    - **Lens yield:** a lens with no accepted proposal in its last three runs is retired (note it in `history.md`; it can be revived with a reason).
    - **Rejection patterns:** the same rejection reason twice becomes a ground rule or a smell in `lenses.md`, worded as a check.
