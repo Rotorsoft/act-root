@@ -73,6 +73,10 @@ const DEFAULT_CORRELATION_LEASE_MS = 5_000;
  * with identical event *and* handler names share a lease, and those are
  * interchangeable by construction.
  *
+ * Workers sharded by `onlyLanes` are not interchangeable either: the lease
+ * holder would mark targets on lanes it cannot drain while the refused
+ * worker found nothing. The cycle appends the shard's lanes to this key.
+ *
  * This separates leases; it does not make two applications over one store
  * supported. They still share one read cursor, so the second would never
  * correlate what the first had already read past. One store belongs to one
@@ -180,6 +184,12 @@ export type CorrelateCycleDeps<
    * claimant, so correlate reroutes it here.
    */
   declared_lanes: ReadonlySet<string>;
+  /**
+   * The lanes this worker drains, set only when `onlyLanes` leaves some
+   * declared lane out. Workers on different shards are not interchangeable,
+   * so each shard gets its own correlation lease.
+   */
+  shard?: ReadonlyArray<string>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
   cold_start_back_scan?: number;
@@ -343,13 +353,16 @@ export class CorrelateCycle<
     cd,
     max_subscribed_streams,
     declared_lanes,
+    shard,
     on_init,
     on_init_async,
     cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
     lease_millis = DEFAULT_CORRELATION_LEASE_MS,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
     this._lease_millis = lease_millis;
-    this._key = registry_key(registry.events);
+    this._key = shard
+      ? `${registry_key(registry.events)}:${[...shard].sort().join(",")}`
+      : registry_key(registry.events);
     this._dynamic_subscriptions = new LruMap(max_subscribed_streams);
     this._registry = registry;
     this._declared_lanes = declared_lanes;
