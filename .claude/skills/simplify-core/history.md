@@ -8,23 +8,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-07 | 1 | 0 | active (its deprecations were rejected; scope narrowed by rule 2) |
+| Public surface | 2026-10-10 | 2 | 0 | active (finding: four published exports tagged @internal) |
 | Dead code (tool) | 2026-10-08 | 2 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
 | Hotspots (tool) | 2026-10-08 | 2 | 1 | active |
-| File budget | 2026-10-08 | 2 | 1 | active |
+| File budget | 2026-10-10 | 3 | 1 | active (counts code lines now; most long files are doc comments) |
 | Comment noise | 2026-10-08 | 2 | 2 | active (25% bar unreachable while public type docs stay; see P2026-10-08d-6) |
 | Concepts and options | 2026-10-08 | 2 | 1 | active (found the defer wake bug) |
-| Core or decorator? | 2026-10-08 | 1 | 0 | active (PII examined: stays in core) |
+| Core or decorator? | 2026-10-10 | 2 | 0 | active (audit, breaker, lanes stay; priority is a design question for a major) |
 | DRY across adapters and builders | 2026-10-08 | 2 | 1 | active |
-| Reading path | 2026-10-08 | 1 | 1 | active (DrainOps half rejected: trace seams stay) |
+| Reading path | 2026-10-10 | 2 | 1 | active (found the onlyLanes lease bug) |
 | Newcomer test (quarterly) | 2026-10-08 | 1 | 0 | active (baseline: 22 concepts, 3 imports) |
 | Tests by concept | 2026-10-08 | 2 | 3 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
-| Packages earn their place | 2026-10-08 | 2 | 0 | active (no removals possible; found no subtraction) |
+| Packages earn their place | 2026-10-10 | 3 | 0 | active (no removal; act-tck release churn found) |
 | Infra | 2026-10-08 | 2 | 1 | active (found the no-op snippet gate) |
-| One source of truth | 2026-10-08 | 2 | 3 | active |
-| Examples | 2026-10-08 | 1 | 1 | active |
-| Process | 2026-10-08 | 1 | 3 | active |
+| One source of truth | 2026-10-10 | 3 | 3 | active |
+| Examples | 2026-10-10 | 2 | 1 | active |
+| Process | 2026-10-10 | 2 | 3 | active |
 
 ## Mutation baselines
 
@@ -45,7 +45,16 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-- `act.ts` is still 1,993 lines and files over 300 haven't moved in three runs (21). The next File budget run starts there.
+- Move lane wiring out of `act.ts` into `internal/lanes.ts`: 4 fields, 8 private methods and `validate_only_lanes` become one `_lanes` field with ~5 methods (−230 lines from act.ts; `validate_only_lanes` becomes a Zod refinement in `resolveActConfig`). Move restore's `scan` from `event-sourcing.ts` to `internal/restore.ts` (−185 there).
+- Move `all-packages-stability.spec.ts` and its snapshot out of `libs/act-tck` to a repo-level test dir: 94 of 137 act-tck releases since Jul 10 published identical code because a snapshot change counts as a package change.
+- Delete `docs/versioned_docs/version-1.x` (33 files, 7,256 lines): the library is still 1.x, so "current" is the 1.x docs, and the frozen copy still describes pre-#1811 polling.
+- `act-code-reviewer` contradicts CLAUDE.md (says fields are snake_case; public fields are camelCase) and cites a removed section and two dead paths. Fix or delete the three subagents and `.claude/README.md` (209 lines, restates settings).
+- Move CLAUDE.md's naming, config-validation and detailed pre-handoff sections to CONTRIBUTING.md, one-line rule + link each (~9 KB); fix CONTRIBUTING's two dead pointers.
+- Drop the pre-push hook (CI tests every push; 3 of 341 master commits were direct pushes) and the unmaintained RFC "Status:" lines.
+- Four published exports are tagged `@internal` (`default_scope`, `ExitCodes`, `PackageSchema`, `pii_fields`; the last was made public on purpose by RFC 1228). Remove the wrong tag, record the other three in STABILITY.md as published-but-not-for-use. `export *` over `ports.ts`, `utils.ts`, `config.ts` publishes anything added there without an RFC.
+- act-tck README and tck-conformance.md hand-copy stale peer versions (vitest >=3.0.9, zod ^4.4.3) and carry history banners.
+- Design finding, no action: every runnable example needs `app.on("committed", () => app.settle())` (~10 copies, each with a caveat); worth asking whether that should be a default.
+- Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question.
 - Drop the in-memory core perf gate from CI (0 failures in 400 runs; its baseline was never made on CI hardware; pg and sqlite gates stay): −2 steps, 3 files (~390 lines).
 - Delete `BENCH.md` (lists 25 of 50 bench files; claims scenario benches run on every PR): −85 lines.
 - README quickstart: use `.emit("Incremented")` like `hello.ts`, link `hello.ts` first, replace "dead-lettering" with "blocked streams", cut the 9-term "What it is" paragraph (newcomer count 22 → 20).
@@ -57,6 +66,9 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
 
+- 2026-10-10: verified defects (a red test with a control, or a doc that contradicts the code) rank ahead of the cap; the 5–7 cap applies to simplifications. Seven undecided proposals filled the cap, and the pending rule would have pushed a reproduced bug to the backlog.
+- 2026-10-10: `metrics.sh` counts files over 300 *code* lines beside the total. 21 files exceed 300 lines, but only 8 exceed 300 code lines; `types/ports.ts` is 190 code lines and 1,237 comment lines of public docs. Whether the bar should move to code lines is the user's call.
+- 2026-10-10: the Examples lens now includes `@example` blocks in public doc comments; no check compiles them (the `Act.restore` example passes the wrong type).
 - 2026-10-08 (full run): two smells added: a timer that only sets a flag (the #1804 pattern recurred in the defer timer), and a check that has never failed including its self-test (the snippet gate). The comment bar (25%) is left for the user to restate (P2026-10-08d-6); the skill says bars change only with the user.
 - 2026-10-08 (fourth run): `metrics.sh` reports CLAUDE.md in KB, not lines. #1850 cut 3.3 KB and the line count stayed at 333, so the metric hid the change.
 - 2026-10-08 (fourth run): the pass-through-layer smell now excludes the trace seams (`build_es`, `build_drain`). b-4 proposed deleting `DrainOps` under that smell; the user kept it (#1841).
@@ -239,3 +251,24 @@ Proposals (pending), ranked:
 - P2026-10-08d-5. One filter helper per adapter: `query_streams` reuses `_filter_clause` / `_filter_predicate`, and `defer` / `reset` / `unblock` share one selection helper (~190 lines across 3 adapters; `InMemoryStore.query_streams` complexity 45 → ~12); move two misplaced doc blocks.
 - P2026-10-08d-6. Comment pass on `internal/` and `adapters/` by category (keep public docs, shorten the why, cut restated code and essays; ~1,380 lines, 49% → ~46%), per file, non-comment lines byte-identical. With it, restate the bar: 25% for all of core is unreachable while `types/` (3,015 comment lines of public docs, kept by #1851) stays; propose `internal/` and `adapters/` under 30%.
 - P2026-10-08d-7. Hotspot helpers: close-cycle's two hand-written page loops use `walk_streams` (~30 lines), and `event-sourcing.ts` gets `cache_put` / `cache_drop` for its four copies of "update the cache, warn on failure" (~20 lines, in `action()`, the top hotspot: complexity 60, 43 changes in 6 months).
+
+### 2026-10-10 — full run (four specialists: file budget + reading path, core or decorator + public surface, source of truth + examples, process + packages)
+
+| metric | 2026-10-08 | now | why |
+|---|---|---|---|
+| core lines | 20283 | 20280 | #1857 |
+| CLAUDE.md | 41.6 KB | 36.8 KB | #1858 |
+| everything else | | unchanged | |
+
+Audit: two PRs since the last run, both its tickets. #1858 promised a ~3 KB section and delivered 3.4 KB; #1857 promised ~15 names and 1 file and delivered 11 names, 3 barrel re-exports and 1 file. Both kept their promises.
+
+Decisions on P2026-10-08d-1..7: none yet; pending.
+
+Verified in the main loop before ranking: the `onlyLanes` lost wakeup (red: two sharded workers sharing a broker, the worker without the lease drains before the lease holder marks, 0 runs, still 0 after the 5 s lease; controls: unsharded → 1, sharded with the lane's worker holding the lease → 1, lane set added to the lease key → 1); `writing-a-store.md` says a full truncate removes the subscription row (the code keeps it, and the same page says not to touch subscriptions); the act-http README maps `StreamClosedError` → `PRECONDITION_FAILED` (code: 410 → `NOT_FOUND`); the scaffold skill's `error.message === Errors.ValidationError` never matches (the code is on `name`); the `Act.restore` doc example passes an async generator where the parameter is an `EventSource`; `libs/act/README.md` lists `query_streams` and `query_stats` as `Act` methods (`Act` has neither); an act-tck release (1.38.21 → 1.38.22) with only a version bump in its own files and a snapshot change.
+
+Not re-proposed: pointing the three public re-exports at leaf files to shrink the snapshot (decided in #1839: the lint rule requires the barrel).
+
+Proposals (pending), ranked. Defects first; then the seven still-pending from 2026-10-08:
+- P2026-10-10-1. Fix the `onlyLanes` lost wakeup: fold the sorted active lane set into the correlation lease key when `onlyLanes` narrows it (~3 lines), with the probe as a test and a contract row.
+- P2026-10-10-2. Fix broken promises in docs and generated code, shrinking them where another page owns the topic: delete writing-a-store.md's "Splitting retirement" section and its four TCK sections that repeat tck-conformance and the act-tck README (~140 lines); shrink the act-http README's generated-API part to one example and a link (~140 net) and fix the `trpc/index.ts` doc comment; fix the scaffold skill's error check and replace its hand-rolled receiver dedup with `webhookMiddleware`, and cut its five sections that restate docs to one rule + link (~250); fix the `Act.restore` example and the README method list.
+- P2026-10-08d-1..d-7 (still pending, unchanged): defer timer runs the drain; fix the snippet gate and fold its workflow; dead internal state; duplicate tests; one filter helper per adapter; comment pass by category; close-cycle and event-sourcing helpers (add: `close()`'s own correlate pass repeats the catch-up `_run_close` already does, −3 lines).
