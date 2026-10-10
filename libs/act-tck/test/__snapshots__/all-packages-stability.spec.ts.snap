@@ -9074,10 +9074,11 @@ export class DrainController<
    * schedule itself is persisted in the store; this runs the drain at the
    * earliest pending visit. A parked stream already carries its mark, so
    * the drain alone finds it, and on an idle app nothing else would. It
-   * reuses the options of the last drain, which parked the stream.
+   * reuses the options of the last drain, which parked the stream. \`stop()\`
+   * cancels the timer and a stopped drain never re-schedules it, so a wake
+   * never runs after a stop.
    */
   private readonly _defer = new DeferTimer(() => {
-    if (this._stopped) return;
     this._armed = true;
     void this._deps.run_scoped(() => this.drain(this._last_options));
   });
