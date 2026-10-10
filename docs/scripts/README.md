@@ -18,7 +18,9 @@ node scripts/check-snippets.mjs --list   # print the extraction plan, write noth
 
 CI runs `check:snippets` (the gate) followed by `check:snippets:selftest`
 (proves the gate isn't a no-op) on every PR that touches `docs/docs/**` or a
-library's `src/**` — see `.github/workflows/docs-snippets.yml`.
+library's `src/**` — see the `ci` job in `.github/workflows/ci-cd.yml` and
+`.github/workflows/docs-build.yml`. Pages under `docs/docs/api/` are typedoc
+output and are not checked.
 
 ## Convention: marking intentionally-partial snippets
 
