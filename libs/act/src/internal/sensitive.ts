@@ -218,7 +218,7 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  *
  * @internal
  */
-export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
+function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,

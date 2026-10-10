@@ -293,7 +293,7 @@ export const DEFAULT_CLOSE_BATCH_SIZE = 64;
 /** @deprecated Unused since the autoclose sweep was removed. */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
 /** Default IANA zone for `autocloseWindow` when the operator omits one. */
-export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
 
 /** True when `tz` is a zone the runtime's `Intl` accepts. @internal */
 function is_valid_time_zone(tz: string): boolean {
@@ -368,8 +368,8 @@ export function resolveAutocloseConfig(
 // state machine stays in `circuit-breaker.ts` and imports the resolved type.
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
-export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
+const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
 
 const CircuitBreakerOptionsSchema = z.object({
   failureThreshold: z
@@ -400,8 +400,8 @@ export const resolveCircuitBreakerConfig = (
 // Fold — `projection(name).of(state)` batch-fold knobs.
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
+const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+const DEFAULT_MAX_CACHED_STATES = 10_000;
 
 const FoldOptionsSchema = z.object({
   flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
