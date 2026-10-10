@@ -39,7 +39,7 @@ import { DeferSignal } from "./defer-signal.js";
  * an autoclose defer never short-circuits them. Internal; not a public
  * surface.
  */
-export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
+const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 /**
  * Inject one synthesized autoclose reaction per `.autocloses(...)` state

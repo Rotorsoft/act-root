@@ -115,7 +115,7 @@ export type HandleBatch<TEvents extends Schemas> = (
  *
  * @internal
  */
-export type DrainCycle<TEvents extends Schemas> = {
+type DrainCycle<TEvents extends Schemas> = {
   readonly leased: Lease[];
   readonly fetched: Fetch<TEvents>;
   readonly handled: HandleResult[];
@@ -228,7 +228,7 @@ type CycleInput = {
  *
  * @internal
  */
-export async function run_drain_cycle<
+async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,

@@ -132,7 +132,7 @@ const DEFAULT_BATCH = 500;
  *
  * @internal
  */
-export type BoundAction = <
+type BoundAction = <
   TState extends Schema,
   TEvents extends Schemas,
   TActions extends Schemas,

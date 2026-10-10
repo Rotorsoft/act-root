@@ -5214,7 +5214,7 @@ import { DeferSignal } from "./defer-signal.js";
  * an autoclose defer never short-circuits them. Internal; not a public
  * surface.
  */
-export const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
+const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 /**
  * Inject one synthesized autoclose reaction per \`.autocloses(...)\` state
@@ -6713,7 +6713,7 @@ export const DEFAULT_CLOSE_BATCH_SIZE = 64;
 /** @deprecated Unused since the autoclose sweep was removed. */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
 /** Default IANA zone for \`autocloseWindow\` when the operator omits one. */
-export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
 
 /** True when \`tz\` is a zone the runtime's \`Intl\` accepts. @internal */
 function is_valid_time_zone(tz: string): boolean {
@@ -6788,8 +6788,8 @@ export function resolveAutocloseConfig(
 // state machine stays in \`circuit-breaker.ts\` and imports the resolved type.
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
-export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
+const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
 
 const CircuitBreakerOptionsSchema = z.object({
   failureThreshold: z
@@ -6820,8 +6820,8 @@ export const resolveCircuitBreakerConfig = (
 // Fold — \`projection(name).of(state)\` batch-fold knobs.
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
-export const DEFAULT_MAX_CACHED_STATES = 10_000;
+const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
+const DEFAULT_MAX_CACHED_STATES = 10_000;
 
 const FoldOptionsSchema = z.object({
   flushEvery: z.number().int().min(1).default(DEFAULT_FOLD_FLUSH_EVERY),
@@ -8714,7 +8714,7 @@ export type HandleBatch<TEvents extends Schemas> = (
  *
  * @internal
  */
-export type DrainCycle<TEvents extends Schemas> = {
+type DrainCycle<TEvents extends Schemas> = {
   readonly leased: Lease[];
   readonly fetched: Fetch<TEvents>;
   readonly handled: HandleResult[];
@@ -8827,7 +8827,7 @@ type CycleInput = {
  *
  * @internal
  */
-export async function run_drain_cycle<
+async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,
@@ -9941,7 +9941,7 @@ const DEFAULT_BATCH = 500;
  *
  * @internal
  */
-export type BoundAction = <
+type BoundAction = <
   TState extends Schema,
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -12252,13 +12252,10 @@ export {
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  DEFAULT_EVENT_LIMIT,
-  DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
-  DEFAULT_STREAM_LIMIT,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
   resolveActConfig,
@@ -16151,7 +16148,7 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  *
  * @internal
  */
-export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
+function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,
@@ -22771,7 +22768,7 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  *
  * @internal
  */
-export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
+function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,

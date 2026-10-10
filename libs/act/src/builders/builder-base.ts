@@ -61,7 +61,7 @@ type ReactionDo<
  * with `.defer(when).do(...)`. Parameterized by the return builder so
  * `act()` and `slice()` share one shape.
  */
-export type ReactionOn<
+type ReactionOn<
   TReturn,
   TEvents extends Schemas,
   TActions extends Schemas,
