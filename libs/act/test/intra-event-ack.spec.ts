@@ -116,15 +116,17 @@ describe("intra-event ack across co-targeted reactions", () => {
       )
       .to("co-target-2")
       .build();
+    const acked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
     await app.do("tick", { stream: "i2", actor }, { by: 1 });
     await app.correlate();
     await app.drain({ leaseMillis: 1 });
     expect((await watermark("co-target-2")).at).toBe(-1);
 
-    await sleep(5);
-    const d = await app.drain({ leaseMillis: 1 });
-    expect(d.acked.some((l) => l.stream === "co-target-2")).toBe(true);
+    // The wake retries once the 1ms lease lapses.
+    await sleep(20);
+    expect(acked).toContain("co-target-2");
     // Both events of the group completed; watermark passed the event.
     const events = await app.query_array({ stream: "i2", stream_exact: true });
     expect((await watermark("co-target-2")).at).toBe(events.at(-1)!.id);

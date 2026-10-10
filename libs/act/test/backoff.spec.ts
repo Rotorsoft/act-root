@@ -361,13 +361,15 @@ describe("per-reaction backoff (integration)", () => {
     await app.do("tick", { stream: "s2", actor }, {});
     await app.correlate();
 
+    const acked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
     await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(1);
 
-    await sleep(60);
-    const drained = await app.drain({ leaseMillis: 1 });
+    // The wake runs the retry once the backoff window elapses.
+    await sleep(80);
     expect(attempts).toBe(2);
-    expect(drained.acked.length).toBe(1);
+    expect(acked).toEqual(["s2"]);
   });
 
   it("preserves blocking behavior when retries are exhausted", async () => {
@@ -390,14 +392,15 @@ describe("per-reaction backoff (integration)", () => {
     await app.do("tick", { stream: "s3", actor }, {});
     await app.correlate();
 
+    const blocked: string[] = [];
+    app.on("blocked", (leases) => blocked.push(...leases.map((l) => l.stream)));
     await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(1);
 
-    await sleep(15);
-    const drained = await app.drain({ leaseMillis: 1 });
-    // retry=1, maxRetries=1 → block
+    // The wake runs the retry: retry=1, maxRetries=1 → block
+    await sleep(40);
     expect(attempts).toBe(2);
-    expect(drained.blocked.length).toBe(1);
+    expect(blocked).toEqual(["s3"]);
   });
 
   it("garbage-collects only entries whose window has elapsed", async () => {
@@ -518,13 +521,10 @@ describe("per-reaction backoff (integration)", () => {
     await app.do("tick", { stream: "s4", actor }, {});
     await app.correlate();
 
-    // Three drain calls back-to-back with no sleep — without backoff,
-    // each lease (leaseMillis: 1) expires immediately and re-attempts.
+    // Without backoff each 1ms lease lapses at once, so the wake re-attempts
+    // right away until the budget is spent.
     await app.drain({ leaseMillis: 1 });
-    await sleep(5);
-    await app.drain({ leaseMillis: 1 });
-    await sleep(5);
-    await app.drain({ leaseMillis: 1 });
+    await sleep(50);
     expect(attempts).toBe(3);
   });
 });
