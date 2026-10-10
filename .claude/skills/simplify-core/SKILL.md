@@ -1,11 +1,13 @@
 ---
 name: simplify-core
-description: Self-improving simplicity review of the Act repo. Measures the framework, audits recent changes for accreted complexity, runs rotating review lenses (core API, tests, packages, infra, docs, process, the field), proposes ranked, evidence-backed simplifications for the user to approve, then reviews its own effectiveness and rewrites itself. Use when the user says "run the simplicity review", "weekly review", "simplify the core", "find simplification opportunities", or asks to evaluate the framework's design.
+description: Self-improving simplicity review of the Act repo. Measures the framework, audits recent changes for accreted complexity, runs rotating review lenses (core API, feature interactions and orthogonality, tests, packages, infra, docs, process, the field), proposes ranked, evidence-backed simplifications for the user to approve, then reviews its own effectiveness and rewrites itself. Use when the user says "run the simplicity review", "weekly review", "simplify the core", "find simplification opportunities", or asks to evaluate the framework's design.
 ---
 
 # Simplify the core
 
 Event sourcing is simple: commands decide, events record, state folds, reactions follow. A framework for it should be small enough to read in an afternoon. Act has drifted from that: every fix was reasonable on its own day, and together they left a core that is half comments, carries hundreds of ticket numbers, and grows a mechanism for every edge case.
+
+The goal is the **minimum set of orthogonal features that keeps every promise** in `docs/docs/architecture/behavior-contracts.md`. Orthogonal means each feature owns its own state and can be understood, tested and changed without reading another one. Where two features must meet, they meet through one named shared primitive (the stream row, the persisted schedule, the lease), not through special cases in each other's code. Features that combine by special case are where the bugs are: the `onlyLanes` × correlation-lease and defer × drain bugs of 2026-10 were both found where two features met.
 
 This skill reverses the drift one approved change at a time, and improves itself as it goes. **It proposes; it never edits product code on its own.** The user picks proposals, and each pick goes through the normal ticket → branch → PR workflow.
 
@@ -27,6 +29,8 @@ Targets the retrospective tracks (adjust them only with the user):
 - no core file over 300 lines; one concept per file
 - runtime exports of `@rotorsoft/act` don't grow (54 today); `IAct` stays the small surface handlers see, and each `Act` method beyond it is documented as operator surface
 - one implementation per idea: adapter logic shared through the orchestrator or the TCK, config validated once in `internal/config.ts`
+- features are orthogonal: no feature reads another's configuration or state to decide its own behavior, and no layer carries a guard whose job is to cancel another layer's rule; every interaction that remains is listed, with its reason, in the interaction register in `history.md`
+- every feature serves at least one contract row; a feature no row needs is a finding
 - one spec per concept, not per ticket; adapter suites don't repeat the TCK
 - each behavior documented in one place and linked elsewhere
 - the README quickstart needs few concepts, and that count only goes down
@@ -40,7 +44,7 @@ Targets the retrospective tracks (adjust them only with the user):
 ## A run
 
 1. **Measure.** `git checkout master && git pull --ff-only && pnpm build && .claude/skills/simplify-core/metrics.sh`. Compare with the last entry in `history.md`; every metric that grew needs an explanation (which PRs, and whether the growth was earned).
-2. **Audit what changed** since the last run: `git log --since=<last run> --stat`. For each PR ask: did it add a concept, option, export, package, workflow or special case? Was a smaller fix available? Is it a fix on a recent fix in the same file? Fix-on-fix chains are where accidental complexity concentrates.
+2. **Audit what changed** since the last run: `git log --since=<last run> --stat`. For each PR ask: did it add a concept, option, export, package, workflow or special case? Did it make one feature read another's state or configuration? Was a smaller fix available? Is it a fix on a recent fix in the same file? Fix-on-fix chains are where accidental complexity concentrates.
 3. **Run lenses.** Pick the lenses due by the rotation in `history.md` (least recently run first, skipping retired ones). Each lens is defined in `lenses.md`.
 4. **Check the field** (monthly, or when a lens raises a design question): how KurrentDB/EventStoreDB, Marten, Equinox, Emmett, Axon or the decider pattern answer that specific question. Look for the simpler answer, not missing features. Cite sources.
 5. **Propose** at most 5–7 simplifications, ranked by simplicity gained per unit of risk, in the template below. Verified defects (a red test with a control, or a doc that contradicts the code) rank first and don't count toward the cap. Sound proposals that miss the cut go to the backlog in `history.md`; the next run ranks the backlog before looking for new ones.
