@@ -3,9 +3,9 @@ name: Docs Build
 # Builds the Docusaurus site (typedoc + docusaurus build) on docs PRs,
 # so MDX parse errors, broken JSX, and fatal build/config failures can't
 # merge (issue #1075). docs-only PRs otherwise run no build at all — the
-# main ci-cd workflow triggers on `libs/**`, and docs-snippets.yml only
-# type-checks fenced snippets. This catches everything else the build
-# validates (MDX/JSX, sidebars, config). Broken links are currently
+# main ci-cd workflow triggers on `libs/**`. This type-checks the fenced
+# snippets and catches everything else the build validates (MDX/JSX,
+# sidebars, config). Broken links are currently
 # `onBrokenLinks: warn` so they don't fail here; flip that to `throw`
 # once the known offenders are cleared to gate links too.
 on:
@@ -36,4 +36,8 @@ jobs:
           node-version: 26.10.0
           cache: "pnpm"
       - run: pnpm install
+      # Snippets before the build: build:all writes docs/docs/api, which the
+      # snippet check skips anyway.
+      - run: pnpm -F docs check:snippets
+      - run: pnpm -F docs check:snippets:selftest
       - run: pnpm -F docs build:all
