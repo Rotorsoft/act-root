@@ -18,6 +18,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - The framework's job is narrow: express the declaration, route the data, gate the read, emit the lifecycle. Key management, encryption and compliance belong to the operator. (#566)
 - Before promoting legacy code to a port, audit what it does by accident; accidents become contract. (#1124)
 - A wakeup is a hint, never the truth: decorators that carry notifications must pass the full Store TCK unchanged. (#987)
+- A shared lease is sound only between interchangeable workers. Anything that narrows what a worker runs (`onlyLanes`) belongs in the lease key, or the holder does work for a lane it can't drain and the lane's own worker never wakes. (2026-10-10 review)
 
 ## State and invariants
 
@@ -84,6 +85,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A proposal to delete a layer must name why the layer exists. `DrainOps` was proposed as a pass-through and turned out to be the trace seam, so it stayed. (#1841)
 - A gate most PRs declare away protects nothing: the rfc-gate fired on comment edits because the stability snapshot copies all source, and 175 of 300 PRs carried an exemption. Fix what the gate measures before adding exemptions. (2026-10-08 review)
 - Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. (2026-10-08 review)
+- A test snapshot inside a published package releases that package on every change to it: 94 of 137 act-tck releases published identical code. Keep repo-wide gates out of published packages. (2026-10-10 review)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
 - Ticket numbers belong in git and here, not in code comments or test names.
