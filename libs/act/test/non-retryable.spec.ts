@@ -84,24 +84,28 @@ describe("NonRetryableError (drain integration)", () => {
     const app = act()
       .withState(counter)
       .on("ticked")
-      .do(handler, { maxRetries: 99, blockOnError: false })
+      .do(handler, {
+        maxRetries: 99,
+        blockOnError: false,
+        backoff: { strategy: "fixed" as const, baseMs: 1 },
+      })
       .build();
+    const acked: string[] = [];
+    const blocked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
+    app.on("blocked", (leases) => blocked.push(...leases.map((l) => l.stream)));
 
     await app.do("tick", { stream: "s2", actor }, {});
     await app.correlate();
 
     // First drain — first attempt throws NonRetryable, but blockOnError:false
-    // means we keep retrying.
+    // means the wake keeps retrying until the handler succeeds.
     await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(1);
-    await sleep(5);
-    await app.drain({ leaseMillis: 1 });
-    expect(attempts).toBe(2);
-    await sleep(5);
-    const drained = await app.drain({ leaseMillis: 1 });
+    await sleep(30);
     expect(attempts).toBe(3);
-    expect(drained.acked.length).toBe(1);
-    expect(drained.blocked.length).toBe(0);
+    expect(acked).toEqual(["s2"]);
+    expect(blocked).toEqual([]);
   });
 
   it("plain Error keeps consuming retry budget", async () => {
@@ -115,7 +119,10 @@ describe("NonRetryableError (drain integration)", () => {
     const app = act()
       .withState(counter)
       .on("ticked")
-      .do(handler, { maxRetries: 2 })
+      .do(handler, {
+        maxRetries: 2,
+        backoff: { strategy: "fixed" as const, baseMs: 1 },
+      })
       .build();
 
     await app.do("tick", { stream: "s3", actor }, {});

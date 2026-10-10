@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { compute_backoff_delay } from "../src/internal/backoff.js";
-import { resolveBackoffConfig } from "../src/internal/config.js";
+import {
+  DEFAULT_BACKOFF,
+  resolveBackoffConfig,
+} from "../src/internal/config.js";
 import type { BackoffOptions } from "../src/types/index.js";
 
 describe("compute_backoff_delay", () => {
@@ -204,70 +207,91 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts).toBe(2);
   });
 
-  it("retries a no-backoff failure once its own lease lapses", async () => {
-    // A failed no-progress cycle submits no ack, so the lease stays held —
-    // and `claim` excludes a live-leased stream even from its holder. Any
-    // drain inside that window therefore claims nothing, which used to be
-    // read as "fully caught up" and disarmed the controller.
-    const LEASE = 300;
-    let attempts = 0;
-    const app = act()
-      .withState(counter)
-      .on("ticked")
-      .do(
-        async function alwaysFails() {
-          attempts++;
-          throw new Error("transient");
-        },
-        { maxRetries: 5 }
-      )
-      .build();
+  // A reaction with no backoff is paced by the default one, not by the lease
+  // of whichever drain claimed it. Only `Date` is faked, so the store's async
+  // work runs on real timers while the clock jumps past the default.
+  describe("with no backoff configured", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const past_default_backoff = () =>
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
 
-    await app.do("tick", { stream: "s1", actor }, {});
-    await app.correlate();
+    it("retries after the default backoff, whatever the drain's lease", async () => {
+      let attempts = 0;
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(
+          async function alwaysFails() {
+            attempts++;
+            throw new Error("transient");
+          },
+          { maxRetries: 5 }
+        )
+        .build();
 
-    await app.drain({ leaseMillis: LEASE });
-    expect(attempts).toBe(1);
+      await app.do("tick", { stream: "s1", actor }, {});
+      await app.correlate();
+      await app.drain({ leaseMillis: 1 });
+      expect(attempts).toBe(1);
 
-    // Inside the lease window: claims nothing, must not conclude "caught up".
-    await app.drain({ leaseMillis: LEASE });
-    expect(attempts).toBe(1);
+      // The schedule is persisted, so a lapsed 1ms lease changes nothing.
+      let deferred_at: number | undefined;
+      await store().query_streams((p) => {
+        if (p.stream === "s1") deferred_at = p.deferred_at;
+      });
+      expect(deferred_at).toBeGreaterThanOrEqual(
+        Date.now() + DEFAULT_BACKOFF.baseMs - 50
+      );
+      await sleep(20);
+      await app.drain({ leaseMillis: 1 });
+      expect(attempts).toBe(1);
 
-    await sleep(LEASE + 100);
-    await app.drain({ leaseMillis: LEASE });
-    expect(attempts).toBe(2);
-  });
-
-  it("spends the whole retry budget and blocks, with no backoff configured", async () => {
-    const LEASE = 60;
-    let attempts = 0;
-    const blocked: string[] = [];
-    const app = act()
-      .withState(counter)
-      .on("ticked")
-      .do(
-        async function alwaysFails() {
-          attempts++;
-          throw new Error("transient");
-        },
-        { maxRetries: 2, blockOnError: true }
-      )
-      .build();
-    app.on("blocked", (leases) => {
-      for (const l of leases as { stream: string }[]) blocked.push(l.stream);
+      // That empty claim disarmed the drain; the wake would re-arm it at the
+      // due-time, but its timer runs on the real clock.
+      past_default_backoff();
+      (
+        app as unknown as {
+          _drain_controllers: Map<string, { arm(): void }>;
+        }
+      )._drain_controllers
+        .get("default")!
+        .arm();
+      await app.drain({ leaseMillis: 1 });
+      expect(attempts).toBe(2);
     });
 
-    await app.do("tick", { stream: "s1", actor }, {});
-    await app.correlate();
+    it("spends the whole retry budget and blocks", async () => {
+      let attempts = 0;
+      const blocked: string[] = [];
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(
+          async function alwaysFails() {
+            attempts++;
+            throw new Error("transient");
+          },
+          { maxRetries: 2, blockOnError: true }
+        )
+        .build();
+      app.on("blocked", (leases) => {
+        for (const l of leases as { stream: string }[]) blocked.push(l.stream);
+      });
 
-    // A drain inside every lease window, as a cycleMs worker would issue.
-    for (let i = 0; i < 6; i++) {
-      await app.drain({ leaseMillis: LEASE });
-      await app.drain({ leaseMillis: LEASE });
-      await sleep(LEASE + 20);
-    }
-    expect(attempts).toBe(3);
-    expect(blocked).toEqual(["s1"]);
+      await app.do("tick", { stream: "s1", actor }, {});
+      await app.correlate();
+      for (let i = 0; i < 6; i++) {
+        await app.drain({ leaseMillis: 1 });
+        past_default_backoff();
+      }
+      expect(attempts).toBe(3);
+      expect(blocked).toEqual(["s1"]);
+    });
   });
 
   it("advances the watermark past the succeeded prefix AND persists the window on partial progress", async () => {
@@ -361,13 +385,15 @@ describe("per-reaction backoff (integration)", () => {
     await app.do("tick", { stream: "s2", actor }, {});
     await app.correlate();
 
+    const acked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
     await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(1);
 
-    await sleep(60);
-    const drained = await app.drain({ leaseMillis: 1 });
+    // The wake runs the retry once the backoff window elapses.
+    await sleep(80);
     expect(attempts).toBe(2);
-    expect(drained.acked.length).toBe(1);
+    expect(acked).toEqual(["s2"]);
   });
 
   it("preserves blocking behavior when retries are exhausted", async () => {
@@ -390,14 +416,15 @@ describe("per-reaction backoff (integration)", () => {
     await app.do("tick", { stream: "s3", actor }, {});
     await app.correlate();
 
+    const blocked: string[] = [];
+    app.on("blocked", (leases) => blocked.push(...leases.map((l) => l.stream)));
     await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(1);
 
-    await sleep(15);
-    const drained = await app.drain({ leaseMillis: 1 });
-    // retry=1, maxRetries=1 → block
+    // The wake runs the retry: retry=1, maxRetries=1 → block
+    await sleep(40);
     expect(attempts).toBe(2);
-    expect(drained.blocked.length).toBe(1);
+    expect(blocked).toEqual(["s3"]);
   });
 
   it("garbage-collects only entries whose window has elapsed", async () => {
@@ -499,32 +526,5 @@ describe("per-reaction backoff (integration)", () => {
     ctrl.arm();
     await app.drain({ leaseMillis: 500 });
     expect(attempts).toBe(2);
-  });
-
-  it("default (no backoff) preserves current rapid-retry behavior", async () => {
-    let attempts = 0;
-    const handler = vi.fn().mockImplementation(async () => {
-      attempts++;
-      throw new Error("transient");
-    });
-    Object.defineProperty(handler, "name", { value: "noBackoff" });
-
-    const app = act()
-      .withState(counter)
-      .on("ticked")
-      .do(handler, { maxRetries: 2 })
-      .build();
-
-    await app.do("tick", { stream: "s4", actor }, {});
-    await app.correlate();
-
-    // Three drain calls back-to-back with no sleep — without backoff,
-    // each lease (leaseMillis: 1) expires immediately and re-attempts.
-    await app.drain({ leaseMillis: 1 });
-    await sleep(5);
-    await app.drain({ leaseMillis: 1 });
-    await sleep(5);
-    await app.drain({ leaseMillis: 1 });
-    expect(attempts).toBe(3);
   });
 });

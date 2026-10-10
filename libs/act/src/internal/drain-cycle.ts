@@ -33,6 +33,7 @@ import type {
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import {
+  DEFAULT_BACKOFF,
   DEFAULT_EVENT_LIMIT,
   DEFAULT_LEASE_MILLIS,
   DEFAULT_STREAM_LIMIT,
@@ -303,9 +304,9 @@ async function run_drain_cycle<
     leased.map((lease) => {
       const entry = fetch_map.get(lease.stream)!;
       // This stream's read failed: a no-progress failure for this stream
-      // alone (no ack, the lease lapses). It blocks once the retry budget is
-      // spent, like a failing handler, except while the whole store is
-      // failing, which is the breaker's job.
+      // alone, retried after the default backoff. It blocks once the retry
+      // budget is spent, like a failing handler, except while the whole
+      // store is failing, which is the breaker's job.
       if (entry.fetch.error !== undefined) {
         const error = `Fetch failed for ${lease.stream}: ${entry.fetch.error}`;
         log().error(error);
@@ -319,7 +320,9 @@ async function run_drain_cycle<
           handled: 0,
           acked_at: lease.at,
           error,
-          ...(block ? { block: true } : {}),
+          ...(block
+            ? { block: true }
+            : { next_attempt_at: Date.now() + DEFAULT_BACKOFF.baseMs }),
         };
         return Promise.resolve(failed);
       }
@@ -472,11 +475,15 @@ export class DrainController<
   private _ratio = 0.5;
   /**
    * Local wake for streams this worker parked (backoff or defer). The
-   * schedule itself is persisted in the store; this only re-arms the drain
-   * at the earliest pending visit.
+   * schedule itself is persisted in the store; this runs the drain at the
+   * earliest pending visit. A parked stream already carries its mark, so
+   * the drain alone finds it, and on an idle app nothing else would.
+   * `stop()` cancels the timer and a stopped drain never re-schedules it,
+   * so a wake never runs after a stop.
    */
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
+    void this._deps.run_scoped(() => this.drain());
   });
   /** Worker timer. Set when `start()` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
@@ -577,11 +584,6 @@ export class DrainController<
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
-    // Circuit open: the store is failing, skip the claim entirely so we
-    // don't hammer a down backend. `_armed` stays set, so the next tick
-    // after the cooldown (half-open) retries.
-    if (this._deps.breaker.state(Date.now()) === "open")
-      return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
     // Per-lane config wins over caller options: a lane's own budget is the
@@ -594,6 +596,12 @@ export class DrainController<
       d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
     try {
+      // Circuit open: the store is failing, skip the claim entirely so we
+      // don't hammer a down backend. `_armed` stays set, so the next tick
+      // after the cooldown (half-open) retries, and `finally` still re-aims
+      // the wake.
+      if (this._deps.breaker.state(Date.now()) === "open")
+        return EMPTY_DRAIN as Drain<TEvents>;
       this._locked = true;
       this._inflight = new Promise<void>((done) => {
         this._inflight_done = done;
@@ -614,9 +622,6 @@ export class DrainController<
         // Nothing claimed: caught up, and the store answered.
         this._deps.breaker.passed();
         this._armed = false;
-        // Keep the wake for streams still parked; on an idle aggregate
-        // nothing else re-arms the drain.
-        if (this._defer.size > 0) this._defer.schedule();
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
@@ -633,15 +638,9 @@ export class DrainController<
       for (const lease of acked) this._defer.delete(lease.stream);
       for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
-        // A no-progress failure keeps its lease, so park until it lapses.
-        const retry_at =
-          h.error && !h.block
-            ? (h.next_attempt_at ?? Date.now() + leaseMillis)
-            : undefined;
-        const next = h.defer ?? retry_at;
+        const next = h.defer ?? h.next_attempt_at;
         if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
-      if (this._defer.size > 0) this._defer.schedule();
 
       // Listener throws are contained in `Act.emit`, so they never reach the
       // store-error catch below.
@@ -666,6 +665,9 @@ export class DrainController<
       this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
+      // Re-aim the wake at the earliest stream still parked, including one
+      // whose wake fired early at the timer ceiling.
+      if (!this._stopped) this._defer.schedule();
       this._locked = false;
       this._inflight = undefined;
       this._inflight_done?.();

@@ -62,12 +62,21 @@ describe("recurring reminder timer recipe", () => {
       return ack(...args);
     };
 
+    // The failed finalize leaves tick 1 leased until the lease expires; jump
+    // the clock past it once (only `Date` is faked, and it keeps moving).
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    let jumped = false;
     await startReminders(app, "t3");
     for (let i = 0; i < 10; i++) {
       await app.correlate();
       await app.drain({ leaseMillis: 1 });
       await sleep(STEP + 20);
+      if (!blip && !jumped) {
+        jumped = true;
+        vi.setSystemTime(Date.now() + 10_001);
+      }
     }
+    vi.useRealTimers();
 
     const ticks = (await app.query_array({ stream: "reminders:t3" }))
       .filter((e) => e.name === "Reminded")

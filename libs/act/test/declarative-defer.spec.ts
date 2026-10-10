@@ -82,16 +82,18 @@ describe("declarative .defer(when)", () => {
         ran++;
       })
       .build();
+    const acked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
     await app.do("enqueue", { stream: "j1", actor }, { delayMs: 100 });
     await app.correlate();
     await app.drain({ leaseMillis: 1 });
     expect(ran).toBe(0); // deferred by the payload-derived delay
 
+    // The local wake runs the drain at the due-time.
     await sleep(150);
-    const done = await app.drain({ leaseMillis: 1 });
     expect(ran).toBe(1);
-    expect(done.acked.some((l) => l.stream === "j1")).toBe(true);
+    expect(acked).toContain("j1");
   });
 
   it("runs immediately once the schedule is already due", async () => {
