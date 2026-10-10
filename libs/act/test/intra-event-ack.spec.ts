@@ -63,7 +63,11 @@ describe("intra-event ack across co-targeted reactions", () => {
           second_attempts++;
           throw new Error("second reaction fails");
         },
-        { maxRetries: 1, blockOnError: true }
+        {
+          maxRetries: 1,
+          blockOnError: true,
+          backoff: { strategy: "fixed" as const, baseMs: 1 },
+        }
       )
       .to("co-target-1")
       .build();
@@ -112,7 +116,11 @@ describe("intra-event ack across co-targeted reactions", () => {
             throw new Error("transient");
           }
         },
-        { maxRetries: 5, blockOnError: true }
+        {
+          maxRetries: 5,
+          blockOnError: true,
+          backoff: { strategy: "fixed" as const, baseMs: 1 },
+        }
       )
       .to("co-target-2")
       .build();

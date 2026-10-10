@@ -300,7 +300,7 @@ Set `maxRetries: 0` for handlers that should never retry — typically those tha
 
 ### Backoff
 
-Without `backoff`, the framework re-claims a failed stream once its lease lapses: a failed no-progress cycle submits no ack, so it keeps the lease and `leaseMillis` sets the floor on the next attempt. With a short lease, for handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by persisting a defer schedule on the stream, so it isn't re-dispatched — by any worker — until the delay elapses.
+Every failed attempt is paced by a backoff, persisted as a defer schedule on the stream, so no worker re-dispatches it until the delay elapses. A reaction that declares no `backoff` waits a fixed 10 seconds. Retry timing belongs to the reaction: `leaseMillis` never sets it, so a short lease can't turn a brief outage into an exhausted retry budget. Projections, which take no options, and a stream whose read fails use the same 10-second default. Declare a `backoff` for handlers that talk to external systems (HTTP, queues, third-party APIs):
 
 ```typescript no-check
 backoff: {

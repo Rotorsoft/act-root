@@ -176,9 +176,9 @@ export type LaneConfig<TName extends string = string> = {
  * @property blockOnError - Whether to block on error.
  * @property maxRetries - Retries after the first attempt: a failing stream
  *   is attempted `maxRetries + 1` times before it blocks.
- * @property backoff - Optional retry pacing. When omitted, a retry runs as
- *   soon as the lease expires. When set, no worker re-attempts the stream
- *   before the computed delay.
+ * @property backoff - Optional retry pacing. When omitted, a retry waits a
+ *   fixed 10 seconds. Either way, no worker re-attempts the stream before
+ *   the delay; the lease never sets retry timing.
  */
 export type ReactionOptions = {
   readonly blockOnError: boolean;

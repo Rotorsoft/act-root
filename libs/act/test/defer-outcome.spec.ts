@@ -126,6 +126,40 @@ describe("defer outcome (integration)", () => {
     expect(ran.sort()).toEqual(["w1", "w2"]);
   });
 
+  it("keeps the wake for parked streams when it fires while the breaker is open", async () => {
+    // The wake's drain skips the store while the breaker is open, but still
+    // re-aims the timer, so w2 fires once the store recovers even when
+    // nothing drains in between.
+    const ran: string[] = [];
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .defer((e) => ({
+        at: new Date(e.created.getTime() + (e.stream === "w1" ? 60 : 250)),
+      }))
+      .do(async function remind(e) {
+        ran.push(e.stream);
+      })
+      .to((e) => ({ target: `remind-${e.stream}` }))
+      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
+    app.on("error", () => {});
+    await app.do("tick", { stream: "w1", actor }, {});
+    await app.do("tick", { stream: "w2", actor }, {});
+    await app.correlate();
+    await app.drain(); // both parked
+
+    const breaker = (
+      app as unknown as {
+        _breaker: { failed(at: number, error: unknown): void; passed(): void };
+      }
+    )._breaker;
+    breaker.failed(Date.now(), new Error("store down"));
+    await sleep(100); // w1's wake fired while open
+    breaker.passed(); // recovered through a path that does not drain
+    await sleep(300); // past w2's due-time
+    expect(ran).toContain("w2");
+  });
+
   it("re-runs a sibling that shares the deferred reaction's target, but not an isolated one", async () => {
     // Documented in state-management.md § Isolating a defer with `.to`:
     // a group is delivered again when its deferred member comes due.

@@ -8,6 +8,7 @@ import {
   state,
   store,
 } from "../src/index.js";
+import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 import { SNAP_EVENT } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
 import type { CacheEntry } from "../src/types/index.js";
@@ -174,13 +175,15 @@ describe("state projection (.of)", () => {
       await app.do("increment", { stream: "c1", actor }, { by: 4 });
       h.fail_next_flush();
       await app.correlate();
+      vi.useFakeTimers({ toFake: ["Date"] });
       const failed = await app.drain({ leaseMillis: 1 });
       expect(failed.acked.length).toBe(0);
-      // retry after the lease expires — same events refold, same row lands
-      await new Promise((r) => setTimeout(r, 5));
+      // retry after the default backoff — same events refold, same row lands
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       await settle_all(app);
       expect(h.table.get("c1")?.state).toEqual({ count: 4 });
     } finally {
+      vi.useRealTimers();
       await ctx.dispose();
     }
   });
@@ -327,13 +330,15 @@ describe("state projection (.of)", () => {
       await app.do("increment", { stream: "c2", actor }, { by: 5 });
       h.fail_every_flush(2); // second flush call throws
       await app.correlate();
+      vi.useFakeTimers({ toFake: ["Date"] });
       await app.drain({ leaseMillis: 1, eventLimit: 1_000 });
       h.fail_every_flush(0);
-      await new Promise((r) => setTimeout(r, 5));
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       await settle_all(app);
       expect(h.table.get("c1")?.state).toEqual({ count: 3 });
       expect(h.table.get("c2")?.state).toEqual({ count: 5 });
     } finally {
+      vi.useRealTimers();
       await ctx.dispose();
     }
   });

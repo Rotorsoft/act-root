@@ -84,7 +84,11 @@ describe("NonRetryableError (drain integration)", () => {
     const app = act()
       .withState(counter)
       .on("ticked")
-      .do(handler, { maxRetries: 99, blockOnError: false })
+      .do(handler, {
+        maxRetries: 99,
+        blockOnError: false,
+        backoff: { strategy: "fixed" as const, baseMs: 1 },
+      })
       .build();
     const acked: string[] = [];
     const blocked: string[] = [];
@@ -115,7 +119,10 @@ describe("NonRetryableError (drain integration)", () => {
     const app = act()
       .withState(counter)
       .on("ticked")
-      .do(handler, { maxRetries: 2 })
+      .do(handler, {
+        maxRetries: 2,
+        backoff: { strategy: "fixed" as const, baseMs: 1 },
+      })
       .build();
 
     await app.do("tick", { stream: "s3", actor }, {});

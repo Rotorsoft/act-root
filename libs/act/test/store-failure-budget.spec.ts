@@ -10,6 +10,7 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
+import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 import type { Query, Store } from "../src/types/index.js";
 
 /**
@@ -203,8 +204,14 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
   });
 
   describe("a read that keeps failing spends the retry budget", () => {
+    // A failed read is retried after the default backoff; each loop jumps the
+    // clock past it (timers stay real).
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+    });
     afterEach(() => {
       armed.on = false;
+      vi.useRealTimers();
     });
 
     const poisoned_app = (options: { blockOnError: boolean }) => {
@@ -238,7 +245,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       for (let i = 0; i < 6; i++) {
         await app.correlate();
         await app.drain({ leaseMillis: 1 });
-        await sleep(2);
+        vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       const blocked = await app.blocked_streams();
       expect(blocked.map((b) => b.stream)).toEqual(["victim"]);
@@ -253,7 +260,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       for (let i = 0; i < 6; i++) {
         await app.correlate();
         await app.drain({ leaseMillis: 1 });
-        await sleep(2);
+        vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       expect(await app.blocked_streams()).toEqual([]);
     });
@@ -274,7 +281,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       for (let i = 0; i < 6; i++) {
         await app.correlate();
         await app.drain({ leaseMillis: 1 });
-        await sleep(2);
+        vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       expect(await app.blocked_streams()).toEqual([]);
       // Once the store recovers, the read that still fails blocks as usual.
@@ -282,7 +289,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       for (let i = 0; i < 6; i++) {
         await app.correlate();
         await app.drain({ leaseMillis: 1 });
-        await sleep(2);
+        vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       expect((await app.blocked_streams()).map((b) => b.stream)).toEqual([
         "victim",
@@ -318,12 +325,14 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
     // The healthy stream was leased in the same cycle and still ran.
     expect(seen).toEqual(["healthy"]);
 
-    // The poison stream submitted no ack, so its watermark held and the event
-    // is still pending — not silently skipped. Once the read recovers and the
-    // lease lapses, it is delivered.
+    // The poison stream's watermark held, so the event is still pending — not
+    // silently skipped. Once the read recovers and the default backoff
+    // elapses, it is delivered.
     armed.on = false;
-    await sleep(80);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
     await app.drain({ leaseMillis: 50 });
+    vi.useRealTimers();
     expect(seen).toContain("victim");
   });
 });

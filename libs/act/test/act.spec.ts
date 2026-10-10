@@ -8,6 +8,7 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
+import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 
 describe("act", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -79,32 +80,41 @@ describe("act", () => {
   });
 
   it("should handle increment and decrement should block", async () => {
+    // Retries wait the default backoff; jump the clock past it (timers stay
+    // real) instead of waiting it out.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const past_backoff = () =>
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
     await app.do("decrement", { stream: "s", actor }, {});
     await app.correlate();
 
     // should drain the first two events...  third event should throw and stop drain
+    // The handled prefix lands with the retry schedule, so it is not
+    // reported as acked; the watermark shows it.
     let drained = await app.drain({ leaseMillis: 1 });
-    expect(drained.acked.length).toBe(1);
-    expect(drained.acked[0].at).toBe(1);
+    expect(drained.acked.length).toBe(0);
+    let at: number | undefined;
+    await store().query_streams((p) => {
+      if (p.stream === "s") at = p.at;
+    });
+    expect(at).toBe(1);
     expect(onIncremented).toHaveBeenCalledTimes(2);
     expect(onDecremented).toHaveBeenCalledTimes(1);
 
-    // first fully failed
+    // second attempt (first retry)
+    past_backoff();
     drained = await app.drain({ leaseMillis: 1 });
     expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
-    // second fully failed (first retry)
-    drained = await app.drain({ leaseMillis: 1 });
-    expect(drained.acked.length).toBe(0);
-    expect(drained.blocked.length).toBe(0);
-    expect(onDecremented).toHaveBeenCalledTimes(3);
-
-    // third fully failed (second retry) - should block
+    // third attempt (second retry) - the handled prefix did not refill the
+    // budget, so maxRetries: 2 blocks here
+    past_backoff();
     drained = await app.drain({ leaseMillis: 1 });
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(1);
-    expect(onDecremented).toHaveBeenCalledTimes(4);
+    expect(onDecremented).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
   });
 
   it("should not do anything when ignored events are emitted", async () => {
