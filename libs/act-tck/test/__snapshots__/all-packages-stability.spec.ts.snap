@@ -9071,12 +9071,17 @@ export class DrainController<
   private _ratio = 0.5;
   /**
    * Local wake for streams this worker parked (backoff or defer). The
-   * schedule itself is persisted in the store; this only re-arms the drain
-   * at the earliest pending visit.
+   * schedule itself is persisted in the store; this runs the drain at the
+   * earliest pending visit. A parked stream already carries its mark, so
+   * the drain alone finds it, and on an idle app nothing else would. It
+   * reuses the options of the last drain, which parked the stream.
    */
   private readonly _defer = new DeferTimer(() => {
+    if (this._stopped) return;
     this._armed = true;
+    void this._deps.run_scoped(() => this.drain(this._last_options));
   });
+  private _last_options: DrainOptions = {};
   /** Worker timer. Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   /**
@@ -9174,6 +9179,7 @@ export class DrainController<
 
   /** Run one drain pass. Short-circuits when not armed or already running. */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    this._last_options = options;
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
     // Circuit open: the store is failing, skip the claim entirely so we
@@ -9213,9 +9219,6 @@ export class DrainController<
         // Nothing claimed: caught up, and the store answered.
         this._deps.breaker.passed();
         this._armed = false;
-        // Keep the wake for streams still parked; on an idle aggregate
-        // nothing else re-arms the drain.
-        if (this._defer.size > 0) this._defer.schedule();
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
@@ -9240,7 +9243,6 @@ export class DrainController<
         const next = h.defer ?? retry_at;
         if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
-      if (this._defer.size > 0) this._defer.schedule();
 
       // Listener throws are contained in \`Act.emit\`, so they never reach the
       // store-error catch below.
@@ -9265,6 +9267,9 @@ export class DrainController<
       this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
+      // Re-aim the wake at the earliest stream still parked, including one
+      // whose wake fired early at the timer ceiling.
+      if (!this._stopped) this._defer.schedule();
       this._locked = false;
       this._inflight = undefined;
       this._inflight_done?.();
