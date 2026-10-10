@@ -6,7 +6,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 
 - Look for the invariant that turns a new verb into an option on an old one. (#1011: rolling-window close shipped as three optional fields because replay is snapshot-anchored)
 - Check whether a recovery path already exists and whether the defect is the promise, before building machinery. A fix that needs a second mechanism to undo its own side effect is the wrong design. (#1795 closed for the doc fix #1801)
-- A background path that repeats a foreground path drifts, because nothing exercises it. Make it trigger the foreground path. (#1804: polling marked work and never drained)
+- A background path that repeats a foreground path drifts, because nothing exercises it. Make it trigger the foreground path. (#1804: polling marked work and never drained; again in the defer timer, which only set a flag, 2026-10-08)
 - When a capability is buried in one feature, re-express the feature as a use of a general primitive and delete the special machinery. (#1090: autoclose became a deferred reaction; its controller and ticker went away)
 - Several features that look different can be one operation; find the shared verb before building separate guardrails. (#1128: backup, restore and transfer are all source → sink)
 - Prefer declarations read by the orchestrator over new ports, columns or caller-side helpers. (#566: PII is a column plus `.sensitive`, three heavier designs rejected. Re-examined 2026-10-08: a `Store` decorator can't carry it, because gated reads and handler stripping need the schema markers and the actor; it stays in core.)
@@ -60,6 +60,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Fixtures written through the raw store never produce what the framework produces (snapshots, tombstones); test through the framework too. (#1374)
 - A convenience is a promise; an unexercised default decays into silent loss. Refuse a default you can't honor. (#1443)
 - A test that skips by default is no contract. (#1441)
+- A gate whose self-test checks only that something failed can pass for the wrong reason. The snippet check type-checked zero files for 2.5 months while its self-test passed on a missing-module error. (2026-10-08 review)
 - A test whose verdict depends on the machine it runs on teaches people to ignore red. (#1443)
 - Trust boundaries pool around user code; enforce the contract the user already declared (opt-in when it costs). (#1238)
 - Type quality is judged at the weakest boundary; prefer generics with defaults, and the widest true type over a cast. (#1185)
@@ -79,6 +80,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Merging spec files without a shared fixture saves files, not lines. (#1821)
 - A commit pushed after its PR merged is lost; check the PR is still open before pushing a follow-up. (#1816, #1819)
 - A scripted comment rewrite can swallow code; diff the non-comment lines before trusting it. (#1820)
+- Measure prose in bytes, not lines: the CLAUDE.md trim cut 4 KB (9%) and left its line count at 333. (#1838, #1850)
+- A proposal to delete a layer must name why the layer exists. `DrainOps` was proposed as a pass-through and turned out to be the trace seam, so it stayed. (#1841)
 - A gate most PRs declare away protects nothing: the rfc-gate fired on comment edits because the stability snapshot copies all source, and 175 of 300 PRs carried an exemption. Fix what the gate measures before adding exemptions. (2026-10-08 review)
 - Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. (2026-10-08 review)
 
