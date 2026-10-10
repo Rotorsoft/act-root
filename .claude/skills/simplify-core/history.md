@@ -25,6 +25,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | One source of truth | 2026-10-10 | 3 | 3 | active |
 | Examples | 2026-10-10 | 2 | 1 | active |
 | Process | 2026-10-10 | 2 | 3 | active |
+| Feature interactions | 2026-10-10 | 1 | 0 | active (added 2026-10-10) |
+
+## Interaction register
+
+Where two features meet, and why. The Feature interactions lens reads this first: a justified entry is not re-proposed unless its reason stops holding; an accidental one stays here until a proposal removes it.
+
+| features | where they meet | kind | reason |
+|---|---|---|---|
+| defer, backoff, autoclose | the persisted `deferred_at` schedule and the per-worker wake | shared primitive | one schedule serves all three |
+| retry budget, breaker | `claim` raises `retry`; the drain skips the block while `store_failing` | justified | counting at claim makes a handler that crashes the worker spend its budget; a store outage must not |
+| close, drain | a reaction's close request runs after the drain's `ack` | justified | the close guard must see the requesting reaction caught up |
+| correlation lease, lanes / explicit correlate / shutdown / checkpoint | lease key includes the `onlyLanes` shard; `app.correlate()` skips the lease; shutdown hands it back last; the key selects the checkpoint row | justified | N workers otherwise read and mark every event N times (#1532) |
+| defer, retry count | an explicit defer acks with `retry: -1` | accidental, low value | a sentinel in a public port field; cheap to keep |
+| retry timing, lease | a no-backoff failure waits for the claiming drain's lease to lapse; the wake reuses the last drain's options | accidental | P2026-10-10o-2, #1875 (probed) |
+| lanes, priority | `subscribe` re-lanes on priority ≥ stored (needed so a restart applies an edited lane); correlate's bounded-memory guard re-sends the row's lane at runtime to cancel it | accidental, and a bug | P2026-10-10o-3, #1876: after eviction an equal-priority resolution moves the lane silently |
+| breaker, drain / settle | five places feed one consecutive-failure count; a success in one loop resets failures in another | accidental (probed; no documented promise broken) | P2026-10-10o-4, #1877 |
+| defer wake, breaker | the drain returns before its `try` while the breaker is open, so the wake depends on every breaker close being followed by a drain | accidental (probed; not observable today) | P2026-10-10o-1, #1874 |
 
 ## Mutation baselines
 
@@ -60,11 +77,13 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - README quickstart: use `.emit("Incremented")` like `hello.ts`, link `hello.ts` first, replace "dead-lettering" with "blocked streams", cut the 9-term "What it is" paragraph (newcomer count 22 → 20).
 - `ci-cd.yml` comments: ~100 of 158 comment lines are history; one misplaced.
 - act-http tests: drop the tRPC and Hono error tables that repeat the parity table and `api/errors.spec.ts` (~170 lines); `audit.spec.ts` collector helper and shared `meta` (~140 lines).
-- Unverified, worth a probe: with `onlyLanes` sharding, a worker refused the correlation lease may not wake when another worker marks its lane's rows.
 
 ## Self-changes
 
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
+
+- 2026-10-10 (same run, after probing): the Feature interactions lens now requires probing the interaction, the simulated fix and every cited number before ticketing. Probing turned o-3 from a refactor into a bug and showed its first fix was wrong (it broke the restart re-laning TCK case), showed o-4's fix wouldn't cover correlate, and corrected a count (9 → 7).
+- 2026-10-10 (user request): the goal is now stated as the minimum set of orthogonal features that keeps every contract row. Added: two bar items (no feature reads another's config or cancels another layer's rule; every feature serves a contract row), an audit question, the Feature interactions lens, two smells, the interaction register above, and the `core files touching 5+ features` metric (9 today). The two ticket metrics merged into one row (both 0 for three runs). Prompted by the user after #1860 and #1862, both bugs where two features met.
 
 - 2026-10-10: verified defects (a red test with a control, or a doc that contradicts the code) rank ahead of the cap; the 5–7 cap applies to simplifications. Seven undecided proposals filled the cap, and the pending rule would have pushed a reproduced bug to the backlog.
 - 2026-10-10: `metrics.sh` counts files over 300 *code* lines beside the total. 21 files exceed 300 lines, but only 8 exceed 300 code lines; `types/ports.ts` is 190 code lines and 1,237 comment lines of public docs. Whether the bar should move to code lines is the user's call.
@@ -274,3 +293,19 @@ Proposals (pending), ranked. Defects first; then the seven still-pending from 20
 - P2026-10-08d-1..d-7 (still pending, unchanged): defer timer runs the drain; fix the snippet gate and fold its workflow; dead internal state; duplicate tests; one filter helper per adapter; comment pass by category; close-cycle and event-sourcing helpers (add: `close()`'s own correlate pass repeats the catch-up `_run_close` already does, −3 lines).
 
 Tickets (user: "open tickets for all of them"): #1860 (10-10-1), #1861 (10-10-2), #1862 (d-1), #1863 (d-2), #1864 (d-3), #1865 (d-4), #1866 (d-5), #1867 (d-6, includes restating the comment bar), #1868 (d-7, includes the extra correlate in `close`).
+
+### 2026-10-10 — weekly (one lens: Feature interactions, new)
+
+Metrics unchanged from the full run earlier today, plus the new one: 9 core files touch 5+ features (`act.ts` 12, `types/ports.ts` 11, `in-memory-store.ts` 10, `drain-cycle.ts` 8, `audit.ts` 7, `types/reaction.ts`, `types/audit.ts`, `event-sourcing.ts` 6, `types/action.ts` 5).
+
+Audit: #1870, #1871, #1872 (this morning's tickets, open). #1872 added coupling (P2026-10-10o-1, and `_last_options` under o-2).
+
+Evidence: 143 fix commits in core and the SQL adapters over four months. By feature: close 16, defer 13, PII 13, lanes 12, notify 10. Of the 12 lane fixes, 7 were the lane-agreement machinery, not lanes (first count said 9; recounted when probing). Pairs: close × defer 3, notify × settle 3, breaker × settle 2, blocked × lease 2, correlate × lanes 2. The `Store` port carries the interactions: `subscribe` registers targets, raises marks, advances the checkpoint and takes the correlation lease; `claim` combines lane, priority, fairness, defer, blocked and the lease.
+
+Probed before ticketing (user: "make sure you can probe all claims"). Each has a red test and a control; o-1 and o-3 also a simulated fix.
+
+Proposals (pending), ranked, ticketed:
+- P2026-10-10o-3 → #1876 (bug). A dynamic target changes lanes mid-run once correlate's LRU evicts it: with `maxSubscribedStreams: 1`, an equal-priority resolution naming another lane moved `t` from `a` to `b` with no log (control with 1000: stays `a`, logged). The store's `≥` rule is not removable: equal priority applying the lane is how a restart picks up an edited lane (TCK case). A strict `>` fixed the probe and broke that case. Options: read the row on a guard miss (internal), an explicit "set lane" on `subscribe` (port change), or stop priority moving lanes (design). The first proposal ("lane fixed once the row exists") was wrong as stated.
+- P2026-10-10o-2 → #1875 (design question). Retry timing has two owners. On master, a no-backoff retry gap equals the claiming drain's lease (200 → ~200 ms, 800 → ~800 ms; control with backoff 100 ms: ~100 ms whatever the lease). On #1872 without `_last_options`, no-backoff retries stall after 2 attempts (a 10 s default lease), while a reaction-owned backoff keeps going.
+- P2026-10-10o-1 → #1874. While the breaker is open, the wake's drain returns before `finally`, dropping the timer for streams still parked (red: timer gone, w2 never ran once the breaker closed without a drain; control and simulated fix: both fire). Not observable today: every breaker close is followed by a drain.
+- P2026-10-10o-4 → #1877 (design question). A store whose correlate scan fails while `claim` works never opens the breaker when a `cycleMs` lane is claiming (red: `closed` after 8 failing passes; control without the lane: `open`). The proposed `DrainOps` feed would not have covered it: correlate reads outside `DrainOps`. Options: document it as a whole-store detector, a breaker per loop, or per-operation counts.

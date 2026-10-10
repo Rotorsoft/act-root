@@ -18,6 +18,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - The framework's job is narrow: express the declaration, route the data, gate the read, emit the lifecycle. Key management, encryption and compliance belong to the operator. (#566)
 - Before promoting legacy code to a port, audit what it does by accident; accidents become contract. (#1124)
 - A wakeup is a hint, never the truth: decorators that carry notifications must pass the full Store TCK unchanged. (#987)
+- A field with two owners shows up as a rule in one layer and a guard in another that cancels it, and if the guard lives in a bounded memory, eviction breaks the rule. Before removing either owner, find why each exists: the store's re-lane on equal priority is how a restart applies an edited lane. (#1876, 2026-10-10)
+- Probe every claim in a proposal, not only bug claims: of four interaction findings, one was a real bug, one proposed fix was wrong, and one count was off (9 → 7). (2026-10-10)
 - A shared lease is sound only between interchangeable workers. Anything that narrows what a worker runs (`onlyLanes`) belongs in the lease key, or the holder does work for a lane it can't drain and the lane's own worker never wakes. (2026-10-10 review)
 
 ## State and invariants
@@ -33,7 +35,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A spread followed by an explicit re-list is an allow-list in disguise; ask what the spread silently decides. (#1645)
 - A snapshot is a valid head only for the concurrency version; every domain decision must look past it. (#1356, #1374)
 - A resume-from-checkpoint read must request everything that could rebaseline it (snapshots included). (#1345)
-- A lease is mutual exclusion for one attempt; pacing across attempts is a separate, persisted schedule. Don't overload a primitive because it resembles what you need. (#1262)
+- A lease is mutual exclusion for one attempt; pacing across attempts is a separate, persisted schedule. Don't overload a primitive because it resembles what you need. (#1262; #1681 used the lease as the no-backoff retry timer, and #1872 then needed the last drain's options to keep that timing)
 - Reserve, then confirm: never record success on acquisition. (#1193)
 - A guard only holds if every path goes through it; a call site that reaches around a helper opts out of its invariant. (#1293)
 - When two steps share a precondition and one consumes it, the consumer goes last. (#1296)
