@@ -312,6 +312,8 @@ const tenantApp = act()
   });
 ```
 
+The bag takes `store` and `cache` together: the cache is keyed by stream name, so one cache shared by two stores would mix their streams.
+
 The framework threads the bag through `AsyncLocalStorage` and wraps every public Act method (`do`, `load`, `query`, `drain`, `settle`, `close`, ...) so internal `store()`/`cache()` calls resolve to the scoped ports transparently. Adapters are unchanged. Both `store` and `cache` are required together — sharing a single cache across two distinct stores would collide on stream-keyed entries.
 
 ### One store, one application

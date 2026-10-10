@@ -169,7 +169,7 @@ it("should enforce business rules", async () => {
 
 ## Testing Reactions and Projections
 
-Reactions don't run as part of `app.do()` — they're processed by `drain()` after the orchestrator has discovered new target streams via `correlate()`. The two are explicit in tests so the test controls exactly when reactions fire.
+Reactions don't run as part of `app.do()` — they're processed by `drain()` after the orchestrator has discovered new target streams via `correlate()`. The two are explicit in tests so the test controls exactly when reactions fire. The pair is required, not a style choice: `drain()` claims only streams that `correlate()` has marked, so a bare `drain()` after a commit finds nothing.
 
 ```typescript no-check
 it("should process reactions", async () => {
