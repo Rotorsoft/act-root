@@ -127,9 +127,9 @@ describe("defer outcome (integration)", () => {
   });
 
   it("keeps the wake for parked streams when it fires while the breaker is open", async () => {
-    // The wake's drain skips the store while the breaker is open, but still
-    // re-aims the timer, so w2 fires once the store recovers even when
-    // nothing drains in between.
+    // w1's wake fires while the breaker is open, so its drain skips the
+    // store. Nothing is lost: the breaker's own wake settles after the
+    // cooldown, that drain runs w1 and re-aims the wake for w2.
     const ran: string[] = [];
     const app = act()
       .withState(counter)
@@ -141,7 +141,7 @@ describe("defer outcome (integration)", () => {
         ran.push(e.stream);
       })
       .to((e) => ({ target: `remind-${e.stream}` }))
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
+      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 120 } });
     app.on("error", () => {});
     await app.do("tick", { stream: "w1", actor }, {});
     await app.do("tick", { stream: "w2", actor }, {});
@@ -150,14 +150,69 @@ describe("defer outcome (integration)", () => {
 
     const breaker = (
       app as unknown as {
-        _breaker: { failed(at: number, error: unknown): void; passed(): void };
+        _breaker: { failed(at: number, error: unknown): void };
       }
     )._breaker;
     breaker.failed(Date.now(), new Error("store down"));
     await sleep(100); // w1's wake fired while open
-    breaker.passed(); // recovered through a path that does not drain
-    await sleep(300); // past w2's due-time
-    expect(ran).toContain("w2");
+    expect(ran).toEqual([]);
+    await vi.waitFor(() => expect(ran).toEqual(["w1", "w2"]), {
+      timeout: 1000,
+    });
+  });
+
+  describe("a wake that lands while another drain is running", () => {
+    it("still runs the stream that came due", async () => {
+      // b comes due while a slow drain of a holds the lock, so the wake's
+      // own drain returns at once. b must still run without a new commit.
+      const ran: string[] = [];
+      const until = Date.now() + 100;
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(async function slow(e) {
+          if (e.stream === "b" && Date.now() < until)
+            throw new DeferSignal({ at: new Date(until) });
+          if (e.stream === "a") await sleep(300);
+          ran.push(e.stream);
+        })
+        .to((e) => ({ target: `t-${e.stream}` }))
+        .build();
+      await app.do("tick", { stream: "b", actor }, {});
+      await app.correlate();
+      await app.drain(); // b parked until +100
+      await app.do("tick", { stream: "a", actor }, {});
+      await app.correlate();
+      const running = app.drain(); // still running at b's due-time
+      await vi.waitFor(() => expect(ran).toEqual(["a", "b"]), {
+        timeout: 1500,
+      });
+      await running;
+    });
+
+    it("control — runs it when no drain is running", async () => {
+      const ran: string[] = [];
+      const until = Date.now() + 100;
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(async function quick(e) {
+          if (e.stream === "b" && Date.now() < until)
+            throw new DeferSignal({ at: new Date(until) });
+          ran.push(e.stream);
+        })
+        .to((e) => ({ target: `t-${e.stream}` }))
+        .build();
+      await app.do("tick", { stream: "b", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await app.do("tick", { stream: "a", actor }, {});
+      await app.correlate();
+      await app.drain();
+      await vi.waitFor(() => expect(ran).toEqual(["a", "b"]), {
+        timeout: 1500,
+      });
+    });
   });
 
   it("re-runs a sibling that shares the deferred reaction's target, but not an isolated one", async () => {
