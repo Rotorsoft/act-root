@@ -67,7 +67,7 @@ describe("NonRetryableError (drain integration)", () => {
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
 
-    const drained = await app.drain({ leaseMillis: 1 });
+    const drained = await app.drain();
     expect(attempts).toBe(1);
     expect(drained.blocked.length).toBe(1);
     expect(drained.blocked[0].error).toContain("permanent input");
@@ -100,7 +100,7 @@ describe("NonRetryableError (drain integration)", () => {
 
     // First drain — first attempt throws NonRetryable, but blockOnError:false
     // means the wake keeps retrying until the handler succeeds.
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
     await sleep(30);
     expect(attempts).toBe(3);
@@ -130,13 +130,13 @@ describe("NonRetryableError (drain integration)", () => {
 
     // Plain Error → drain retries up to maxRetries; only blocks when
     // retry >= maxRetries. Three drains exhaust the budget.
-    const r1 = await app.drain({ leaseMillis: 1 });
+    const r1 = await app.drain();
     expect(attempts).toBe(1);
     expect(r1.blocked.length).toBe(0);
-    const r2 = await app.drain({ leaseMillis: 1 });
+    const r2 = await app.drain();
     expect(attempts).toBe(2);
     expect(r2.blocked.length).toBe(0);
-    const r3 = await app.drain({ leaseMillis: 1 });
+    const r3 = await app.drain();
     expect(attempts).toBe(3);
     expect(r3.blocked.length).toBe(1);
   });
@@ -161,14 +161,14 @@ describe("NonRetryableError (drain integration)", () => {
     await app.do("tick", { stream: "s4", actor }, {});
     await app.correlate();
 
-    const drained = await app.drain({ leaseMillis: 1 });
+    const drained = await app.drain();
     expect(attempts).toBe(1);
     expect(drained.blocked.length).toBe(1);
 
     // A second drain shortly after must not re-attempt — the stream is
     // already blocked, not deferred.
     await sleep(5);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
   });
 
@@ -189,7 +189,7 @@ describe("NonRetryableError (drain integration)", () => {
     await app.do("tick", { stream: "s5", actor }, {});
     await app.correlate();
 
-    const drained = await app.drain({ leaseMillis: 1 });
+    const drained = await app.drain();
     expect(calls).toBe(1);
     expect(drained.blocked.length).toBe(1);
   });
@@ -213,12 +213,12 @@ describe("NonRetryableError (drain integration)", () => {
     await app.correlate();
 
     // First drain — fails permanently, stream blocks.
-    const blockedRes = await app.drain({ leaseMillis: 1 });
+    const blockedRes = await app.drain();
     expect(attempts).toBe(1);
     expect(blockedRes.blocked.length).toBe(1);
 
     // Further drains don't re-attempt — stream is blocked.
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // Operator fixes the underlying issue, then unblocks.
@@ -227,7 +227,7 @@ describe("NonRetryableError (drain integration)", () => {
     expect(unblocked).toBe(1);
 
     // Next drain re-attempts at the same event (no replay from zero).
-    const okRes = await app.drain({ leaseMillis: 1 });
+    const okRes = await app.drain();
     expect(attempts).toBe(2);
     expect(okRes.acked.length).toBe(1);
   });
@@ -241,7 +241,7 @@ describe("NonRetryableError (drain integration)", () => {
 
     await app.do("tick", { stream: "s7", actor }, {});
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
 
     expect(await app.unblock(["s7"])).toBe(0);
     expect(await app.unblock(["unknown-stream"])).toBe(0);
@@ -265,7 +265,7 @@ describe("NonRetryableError (drain integration)", () => {
       await app.do("tick", { stream, actor }, {});
     }
     await app.correlate();
-    const blocked = await app.drain({ leaseMillis: 1 });
+    const blocked = await app.drain();
     expect(blocked.blocked.length).toBe(3);
 
     // Operator confirms the bug is fixed.
@@ -276,7 +276,7 @@ describe("NonRetryableError (drain integration)", () => {
     expect(unblocked).toBe(3);
 
     // Next drain succeeds for all three.
-    const ok = await app.drain({ leaseMillis: 1 });
+    const ok = await app.drain();
     expect(ok.acked.length).toBe(3);
     expect(ok.blocked.length).toBe(0);
   });
@@ -301,7 +301,7 @@ describe("NonRetryableError (drain integration)", () => {
       await app.do("tick", { stream, actor }, {});
     }
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
 
     const blocked = await app.blocked_streams();
     expect(blocked.length).toBe(2);
@@ -344,7 +344,7 @@ describe("NonRetryableError (drain integration)", () => {
     await app.do("tick", { stream: "partial-1", actor }, {});
     await app.correlate();
 
-    const drained = await app.drain({ leaseMillis: 1 });
+    const drained = await app.drain();
     // Lands in BOTH: the watermark advanced past the succeeded prefix AND the
     // stream is blocked in the same cycle.
     expect(drained.acked.length).toBe(1);
@@ -354,7 +354,7 @@ describe("NonRetryableError (drain integration)", () => {
 
     // The stream is blocked, so a second drain never re-invokes the
     // permanently-failed handler on the tail event.
-    const again = await app.drain({ leaseMillis: 1 });
+    const again = await app.drain();
     expect(again.blocked.length).toBe(0);
     expect(attempts).toBe(1);
     expect((await app.blocked_streams()).map((p) => p.stream)).toEqual([

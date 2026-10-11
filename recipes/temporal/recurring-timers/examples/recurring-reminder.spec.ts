@@ -27,7 +27,7 @@ describe("recurring reminder timer recipe", () => {
     await startReminders(app, "t1");
     for (let i = 0; i < 8; i++) {
       await app.correlate();
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       await sleep(STEP + 20);
     }
 
@@ -69,7 +69,7 @@ describe("recurring reminder timer recipe", () => {
     await startReminders(app, "t3");
     for (let i = 0; i < 10; i++) {
       await app.correlate();
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       await sleep(STEP + 20);
       if (!blip && !jumped) {
         jumped = true;
@@ -101,7 +101,7 @@ describe("recurring reminder timer recipe", () => {
     await startReminders(app, "t2");
     for (let i = 0; i < 8; i++) {
       await app.correlate();
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       await sleep(STEP + 20);
     }
 

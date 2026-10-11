@@ -244,7 +244,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       armed.on = true;
       for (let i = 0; i < 6; i++) {
         await app.correlate();
-        await app.drain({ leaseMillis: 1 });
+        await app.drain();
         vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       const blocked = await app.blocked_streams();
@@ -259,7 +259,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       armed.on = true;
       for (let i = 0; i < 6; i++) {
         await app.correlate();
-        await app.drain({ leaseMillis: 1 });
+        await app.drain();
         vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       expect(await app.blocked_streams()).toEqual([]);
@@ -280,7 +280,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       armed.on = true;
       for (let i = 0; i < 6; i++) {
         await app.correlate();
-        await app.drain({ leaseMillis: 1 });
+        await app.drain();
         vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       expect(await app.blocked_streams()).toEqual([]);
@@ -288,7 +288,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       failing = false;
       for (let i = 0; i < 6; i++) {
         await app.correlate();
-        await app.drain({ leaseMillis: 1 });
+        await app.drain();
         vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       }
       expect((await app.blocked_streams()).map((b) => b.stream)).toEqual([

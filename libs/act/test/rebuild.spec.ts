@@ -103,7 +103,7 @@ describe("Store.reset", () => {
 
     // Drain until blocked (max retries = 3)
     for (let i = 0; i < 5; i++) {
-      await app.drain({ eventLimit: 100, leaseMillis: 1 });
+      await app.drain({ eventLimit: 100 });
       await new Promise((r) => setTimeout(r, 5));
     }
 

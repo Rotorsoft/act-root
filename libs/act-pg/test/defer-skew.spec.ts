@@ -39,7 +39,7 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
     const ran: string[] = [];
     const app = act()
       .withState(S)
-      .withLane({ name: "l", cycleMs: 200, leaseMillis: 1 })
+      .withLane({ name: "l", cycleMs: 200 })
       .on("Pinged")
       .defer((e) => ({ at: new Date(e.created.getTime() + 2_000) }))
       .do(async function r(e) {
@@ -61,7 +61,7 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
     let attempts = 0;
     const app = act()
       .withState(S)
-      .withLane({ name: "l", cycleMs: 200, leaseMillis: 1 })
+      .withLane({ name: "l", cycleMs: 200 })
       .on("Pinged")
       .do(
         async function r() {

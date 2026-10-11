@@ -91,7 +91,7 @@ describe("act", () => {
     // should drain the first two events...  third event should throw and stop drain
     // The handled prefix lands with the retry schedule, so it is not
     // reported as acked; the watermark shows it.
-    let drained = await app.drain({ leaseMillis: 1 });
+    let drained = await app.drain();
     expect(drained.acked.length).toBe(0);
     let at: number | undefined;
     await store().query_streams((p) => {
@@ -103,14 +103,14 @@ describe("act", () => {
 
     // second attempt (first retry)
     past_backoff();
-    drained = await app.drain({ leaseMillis: 1 });
+    drained = await app.drain();
     expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
     // third attempt (second retry) - the handled prefix did not refill the
     // budget, so maxRetries: 2 blocks here
     past_backoff();
-    drained = await app.drain({ leaseMillis: 1 });
+    drained = await app.drain();
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(1);
     expect(onDecremented).toHaveBeenCalledTimes(3);
@@ -261,7 +261,7 @@ describe("act", () => {
     await app.do("increment", { stream: "ratio-test", actor }, {});
     await app.correlate();
     // streamLimit 1 → one lagging slot, no leading slot
-    const drained = await app.drain({ streamLimit: 1, leaseMillis: 1 });
+    const drained = await app.drain({ streamLimit: 1 });
     expect(drained.fetched.length).toBeLessThanOrEqual(1);
   });
 

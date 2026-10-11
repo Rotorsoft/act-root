@@ -44,11 +44,11 @@ describe("declarative .defer(when)", () => {
 
     await app.do("tick", { stream: "d1", actor }, {});
     await app.correlate();
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(ran).toBe(0); // held before the handler ran
     expect(first.acked.length).toBe(0);
     // still deferred on the next pass
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(ran).toBe(0);
   });
 
@@ -65,7 +65,7 @@ describe("declarative .defer(when)", () => {
 
     await app.do("tick", { stream: "dh1", actor }, {});
     await app.correlate();
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(ran).toBe(0); // ~26h out, held
     expect(first.acked.length).toBe(0);
   });
@@ -87,7 +87,7 @@ describe("declarative .defer(when)", () => {
 
     await app.do("enqueue", { stream: "j1", actor }, { delayMs: 100 });
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(ran).toBe(0); // deferred by the payload-derived delay
 
     // The local wake runs the drain at the due-time.
@@ -110,7 +110,7 @@ describe("declarative .defer(when)", () => {
 
     await app.do("tick", { stream: "now1", actor }, {});
     await app.correlate();
-    const done = await app.drain({ leaseMillis: 1 });
+    const done = await app.drain();
     expect(ran).toBe(1);
     expect(done.acked.some((l) => l.stream === "now1")).toBe(true);
   });
@@ -129,7 +129,7 @@ describe("declarative .defer(when)", () => {
 
     await app.do("tick", { stream: "r1", actor }, {});
     await app.correlate();
-    const done = await app.drain({ leaseMillis: 1 });
+    const done = await app.drain();
     expect(ran).toBe(1);
     // ran on the routed target, not the source stream
     expect(done.acked.some((l) => l.stream === "counter-deadlines")).toBe(true);
@@ -169,7 +169,7 @@ describe("declarative .defer(when)", () => {
     await app.correlate();
     // The wrapper resolves the schedule on delivery; a bad shape fails the
     // reaction (blockOnError defaults on), so nothing is acked.
-    const res = await app.drain({ leaseMillis: 1 });
+    const res = await app.drain();
     expect(res.acked.length).toBe(0);
   });
 
@@ -187,7 +187,7 @@ describe("declarative .defer(when)", () => {
     const app = act().withSlice(s).build();
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(ran).toBe(0);
     expect(first.acked.length).toBe(0);
   });

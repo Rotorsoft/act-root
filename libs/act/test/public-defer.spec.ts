@@ -47,7 +47,7 @@ describe("imperative DeferSignal(when)", () => {
 
     await app.do("tick", { stream: "at1", actor }, {});
     await app.correlate();
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(attempts).toBe(1);
     expect(first.acked.length).toBe(0); // deferred, not acked
 
@@ -72,7 +72,7 @@ describe("imperative DeferSignal(when)", () => {
 
     await app.do("tick", { stream: "atfn1", actor }, {});
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     await sleep(140);
@@ -93,11 +93,11 @@ describe("imperative DeferSignal(when)", () => {
 
     await app.do("tick", { stream: "after1", actor }, {});
     await app.correlate();
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(attempts).toBe(1);
     expect(first.acked.length).toBe(0); // deferred 30m out, not acked
     // still deferred right after
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
   });
 });

@@ -153,16 +153,16 @@ describe("pg store", () => {
       // `Date` is faked, so timers and the database keep real time).
       vi.useFakeTimers({ toFake: ["Date"] });
       const past_backoff = () => vi.setSystemTime(Date.now() + 10_001);
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       expect(onDecremented).toHaveBeenCalledTimes(1);
 
       past_backoff();
-      drained = await app.drain({ leaseMillis: 1 });
+      drained = await app.drain();
       expect(drained.acked.length).toBe(0);
       expect(onDecremented).toHaveBeenCalledTimes(2);
 
       past_backoff();
-      drained = await app.drain({ leaseMillis: 1 });
+      drained = await app.drain();
       expect(drained.acked.length).toBe(0);
       expect(drained.blocked.length).toBe(1);
       expect(onDecremented).toHaveBeenCalledTimes(3);

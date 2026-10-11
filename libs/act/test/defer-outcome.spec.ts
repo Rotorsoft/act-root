@@ -76,14 +76,14 @@ describe("defer outcome (integration)", () => {
     await app.correlate();
 
     // First drain: handler defers — no ack, watermark held.
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(attempts).toBe(1);
     expect(first.acked.length).toBe(0);
     expect(first.blocked.length).toBe(0);
 
     // Before the due-time: the stream is skipped, handler is not re-run.
     await sleep(20);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // After the due-time: the wake redelivers, the handler succeeds, acked.
@@ -113,7 +113,7 @@ describe("defer outcome (integration)", () => {
     await w1.do("tick", { stream: "w1", actor }, {});
     await w1.do("tick", { stream: "w2", actor }, {});
     await w1.correlate();
-    await w1.drain({ leaseMillis: 1 }); // both parked
+    await w1.drain(); // both parked
     expect(ran).toEqual([]);
 
     const claim = vi.spyOn(store(), "claim");
@@ -237,7 +237,7 @@ describe("defer outcome (integration)", () => {
       await app.do("tick", { stream: isolate ? "iso" : "shared", actor }, {});
       for (let i = 0; i < 4; i++) {
         await app.correlate();
-        await app.drain({ leaseMillis: 1 });
+        await app.drain();
         await sleep(50);
       }
       await dispose()();
@@ -268,7 +268,7 @@ describe("defer outcome (integration)", () => {
     await app.correlate();
 
     // Both streams defer in the same cycle, sharing the due-time.
-    const first = await app.drain({ leaseMillis: 1 });
+    const first = await app.drain();
     expect(seen.has("g1") && seen.has("g2")).toBe(true);
     expect(first.acked.length).toBe(0);
 

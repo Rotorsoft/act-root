@@ -77,7 +77,7 @@ describe("intra-event ack across co-targeted reactions", () => {
 
     // First pass: reaction 1 succeeds, reaction 2 throws — the event's
     // group is incomplete, so nothing is acked and the watermark holds.
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(first_calls).toHaveLength(1);
     expect(second_attempts).toBe(1);
     expect((await watermark("co-target-1")).at).toBe(-1);
@@ -85,14 +85,14 @@ describe("intra-event ack across co-targeted reactions", () => {
     // Redelivery re-runs the WHOLE group — at-least-once means the
     // already-succeeded reaction runs again.
     await sleep(5);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(first_calls).toHaveLength(2);
     expect(second_attempts).toBe(2);
 
     // Retry budget exhausted (maxRetries: 1) — the stream blocks with
     // the watermark still before the event; nothing was silently lost.
     await sleep(5);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     const { at, blocked } = await watermark("co-target-1");
     expect(blocked).toBe(true);
     expect(at).toBe(-1);
@@ -129,7 +129,7 @@ describe("intra-event ack across co-targeted reactions", () => {
 
     await app.do("tick", { stream: "i2", actor }, { by: 1 });
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect((await watermark("co-target-2")).at).toBe(-1);
 
     // The wake retries once the 1ms lease lapses.
@@ -164,7 +164,7 @@ describe("intra-event ack across co-targeted reactions", () => {
     await app.do("tick", { stream: "i3", actor }, { by: 1 });
     await app.do("tick", { stream: "i3", actor }, { by: 1 });
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
 
     const events = await app.query_array({ stream: "i3", stream_exact: true });
     // Event 1's group completed — acked. Event 2's group failed midway —

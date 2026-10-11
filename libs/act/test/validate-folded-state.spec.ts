@@ -135,7 +135,7 @@ describe("validateFoldedState", () => {
     // throws exhaust the retry budget and the stream lands blocked.
     vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 10; i++) {
-      const d = await app.drain({ leaseMillis: 1, eventLimit: 1_000 });
+      const d = await app.drain({ eventLimit: 1_000 });
       vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       if (
         d.acked.length === 0 &&
