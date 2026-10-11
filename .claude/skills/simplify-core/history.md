@@ -351,3 +351,4 @@ Proposals (pending), ranked. Defects first:
 - P2026-10-11c-2/3. Merge `shutdown-grace` + `shutdown-settle` (one `park(kind)` helper, the four `< 50 ms` checks become gate-based; ~−80) and the four target-ownership specs (~−120, 3 files); test names kept, rows change only their file cell.
 - P2026-10-11d-2. Move `node-compat` (Node 22 + 24) to the weekly conformance workflow: 3 failures in 100 runs, none `ci` missed; ~4 runner-minutes per run. Only 5 days of history.
 
+Tickets (user: "open tickets for all of them, and take care of the regression in master"): #1889 (b-1, fixed in #1891), #1890 (a-1), #1882 (a-3 + b-2 + b-4), #1883 (d-1), #1884 (c-1), #1885 (b-3), #1886 (a-4 + a-2), #1887 (c-2 + c-3), #1888 (d-2).
