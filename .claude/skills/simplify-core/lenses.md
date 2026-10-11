@@ -50,7 +50,7 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **One source of truth.** Find behaviors described in several places (docs pages, package READMEs, recipes, `CLAUDE.md`, code comments) with differing wording. One page owns each; the rest link to it. `CLAUDE.md` should be the short index it says it is.
 
-**Examples.** Do the examples in `packages/` and the docs show the simple path first, compile against today's API, and use the fewest concepts they can? An example that needs a paragraph of caveats means the API is too complicated. Include the code the `scaffold-act-app` skill writes into new apps and the `@example` blocks in public doc comments: no check compiles either, so they drift unseen.
+**Examples.** Do the examples in `packages/` and the docs show the simple path first, compile against today's API, and use the fewest concepts they can? An example that needs a paragraph of caveats means the API is too complicated. Include the code the `scaffold-act-app` skill writes into new apps, the `@example` blocks in public doc comments, and the runnable `recipes/**/examples/*.ts` (run them with `npx tsx` and compare with their README): no check compiles or runs any of these, so they drift unseen.
 
 ## Process
 
@@ -74,3 +74,4 @@ Check for these by name; the retrospective adds recurring rejection reasons here
 - A check that has never failed, including its self-test: plant the error and assert that exact error comes back.
 - A feature that reads another feature's configuration to decide its own behavior (retry timing from the lease length, a stream's lane from its priority, a lease key from the lane set). Each is an edge in the interaction matrix; give the fact one owner.
 - A rule in the store and a guard in the orchestrator that cancels it (or the reverse): two owners for one field.
+- A schedule entry removed before the work it schedules is done (the defer timer dropped due streams before its drain ran). Remove it only once a pass that started after it came due finds nothing.
