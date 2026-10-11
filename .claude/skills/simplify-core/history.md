@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-10-10 | 2 | 0 | active (finding: four published exports tagged @internal) |
-| Dead code (tool) | 2026-10-08 | 2 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
-| Hotspots (tool) | 2026-10-08 | 2 | 1 | active |
+| Dead code (tool) | 2026-10-11 | 3 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
+| Hotspots (tool) | 2026-10-11 | 3 | 1 | active |
 | File budget | 2026-10-10 | 3 | 1 | active (counts code lines now; most long files are doc comments) |
 | Comment noise | 2026-10-08 | 2 | 2 | active (25% bar unreachable while public type docs stay; see P2026-10-08d-6) |
-| Concepts and options | 2026-10-08 | 2 | 1 | active (found the defer wake bug) |
+| Concepts and options | 2026-10-11 | 3 | 1 | active (found the defer wake bug) |
 | Core or decorator? | 2026-10-10 | 2 | 0 | active (audit, breaker, lanes stay; priority is a design question for a major) |
-| DRY across adapters and builders | 2026-10-08 | 2 | 1 | active |
+| DRY across adapters and builders | 2026-10-11 | 3 | 1 | active |
 | Reading path | 2026-10-10 | 2 | 1 | active (found the onlyLanes lease bug) |
 | Newcomer test (quarterly) | 2026-10-08 | 1 | 0 | active (baseline: 22 concepts, 3 imports) |
-| Tests by concept | 2026-10-08 | 2 | 3 | active |
+| Tests by concept | 2026-10-11 | 3 | 3 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-10 | 3 | 0 | active (no removal; act-tck release churn found) |
-| Infra | 2026-10-08 | 2 | 1 | active (found the no-op snippet gate) |
+| Infra | 2026-10-11 | 3 | 1 | active (found the no-op snippet gate) |
 | One source of truth | 2026-10-10 | 3 | 3 | active |
 | Examples | 2026-10-10 | 2 | 1 | active |
 | Process | 2026-10-10 | 2 | 3 | active |
-| Feature interactions | 2026-10-10 | 1 | 0 | active (added 2026-10-10) |
+| Feature interactions | 2026-10-10 | 1 | 3 | active (added 2026-10-10; o-1, o-2, o-3 accepted) |
 
 ## Interaction register
 
@@ -38,10 +38,12 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | close, drain | a reaction's close request runs after the drain's `ack` | justified | the close guard must see the requesting reaction caught up |
 | correlation lease, lanes / explicit correlate / shutdown / checkpoint | lease key includes the `onlyLanes` shard; `app.correlate()` skips the lease; shutdown hands it back last; the key selects the checkpoint row | justified | N workers otherwise read and mark every event N times (#1532) |
 | defer, retry count | an explicit defer acks with `retry: -1` | accidental, low value | a sentinel in a public port field; cheap to keep |
-| retry timing, lease | a no-backoff failure waits for the claiming drain's lease to lapse; the wake reuses the last drain's options | accidental | P2026-10-10o-2, #1875 (probed) |
-| lanes, priority | `subscribe` re-lanes on priority ≥ stored (needed so a restart applies an edited lane); correlate's bounded-memory guard re-sends the row's lane at runtime to cancel it | accidental, and a bug | P2026-10-10o-3, #1876: after eviction an equal-priority resolution moves the lane silently |
+| retry timing, lease | removed by #1872: every retry is paced by the reaction's backoff (default fixed 10 s); the lease only keeps workers apart | resolved | P2026-10-10o-2, #1875 |
+| lanes, priority | `subscribe` re-lanes on priority ≥ stored (how a restart applies an edited declared lane); correlate reads the row when it has no record, so the row owns a dynamic target's lane and the LRU only caches it | justified once #1878 merges | P2026-10-10o-3, #1876; the coupling itself goes only if priority does (major-version question) |
 | breaker, drain / settle | five places feed one consecutive-failure count; a success in one loop resets failures in another | accidental (probed; no documented promise broken) | P2026-10-10o-4, #1877 |
-| defer wake, breaker | the drain returns before its `try` while the breaker is open, so the wake depends on every breaker close being followed by a drain | accidental (probed; not observable today) | P2026-10-10o-1, #1874 |
+| defer wake, breaker | fixed by #1872: the breaker check sits inside the drain's `try`, so `finally` re-aims the wake | resolved | P2026-10-10o-1, #1874 |
+| defer wake, drain lock / streamLimit | the timer drops every due entry before its one bounded drain runs; a drain already in flight, or more due streams than `streamLimit`, strands the rest until a commit | accidental, and a bug | P2026-10-11a-1 (probed: 1 of 2 and 10 of 15 ran; controls ran all) |
+| lease, lanes | background drains (wake, settle, `cycleMs`, `start_correlations`) claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call, and the default lane can't be configured | justified, under-documented | P2026-10-11b-2 |
 
 ## Mutation baselines
 
@@ -71,15 +73,21 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Four published exports are tagged `@internal` (`default_scope`, `ExitCodes`, `PackageSchema`, `pii_fields`; the last was made public on purpose by RFC 1228). Remove the wrong tag, record the other three in STABILITY.md as published-but-not-for-use. `export *` over `ports.ts`, `utils.ts`, `config.ts` publishes anything added there without an RFC.
 - act-tck README and tck-conformance.md hand-copy stale peer versions (vitest >=3.0.9, zod ^4.4.3) and carry history banners.
 - Design finding, no action: every runnable example needs `app.on("committed", () => app.settle())` (~10 copies, each with a caveat); worth asking whether that should be a default.
-- Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question.
+- Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question. 2026-10-11: Marten (per shard), Axon (per processor/segment), Kurrent (per group) and Emmett (per processor) all answer "a slow reaction must not block a fast one" with separate processors and none orders claims by priority; priority touches 13 source and 26 test files, and dropping it also drops the lane/priority coupling behind #1599 and #1876.
 - Drop the in-memory core perf gate from CI (0 failures in 400 runs; its baseline was never made on CI hardware; pg and sqlite gates stay): −2 steps, 3 files (~390 lines).
 - Delete `BENCH.md` (lists 25 of 50 bench files; claims scenario benches run on every PR): −85 lines.
 - README quickstart: use `.emit("Incremented")` like `hello.ts`, link `hello.ts` first, replace "dead-lettering" with "blocked streams", cut the 9-term "What it is" paragraph (newcomer count 22 → 20).
 - `ci-cd.yml` comments: ~100 of 158 comment lines are history; one misplaced.
 - act-http tests: drop the tRPC and Hono error tables that repeat the parity table and `api/errors.spec.ts` (~170 lines); `audit.spec.ts` collector helper and shared `meta` (~140 lines).
 
+- Tests: replace `sleep`-then-`expect` with `vi.waitFor` (~18 sites; thin margins in public-defer, backoff, intra-event-ack) and drop the two hand-written `until` helpers; `action-retry` asserts `elapsed < 50`. (P2026-10-11c-4)
+- act-pg / act-sqlite `pii-encryption.spec.ts` run the same 9 cases (~238 shared lines): delete the sqlite `query_stats` duplicate of a TCK case now; moving the rest into a TCK capability adds act-tck surface and needs an RFC (~−400 net, unprobed). (P2026-10-11c-5)
+- PostgresStore `commit`'s single-event SQL fork (4 statement variants → 2) if a CI bench shows it doesn't pay; `commit` is the most-changed function in the most-changed adapter. (P2026-10-11a-5)
+- Delete the renovate rule guarding a `pnpm.overrides` block that doesn't exist (`jq .pnpm package.json` → null; −6 lines). (P2026-10-11d-3)
+
 ## Self-changes
 
+- 2026-10-11: step 2 now asks, for a PR that changed a default or a timing, to grep docs, recipes and examples for the old behavior and run the recipes it touches; the Examples lens covers `recipes/**/examples/*.ts`; one smell added (a schedule entry removed before its work is done). #1872 changed retry timing and this run found three things it missed: the Prometheus recipe no longer blocks its poison stream (probed against the commit before), four doc and comment passages still describe lease-paced retries, and the defer timer drops due streams before its drain runs (probed).
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
 
 - 2026-10-10 (same run, after probing): the Feature interactions lens now requires probing the interaction, the simulated fix and every cited number before ticketing. Probing turned o-3 from a refactor into a bug and showed its first fix was wrong (it broke the restart re-laning TCK case), showed o-4's fix wouldn't cover correlate, and corrected a count (9 → 7).
@@ -309,3 +317,37 @@ Proposals (pending), ranked, ticketed:
 - P2026-10-10o-2 → #1875 (design question). Retry timing has two owners. On master, a no-backoff retry gap equals the claiming drain's lease (200 → ~200 ms, 800 → ~800 ms; control with backoff 100 ms: ~100 ms whatever the lease). On #1872 without `_last_options`, no-backoff retries stall after 2 attempts (a 10 s default lease), while a reaction-owned backoff keeps going.
 - P2026-10-10o-1 → #1874. While the breaker is open, the wake's drain returns before `finally`, dropping the timer for streams still parked (red: timer gone, w2 never ran once the breaker closed without a drain; control and simulated fix: both fire). Not observable today: every breaker close is followed by a drain.
 - P2026-10-10o-4 → #1877 (design question). A store whose correlate scan fails while `claim` works never opens the breaker when a `cycleMs` lane is claiming (red: `closed` after 8 failing passes; control without the lane: `open`). The proposed `DrainOps` feed would not have covered it: correlate reads outside `DrainOps`. Options: document it as a whole-store detector, a breaker per loop, or per-operation counts.
+
+### 2026-10-11 — full run (four specialists: dead code + hotspots, concepts and options + DRY, tests by concept, infra + field)
+
+| metric | 2026-10-10 | now | why |
+|---|---|---|---|
+| core lines | 20280 | 20293 | #1871 +18 (shard lease key, mostly doc comments), #1872 −5 |
+| spec files / test lines | 231 / 59968 | 231 / 60166 | #1871, #1872 (default-backoff tests replaced lease-timing tests) |
+| CI workflows / lines | 6 / 919 | 5 / 874 | #1870 folded `docs-snippets.yml` |
+| docs lines / CLAUDE.md | 9402 / 36.8 KB | 9408 / 36 KB | |
+| everything else | | unchanged | 54 exports, 8 / 20 methods, 18 Store methods, 14 ActOptions, 9 files touching 5+ features |
+
+Open PRs not yet in these numbers: #1878, #1879 (~−600 test lines), #1880 (~−480 doc lines).
+
+Audit: #1871, #1872, #1873 merged. #1872 (a fix on #1681's lease-timed retry) removed an interaction (`_last_options`) but this run found three things it missed, all ranked first below. #1878 (open) moves a dynamic target's lane to the store row; correlate's LRU only caches it.
+
+Decisions on P2026-10-10o-1..4: o-1 accepted (#1874, shipped in #1872); o-2 accepted (#1875, shipped in #1872, default 10 s fixed); o-3 accepted (#1876, option 1, PR #1878); o-4 pending (#1877). Earlier tickets: #1860, #1862, #1863 shipped; #1861, #1865 in PRs #1880, #1879; #1864, #1866, #1867, #1868 accepted, deferred by the user ("leave refactors for later").
+
+Promises kept: #1870 promised −1 workflow and ~54 lines, delivered −1 and −40. #1871 promised ~3 lines and added 18 (doc comments and threading the shard through; estimate the comments too). #1872 shrank source by 5 lines; tests grew 115.
+
+Verified in the main loop before ranking: the Prometheus recipe reports `act_streams_blocked 0` on master and `1` on the commit before #1872 (a worktree at 2c2557190); the defer wake loses parked streams (red: a wake during an in-flight drain ran 1 of 2 streams, a wake with 15 due streams ran 10; controls with a fast handler and 5 streams ran all); `error-handling.md:297`, `concurrency-model.md:145` and the `next_attempt_at` comment still describe lease-paced retries; ci-cd's `on.paths` lists omit `behavior-contracts.md` and `scripts/check-contracts.mjs`, which its `changes` filter includes. Checked and downgraded: background drains claim with the lane's lease, not a per-call `leaseMillis` (`[60000, 10000]` on master), but the commit before #1872 never drained from the wake at all, so this is a doc gap, not a regression.
+
+Field: none of Marten, Axon, Kurrent or Emmett orders claims across streams by priority; all use separate processors (Act's lanes). None has a store-level breaker; Axon, Marten and Emmett retry per processor or per operation. Act's 10 s default matches Kurrent's message timeout. Sources in the specialist notes (Marten async daemon and retries docs, AxonIQ 4.6 fault-tolerant processors, Kurrent persistent subscriptions).
+
+Proposals (pending), ranked. Defects first:
+- P2026-10-11a-1. Fix the defer wake (bug, #1872 incomplete): drop a due entry only after a pass that started after it came due claims nothing, and let the wake loop until a pass makes no progress (route it through `settle`, as the breaker's `on_retry` already does). The two probes become tests; the "fires at its due-time on an idle app" row gains them. The fix is reasoned, not yet probed.
+- P2026-10-11b-1. Fix the Prometheus recipe (regression from #1872): give `fulfill` a short backoff, loop until the `blocked` event, drop `leaseMillis: 1` and its comment.
+- P2026-10-11a-3. Fix prose that contradicts the code: `error-handling.md:297`, `concurrency-model.md:145`, the `next_attempt_at` and `DEFAULT_BACKOFF` comments; spell the fetch-failure delay through `compute_backoff_delay` (one spelling); the pg and in-memory `query_stats` comments describe filters the signature excludes. With it, b-2: say a per-call `leaseMillis` covers one call and a slow handler belongs on a named lane, and fix `budget_exhausted`'s advice. User call inside it: allow `withLane({ name: "default", leaseMillis })` (−2 lines).
+- P2026-10-11d-1. Delete ci-cd's two `on.paths` lists (−22 lines) and let the `changes` job be the only filter: today a PR touching only `behavior-contracts.md` or `check-contracts.mjs` never runs `check:contracts`.
+- P2026-10-11c-1. Delete adapter migration specs that `seed-upgrade.spec.ts` already pins (its header says so): act-pg and act-sqlite `lanes.spec.ts`, act-sqlite `priority.spec.ts`, the first describe of act-pg `priority.spec.ts` (~235 lines, 3 files; coverage probed at 100%; no row cites them).
+- P2026-10-11b-3. Drop the 93 `leaseMillis: 1` literals in 19 test files, left over from lease-paced retries (they now read as if they matter, which misled the recipe); keep the lease-loss cases. After #1879.
+- P2026-10-11a-4. Delete dead code outside core: `digit-board.ts` `main()` (104 lines), two unreferenced act-diagram data files (121), act-pg deps in `packages/client` and `packages/server`, act-tck dev dep in act-otel (~230 lines, 4 deps). With it, a-2: `AuditDeps.logger`/`states` and `DEFAULT_SHUTDOWN_GRACE_MS` (a second name for `DEFAULT_LEASE_MILLIS`), ~12 lines (could join #1864).
+- P2026-10-11c-2/3. Merge `shutdown-grace` + `shutdown-settle` (one `park(kind)` helper, the four `< 50 ms` checks become gate-based; ~−80) and the four target-ownership specs (~−120, 3 files); test names kept, rows change only their file cell.
+- P2026-10-11d-2. Move `node-compat` (Node 22 + 24) to the weekly conformance workflow: 3 failures in 100 runs, none `ci` missed; ~4 runner-minutes per run. Only 5 days of history.
+

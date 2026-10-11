@@ -36,7 +36,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A snapshot is a valid head only for the concurrency version; every domain decision must look past it. (#1356, #1374)
 - A resume-from-checkpoint read must request everything that could rebaseline it (snapshots included). (#1345)
 - A lease is mutual exclusion for one attempt; pacing across attempts is a separate, persisted schedule. Don't overload a primitive because it resembles what you need. (#1262; #1681 used the lease as the no-backoff retry timer, and #1872 then needed the last drain's options to keep that timing)
-- Reserve, then confirm: never record success on acquisition. (#1193)
+- Reserve, then confirm: never record success on acquisition. (#1193; again 2026-10-11: the defer timer dropped due entries before its drain ran, so streams the drain didn't reach were lost)
 - A guard only holds if every path goes through it; a call site that reaches around a helper opts out of its invariant. (#1293)
 - When two steps share a precondition and one consumes it, the consumer goes last. (#1296)
 - Put the bound before the effect it bounds; otherwise the degenerate input (0) does the wrong thing. (#1600)
@@ -87,6 +87,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A proposal to delete a layer must name why the layer exists. `DrainOps` was proposed as a pass-through and turned out to be the trace seam, so it stayed. (#1841)
 - A gate most PRs declare away protects nothing: the rfc-gate fired on comment edits because the stability snapshot copies all source, and 175 of 300 PRs carried an exemption. Fix what the gate measures before adding exemptions. (2026-10-08 review)
 - Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. (2026-10-08 review)
+- A change to a default or a timing breaks what nothing in CI runs. #1872 made a no-backoff retry wait 10 s; the gate passed, and the Prometheus recipe silently stopped blocking its poison stream, while three doc passages kept the old timing. Grep and run recipes and examples for the old behavior in the same PR. (2026-10-11 review)
 - A test snapshot inside a published package releases that package on every change to it: 94 of 137 act-tck releases published identical code. Keep repo-wide gates out of published packages. (2026-10-10 review)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
