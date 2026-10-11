@@ -22,7 +22,15 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Newcomer test (quarterly).** Build the canonical example from scratch using only the README. Count concepts and imports. Record the count in `history.md`; it should only go down.
 
-## Tests
+## Orthogonality
+
+**Feature interactions.** The question: does each feature stand alone, and where two meet, do they meet through one shared primitive or through special cases?
+
+1. *Inventory.* List the core features (lanes, priority, fairness, leases, correlation lease, work marks, defer, backoff and retry, blocking, the breaker, close and autoclose, archives, notify, snapshots, PII, batch projections). For each: the state it owns (fields, columns), its options, and the contract rows it serves. A feature that serves no row, or only rows another feature also serves, is a removal or fold candidate.
+2. *Matrix.* For each pair, find where one reads the other: `grep` each feature's vocabulary per file and look at the files that mention five or more (`metrics.sh` counts them), the `Store` methods that carry several features in one call, and the fix commits whose subject names two features (`git log --since=4.months --format=%s -- libs/*/src | grep '^fix'`). Pairs that keep producing fixes rank first.
+3. *Classify each interaction* as one of: **shared primitive** (both use the same mechanism, such as autoclose and backoff riding the defer schedule: fine); **justified** (the coupling has a reason that still holds: record it in the register in `history.md` so later runs don't re-dig it); **accidental** (one feature reads another's configuration to decide its own behavior, a guard cancels another layer's rule, or an option only means something next to another option).
+4. *Propose for each accidental one* the fix that removes the coupling, in this order of preference: give the shared fact one owner (one layer decides; the other stops guarding); re-express one feature as a use of the other's primitive; move the decision to where the knowledge is (a reaction's retry policy belongs to the reaction, not to the lease of whichever drain ran it); make the combination impossible by construction (fold the narrowing into a key). A fix that changes what an app observes is a design question for the user, and says so. Before ticketing, probe three things: the interaction (a red test and a control), the fix (simulate it and run the suite and TCK; a case that breaks names the reason the coupling exists), and every number the proposal cites.
+
 
 **Tests by concept.** Specs named after a fix rather than a concept (`correlate-arm`, `correlate-armed`, `correlate-checkpoint`, …) merge into one spec per concept that describes behavior. Ticket numbers leave test names. Adapter suites (`libs/act-pg/test`, `libs/act-sqlite/test`, `libs/act-notify/test`) that repeat a TCK case move into the TCK or go. Flag tests that mutate private state where a public assertion would do, and flaky tests. **Guard:** no row of `behavior-contracts.md` and no coverage may be lost; cite the rows each merged spec still pins.
 
@@ -64,3 +72,5 @@ Check for these by name; the retrospective adds recurring rejection reasons here
 - A gate most PRs have to declare away.
 - A timer or background path that only sets a flag the foreground reads later (#1804 polling, the defer timer). Make it run the foreground path.
 - A check that has never failed, including its self-test: plant the error and assert that exact error comes back.
+- A feature that reads another feature's configuration to decide its own behavior (retry timing from the lease length, a stream's lane from its priority, a lease key from the lane set). Each is an edge in the interaction matrix; give the fact one owner.
+- A rule in the store and a guard in the orchestrator that cancels it (or the reverse): two owners for one field.

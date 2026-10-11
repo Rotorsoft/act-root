@@ -9,6 +9,9 @@ lines=$(files | xargs cat | wc -l | tr -d ' ')
 comments=$(files | xargs cat | grep -cE '^\s*(//|\*|/\*)' || true)
 code=$((lines - comments))
 tickets=$(files | xargs cat | { grep -oE '#[0-9]{3,4}|ACT-[0-9]+' || true; } | wc -l | tr -d ' ')
+# Orthogonality: core files whose code mentions 5+ feature vocabularies.
+features='\blane|\bpriority|lagging|correlating|correlated_at|deferred_at|DeferSignal|backoff|maxRetries|breaker|tombstone|autoclose|notify|\bpii|\bsnap|\bbatch|\bblocked'
+coupled=$(for f in $(files); do n=$(grep -vE '^\s*(//|\*|/\*)' "$f" | grep -oE "$features" | sort -u | wc -l | tr -d ' '); if [ "$n" -ge 5 ]; then echo; fi; done | wc -l | tr -d ' ')
 over300=$(files | xargs wc -l | awk '$2!="total" && $1>300' | wc -l | tr -d ' ')
 over300code=$(for f in $(files); do n=$(grep -cvE '^\s*(//|\*|/\*|$)' "$f" || true); if [ "$n" -gt 300 ]; then echo; fi; done | wc -l | tr -d ' ')
 exports=$(node -e "import('./libs/act/dist/index.js').then(m=>console.log(Object.keys(m).length)).catch(()=>console.log('n/a (build first)'))")
@@ -21,7 +24,9 @@ echo "| metric | value |"
 echo "|---|---|"
 echo "| core lines (libs/act/src) | $lines |"
 echo "| code lines / comment lines | $code / $comments ($((comments * 100 / lines))% comments) |"
-echo "| ticket refs in source | $tickets |"
+ticket_tests=$(git ls-files '*.spec.ts' | xargs grep -hE '(it|describe|test)\(.*(#[0-9]{3,4}|ACT-[0-9]+)' | wc -l | tr -d ' ' || true)
+echo "| ticket refs in source / in test names | $tickets / $ticket_tests |"
+echo "| core files touching 5+ features | $coupled |"
 echo "| files over 300 lines / over 300 code lines | $over300 / $over300code |"
 echo "| runtime exports (@rotorsoft/act) | $exports |"
 echo "| IAct methods / Act class public methods | $iact / $act_public |"
@@ -32,7 +37,6 @@ echo "| ActOptions fields | $act_options |"
 specs=$(git ls-files '*.spec.ts' | wc -l | tr -d ' ')
 test_lines=$(git ls-files '*.spec.ts' | xargs cat | wc -l | tr -d ' ')
 lib_lines=$(git ls-files 'libs/*/src/*.ts' 'libs/*/src/**/*.ts' | xargs cat | wc -l | tr -d ' ')
-ticket_tests=$(git ls-files '*.spec.ts' | xargs grep -hE '(it|describe|test)\(.*(#[0-9]{3,4}|ACT-[0-9]+)' | wc -l | tr -d ' ' || true)
 packages=$(git ls-files 'libs/*/package.json' | wc -l | tr -d ' ')
 workflows=$(ls .github/workflows/*.yml | wc -l | tr -d ' ')
 workflow_lines=$(cat .github/workflows/*.yml | wc -l | tr -d ' ')
@@ -40,7 +44,6 @@ doc_lines=$(find docs/docs -name '*.md' -not -path '*/api/*' | xargs cat | wc -l
 claude_md=$(( $(wc -c < CLAUDE.md) / 1024 ))
 
 echo "| spec files / test lines (all libs: $lib_lines src lines) | $specs / $test_lines |"
-echo "| test names citing tickets | $ticket_tests |"
 echo "| published packages (libs/) | $packages |"
 echo "| CI workflows / lines | $workflows / $workflow_lines |"
 echo "| docs lines (excl. generated API) / CLAUDE.md KB | $doc_lines / $claude_md |"
