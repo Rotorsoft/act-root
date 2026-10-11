@@ -1,7 +1,8 @@
 name: Store Conformance Matrix
 
 # Weekly (and on demand): the Store TCK against every supported backend
-# version, plus the multi-process Postgres stress harness. Catches
+# version, the full suite on the older supported Node lines, plus the
+# multi-process Postgres stress harness. Catches
 # dialect-specific regressions (PG SKIP LOCKED behavior across majors,
 # libSQL release bumps) and lease/commit/drain races that single-process
 # tests cannot. ci-cd.yml already runs the full TCK against PG 18 and the
@@ -157,12 +158,49 @@ jobs:
           name: stress-report
           path: stress-report.md
 
+  # The libraries' engines floor is Node >=22.23.3, while CI, docs and the
+  # perf image run on 26. This proves every supported release line still
+  # passes, so the floor is a fact rather than a promise. Weekly rather than
+  # per PR: typecheck already pins the floor's API (`@types/node`), and in
+  # 100 per-PR runs this caught nothing the Node 26 job missed.
+  node-compat:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.23.3", "24.21.0"]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: "pnpm"
+      - run: pnpm install
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm test
+
   summary:
     # Always runs so the workflow summary is populated even when a cell
     # fails. `if: always()` is required because the matrix jobs' failure
     # would otherwise mark this dependency as skipped.
     if: always()
-    needs: [pg, sqlite]
+    needs: [pg, sqlite, node-compat]
     runs-on: ubuntu-latest
     steps:
       - name: Compose conformance table
@@ -184,6 +222,7 @@ jobs:
             # worst single cell; per-cell detail is in the run UI.
             echo "| PostgreSQL | 14, 15, 16, 17 | $(status ${{ needs.pg.result }}) |"
             echo "| libSQL | latest | $(status ${{ needs.sqlite.result }}) |"
+            echo "| Node | 22, 24 | $(status ${{ needs.node-compat.result }}) |"
             echo ""
             echo "Per-version detail in the [run page](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           } >> "$GITHUB_STEP_SUMMARY"
