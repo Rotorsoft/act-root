@@ -18,8 +18,8 @@ async function freshStore(
   key?: Buffer | (() => Buffer | Promise<Buffer>)
 ): Promise<{ store: SqliteStore; raw: Client; url: string; path: string }> {
   // libSQL's `file::memory:` doesn't share state across client
-  // instances, so we use a scratch file per test (matches the
-  // priority.spec.ts pattern) — that way the raw client below can
+  // instances, so we use a scratch file per test — that way the raw
+  // client below can
   // read the same rows the SqliteStore committed.
   const path = `/tmp/act-pii-enc-${randomUUID()}.db`;
   const url = `file:${path}`;

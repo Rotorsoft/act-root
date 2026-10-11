@@ -2,9 +2,9 @@
  * The seed-sync contract: `seed()` IS the schema maintenance story —
  * additive, idempotent, lossless on any prior released shape, and safe
  * to run on every boot from every worker. Act deliberately has no
- * migration framework; this suite pins the guarantee the per-feature
- * specs (lanes, priority, retry-default) cover piecemeal, against one
- * canonical oldest-supported fixture.
+ * migration framework; this suite pins the guarantee against one
+ * canonical oldest-supported fixture, including the `priority`, `lane` and
+ * `deferred_at` columns added since.
  */
 
 import { dispose, store } from "@rotorsoft/act";
