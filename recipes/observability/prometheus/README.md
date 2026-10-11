@@ -12,7 +12,7 @@ The one-shot example places three orders, lets reactions fulfill two of them, an
 
 ```
 act_events_committed_total{name="OrderPlaced"} 3
-act_reactions_acked_total{lane="default"} 4
+act_reactions_acked_total{lane="default"} 2
 act_reactions_blocked_total{lane="default"} 1
 act_streams_blocked 1
 ```
