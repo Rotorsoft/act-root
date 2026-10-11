@@ -174,30 +174,7 @@ boundary, name the stream, keep the driver's message.
 
 ## The TCK is the spec
 
-`@rotorsoft/act-tck` exports `runStoreTck`, a function you drop into your adapter's vitest suite:
-
-```ts no-check
-// libs/act-mysql/test/store-tck.spec.ts
-import { runStoreTck } from "@rotorsoft/act-tck";
-import { MysqlStore } from "../src/index.js";
-
-runStoreTck({
-  name: "MysqlStore",
-  factory: () =>
-    new MysqlStore({
-      host: "localhost",
-      database: "act_tck",
-      // … adapter-specific config
-    }),
-  capabilities: {
-    notify: false, // turn on once you implement Store.notify
-  },
-});
-```
-
-That single call runs 29+ contract cases against your adapter — every method on `Store`, every documented behavior, every error mode. If it passes, your adapter honors the contract every other piece of the framework relies on.
-
-Adapter-specific tests (e.g., dialect-specific error paths, transaction edge cases, performance smoke tests) stay in their own files. The TCK only asserts what every Store must do.
+Call `runStoreTck({ name, factory, capabilities })` from `@rotorsoft/act-tck` in your adapter's test suite: it runs every contract case against your store, and passing it means the framework can rely on your adapter. [TCK conformance](./tck-conformance.md) covers the repo layout and the conformance badge; the [act-tck README](https://github.com/Rotorsoft/act-root/tree/master/libs/act-tck) covers `runStoreDifferentialTck`, which replays seeded workloads against your store and the in-memory reference and fails on any difference.
 
 ## `with_pii` — a read that declines the sensitive payload
 
@@ -215,21 +192,7 @@ The TCK pins all of it in the `with_pii` block of the `pii_isolation` suite: the
 
 ## Capabilities flags
 
-Some methods are optional. `Store.notify` is the only one today — it's a cross-process wakeup hook implemented by Postgres' `LISTEN`/`NOTIFY` and skipped by single-node adapters like SQLite.
-
-```ts no-check
-runStoreTck({
-  name: "MysqlStore",
-  factory: () => new MysqlStore({ /* … */ }),
-  capabilities: { notify: true }, // your adapter implements notify
-});
-```
-
-When `notify: true`, the TCK runs the cross-instance conformance cases: a listener receives commits from a *sibling* instance created by the same `factory`, never its own commits (the port's self-filtering MUST — "implementations must skip their own commits"), and exactly one notification per commit transaction carrying the full event batch. This requires your `factory` to produce instances that share one backing store (two adapters on the same schema/table is the standing pattern). True cross-*process* plumbing — reconnect discipline, payload caps — still belongs in your adapter's own tests.
-
-`lease_correlation` is another opt-in. Skip it and every worker scans the log for itself, which is correct — the marks are idempotent — but costs one full pass and one set of mark-writes per worker. Implement it and one worker scans on behalf of the rest; see [Serializing correlation](#serializing-correlation-optional).
-
-The `restore` capability is the other opt-in today. Skip it (`capabilities.restore: false` or just omit) and the TCK's restore cases stay parked. Flip it on once you've implemented `Store.restore` — see the next section for the contract.
+Optional methods and behaviors (`notify`, `lease_correlation`, `restore`, `source_matches` and others) are gated by flags on the TCK's `capabilities` option. Each flag is documented on [`StoreCapabilities`](https://github.com/Rotorsoft/act-root/blob/master/libs/act-tck/src/store-tck.ts); leave one off and its cases stay parked until your adapter opts in. Correlation leasing has its own section below: [Serializing correlation](#serializing-correlation-optional).
 
 ## Deferring a stream (`defer` and the `claim` skip)
 
@@ -313,38 +276,6 @@ The contract points adapter authors get wrong first:
 Why the boundary anchors on a real snapshot: the framework's `load()` resets state at each `__snapshot__` on replay, so events below the latest snapshot contribute nothing to any load result — deleting them cannot change what `load()` returns. The `max_id` cap is the consumer-safety half: the orchestrator probes the minimum subscription watermark before calling you, so the boundary never rises past what the laggiest reaction has read.
 
 The TCK pins all of this in the `describe("windowed (before boundary)")` block of `store-tck.ts`: prefix deleted behind the closest safe snapshot, `max_id` cap honored, no-snapshot no-op, subscriptions preserved (explicitly contrasted with the full truncate), mixed full + windowed batches, and the stream staying writable and readable after a prune. Pass that block and windowed closes work on your backend with no further wiring.
-
-## Splitting retirement across two systems
-
-A full `truncate` target does three things atomically: delete the stream's events, seed a final marker, and remove its subscription row. If your event log and your subscriptions live in the **same** database, that is one transaction and there is nothing more to think about.
-
-If they live apart — the shape the [hybrid-store recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/hybrid-store) uses — no transaction spans both, and you have to sequence two calls. Two things to get right.
-
-**Use `truncate` on both halves.** `truncate` is already the verb that retires a subscription, so pointing it at the subscription store retires the row there. There is no separate "remove this subscription" method, and you do not need one:
-
-```ts no-check
-truncate: async (targets) => {
-  const result = await log.truncate(targets);
-  const retired = targets
-    .filter(
-      (t) =>
-        t.before === undefined &&   // windowed targets keep subscriptions
-        t.snapshot === undefined && // restart targets keep subscriptions (#1398)
-        result.has(t.stream)        // absent means skipped, never truncated
-    )
-    .map((t) => ({ stream: t.stream }));
-  if (retired.length) await subs.truncate(retired);
-  return result;
-},
-```
-
-Forward a **bare** `{ stream }` rather than the original target. Passing the original would seed a restart snapshot's state into the subscription store, copying domain data — possibly sensitive — into a database that should only ever hold watermarks.
-
-**Do not use `reset` for this.** It reads like the subscription-side verb and does the opposite of what you want: `reset` rewinds the watermark to -1 and deliberately leaves the work mark untouched, so `at < correlated_at` becomes true and the stream you meant to retire becomes **claimable again**. That is correct behaviour — it is what makes `app.reset(...)` replay a projection — but it is not retirement.
-
-**Truncate the log first.** Its truncate commits the tombstone that stops new events landing on the stream, so a crash between the two calls leaves an orphaned subscription row: it points at a stream whose events are gone, claims nothing, and is reaped by the next close of that stream. The reverse order leaves a live stream with **no** subscription, which silently stops delivery and never heals. `Act.close` is already resumable after an interrupted truncate ([#1389](https://github.com/Rotorsoft/act-root/issues/1389)), which is what makes the window recoverable rather than merely rare.
-
-The store TCK already pins every fact this relies on — restart keeps the row while retire drops it, windowed leaves subscriptions untouched, and `reset` re-arms a caught-up subscription — so a composition built from them inherits those guarantees.
 
 ## Serializing correlation (optional)
 
@@ -483,90 +414,9 @@ Some failure modes are dialect-specific and live in your adapter's own error-spe
 
 Each lands as a separate spec; the assertion is always the same — `kept === 0`, no events in the store afterwards, no partial state observable.
 
-### Differential testing against the reference adapter
+## Packaging and keeping up with the port
 
-`runStoreTck` proves your adapter honors the contract in isolation. `runStoreDifferentialTck` proves it honors the contract _identically to the in-memory reference_ — the failure mode (ordering, `with_snaps` floor, `query_stats` / `query_streams` shape drift) that a single-adapter suite can't see. It replays a **family of randomized, seeded workloads** against every store you pass and compares their normalized outputs for each one:
-
-```ts no-check
-import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
-import { InMemoryStore } from "@rotorsoft/act";
-import { MysqlStore } from "../src/index.js";
-
-runStoreDifferentialTck({
-  name: "InMemory vs Mysql",
-  // First entry is the reference; every other store must match it.
-  runs: 6, // durable adapter: fewer workloads keep the suite fast
-  stores: [
-    { name: "InMemoryStore", factory: () => new InMemoryStore() },
-    { name: "MysqlStore", factory: () => new MysqlStore({ /* … */ }) },
-  ],
-});
-```
-
-Each workload is its own seeded plan (`seed`, `seed + 1`, …): the operation sequence — and even its length — varies by seed, so divergence is hunted across a slice of the input space rather than one fixed script. The seeds are deterministic, so a failing workload (named with its seed in the describe block) is always replayable. Normalization drops only the fields that legitimately differ between stores (absolute event ids, `created` timestamps, correlation/causation uuids); everything that defines correctness — stream, version, name, data, emission order — must be byte-for-byte equal. The in-tree adapters wire it as `store-differential-tck.spec.ts` alongside `store-tck.spec.ts`.
-
-## Scaffolding `@rotorsoft/act-mysql` (worked example)
-
-```
-libs/act-mysql/
-├── package.json              # peerDeps: @rotorsoft/act, zod; devDeps: @rotorsoft/act-tck
-├── tsconfig.json
-├── tsconfig.build.json
-├── tsup.config.ts
-├── src/
-│   ├── index.ts              # export { MysqlStore }
-│   └── mysql-store.ts        # implements Store
-├── test/
-│   ├── store-tck.spec.ts             # runStoreTck({ factory: () => new MysqlStore(…) })
-│   ├── store-differential-tck.spec.ts # runStoreDifferentialTck({ stores: [InMemory, Mysql] })
-│   └── store.error.spec.ts           # MySQL-specific error paths
-└── README.md
-```
-
-The `package.json` mirrors `@rotorsoft/act-pg`:
-
-```jsonc
-{
-  "name": "@rotorsoft/act-mysql",
-  "type": "module",
-  "peerDependencies": {
-    "@rotorsoft/act": ">=0.39.0",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "@rotorsoft/act-tck": "workspace:^"
-    // mysql client lib of your choice
-  }
-}
-```
-
-The README's testing section shows the TCK invocation so users can verify the adapter still passes the contract after upgrading:
-
-````md
-## Testing
-
-The Postgres store is validated against `@rotorsoft/act-tck`:
-
-```ts no-check
-import { runStoreTck } from "@rotorsoft/act-tck";
-import { MysqlStore } from "@rotorsoft/act-mysql";
-
-runStoreTck({
-  name: "MysqlStore",
-  factory: () => new MysqlStore({ host: "localhost", database: "act_tck" }),
-});
-```
-````
-
-## When the Store port changes
-
-The TCK and the interface evolve together. When the framework adds, removes, or changes a method on `Store` (e.g., the `Store.query_stats(input, options)` primitive added in [#639](https://github.com/Rotorsoft/act-root/issues/639) / [#752](https://github.com/Rotorsoft/act-root/pull/752)):
-
-1. The matching cases land in `libs/act-tck/src/store-tck.ts`.
-2. New optional methods are gated behind a `Capabilities` flag so existing adapters keep passing until they opt in.
-3. Each shipped adapter updates its own implementation; this guide is updated alongside.
-
-Watching the TCK changelog for breaking changes is the simplest way to keep a third-party adapter in lockstep with the framework.
+For the package layout and the README's testing section, follow [TCK conformance](./tck-conformance.md) and [contributing a new package](./contributing-new-package.md). When the `Store` port changes, the matching TCK cases change in the same release, and new optional methods arrive behind a capability flag, so watching the act-tck changelog keeps a third-party adapter in step.
 
 ## Cross-references
 

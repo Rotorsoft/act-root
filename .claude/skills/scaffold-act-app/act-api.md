@@ -314,12 +314,12 @@ Every reaction requires a `.to(resolver)` to tell `drain()` which stream to proc
 
 For fire-and-forget side effects (logging, metrics), use lifecycle events (`app.on("committed", ...)`) instead of reactions.
 
-**Gotcha — don't set per-event `source` in fan-in resolvers.** The `source` field on a resolver becomes a persisted LIKE pattern in the `streams` table. `subscribe()` is `INSERT OR IGNORE` keyed on `target`, so whatever the *first* correlate persists for `source` is what `claim()` keeps using forever — every subsequent subscribe with a different source is a no-op, and `claim()`'s `WHERE stream LIKE persisted_source` filter excludes everyone else's events. The leasing/ordering layer is innocent; the source filter just never widens.
+**Gotcha — don't set per-event `source` in fan-in resolvers.** A resolver's `source` is the window the target's drain reads events from. It is stored when the target is first subscribed and never changes, so whatever the *first* correlate stores is the window forever. Correlate only marks work for events inside that window, and the drain only fetches from it, so events from every other source stream are never delivered. `claim` itself ignores `source`; the window just never widens.
 
 ```typescript
 // ❌ Wrong — first source's stream pattern locks the filter forever
 .to((event) => ({ source: event.stream, target: "book-income" }))
-// → row written with source="invoice-A"; payments on invoice-B/-C never match the LIKE filter
+// → row stored with source="invoice-A"; payments on invoice-B/-C fall outside the window
 
 // ✅ Right — leave source unset for fan-in
 .to({ target: "book-income" })
@@ -330,80 +330,7 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 
 ## 7. Correlate Before Drain — settle() Pattern
 
-`app.correlate()` scans events, resolves each one to its reaction targets, and records what it found via `store().subscribe()` — registering new target streams, and marking every target that has work waiting.
-
-That second half is why `drain()` alone finds nothing. A stream is claimable only while its watermark sits below its **work mark**, and `correlate` is the only thing that raises a mark. So this holds even for a target that was registered long ago and for a static `.to("name")` target — committing an event does not make it drainable, correlating it does.
-
-```typescript
-// ✅ Correct — correlate marks the work, then drain claims it
-await app.correlate();
-await app.drain();
-
-// ❌ Wrong — nothing has marked the new events as claimable
-await app.drain();  // returns empty results
-```
-
-**`app.settle()`** — the production pattern for API mutations. Non-blocking, debounced, runs correlate→drain in a loop, emits `"settled"` when the system reaches a consistent state:
-
-```typescript
-// In API mutations — fire-and-forget
-await app.do("CreateItem", target, input);
-app.settle();  // non-blocking, debounced — UI notified via "settled" event
-
-// Subscribe to settled event for SSE notifications
-app.on("settled", (drain) => {
-  // drain has { fetched, leased, acked, blocked }
-  // notify SSE clients that the system is consistent
-});
-```
-
-**`settle()` options:**
-```typescript
-app.settle({
-  debounceMs: 10,                      // debounce window (default: 10ms)
-  correlate: { after: -1, limit: 100 }, // correlate query (default)
-  maxPasses: Infinity,                  // kill-switch cap (default: Infinity)
-  streamLimit: 10,                      // passed to drain()
-  eventLimit: 100,                      // passed to drain()
-});
-```
-
-**Key design:**
-- **Non-blocking**: `settle()` returns immediately — mutations don't wait for drain
-- **Debounced**: Multiple rapid `app.do()` calls coalesce into one settle cycle (10ms window)
-- **Guarded**: Internal `_settling` flag prevents concurrent settle cycles
-- **Drains to completion**: loops correlate→drain until a pass makes no progress (no new subscriptions, no acks, no blocks). Paginated catch-up after `app.reset(...)` works without a manual loop.
-- **`maxPasses` is a kill-switch**, not a tuning knob — it caps runtime if a reaction handler keeps emitting events that re-trigger itself. Default `Infinity` means the natural exit always wins.
-- **Lifecycle event**: `"settled"` fires only after all correlate/drain iterations finish, so SSE clients see a consistent view
-
-**In tests:** Call `correlate()` + `drain()` directly (synchronous, no debounce):
-```typescript
-it("should process reactions", async () => {
-  await app.do("CreateItem", target, { name: "Test" });
-  await app.correlate();  // ← discovers reaction target streams
-  await app.drain();      // ← now processes them
-});
-```
-
-**In bootstrap:** Wire `app.on("committed", () => app.settle())` before the initial settle. This ensures reaction chains fully propagate — when a reaction produces new events during drain, the `committed` listener triggers another settle cycle to process those events through projections and further reactions. Without this, projection streams lag behind after reaction chains.
-
-```typescript
-const settleOpts = { streamLimit: 100, eventLimit: 1000 };
-app.on("committed", () => app.settle(settleOpts));
-```
-
-**In API mutations:** No explicit `settle()` needed — the `committed` listener handles it automatically:
-```typescript
-CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
-  await app.do("CreateItem", target, input);
-  return { success: true };
-});
-```
-
-**For background processing:** `app.start_correlations()` settles on a timer (correlate, then drain), which picks up work committed by other processes:
-```typescript
-app.start_correlations({ limit: 100 }, 5000); // stopped by app.shutdown() / dispose()()
-```
+**Rule:** a commit doesn't make work drainable; `correlate` does. In tests call `await app.correlate(); await app.drain();` (a bare `drain()` finds nothing). In the app, wire `app.on("committed", () => app.settle())` at bootstrap so API mutations need no explicit `settle()`, and use `app.start_correlations()` when other processes commit to the same store. See [testing](https://rotorsoft.github.io/act-root/docs/concepts/testing) and [correlation and drain](https://rotorsoft.github.io/act-root/docs/architecture/correlation-and-drain).
 
 ## 8. Invariant Type
 
@@ -566,37 +493,7 @@ Legacy `store().seed()` in `beforeEach` + `dispose()()` in `afterAll` remains va
 
 ## 11. Cache Port — Always-On State Caching
 
-Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It stores the latest state checkpoint per stream, eliminating full event replay on every `load()`.
-
-**How it works:**
-- `load()` checks `cache().get(stream)` first — on hit, only events after the cached position are replayed
-- `action()` updates the cache after every successful commit (`cache().set()`)
-- On `ConcurrencyError`, the stale cache entry is invalidated (`cache().invalidate()`)
-
-**Cache vs Snapshots:**
-- **Cache** (in-memory) — checked first on every `load()`. Eliminates store round-trips entirely on warm hits.
-- **Snapshots** (in-store as `__snapshot__` events) — fallback on cache miss (cold start, LRU eviction, process restart). Avoids replaying the entire event stream.
-
-```typescript
-import { cache } from "@rotorsoft/act";
-
-// Cache is active by default — no setup needed
-// load() and action() use it transparently
-
-// For distributed deployments, replace with a custom adapter:
-cache(new RedisCache({ url: "redis://localhost:6379" }));
-```
-
-The `Cache` interface is async for forward-compatibility with external caches (Redis, Memcached, etc.):
-
-```typescript
-interface Cache extends Disposable {
-  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
-  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
-  invalidate(stream: string): Promise<void>;
-  clear(): Promise<void>;
-}
-```
+**Rule:** the cache is on by default (`InMemoryCache`, LRU of 1000 streams) and needs no setup. Replace it with `cache(adapter)` only for a distributed deployment, and give each scoped store its own cache. See [cache and snapshots](https://rotorsoft.github.io/act-root/docs/architecture/cache-and-snapshots).
 
 ## 12. Projection Builder
 
@@ -670,102 +567,12 @@ const ItemSlice = slice()
 
 ## 14. Close the Books — Stream Archival and Truncation
 
-`app.close()` safely archives, truncates, and optionally restarts streams. It guards streams with a tombstone to block concurrent writes, archives while guarded, then atomically truncates + seeds each stream.
-
-```typescript
-const result = await app.close([
-  {
-    stream: "counter-1",
-    restart: true,  // restart with snapshot of final state
-    archive: async () => {
-      const events = await app.query_array({ stream: "counter-1", stream_exact: true });
-      await s3.putObject({ Key: "counter-1.json", Body: JSON.stringify(events) });
-    },
-  },
-  { stream: "counter-2" },  // tombstoned
-]);
-
-// result: { truncated: Map<stream, {deleted, committed}>, skipped: string[] }
-```
-
-**Key types:**
-- `CloseTarget` — `{ stream: string; restart?: boolean; archive?: () => Promise<void> }`
-- `StreamClosedError` — thrown by `action()` when writing to a tombstoned stream
-- `TOMBSTONE_EVENT` (`"__tombstone__"`) — marks a stream as permanently closed
-- `CloseResult` — `{ truncated: TruncateResult, skipped: string[] }`
-- `TruncateResult` — `Map<string, { deleted: number, committed: Committed }>`
-
-**Flow:** correlate → safety check → guard (tombstone with expectedVersion) → load state (for restart) → archive → atomic truncate + seed → cache update → emit "closed"
-
-**In tests:**
-```typescript
-await app.do("increment", { stream: "s1", actor }, { by: 1 });
-await app.correlate();
-await app.drain();
-const result = await app.close([{ stream: "s1" }]);
-expect(result.truncated.has("s1")).toBe(true);
-await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
-```
+**Rule:** retire or restart streams with `app.close([{ stream, restart?, archive? }])`, never with store calls; writing to a closed stream throws `StreamClosedError`. For streams that should close on their own, declare `.autocloses(...)` / `.archives(...)` on the state. See [close-the-books](https://rotorsoft.github.io/act-root/docs/architecture/close-cycle) and [close policies](https://rotorsoft.github.io/act-root/docs/guides/close-policies).
 
 ## 15. Projection Rebuild — Replay Events Through Updated Projections
 
-When a projection's logic changes, reset its watermark and let `settle()` replay every event through the updated handler.
-
-```typescript
-// 1. Clear the read-model side effects (DB rows, cache, in-memory map)
-await db.delete(items);
-clearItems();
-
-// 2. Reset the projection stream watermark AND arm the orchestrator's drain flag
-await app.reset(["items"]);
-
-// 3. Trigger settle — it loops correlate→drain until caught up, then emits "settled"
-app.settle({ eventLimit: 1000 });
-```
-
-**Always use `app.reset(...)` — never `store().reset(...)` directly.**
-
-Both reset the watermark, but only `app.reset(...)` raises the orchestrator's internal `_needs_drain` flag. After a settled app (no recent commits) has caught up, `_needs_drain === false` and any subsequent `drain()`/`settle()` short-circuits and returns immediately. `store().reset(...)` alone leaves the flag unchanged, so the replay never runs. `app.reset(...)` wraps the store call and arms the flag in one step:
-
-```typescript
-// libs/act/src/act.ts
-async reset(streams: string[]): Promise<number> {
-  const count = await store().reset(streams);
-  if (count > 0 && this._reactive_events.size > 0) {
-    this._needs_drain = true;
-  }
-  return count;
-}
-```
-
-**`settle()` drains to completion by default.** The `maxPasses` cap defaults to `Infinity` — settle exits naturally when a pass makes no progress (no new subscriptions, no acks, no blocks). One `settle()` call fully catches up paginated streams of any length; the cap only acts as a kill-switch for runaway reaction loops.
-
-**Typical production workflow:**
-1. Deploy updated projection code
-2. Clear projected data (truncate read-model table, flush cache)
-3. `await app.reset(["projection-target"])`
-4. `app.settle()` (or wait on `"settled"`) — drives the catch-up to completion
+**Rule:** clear the read model, then `await app.reset(["projection-target"])` and `app.settle()`. Always use `app.reset(...)`, never `store().reset(...)`: on a settled app only `app.reset` wakes the drain, so the store call alone replays nothing. See [event sourcing § Projection Rebuild](https://rotorsoft.github.io/act-root/docs/concepts/event-sourcing#projection-rebuild).
 
 ## 16. Subscription Introspection — store().query_streams()
 
-For operational dashboards (projection lag, blocked subscriptions, in-flight leases), use `store().query_streams()` instead of opening a second DB connection or running raw SQL against the adapter-specific streams table. The method is read-only and adapter-agnostic — works against `InMemoryStore`, `SqliteStore`, and `PostgresStore`.
-
-```typescript
-const { maxEventId, count } = await store().query_streams(
-  (position) => {
-    // position: { stream, source?, at, retry, blocked, error, leased_by?, leased_until? }
-    console.log(`${position.stream}: lag=${maxEventId - position.at}`);
-  },
-  {
-    stream: "^projection-",   // regex by default; pass stream_exact: true for equality
-    source: "user-.*",        // same regex/exact convention via source_exact
-    blocked: true,             // restrict to blocked / unblocked / omit for all
-    after: lastSeenStream,     // keyset cursor — pass last entry's stream for next page
-    limit: 100,                // default 100
-  }
-);
-```
-
-**Use the keyset cursor for paging.** Dynamic reactions can register one subscription per aggregate, so the streams table can grow large. The `after` cursor (last seen stream name, lexicographic) is cheap on big tables — no `OFFSET`. To page through all positions, call repeatedly with `after = lastPage.at(-1).stream` until `count < limit`.
-
-**Filter set is intentionally minimal.** Only what the streams table actually persists (`stream`, `source`, `blocked`). Higher-level classification ("is this a projection vs reaction?", "static vs dynamic resolver?") is an orchestrator concern — the table doesn't store kinds. Layer that on top by joining results with the orchestrator's known projections/reactions registry.
+**Rule:** for dashboards (lag, blocked streams, leases) read `store().query_streams(callback, filter)` and page with the `after` cursor; don't query the adapter's tables directly. A stream has work waiting when `at < correlated_at`; `maxEventId` is the log's head, not a stream's lag. See [error handling § debugging](https://rotorsoft.github.io/act-root/docs/concepts/error-handling).

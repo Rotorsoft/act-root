@@ -198,8 +198,9 @@ export function authenticated(
 
 /**
  * Map a thrown framework error onto a `TRPCError`. Known errors get
- * their conventional tRPC code (`ConcurrencyError` → `CONFLICT`,
- * `ValidationError` → `UNPROCESSABLE_CONTENT`, etc.); unknown throws
+ * their conventional tRPC code (`ConcurrencyError` → `PRECONDITION_FAILED`,
+ * `StreamClosedError` → `NOT_FOUND`, `ValidationError` →
+ * `UNPROCESSABLE_CONTENT`, etc.); unknown throws
  * surface as `INTERNAL_SERVER_ERROR`. Every transport in the
  * act-http epic passes through the same {@link toApiError} table,
  * so a client talking to both this subpath and the REST sibling
