@@ -1,6 +1,5 @@
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { dispose, store } from "../src/index.js";
-import type { Store } from "../src/types/index.js";
 
 /**
  * Correlate's job, done by hand: `claim` follows the work mark since #1488,
@@ -8,31 +7,6 @@ import type { Store } from "../src/types/index.js";
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
-const mark_all = async (s: Store) => {
-  const rows: {
-    stream: string;
-    at: number;
-    priority: number;
-    lane?: string;
-  }[] = [];
-  const { maxEventId } = await s.query_streams((p) =>
-    rows.push({
-      stream: p.stream,
-      at: p.at,
-      priority: p.priority,
-      lane: p.lane,
-    })
-  );
-  const marks = rows
-    .filter((r) => r.at < maxEventId)
-    .map((r) => ({
-      stream: r.stream,
-      priority: r.priority,
-      lane: r.lane,
-      correlated_at: maxEventId,
-    }));
-  if (marks.length) await s.subscribe(marks);
-};
 
 // Contract-level cases live in `in-memory-store-tck.spec.ts` (via the
 // shared Store TCK in `@rotorsoft/act-tck`). This file only covers
@@ -92,7 +66,6 @@ describe("InMemoryStore (adapter-specific)", () => {
     await s.subscribe([{ stream: "sub", source: "src" }]);
 
     // Nothing committed yet, so there is nothing to claim.
-    await mark_all(s);
     expect(await s.claim(5, 5, "w", 5_000)).toHaveLength(0);
 
     // The first event this store ever issues carries id 0.
@@ -104,7 +77,7 @@ describe("InMemoryStore (adapter-specific)", () => {
 
     // It must be claimable, and the lease must open at -1 so the event
     // sits inside the fetch window rather than behind it.
-    await mark_all(s);
+    await s.subscribe([{ stream: "sub", correlated_at: first.id }]);
     const leases = await s.claim(5, 5, "w", 5_000);
     expect(leases).toHaveLength(1);
     expect(leases[0].at).toBe(-1);

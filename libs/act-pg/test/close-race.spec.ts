@@ -1,17 +1,11 @@
 /**
- * Overlapping full closes on Postgres (#1738). Two Acts over one store
- * stand in for two processes: each has its own process-local close lock,
- * so only the head re-check before the truncate keeps the first closer
- * from undoing what the second one finished.
+ * Overlapping full closes on Postgres. Two Acts over one store stand in
+ * for two processes: each has its own process-local close lock, so only
+ * the head re-check before the truncate keeps the first closer from
+ * deleting a commit the second one let through after reseeding. The case
+ * where both closes truncate is covered in core (`close.spec.ts`).
  */
-import {
-  act,
-  cache,
-  dispose,
-  state,
-  store,
-  TOMBSTONE_EVENT,
-} from "@rotorsoft/act";
+import { act, cache, dispose, state, store } from "@rotorsoft/act";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
@@ -30,11 +24,7 @@ const Tally = state({ Tally: z.object({ n: z.number() }) })
 const actor = { id: "pg", name: "pg" };
 const build = () => act().withState(Tally).build();
 
-function parked_close(
-  app: ReturnType<typeof build>,
-  stream: string,
-  restart: boolean
-) {
+function parked_close(app: ReturnType<typeof build>, stream: string) {
   let entered!: () => void;
   let release!: () => void;
   const in_archive = new Promise<void>((r) => (entered = r));
@@ -42,7 +32,7 @@ function parked_close(
   const done = app.close([
     {
       stream,
-      restart,
+      restart: true,
       archive: async () => {
         entered();
         await gate;
@@ -74,7 +64,7 @@ describe("PostgresStore — overlapping full closes", () => {
     const app2 = build();
     for (let i = 0; i < 3; i++)
       await app1.do("add", { stream: "r1", actor }, { by: 1 });
-    const a = parked_close(app1, "r1", true);
+    const a = parked_close(app1, "r1");
     await a.in_archive;
     await app2.close([{ stream: "r1", restart: true }]);
     await app2.do("add", { stream: "r1", actor }, { by: 100 });
@@ -82,28 +72,5 @@ describe("PostgresStore — overlapping full closes", () => {
     expect((await a.done).skipped).toEqual(["r1"]);
     await cache().clear();
     expect((await app2.load(Tally, "r1")).state.n).toBe(103);
-  });
-
-  it("does not truncate a second time after another app finished the close", async () => {
-    const app1 = build();
-    const app2 = build();
-    for (let i = 0; i < 3; i++)
-      await app1.do("add", { stream: "r2", actor }, { by: 1 });
-    const a = parked_close(app1, "r2", false);
-    await a.in_archive;
-    expect((await app2.close([{ stream: "r2" }])).truncated.has("r2")).toBe(
-      true
-    );
-    a.release();
-    expect((await a.done).skipped).toEqual(["r2"]);
-    const names = (
-      await app1.query_array({
-        stream: "r2",
-        stream_exact: true,
-        with_snaps: true,
-        after: -1,
-      })
-    ).map((e) => e.name);
-    expect(names).toEqual([TOMBSTONE_EVENT]);
   });
 });

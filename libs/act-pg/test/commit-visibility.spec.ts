@@ -14,7 +14,6 @@
  * Requires Postgres on :5431 — same contract as every other act-pg spec.
  */
 import type { EventMeta } from "@rotorsoft/act";
-import type { Store } from "@rotorsoft/act/types";
 import { Pool, type PoolClient } from "pg";
 import { PostgresStore } from "../src/index.js";
 import { schema } from "./schema.js";
@@ -25,31 +24,6 @@ import { schema } from "./schema.js";
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
-const mark_all = async (s: Store) => {
-  const rows: {
-    stream: string;
-    at: number;
-    priority: number;
-    lane?: string;
-  }[] = [];
-  const { maxEventId } = await s.query_streams((p) =>
-    rows.push({
-      stream: p.stream,
-      at: p.at,
-      priority: p.priority,
-      lane: p.lane,
-    })
-  );
-  const marks = rows
-    .filter((r) => r.at < maxEventId)
-    .map((r) => ({
-      stream: r.stream,
-      priority: r.priority,
-      lane: r.lane,
-      correlated_at: maxEventId,
-    }));
-  if (marks.length) await s.subscribe(marks);
-};
 
 const PG = {
   port: 5431,
@@ -209,7 +183,12 @@ describe("pg commit visibility — end-to-end no-loss", () => {
     await store.subscribe([{ stream: "proj-e2e" }]);
     const delivered: number[] = [];
     const consume = async () => {
-      await mark_all(store);
+      const { maxEventId } = await store.query_streams(() => {}, {
+        limit: 0,
+      });
+      await store.subscribe([
+        { stream: "proj-e2e", correlated_at: maxEventId },
+      ]);
       const leases = await store.claim(5, 5, "w-e2e", 5000);
       for (const lease of leases) {
         const events: number[] = [];

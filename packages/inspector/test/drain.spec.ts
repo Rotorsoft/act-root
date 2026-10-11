@@ -13,42 +13,9 @@
  */
 import { randomUUID } from "node:crypto";
 import type { InMemoryStore } from "@rotorsoft/act";
-import type { Store } from "@rotorsoft/act/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveStore, inspectorRouter } from "../src/server/router.js";
 import { seed } from "./helpers.js";
-
-/**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
- * so a test that commits events has to say which of them resolve where.
- * Marks every subscription up to the log head, which is honest for these
- * fixtures — their sources carry the events under test.
- */
-const mark_all = async (s: Store) => {
-  const rows: {
-    stream: string;
-    at: number;
-    priority: number;
-    lane?: string;
-  }[] = [];
-  const { maxEventId } = await s.query_streams((p) =>
-    rows.push({
-      stream: p.stream,
-      at: p.at,
-      priority: p.priority,
-      lane: p.lane,
-    })
-  );
-  const marks = rows
-    .filter((r) => r.at < maxEventId)
-    .map((r) => ({
-      stream: r.stream,
-      priority: r.priority,
-      lane: r.lane,
-      correlated_at: maxEventId,
-    }));
-  if (marks.length) await s.subscribe(marks);
-};
 
 const caller = inspectorRouter.createCaller({});
 let store: InMemoryStore;
@@ -65,8 +32,9 @@ afterEach(() => {
 
 async function fixture() {
   // Source events so subscriptions have something to chase.
+  let head = -1;
   for (let i = 0; i < 20; i++) {
-    await seed(store, "src-fast", "tick", { i }, i - 1);
+    head = (await seed(store, "src-fast", "tick", { i }, i - 1)).id;
   }
   // Subscribe four reaction streams with varied shape:
   //   healthy — caught up, no lease, default lane/priority
@@ -74,19 +42,19 @@ async function fixture() {
   //   blocked — blocked after a claim
   //   leased  — actively leased, premium lane + non-zero priority
   await store.subscribe([
-    { stream: "sub-healthy", source: "src-fast" },
-    { stream: "sub-lagging", source: "src-fast" },
-    { stream: "sub-blocked", source: "src-fast" },
+    { stream: "sub-healthy", source: "src-fast", correlated_at: head },
+    { stream: "sub-lagging", source: "src-fast", correlated_at: head },
+    { stream: "sub-blocked", source: "src-fast", correlated_at: head },
     {
       stream: "sub-leased",
       source: "src-fast",
       priority: 9,
       lane: "premium",
+      correlated_at: head,
     },
   ]);
 
   // Bring sub-healthy fully caught up via ack so gap = 0.
-  await mark_all(store);
   const claimed = await store.claim(10, 10, randomUUID(), 30_000);
   const healthy = claimed.find((l) => l.stream === "sub-healthy");
   if (healthy) {
@@ -99,7 +67,6 @@ async function fixture() {
   }
   // Acquire an exclusive lease on sub-leased and leave it held — the
   // dashboard's "active leases" panel reads this row.
-  await mark_all(store);
   await store.claim(10, 10, "worker-A", 60_000);
 }
 
@@ -297,10 +264,11 @@ describe("drainStatus", () => {
       // claim predicate, and the property the framework relies on when
       // it calls a retired stream's subscription inert.
       await seed(store, "src", "Opened", {}, -1);
-      await seed(store, "order-1", "Opened", {}, -1);
+      const { id } = await seed(store, "order-1", "Opened", {}, -1);
       await retire("order-1");
-      await store.subscribe([{ stream: "order-1", source: "src" }]);
-      await mark_all(store);
+      await store.subscribe([
+        { stream: "order-1", source: "src", correlated_at: id },
+      ]);
       const claimed = await store.claim(10, 10, randomUUID(), 30_000);
       const mine = claimed.find((l) => l.stream === "order-1")!;
       await store.block([{ ...mine, error: "poison" }]);
@@ -323,9 +291,10 @@ describe("drainStatus", () => {
       // The half that was always right: target == source, the stream is
       // closed for good, and the consumer has nothing left to do. The
       // extra "nothing pending" conjunct must not disturb this.
-      await seed(store, "saga-1", "Opened", {}, -1);
-      await store.subscribe([{ stream: "saga-1", source: "saga-1" }]);
-      await mark_all(store);
+      const { id } = await seed(store, "saga-1", "Opened", {}, -1);
+      await store.subscribe([
+        { stream: "saga-1", source: "saga-1", correlated_at: id },
+      ]);
       const claimed = await store.claim(10, 10, randomUUID(), 30_000);
       const mine = claimed.find((l) => l.stream === "saga-1")!;
       await store.ack([{ ...mine, at: 0 }]);
@@ -339,8 +308,8 @@ describe("drainStatus", () => {
     it("reports each retired watermark as the record it is", async () => {
       await seed(store, "src-r", "Opened", {}, -1);
       await store.subscribe([{ stream: "retired-a", source: "src-r" }]);
-      await seed(store, "retired-a", "Opened", {}, -1);
-      await mark_all(store);
+      const { id } = await seed(store, "retired-a", "Opened", {}, -1);
+      await store.subscribe([{ stream: "retired-a", correlated_at: id }]);
       const claimed = await store.claim(10, 10, randomUUID(), 30_000);
       const mine = claimed.find((l) => l.stream === "retired-a")!;
       await store.ack([{ ...mine, at: 1 }]);

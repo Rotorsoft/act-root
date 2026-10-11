@@ -1,4 +1,3 @@
-import type { Store } from "@rotorsoft/act/types";
 import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
 
@@ -8,31 +7,6 @@ import { PostgresStore } from "../src/index.js";
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
-const mark_all = async (s: Store) => {
-  const rows: {
-    stream: string;
-    at: number;
-    priority: number;
-    lane?: string;
-  }[] = [];
-  const { maxEventId } = await s.query_streams((p) =>
-    rows.push({
-      stream: p.stream,
-      at: p.at,
-      priority: p.priority,
-      lane: p.lane,
-    })
-  );
-  const marks = rows
-    .filter((r) => r.at < maxEventId)
-    .map((r) => ({
-      stream: r.stream,
-      priority: r.priority,
-      lane: r.lane,
-      correlated_at: maxEventId,
-    }));
-  if (marks.length) await s.subscribe(marks);
-};
 
 /**
  * #1190: `streams.retry` was `smallint` (max 32767). `claim()` does
@@ -69,12 +43,12 @@ describe("pg streams.retry does not overflow at the smallint ceiling", () => {
       );
 
       // Commit an event so the stream lags and is claimable.
-      await s.commit("poison-1", [{ name: "Poison", data: {} }], {
+      const [e] = await s.commit("poison-1", [{ name: "Poison", data: {} }], {
         correlation: "c",
         causation: {},
       } as never);
 
-      await mark_all(s);
+      await s.subscribe([{ stream: "poison-1", correlated_at: e.id }]);
       const leases = await s.claim(10, 0, "worker", 10_000);
       const lease = leases.find((l) => l.stream === "poison-1");
       expect(lease).toBeDefined();
