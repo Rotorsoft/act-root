@@ -23,9 +23,9 @@ import {
   CorrelateCycle,
   catch_up_correlation,
   close_correlation,
+  DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
-  DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -730,9 +730,7 @@ export class Act<
   private _build_audit_deps(): AuditDeps {
     return {
       store,
-      logger: this._logger,
       event_to_state: this._event_to_state,
-      states: this._states,
       // Declared lanes, not this process's controllers: a lane another
       // worker drains is not `unknown-lane`.
       declared_lanes: new Set(this._declared_lanes),
@@ -865,9 +863,11 @@ export class Act<
     running: { readonly lease_millis: number | undefined }[],
     settling: boolean
   ): number {
-    let max = settling ? DEFAULT_SHUTDOWN_GRACE_MS : 0;
+    // A lane with no lease waits the drain's default lease: as long as its
+    // handlers were already allowed to hold a stream.
+    let max = settling ? DEFAULT_LEASE_MILLIS : 0;
     for (const c of running)
-      max = Math.max(max, c.lease_millis || DEFAULT_SHUTDOWN_GRACE_MS);
+      max = Math.max(max, c.lease_millis || DEFAULT_LEASE_MILLIS);
     return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
   }
 

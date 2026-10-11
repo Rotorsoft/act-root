@@ -38,7 +38,6 @@ import type {
   AuditFinding,
   AuditOptions,
   Committed,
-  Logger,
   Query,
   Schemas,
   State,
@@ -56,11 +55,8 @@ import { walk_streams } from "./walk-streams.js";
 /** The orchestrator state the audit reads, built once at `build()`. */
 export type AuditDeps = {
   readonly store: () => Store;
-  readonly logger: Logger;
   /** event-name → state that registers it (for schema validation). */
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
-  /** state-name → state (for snapshot-supported check on restart-candidate). */
-  readonly states: ReadonlyMap<string, State<any, any, any>>;
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
   /**
