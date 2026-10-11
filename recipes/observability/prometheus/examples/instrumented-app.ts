@@ -24,11 +24,16 @@ const Order = state({ Order: z.object({ placed: z.number() }) })
 const app = act()
   .withState(Order)
   .on("OrderPlaced")
-  .do(async function fulfill(event) {
-    // The poison pill: one SKU always fails, so its reaction stream
-    // exhausts retries and blocks — watch it land on the gauge.
-    if (event.data.sku === "poison") throw new Error("downstream rejects");
-  })
+  .do(
+    async function fulfill(event) {
+      // The poison pill: one SKU always fails, so its reaction stream
+      // exhausts retries and blocks — watch it land on the gauge.
+      if (event.data.sku === "poison") throw new Error("downstream rejects");
+    },
+    // A short backoff keeps the demo quick; without one, each retry waits
+    // the default 10 seconds.
+    { backoff: { strategy: "fixed", baseMs: 10 } }
+  )
   .to((event) => ({ target: `fulfillment:${event.stream}` }))
   .build();
 // Production wires app.on("committed", () => app.settle()) and lets the
@@ -46,11 +51,15 @@ await app.do("place", { stream: "order-3", actor }, { sku: "poison" });
 
 // Deterministic processing for the demo: correlate + drain until the
 // poison stream exhausts its retry budget (default 3) and blocks. The
-// short sleep lets each failed attempt's lease expire before the next.
-for (let i = 0; i < 6; i++) {
+// sleep waits out the backoff between attempts.
+let blocked = false;
+app.on("blocked", () => {
+  blocked = true;
+});
+while (!blocked) {
   await app.correlate();
-  await app.drain({ leaseMillis: 1 });
-  await sleep(10);
+  await app.drain();
+  await sleep(20);
 }
 
 // What Prometheus would scrape from your /metrics endpoint:
