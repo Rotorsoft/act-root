@@ -1103,10 +1103,7 @@ export class InMemoryStore implements Store {
    * Scope rules:
    * - Array `input` — explicit stream names, regardless of subscription.
    * - Filter `input` — `stream`/`stream_exact` match against event-bearing
-   *   stream names; `source`/`source_exact`/`blocked` require a
-   *   corresponding subscription in `_streams` (those are subscription
-   *   concepts, not event concepts). Empty filter `{}` matches every
-   *   event-bearing stream.
+   *   stream names. Empty filter `{}` matches every event-bearing stream.
    */
   async query_stats<E extends Schemas>(
     input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
