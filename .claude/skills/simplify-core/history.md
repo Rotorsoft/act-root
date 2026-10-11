@@ -42,7 +42,7 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | lanes, priority | `subscribe` re-lanes on priority ≥ stored (how a restart applies an edited declared lane); correlate reads the row when it has no record, so the row owns a dynamic target's lane and the LRU only caches it | justified once #1878 merges | P2026-10-10o-3, #1876; the coupling itself goes only if priority does (major-version question) |
 | breaker, drain / settle | five places feed one consecutive-failure count; a success in one loop resets failures in another | accidental (probed; no documented promise broken) | P2026-10-10o-4, #1877 |
 | defer wake, breaker | fixed by #1872: the breaker check sits inside the drain's `try`, so `finally` re-aims the wake | resolved | P2026-10-10o-1, #1874 |
-| defer wake, drain lock / streamLimit | the timer drops every due entry before its one bounded drain runs; a drain already in flight, or more due streams than `streamLimit`, strands the rest until a commit | accidental, and a bug | P2026-10-11a-1 (probed: 1 of 2 and 10 of 15 ran; controls ran all) |
+| defer wake, drain lock | the timer dropped every due entry before its drain ran; a drain already in flight stranded the stream until a commit | accidental, and a bug | P2026-10-11a-1 (probed: 1 of 2 ran, control ran both; the streamLimit half was a probe error, see the run entry) → #1890, PR #1892 |
 | lease, lanes | background drains (wake, settle, `cycleMs`, `start_correlations`) claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call, and the default lane can't be configured | justified, under-documented | P2026-10-11b-2 |
 
 ## Mutation baselines
@@ -352,3 +352,5 @@ Proposals (pending), ranked. Defects first:
 - P2026-10-11d-2. Move `node-compat` (Node 22 + 24) to the weekly conformance workflow: 3 failures in 100 runs, none `ci` missed; ~4 runner-minutes per run. Only 5 days of history.
 
 Tickets (user: "open tickets for all of them, and take care of the regression in master"): #1889 (b-1, fixed in #1891), #1890 (a-1), #1882 (a-3 + b-2 + b-4), #1883 (d-1), #1884 (c-1), #1885 (b-3), #1886 (a-4 + a-2), #1887 (c-2 + c-3), #1888 (d-2).
+
+Correction (while fixing #1890): the second defer-wake probe (15 due streams, 10 run) was wrong, and the main loop's check repeated its setup instead of questioning it. One `app.correlate()` reads 10 events by default, so 5 of the 15 targets were never subscribed. With all 15 correlated, every stream runs with or without the fix. Only the in-flight-drain case is a bug.
