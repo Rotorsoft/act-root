@@ -6,36 +6,11 @@ permissions:
   issues: write
 
 on:
-  # Anything that can change what typecheck, build or the tests produce
-  # triggers the workflow: lib code and tests, the example apps and recipes
-  # (`pnpm test` runs them), dependency manifests and the lockfile, and the
-  # root toolchain config. A dependency-only PR used to skip CI entirely
-  # (#1778).
+  # Every PR and master push starts the workflow; the `changes` job below is
+  # the only path filter, so it decides what runs.
   pull_request:
-    paths:
-      - 'libs/**'
-      - 'packages/**'
-      - 'recipes/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'tsconfig*.json'
-      - 'vite.config.ts'
-      - 'biome.json'
-      - '.github/workflows/ci-cd.yml'
   push:
     branches: [master]
-    paths:
-      - 'libs/**'
-      - 'packages/**'
-      - 'recipes/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'tsconfig*.json'
-      - 'vite.config.ts'
-      - 'biome.json'
-      - '.github/workflows/ci-cd.yml'
   workflow_dispatch:
 
 env:
@@ -77,7 +52,7 @@ jobs:
               - 'packages/**'
               - 'recipes/**'
               - 'docs/docs/architecture/behavior-contracts.md'
-              - 'scripts/check-contracts.mjs'
+              - 'scripts/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
