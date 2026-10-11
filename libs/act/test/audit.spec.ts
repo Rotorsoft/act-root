@@ -17,31 +17,6 @@ import type { AuditFinding, Store } from "../src/types/index.js";
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
-const mark_all = async (s: Store) => {
-  const rows: {
-    stream: string;
-    at: number;
-    priority: number;
-    lane?: string;
-  }[] = [];
-  const { maxEventId } = await s.query_streams((p) =>
-    rows.push({
-      stream: p.stream,
-      at: p.at,
-      priority: p.priority,
-      lane: p.lane,
-    })
-  );
-  const marks = rows
-    .filter((r) => r.at < maxEventId)
-    .map((r) => ({
-      stream: r.stream,
-      priority: r.priority,
-      lane: r.lane,
-      correlated_at: maxEventId,
-    }));
-  if (marks.length) await s.subscribe(marks);
-};
 
 /**
  * #723 / ACT-708.5 — `app.audit()` smoke tests for slice 1.
@@ -535,7 +510,7 @@ describe("audit", () => {
     it("flags blocked streams", async () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
-      await store().commit(
+      const [e] = await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 1 } }],
         meta
@@ -544,8 +519,9 @@ describe("audit", () => {
       // blocked entry for the audit to find. The framework's
       // drain machinery normally drives blocking; for tests we
       // hit the store directly.
-      await store().subscribe([{ stream: "w1", source: "w1" }]);
-      await mark_all(store());
+      await store().subscribe([
+        { stream: "w1", source: "w1", correlated_at: e.id },
+      ]);
       const claimed = await store().claim(1, 1, "audit-test", 60_000);
       if (claimed.length > 0) {
         await store().block([
@@ -652,16 +628,17 @@ describe("audit", () => {
     it("flags stuck-backoff for expired leases that weren't released", async () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
-      await store().commit(
+      const [e] = await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 1 } }],
         meta
       );
-      await store().subscribe([{ stream: "w1", source: "w1" }]);
+      await store().subscribe([
+        { stream: "w1", source: "w1", correlated_at: e.id },
+      ]);
       // Lease for a very short window — by the time the audit runs,
       // leased_until is in the past but no ack/block has cleared
       // leased_by.
-      await mark_all(store());
       await store().claim(1, 1, "audit-stuck-test", 5);
       await sleep(20);
 

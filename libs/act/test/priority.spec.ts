@@ -15,7 +15,6 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { classify_registry } from "../src/builders/build-classify.js";
 import { act, state, ZodEmpty } from "../src/index.js";
 import { dispose, store } from "../src/ports.js";
-import type { Store } from "../src/types/index.js";
 
 /**
  * Correlate's job, done by hand: `claim` follows the work mark since #1488,
@@ -23,31 +22,6 @@ import type { Store } from "../src/types/index.js";
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
-const mark_all = async (s: Store) => {
-  const rows: {
-    stream: string;
-    at: number;
-    priority: number;
-    lane?: string;
-  }[] = [];
-  const { maxEventId } = await s.query_streams((p) =>
-    rows.push({
-      stream: p.stream,
-      at: p.at,
-      priority: p.priority,
-      lane: p.lane,
-    })
-  );
-  const marks = rows
-    .filter((r) => r.at < maxEventId)
-    .map((r) => ({
-      stream: r.stream,
-      priority: r.priority,
-      lane: r.lane,
-      correlated_at: maxEventId,
-    }));
-  if (marks.length) await s.subscribe(marks);
-};
 
 describe("priority lanes — framework", () => {
   beforeEach(() => {
@@ -65,14 +39,12 @@ describe("priority lanes — framework", () => {
       // Two source events so both targets have work to do.
       const meta = { correlation: "", causation: {} };
       await store().commit("src", [{ name: "X", data: {} }], meta);
-      await store().commit("src", [{ name: "Y", data: {} }], meta);
+      const [y] = await store().commit("src", [{ name: "Y", data: {} }], meta);
 
       await store().subscribe([
-        { stream: "low", source: "src", priority: 0 },
-        { stream: "high", source: "src", priority: 10 },
+        { stream: "low", source: "src", priority: 0, correlated_at: y.id },
+        { stream: "high", source: "src", priority: 10, correlated_at: y.id },
       ]);
-
-      await mark_all(store());
       const leases = await store().claim(1, 0, "w", 1000);
       expect(leases).toHaveLength(1);
       expect(leases[0].stream).toBe("high");
@@ -90,14 +62,12 @@ describe("priority lanes — framework", () => {
 
     it("default priority is 0 — behavior unchanged when no priority is set", async () => {
       const meta = { correlation: "", causation: {} };
-      await store().commit("src", [{ name: "A", data: {} }], meta);
+      const [a] = await store().commit("src", [{ name: "A", data: {} }], meta);
 
       await store().subscribe([
-        { stream: "later", source: "src" },
-        { stream: "earlier", source: "src" },
+        { stream: "later", source: "src", correlated_at: a.id },
+        { stream: "earlier", source: "src", correlated_at: a.id },
       ]);
-
-      await mark_all(store());
       const leases = await store().claim(2, 0, "w", 1000);
       // No priorities → tie-break is whatever the adapter's natural
       // ordering yields. Both should come back; the contract is just
@@ -114,7 +84,12 @@ describe("priority lanes — framework", () => {
       // slots for pure watermark order, so the most-behind stream — the
       // never-processed low one — is claimed within a bounded window.
       const meta = { correlation: "", causation: {} };
-      await store().commit("src", [{ name: "X", data: {} }], meta);
+      let [{ id: head_id }] = await store().commit(
+        "src",
+        [{ name: "X", data: {} }],
+        meta
+      );
+      const streams = [0, 1, 2, 3, 4, 5].map((i) => `high-${i}`).concat("low");
 
       await store().subscribe([
         { stream: "high-0", source: "src", priority: 100 },
@@ -130,7 +105,9 @@ describe("priority lanes — framework", () => {
       let low_claimed_at = -1;
       const MAX_CYCLES = 20;
       for (let cycle = 0; cycle < MAX_CYCLES; cycle++) {
-        await mark_all(store());
+        await store().subscribe(
+          streams.map((stream) => ({ stream, correlated_at: head_id }))
+        );
         const leases = await store().claim(4, 0, by, 1000);
         if (leases.some((l) => l.stream === "low")) {
           low_claimed_at = cycle;
@@ -144,7 +121,11 @@ describe("priority lanes — framework", () => {
         await store().ack(leases.map((l) => ({ ...l, at: head })));
         // ...then commit a fresh source event so every subscribed stream
         // is lagging again on the next cycle — sustained high-priority load.
-        await store().commit("src", [{ name: "X", data: {} }], meta);
+        [{ id: head_id }] = await store().commit(
+          "src",
+          [{ name: "X", data: {} }],
+          meta
+        );
       }
 
       expect(low_claimed_at).toBeGreaterThanOrEqual(0);
@@ -210,12 +191,11 @@ describe("priority lanes — framework", () => {
       // Manually block one stream via the existing test path — claim
       // → block → prioritize.
       const meta = { correlation: "", causation: {} };
-      await store().commit("src", [{ name: "X", data: {} }], meta);
+      const [x] = await store().commit("src", [{ name: "X", data: {} }], meta);
       await store().subscribe([
-        { stream: "ok", source: "src" },
-        { stream: "bad", source: "src" },
+        { stream: "ok", source: "src", correlated_at: x.id },
+        { stream: "bad", source: "src", correlated_at: x.id },
       ]);
-      await mark_all(store());
       const leases = await store().claim(2, 0, "w", 1000);
       const badLease = leases.find((l) => l.stream === "bad")!;
       await store().block([{ ...badLease, error: "boom" }]);

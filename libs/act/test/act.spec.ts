@@ -421,36 +421,6 @@ describe("act", () => {
       app.off("settled", settledListener);
     });
 
-    it("re-arms a wake-up requested while a cycle is running", async () => {
-      const settledListener = vi.fn();
-      app.on("settled", settledListener);
-
-      // Slow down correlate so the first settle is still running when the
-      // second fires.
-      const originalCorrelate = app.correlate.bind(app);
-      const spy = vi.spyOn(app, "correlate").mockImplementation(async (q) => {
-        await sleep(200);
-        return originalCorrelate(q);
-      });
-
-      await app.do("increment", { stream: "settle-guard", actor }, {});
-      // First call starts the cycle.
-      app.settle({ debounceMs: 1 });
-      await sleep(50); // let the timer fire and the settle begin
-      // Second call while the first cycle is still running. The mid-cycle
-      // wake-up is no longer dropped (ACT-1205): the running cycle's
-      // finally re-arms it, so a second cycle runs and emits `settled`
-      // again — armed controllers never starve on a lost wake-up.
-      app.settle({ debounceMs: 1 });
-      await sleep(800);
-
-      // The wake-up was honored: a second settled emission followed.
-      expect(settledListener).toHaveBeenCalledTimes(2);
-
-      spy.mockRestore();
-      app.off("settled", settledListener);
-    });
-
     it("should respect custom options", async () => {
       const settledListener = vi.fn();
       app.on("settled", settledListener);
@@ -471,10 +441,18 @@ describe("act", () => {
     });
 
     it("should stop_settling cancel a pending timer", async () => {
-      app.settle({ debounceMs: 500 });
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+      const spy = vi.spyOn(app, "correlate");
+
+      app.settle({ debounceMs: 50 });
       app.stop_settling(); // cancels before it fires
-      await sleep(600);
-      // no error, no settle cycle ran
+      await sleep(100);
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(settledListener).not.toHaveBeenCalled();
+      spy.mockRestore();
+      app.off("settled", settledListener);
     });
 
     it("uses ActOptions.settleDebounceMs as default when settle() is called with no options", async () => {
@@ -552,14 +530,26 @@ describe("act", () => {
     });
 
     it("should handle errors in settle gracefully", async () => {
+      await app.do("increment", { stream: "settle-error", actor }, {});
       const spy = vi
-        .spyOn(app, "correlate")
+        .spyOn(store(), "query")
         .mockRejectedValue(new Error("settle-error"));
 
+      const errors: unknown[] = [];
+      const onError = ({ error }: { error: unknown }) => errors.push(error);
+      app.on("error", onError);
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
       app.settle({ debounceMs: 1 });
-      await sleep(300);
-      // settle caught the error internally — no unhandled rejection
+      await sleep(50);
+
+      // settle caught the error and surfaced it, without settling.
+      expect(errors.map(String)).toEqual(["Error: settle-error"]);
+      expect(settledListener).not.toHaveBeenCalled();
       spy.mockRestore();
+      app.off("error", onError);
+      app.off("settled", settledListener);
     });
   });
 

@@ -161,8 +161,9 @@ describe("PostgresStore LISTEN client resilience", () => {
   it("dispose during a pending reconnect cancels it — no client is checked out after teardown", async () => {
     const { store, pool } = makeStore();
     await store.notify!(() => {});
+    const first = pool.clients[0];
 
-    pool.clients[0].emit("error", new Error("down"));
+    first.emit("error", new Error("down"));
     expect(pool.connect).toHaveBeenCalledTimes(1);
 
     // Dispose while the reconnect timer is still pending.
@@ -171,6 +172,13 @@ describe("PostgresStore LISTEN client resilience", () => {
     // Advancing time must NOT trigger a reconnect after teardown.
     await vi.advanceTimersByTimeAsync(60_000);
     expect(pool.connect).toHaveBeenCalledTimes(1);
+
+    // The dead client is released; no new client was checked out.
+    expect(first.released).toBe(true);
+    expect(pool.clients).toHaveLength(1);
+    expect(
+      (store as unknown as { _reconnect_timer: unknown })._reconnect_timer
+    ).toBeUndefined();
   });
 
   it("a client error after the handler was already cleared is a no-op reconnect", async () => {
@@ -305,29 +313,6 @@ describe("PostgresStore LISTEN client resilience", () => {
     expect(pool.connect).toHaveBeenCalledTimes(2);
 
     await store.dispose();
-  });
-
-  it("dispose during a pending reconnect fires no reconnect and leaves no client checked out", async () => {
-    const { store, pool } = makeStore();
-    await store.notify!(() => {});
-    const first = pool.clients[0];
-
-    first.emit("error", new Error("down"));
-    expect(pool.connect).toHaveBeenCalledTimes(1);
-
-    // Dispose while the reconnect timer is pending.
-    await store.dispose();
-
-    // No reconnect fires after teardown.
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(pool.connect).toHaveBeenCalledTimes(1);
-
-    // The dead client is released; no new client was checked out.
-    expect(first.released).toBe(true);
-    expect(pool.clients).toHaveLength(1);
-    expect(
-      (store as unknown as { _reconnect_timer: unknown })._reconnect_timer
-    ).toBeUndefined();
   });
 });
 
