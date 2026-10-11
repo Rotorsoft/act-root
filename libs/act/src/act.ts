@@ -760,6 +760,11 @@ export class Act<
       // Declared lanes (not active ones): a lane another process claims is
       // still a valid destination.
       declared_lanes: new Set(this._declared_lanes),
+      // Built after the controllers, so their keys are the active lanes.
+      shard:
+        this._drain_controllers.size < this._declared_lanes.length
+          ? [...this._drain_controllers.keys()]
+          : undefined,
       on_init: () => {
         if (this._drain && this._reactive_events.size > 0) this._arm_all();
       },

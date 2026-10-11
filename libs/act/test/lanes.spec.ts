@@ -1,6 +1,15 @@
 import { vi } from "vitest";
 import { z } from "zod";
-import { act, dispose, log, slice, state, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  dispose,
+  InMemoryCache,
+  InMemoryStore,
+  log,
+  slice,
+  state,
+  ZodEmpty,
+} from "../src/index.js";
 import { sandbox } from "../src/test/sandbox.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -1005,6 +1014,80 @@ describe("lanes", () => {
       expect(slow_ctrls.get("slow")?.lane).toBe("slow");
       expect(slow_ctrls.get("slow")?.lease_millis).toBe(30_000);
       await slow_worker.dispose();
+    });
+  });
+
+  // Workers sharded by onlyLanes are not interchangeable, so they must not
+  // share one correlation lease. If they did, the holder would mark another
+  // shard's targets it has no controller for, and the refused worker would
+  // drain before anything was marked and go idle.
+  describe("onlyLanes shards the correlation lease", () => {
+    const actor = { id: "a", name: "a" };
+
+    const make_worker = (store: InMemoryStore, only_lanes: string[]) => {
+      const ran = { b: 0 };
+      const app = act()
+        .withState(Counter)
+        .withLane({ name: "b" })
+        .on("Incremented")
+        .do(async function onB() {
+          ran.b++;
+        })
+        .to({ target: "t-b", lane: "b" })
+        .build({
+          scoped: { store, cache: new InMemoryCache() },
+          onlyLanes: only_lanes as ["default"],
+        });
+      const settled = () =>
+        new Promise<void>((resolve) => {
+          const done = () => {
+            app.off("settled", done);
+            resolve();
+          };
+          app.on("settled", done);
+          app.settle({ debounceMs: 0 });
+        });
+      return { app, ran, settled };
+    };
+
+    it("lets a worker on another shard correlate while the first holds its lease", async () => {
+      const store = new InMemoryStore();
+      await store.seed();
+      const a = make_worker(store, ["default"]);
+      const b = make_worker(store, ["b"]);
+
+      // `a` takes its lease on an empty log, then an event lands that only
+      // `b` can drain, and only `b` is told.
+      await a.settled();
+      await a.app.do("increment", { stream: "s", actor }, {});
+      await b.settled();
+
+      expect(b.ran.b).toBe(1);
+      await a.app.shutdown();
+      await b.app.shutdown();
+    });
+
+    it("keeps one lease for workers on the same shard", async () => {
+      const store = new InMemoryStore();
+      await store.seed();
+      const spy = vi.spyOn(store, "subscribe");
+      const one = make_worker(store, ["b"]);
+      const two = make_worker(store, ["b"]);
+      const unsharded = make_worker(store, ["default", "b"]);
+      await one.settled();
+      await two.settled();
+      await unsharded.settled();
+
+      const keys = spy.mock.calls
+        .map(([, , correlator]) => correlator?.key)
+        .filter((k): k is string => typeof k === "string");
+      expect(new Set(keys).size).toBe(2);
+      expect(keys.filter((k) => k.endsWith(":b")).length).toBeGreaterThan(0);
+
+      spy.mockRestore();
+      await one.app.shutdown();
+      await two.app.shutdown();
+      await unsharded.app.shutdown();
     });
   });
 });
