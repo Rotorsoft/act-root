@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.38.25](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.24...@rotorsoft/act-tck-v1.38.25) (2026-10-11)
+
+
+### Bug Fixes
+
+* **act:** keep a due stream's wake until a drain reaches it ([#1892](https://github.com/Rotorsoft/act-root/issues/1892)) ([20d90a7](https://github.com/Rotorsoft/act-root/commit/20d90a7920a4b930f975ab341652489ea64e6e71)), closes [#1890](https://github.com/Rotorsoft/act-root/issues/1890)
+
 # [@rotorsoft/act-tck-v1.38.24](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.23...@rotorsoft/act-tck-v1.38.24) (2026-10-11)
 
 
