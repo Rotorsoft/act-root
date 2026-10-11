@@ -478,6 +478,9 @@ export class DrainController<
    * schedule itself is persisted in the store; this runs the drain at the
    * earliest pending visit. A parked stream already carries its mark, so
    * the drain alone finds it, and on an idle app nothing else would.
+   * Every drain re-aims it when it ends, and a due entry stays until a pass
+   * handles it or a pass that started after it came due claims nothing, so
+   * the wake keeps draining until every due stream is reached.
    * `stop()` cancels the timer and a stopped drain never re-schedules it,
    * so a wake never runs after a stop.
    */
@@ -595,13 +598,15 @@ export class DrainController<
     const leaseMillis =
       d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
+    // Circuit open: the store is failing, skip the claim entirely so we
+    // don't hammer a down backend. `_armed` stays set, and the wake is not
+    // re-aimed, which would fire at once for any stream already due: the
+    // breaker's own wake settles after the cooldown, and that drain re-aims
+    // it. Parked entries stay until then.
+    if (this._deps.breaker.state(Date.now()) === "open")
+      return EMPTY_DRAIN as Drain<TEvents>;
+
     try {
-      // Circuit open: the store is failing, skip the claim entirely so we
-      // don't hammer a down backend. `_armed` stays set, so the next tick
-      // after the cooldown (half-open) retries, and `finally` still re-aims
-      // the wake.
-      if (this._deps.breaker.state(Date.now()) === "open")
-        return EMPTY_DRAIN as Drain<TEvents>;
       this._locked = true;
       this._inflight = new Promise<void>((done) => {
         this._inflight_done = done;
@@ -609,6 +614,7 @@ export class DrainController<
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
+      const started = Date.now();
       const cycle = await run_drain_cycle(this._deps, {
         lagging,
         leading,
@@ -619,7 +625,9 @@ export class DrainController<
       });
 
       if (!cycle) {
-        // Nothing claimed: caught up, and the store answered.
+        // Nothing claimed: caught up, and the store answered. Whatever was
+        // due when this pass started was handled elsewhere or has no work.
+        this._defer.prune(started);
         this._deps.breaker.passed();
         this._armed = false;
         return EMPTY_DRAIN as Drain<TEvents>;
@@ -665,8 +673,9 @@ export class DrainController<
       this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
-      // Re-aim the wake at the earliest stream still parked, including one
-      // whose wake fired early at the timer ceiling.
+      // Re-aim the wake at the earliest stream still parked: one still due
+      // fires again at once, and one whose wake fired early at the timer
+      // ceiling waits out the rest of its span.
       if (!this._stopped) this._defer.schedule();
       this._locked = false;
       this._inflight = undefined;

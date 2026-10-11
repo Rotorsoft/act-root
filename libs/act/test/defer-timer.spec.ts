@@ -43,7 +43,7 @@ describe("DeferTimer", () => {
     expect(t.is_deferred("a")).toBe(true); // still deferred — uses the later time
   });
 
-  it("wakes once at the earliest due-time and GCs only the come-due entries", () => {
+  it("wakes once at the earliest due-time and keeps entries until pruned", () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     let wakes = 0;
@@ -58,7 +58,9 @@ describe("DeferTimer", () => {
     expect(wakes).toBe(0);
     vi.advanceTimersByTime(1); // earliest (1000) elapses
     expect(wakes).toBe(1);
-    // "soon" is collected; "later" stays parked.
+    // The wake keeps both: "soon" stays until a pass handles it or prunes it.
+    expect(t.size).toBe(2);
+    t.prune(1000); // a pass that started at 1000 claimed nothing
     expect(t.size).toBe(1);
     expect(t.is_deferred("later")).toBe(true);
   });
@@ -107,7 +109,7 @@ describe("DeferTimer", () => {
     t.schedule();
     vi.advanceTimersByTime(0);
     expect(wakes).toBe(1);
-    expect(t.size).toBe(0); // collected on wake
+    expect(t.size).toBe(1); // kept until a pass handles or prunes it
   });
 
   it("stop cancels a pending wake and is idempotent", () => {
@@ -130,9 +132,11 @@ describe("DeferTimer", () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     let wakes = 0;
-    // The consumer re-schedules on every wake, as the drain does when it ends.
+    // The consumer re-schedules on every wake, as the drain does when it
+    // ends, after pruning what came due (a pass that claimed nothing).
     const t: DeferTimer = new DeferTimer(() => {
       wakes++;
+      t.prune(Date.now());
       t.schedule();
     });
     // 90 days out — well past setTimeout's ~24.8-day ceiling.
@@ -147,7 +151,7 @@ describe("DeferTimer", () => {
     expect(t.size).toBe(1);
     expect(t.is_deferred("far")).toBe(true);
     // Advancing past the real due-time fires again (through the intermediate
-    // ceiling clamps) and finally GCs the entry.
+    // ceiling clamps) and the pass at the due-time prunes the entry.
     vi.advanceTimersByTime(90 * 86_400_000);
     expect(wakes).toBeGreaterThan(1);
     expect(t.size).toBe(0);
