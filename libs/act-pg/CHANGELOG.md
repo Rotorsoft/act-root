@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.20.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.7...@rotorsoft/act-pg-v1.20.8) (2026-10-11)
+
+
+### Bug Fixes
+
+* **act:** run deferred work on time, and let the reaction own retry timing ([#1872](https://github.com/Rotorsoft/act-root/issues/1872)) ([a65be3d](https://github.com/Rotorsoft/act-root/commit/a65be3dde912c269cfde48b052cc52c82851c846)), closes [#1862](https://github.com/Rotorsoft/act-root/issues/1862) [#1874](https://github.com/Rotorsoft/act-root/issues/1874) [#1875](https://github.com/Rotorsoft/act-root/issues/1875)
+
 # [@rotorsoft/act-pg-v1.20.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.6...@rotorsoft/act-pg-v1.20.7) (2026-10-07)
 
 # [@rotorsoft/act-pg-v1.20.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.5...@rotorsoft/act-pg-v1.20.6) (2026-10-07)
