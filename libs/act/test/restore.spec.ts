@@ -777,7 +777,7 @@ describe("restore into a store that already correlated", () => {
     for (let i = 0; i < 10; i++)
       await app.do("tick", { stream: "before", actor: who }, {});
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     seen = 0;
 
     await app.restore(await backup(), {});
@@ -785,7 +785,7 @@ describe("restore into a store that already correlated", () => {
       await app.do("tick", { stream: "after", actor: who }, {});
     for (let i = 0; i < 4; i++) {
       await app.correlate();
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
     }
     await done();
     // 3 restored + 3 new, all reached their reaction

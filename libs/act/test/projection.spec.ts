@@ -445,7 +445,7 @@ describe("projection", () => {
     // Each retry waits the default backoff; jump the clock past it.
     vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 5; i++) {
-      await app.drain({ eventLimit: 100, leaseMillis: 1 });
+      await app.drain({ eventLimit: 100 });
       vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
     }
     vi.useRealTimers();

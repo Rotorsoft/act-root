@@ -98,7 +98,7 @@ describe("defer durability", () => {
 
     await app.do("tick", { stream: "h1", actor }, {});
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
 
     // One atomic call: the deferred lease rides the finalize batch marked
     // with `due`; the standalone defer() op is not part of drain

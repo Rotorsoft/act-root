@@ -176,7 +176,7 @@ describe("state projection (.of)", () => {
       h.fail_next_flush();
       await app.correlate();
       vi.useFakeTimers({ toFake: ["Date"] });
-      const failed = await app.drain({ leaseMillis: 1 });
+      const failed = await app.drain();
       expect(failed.acked.length).toBe(0);
       // retry after the default backoff — same events refold, same row lands
       vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
@@ -331,7 +331,7 @@ describe("state projection (.of)", () => {
       h.fail_every_flush(2); // second flush call throws
       await app.correlate();
       vi.useFakeTimers({ toFake: ["Date"] });
-      await app.drain({ leaseMillis: 1, eventLimit: 1_000 });
+      await app.drain({ eventLimit: 1_000 });
       h.fail_every_flush(0);
       vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       await settle_all(app);
@@ -393,7 +393,7 @@ describe("state projection (.of)", () => {
         await app.do("increment", { stream: s2, actor }, { by: (i % 7) + 1 });
         if (i % 17 === 0) {
           await app.correlate();
-          await app.drain({ leaseMillis: 1, eventLimit: 50 });
+          await app.drain({ eventLimit: 50 });
           await new Promise((r) => setTimeout(r, 3));
         }
       }

@@ -189,21 +189,21 @@ describe("per-reaction backoff (integration)", () => {
     await app.correlate();
 
     // First attempt fails — controller now defers
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // Immediate next drain: stream is in backoff, handler must not run
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // Still inside window
     await sleep(50);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // After window — handler can run again
     await sleep(200);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(2);
   });
 
@@ -236,7 +236,7 @@ describe("per-reaction backoff (integration)", () => {
 
       await app.do("tick", { stream: "s1", actor }, {});
       await app.correlate();
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       expect(attempts).toBe(1);
 
       // The schedule is persisted, so a lapsed 1ms lease changes nothing.
@@ -248,7 +248,7 @@ describe("per-reaction backoff (integration)", () => {
         Date.now() + DEFAULT_BACKOFF.baseMs - 50
       );
       await sleep(20);
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       expect(attempts).toBe(1);
 
       // That empty claim disarmed the drain; the wake would re-arm it at the
@@ -261,7 +261,7 @@ describe("per-reaction backoff (integration)", () => {
       )._drain_controllers
         .get("default")!
         .arm();
-      await app.drain({ leaseMillis: 1 });
+      await app.drain();
       expect(attempts).toBe(2);
     });
 
@@ -286,7 +286,7 @@ describe("per-reaction backoff (integration)", () => {
       await app.do("tick", { stream: "s1", actor }, {});
       await app.correlate();
       for (let i = 0; i < 6; i++) {
-        await app.drain({ leaseMillis: 1 });
+        await app.drain();
         past_default_backoff();
       }
       expect(attempts).toBe(3);
@@ -333,7 +333,7 @@ describe("per-reaction backoff (integration)", () => {
     });
     const firstId = firstEvent.id;
 
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
 
     // Partial progress actually happened: first succeeded, second threw.
     expect(calls).toBe(2);
@@ -387,7 +387,7 @@ describe("per-reaction backoff (integration)", () => {
 
     const acked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // The wake runs the retry once the backoff window elapses.
@@ -418,7 +418,7 @@ describe("per-reaction backoff (integration)", () => {
 
     const blocked: string[] = [];
     app.on("blocked", (leases) => blocked.push(...leases.map((l) => l.stream)));
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts).toBe(1);
 
     // The wake runs the retry: retry=1, maxRetries=1 → block
@@ -454,7 +454,7 @@ describe("per-reaction backoff (integration)", () => {
     // Commit + correlate + drain "early" — backoff entry set at T+50.
     await app.do("tick", { stream: "early", actor }, {});
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts.early).toBe(1);
 
     // Commit + correlate + drain "late" 30ms later — entry set at T'+50.
@@ -462,14 +462,14 @@ describe("per-reaction backoff (integration)", () => {
     await sleep(30);
     await app.do("tick", { stream: "late", actor }, {});
     await app.correlate();
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts.late).toBe(1);
 
     // ~25ms more lets `early`'s timer fire (~55ms total from its
     // failure) while `late` is only ~25ms in. The callback iterates the
     // map and must delete `early` but keep `late`.
     await sleep(25);
-    await app.drain({ leaseMillis: 1 });
+    await app.drain();
     expect(attempts.early).toBe(2);
     expect(attempts.late).toBe(1);
   });
