@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.38.24](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.23...@rotorsoft/act-tck-v1.38.24) (2026-10-11)
+
+
+### Bug Fixes
+
+* **act:** give each onlyLanes shard its own correlation lease ([#1871](https://github.com/Rotorsoft/act-root/issues/1871)) ([8bd44b2](https://github.com/Rotorsoft/act-root/commit/8bd44b20cb61ce4028e592488403c3dd55229a0b)), closes [#1860](https://github.com/Rotorsoft/act-root/issues/1860)
+* **act:** run deferred work on time, and let the reaction own retry timing ([#1872](https://github.com/Rotorsoft/act-root/issues/1872)) ([a65be3d](https://github.com/Rotorsoft/act-root/commit/a65be3dde912c269cfde48b052cc52c82851c846)), closes [#1862](https://github.com/Rotorsoft/act-root/issues/1862) [#1874](https://github.com/Rotorsoft/act-root/issues/1874) [#1875](https://github.com/Rotorsoft/act-root/issues/1875)
+
 # [@rotorsoft/act-tck-v1.38.23](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.22...@rotorsoft/act-tck-v1.38.23) (2026-10-10)
 
 # [@rotorsoft/act-tck-v1.38.22](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.21...@rotorsoft/act-tck-v1.38.22) (2026-10-08)
