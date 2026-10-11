@@ -1643,11 +1643,11 @@ export class Act<
   }
 
   /**
-   * Atomically wipe the store and rebuild it from an async stream of
-   * committed events. The framework owns iteration, validation,
-   * `drop_snapshots` filtering, `on_progress`, and the per-call
-   * `old → new` causation remap; the adapter's {@link Store.restore}
-   * driver supplies the transaction lifecycle and per-event insert.
+   * Atomically wipe the store and rebuild it from an event source. The
+   * framework owns iteration, validation, `drop_snapshots` filtering,
+   * `on_progress`, and the per-call `old → new` causation remap; the
+   * adapter's {@link Store.restore} driver supplies the transaction
+   * lifecycle and per-event insert.
    *
    * Throws if the adapter has no restore capability. Throws on the
    * first invalid event (negative version, malformed `created`) with
@@ -1655,31 +1655,28 @@ export class Act<
    * the adapter means a failing restore leaves the store byte-for-byte
    * unchanged.
    *
-   * @param source - Async stream of events in target order. Streamed
-   *   rather than buffered so multi-million-event backups don't OOM.
-   *   Each event's original `id` is used as a causation lookup key but
-   *   never written through — adapters renumber densely.
+   * @param source - Any {@link EventSource}: a `CsvFile` backup or
+   *   another store. Read in batches rather than buffered, so
+   *   multi-million-event backups don't OOM. Each event's original `id`
+   *   is used as a causation lookup key but never written through —
+   *   adapters renumber densely.
    * @param opts - {@link ScanOptions}. `drop_snapshots` skips
    *   `__snapshot__` events (counted in the result); `on_progress`
    *   fires once per event.
+   * @param sink - Where the events land. Defaults to this Act's store.
    * @returns {@link ScanResult} with `kept`, `duration_ms`, and
    *   `dropped` per-category counters.
    *
-   * @example Round-trip a CSV backup
+   * @example Restore a CSV backup into the connected store
    * ```typescript
-   * async function* parseCsv(blob: string) {
-   *   for (const line of blob.split("\n").slice(1)) {
-   *     const [id, name, data, stream, version, created, meta] = parse(line);
-   *     yield {
-   *       id: +id, name, data: JSON.parse(data), stream,
-   *       version: +version, created: new Date(created),
-   *       meta: JSON.parse(meta),
-   *     };
-   *   }
-   * }
-   * const result = await app.restore(parseCsv(csvBlob), {});
+   * const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
    * console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
    * await cache().clear();   // operator's responsibility
+   * ```
+   *
+   * @example Copy one store into another
+   * ```typescript
+   * await app.restore(pg, {}, sqlite);
    * ```
    *
    * @see {@link Store.restore} for the underlying driver-pattern primitive.

@@ -176,7 +176,7 @@ The framework logs the error regardless of listeners; the event is emitted only 
 
 ## Error Constants
 
-For string-based error matching (e.g., in tRPC error handlers):
+Each error class sets its `name` to one of these constants, which is what serialized or logged errors carry. Match a thrown error in code with `instanceof`; the constants are on `name`, not `message`.
 
 ```typescript
 import { Errors } from "@rotorsoft/act";
@@ -192,7 +192,11 @@ import { Errors } from "@rotorsoft/act";
 ## Production Error Handling
 
 ```typescript no-check
-import { Errors } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  InvariantError,
+  ValidationError,
+} from "@rotorsoft/act";
 
 // tRPC mutation
 CreateItem: authedProcedure
@@ -204,13 +208,13 @@ CreateItem: authedProcedure
       // app.on("committed", () => app.settle())
       return { success: true, id };
     } catch (error) {
-      if (error.message === Errors.ValidationError) {
+      if (error instanceof ValidationError) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid input" });
       }
-      if (error.message === Errors.InvariantError) {
+      if (error instanceof InvariantError) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.description });
       }
-      if (error.message === Errors.ConcurrencyError) {
+      if (error instanceof ConcurrencyError) {
         throw new TRPCError({ code: "CONFLICT", message: "Please retry" });
       }
       throw error;

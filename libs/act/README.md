@@ -51,8 +51,8 @@ Top-level exports:
 
 - **Builders** — `state()`, `slice()`, `projection()`, `act()` build the domain. `withState`, `withSlice`, `withProjection` compose them.
 - **Ports** — `store()`, `cache()`, `log()` are first-call-wins singletons; pass an adapter on first call to override the default. `dispose()` registers shutdown callbacks.
-- **`Act` orchestrator** — `do`, `load`, `query`, `query_array`, `query_streams`, `query_stats`, `drain`, `settle`, `correlate`, `reset`, `unblock`, `blocked_streams`, `close` plus lifecycle events (`committed`, `notified`, `settled`, `blocked`, `closed`, …).
-- **Errors** — `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError` plus the `Errors` constants for string-matching.
+- **`Act` orchestrator** — `do`, `load`, `query`, `query_array`, `drain`, `correlate`, `settle`, `start_correlations`, `reset`, `unblock`, `blocked_streams`, `prioritize`, `close`, `forget`, `restore`, `audit`, `shutdown` plus lifecycle events (`committed`, `notified`, `settled`, `blocked`, `closed`, …). Subscription introspection (`query_streams`, `query_stats`) is on the store: `store().query_streams(...)`.
+- **Errors** — `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError` plus the `Errors` constants (each error's `name`); match with `instanceof`.
 - **In-memory adapters** — `InMemoryStore`, `InMemoryCache`, `ConsoleLogger`.
 - **Constants** — `SNAP_EVENT`, `TOMBSTONE_EVENT`.
 - **Types** — full re-export of port interfaces, builder result types, lifecycle event payloads.

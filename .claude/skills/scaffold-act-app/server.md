@@ -196,18 +196,22 @@ setInterval(() => autoClose(10), 15_000);
 ## Error Handling in Production
 
 ```typescript
-import { Errors } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  InvariantError,
+  ValidationError,
+} from "@rotorsoft/act";
 
 try {
   await app.do("CreateItem", target, payload);
 } catch (error) {
-  if (error.message === Errors.ValidationError) { /* bad input */ }
-  if (error.message === Errors.InvariantError) { /* rule violated */ }
-  if (error.message === Errors.ConcurrencyError) { /* retry */ }
+  if (error instanceof ValidationError) { /* bad input */ }
+  if (error instanceof InvariantError) { /* rule violated */ }
+  if (error instanceof ConcurrencyError) { /* retry */ }
 }
 ```
 
-Error constants: `Errors.ValidationError = "ERR_VALIDATION"`, `Errors.InvariantError = "ERR_INVARIANT"`, `Errors.ConcurrencyError = "ERR_CONCURRENCY"`.
+Use `instanceof`. The `Errors` constants are the errors' `name`, not their `message`, so comparing `error.message` never matches.
 
 ## Idempotency
 
@@ -220,17 +224,15 @@ If the scaffolded app exposes a webhook receiver, reach for `@rotorsoft/act-ops`
 
 ### Receiver-side dedup with `@rotorsoft/act-ops`
 
-When the app receives webhooks (or forwarded bus events) and needs the receiver-side idempotency contract documented in [external integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration), use the shipped port + reference implementation:
+When the app receives webhooks (or forwarded bus events) and needs the receiver-side idempotency contract documented in [external integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration), use the shipped middleware. It claims the key tentatively, then commits it when the procedure succeeds and releases it when the procedure throws, so a failed delivery is processed again on the sender's retry instead of being skipped as a duplicate:
 
 ```typescript
 // packages/app/src/api/webhook-receiver.ts
-import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/trpc";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 // Size the dedup window from the sender's retry profile — don't
-// guess. The store applies a 4× safety factor by default and honors
-// `jitter: true` (worst-case 1.5× backoff multiplier). Pass `ttlMs`
-// directly instead if you want to skip the derivation.
+// guess. Pass `ttlMs` directly instead if you want to skip the derivation.
 const dedup = new InMemoryIdempotencyStore({
   retryProfile: {
     maxRetries: 5,
@@ -240,21 +242,23 @@ const dedup = new InMemoryIdempotencyStore({
   maxEntries: 50_000,
 });
 
+const idempotent = t.procedure.use(
+  webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+);
+
 export const webhookRouter = router({
-  inbound: t.procedure
+  inbound: idempotent
     .input(InboundEventSchema)
     .mutation(async ({ input, ctx }) => {
-      const key = extractIdempotencyKey(ctx.headers);
-      if (!key) throw new TRPCError({ code: "BAD_REQUEST", message: "Missing Idempotency-Key" });
-
-      const fresh = dedup.claim(key);
-      if (!fresh) return { status: "dedup-skipped" as const, key };
-
+      const { key, deduped } = ctx.idempotency;
+      if (deduped) return { status: "dedup-skipped" as const, key };
       await app.do(/* … apply the inbound event … */);
       return { status: "processed" as const, key };
     }),
 });
 ```
+
+Don't hand-roll this with `claim()` alone: a claim that is never committed or released can drop a delivery whose first attempt failed.
 
 For multi-process receivers, swap `InMemoryIdempotencyStore` for a durable adapter (Postgres unique index, Redis `SET NX EX`) implementing the same `IdempotencyStore` port — the middleware body doesn't change. Working examples in [external integration § implementations](https://rotorsoft.github.io/act-root/docs/guides/external-integration#implementations).
 
