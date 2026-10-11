@@ -149,17 +149,24 @@ describe("pg store", () => {
       // below the mark until it succeeds or blocks.
       await app.correlate({ limit: 100 });
 
-      await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      // Each retry waits the default backoff; jump the clock past it (only
+      // `Date` is faked, so timers and the database keep real time).
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const past_backoff = () => vi.setSystemTime(Date.now() + 10_001);
+      await app.drain({ leaseMillis: 1 });
       expect(onDecremented).toHaveBeenCalledTimes(1);
 
-      drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      past_backoff();
+      drained = await app.drain({ leaseMillis: 1 });
       expect(drained.acked.length).toBe(0);
       expect(onDecremented).toHaveBeenCalledTimes(2);
 
-      drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      past_backoff();
+      drained = await app.drain({ leaseMillis: 1 });
       expect(drained.acked.length).toBe(0);
       expect(drained.blocked.length).toBe(1);
       expect(onDecremented).toHaveBeenCalledTimes(3);
+      vi.useRealTimers();
     });
   });
 });

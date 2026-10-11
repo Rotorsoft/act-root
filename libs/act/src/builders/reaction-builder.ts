@@ -19,6 +19,7 @@
 import {
   CloseSignal,
   compute_backoff_delay,
+  DEFAULT_BACKOFF,
   DeferSignal,
   type Handle,
   type HandleBatch,
@@ -91,13 +92,13 @@ function finalize(
         ? `Blocking ${lease.stream} on non-retryable error.`
         : `Blocking ${lease.stream} after ${lease.retry} retries.`
     );
-  // Backoff applies only on retry paths — successful handles and terminal
-  // blocks never defer. `lease.retry` here is the just-failed attempt's
-  // counter, so the delay paces the *next* attempt.
-  const next_attempt_at =
-    !block && options.backoff
-      ? Date.now() + compute_backoff_delay(lease.retry, options.backoff)
-      : undefined;
+  // Every retry is paced by the reaction's backoff, or the default one;
+  // terminal blocks never defer. `lease.retry` here is the just-failed
+  // attempt's counter, so the delay paces the *next* attempt.
+  const next_attempt_at = block
+    ? undefined
+    : Date.now() +
+      compute_backoff_delay(lease.retry, options.backoff ?? DEFAULT_BACKOFF);
   return {
     lease,
     handled,

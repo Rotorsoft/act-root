@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { act, projection, slice, state } from "../src/index.js";
+import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 import { sandbox } from "../src/test/index.js";
 
 describe("projection", () => {
@@ -440,11 +441,14 @@ describe("projection", () => {
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
 
-    // retry increments on each claim: 0→fail, 1→fail, 2→fail, 3→block
+    // retry increments on each claim: 0→fail, 1→fail, 2→fail, 3→block.
+    // Each retry waits the default backoff; jump the clock past it.
+    vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 5; i++) {
       await app.drain({ eventLimit: 100, leaseMillis: 1 });
-      await new Promise((r) => setTimeout(r, 5));
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
     }
+    vi.useRealTimers();
 
     expect(blocked.length).toBeGreaterThanOrEqual(1);
     expect(blocked[0].error).toBe("permanent failure");

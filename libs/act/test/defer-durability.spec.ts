@@ -180,7 +180,7 @@ describe("defer durability", () => {
     await app.shutdown();
   });
 
-  it("re-arms the drain at the persisted due-time with no intervening commit", async () => {
+  it("runs the drain at the persisted due-time with no intervening commit", async () => {
     // A near-future due-time so a real-time wait is short. The store's own
     // async ops use real setTimeout, so fake timers can't drive the wake
     // without deadlocking the store — a short real delay is the honest test.
@@ -203,11 +203,12 @@ describe("defer durability", () => {
 
     // Disarmed, and nothing has committed to the idle aggregate.
     expect(controller.armed).toBe(false);
+    const claim = vi.spyOn(store(), "claim");
 
-    // Past the due-time: the re-seeded timer wakes and re-arms the
-    // controller — the only thing that could, since no commit intervened.
+    // Past the due-time: the re-seeded timer wakes and runs the drain — the
+    // only thing that could, since no commit intervened.
     await sleep(80);
-    expect(controller.armed).toBe(true);
+    expect(claim).toHaveBeenCalled();
   });
 
   it("seeds a non-default lane's controller from persisted deferred_at", async () => {

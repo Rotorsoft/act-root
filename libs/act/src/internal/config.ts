@@ -73,6 +73,16 @@ const BackoffOptionsSchema = z.object({
   jitter: z.boolean().optional(),
 });
 
+/**
+ * Retry pacing for a reaction that declares no backoff. Ten seconds matches
+ * the default lease, which used to pace these retries. The lease now only
+ * keeps two workers off one stream; retry timing belongs to the reaction.
+ */
+export const DEFAULT_BACKOFF: BackoffOptions = {
+  strategy: "fixed",
+  baseMs: 10_000,
+};
+
 /** Validate a backoff bag, or pass `undefined` through. Throws `ZodError`. */
 export function resolveBackoffConfig(
   options: BackoffOptions | undefined

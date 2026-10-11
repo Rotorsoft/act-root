@@ -42,6 +42,8 @@ describe("imperative DeferSignal(when)", () => {
         if (Date.now() < until) throw new DeferSignal({ at: new Date(until) });
       })
       .build();
+    const acked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
     await app.do("tick", { stream: "at1", actor }, {});
     await app.correlate();
@@ -50,9 +52,8 @@ describe("imperative DeferSignal(when)", () => {
     expect(first.acked.length).toBe(0); // deferred, not acked
 
     await sleep(150);
-    const done = await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(2);
-    expect(done.acked.some((l) => l.stream === "at1")).toBe(true);
+    expect(acked).toContain("at1");
   });
 
   it("{ at: Date } derived from the event in the handler", async () => {
@@ -66,6 +67,8 @@ describe("imperative DeferSignal(when)", () => {
         if (Date.now() < due) throw new DeferSignal({ at: new Date(due) });
       })
       .build();
+    const acked: string[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
     await app.do("tick", { stream: "atfn1", actor }, {});
     await app.correlate();
@@ -73,9 +76,8 @@ describe("imperative DeferSignal(when)", () => {
     expect(attempts).toBe(1);
 
     await sleep(140);
-    const done = await app.drain({ leaseMillis: 1 });
     expect(attempts).toBe(2);
-    expect(done.acked.some((l) => l.stream === "atfn1")).toBe(true);
+    expect(acked).toContain("atfn1");
   });
 
   it("{ after } is measured from the event's created time (parks, not acked)", async () => {

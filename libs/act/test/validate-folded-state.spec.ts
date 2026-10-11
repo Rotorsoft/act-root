@@ -7,6 +7,7 @@ import {
   state,
   ValidationError,
 } from "../src/index.js";
+import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 import type { CacheEntry } from "../src/types/index.js";
 
 /**
@@ -132,8 +133,10 @@ describe("validateFoldedState", () => {
     await app.correlate();
     // Drive drain to quiescence with a tiny lease so the batch handler's
     // throws exhaust the retry budget and the stream lands blocked.
+    vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 10; i++) {
       const d = await app.drain({ leaseMillis: 1, eventLimit: 1_000 });
+      vi.setSystemTime(Date.now() + DEFAULT_BACKOFF.baseMs + 1);
       if (
         d.acked.length === 0 &&
         d.blocked.length === 0 &&
@@ -144,6 +147,7 @@ describe("validateFoldedState", () => {
 
     // The fold handler threw the ValidationError during the reduction,
     // blocking the stream; the message names the state and the event.
+    vi.useRealTimers();
     expect(errors.some((e) => e.includes("Calc.dividedByZero"))).toBe(true);
     // The bad row never made it into the read table.
     expect(table.has("p1")).toBe(false);

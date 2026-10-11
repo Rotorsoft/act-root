@@ -76,24 +76,4 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
     await sleep(3_000);
     expect(attempts).toBe(2);
   }, 10_000);
-
-  it("retries without backoff (a lease-expiry park is a duration, unaffected by skew)", async () => {
-    let attempts = 0;
-    const app = act()
-      .withState(S)
-      .withLane({ name: "l", cycleMs: 200, leaseMillis: 1_000 })
-      .on("Pinged")
-      .do(
-        async function r() {
-          if (++attempts === 1) throw new Error("once");
-        },
-        { maxRetries: 3 }
-      )
-      .to((e) => ({ target: `r-${e.stream}`, lane: "l" }))
-      .build();
-    await app.do("ping", { stream: "n", actor }, {});
-    await app.correlate();
-    await sleep(3_500);
-    expect(attempts).toBe(2);
-  }, 10_000);
 });

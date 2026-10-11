@@ -8,15 +8,10 @@
  * at the earliest pending due-time, garbage-collecting the entries that have
  * come due.
  *
- * Two consumers ride it:
- *
- * - the {@link "drain-cycle".DrainController} — for per-reaction backoff (a
- *   retry's `next_attempt_at`) and, once handlers can express it, the
- *   `defer` outcome that holds a stream pending without advancing the
- *   watermark or bumping `retry`.
- * - the autoclose controller — to schedule its next eligibility check at the
- *   precise time an `after`-style cooldown elapses, instead of a blind
- *   fixed-interval sweep.
+ * The {@link "drain-cycle".DrainController} rides it for per-reaction
+ * backoff (a retry's `next_attempt_at`) and for the `defer` outcome, which
+ * holds a stream pending without advancing the watermark or bumping `retry`.
+ * The wake runs a drain, and the drain re-schedules the timer when it ends.
  *
  * Lives in process memory, per worker — the same per-worker pacing trade-off
  * documented for backoff. Durability comes from the data the due-time is
@@ -53,9 +48,8 @@ export class DeferTimer {
 
   /**
    * @param on_wake - invoked once each time the earliest due-time elapses,
-   *   after the come-due entries have been removed. Consumers use it to
-   *   re-arm their loop (the drain sets its `armed` flag; autoclose runs a
-   *   tick).
+   *   after the come-due entries have been removed. The consumer re-schedules
+   *   for whatever is still parked.
    */
   constructor(on_wake: () => void) {
     this._on_wake = on_wake;
@@ -108,10 +102,10 @@ export class DeferTimer {
     for (const t of this._due.values()) if (t < earliest) earliest = t;
     // Clamp to setTimeout's 32-bit ceiling (~24.8 days). A longer due-time
     // (e.g. a 90-day autoclose cooldown) would otherwise overflow and Node
-    // fires it immediately, busy-looping. Instead we wake at the ceiling and
-    // re-arm: the GC below keeps the still-future entry, `on_wake` re-schedules
-    // for the remaining span, and (for persisted defers) `claim` skips the
-    // stream until its real due-time anyway.
+    // fires it immediately, busy-looping. Instead we wake at the ceiling: the
+    // GC below keeps the still-future entry, the consumer re-schedules for
+    // the remaining span, and (for persisted defers) `claim` skips the stream
+    // until its real due-time anyway.
     const delay = Math.min(
       Math.max(0, earliest - Date.now()),
       MAX_TIMER_DELAY_MS
@@ -121,22 +115,9 @@ export class DeferTimer {
       // Garbage-collect the entries that have come due so the consumer's
       // next pass sees them as active again.
       const now = Date.now();
-      let came_due = false;
       for (const [stream, at] of this._due)
-        if (at <= now) {
-          this._due.delete(stream);
-          came_due = true;
-        }
+        if (at <= now) this._due.delete(stream);
       this._on_wake();
-      // Premature ceiling clamp: nothing came due, yet entries remain — the
-      // earliest due-time was past the 32-bit `setTimeout` ceiling, so this
-      // wake fired early. The consumer's `on_wake` won't re-arm (the drain's
-      // just sets its armed flag, and its next pass early-returns while the
-      // stream is still store-excluded), so the primitive must self-re-arm or
-      // a >ceiling defer/cooldown loses its precise wake. A normal wake
-      // (something came due) leaves re-arming to the consumer, preserving the
-      // fire-once-per-schedule model.
-      if (!came_due && this._due.size > 0) this.schedule();
     }, delay);
     this._timer.unref();
   }
