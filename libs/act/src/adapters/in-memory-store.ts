@@ -809,27 +809,22 @@ export class InMemoryStore implements Store {
    */
   async defer(input: string[] | StreamFilter, deferred_at: number) {
     await sleep();
-    let count = 0;
-    if (Array.isArray(input)) {
-      // De-dup the array so a repeated name counts once, matching PG's
-      // set-based `WHERE stream = ANY(...)`.
-      for (const name of new Set(input)) {
-        const s = this._streams.get(name);
-        if (s) {
-          s.defer(deferred_at);
-          count++;
-        }
-      }
-    } else {
-      const matches = this._filter_predicate(input);
-      for (const s of this._streams.values()) {
-        if (matches(s)) {
-          s.defer(deferred_at);
-          count++;
-        }
-      }
-    }
-    return count;
+    const selected = this._select(input);
+    for (const s of selected) s.defer(deferred_at);
+    return selected.length;
+  }
+
+  /**
+   * The streams named by `input`: an explicit list (de-duplicated, so a
+   * repeated name counts once, matching the SQL adapters' set-based
+   * `stream = ANY(...)`; unknown names are skipped) or a {@link StreamFilter}.
+   */
+  private _select(input: string[] | StreamFilter): InMemoryStream[] {
+    if (Array.isArray(input))
+      return [...new Set(input)]
+        .map((name) => this._streams.get(name))
+        .filter((s) => s !== undefined);
+    return [...this._streams.values()].filter(this._filter_predicate(input));
   }
 
   /**
@@ -883,40 +878,11 @@ export class InMemoryStore implements Store {
    */
   async reset(input: string[] | StreamFilter) {
     await sleep();
-    let count = 0;
-    if (Array.isArray(input)) {
-      // De-dup the array so a repeated name counts once, matching PG's
-      // set-based `WHERE stream = ANY(...)`.
-      for (const name of new Set(input)) {
-        const s = this._streams.get(name);
-        if (s) {
-          s.reset();
-          count++;
-        }
-      }
-    } else {
-      const matches = this._filter_predicate(input);
-      for (const s of this._streams.values()) {
-        if (matches(s)) {
-          s.reset();
-          count++;
-        }
-      }
-    }
-    return count;
+    const selected = this._select(input);
+    for (const s of selected) s.reset();
+    return selected.length;
   }
 
-  /**
-   * Clear the blocked flag (and retry / error / lease) on the matched
-   * streams without touching the watermark. Streams that aren't blocked
-   * at call time are silently skipped. Accepts either an explicit list
-   * of names or a {@link StreamFilter}. The filter form always restricts
-   * to blocked streams — passing `blocked: false` matches nothing.
-   * See {@link Store.unblock}.
-   *
-   * @param input - Stream names or a filter selecting the streams to unblock.
-   * @returns Count of streams that were actually flipped (were blocked).
-   */
   /**
    * Wipe the sensitive-data payload for every event on the stream — see
    * {@link Store.forget_pii}. O(1) drop of the stream's inner Map; the size of
@@ -933,24 +899,25 @@ export class InMemoryStore implements Store {
     return count;
   }
 
+  /**
+   * Clear the blocked flag (and retry / error / lease) on the matched
+   * streams without touching the watermark. Streams that aren't blocked
+   * at call time are silently skipped. Accepts either an explicit list
+   * of names or a {@link StreamFilter}. The filter form always restricts
+   * to blocked streams — passing `blocked: false` matches nothing.
+   * See {@link Store.unblock}.
+   *
+   * @param input - Stream names or a filter selecting the streams to unblock.
+   * @returns Count of streams that were actually flipped (were blocked).
+   */
   async unblock(input: string[] | StreamFilter) {
     await sleep();
-    let count = 0;
-    if (Array.isArray(input)) {
-      for (const name of input) {
-        const s = this._streams.get(name);
-        if (s?.unblock()) count++;
-      }
-    } else {
-      // Filter form: always restrict to blocked streams. An explicit
-      // `blocked: false` in the filter is silently overridden — there
-      // is no use case for "unblock unblocked streams."
-      const matches = this._filter_predicate({ ...input, blocked: true });
-      for (const s of this._streams.values()) {
-        if (matches(s) && s.unblock()) count++;
-      }
-    }
-    return count;
+    // An explicit `blocked: false` in the filter is overridden: there is no
+    // use case for "unblock unblocked streams."
+    const selected = this._select(
+      Array.isArray(input) ? input : { ...input, blocked: true }
+    );
+    return selected.filter((s) => s.unblock()).length;
   }
 
   /**
@@ -964,16 +931,9 @@ export class InMemoryStore implements Store {
    */
   async prioritize(filter: StreamFilter, priority: number) {
     await sleep();
-    const matches = this._filter_predicate(filter);
-    let count = 0;
-    for (const s of this._streams.values()) {
-      if (!matches(s)) continue;
-      if (s.priority !== priority) {
-        s.set_priority(priority);
-        count++;
-      }
-    }
-    return count;
+    const changed = this._select(filter).filter((s) => s.priority !== priority);
+    for (const s of changed) s.set_priority(priority);
+    return changed.length;
   }
 
   /**
@@ -988,16 +948,8 @@ export class InMemoryStore implements Store {
     await sleep();
     const limit = query?.limit ?? 100;
     const after = query?.after;
-    const blocked = query?.blocked;
     const source_matches = query?.source_matches;
-    const stream_re =
-      query?.stream !== undefined && !query.stream_exact
-        ? new RegExp(query.stream)
-        : undefined;
-    const source_re =
-      query?.source !== undefined && !query.source_exact
-        ? new RegExp(query.source)
-        : undefined;
+    const matches = this._filter_predicate(query ?? {});
     // Reverse-match: a stream qualifies when its stored `source` pattern
     // matches at least one of the requested names. Patterns are compiled
     // once and cached — many subscriptions share one source pattern.
@@ -1028,31 +980,13 @@ export class InMemoryStore implements Store {
     let count = 0;
     for (const s of sorted) {
       if (after !== undefined && s.stream <= after) continue;
-      if (query?.stream !== undefined) {
-        if (
-          query.stream_exact
-            ? s.stream !== query.stream
-            : !stream_re!.test(s.stream)
-        )
-          continue;
-      }
-      if (query?.source !== undefined) {
-        if (s.source === undefined) continue;
-        if (
-          query.source_exact
-            ? s.source !== query.source
-            : !source_re!.test(s.source)
-        )
-          continue;
-      }
+      if (!matches(s)) continue;
       if (source_matches !== undefined) {
         // Absent/empty source = no source constraint = consumes from
         // every stream, so it matches any requested name. Only a
         // present source that matches none of them is excluded.
         if (s.source && !reverse_match(s.source)) continue;
       }
-      if (blocked !== undefined && s.blocked !== blocked) continue;
-      if (query?.lane !== undefined && s.lane !== query.lane) continue;
       // Checked before emitting, not after: a bound applied afterwards
       // lets `limit: 0` through as exactly one row, where both SQL
       // adapters return none.

@@ -1635,29 +1635,38 @@ export class PostgresStore implements Store {
   ): Promise<number> {
     // Reset retry too: a defer is a deliberate "come back later," not a
     // failure, so the redelivery after the due-time is a fresh attempt.
-    const set_clause = `SET deferred_at = to_timestamp($1 / 1000.0), retry = -1`;
-    if (Array.isArray(input)) {
-      if (!input.length) return 0;
-      const { rowCount } = await this._pool.query(
-        `UPDATE ${this._fqs} ${set_clause} WHERE stream = ANY($2)`,
-        [deferred_at, input]
-      );
-      return rowCount ?? 0;
-    }
-    const { clause, values } = this._filter_clause(input, 2);
+    return this._update(
+      input,
+      "SET deferred_at = to_timestamp($1 / 1000.0), retry = -1",
+      [deferred_at]
+    );
+  }
+
+  /**
+   * Runs `UPDATE ... <set>` on the streams named by `input`: an explicit
+   * list (an empty one updates nothing) or a {@link StreamFilter}. `set`
+   * and `where` may use `$1..$n` for `params`; the selection's own
+   * parameters are numbered after them.
+   *
+   * @returns Count of rows updated.
+   */
+  private async _update(
+    input: string[] | StreamFilter,
+    set: string,
+    params: unknown[] = [],
+    where?: string
+  ): Promise<number> {
+    if (Array.isArray(input) && !input.length) return 0;
+    const { clause, values } = Array.isArray(input)
+      ? { clause: `stream = ANY($${params.length + 1})`, values: [input] }
+      : this._filter_clause(input, params.length + 1);
     const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs} ${set_clause} WHERE ${clause}`,
-      [deferred_at, ...values]
+      `UPDATE ${this._fqs} ${set} WHERE ${where ? `${where} AND ` : ""}${clause}`,
+      [...params, ...values]
     );
     return rowCount ?? 0;
   }
 
-  /**
-   * Reset watermarks for the given streams to -1, clearing retry, blocked,
-   * error, and lease state so they can be replayed from the beginning.
-   * @param streams - Stream names to reset.
-   * @returns Count of streams that were actually reset.
-   */
   /**
    * Translate a {@link StreamFilter} to a `WHERE` clause fragment and
    * the corresponding parameter values. The fragment never starts with
@@ -1701,23 +1710,18 @@ export class PostgresStore implements Store {
     };
   }
 
-  async reset(input: string[] | StreamFilter): Promise<number> {
-    const set_clause = `SET at = -1, retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
-    if (Array.isArray(input)) {
-      if (!input.length) return 0;
-      const { rowCount } = await this._pool.query(
-        `UPDATE ${this._fqs} ${set_clause} WHERE stream = ANY($1)`,
-        [input]
-      );
-      return rowCount ?? 0;
-    }
-    const { clause, values } = this._filter_clause(input, 1);
-    const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs} ${set_clause} WHERE ${clause}`,
-      values
+  /**
+   * Reset watermarks to -1, clearing retry, blocked, error, and lease
+   * state so the matched streams can be replayed from the beginning.
+   *
+   * @returns Count of streams that were actually reset.
+   */
+  reset(input: string[] | StreamFilter): Promise<number> {
+    return this._update(
+      input,
+      `SET at = -1, retry = -1, blocked = false, error = NULL,
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL`
     );
-    return rowCount ?? 0;
   }
 
   /**
@@ -1735,30 +1739,16 @@ export class PostgresStore implements Store {
    *
    * @returns Count of streams that were actually flipped (were blocked).
    */
-  async unblock(input: string[] | StreamFilter): Promise<number> {
-    const set_clause = `SET retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
-    if (Array.isArray(input)) {
-      if (!input.length) return 0;
-      const { rowCount } = await this._pool.query(
-        `UPDATE ${this._fqs} ${set_clause}
-         WHERE stream = ANY($1) AND blocked = true`,
-        [input]
-      );
-      return rowCount ?? 0;
-    }
-    // Filter form: force `blocked = true` regardless of what the
-    // caller passed — there is no use case for "unblock unblocked
-    // streams." A no-op overlay is the right shape here.
-    const { clause, values } = this._filter_clause(
-      { ...input, blocked: true },
-      1
+  unblock(input: string[] | StreamFilter): Promise<number> {
+    // Always restricted to blocked rows, whatever the filter says: there is
+    // no use case for "unblock unblocked streams."
+    return this._update(
+      Array.isArray(input) ? input : { ...input, blocked: undefined },
+      `SET retry = -1, blocked = false, error = NULL,
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL`,
+      [],
+      "blocked = true"
     );
-    const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs} ${set_clause} WHERE ${clause}`,
-      values
-    );
-    return rowCount ?? 0;
   }
 
   /**
@@ -1775,12 +1765,13 @@ export class PostgresStore implements Store {
    *
    * @returns Count of streams whose priority changed.
    */
-  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    const { clause, values } = this._filter_clause(filter, 2);
-    const sql = `UPDATE ${this._fqs} SET priority = $1
-                 WHERE priority <> $1 AND ${clause}`;
-    const { rowCount } = await this._pool.query(sql, [priority, ...values]);
-    return rowCount ?? 0;
+  prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    return this._update(
+      filter,
+      "SET priority = $1",
+      [priority],
+      "priority <> $1"
+    );
   }
 
   /**
@@ -1798,26 +1789,8 @@ export class PostgresStore implements Store {
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
-    const conditions: string[] = [];
-    const values: unknown[] = [];
-
-    if (query?.stream !== undefined) {
-      values.push(query.stream);
-      conditions.push(
-        query.stream_exact
-          ? `stream = $${values.length}`
-          : `stream ~ $${values.length}`
-      );
-    }
-    if (query?.source !== undefined) {
-      conditions.push(`source IS NOT NULL`);
-      values.push(query.source);
-      conditions.push(
-        query.source_exact
-          ? `source = $${values.length}`
-          : `source ~ $${values.length}`
-      );
-    }
+    const { clause, values } = this._filter_clause(query ?? {}, 1);
+    const conditions = [clause];
     if (query?.source_matches?.length) {
       // Reverse-match narrowing: the inverse of the `source` filter.
       // The stored `source` is treated as the regex pattern, and a row
@@ -1831,20 +1804,12 @@ export class PostgresStore implements Store {
         ))`
       );
     }
-    if (query?.blocked !== undefined) {
-      values.push(query.blocked);
-      conditions.push(`blocked = $${values.length}`);
-    }
-    if (query?.lane !== undefined) {
-      values.push(query.lane);
-      conditions.push(`lane = $${values.length}`);
-    }
     if (query?.after !== undefined) {
       values.push(query.after);
       conditions.push(`stream > $${values.length}`);
     }
     let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM ${this._fqs}`;
-    if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
+    sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += ` ORDER BY stream LIMIT $${values.length}`;
 

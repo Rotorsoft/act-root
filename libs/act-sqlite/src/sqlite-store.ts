@@ -1104,32 +1104,53 @@ export class SqliteStore implements Store {
   // Cleared by ack/block/reset/unblock. See {@link Store.defer}.
   async defer(input: string[] | StreamFilter, deferred_at: number) {
     const at_iso = new Date(deferred_at).toISOString();
+    try {
+      return await this._update(input, "SET deferred_at = ?, retry = -1", [
+        at_iso,
+      ]);
+    } catch (e) {
+      throw new StoreError("defer", { cause: e });
+    }
+  }
+
+  /**
+   * Runs `UPDATE streams <set>` on the streams named by `input`, in one
+   * write transaction that rolls back on failure. An explicit list is
+   * de-duplicated, so a repeated name counts once (matching PG's set-based
+   * `stream = ANY(...)`), and updated one name per statement, so a long list
+   * never meets SQLite's bound-parameter limit. `set` and `where` bind
+   * `params` in order; libSQL `?` placeholders are positional and can't be
+   * reused, so a value used twice is passed twice.
+   *
+   * @returns Count of rows updated.
+   */
+  private async _update(
+    input: string[] | StreamFilter,
+    set: string,
+    params: unknown[] = [],
+    where?: string
+  ): Promise<number> {
+    const selections = Array.isArray(input)
+      ? [...new Set(input)].map((stream) => ({
+          clause: "stream = ?",
+          args: [stream] as unknown[],
+        }))
+      : [this._filter_clause(input)];
     const tx = await this.client.transaction("write");
     try {
       let count = 0;
-      if (Array.isArray(input)) {
-        // De-dup so a repeated name counts once, matching PG's set-based
-        // `WHERE stream = ANY(...)`.
-        for (const stream of new Set(input)) {
-          const r = await tx.execute({
-            sql: `UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?`,
-            args: [at_iso, stream],
-          });
-          count += r.rowsAffected;
-        }
-      } else {
-        const { clause, args } = this._filter_clause(input);
+      for (const { clause, args } of selections) {
         const r = await tx.execute({
-          sql: `UPDATE streams SET deferred_at = ?, retry = -1 WHERE ${clause}`,
-          args: [at_iso, ...args] as any[],
+          sql: `UPDATE streams ${set} WHERE ${where ? `${where} AND ` : ""}${clause}`,
+          args: [...params, ...args] as any[],
         });
-        count = r.rowsAffected;
+        count += r.rowsAffected;
       }
       await tx.commit();
       return count;
     } catch (e) {
       await tx.rollback();
-      throw new StoreError("defer", { cause: e });
+      throw e;
     }
   }
 
@@ -1175,75 +1196,27 @@ export class SqliteStore implements Store {
   }
 
   // --- reset: transactional, accepts names or filter ---
-  async reset(input: string[] | StreamFilter) {
-    const set_clause = `SET at = -1, retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
-    const tx = await this.client.transaction("write");
-    try {
-      let count = 0;
-      if (Array.isArray(input)) {
-        // De-dup so a repeated name counts once, matching PG's set-based
-        // `WHERE stream = ANY(...)`.
-        for (const stream of new Set(input)) {
-          const r = await tx.execute({
-            sql: `UPDATE streams ${set_clause} WHERE stream = ?`,
-            args: [stream],
-          });
-          count += r.rowsAffected;
-        }
-      } else {
-        const { clause, args } = this._filter_clause(input);
-        const r = await tx.execute({
-          sql: `UPDATE streams ${set_clause} WHERE ${clause}`,
-          args: args as any[],
-        });
-        count = r.rowsAffected;
-      }
-      await tx.commit();
-      return count;
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+  reset(input: string[] | StreamFilter) {
+    return this._update(
+      input,
+      `SET at = -1, retry = -1, blocked = 0, error = '',
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL`
+    );
   }
 
   // --- unblock: clear blocked + retry + lease without touching watermark ---
   // `retry = -1` so claim's post-bump returns retry=0 (first attempt),
-  // matching the InMemoryStore convention.
-  async unblock(input: string[] | StreamFilter) {
-    const set_clause = `SET retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
-    const tx = await this.client.transaction("write");
-    try {
-      let count = 0;
-      if (Array.isArray(input)) {
-        for (const stream of input) {
-          const r = await tx.execute({
-            sql: `UPDATE streams ${set_clause}
-                  WHERE stream = ? AND blocked = 1`,
-            args: [stream],
-          });
-          count += r.rowsAffected;
-        }
-      } else {
-        // Filter form: force blocked = true regardless of what the
-        // caller passed.
-        const { clause, args } = this._filter_clause({
-          ...input,
-          blocked: true,
-        });
-        const r = await tx.execute({
-          sql: `UPDATE streams ${set_clause} WHERE ${clause}`,
-          args: args as any[],
-        });
-        count = r.rowsAffected;
-      }
-      await tx.commit();
-      return count;
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+  // matching the InMemoryStore convention. Always restricted to blocked
+  // rows, whatever the filter says: there is no use case for "unblock
+  // unblocked streams."
+  unblock(input: string[] | StreamFilter) {
+    return this._update(
+      Array.isArray(input) ? input : { ...input, blocked: undefined },
+      `SET retry = -1, blocked = 0, error = '',
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL`,
+      [],
+      "blocked = 1"
+    );
   }
 
   // --- query_streams: read-only introspection with filters ---
@@ -1252,37 +1225,8 @@ export class SqliteStore implements Store {
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
-    let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE 1=1";
-    const args: unknown[] = [];
-
-    if (query?.stream !== undefined) {
-      if (query.stream_exact) {
-        sql += " AND stream = ?";
-        args.push(query.stream);
-      } else {
-        sql += " AND stream GLOB ?";
-        args.push(streamPatternToGlob(query.stream));
-      }
-    }
-    if (query?.source !== undefined) {
-      sql += " AND source IS NOT NULL";
-      if (query.source_exact) {
-        sql += " AND source = ?";
-        args.push(query.source);
-      } else {
-        sql += " AND source GLOB ?";
-        args.push(streamPatternToGlob(query.source));
-      }
-    }
-    if (query?.blocked !== undefined) {
-      sql += " AND blocked = ?";
-      args.push(query.blocked ? 1 : 0);
-    }
-    if (query?.lane !== undefined) {
-      sql += " AND lane = ?";
-      args.push(query.lane);
-    }
+    const { clause, args } = this._filter_clause(query ?? {});
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE ${clause}`;
     if (query?.after !== undefined) {
       sql += " AND stream > ?";
       args.push(query.after);
@@ -1648,18 +1592,13 @@ export class SqliteStore implements Store {
   }
 
   // --- prioritize: bulk priority update with filter ---
-  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    const { clause, args: filterArgs } = this._filter_clause(filter);
-    // libSQL `?` placeholders are positional and NOT reusable, so we
-    // bind `priority` twice: once for SET, once for the no-op skip
-    // in WHERE.
-    const sql = `UPDATE streams SET priority = ?
-                 WHERE priority <> ? AND ${clause}`;
-    const result = await this.client.execute({
-      sql,
-      args: [priority, priority, ...filterArgs] as any[],
-    });
-    return result.rowsAffected;
+  prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    return this._update(
+      filter,
+      "SET priority = ?",
+      [priority, priority],
+      "priority <> ?"
+    );
   }
 
   // --- truncate: transactional delete + seed ---
