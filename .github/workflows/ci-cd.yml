@@ -126,7 +126,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.10.0
+          node-version: 26.11.1
           cache: "pnpm"
 
       - run: pnpm install
@@ -335,7 +335,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.10.0
+          node-version: 26.11.1
           cache: "pnpm"
       - run: pnpm install
       # Scenario benchmarks (Shape C). Each one has a built-in
@@ -418,7 +418,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.10.0
+          node-version: 26.11.1
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
