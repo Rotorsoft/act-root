@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.21](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.20...@rotorsoft/act-v1.32.21) (2026-10-13)
+
+
+### Bug Fixes
+
+* **act:** keep a dynamic target's lane when correlate forgets it ([#1878](https://github.com/Rotorsoft/act-root/issues/1878)) ([5f28644](https://github.com/Rotorsoft/act-root/commit/5f28644c74f5a90254b8155ace2f98fdf05a936c)), closes [#1876](https://github.com/Rotorsoft/act-root/issues/1876)
+
 # [@rotorsoft/act-v1.32.20](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.19...@rotorsoft/act-v1.32.20) (2026-10-11)
 
 
