@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.38.26](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.25...@rotorsoft/act-tck-v1.38.26) (2026-10-13)
+
+
+### Bug Fixes
+
+* **act:** keep a dynamic target's lane when correlate forgets it ([#1878](https://github.com/Rotorsoft/act-root/issues/1878)) ([5f28644](https://github.com/Rotorsoft/act-root/commit/5f28644c74f5a90254b8155ace2f98fdf05a936c)), closes [#1876](https://github.com/Rotorsoft/act-root/issues/1876)
+
 # [@rotorsoft/act-tck-v1.38.25](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.38.24...@rotorsoft/act-tck-v1.38.25) (2026-10-11)
 
 
