@@ -43,14 +43,14 @@ import { report_once } from "./report-once.js";
  *
  * @internal
  */
-const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+const COLD_START_BACK_SCAN = 10_000;
 
 /**
  * Default correlation lease duration. Too short and a slow scan outruns its
  * lease, so a second worker scans the same range (duplicate work, still
  * safe). Too long and a crashed holder stalls discovery for the whole lease.
  */
-const DEFAULT_CORRELATION_LEASE_MS = 5_000;
+const CORRELATION_LEASE_MS = 5_000;
 
 /**
  * A stable identity for "which correlator is this?".
@@ -199,8 +199,6 @@ export type CorrelateCycleDeps<
   shard?: ReadonlyArray<string>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
-  cold_start_back_scan?: number;
-  lease_millis?: number;
 };
 
 /**
@@ -285,8 +283,6 @@ export class CorrelateCycle<
    * same holder and a restarted process never inherits a stale claim.
    */
   private readonly _by = randomUUID();
-  /** How long the correlation lease is taken for. */
-  private readonly _lease_millis: number;
   /**
    * Which correlator this is. Computed once from the registry so identical
    * workers share a lease and unrelated applications never do.
@@ -339,12 +335,6 @@ export class CorrelateCycle<
    * here, so an idle deferred stream re-arms across a restart.
    */
   private readonly _on_init_async: (() => Promise<void>) | undefined;
-  /**
-   * Tail re-scan window applied to the cold-start checkpoint.
-   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
-   * public option) so tests can shrink it; defaults otherwise.
-   */
-  private readonly _cold_start_back_scan: number;
   /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
   private readonly _declared_lanes: ReadonlySet<string>;
   /**
@@ -363,10 +353,7 @@ export class CorrelateCycle<
     shard,
     on_init,
     on_init_async,
-    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
-    lease_millis = DEFAULT_CORRELATION_LEASE_MS,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
-    this._lease_millis = lease_millis;
     this._key = shard
       ? `${registry_key(registry.events)}:${[...shard].sort().join(",")}`
       : registry_key(registry.events);
@@ -377,7 +364,6 @@ export class CorrelateCycle<
     this._cd = cd;
     this._on_init = on_init;
     this._on_init_async = on_init_async;
-    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -425,11 +411,11 @@ export class CorrelateCycle<
     ]);
     // Resume from the durable checkpoint. On a first boot it is -1 and a full
     // scan of an existing log would be unbounded, so start a bounded window
-    // below the watermark instead (see DEFAULT_COLD_START_BACK_SCAN).
+    // below the watermark instead (see COLD_START_BACK_SCAN).
     this._checkpoint =
       correlated_at >= 0
         ? correlated_at
-        : Math.max(-1, watermark - this._cold_start_back_scan);
+        : Math.max(-1, watermark - COLD_START_BACK_SCAN);
     this._on_init?.();
     for (const { stream, priority = 0, lane } of this._static_targets) {
       // Floor +Infinity: no dynamic resolution can re-open a static target;
@@ -547,13 +533,13 @@ export class CorrelateCycle<
     // floor shared by every correlator, and adopting it would skip events this
     // worker never read. Renew at the halfway mark so the holder never lapses.
     const now = Date.now();
-    if (lease && now >= this._lease_until - this._lease_millis / 2) {
+    if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
-        millis: this._lease_millis,
+        millis: CORRELATION_LEASE_MS,
       });
-      this._lease_until = correlating ? now + this._lease_millis : 0;
+      this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // `undefined` means the store does not implement leasing, so every
       // worker scans exactly as before.
       if (correlating === false)
@@ -692,11 +678,11 @@ export class CorrelateCycle<
         streams,
         last_id,
         lease
-          ? { key: this._key, by: this._by, millis: this._lease_millis }
+          ? { key: this._key, by: this._by, millis: CORRELATION_LEASE_MS }
           : undefined
       );
       if (lease && correlating !== false)
-        this._lease_until = renewed_at + this._lease_millis;
+        this._lease_until = renewed_at + CORRELATION_LEASE_MS;
       // A raised mark makes work claimable just like a new target, so the
       // orchestrator arms on both (`subscribed` alone misses re-marks).
       const marked = streams.filter(
@@ -790,7 +776,7 @@ export class CorrelateCycle<
       // `warn`, not `error`: this runs during shutdown, nothing is lost, and
       // the lease expires on its own.
       log().warn(
-        `Could not hand back the correlation lease during shutdown; it expires on its own within ${this._lease_millis}ms and correlation resumes normally after that. ` +
+        `Could not hand back the correlation lease during shutdown; it expires on its own within ${CORRELATION_LEASE_MS}ms and correlation resumes normally after that. ` +
           "On a single-writer store this usually means another connection holds the database. " +
           `Cause: ${String(error)}`
       );

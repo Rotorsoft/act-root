@@ -337,6 +337,12 @@ export function act<
   };
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
+  const add_projection = (proj: Projection<any>) => {
+    record_projection_reactions(proj);
+    merge_projection(proj, registry.events as Record<string, any>);
+    register_batch_handler(proj, batch_handlers);
+    if (proj.fold) fold_projections.push(proj);
+  };
   // Validated fold-projection ingredients, resolved once on the first
   // build. The HANDLERS themselves are built per \`.build()\` — see
   // \`make_batch_handlers\` — because a fold handler owns a mutable
@@ -508,11 +514,7 @@ export function act<
       },
       withProjection: (proj) => {
         if (_built) closed("withProjection");
-        record_projection_reactions(proj as Projection<any>);
-        merge_projection(proj as Projection<any>, registry.events);
-        register_batch_handler(proj as Projection<any>, batch_handlers);
-        if ((proj as Projection<any>).fold)
-          fold_projections.push(proj as Projection<any>);
+        add_projection(proj as Projection<any>);
         return builder;
       },
       withActor: <TNewActor extends Actor>() =>
@@ -545,12 +547,7 @@ export function act<
           options?.validateFoldedState === true ? validating_patch : bare_patch;
         // Finalize once: repeated builds (per tenant) share the registry.
         if (!_built) {
-          for (const proj of pending_projections) {
-            record_projection_reactions(proj);
-            merge_projection(proj, registry.events as Record<string, any>);
-            register_batch_handler(proj, batch_handlers);
-            if (proj.fold) fold_projections.push(proj);
-          }
+          for (const proj of pending_projections) add_projection(proj);
           // State projections fold the registry-merged FULL state — the
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
@@ -7275,14 +7272,14 @@ import { report_once } from "./report-once.js";
  *
  * @internal
  */
-const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+const COLD_START_BACK_SCAN = 10_000;
 
 /**
  * Default correlation lease duration. Too short and a slow scan outruns its
  * lease, so a second worker scans the same range (duplicate work, still
  * safe). Too long and a crashed holder stalls discovery for the whole lease.
  */
-const DEFAULT_CORRELATION_LEASE_MS = 5_000;
+const CORRELATION_LEASE_MS = 5_000;
 
 /**
  * A stable identity for "which correlator is this?".
@@ -7431,8 +7428,6 @@ export type CorrelateCycleDeps<
   shard?: ReadonlyArray<string>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
-  cold_start_back_scan?: number;
-  lease_millis?: number;
 };
 
 /**
@@ -7517,8 +7512,6 @@ export class CorrelateCycle<
    * same holder and a restarted process never inherits a stale claim.
    */
   private readonly _by = randomUUID();
-  /** How long the correlation lease is taken for. */
-  private readonly _lease_millis: number;
   /**
    * Which correlator this is. Computed once from the registry so identical
    * workers share a lease and unrelated applications never do.
@@ -7571,12 +7564,6 @@ export class CorrelateCycle<
    * here, so an idle deferred stream re-arms across a restart.
    */
   private readonly _on_init_async: (() => Promise<void>) | undefined;
-  /**
-   * Tail re-scan window applied to the cold-start checkpoint.
-   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
-   * public option) so tests can shrink it; defaults otherwise.
-   */
-  private readonly _cold_start_back_scan: number;
   /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
   private readonly _declared_lanes: ReadonlySet<string>;
   /**
@@ -7595,10 +7582,7 @@ export class CorrelateCycle<
     shard,
     on_init,
     on_init_async,
-    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
-    lease_millis = DEFAULT_CORRELATION_LEASE_MS,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
-    this._lease_millis = lease_millis;
     this._key = shard
       ? \`\${registry_key(registry.events)}:\${[...shard].sort().join(",")}\`
       : registry_key(registry.events);
@@ -7609,7 +7593,6 @@ export class CorrelateCycle<
     this._cd = cd;
     this._on_init = on_init;
     this._on_init_async = on_init_async;
-    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -7657,11 +7640,11 @@ export class CorrelateCycle<
     ]);
     // Resume from the durable checkpoint. On a first boot it is -1 and a full
     // scan of an existing log would be unbounded, so start a bounded window
-    // below the watermark instead (see DEFAULT_COLD_START_BACK_SCAN).
+    // below the watermark instead (see COLD_START_BACK_SCAN).
     this._checkpoint =
       correlated_at >= 0
         ? correlated_at
-        : Math.max(-1, watermark - this._cold_start_back_scan);
+        : Math.max(-1, watermark - COLD_START_BACK_SCAN);
     this._on_init?.();
     for (const { stream, priority = 0, lane } of this._static_targets) {
       // Floor +Infinity: no dynamic resolution can re-open a static target;
@@ -7779,13 +7762,13 @@ export class CorrelateCycle<
     // floor shared by every correlator, and adopting it would skip events this
     // worker never read. Renew at the halfway mark so the holder never lapses.
     const now = Date.now();
-    if (lease && now >= this._lease_until - this._lease_millis / 2) {
+    if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
-        millis: this._lease_millis,
+        millis: CORRELATION_LEASE_MS,
       });
-      this._lease_until = correlating ? now + this._lease_millis : 0;
+      this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // \`undefined\` means the store does not implement leasing, so every
       // worker scans exactly as before.
       if (correlating === false)
@@ -7924,11 +7907,11 @@ export class CorrelateCycle<
         streams,
         last_id,
         lease
-          ? { key: this._key, by: this._by, millis: this._lease_millis }
+          ? { key: this._key, by: this._by, millis: CORRELATION_LEASE_MS }
           : undefined
       );
       if (lease && correlating !== false)
-        this._lease_until = renewed_at + this._lease_millis;
+        this._lease_until = renewed_at + CORRELATION_LEASE_MS;
       // A raised mark makes work claimable just like a new target, so the
       // orchestrator arms on both (\`subscribed\` alone misses re-marks).
       const marked = streams.filter(
@@ -8022,7 +8005,7 @@ export class CorrelateCycle<
       // \`warn\`, not \`error\`: this runs during shutdown, nothing is lost, and
       // the lease expires on its own.
       log().warn(
-        \`Could not hand back the correlation lease during shutdown; it expires on its own within \${this._lease_millis}ms and correlation resumes normally after that. \` +
+        \`Could not hand back the correlation lease during shutdown; it expires on its own within \${CORRELATION_LEASE_MS}ms and correlation resumes normally after that. \` +
           "On a single-writer store this usually means another connection holds the database. " +
           \`Cause: \${String(error)}\`
       );
@@ -9118,10 +9101,9 @@ export type DrainControllerDeps<
   readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Lane this controller drains. Undefined spans all lanes. */
   readonly lane?: string;
-  /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
+  /** The lane's own config; it wins over the caller's DrainOptions. */
   readonly defaults?: {
     readonly streamLimit?: number;
-    readonly eventLimit?: number;
     readonly leaseMillis?: number;
   };
 };
@@ -9267,8 +9249,7 @@ export class DrainController<
     // point of \`withLane({leaseMillis})\`.
     const streamLimit =
       d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
-    const eventLimit =
-      d.eventLimit ?? options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+    const eventLimit = options.eventLimit ?? DEFAULT_EVENT_LIMIT;
     const leaseMillis =
       d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
@@ -10922,8 +10903,7 @@ class InMemoryStream {
   // in-process backoff, this is durable store state shared across workers.
   private _deferred_at: number | undefined = undefined;
   // Work mark: highest event id observed to resolve to this target.
-  // \`undefined\` means UNKNOWN — the row predates the mark, so \`claim\` falls
-  // back to the legacy has-work probe rather than treating it as "no work".
+  // \`undefined\` means the row was never correlated, so \`claim\` skips it.
   private _correlated_at: number | undefined = undefined;
 
   constructor(
@@ -11256,12 +11236,6 @@ export class InMemoryStore implements Store {
   >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the has-work probe in
-  // claim(): an O(1) lookup for a literal source, and the per-stream max
-  // that a pattern source scans, without touching the full event log.
-  private _max_event_id_by_stream: Map<string, number> = new Map();
-  // global max non-snapshot event id — fast pre-check for source-less streams in claim()
-  private _max_non_snap_event_id = -1;
   // stream → (event_id → cloned sensitive payload). Two-level so \`forget_pii\`
   // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
   // the \`DELETE WHERE stream = ?\` scope that durable adapters get from their
@@ -11274,9 +11248,17 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._correlated_at = -1;
     this._stream_versions.clear();
-    this._max_event_id_by_stream.clear();
-    this._max_non_snap_event_id = -1;
     this._pii.clear();
+  }
+
+  // Stores a cloned copy, so caller-side mutation can't reach it.
+  private _put_pii(stream: string, id: number, pii: Record<string, unknown>) {
+    let per_stream = this._pii.get(stream);
+    if (!per_stream) {
+      per_stream = new Map();
+      this._pii.set(stream, per_stream);
+    }
+    per_stream.set(id, structuredClone(pii));
   }
 
   // First index whose event id is greater than \`after\`. \`_events\` stays
@@ -11440,7 +11422,6 @@ export class InMemoryStore implements Store {
     }
 
     let version = current_version + 1;
-    let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
         id: this._next_id++,
@@ -11452,28 +11433,13 @@ export class InMemoryStore implements Store {
         meta,
       };
       // The stored event is the pii-less view — \`forget_pii\` only has to
-      // drop the inner Map for the stream, never the event row. Mandatory
-      // clone on the pii payload defends against caller-side mutation.
+      // drop the inner Map for the stream, never the event row.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
-      if (pii != null) {
-        let per_stream = this._pii.get(stream);
-        if (!per_stream) {
-          per_stream = new Map();
-          this._pii.set(stream, per_stream);
-        }
-        per_stream.set(c.id, structuredClone(pii) as Record<string, unknown>);
-      }
-      if (name !== SNAP_EVENT) last_non_snap_id = c.id;
+      if (pii != null) this._put_pii(stream, c.id, pii);
       version++;
       return this._with_pii(c);
     });
     this._stream_versions.set(stream, version - 1);
-    if (last_non_snap_id >= 0) {
-      this._max_event_id_by_stream.set(stream, last_non_snap_id);
-      // commit always assigns a fresh id from the monotonic _next_id, so
-      // any non-snap commit strictly raises the global max.
-      this._max_non_snap_event_id = last_non_snap_id;
-    }
     return committed;
   }
 
@@ -12148,7 +12114,6 @@ export class InMemoryStore implements Store {
       // stream's subscription is inert, and reaping it is maintenance that
       // \`seed()\` performs.
       this._stream_versions.delete(stream);
-      this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
       // adapters' \`DELETE WHERE stream = ?\` scope.
       this._pii.delete(stream);
@@ -12163,17 +12128,8 @@ export class InMemoryStore implements Store {
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);
-      if (event.name !== SNAP_EVENT) {
-        this._max_event_id_by_stream.set(stream, event.id);
-      }
       result.set(stream, { deleted, committed: event });
     }
-    // Recompute global max from the per-stream index — deletions may have
-    // dropped the previous max, while new tombstones may have raised it.
-    let max = -1;
-    for (const id of this._max_event_id_by_stream.values())
-      if (id > max) max = id;
-    this._max_non_snap_event_id = max;
     return result;
   }
 
@@ -12200,8 +12156,6 @@ export class InMemoryStore implements Store {
     const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
-    const prev_max_event_id_by_stream = this._max_event_id_by_stream;
-    const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     const prev_pii = this._pii;
     const prev_correlated_at = this._correlated_at;
     const prev_correlators = new Map(
@@ -12218,8 +12172,6 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
-    this._max_event_id_by_stream = new Map();
-    this._max_non_snap_event_id = -1;
     this._pii = new Map();
     try {
       await driver(async (event) => {
@@ -12232,23 +12184,12 @@ export class InMemoryStore implements Store {
         const { pii, ...rest } = event;
         const committed: Committed<Schemas, keyof Schemas> = { ...rest, id };
         this._events.push(committed);
-        if (pii != null) {
-          let per_stream = this._pii.get(event.stream);
-          if (!per_stream) {
-            per_stream = new Map();
-            this._pii.set(event.stream, per_stream);
-          }
-          per_stream.set(id, structuredClone(pii) as Record<string, unknown>);
-        }
+        if (pii != null) this._put_pii(event.stream, id, pii);
         // Last event per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also
         // the highest version. Out-of-order sources get last-wins,
         // matching the legacy raw-SQL restore.
         this._stream_versions.set(event.stream, event.version);
-        if (event.name !== SNAP_EVENT) {
-          this._max_event_id_by_stream.set(event.stream, id);
-          this._max_non_snap_event_id = id;
-        }
         return id;
       });
     } catch (err) {
@@ -12258,8 +12199,6 @@ export class InMemoryStore implements Store {
       this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
-      this._max_event_id_by_stream = prev_max_event_id_by_stream;
-      this._max_non_snap_event_id = prev_max_non_snap_event_id;
       this._pii = prev_pii;
       this._correlated_at = prev_correlated_at;
       this._correlators = prev_correlators;

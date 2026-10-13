@@ -52,8 +52,7 @@ class InMemoryStream {
   // in-process backoff, this is durable store state shared across workers.
   private _deferred_at: number | undefined = undefined;
   // Work mark: highest event id observed to resolve to this target.
-  // `undefined` means UNKNOWN — the row predates the mark, so `claim` falls
-  // back to the legacy has-work probe rather than treating it as "no work".
+  // `undefined` means the row was never correlated, so `claim` skips it.
   private _correlated_at: number | undefined = undefined;
 
   constructor(
@@ -386,12 +385,6 @@ export class InMemoryStore implements Store {
   >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the has-work probe in
-  // claim(): an O(1) lookup for a literal source, and the per-stream max
-  // that a pattern source scans, without touching the full event log.
-  private _max_event_id_by_stream: Map<string, number> = new Map();
-  // global max non-snapshot event id — fast pre-check for source-less streams in claim()
-  private _max_non_snap_event_id = -1;
   // stream → (event_id → cloned sensitive payload). Two-level so `forget_pii`
   // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
   // the `DELETE WHERE stream = ?` scope that durable adapters get from their
@@ -404,9 +397,17 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._correlated_at = -1;
     this._stream_versions.clear();
-    this._max_event_id_by_stream.clear();
-    this._max_non_snap_event_id = -1;
     this._pii.clear();
+  }
+
+  // Stores a cloned copy, so caller-side mutation can't reach it.
+  private _put_pii(stream: string, id: number, pii: Record<string, unknown>) {
+    let per_stream = this._pii.get(stream);
+    if (!per_stream) {
+      per_stream = new Map();
+      this._pii.set(stream, per_stream);
+    }
+    per_stream.set(id, structuredClone(pii));
   }
 
   // First index whose event id is greater than `after`. `_events` stays
@@ -570,7 +571,6 @@ export class InMemoryStore implements Store {
     }
 
     let version = current_version + 1;
-    let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
         id: this._next_id++,
@@ -582,28 +582,13 @@ export class InMemoryStore implements Store {
         meta,
       };
       // The stored event is the pii-less view — `forget_pii` only has to
-      // drop the inner Map for the stream, never the event row. Mandatory
-      // clone on the pii payload defends against caller-side mutation.
+      // drop the inner Map for the stream, never the event row.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
-      if (pii != null) {
-        let per_stream = this._pii.get(stream);
-        if (!per_stream) {
-          per_stream = new Map();
-          this._pii.set(stream, per_stream);
-        }
-        per_stream.set(c.id, structuredClone(pii) as Record<string, unknown>);
-      }
-      if (name !== SNAP_EVENT) last_non_snap_id = c.id;
+      if (pii != null) this._put_pii(stream, c.id, pii);
       version++;
       return this._with_pii(c);
     });
     this._stream_versions.set(stream, version - 1);
-    if (last_non_snap_id >= 0) {
-      this._max_event_id_by_stream.set(stream, last_non_snap_id);
-      // commit always assigns a fresh id from the monotonic _next_id, so
-      // any non-snap commit strictly raises the global max.
-      this._max_non_snap_event_id = last_non_snap_id;
-    }
     return committed;
   }
 
@@ -1278,7 +1263,6 @@ export class InMemoryStore implements Store {
       // stream's subscription is inert, and reaping it is maintenance that
       // `seed()` performs.
       this._stream_versions.delete(stream);
-      this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
       // adapters' `DELETE WHERE stream = ?` scope.
       this._pii.delete(stream);
@@ -1293,17 +1277,8 @@ export class InMemoryStore implements Store {
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);
-      if (event.name !== SNAP_EVENT) {
-        this._max_event_id_by_stream.set(stream, event.id);
-      }
       result.set(stream, { deleted, committed: event });
     }
-    // Recompute global max from the per-stream index — deletions may have
-    // dropped the previous max, while new tombstones may have raised it.
-    let max = -1;
-    for (const id of this._max_event_id_by_stream.values())
-      if (id > max) max = id;
-    this._max_non_snap_event_id = max;
     return result;
   }
 
@@ -1330,8 +1305,6 @@ export class InMemoryStore implements Store {
     const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
-    const prev_max_event_id_by_stream = this._max_event_id_by_stream;
-    const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     const prev_pii = this._pii;
     const prev_correlated_at = this._correlated_at;
     const prev_correlators = new Map(
@@ -1348,8 +1321,6 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
-    this._max_event_id_by_stream = new Map();
-    this._max_non_snap_event_id = -1;
     this._pii = new Map();
     try {
       await driver(async (event) => {
@@ -1362,23 +1333,12 @@ export class InMemoryStore implements Store {
         const { pii, ...rest } = event;
         const committed: Committed<Schemas, keyof Schemas> = { ...rest, id };
         this._events.push(committed);
-        if (pii != null) {
-          let per_stream = this._pii.get(event.stream);
-          if (!per_stream) {
-            per_stream = new Map();
-            this._pii.set(event.stream, per_stream);
-          }
-          per_stream.set(id, structuredClone(pii) as Record<string, unknown>);
-        }
+        if (pii != null) this._put_pii(event.stream, id, pii);
         // Last event per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also
         // the highest version. Out-of-order sources get last-wins,
         // matching the legacy raw-SQL restore.
         this._stream_versions.set(event.stream, event.version);
-        if (event.name !== SNAP_EVENT) {
-          this._max_event_id_by_stream.set(event.stream, id);
-          this._max_non_snap_event_id = id;
-        }
         return id;
       });
     } catch (err) {
@@ -1388,8 +1348,6 @@ export class InMemoryStore implements Store {
       this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
-      this._max_event_id_by_stream = prev_max_event_id_by_stream;
-      this._max_non_snap_event_id = prev_max_non_snap_event_id;
       this._pii = prev_pii;
       this._correlated_at = prev_correlated_at;
       this._correlators = prev_correlators;

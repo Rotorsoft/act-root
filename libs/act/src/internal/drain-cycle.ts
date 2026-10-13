@@ -448,10 +448,9 @@ export type DrainControllerDeps<
   readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Lane this controller drains. Undefined spans all lanes. */
   readonly lane?: string;
-  /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
+  /** The lane's own config; it wins over the caller's DrainOptions. */
   readonly defaults?: {
     readonly streamLimit?: number;
-    readonly eventLimit?: number;
     readonly leaseMillis?: number;
   };
 };
@@ -597,8 +596,7 @@ export class DrainController<
     // point of `withLane({leaseMillis})`.
     const streamLimit =
       d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
-    const eventLimit =
-      d.eventLimit ?? options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+    const eventLimit = options.eventLimit ?? DEFAULT_EVENT_LIMIT;
     const leaseMillis =
       d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
