@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeferTimer } from "../src/internal/defer-timer.js";
 
+// The due-time parked for a stream, read from the private map.
+const due_at = (t: DeferTimer, stream: string) =>
+  (t as unknown as { _due: Map<string, number> })._due.get(stream);
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -19,19 +23,6 @@ describe("DeferTimer", () => {
     expect(t.size).toBe(1);
   });
 
-  it("is_deferred: absent → false, future → true, past → false", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const t = new DeferTimer(() => {});
-    expect(t.is_deferred("a")).toBe(false); // absent
-    t.set("a", 1000);
-    expect(t.is_deferred("a")).toBe(true); // future
-    vi.setSystemTime(1000);
-    expect(t.is_deferred("a")).toBe(false); // due now (not strictly future)
-    vi.setSystemTime(1500);
-    expect(t.is_deferred("a")).toBe(false); // past
-  });
-
   it("set overwrites the prior due-time for a stream", () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -39,8 +30,7 @@ describe("DeferTimer", () => {
     t.set("a", 1000);
     t.set("a", 5000); // overwrite, not merge
     expect(t.size).toBe(1);
-    vi.setSystemTime(1000);
-    expect(t.is_deferred("a")).toBe(true); // still deferred — uses the later time
+    expect(due_at(t, "a")).toBe(5000);
   });
 
   it("wakes once at the earliest due-time and keeps entries until pruned", () => {
@@ -62,7 +52,8 @@ describe("DeferTimer", () => {
     expect(t.size).toBe(2);
     t.prune(1000); // a pass that started at 1000 claimed nothing
     expect(t.size).toBe(1);
-    expect(t.is_deferred("later")).toBe(true);
+    expect(due_at(t, "soon")).toBeUndefined();
+    expect(due_at(t, "later")).toBe(5000);
   });
 
   it("schedule with an empty map is a no-op that clears any pending timer", () => {
@@ -149,12 +140,11 @@ describe("DeferTimer", () => {
     vi.advanceTimersByTime(1);
     expect(wakes).toBe(1);
     expect(t.size).toBe(1);
-    expect(t.is_deferred("far")).toBe(true);
+    expect(due_at(t, "far")).toBe(90 * 86_400_000);
     // Advancing past the real due-time fires again (through the intermediate
     // ceiling clamps) and the pass at the due-time prunes the entry.
     vi.advanceTimersByTime(90 * 86_400_000);
     expect(wakes).toBeGreaterThan(1);
     expect(t.size).toBe(0);
-    expect(t.is_deferred("far")).toBe(false);
   });
 });

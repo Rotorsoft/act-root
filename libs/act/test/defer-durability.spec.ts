@@ -133,17 +133,17 @@ describe("defer durability", () => {
       app as unknown as {
         _drain_controllers: Map<
           string,
-          { _defer: { size: number; is_deferred: (s: string) => boolean } }
+          { _defer: { size: number; _due: Map<string, number> } }
         >;
       }
     )._drain_controllers;
     const controller = controllers.get("default")! as unknown as {
-      _defer: { size: number; is_deferred: (s: string) => boolean };
+      _defer: { size: number; _due: Map<string, number> };
       armed: boolean;
     };
     const defer_timer = controller._defer;
     expect(defer_timer.size).toBe(1);
-    expect(defer_timer.is_deferred("idle-agg")).toBe(true);
+    expect(defer_timer._due.get("idle-agg")).toBeGreaterThan(Date.now());
   });
 
   it("re-seeds a deferred stream sorting past the first stream page", async () => {
@@ -172,11 +172,11 @@ describe("defer durability", () => {
       app as unknown as {
         _drain_controllers: Map<
           string,
-          { _defer: { size: number; is_deferred: (s: string) => boolean } }
+          { _defer: { size: number; _due: Map<string, number> } }
         >;
       }
     )._drain_controllers.get("default")!;
-    expect(controller._defer.is_deferred("zzz-idle")).toBe(true);
+    expect(controller._defer._due.get("zzz-idle")).toBeGreaterThan(Date.now());
     await app.shutdown();
   });
 
@@ -232,12 +232,14 @@ describe("defer durability", () => {
       app as unknown as {
         _drain_controllers: Map<
           string,
-          { _defer: { size: number; is_deferred: (s: string) => boolean } }
+          { _defer: { size: number; _due: Map<string, number> } }
         >;
       }
     )._drain_controllers;
     // Seeded on the "slow" controller, not "default".
-    expect(controllers.get("slow")!._defer.is_deferred("slow-agg")).toBe(true);
+    expect(
+      controllers.get("slow")!._defer._due.get("slow-agg")
+    ).toBeGreaterThan(Date.now());
     expect(controllers.get("default")!._defer.size).toBe(0);
   });
 
@@ -299,13 +301,13 @@ describe("defer durability", () => {
       app as unknown as {
         _drain_controllers: Map<
           string,
-          { _defer: { is_deferred: (s: string) => boolean } }
+          { _defer: { _due: Map<string, number> } }
         >;
       }
     )._drain_controllers;
-    expect(controllers.get("default")!._defer.is_deferred("lane-less")).toBe(
-      true
-    );
+    expect(
+      controllers.get("default")!._defer._due.get("lane-less")
+    ).toBeGreaterThan(Date.now());
   });
 
   it("does not seed a past-due deferred_at at cold start", async () => {

@@ -103,8 +103,9 @@ const SOURCE_METACHARACTERS = /[\^$.*+?()[\]{}|\\]/;
  * `source: "^(A|B)$"` reaction relies on.
  *
  * The single source of truth for literal-vs-pattern classification across
- * the InMemory has-work probe, the drain fetch path, and the SQL adapters,
- * so all three agree on which sources take the exact path.
+ * correlate (which decides what a source marks), the drain fetch path, and
+ * the SQLite adapter (which rejects a non-portable pattern), so all three
+ * agree on which sources take the exact path.
  *
  * @example
  * ```typescript

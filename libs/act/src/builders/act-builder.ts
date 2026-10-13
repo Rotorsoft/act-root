@@ -333,6 +333,12 @@ export function act<
   };
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
+  const add_projection = (proj: Projection<any>) => {
+    record_projection_reactions(proj);
+    merge_projection(proj, registry.events as Record<string, any>);
+    register_batch_handler(proj, batch_handlers);
+    if (proj.fold) fold_projections.push(proj);
+  };
   // Validated fold-projection ingredients, resolved once on the first
   // build. The HANDLERS themselves are built per `.build()` — see
   // `make_batch_handlers` — because a fold handler owns a mutable
@@ -504,11 +510,7 @@ export function act<
       },
       withProjection: (proj) => {
         if (_built) closed("withProjection");
-        record_projection_reactions(proj as Projection<any>);
-        merge_projection(proj as Projection<any>, registry.events);
-        register_batch_handler(proj as Projection<any>, batch_handlers);
-        if ((proj as Projection<any>).fold)
-          fold_projections.push(proj as Projection<any>);
+        add_projection(proj as Projection<any>);
         return builder;
       },
       withActor: <TNewActor extends Actor>() =>
@@ -541,12 +543,7 @@ export function act<
           options?.validateFoldedState === true ? validating_patch : bare_patch;
         // Finalize once: repeated builds (per tenant) share the registry.
         if (!_built) {
-          for (const proj of pending_projections) {
-            record_projection_reactions(proj);
-            merge_projection(proj, registry.events as Record<string, any>);
-            register_batch_handler(proj, batch_handlers);
-            if (proj.fold) fold_projections.push(proj);
-          }
+          for (const proj of pending_projections) add_projection(proj);
           // State projections fold the registry-merged FULL state — the
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the

@@ -64,15 +64,6 @@ export class DeferTimer {
   }
 
   /**
-   * True while `stream` is parked with a due-time still in the future.
-   * Consumers skip work for deferred streams until their window elapses.
-   */
-  is_deferred = (stream: string): boolean => {
-    const next = this._due.get(stream);
-    return next !== undefined && next > Date.now();
-  };
-
-  /**
    * Park `stream` for a re-visit at `at` (ms since epoch). A plain
    * overwrite: the caller computes the authoritative next-visit for the
    * stream (the drain's `handle` already reconciles a stream's reactions

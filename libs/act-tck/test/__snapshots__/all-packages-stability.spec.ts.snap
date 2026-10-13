@@ -337,6 +337,12 @@ export function act<
   };
   const fold_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
+  const add_projection = (proj: Projection<any>) => {
+    record_projection_reactions(proj);
+    merge_projection(proj, registry.events as Record<string, any>);
+    register_batch_handler(proj, batch_handlers);
+    if (proj.fold) fold_projections.push(proj);
+  };
   // Validated fold-projection ingredients, resolved once on the first
   // build. The HANDLERS themselves are built per \`.build()\` — see
   // \`make_batch_handlers\` — because a fold handler owns a mutable
@@ -508,11 +514,7 @@ export function act<
       },
       withProjection: (proj) => {
         if (_built) closed("withProjection");
-        record_projection_reactions(proj as Projection<any>);
-        merge_projection(proj as Projection<any>, registry.events);
-        register_batch_handler(proj as Projection<any>, batch_handlers);
-        if ((proj as Projection<any>).fold)
-          fold_projections.push(proj as Projection<any>);
+        add_projection(proj as Projection<any>);
         return builder;
       },
       withActor: <TNewActor extends Actor>() =>
@@ -545,12 +547,7 @@ export function act<
           options?.validateFoldedState === true ? validating_patch : bare_patch;
         // Finalize once: repeated builds (per tenant) share the registry.
         if (!_built) {
-          for (const proj of pending_projections) {
-            record_projection_reactions(proj);
-            merge_projection(proj, registry.events as Record<string, any>);
-            register_batch_handler(proj, batch_handlers);
-            if (proj.fold) fold_projections.push(proj);
-          }
+          for (const proj of pending_projections) add_projection(proj);
           // State projections fold the registry-merged FULL state — the
           // builder only recorded intent. Resolve here, where every
           // partial has merged, and refuse silently-partial folds: the
@@ -1957,8 +1954,7 @@ export class Act<
    * Call \`correlate()\` before \`drain()\`. It is not only how dynamic targets
    * are discovered: a stream is claimable while \`at < correlated_at\`, and
    * \`correlate\` is the only component that raises that mark, so a
-   * commit no correlate has seen is not drainable — including for static
-   * targets, which were served by a probe of the event log before. For a
+   * commit no correlate has seen is not drainable, static targets included. For a
    * higher-level API that handles debouncing, correlation, and signaling
    * automatically, use {@link settle}.
    *
@@ -7275,14 +7271,14 @@ import { report_once } from "./report-once.js";
  *
  * @internal
  */
-const DEFAULT_COLD_START_BACK_SCAN = 10_000;
+const COLD_START_BACK_SCAN = 10_000;
 
 /**
  * Default correlation lease duration. Too short and a slow scan outruns its
  * lease, so a second worker scans the same range (duplicate work, still
  * safe). Too long and a crashed holder stalls discovery for the whole lease.
  */
-const DEFAULT_CORRELATION_LEASE_MS = 5_000;
+const CORRELATION_LEASE_MS = 5_000;
 
 /**
  * A stable identity for "which correlator is this?".
@@ -7431,8 +7427,6 @@ export type CorrelateCycleDeps<
   shard?: ReadonlyArray<string>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
-  cold_start_back_scan?: number;
-  lease_millis?: number;
 };
 
 /**
@@ -7517,8 +7511,6 @@ export class CorrelateCycle<
    * same holder and a restarted process never inherits a stale claim.
    */
   private readonly _by = randomUUID();
-  /** How long the correlation lease is taken for. */
-  private readonly _lease_millis: number;
   /**
    * Which correlator this is. Computed once from the registry so identical
    * workers share a lease and unrelated applications never do.
@@ -7571,12 +7563,6 @@ export class CorrelateCycle<
    * here, so an idle deferred stream re-arms across a restart.
    */
   private readonly _on_init_async: (() => Promise<void>) | undefined;
-  /**
-   * Tail re-scan window applied to the cold-start checkpoint.
-   * See {@link DEFAULT_COLD_START_BACK_SCAN}. Constructor arg (not a
-   * public option) so tests can shrink it; defaults otherwise.
-   */
-  private readonly _cold_start_back_scan: number;
   /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
   private readonly _declared_lanes: ReadonlySet<string>;
   /**
@@ -7595,10 +7581,7 @@ export class CorrelateCycle<
     shard,
     on_init,
     on_init_async,
-    cold_start_back_scan = DEFAULT_COLD_START_BACK_SCAN,
-    lease_millis = DEFAULT_CORRELATION_LEASE_MS,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
-    this._lease_millis = lease_millis;
     this._key = shard
       ? \`\${registry_key(registry.events)}:\${[...shard].sort().join(",")}\`
       : registry_key(registry.events);
@@ -7609,7 +7592,6 @@ export class CorrelateCycle<
     this._cd = cd;
     this._on_init = on_init;
     this._on_init_async = on_init_async;
-    this._cold_start_back_scan = cold_start_back_scan;
   }
 
   /** Last correlated event id. */
@@ -7657,11 +7639,11 @@ export class CorrelateCycle<
     ]);
     // Resume from the durable checkpoint. On a first boot it is -1 and a full
     // scan of an existing log would be unbounded, so start a bounded window
-    // below the watermark instead (see DEFAULT_COLD_START_BACK_SCAN).
+    // below the watermark instead (see COLD_START_BACK_SCAN).
     this._checkpoint =
       correlated_at >= 0
         ? correlated_at
-        : Math.max(-1, watermark - this._cold_start_back_scan);
+        : Math.max(-1, watermark - COLD_START_BACK_SCAN);
     this._on_init?.();
     for (const { stream, priority = 0, lane } of this._static_targets) {
       // Floor +Infinity: no dynamic resolution can re-open a static target;
@@ -7779,13 +7761,13 @@ export class CorrelateCycle<
     // floor shared by every correlator, and adopting it would skip events this
     // worker never read. Renew at the halfway mark so the holder never lapses.
     const now = Date.now();
-    if (lease && now >= this._lease_until - this._lease_millis / 2) {
+    if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
-        millis: this._lease_millis,
+        millis: CORRELATION_LEASE_MS,
       });
-      this._lease_until = correlating ? now + this._lease_millis : 0;
+      this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // \`undefined\` means the store does not implement leasing, so every
       // worker scans exactly as before.
       if (correlating === false)
@@ -7924,11 +7906,11 @@ export class CorrelateCycle<
         streams,
         last_id,
         lease
-          ? { key: this._key, by: this._by, millis: this._lease_millis }
+          ? { key: this._key, by: this._by, millis: CORRELATION_LEASE_MS }
           : undefined
       );
       if (lease && correlating !== false)
-        this._lease_until = renewed_at + this._lease_millis;
+        this._lease_until = renewed_at + CORRELATION_LEASE_MS;
       // A raised mark makes work claimable just like a new target, so the
       // orchestrator arms on both (\`subscribed\` alone misses re-marks).
       const marked = streams.filter(
@@ -8022,7 +8004,7 @@ export class CorrelateCycle<
       // \`warn\`, not \`error\`: this runs during shutdown, nothing is lost, and
       // the lease expires on its own.
       log().warn(
-        \`Could not hand back the correlation lease during shutdown; it expires on its own within \${this._lease_millis}ms and correlation resumes normally after that. \` +
+        \`Could not hand back the correlation lease during shutdown; it expires on its own within \${CORRELATION_LEASE_MS}ms and correlation resumes normally after that. \` +
           "On a single-writer store this usually means another connection holds the database. " +
           \`Cause: \${String(error)}\`
       );
@@ -9118,10 +9100,9 @@ export type DrainControllerDeps<
   readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Lane this controller drains. Undefined spans all lanes. */
   readonly lane?: string;
-  /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
+  /** The lane's own config; it wins over the caller's DrainOptions. */
   readonly defaults?: {
     readonly streamLimit?: number;
-    readonly eventLimit?: number;
     readonly leaseMillis?: number;
   };
 };
@@ -9267,8 +9248,7 @@ export class DrainController<
     // point of \`withLane({leaseMillis})\`.
     const streamLimit =
       d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
-    const eventLimit =
-      d.eventLimit ?? options.eventLimit ?? DEFAULT_EVENT_LIMIT;
+    const eventLimit = options.eventLimit ?? DEFAULT_EVENT_LIMIT;
     const leaseMillis =
       d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
@@ -9420,7 +9400,7 @@ export async function fetch<TEvents extends Schemas>(
       // A literal \`source\` fetches with \`stream_exact\` so an exact name
       // like "s1" reads only "s1" — never a sibling prefix "s12". A
       // pattern source (e.g. \`^(A|B)$\`) stays a regex query, matching the
-      // same streams the has-work probe claimed it for.
+      // same streams correlate resolved it for.
       const stream_exact =
         source !== undefined && is_literal_source(source) ? true : undefined;
       try {
@@ -10922,8 +10902,7 @@ class InMemoryStream {
   // in-process backoff, this is durable store state shared across workers.
   private _deferred_at: number | undefined = undefined;
   // Work mark: highest event id observed to resolve to this target.
-  // \`undefined\` means UNKNOWN — the row predates the mark, so \`claim\` falls
-  // back to the legacy has-work probe rather than treating it as "no work".
+  // \`undefined\` means the row was never correlated, so \`claim\` skips it.
   private _correlated_at: number | undefined = undefined;
 
   constructor(
@@ -11256,12 +11235,6 @@ export class InMemoryStore implements Store {
   >();
   // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // max non-snapshot event id per stream — drives the has-work probe in
-  // claim(): an O(1) lookup for a literal source, and the per-stream max
-  // that a pattern source scans, without touching the full event log.
-  private _max_event_id_by_stream: Map<string, number> = new Map();
-  // global max non-snapshot event id — fast pre-check for source-less streams in claim()
-  private _max_non_snap_event_id = -1;
   // stream → (event_id → cloned sensitive payload). Two-level so \`forget_pii\`
   // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
   // the \`DELETE WHERE stream = ?\` scope that durable adapters get from their
@@ -11274,9 +11247,17 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._correlated_at = -1;
     this._stream_versions.clear();
-    this._max_event_id_by_stream.clear();
-    this._max_non_snap_event_id = -1;
     this._pii.clear();
+  }
+
+  // Stores a cloned copy, so caller-side mutation can't reach it.
+  private _put_pii(stream: string, id: number, pii: Record<string, unknown>) {
+    let per_stream = this._pii.get(stream);
+    if (!per_stream) {
+      per_stream = new Map();
+      this._pii.set(stream, per_stream);
+    }
+    per_stream.set(id, structuredClone(pii));
   }
 
   // First index whose event id is greater than \`after\`. \`_events\` stays
@@ -11440,7 +11421,6 @@ export class InMemoryStore implements Store {
     }
 
     let version = current_version + 1;
-    let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
         id: this._next_id++,
@@ -11452,28 +11432,13 @@ export class InMemoryStore implements Store {
         meta,
       };
       // The stored event is the pii-less view — \`forget_pii\` only has to
-      // drop the inner Map for the stream, never the event row. Mandatory
-      // clone on the pii payload defends against caller-side mutation.
+      // drop the inner Map for the stream, never the event row.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
-      if (pii != null) {
-        let per_stream = this._pii.get(stream);
-        if (!per_stream) {
-          per_stream = new Map();
-          this._pii.set(stream, per_stream);
-        }
-        per_stream.set(c.id, structuredClone(pii) as Record<string, unknown>);
-      }
-      if (name !== SNAP_EVENT) last_non_snap_id = c.id;
+      if (pii != null) this._put_pii(stream, c.id, pii);
       version++;
       return this._with_pii(c);
     });
     this._stream_versions.set(stream, version - 1);
-    if (last_non_snap_id >= 0) {
-      this._max_event_id_by_stream.set(stream, last_non_snap_id);
-      // commit always assigns a fresh id from the monotonic _next_id, so
-      // any non-snap commit strictly raises the global max.
-      this._max_non_snap_event_id = last_non_snap_id;
-    }
     return committed;
   }
 
@@ -11497,9 +11462,8 @@ export class InMemoryStore implements Store {
     // Eligibility is a pure subscription-row predicate. \`claim\`
     // never looks at the event log: \`correlate\` records the highest event id
     // that resolves to a target, and \`at < correlated_at\` is the whole
-    // question. The probe this replaced walked the event index once per
-    // eligible subscription, matching \`source\` literally or as a pattern —
-    // matching that now happens in correlate, when it decides what to mark.
+    // question. Matching \`source\` happens in correlate, when it decides what
+    // to mark.
     //
     // An unmarked row is not claimable, by definition: \`undefined\`
     // means the row has never been correlated, not that it has no work.
@@ -12148,7 +12112,6 @@ export class InMemoryStore implements Store {
       // stream's subscription is inert, and reaping it is maintenance that
       // \`seed()\` performs.
       this._stream_versions.delete(stream);
-      this._max_event_id_by_stream.delete(stream);
       // The pii payloads die with the event rows, matching the durable
       // adapters' \`DELETE WHERE stream = ?\` scope.
       this._pii.delete(stream);
@@ -12163,17 +12126,8 @@ export class InMemoryStore implements Store {
       };
       this._events.push(event);
       this._stream_versions.set(stream, 0);
-      if (event.name !== SNAP_EVENT) {
-        this._max_event_id_by_stream.set(stream, event.id);
-      }
       result.set(stream, { deleted, committed: event });
     }
-    // Recompute global max from the per-stream index — deletions may have
-    // dropped the previous max, while new tombstones may have raised it.
-    let max = -1;
-    for (const id of this._max_event_id_by_stream.values())
-      if (id > max) max = id;
-    this._max_non_snap_event_id = max;
     return result;
   }
 
@@ -12200,8 +12154,6 @@ export class InMemoryStore implements Store {
     const prev_next_id = this._next_id;
     const prev_streams = this._streams;
     const prev_stream_versions = this._stream_versions;
-    const prev_max_event_id_by_stream = this._max_event_id_by_stream;
-    const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     const prev_pii = this._pii;
     const prev_correlated_at = this._correlated_at;
     const prev_correlators = new Map(
@@ -12218,8 +12170,6 @@ export class InMemoryStore implements Store {
     this._next_id = 0;
     this._streams = new Map();
     this._stream_versions = new Map();
-    this._max_event_id_by_stream = new Map();
-    this._max_non_snap_event_id = -1;
     this._pii = new Map();
     try {
       await driver(async (event) => {
@@ -12232,23 +12182,12 @@ export class InMemoryStore implements Store {
         const { pii, ...rest } = event;
         const committed: Committed<Schemas, keyof Schemas> = { ...rest, id };
         this._events.push(committed);
-        if (pii != null) {
-          let per_stream = this._pii.get(event.stream);
-          if (!per_stream) {
-            per_stream = new Map();
-            this._pii.set(event.stream, per_stream);
-          }
-          per_stream.set(id, structuredClone(pii) as Record<string, unknown>);
-        }
+        if (pii != null) this._put_pii(event.stream, id, pii);
         // Last event per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also
         // the highest version. Out-of-order sources get last-wins,
         // matching the legacy raw-SQL restore.
         this._stream_versions.set(event.stream, event.version);
-        if (event.name !== SNAP_EVENT) {
-          this._max_event_id_by_stream.set(event.stream, id);
-          this._max_non_snap_event_id = id;
-        }
         return id;
       });
     } catch (err) {
@@ -12258,8 +12197,6 @@ export class InMemoryStore implements Store {
       this._next_id = prev_next_id;
       this._streams = prev_streams;
       this._stream_versions = prev_stream_versions;
-      this._max_event_id_by_stream = prev_max_event_id_by_stream;
-      this._max_non_snap_event_id = prev_max_non_snap_event_id;
       this._pii = prev_pii;
       this._correlated_at = prev_correlated_at;
       this._correlators = prev_correlators;
@@ -13318,10 +13255,8 @@ export type SubscribeInput = {
    * best-effort — which is what the name records.
    *
    * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
-   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
-   * legacy has-work probe against the event log, which is how installs that
-   * predate the column keep working. That arm is deleted once \`correlate\`
-   * marks universally.
+   * \`NULL\` means the row has never been correlated, so it is not claimable
+   * until \`correlate\` marks it.
    */
   readonly correlated_at?: number;
 };
@@ -13479,8 +13414,10 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is matched against candidate streams by one
-   * of two rules in the has-work probe. A **literal** source (no regex
+   * Claim reads only the subscription rows; it never matches a \`source\`
+   * against the event log. Correlate does that when it decides which
+   * targets to mark, and the drain uses the same rule when it fetches the
+   * claimed stream's events. A **literal** source (no regex
    * metacharacter — the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
    * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
@@ -13488,7 +13425,7 @@ export interface Store extends Disposable, EventSource {
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently
-   * never claiming the stream.
+   * never fetching its events.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -13539,9 +13476,9 @@ export interface Store extends Disposable, EventSource {
    * used internally for correlation checkpoint initialization on cold start.
    *
    * @param streams - Streams to register with optional source hint — a
-   *   literal stream name (matched by equality in {@link claim}'s has-work
-   *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite.
+   *   literal stream name (matched by equality when the drain fetches the
+   *   stream's events) or a regex pattern (compiled and matched against
+   *   stream names); non-portable patterns are rejected here on SQLite.
    *
    *   **At most one entry per stream.** A subscription row is keyed by
    *   stream and its \`source\` is set once at creation, so a second entry
@@ -18231,8 +18168,9 @@ const SOURCE_METACHARACTERS = /[\\^$.*+?()[\\]{}|\\\\]/;
  * \`source: "^(A|B)$"\` reaction relies on.
  *
  * The single source of truth for literal-vs-pattern classification across
- * the InMemory has-work probe, the drain fetch path, and the SQL adapters,
- * so all three agree on which sources take the exact path.
+ * correlate (which decides what a source marks), the drain fetch path, and
+ * the SQLite adapter (which rejects a non-portable pattern), so all three
+ * agree on which sources take the exact path.
  *
  * @example
  * \`\`\`typescript
@@ -20863,10 +20801,8 @@ export type SubscribeInput = {
    * best-effort — which is what the name records.
    *
    * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
-   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
-   * legacy has-work probe against the event log, which is how installs that
-   * predate the column keep working. That arm is deleted once \`correlate\`
-   * marks universally.
+   * \`NULL\` means the row has never been correlated, so it is not claimable
+   * until \`correlate\` marks it.
    */
   readonly correlated_at?: number;
 };
@@ -21024,8 +20960,10 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is matched against candidate streams by one
-   * of two rules in the has-work probe. A **literal** source (no regex
+   * Claim reads only the subscription rows; it never matches a \`source\`
+   * against the event log. Correlate does that when it decides which
+   * targets to mark, and the drain uses the same rule when it fetches the
+   * claimed stream's events. A **literal** source (no regex
    * metacharacter — the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
    * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
@@ -21033,7 +20971,7 @@ export interface Store extends Disposable, EventSource {
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently
-   * never claiming the stream.
+   * never fetching its events.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -21084,9 +21022,9 @@ export interface Store extends Disposable, EventSource {
    * used internally for correlation checkpoint initialization on cold start.
    *
    * @param streams - Streams to register with optional source hint — a
-   *   literal stream name (matched by equality in {@link claim}'s has-work
-   *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite.
+   *   literal stream name (matched by equality when the drain fetches the
+   *   stream's events) or a regex pattern (compiled and matched against
+   *   stream names); non-portable patterns are rejected here on SQLite.
    *
    *   **At most one entry per stream.** A subscription row is keyed by
    *   stream and its \`source\` is set once at creation, so a second entry
@@ -29750,16 +29688,12 @@ export class PostgresStore implements Store {
         ON \${this._fqt} (stream COLLATE pg_catalog."default", id)
         WHERE name = '\${SNAP_EVENT}';\`
       );
-      // The complement of the snapshot index, and the one \`claim\`'s has-work
-      // probe seeks on: "does this source stream have a non-snapshot event
-      // past the watermark?". Partial over non-snapshot rows so the
-      // two indexes partition the table rather than overlapping.
-      //
-      // Without it the probe fell back to the pk and scanned forward from
-      // each stream's watermark — and because a dormant aggregate's
-      // watermark is old, that tail is long and grows with the table. At 10k
-      // subscribed streams a single claim cost 5,792 ms; with this index and
-      // the source-class split in \`claim\`, 10.3 ms.
+      // The complement of the snapshot index, and the one the drain fetch
+      // seeks on: "this stream's non-snapshot events past the watermark".
+      // Without it the fetch falls back to the pk and scans forward from the
+      // watermark, a tail that grows with the table for a dormant stream.
+      // Partial over non-snapshot rows so the two indexes partition the
+      // table rather than overlapping.
       await client.query(
         \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_stream_id_ix"
         ON \${this._fqt} (stream COLLATE pg_catalog."default", id)
@@ -30174,8 +30108,8 @@ export class PostgresStore implements Store {
     if (msgs.length === 0 && expectedVersion === undefined) return [];
     // Serialize commit VISIBILITY, not just id assignment. \`id\` is a
     // serial: it is assigned at INSERT time but the row appears at
-    // COMMIT time, and every watermark consumer (the claim has-work
-    // probe, fetch's \`after\`, the correlate checkpoint) assumes id
+    // COMMIT time, and every watermark consumer (the correlate
+    // checkpoint and work marks, fetch's \`after\`) assumes id
     // order equals visibility order. Without a fence two concurrent
     // commits to different streams can surface out of id order, and a
     // reader that acks past the higher id permanently skips the lower
@@ -30394,10 +30328,8 @@ export class PostgresStore implements Store {
         -- Eligibility is a pure subscription-table predicate.
         -- claim does not read the event log at all: correlate marks the
         -- highest event id that resolves to a target, and at <
-        -- correlated_at is the whole question. The probe this replaced ran
-        -- an EXISTS against the events table once per eligible row, which
-        -- cost O(subscribed streams) per claim per worker no matter how
-        -- little work was pending.
+        -- correlated_at is the whole question, so a claim costs the lease
+        -- budget, not the number of subscribed streams.
         --
         -- The predicate is repeated in each arm below rather than factored
         -- into a shared CTE, and that repetition is load-bearing. A
@@ -32315,12 +32247,10 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
     );
-    // Complement of the snapshot index, and the one claim's has-work probe
-    // seeks on: "does this source stream have a non-snapshot event past the
-    // watermark?". SQLite already probes per candidate with a
-    // sargable \`stream = ? AND id > ?\`, so it only lacked the index — the
-    // existing idx_events_stream is stream-only and still has to walk every
-    // event of that stream. Partial over non-snapshot rows so the two
+    // Complement of the snapshot index, and the one the drain fetch seeks
+    // on: "this stream's non-snapshot events past the watermark", a
+    // sargable \`stream = ? AND id > ?\`. The existing idx_events_stream is
+    // stream-only and would walk every event of that stream. Partial over non-snapshot rows so the two
     // indexes partition the table rather than overlapping.
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_stream_id ON events(stream, id) WHERE name <> '__snapshot__'"
@@ -32828,14 +32758,6 @@ export class SqliteStore implements Store {
       // does not read the events table at all: correlate records the highest
       // event id that resolves to a target, and \`at < correlated_at\` is the
       // whole question, answered by the partial index built for it.
-      //
-      // What this replaced was the worst shape in the adapter — every
-      // eligible row selected with no limit, then one \`SELECT 1 FROM events\`
-      // per candidate in a JavaScript loop with no early exit, all inside
-      // \`transaction("write")\`, so a claim's cost was linear in subscribed
-      // streams and every concurrent commit queued behind it. There was no
-      // index fix available for it, because the probe was in JS rather than
-      // in SQL.
       //
       // A row with no mark is not claimable, by definition: NULL
       // means the row has never been correlated, not that it has no work.
@@ -36098,29 +36020,22 @@ export type StoreCapabilities = {
    */
   readonly source_matches?: boolean;
   /**
-   * Adapter matches a **pattern** reaction \`source\` (one carrying regex
-   * metacharacters, e.g. the calculator's \`^(A|B)$\`) as a full RegExp in
-   * claim()'s has-work probe, so a stream whose max event id exceeds the
-   * subscription watermark is claimed when its name matches the pattern.
-   * When \`true\`, the TCK runs the pattern-source claim suite. Literal
-   * sources stay exact everywhere regardless of this flag — the fast,
-   * index-friendly path.
-   *
-   * Stores that cannot run an arbitrary regex against candidate streams
-   * (e.g. SQLite, whose libsql build has no \`REGEXP\` and whose portable
-   * \`LIKE\` grammar cannot express alternation/grouping) leave this
-   * \`false\` and instead reject a non-portable claim source at
-   * {@link subscribe} time — see {@link rejects_nonportable_claim_source}.
+   * Gates nothing. \`claim\` reads only the subscription row and never
+   * matches a \`source\`; correlate does, so a **pattern** source (e.g. the
+   * calculator's \`^(A|B)$\`) works on every adapter that accepts it at
+   * {@link subscribe}. Kept so specs that set it still compile. Stores that
+   * cannot run an arbitrary regex reject a non-portable source at subscribe
+   * instead; see {@link rejects_nonportable_claim_source}.
    */
   readonly pattern_claim_source?: boolean;
   /**
-   * Adapter cannot faithfully match every regex claim \`source\`, so it
-   * fails loud at registration: {@link subscribe} throws
+   * Adapter cannot faithfully match every regex \`source\` when the drain
+   * fetches a stream's events, so it fails loud at registration: {@link subscribe} throws
    * {@link ValidationError} for a source outside its portable subset
    * (alternation/grouping like \`^(A|B)$\`), rather than silently never
-   * claiming the stream. When \`true\`, the TCK runs the reject-at-subscribe
+   * fetching them. When \`true\`, the TCK runs the reject-at-subscribe
    * case. Currently only SQLite sets this — its message points operators
-   * to InMemory/PG for full regex claim sources.
+   * to InMemory/PG for full regex sources.
    */
   readonly rejects_nonportable_claim_source?: boolean;
   /**
@@ -36203,7 +36118,7 @@ export type StoreTckOptions = {
  *   \`ValidationError\` — never a silent approximation
  * - \`subscribe\` — idempotent re-subscribe, watermark return value
  * - \`claim\` / \`ack\` — lease lifecycle, dual frontiers, leased streams
- *   not double-claimed, exact-source has-work matching, timed-out-lease
+ *   not double-claimed, exact-source fetch, timed-out-lease
  *   retry accounting
  * - \`block\` — blocked streams hidden from claim, only same-drainer can block
  * - \`reset\` — restart watermarks (including blocked), no-op for missing
@@ -37317,16 +37232,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
       });
 
-      // The subscription work set (#1485). \`correlate\` records the highest
-      // event id that resolved to a target as that row's \`correlated_at\` mark,
-      // and \`claim\` serves a marked stream from the subscription row alone —
-      // \`at < correlated_at\` — instead of probing the event log per row. The
-      // probe is what makes claim cost O(subscribed streams); the mark makes
-      // it O(lease budget).
-      //
-      // \`NULL\` means UNKNOWN, not "no work": an unmarked row falls back to
-      // the legacy probe, which is how an install that predates the column
-      // keeps working. That arm is deleted once correlate marks universally.
+      // The subscription work set. \`correlate\` records the highest event id
+      // that resolved to a target as that row's \`correlated_at\` mark, and
+      // \`claim\` serves a stream from the subscription row alone: it is
+      // claimable while \`at < correlated_at\`, so a claim costs the lease
+      // budget, not the number of subscribed streams. An unmarked row
+      // (\`NULL\`) has never been correlated and is not claimable.
       describe("subscription work set", () => {
         /** Claim just this stream, and say whether it came back. */
         const claimable = async (stream: string) => {
@@ -37339,9 +37250,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         };
 
         it("claims a marked stream without probing the event log", async () => {
-          // The source has no events at all, so the legacy probe would say
-          // "no work" — only the mark can make this claimable. That is the
-          // whole point: eligibility comes from the subscription row.
+          // The source has no events at all, so only the mark can make this
+          // claimable: eligibility comes from the subscription row.
           const s = \`ws-mark-\${uid()}\`;
           await store.subscribe([{ stream: s, source: \`ws-src-\${uid()}\` }]);
           expect(await claimable(s)).toBe(false);
@@ -37941,12 +37851,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
-      // ACT-1220: an exact (literal) source must never fetch events from a
-      // sibling stream sharing its prefix. Guards the drain fetch path: an
-      // exact source \`s1\` claimed as work must, when queried, receive only
-      // \`s1\`'s events — not \`s12\`'s. Pre-#1215 fetch treated \`source\` as an
-      // unanchored regex, so \`s1\` would have pulled \`s12\`'s events into the
-      // handler.
+      // An exact (literal) source must never fetch events from a sibling
+      // stream sharing its prefix: a claimed \`s1\` reads only \`s1\`'s events,
+      // never \`s12\`'s.
       it("fetches only the exact source stream's events, never a sibling prefix", async () => {
         const fresh = await options.factory();
         try {

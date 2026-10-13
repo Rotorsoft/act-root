@@ -89,6 +89,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Code the assistant writes into new apps (the scaffold skill) drifts like docs, and no check compiles it; two of its calls crashed. (2026-10-08 review)
 - A change to a default or a timing breaks what nothing in CI runs. #1872 made a no-backoff retry wait 10 s; the gate passed, and the Prometheus recipe silently stopped blocking its poison stream, while three doc passages kept the old timing. Grep and run recipes and examples for the old behavior in the same PR. (2026-10-11 review)
 - A test snapshot inside a published package releases that package on every change to it: 94 of 137 act-tck releases published identical code. Keep repo-wide gates out of published packages. (2026-10-10 review)
+- When a mechanism is removed, grep for its name in comments, capability flags and docs in the same PR. Two months after `claim` stopped probing the event log (#1511), 14 comments still described the probe and the TCK still carried a flag that gated nothing. (#1864)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
 - Ticket numbers belong in git and here, not in code comments or test names.
