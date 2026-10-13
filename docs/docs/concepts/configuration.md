@@ -250,7 +250,7 @@ const app = act()
 - **`streamLimit`** — max streams claimed per cycle. Bounds the parallel-handler dispatch budget for the lane.
 - **`cycleMs`** — when set, auto-starts a per-lane `setTimeout` chain that calls the controller's `drain()` at this cadence. The timer is `unref()`'d so it doesn't keep the process alive; `app.shutdown()` clears it. When omitted, the lane drains alongside the Act-level `settle()` loop. The chain only drains work correlation has already marked; new commits still need `notify`, `settle()` or `start_correlations()` to be correlated.
 
-Each declared lane field overrides caller-passed `DrainOptions` at drain time — `withLane({leaseMillis: 30_000})` would be meaningless if `drain({leaseMillis: 1_000})` could erase it. Caller options only apply when the lane is silent on the field.
+Each declared lane field overrides caller-passed `DrainOptions` at drain time — `withLane({leaseMillis: 30_000})` would be meaningless if `drain({leaseMillis: 1_000})` could erase it. Caller options only apply when the lane is silent on the field, and only to that one call: the drains Act runs on its own (settle, the defer wake, `cycleMs`, `start_correlations`) pass no options, so they use the lane's value or the default. A handler that needs a longer lease than the default 10 seconds belongs on a named lane with its own `leaseMillis`.
 
 ### Type-safe lane references
 

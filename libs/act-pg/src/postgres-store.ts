@@ -1925,11 +1925,9 @@ export class PostgresStore implements Store {
    *   from `DISTINCT ON` over the same CTE — they ride free on the
    *   already-paid scan.
    *
-   * The stream universe is derived from the events table: filter form
-   * matches event-bearing streams (not subscription rows). When the
-   * filter sets `source` or `blocked`, the events table is joined
-   * against the streams subscription table since those concepts only
-   * exist for subscribed streams.
+   * The stream universe is derived from the events table: the filter
+   * (`stream` / `stream_exact` only) matches event-bearing streams, not
+   * subscription rows.
    */
   async query_stats<E extends Schemas>(
     input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,

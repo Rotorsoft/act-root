@@ -228,7 +228,7 @@ Streams block on three paths:
 
 1. A reaction handler fails repeatedly and `lease.retry` reaches `maxRetries` (after `maxRetries + 1` failed attempts). The lease is committed with `blocked = true` and stays out of `claim()` results.
 2. A reaction handler throws `NonRetryableError` (or a subclass like `NonRetryableWebhookError`) — the drain finalizer blocks the stream on the first failed attempt without consuming the retry budget. See [Non-retryable errors](#non-retryable-errors).
-3. A reaction handler never fails but never finishes inside its lease. Each attempt completes, submits an ack the store drops (the lease is gone), and the next claim bumps `retry` again — the budget is spent without a single error, so paths 1 and 2 can't fire. The drain blocks such a stream at claim time, before dispatching, once `retry` is **strictly greater** than `maxRetries`. The fix is `leaseMillis`, not `maxRetries`: size the lease above the handler's real duration, then `app.unblock`. See [When every attempt loses its lease](../architecture/concurrency-model#when-every-attempt-loses-its-lease).
+3. A reaction handler never fails but never finishes inside its lease. Each attempt completes, submits an ack the store drops (the lease is gone), and the next claim bumps `retry` again — the budget is spent without a single error, so paths 1 and 2 can't fire. The drain blocks such a stream at claim time, before dispatching, once `retry` is **strictly greater** than `maxRetries`. The fix is `leaseMillis`, not `maxRetries`: put the reaction on a lane whose `leaseMillis` is above the handler's real duration, then `app.unblock`. A `leaseMillis` passed to one `app.drain()` call covers only that call; the background drains (settle, the defer wake, `cycleMs`, `start_correlations`) use the lane's. See [When every attempt loses its lease](../architecture/concurrency-model#when-every-attempt-loses-its-lease).
 
 A failing store is deliberately not a fourth path. `claim` writes the retry count up before any handler runs, so a store that fails partway through a pass raises the count with no handler behind it, and path 3 would fire on that. Path 3 therefore stands down while the store is failing. See [When the database, not the handler, spent the count](../architecture/concurrency-model#when-the-database-not-the-handler-spent-the-count).
 
@@ -298,7 +298,7 @@ Each reaction handler accepts options that control retry and blocking behaviour:
 
 - **`maxRetries`** (default `3`) — how many times the framework re-claims a stream after a handler throws. Each failed cycle increments `retry_count`; the next `claim()` picks the stream up again with the same events.
 - **`blockOnError`** (default `true`) — once a failure happens with `retry_count` at `maxRetries` (the `maxRetries + 1`th attempt), the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
-- **`backoff`** (default omitted — retry as soon as the lease expires) — paces inter-attempt timing so flaky receivers aren't hammered.
+- **`backoff`** (default: a fixed 10 seconds) — paces inter-attempt timing so flaky receivers aren't hammered. See [Backoff](#backoff).
 
 Set `maxRetries: 0` for handlers that should never retry — typically those that already implement their own dead-letter strategy.
 

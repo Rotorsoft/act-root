@@ -142,7 +142,7 @@ Three "exits" from a leased state:
 
 ### Why a stream stays in `claim()` after a partial handler failure
 
-If a reaction handler throws, the framework `block`s the lease *only if* `retry_count > maxRetries && blockOnError`. Otherwise it just releases without advancing the watermark. The next `claim()` cycle picks the stream up again — same events, fresh handler invocation, retry count incremented. Bounded retries with backoff are configured per-reaction via `ReactionOptions`.
+If a reaction handler throws, the framework `block`s the lease *only if* `retry_count > maxRetries && blockOnError`. Otherwise it releases without advancing the watermark and schedules the next attempt after the reaction's backoff (a fixed 10 seconds when none is declared). The first `claim()` after that picks the stream up again — same events, fresh handler invocation, retry count incremented. Retry counts and backoff are configured per reaction via `ReactionOptions`.
 
 ## How the two interact
 

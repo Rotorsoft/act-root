@@ -74,9 +74,9 @@ const BackoffOptionsSchema = z.object({
 });
 
 /**
- * Retry pacing for a reaction that declares no backoff. Ten seconds matches
- * the default lease, which used to pace these retries. The lease now only
- * keeps two workers off one stream; retry timing belongs to the reaction.
+ * Retry pacing for a reaction that declares no backoff, and for projections
+ * and failed fetches, which have no options. Ten seconds, like the default
+ * lease; the lease itself only keeps two workers off one stream.
  */
 export const DEFAULT_BACKOFF: BackoffOptions = {
   strategy: "fixed",

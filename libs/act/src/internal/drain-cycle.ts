@@ -31,6 +31,7 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
+import { compute_backoff_delay } from "./backoff.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import {
   DEFAULT_BACKOFF,
@@ -62,9 +63,8 @@ export type HandleResult = Readonly<{
   block?: boolean;
   /**
    * Wall-clock timestamp (ms since epoch) at which the next attempt on
-   * this stream may run. Populated by `_finalize` only on retry paths
-   * where the reaction defined `options.backoff`. Undefined means "no
-   * backoff configured" — drain re-attempts as soon as the lease expires.
+   * this stream may run, from the reaction's backoff (or the default).
+   * Set on every retry; absent on success, block and defer.
    */
   next_attempt_at?: number;
   /**
@@ -153,7 +153,7 @@ function budget_exhausted<TEvents extends Schemas>(
     lease.retry <= options.maxRetries
   )
     return undefined;
-  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. That means every attempt lost its lease before it could ack: raise leaseMillis for this handler, then unblock the stream.`;
+  const error = `Blocking ${lease.stream} after ${lease.retry} claims with no acknowledged progress — the retry budget (${options.maxRetries}) was spent without the handler ever reporting an error. That means every attempt lost its lease before it could ack: move the reaction to a lane whose leaseMillis covers the handler, then unblock the stream.`;
   log().error(error);
   return { lease, handled: 0, acked_at: lease.at, error, block: true };
 }
@@ -322,7 +322,11 @@ async function run_drain_cycle<
           error,
           ...(block
             ? { block: true }
-            : { next_attempt_at: Date.now() + DEFAULT_BACKOFF.baseMs }),
+            : {
+                next_attempt_at:
+                  Date.now() +
+                  compute_backoff_delay(lease.retry, DEFAULT_BACKOFF),
+              }),
         };
         return Promise.resolve(failed);
       }
