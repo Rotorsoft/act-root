@@ -52,7 +52,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@rotorsoft/act-tck": "workspace:^",
     "prom-client": "^15.1.3"
   }
 }

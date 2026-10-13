@@ -240,13 +240,6 @@ export function resolveSettleConfig(
  */
 export const MAX_SHUTDOWN_GRACE_MS = 30_000;
 
-/**
- * Grace budget used when no lane pinned a `leaseMillis`: the drain's own
- * lease, so the default deployment waits as long as its handlers were
- * already allowed to hold a stream.
- */
-export const DEFAULT_SHUTDOWN_GRACE_MS = DEFAULT_LEASE_MILLIS;
-
 const ShutdownOptionsSchema = z
   .object({
     // `0` is legal and is exactly today's behavior: stop scheduling and

@@ -676,9 +676,9 @@ import {
   CorrelateCycle,
   catch_up_correlation,
   close_correlation,
+  DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
-  DEFAULT_SHUTDOWN_GRACE_MS,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -1383,9 +1383,7 @@ export class Act<
   private _build_audit_deps(): AuditDeps {
     return {
       store,
-      logger: this._logger,
       event_to_state: this._event_to_state,
-      states: this._states,
       // Declared lanes, not this process's controllers: a lane another
       // worker drains is not \`unknown-lane\`.
       declared_lanes: new Set(this._declared_lanes),
@@ -1518,9 +1516,11 @@ export class Act<
     running: { readonly lease_millis: number | undefined }[],
     settling: boolean
   ): number {
-    let max = settling ? DEFAULT_SHUTDOWN_GRACE_MS : 0;
+    // A lane with no lease waits the drain's default lease: as long as its
+    // handlers were already allowed to hold a stream.
+    let max = settling ? DEFAULT_LEASE_MILLIS : 0;
     for (const c of running)
-      max = Math.max(max, c.lease_millis || DEFAULT_SHUTDOWN_GRACE_MS);
+      max = Math.max(max, c.lease_millis || DEFAULT_LEASE_MILLIS);
     return Math.min(max, MAX_SHUTDOWN_GRACE_MS);
   }
 
@@ -3904,7 +3904,6 @@ import type {
   AuditFinding,
   AuditOptions,
   Committed,
-  Logger,
   Query,
   Schemas,
   State,
@@ -3922,11 +3921,8 @@ import { walk_streams } from "./walk-streams.js";
 /** The orchestrator state the audit reads, built once at \`build()\`. */
 export type AuditDeps = {
   readonly store: () => Store;
-  readonly logger: Logger;
   /** event-name → state that registers it (for schema validation). */
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
-  /** state-name → state (for snapshot-supported check on restart-candidate). */
-  readonly states: ReadonlyMap<string, State<any, any, any>>;
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
   /**
@@ -6661,13 +6657,6 @@ export function resolveSettleConfig(
  * operator's intent.
  */
 export const MAX_SHUTDOWN_GRACE_MS = 30_000;
-
-/**
- * Grace budget used when no lane pinned a \`leaseMillis\`: the drain's own
- * lease, so the default deployment waits as long as its handlers were
- * already allowed to hold a stream.
- */
-export const DEFAULT_SHUTDOWN_GRACE_MS = DEFAULT_LEASE_MILLIS;
 
 const ShutdownOptionsSchema = z
   .object({
@@ -12347,10 +12336,10 @@ export {
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_RETRIES,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
-  DEFAULT_SHUTDOWN_GRACE_MS,
   type FoldConfig,
   MAX_SHUTDOWN_GRACE_MS,
   resolveActConfig,

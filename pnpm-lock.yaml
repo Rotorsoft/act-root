@@ -495,9 +495,6 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
-      '@rotorsoft/act-tck':
-        specifier: workspace:^
-        version: link:../act-tck
       prom-client:
         specifier: ^15.1.3
         version: 15.1.3
@@ -606,9 +603,6 @@ importers:
       '@rotorsoft/act-http':
         specifier: workspace:^
         version: link:../../libs/act-http
-      '@rotorsoft/act-pg':
-        specifier: workspace:^
-        version: link:../../libs/act-pg
       '@tanstack/react-query':
         specifier: ^5.104.1
         version: 5.104.1(react@19.3.0)
@@ -749,9 +743,6 @@ importers:
       '@rotorsoft/act-otel':
         specifier: workspace:^
         version: link:../../libs/act-otel
-      '@rotorsoft/act-pg':
-        specifier: workspace:^
-        version: link:../../libs/act-pg
       '@trpc/server':
         specifier: 11.19.0
         version: 11.19.0(typescript@7.0.2)
