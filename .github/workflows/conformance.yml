@@ -55,7 +55,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.10.0
+          node-version: 26.11.1
           cache: "pnpm"
       - run: pnpm install
       # Run from the repo root, not `pnpm -F <pkg> exec vitest`: the root
@@ -83,7 +83,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.10.0
+          node-version: 26.11.1
           cache: "pnpm"
 
       - name: Override @libsql/client to latest
@@ -130,7 +130,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 26.10.0
+          node-version: 26.11.1
           cache: "pnpm"
 
       - run: pnpm install
