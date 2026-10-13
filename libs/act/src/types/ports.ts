@@ -499,10 +499,8 @@ export type SubscribeInput = {
    * best-effort — which is what the name records.
    *
    * Eligibility follows from it: a stream is claimable iff `at < correlated_at`.
-   * `NULL` means **unknown**, not "no work": those rows fall back to the
-   * legacy has-work probe against the event log, which is how installs that
-   * predate the column keep working. That arm is deleted once `correlate`
-   * marks universally.
+   * `NULL` means the row has never been correlated, so it is not claimable
+   * until `correlate` marks it.
    */
   readonly correlated_at?: number;
 };
@@ -660,8 +658,10 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's `source` is matched against candidate streams by one
-   * of two rules in the has-work probe. A **literal** source (no regex
+   * Claim reads only the subscription rows; it never matches a `source`
+   * against the event log. Correlate does that when it decides which
+   * targets to mark, and the drain uses the same rule when it fetches the
+   * claimed stream's events. A **literal** source (no regex
    * metacharacter — the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
    * exact so `"s1"` never matches `"s12"`. A **pattern** source (carrying
@@ -669,7 +669,7 @@ export interface Store extends Disposable, EventSource {
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently
-   * never claiming the stream.
+   * never fetching its events.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -720,9 +720,9 @@ export interface Store extends Disposable, EventSource {
    * used internally for correlation checkpoint initialization on cold start.
    *
    * @param streams - Streams to register with optional source hint — a
-   *   literal stream name (matched by equality in {@link claim}'s has-work
-   *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite.
+   *   literal stream name (matched by equality when the drain fetches the
+   *   stream's events) or a regex pattern (compiled and matched against
+   *   stream names); non-portable patterns are rejected here on SQLite.
    *
    *   **At most one entry per stream.** A subscription row is keyed by
    *   stream and its `source` is set once at creation, so a second entry

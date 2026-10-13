@@ -2,9 +2,9 @@
  * Commit-visibility serialization (#1178).
  *
  * `id` is a serial: assigned at INSERT, visible at COMMIT. Watermark
- * consumers (claim's has-work probe, fetch's `after`, the correlate
- * checkpoint) assume id order equals visibility order, so two concurrent
- * commits to different streams surfacing out of id order can push a
+ * consumers (the correlate checkpoint and work marks, fetch's `after`)
+ * assume id order equals visibility order, so two concurrent commits
+ * to different streams surfacing out of id order can push a
  * watermark past an event that is not yet visible — permanently skipping
  * it. The append path closes the gap with a transaction-scoped advisory
  * lock: these tests prove a commit (and a truncate seed) cannot proceed

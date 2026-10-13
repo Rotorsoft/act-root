@@ -612,9 +612,8 @@ export class InMemoryStore implements Store {
     // Eligibility is a pure subscription-row predicate. `claim`
     // never looks at the event log: `correlate` records the highest event id
     // that resolves to a target, and `at < correlated_at` is the whole
-    // question. The probe this replaced walked the event index once per
-    // eligible subscription, matching `source` literally or as a pattern —
-    // matching that now happens in correlate, when it decides what to mark.
+    // question. Matching `source` happens in correlate, when it decides what
+    // to mark.
     //
     // An unmarked row is not claimable, by definition: `undefined`
     // means the row has never been correlated, not that it has no work.

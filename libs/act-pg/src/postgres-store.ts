@@ -590,16 +590,12 @@ export class PostgresStore implements Store {
         ON ${this._fqt} (stream COLLATE pg_catalog."default", id)
         WHERE name = '${SNAP_EVENT}';`
       );
-      // The complement of the snapshot index, and the one `claim`'s has-work
-      // probe seeks on: "does this source stream have a non-snapshot event
-      // past the watermark?". Partial over non-snapshot rows so the
-      // two indexes partition the table rather than overlapping.
-      //
-      // Without it the probe fell back to the pk and scanned forward from
-      // each stream's watermark — and because a dormant aggregate's
-      // watermark is old, that tail is long and grows with the table. At 10k
-      // subscribed streams a single claim cost 5,792 ms; with this index and
-      // the source-class split in `claim`, 10.3 ms.
+      // The complement of the snapshot index, and the one the drain fetch
+      // seeks on: "this stream's non-snapshot events past the watermark".
+      // Without it the fetch falls back to the pk and scans forward from the
+      // watermark, a tail that grows with the table for a dormant stream.
+      // Partial over non-snapshot rows so the two indexes partition the
+      // table rather than overlapping.
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_stream_id_ix"
         ON ${this._fqt} (stream COLLATE pg_catalog."default", id)
@@ -1014,8 +1010,8 @@ export class PostgresStore implements Store {
     if (msgs.length === 0 && expectedVersion === undefined) return [];
     // Serialize commit VISIBILITY, not just id assignment. `id` is a
     // serial: it is assigned at INSERT time but the row appears at
-    // COMMIT time, and every watermark consumer (the claim has-work
-    // probe, fetch's `after`, the correlate checkpoint) assumes id
+    // COMMIT time, and every watermark consumer (the correlate
+    // checkpoint and work marks, fetch's `after`) assumes id
     // order equals visibility order. Without a fence two concurrent
     // commits to different streams can surface out of id order, and a
     // reader that acks past the higher id permanently skips the lower
@@ -1234,10 +1230,8 @@ export class PostgresStore implements Store {
         -- Eligibility is a pure subscription-table predicate.
         -- claim does not read the event log at all: correlate marks the
         -- highest event id that resolves to a target, and at <
-        -- correlated_at is the whole question. The probe this replaced ran
-        -- an EXISTS against the events table once per eligible row, which
-        -- cost O(subscribed streams) per claim per worker no matter how
-        -- little work was pending.
+        -- correlated_at is the whole question, so a claim costs the lease
+        -- budget, not the number of subscribed streams.
         --
         -- The predicate is repeated in each arm below rather than factored
         -- into a shared CTE, and that repetition is load-bearing. A

@@ -18,7 +18,6 @@ runStoreTck({
     pii_isolation: true,
     concurrent_claim: true,
     source_matches: true,
-    pattern_claim_source: true,
     work_set: true,
   },
 });

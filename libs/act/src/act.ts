@@ -1304,8 +1304,7 @@ export class Act<
    * Call `correlate()` before `drain()`. It is not only how dynamic targets
    * are discovered: a stream is claimable while `at < correlated_at`, and
    * `correlate` is the only component that raises that mark, so a
-   * commit no correlate has seen is not drainable — including for static
-   * targets, which were served by a probe of the event log before. For a
+   * commit no correlate has seen is not drainable, static targets included. For a
    * higher-level API that handles debouncing, correlation, and signaling
    * automatically, use {@link settle}.
    *

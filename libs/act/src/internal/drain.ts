@@ -58,7 +58,7 @@ export async function fetch<TEvents extends Schemas>(
       // A literal `source` fetches with `stream_exact` so an exact name
       // like "s1" reads only "s1" — never a sibling prefix "s12". A
       // pattern source (e.g. `^(A|B)$`) stays a regex query, matching the
-      // same streams the has-work probe claimed it for.
+      // same streams correlate resolved it for.
       const stream_exact =
         source !== undefined && is_literal_source(source) ? true : undefined;
       try {

@@ -383,12 +383,10 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
     );
-    // Complement of the snapshot index, and the one claim's has-work probe
-    // seeks on: "does this source stream have a non-snapshot event past the
-    // watermark?". SQLite already probes per candidate with a
-    // sargable `stream = ? AND id > ?`, so it only lacked the index — the
-    // existing idx_events_stream is stream-only and still has to walk every
-    // event of that stream. Partial over non-snapshot rows so the two
+    // Complement of the snapshot index, and the one the drain fetch seeks
+    // on: "this stream's non-snapshot events past the watermark", a
+    // sargable `stream = ? AND id > ?`. The existing idx_events_stream is
+    // stream-only and would walk every event of that stream. Partial over non-snapshot rows so the two
     // indexes partition the table rather than overlapping.
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_stream_id ON events(stream, id) WHERE name <> '__snapshot__'"
@@ -896,14 +894,6 @@ export class SqliteStore implements Store {
       // does not read the events table at all: correlate records the highest
       // event id that resolves to a target, and `at < correlated_at` is the
       // whole question, answered by the partial index built for it.
-      //
-      // What this replaced was the worst shape in the adapter — every
-      // eligible row selected with no limit, then one `SELECT 1 FROM events`
-      // per candidate in a JavaScript loop with no early exit, all inside
-      // `transaction("write")`, so a claim's cost was linear in subscribed
-      // streams and every concurrent commit queued behind it. There was no
-      // index fix available for it, because the probe was in JS rather than
-      // in SQL.
       //
       // A row with no mark is not claimable, by definition: NULL
       // means the row has never been correlated, not that it has no work.

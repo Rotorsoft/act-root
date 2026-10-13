@@ -104,29 +104,22 @@ export type StoreCapabilities = {
    */
   readonly source_matches?: boolean;
   /**
-   * Adapter matches a **pattern** reaction `source` (one carrying regex
-   * metacharacters, e.g. the calculator's `^(A|B)$`) as a full RegExp in
-   * claim()'s has-work probe, so a stream whose max event id exceeds the
-   * subscription watermark is claimed when its name matches the pattern.
-   * When `true`, the TCK runs the pattern-source claim suite. Literal
-   * sources stay exact everywhere regardless of this flag — the fast,
-   * index-friendly path.
-   *
-   * Stores that cannot run an arbitrary regex against candidate streams
-   * (e.g. SQLite, whose libsql build has no `REGEXP` and whose portable
-   * `LIKE` grammar cannot express alternation/grouping) leave this
-   * `false` and instead reject a non-portable claim source at
-   * {@link subscribe} time — see {@link rejects_nonportable_claim_source}.
+   * Gates nothing. `claim` reads only the subscription row and never
+   * matches a `source`; correlate does, so a **pattern** source (e.g. the
+   * calculator's `^(A|B)$`) works on every adapter that accepts it at
+   * {@link subscribe}. Kept so specs that set it still compile. Stores that
+   * cannot run an arbitrary regex reject a non-portable source at subscribe
+   * instead; see {@link rejects_nonportable_claim_source}.
    */
   readonly pattern_claim_source?: boolean;
   /**
-   * Adapter cannot faithfully match every regex claim `source`, so it
-   * fails loud at registration: {@link subscribe} throws
+   * Adapter cannot faithfully match every regex `source` when the drain
+   * fetches a stream's events, so it fails loud at registration: {@link subscribe} throws
    * {@link ValidationError} for a source outside its portable subset
    * (alternation/grouping like `^(A|B)$`), rather than silently never
-   * claiming the stream. When `true`, the TCK runs the reject-at-subscribe
+   * fetching them. When `true`, the TCK runs the reject-at-subscribe
    * case. Currently only SQLite sets this — its message points operators
-   * to InMemory/PG for full regex claim sources.
+   * to InMemory/PG for full regex sources.
    */
   readonly rejects_nonportable_claim_source?: boolean;
   /**
@@ -209,7 +202,7 @@ export type StoreTckOptions = {
  *   `ValidationError` — never a silent approximation
  * - `subscribe` — idempotent re-subscribe, watermark return value
  * - `claim` / `ack` — lease lifecycle, dual frontiers, leased streams
- *   not double-claimed, exact-source has-work matching, timed-out-lease
+ *   not double-claimed, exact-source fetch, timed-out-lease
  *   retry accounting
  * - `block` — blocked streams hidden from claim, only same-drainer can block
  * - `reset` — restart watermarks (including blocked), no-op for missing
@@ -1323,16 +1316,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
       });
 
-      // The subscription work set (#1485). `correlate` records the highest
-      // event id that resolved to a target as that row's `correlated_at` mark,
-      // and `claim` serves a marked stream from the subscription row alone —
-      // `at < correlated_at` — instead of probing the event log per row. The
-      // probe is what makes claim cost O(subscribed streams); the mark makes
-      // it O(lease budget).
-      //
-      // `NULL` means UNKNOWN, not "no work": an unmarked row falls back to
-      // the legacy probe, which is how an install that predates the column
-      // keeps working. That arm is deleted once correlate marks universally.
+      // The subscription work set. `correlate` records the highest event id
+      // that resolved to a target as that row's `correlated_at` mark, and
+      // `claim` serves a stream from the subscription row alone: it is
+      // claimable while `at < correlated_at`, so a claim costs the lease
+      // budget, not the number of subscribed streams. An unmarked row
+      // (`NULL`) has never been correlated and is not claimable.
       describe("subscription work set", () => {
         /** Claim just this stream, and say whether it came back. */
         const claimable = async (stream: string) => {
@@ -1345,9 +1334,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         };
 
         it("claims a marked stream without probing the event log", async () => {
-          // The source has no events at all, so the legacy probe would say
-          // "no work" — only the mark can make this claimable. That is the
-          // whole point: eligibility comes from the subscription row.
+          // The source has no events at all, so only the mark can make this
+          // claimable: eligibility comes from the subscription row.
           const s = `ws-mark-${uid()}`;
           await store.subscribe([{ stream: s, source: `ws-src-${uid()}` }]);
           expect(await claimable(s)).toBe(false);
@@ -1947,12 +1935,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
-      // ACT-1220: an exact (literal) source must never fetch events from a
-      // sibling stream sharing its prefix. Guards the drain fetch path: an
-      // exact source `s1` claimed as work must, when queried, receive only
-      // `s1`'s events — not `s12`'s. Pre-#1215 fetch treated `source` as an
-      // unanchored regex, so `s1` would have pulled `s12`'s events into the
-      // handler.
+      // An exact (literal) source must never fetch events from a sibling
+      // stream sharing its prefix: a claimed `s1` reads only `s1`'s events,
+      // never `s12`'s.
       it("fetches only the exact source stream's events, never a sibling prefix", async () => {
         const fresh = await options.factory();
         try {

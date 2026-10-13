@@ -1954,8 +1954,7 @@ export class Act<
    * Call \`correlate()\` before \`drain()\`. It is not only how dynamic targets
    * are discovered: a stream is claimable while \`at < correlated_at\`, and
    * \`correlate\` is the only component that raises that mark, so a
-   * commit no correlate has seen is not drainable — including for static
-   * targets, which were served by a probe of the event log before. For a
+   * commit no correlate has seen is not drainable, static targets included. For a
    * higher-level API that handles debouncing, correlation, and signaling
    * automatically, use {@link settle}.
    *
@@ -9401,7 +9400,7 @@ export async function fetch<TEvents extends Schemas>(
       // A literal \`source\` fetches with \`stream_exact\` so an exact name
       // like "s1" reads only "s1" — never a sibling prefix "s12". A
       // pattern source (e.g. \`^(A|B)$\`) stays a regex query, matching the
-      // same streams the has-work probe claimed it for.
+      // same streams correlate resolved it for.
       const stream_exact =
         source !== undefined && is_literal_source(source) ? true : undefined;
       try {
@@ -11463,9 +11462,8 @@ export class InMemoryStore implements Store {
     // Eligibility is a pure subscription-row predicate. \`claim\`
     // never looks at the event log: \`correlate\` records the highest event id
     // that resolves to a target, and \`at < correlated_at\` is the whole
-    // question. The probe this replaced walked the event index once per
-    // eligible subscription, matching \`source\` literally or as a pattern —
-    // matching that now happens in correlate, when it decides what to mark.
+    // question. Matching \`source\` happens in correlate, when it decides what
+    // to mark.
     //
     // An unmarked row is not claimable, by definition: \`undefined\`
     // means the row has never been correlated, not that it has no work.
@@ -13257,10 +13255,8 @@ export type SubscribeInput = {
    * best-effort — which is what the name records.
    *
    * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
-   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
-   * legacy has-work probe against the event log, which is how installs that
-   * predate the column keep working. That arm is deleted once \`correlate\`
-   * marks universally.
+   * \`NULL\` means the row has never been correlated, so it is not claimable
+   * until \`correlate\` marks it.
    */
   readonly correlated_at?: number;
 };
@@ -13418,8 +13414,10 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is matched against candidate streams by one
-   * of two rules in the has-work probe. A **literal** source (no regex
+   * Claim reads only the subscription rows; it never matches a \`source\`
+   * against the event log. Correlate does that when it decides which
+   * targets to mark, and the drain uses the same rule when it fetches the
+   * claimed stream's events. A **literal** source (no regex
    * metacharacter — the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
    * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
@@ -13427,7 +13425,7 @@ export interface Store extends Disposable, EventSource {
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently
-   * never claiming the stream.
+   * never fetching its events.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -13478,9 +13476,9 @@ export interface Store extends Disposable, EventSource {
    * used internally for correlation checkpoint initialization on cold start.
    *
    * @param streams - Streams to register with optional source hint — a
-   *   literal stream name (matched by equality in {@link claim}'s has-work
-   *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite.
+   *   literal stream name (matched by equality when the drain fetches the
+   *   stream's events) or a regex pattern (compiled and matched against
+   *   stream names); non-portable patterns are rejected here on SQLite.
    *
    *   **At most one entry per stream.** A subscription row is keyed by
    *   stream and its \`source\` is set once at creation, so a second entry
@@ -18170,8 +18168,9 @@ const SOURCE_METACHARACTERS = /[\\^$.*+?()[\\]{}|\\\\]/;
  * \`source: "^(A|B)$"\` reaction relies on.
  *
  * The single source of truth for literal-vs-pattern classification across
- * the InMemory has-work probe, the drain fetch path, and the SQL adapters,
- * so all three agree on which sources take the exact path.
+ * correlate (which decides what a source marks), the drain fetch path, and
+ * the SQLite adapter (which rejects a non-portable pattern), so all three
+ * agree on which sources take the exact path.
  *
  * @example
  * \`\`\`typescript
@@ -20802,10 +20801,8 @@ export type SubscribeInput = {
    * best-effort — which is what the name records.
    *
    * Eligibility follows from it: a stream is claimable iff \`at < correlated_at\`.
-   * \`NULL\` means **unknown**, not "no work": those rows fall back to the
-   * legacy has-work probe against the event log, which is how installs that
-   * predate the column keep working. That arm is deleted once \`correlate\`
-   * marks universally.
+   * \`NULL\` means the row has never been correlated, so it is not claimable
+   * until \`correlate\` marks it.
    */
   readonly correlated_at?: number;
 };
@@ -20963,8 +20960,10 @@ export interface Store extends Disposable, EventSource {
    * consumer semantics — workers never block each other, each grabbing different
    * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
    *
-   * A subscription's \`source\` is matched against candidate streams by one
-   * of two rules in the has-work probe. A **literal** source (no regex
+   * Claim reads only the subscription rows; it never matches a \`source\`
+   * against the event log. Correlate does that when it decides which
+   * targets to mark, and the drain uses the same rule when it fetches the
+   * claimed stream's events. A **literal** source (no regex
    * metacharacter — the common case, and every autoclose/dynamic-resolver
    * source) matches by string equality: the fast, index-friendly path, and
    * exact so \`"s1"\` never matches \`"s12"\`. A **pattern** source (carrying
@@ -20972,7 +20971,7 @@ export interface Store extends Disposable, EventSource {
    * compiled as a regex and matched against candidate stream names.
    * Adapters that cannot faithfully run an arbitrary regex (SQLite) reject
    * a non-portable pattern at {@link subscribe} time rather than silently
-   * never claiming the stream.
+   * never fetching its events.
    *
    * Every granted lease **counts against the stream's retry budget**: claim
    * increments the stream's retry counter and only {@link ack} resets it, so
@@ -21023,9 +21022,9 @@ export interface Store extends Disposable, EventSource {
    * used internally for correlation checkpoint initialization on cold start.
    *
    * @param streams - Streams to register with optional source hint — a
-   *   literal stream name (matched by equality in {@link claim}'s has-work
-   *   probe) or a regex pattern (compiled and matched against candidate
-   *   streams); non-portable patterns are rejected here on SQLite.
+   *   literal stream name (matched by equality when the drain fetches the
+   *   stream's events) or a regex pattern (compiled and matched against
+   *   stream names); non-portable patterns are rejected here on SQLite.
    *
    *   **At most one entry per stream.** A subscription row is keyed by
    *   stream and its \`source\` is set once at creation, so a second entry
@@ -29689,16 +29688,12 @@ export class PostgresStore implements Store {
         ON \${this._fqt} (stream COLLATE pg_catalog."default", id)
         WHERE name = '\${SNAP_EVENT}';\`
       );
-      // The complement of the snapshot index, and the one \`claim\`'s has-work
-      // probe seeks on: "does this source stream have a non-snapshot event
-      // past the watermark?". Partial over non-snapshot rows so the
-      // two indexes partition the table rather than overlapping.
-      //
-      // Without it the probe fell back to the pk and scanned forward from
-      // each stream's watermark — and because a dormant aggregate's
-      // watermark is old, that tail is long and grows with the table. At 10k
-      // subscribed streams a single claim cost 5,792 ms; with this index and
-      // the source-class split in \`claim\`, 10.3 ms.
+      // The complement of the snapshot index, and the one the drain fetch
+      // seeks on: "this stream's non-snapshot events past the watermark".
+      // Without it the fetch falls back to the pk and scans forward from the
+      // watermark, a tail that grows with the table for a dormant stream.
+      // Partial over non-snapshot rows so the two indexes partition the
+      // table rather than overlapping.
       await client.query(
         \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_stream_id_ix"
         ON \${this._fqt} (stream COLLATE pg_catalog."default", id)
@@ -30113,8 +30108,8 @@ export class PostgresStore implements Store {
     if (msgs.length === 0 && expectedVersion === undefined) return [];
     // Serialize commit VISIBILITY, not just id assignment. \`id\` is a
     // serial: it is assigned at INSERT time but the row appears at
-    // COMMIT time, and every watermark consumer (the claim has-work
-    // probe, fetch's \`after\`, the correlate checkpoint) assumes id
+    // COMMIT time, and every watermark consumer (the correlate
+    // checkpoint and work marks, fetch's \`after\`) assumes id
     // order equals visibility order. Without a fence two concurrent
     // commits to different streams can surface out of id order, and a
     // reader that acks past the higher id permanently skips the lower
@@ -30333,10 +30328,8 @@ export class PostgresStore implements Store {
         -- Eligibility is a pure subscription-table predicate.
         -- claim does not read the event log at all: correlate marks the
         -- highest event id that resolves to a target, and at <
-        -- correlated_at is the whole question. The probe this replaced ran
-        -- an EXISTS against the events table once per eligible row, which
-        -- cost O(subscribed streams) per claim per worker no matter how
-        -- little work was pending.
+        -- correlated_at is the whole question, so a claim costs the lease
+        -- budget, not the number of subscribed streams.
         --
         -- The predicate is repeated in each arm below rather than factored
         -- into a shared CTE, and that repetition is load-bearing. A
@@ -32254,12 +32247,10 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
     );
-    // Complement of the snapshot index, and the one claim's has-work probe
-    // seeks on: "does this source stream have a non-snapshot event past the
-    // watermark?". SQLite already probes per candidate with a
-    // sargable \`stream = ? AND id > ?\`, so it only lacked the index — the
-    // existing idx_events_stream is stream-only and still has to walk every
-    // event of that stream. Partial over non-snapshot rows so the two
+    // Complement of the snapshot index, and the one the drain fetch seeks
+    // on: "this stream's non-snapshot events past the watermark", a
+    // sargable \`stream = ? AND id > ?\`. The existing idx_events_stream is
+    // stream-only and would walk every event of that stream. Partial over non-snapshot rows so the two
     // indexes partition the table rather than overlapping.
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_stream_id ON events(stream, id) WHERE name <> '__snapshot__'"
@@ -32767,14 +32758,6 @@ export class SqliteStore implements Store {
       // does not read the events table at all: correlate records the highest
       // event id that resolves to a target, and \`at < correlated_at\` is the
       // whole question, answered by the partial index built for it.
-      //
-      // What this replaced was the worst shape in the adapter — every
-      // eligible row selected with no limit, then one \`SELECT 1 FROM events\`
-      // per candidate in a JavaScript loop with no early exit, all inside
-      // \`transaction("write")\`, so a claim's cost was linear in subscribed
-      // streams and every concurrent commit queued behind it. There was no
-      // index fix available for it, because the probe was in JS rather than
-      // in SQL.
       //
       // A row with no mark is not claimable, by definition: NULL
       // means the row has never been correlated, not that it has no work.
@@ -36037,29 +36020,22 @@ export type StoreCapabilities = {
    */
   readonly source_matches?: boolean;
   /**
-   * Adapter matches a **pattern** reaction \`source\` (one carrying regex
-   * metacharacters, e.g. the calculator's \`^(A|B)$\`) as a full RegExp in
-   * claim()'s has-work probe, so a stream whose max event id exceeds the
-   * subscription watermark is claimed when its name matches the pattern.
-   * When \`true\`, the TCK runs the pattern-source claim suite. Literal
-   * sources stay exact everywhere regardless of this flag — the fast,
-   * index-friendly path.
-   *
-   * Stores that cannot run an arbitrary regex against candidate streams
-   * (e.g. SQLite, whose libsql build has no \`REGEXP\` and whose portable
-   * \`LIKE\` grammar cannot express alternation/grouping) leave this
-   * \`false\` and instead reject a non-portable claim source at
-   * {@link subscribe} time — see {@link rejects_nonportable_claim_source}.
+   * Gates nothing. \`claim\` reads only the subscription row and never
+   * matches a \`source\`; correlate does, so a **pattern** source (e.g. the
+   * calculator's \`^(A|B)$\`) works on every adapter that accepts it at
+   * {@link subscribe}. Kept so specs that set it still compile. Stores that
+   * cannot run an arbitrary regex reject a non-portable source at subscribe
+   * instead; see {@link rejects_nonportable_claim_source}.
    */
   readonly pattern_claim_source?: boolean;
   /**
-   * Adapter cannot faithfully match every regex claim \`source\`, so it
-   * fails loud at registration: {@link subscribe} throws
+   * Adapter cannot faithfully match every regex \`source\` when the drain
+   * fetches a stream's events, so it fails loud at registration: {@link subscribe} throws
    * {@link ValidationError} for a source outside its portable subset
    * (alternation/grouping like \`^(A|B)$\`), rather than silently never
-   * claiming the stream. When \`true\`, the TCK runs the reject-at-subscribe
+   * fetching them. When \`true\`, the TCK runs the reject-at-subscribe
    * case. Currently only SQLite sets this — its message points operators
-   * to InMemory/PG for full regex claim sources.
+   * to InMemory/PG for full regex sources.
    */
   readonly rejects_nonportable_claim_source?: boolean;
   /**
@@ -36142,7 +36118,7 @@ export type StoreTckOptions = {
  *   \`ValidationError\` — never a silent approximation
  * - \`subscribe\` — idempotent re-subscribe, watermark return value
  * - \`claim\` / \`ack\` — lease lifecycle, dual frontiers, leased streams
- *   not double-claimed, exact-source has-work matching, timed-out-lease
+ *   not double-claimed, exact-source fetch, timed-out-lease
  *   retry accounting
  * - \`block\` — blocked streams hidden from claim, only same-drainer can block
  * - \`reset\` — restart watermarks (including blocked), no-op for missing
@@ -37256,16 +37232,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
       });
 
-      // The subscription work set (#1485). \`correlate\` records the highest
-      // event id that resolved to a target as that row's \`correlated_at\` mark,
-      // and \`claim\` serves a marked stream from the subscription row alone —
-      // \`at < correlated_at\` — instead of probing the event log per row. The
-      // probe is what makes claim cost O(subscribed streams); the mark makes
-      // it O(lease budget).
-      //
-      // \`NULL\` means UNKNOWN, not "no work": an unmarked row falls back to
-      // the legacy probe, which is how an install that predates the column
-      // keeps working. That arm is deleted once correlate marks universally.
+      // The subscription work set. \`correlate\` records the highest event id
+      // that resolved to a target as that row's \`correlated_at\` mark, and
+      // \`claim\` serves a stream from the subscription row alone: it is
+      // claimable while \`at < correlated_at\`, so a claim costs the lease
+      // budget, not the number of subscribed streams. An unmarked row
+      // (\`NULL\`) has never been correlated and is not claimable.
       describe("subscription work set", () => {
         /** Claim just this stream, and say whether it came back. */
         const claimable = async (stream: string) => {
@@ -37278,9 +37250,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         };
 
         it("claims a marked stream without probing the event log", async () => {
-          // The source has no events at all, so the legacy probe would say
-          // "no work" — only the mark can make this claimable. That is the
-          // whole point: eligibility comes from the subscription row.
+          // The source has no events at all, so only the mark can make this
+          // claimable: eligibility comes from the subscription row.
           const s = \`ws-mark-\${uid()}\`;
           await store.subscribe([{ stream: s, source: \`ws-src-\${uid()}\` }]);
           expect(await claimable(s)).toBe(false);
@@ -37880,12 +37851,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
-      // ACT-1220: an exact (literal) source must never fetch events from a
-      // sibling stream sharing its prefix. Guards the drain fetch path: an
-      // exact source \`s1\` claimed as work must, when queried, receive only
-      // \`s1\`'s events — not \`s12\`'s. Pre-#1215 fetch treated \`source\` as an
-      // unanchored regex, so \`s1\` would have pulled \`s12\`'s events into the
-      // handler.
+      // An exact (literal) source must never fetch events from a sibling
+      // stream sharing its prefix: a claimed \`s1\` reads only \`s1\`'s events,
+      // never \`s12\`'s.
       it("fetches only the exact source stream's events, never a sibling prefix", async () => {
         const fresh = await options.factory();
         try {

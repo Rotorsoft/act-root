@@ -58,7 +58,7 @@ Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https:/
 - `commit` — single + multi-event commits, optimistic concurrency, preserved state on rejection
 - `query` — stream, names, correlation, before/after, created_after/before, limit, with_snaps, stream_exact, backward traversal
 - `subscribe` — idempotent re-subscribe
-- `claim` / `ack` — lease lifecycle, dual frontiers, leased streams not double-claimed, ack rejected from wrong holder, exact-source has-work matching, timed-out-lease retry accounting
+- `claim` / `ack` — lease lifecycle, dual frontiers, leased streams not double-claimed, ack rejected from wrong holder, exact-source fetch, timed-out-lease retry accounting
 - `block` — blocked streams hidden from claim, same-drainer-only enforcement
 - `reset` — restart watermarks (including blocked), no-op for missing
 - `prioritize` — bulk priority updates by filter

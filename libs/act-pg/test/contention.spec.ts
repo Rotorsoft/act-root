@@ -311,8 +311,8 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
 
       const S = 20;
       const streams = Array.from({ length: S }, (_, i) => `s${i}`);
-      // One event per stream is enough for the has-work probe (event ids are a
-      // global serial, always past the small watermarks set below). Distinct
+      // One event per stream is enough for a work mark past the small
+      // watermarks set below (event ids are a global serial). Distinct
       // watermarks make the lagging (lowest `at`) and leading (highest `at`)
       // frontiers disjoint.
       for (let i = 0; i < S; i++) {
