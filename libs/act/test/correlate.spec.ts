@@ -1164,6 +1164,152 @@ describe("correlate: dynamic lanes", () => {
 
         expect(await targetLane()).toBe("fast");
       });
+
+      /**
+       * Equal priority is the case the store can't settle: its `subscribe`
+       * moves a stream at an equal priority, because that is how a restart
+       * re-lanes declared targets. So when correlate has no record of a
+       * target, it reads the row and keeps the lane the row holds.
+       */
+      describe("at equal priority", () => {
+        function buildTied(maxSubscribedStreams: number) {
+          return act()
+            .withState(ranker)
+            .withLane({ name: "a" })
+            .withLane({ name: "b" })
+            .on("hied")
+            .do(async function toA() {})
+            .to(() => ({ target: "T", lane: "a" }))
+            .on("loed")
+            .do(async function toB() {})
+            .to(() => ({ target: "T", lane: "b" }))
+            .on("churned")
+            .do(async function churn() {})
+            .to((e) => ({ target: (e.data as { to: string }).to, lane: "a" }))
+            .build({ maxSubscribedStreams });
+        }
+
+        async function conflicts(fn: () => Promise<void>): Promise<number> {
+          const spy = vi.spyOn(log(), "error");
+          try {
+            await fn();
+            return spy.mock.calls.filter(([m]) =>
+              /conflicting lane/.test(String(m))
+            ).length;
+          } finally {
+            spy.mockRestore();
+          }
+        }
+
+        it("CONTROL — no eviction: the target keeps its first lane and the conflict is logged", async () => {
+          const app = buildTied(1000);
+          await app.do("hi", { stream: "s1", actor }, {});
+          await app.correlate();
+          const logged = await conflicts(async () => {
+            await app.do("lo", { stream: "s1", actor }, {});
+            await app.correlate();
+          });
+
+          expect(await targetLane()).toBe("a");
+          expect(logged).toBe(1);
+        });
+
+        it("a target's lane survives correlate forgetting it", async () => {
+          const app = buildTied(1);
+          await app.do("hi", { stream: "s1", actor }, {});
+          await app.correlate();
+          for (const to of ["d1", "d2", "d3"]) {
+            await app.do("churn", { stream: "s1", actor }, { to });
+            await app.correlate();
+          }
+          const logged = await conflicts(async () => {
+            await app.do("lo", { stream: "s1", actor }, {});
+            await app.correlate();
+          });
+
+          expect(await targetLane()).toBe("a");
+          expect(logged).toBe(1);
+        });
+
+        it("a fresh process keeps the lane the row holds", async () => {
+          const app = buildTied(1000);
+          await app.do("hi", { stream: "s1", actor }, {});
+          await app.correlate();
+
+          const restarted = buildTied(1000);
+          await restarted.do("lo", { stream: "s1", actor }, {});
+          await restarted.correlate();
+
+          expect(await targetLane()).toBe("a");
+        });
+
+        it("reads an omitted lane as default on both sides", async () => {
+          const app = act()
+            .withState(ranker)
+            .withLane({ name: "b" })
+            .on("hied")
+            .do(async function toDefault() {})
+            .to(() => ({ target: "T" }))
+            .on("loed")
+            .do(async function toB() {})
+            .to(() => ({ target: "T", lane: "b" }))
+            .build();
+          await app.do("hi", { stream: "s1", actor }, {});
+          await app.correlate();
+
+          // A store may leave the lane off a row; that row is on "default".
+          const query_streams = store().query_streams.bind(store());
+          const spy = vi
+            .spyOn(store(), "query_streams")
+            .mockImplementation((callback, query) =>
+              query_streams((p) => callback({ ...p, lane: undefined }), query)
+            );
+          const restarted = act()
+            .withState(ranker)
+            .withLane({ name: "b" })
+            .on("hied")
+            .do(async function toDefault() {})
+            .to(() => ({ target: "T" }))
+            .on("loed")
+            .do(async function toB() {})
+            .to(() => ({ target: "T", lane: "b" }))
+            .build();
+          const logged = await conflicts(async () => {
+            await restarted.do("hi", { stream: "s1", actor }, {});
+            await restarted.do("lo", { stream: "s1", actor }, {});
+            await restarted.correlate();
+          });
+          spy.mockRestore();
+
+          expect(await targetLane()).toBe("default");
+          expect(logged).toBe(1);
+        });
+
+        it("a forgotten target still moves to a higher-priority resolution", async () => {
+          const app = act()
+            .withState(ranker)
+            .withLane({ name: "a" })
+            .withLane({ name: "b" })
+            .on("hied")
+            .do(async function toA() {})
+            .to(() => ({ target: "T", lane: "a" }))
+            .on("loed")
+            .do(async function toB() {})
+            .to(() => ({ target: "T", lane: "b", priority: 5 }))
+            .on("churned")
+            .do(async function churn() {})
+            .to((e) => ({ target: (e.data as { to: string }).to, lane: "a" }))
+            .build({ maxSubscribedStreams: 1 });
+          await app.do("hi", { stream: "s1", actor }, {});
+          await app.correlate();
+          await app.do("churn", { stream: "s1", actor }, { to: "d1" });
+          await app.correlate();
+          await app.do("lo", { stream: "s1", actor }, {});
+          await app.correlate();
+
+          expect(await targetLane()).toBe("b");
+        });
+      });
     });
   });
 });

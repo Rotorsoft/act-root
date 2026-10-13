@@ -7268,6 +7268,7 @@ import type {
   Registry,
   SchemaRegister,
   Schemas,
+  StreamPosition,
   SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
@@ -7376,11 +7377,13 @@ export type StaticTarget = {
  * riding the same \`subscribe\` carries the row's own values rather than a
  * losing resolution's.
  *
- * This is an optimization, not the guarantee. A record can go missing —
- * eviction here, an empty map after a restart — and a missing record reads
- * as never-seen. What keeps a forgotten target on its lane is the store:
- * \`subscribe\` writes the lane only when the incoming priority is at or
- * above the stored one, the same max it merges priority with.
+ * A record can go missing — eviction here, an empty map after a restart.
+ * The store can't keep a forgotten target on its lane: \`subscribe\` writes
+ * the lane whenever the incoming priority is at or above the stored one,
+ * which is how a restart re-lanes declared targets. So when more than one
+ * lane is declared, a scan that resolves a target it has no record of reads
+ * the target's row and uses it as the record. The store owns the lane; this
+ * map only caches it.
  *
  * Where the record lives decides whether the floor survives: dynamic
  * targets are unbounded and go in the evictable LRU, static targets are a
@@ -7407,6 +7410,10 @@ type Correlated = {
   lane: string | undefined;
   /** True when priority/lane came from a resolution that beat the floor. */
   upgraded: boolean;
+  /** True when the target had no record, so its row must be read. */
+  missed: boolean;
+  /** The reaction whose resolution set priority/lane. */
+  handler: string;
   correlated_at: number | undefined;
 };
 
@@ -7852,6 +7859,8 @@ export class CorrelateCycle<
               priority: carried.priority,
               lane: carried.lane,
               upgraded,
+              missed: !recorded,
+              handler: reaction.handler.name,
               correlated_at: undefined,
             };
             // Report an equal-priority lane disagreement (the build-time guard
@@ -7881,6 +7890,7 @@ export class CorrelateCycle<
               entry.priority = carried.priority;
               entry.lane = carried.lane;
               entry.upgraded = upgraded;
+              entry.handler = reaction.handler.name;
             }
             // The mark is an assertion about the log: only an event the
             // target's own fetch would return may raise it. Ids ascend
@@ -7897,6 +7907,8 @@ export class CorrelateCycle<
       // actor-less, so plaintext here would be un-gated disclosure.
       { ...query, after, with_pii: false }
     );
+
+    if (this._declared_lanes.size > 1) await this._recall(correlated);
 
     // A target rides the batch when it has something to say: a mark to
     // raise, or priority/lane to register. A re-seen target that this scan
@@ -7955,6 +7967,51 @@ export class CorrelateCycle<
     this._checkpoint = last_id;
     this._armed = found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
+  }
+
+  /**
+   * Give each target this scan had no record of the record its row holds.
+   *
+   * A target with no record is either new or forgotten. Its row, when it
+   * has one, says what lane and priority it was subscribed at; a resolution
+   * that doesn't beat that priority carries the row's values, exactly as if
+   * the record had never been evicted. One read per target with no record,
+   * and only when more than one lane is declared: with one lane there is no
+   * lane to lose, and the store already keeps the higher priority.
+   */
+  private async _recall(correlated: Map<string, Correlated>): Promise<void> {
+    const missed = [...correlated].filter(([, entry]) => entry.missed);
+    await Promise.all(
+      missed.map(async ([stream, entry]) => {
+        let row: StreamPosition | undefined;
+        await store().query_streams(
+          (position) => {
+            row = position;
+          },
+          { stream, stream_exact: true, limit: 1 }
+        );
+        if (!row) return;
+        this._dynamic_subscriptions.set(stream, {
+          floor: row.priority,
+          priority: row.priority,
+          lane: row.lane,
+        });
+        if (entry.priority > row.priority) return;
+        const held_lane = row.lane ?? DEFAULT_LANE;
+        const resolved_lane = entry.lane ?? DEFAULT_LANE;
+        if (entry.priority === row.priority && held_lane !== resolved_lane)
+          report_lane_conflict(
+            this._reported,
+            entry.handler,
+            stream,
+            held_lane,
+            resolved_lane
+          );
+        entry.priority = row.priority;
+        entry.lane = row.lane;
+        entry.upgraded = false;
+      })
+    );
   }
 
   /**
