@@ -11659,27 +11659,22 @@ export class InMemoryStore implements Store {
    */
   async defer(input: string[] | StreamFilter, deferred_at: number) {
     await sleep();
-    let count = 0;
-    if (Array.isArray(input)) {
-      // De-dup the array so a repeated name counts once, matching PG's
-      // set-based \`WHERE stream = ANY(...)\`.
-      for (const name of new Set(input)) {
-        const s = this._streams.get(name);
-        if (s) {
-          s.defer(deferred_at);
-          count++;
-        }
-      }
-    } else {
-      const matches = this._filter_predicate(input);
-      for (const s of this._streams.values()) {
-        if (matches(s)) {
-          s.defer(deferred_at);
-          count++;
-        }
-      }
-    }
-    return count;
+    const selected = this._select(input);
+    for (const s of selected) s.defer(deferred_at);
+    return selected.length;
+  }
+
+  /**
+   * The streams named by \`input\`: an explicit list (de-duplicated, so a
+   * repeated name counts once, matching the SQL adapters' set-based
+   * \`stream = ANY(...)\`; unknown names are skipped) or a {@link StreamFilter}.
+   */
+  private _select(input: string[] | StreamFilter): InMemoryStream[] {
+    if (Array.isArray(input))
+      return [...new Set(input)]
+        .map((name) => this._streams.get(name))
+        .filter((s) => s !== undefined);
+    return [...this._streams.values()].filter(this._filter_predicate(input));
   }
 
   /**
@@ -11733,40 +11728,11 @@ export class InMemoryStore implements Store {
    */
   async reset(input: string[] | StreamFilter) {
     await sleep();
-    let count = 0;
-    if (Array.isArray(input)) {
-      // De-dup the array so a repeated name counts once, matching PG's
-      // set-based \`WHERE stream = ANY(...)\`.
-      for (const name of new Set(input)) {
-        const s = this._streams.get(name);
-        if (s) {
-          s.reset();
-          count++;
-        }
-      }
-    } else {
-      const matches = this._filter_predicate(input);
-      for (const s of this._streams.values()) {
-        if (matches(s)) {
-          s.reset();
-          count++;
-        }
-      }
-    }
-    return count;
+    const selected = this._select(input);
+    for (const s of selected) s.reset();
+    return selected.length;
   }
 
-  /**
-   * Clear the blocked flag (and retry / error / lease) on the matched
-   * streams without touching the watermark. Streams that aren't blocked
-   * at call time are silently skipped. Accepts either an explicit list
-   * of names or a {@link StreamFilter}. The filter form always restricts
-   * to blocked streams — passing \`blocked: false\` matches nothing.
-   * See {@link Store.unblock}.
-   *
-   * @param input - Stream names or a filter selecting the streams to unblock.
-   * @returns Count of streams that were actually flipped (were blocked).
-   */
   /**
    * Wipe the sensitive-data payload for every event on the stream — see
    * {@link Store.forget_pii}. O(1) drop of the stream's inner Map; the size of
@@ -11783,24 +11749,25 @@ export class InMemoryStore implements Store {
     return count;
   }
 
+  /**
+   * Clear the blocked flag (and retry / error / lease) on the matched
+   * streams without touching the watermark. Streams that aren't blocked
+   * at call time are silently skipped. Accepts either an explicit list
+   * of names or a {@link StreamFilter}. The filter form always restricts
+   * to blocked streams — passing \`blocked: false\` matches nothing.
+   * See {@link Store.unblock}.
+   *
+   * @param input - Stream names or a filter selecting the streams to unblock.
+   * @returns Count of streams that were actually flipped (were blocked).
+   */
   async unblock(input: string[] | StreamFilter) {
     await sleep();
-    let count = 0;
-    if (Array.isArray(input)) {
-      for (const name of input) {
-        const s = this._streams.get(name);
-        if (s?.unblock()) count++;
-      }
-    } else {
-      // Filter form: always restrict to blocked streams. An explicit
-      // \`blocked: false\` in the filter is silently overridden — there
-      // is no use case for "unblock unblocked streams."
-      const matches = this._filter_predicate({ ...input, blocked: true });
-      for (const s of this._streams.values()) {
-        if (matches(s) && s.unblock()) count++;
-      }
-    }
-    return count;
+    // An explicit \`blocked: false\` in the filter is overridden: there is no
+    // use case for "unblock unblocked streams."
+    const selected = this._select(
+      Array.isArray(input) ? input : { ...input, blocked: true }
+    );
+    return selected.filter((s) => s.unblock()).length;
   }
 
   /**
@@ -11814,16 +11781,9 @@ export class InMemoryStore implements Store {
    */
   async prioritize(filter: StreamFilter, priority: number) {
     await sleep();
-    const matches = this._filter_predicate(filter);
-    let count = 0;
-    for (const s of this._streams.values()) {
-      if (!matches(s)) continue;
-      if (s.priority !== priority) {
-        s.set_priority(priority);
-        count++;
-      }
-    }
-    return count;
+    const changed = this._select(filter).filter((s) => s.priority !== priority);
+    for (const s of changed) s.set_priority(priority);
+    return changed.length;
   }
 
   /**
@@ -11838,16 +11798,8 @@ export class InMemoryStore implements Store {
     await sleep();
     const limit = query?.limit ?? 100;
     const after = query?.after;
-    const blocked = query?.blocked;
     const source_matches = query?.source_matches;
-    const stream_re =
-      query?.stream !== undefined && !query.stream_exact
-        ? new RegExp(query.stream)
-        : undefined;
-    const source_re =
-      query?.source !== undefined && !query.source_exact
-        ? new RegExp(query.source)
-        : undefined;
+    const matches = this._filter_predicate(query ?? {});
     // Reverse-match: a stream qualifies when its stored \`source\` pattern
     // matches at least one of the requested names. Patterns are compiled
     // once and cached — many subscriptions share one source pattern.
@@ -11878,31 +11830,13 @@ export class InMemoryStore implements Store {
     let count = 0;
     for (const s of sorted) {
       if (after !== undefined && s.stream <= after) continue;
-      if (query?.stream !== undefined) {
-        if (
-          query.stream_exact
-            ? s.stream !== query.stream
-            : !stream_re!.test(s.stream)
-        )
-          continue;
-      }
-      if (query?.source !== undefined) {
-        if (s.source === undefined) continue;
-        if (
-          query.source_exact
-            ? s.source !== query.source
-            : !source_re!.test(s.source)
-        )
-          continue;
-      }
+      if (!matches(s)) continue;
       if (source_matches !== undefined) {
         // Absent/empty source = no source constraint = consumes from
         // every stream, so it matches any requested name. Only a
         // present source that matches none of them is excluded.
         if (s.source && !reverse_match(s.source)) continue;
       }
-      if (blocked !== undefined && s.blocked !== blocked) continue;
-      if (query?.lane !== undefined && s.lane !== query.lane) continue;
       // Checked before emitting, not after: a bound applied afterwards
       // lets \`limit: 0\` through as exactly one row, where both SQL
       // adapters return none.
@@ -30733,29 +30667,38 @@ export class PostgresStore implements Store {
   ): Promise<number> {
     // Reset retry too: a defer is a deliberate "come back later," not a
     // failure, so the redelivery after the due-time is a fresh attempt.
-    const set_clause = \`SET deferred_at = to_timestamp($1 / 1000.0), retry = -1\`;
-    if (Array.isArray(input)) {
-      if (!input.length) return 0;
-      const { rowCount } = await this._pool.query(
-        \`UPDATE \${this._fqs} \${set_clause} WHERE stream = ANY($2)\`,
-        [deferred_at, input]
-      );
-      return rowCount ?? 0;
-    }
-    const { clause, values } = this._filter_clause(input, 2);
+    return this._update(
+      input,
+      "SET deferred_at = to_timestamp($1 / 1000.0), retry = -1",
+      [deferred_at]
+    );
+  }
+
+  /**
+   * Runs \`UPDATE ... <set>\` on the streams named by \`input\`: an explicit
+   * list (an empty one updates nothing) or a {@link StreamFilter}. \`set\`
+   * and \`where\` may use \`$1..$n\` for \`params\`; the selection's own
+   * parameters are numbered after them.
+   *
+   * @returns Count of rows updated.
+   */
+  private async _update(
+    input: string[] | StreamFilter,
+    set: string,
+    params: unknown[] = [],
+    where?: string
+  ): Promise<number> {
+    if (Array.isArray(input) && !input.length) return 0;
+    const { clause, values } = Array.isArray(input)
+      ? { clause: \`stream = ANY($\${params.length + 1})\`, values: [input] }
+      : this._filter_clause(input, params.length + 1);
     const { rowCount } = await this._pool.query(
-      \`UPDATE \${this._fqs} \${set_clause} WHERE \${clause}\`,
-      [deferred_at, ...values]
+      \`UPDATE \${this._fqs} \${set} WHERE \${where ? \`\${where} AND \` : ""}\${clause}\`,
+      [...params, ...values]
     );
     return rowCount ?? 0;
   }
 
-  /**
-   * Reset watermarks for the given streams to -1, clearing retry, blocked,
-   * error, and lease state so they can be replayed from the beginning.
-   * @param streams - Stream names to reset.
-   * @returns Count of streams that were actually reset.
-   */
   /**
    * Translate a {@link StreamFilter} to a \`WHERE\` clause fragment and
    * the corresponding parameter values. The fragment never starts with
@@ -30799,23 +30742,18 @@ export class PostgresStore implements Store {
     };
   }
 
-  async reset(input: string[] | StreamFilter): Promise<number> {
-    const set_clause = \`SET at = -1, retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
-    if (Array.isArray(input)) {
-      if (!input.length) return 0;
-      const { rowCount } = await this._pool.query(
-        \`UPDATE \${this._fqs} \${set_clause} WHERE stream = ANY($1)\`,
-        [input]
-      );
-      return rowCount ?? 0;
-    }
-    const { clause, values } = this._filter_clause(input, 1);
-    const { rowCount } = await this._pool.query(
-      \`UPDATE \${this._fqs} \${set_clause} WHERE \${clause}\`,
-      values
+  /**
+   * Reset watermarks to -1, clearing retry, blocked, error, and lease
+   * state so the matched streams can be replayed from the beginning.
+   *
+   * @returns Count of streams that were actually reset.
+   */
+  reset(input: string[] | StreamFilter): Promise<number> {
+    return this._update(
+      input,
+      \`SET at = -1, retry = -1, blocked = false, error = NULL,
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL\`
     );
-    return rowCount ?? 0;
   }
 
   /**
@@ -30833,30 +30771,16 @@ export class PostgresStore implements Store {
    *
    * @returns Count of streams that were actually flipped (were blocked).
    */
-  async unblock(input: string[] | StreamFilter): Promise<number> {
-    const set_clause = \`SET retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
-    if (Array.isArray(input)) {
-      if (!input.length) return 0;
-      const { rowCount } = await this._pool.query(
-        \`UPDATE \${this._fqs} \${set_clause}
-         WHERE stream = ANY($1) AND blocked = true\`,
-        [input]
-      );
-      return rowCount ?? 0;
-    }
-    // Filter form: force \`blocked = true\` regardless of what the
-    // caller passed — there is no use case for "unblock unblocked
-    // streams." A no-op overlay is the right shape here.
-    const { clause, values } = this._filter_clause(
-      { ...input, blocked: true },
-      1
+  unblock(input: string[] | StreamFilter): Promise<number> {
+    // Always restricted to blocked rows, whatever the filter says: there is
+    // no use case for "unblock unblocked streams."
+    return this._update(
+      Array.isArray(input) ? input : { ...input, blocked: undefined },
+      \`SET retry = -1, blocked = false, error = NULL,
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL\`,
+      [],
+      "blocked = true"
     );
-    const { rowCount } = await this._pool.query(
-      \`UPDATE \${this._fqs} \${set_clause} WHERE \${clause}\`,
-      values
-    );
-    return rowCount ?? 0;
   }
 
   /**
@@ -30873,12 +30797,13 @@ export class PostgresStore implements Store {
    *
    * @returns Count of streams whose priority changed.
    */
-  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    const { clause, values } = this._filter_clause(filter, 2);
-    const sql = \`UPDATE \${this._fqs} SET priority = $1
-                 WHERE priority <> $1 AND \${clause}\`;
-    const { rowCount } = await this._pool.query(sql, [priority, ...values]);
-    return rowCount ?? 0;
+  prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    return this._update(
+      filter,
+      "SET priority = $1",
+      [priority],
+      "priority <> $1"
+    );
   }
 
   /**
@@ -30896,26 +30821,8 @@ export class PostgresStore implements Store {
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
-    const conditions: string[] = [];
-    const values: unknown[] = [];
-
-    if (query?.stream !== undefined) {
-      values.push(query.stream);
-      conditions.push(
-        query.stream_exact
-          ? \`stream = $\${values.length}\`
-          : \`stream ~ $\${values.length}\`
-      );
-    }
-    if (query?.source !== undefined) {
-      conditions.push(\`source IS NOT NULL\`);
-      values.push(query.source);
-      conditions.push(
-        query.source_exact
-          ? \`source = $\${values.length}\`
-          : \`source ~ $\${values.length}\`
-      );
-    }
+    const { clause, values } = this._filter_clause(query ?? {}, 1);
+    const conditions = [clause];
     if (query?.source_matches?.length) {
       // Reverse-match narrowing: the inverse of the \`source\` filter.
       // The stored \`source\` is treated as the regex pattern, and a row
@@ -30929,20 +30836,12 @@ export class PostgresStore implements Store {
         ))\`
       );
     }
-    if (query?.blocked !== undefined) {
-      values.push(query.blocked);
-      conditions.push(\`blocked = $\${values.length}\`);
-    }
-    if (query?.lane !== undefined) {
-      values.push(query.lane);
-      conditions.push(\`lane = $\${values.length}\`);
-    }
     if (query?.after !== undefined) {
       values.push(query.after);
       conditions.push(\`stream > $\${values.length}\`);
     }
     let sql = \`SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM \${this._fqs}\`;
-    if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
+    sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += \` ORDER BY stream LIMIT $\${values.length}\`;
 
@@ -32968,32 +32867,53 @@ export class SqliteStore implements Store {
   // Cleared by ack/block/reset/unblock. See {@link Store.defer}.
   async defer(input: string[] | StreamFilter, deferred_at: number) {
     const at_iso = new Date(deferred_at).toISOString();
+    try {
+      return await this._update(input, "SET deferred_at = ?, retry = -1", [
+        at_iso,
+      ]);
+    } catch (e) {
+      throw new StoreError("defer", { cause: e });
+    }
+  }
+
+  /**
+   * Runs \`UPDATE streams <set>\` on the streams named by \`input\`, in one
+   * write transaction that rolls back on failure. An explicit list is
+   * de-duplicated, so a repeated name counts once (matching PG's set-based
+   * \`stream = ANY(...)\`), and updated one name per statement, so a long list
+   * never meets SQLite's bound-parameter limit. \`set\` and \`where\` bind
+   * \`params\` in order; libSQL \`?\` placeholders are positional and can't be
+   * reused, so a value used twice is passed twice.
+   *
+   * @returns Count of rows updated.
+   */
+  private async _update(
+    input: string[] | StreamFilter,
+    set: string,
+    params: unknown[] = [],
+    where?: string
+  ): Promise<number> {
+    const selections = Array.isArray(input)
+      ? [...new Set(input)].map((stream) => ({
+          clause: "stream = ?",
+          args: [stream] as unknown[],
+        }))
+      : [this._filter_clause(input)];
     const tx = await this.client.transaction("write");
     try {
       let count = 0;
-      if (Array.isArray(input)) {
-        // De-dup so a repeated name counts once, matching PG's set-based
-        // \`WHERE stream = ANY(...)\`.
-        for (const stream of new Set(input)) {
-          const r = await tx.execute({
-            sql: \`UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?\`,
-            args: [at_iso, stream],
-          });
-          count += r.rowsAffected;
-        }
-      } else {
-        const { clause, args } = this._filter_clause(input);
+      for (const { clause, args } of selections) {
         const r = await tx.execute({
-          sql: \`UPDATE streams SET deferred_at = ?, retry = -1 WHERE \${clause}\`,
-          args: [at_iso, ...args] as any[],
+          sql: \`UPDATE streams \${set} WHERE \${where ? \`\${where} AND \` : ""}\${clause}\`,
+          args: [...params, ...args] as any[],
         });
-        count = r.rowsAffected;
+        count += r.rowsAffected;
       }
       await tx.commit();
       return count;
     } catch (e) {
       await tx.rollback();
-      throw new StoreError("defer", { cause: e });
+      throw e;
     }
   }
 
@@ -33039,75 +32959,27 @@ export class SqliteStore implements Store {
   }
 
   // --- reset: transactional, accepts names or filter ---
-  async reset(input: string[] | StreamFilter) {
-    const set_clause = \`SET at = -1, retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
-    const tx = await this.client.transaction("write");
-    try {
-      let count = 0;
-      if (Array.isArray(input)) {
-        // De-dup so a repeated name counts once, matching PG's set-based
-        // \`WHERE stream = ANY(...)\`.
-        for (const stream of new Set(input)) {
-          const r = await tx.execute({
-            sql: \`UPDATE streams \${set_clause} WHERE stream = ?\`,
-            args: [stream],
-          });
-          count += r.rowsAffected;
-        }
-      } else {
-        const { clause, args } = this._filter_clause(input);
-        const r = await tx.execute({
-          sql: \`UPDATE streams \${set_clause} WHERE \${clause}\`,
-          args: args as any[],
-        });
-        count = r.rowsAffected;
-      }
-      await tx.commit();
-      return count;
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+  reset(input: string[] | StreamFilter) {
+    return this._update(
+      input,
+      \`SET at = -1, retry = -1, blocked = 0, error = '',
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL\`
+    );
   }
 
   // --- unblock: clear blocked + retry + lease without touching watermark ---
   // \`retry = -1\` so claim's post-bump returns retry=0 (first attempt),
-  // matching the InMemoryStore convention.
-  async unblock(input: string[] | StreamFilter) {
-    const set_clause = \`SET retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
-    const tx = await this.client.transaction("write");
-    try {
-      let count = 0;
-      if (Array.isArray(input)) {
-        for (const stream of input) {
-          const r = await tx.execute({
-            sql: \`UPDATE streams \${set_clause}
-                  WHERE stream = ? AND blocked = 1\`,
-            args: [stream],
-          });
-          count += r.rowsAffected;
-        }
-      } else {
-        // Filter form: force blocked = true regardless of what the
-        // caller passed.
-        const { clause, args } = this._filter_clause({
-          ...input,
-          blocked: true,
-        });
-        const r = await tx.execute({
-          sql: \`UPDATE streams \${set_clause} WHERE \${clause}\`,
-          args: args as any[],
-        });
-        count = r.rowsAffected;
-      }
-      await tx.commit();
-      return count;
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
+  // matching the InMemoryStore convention. Always restricted to blocked
+  // rows, whatever the filter says: there is no use case for "unblock
+  // unblocked streams."
+  unblock(input: string[] | StreamFilter) {
+    return this._update(
+      Array.isArray(input) ? input : { ...input, blocked: undefined },
+      \`SET retry = -1, blocked = 0, error = '',
+           leased_by = NULL, leased_until = NULL, deferred_at = NULL\`,
+      [],
+      "blocked = 1"
+    );
   }
 
   // --- query_streams: read-only introspection with filters ---
@@ -33116,37 +32988,8 @@ export class SqliteStore implements Store {
     query?: QueryStreams
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
-    let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE 1=1";
-    const args: unknown[] = [];
-
-    if (query?.stream !== undefined) {
-      if (query.stream_exact) {
-        sql += " AND stream = ?";
-        args.push(query.stream);
-      } else {
-        sql += " AND stream GLOB ?";
-        args.push(streamPatternToGlob(query.stream));
-      }
-    }
-    if (query?.source !== undefined) {
-      sql += " AND source IS NOT NULL";
-      if (query.source_exact) {
-        sql += " AND source = ?";
-        args.push(query.source);
-      } else {
-        sql += " AND source GLOB ?";
-        args.push(streamPatternToGlob(query.source));
-      }
-    }
-    if (query?.blocked !== undefined) {
-      sql += " AND blocked = ?";
-      args.push(query.blocked ? 1 : 0);
-    }
-    if (query?.lane !== undefined) {
-      sql += " AND lane = ?";
-      args.push(query.lane);
-    }
+    const { clause, args } = this._filter_clause(query ?? {});
+    let sql = \`SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane, deferred_at, correlated_at FROM streams WHERE \${clause}\`;
     if (query?.after !== undefined) {
       sql += " AND stream > ?";
       args.push(query.after);
@@ -33512,18 +33355,13 @@ export class SqliteStore implements Store {
   }
 
   // --- prioritize: bulk priority update with filter ---
-  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    const { clause, args: filterArgs } = this._filter_clause(filter);
-    // libSQL \`?\` placeholders are positional and NOT reusable, so we
-    // bind \`priority\` twice: once for SET, once for the no-op skip
-    // in WHERE.
-    const sql = \`UPDATE streams SET priority = ?
-                 WHERE priority <> ? AND \${clause}\`;
-    const result = await this.client.execute({
-      sql,
-      args: [priority, priority, ...filterArgs] as any[],
-    });
-    return result.rowsAffected;
+  prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    return this._update(
+      filter,
+      "SET priority = ?",
+      [priority, priority],
+      "priority <> ?"
+    );
   }
 
   // --- truncate: transactional delete + seed ---
