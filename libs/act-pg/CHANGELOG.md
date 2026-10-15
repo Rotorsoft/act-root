@@ -1,3 +1,5 @@
+# [@rotorsoft/act-pg-v1.20.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.10...@rotorsoft/act-pg-v1.20.11) (2026-10-15)
+
 # [@rotorsoft/act-pg-v1.20.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.9...@rotorsoft/act-pg-v1.20.10) (2026-10-14)
 
 # [@rotorsoft/act-pg-v1.20.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.20.8...@rotorsoft/act-pg-v1.20.9) (2026-10-13)
