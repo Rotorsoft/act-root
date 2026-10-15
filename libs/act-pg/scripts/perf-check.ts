@@ -3,9 +3,9 @@
  * baseline. Exits non-zero if any scenario's p50 regresses past
  * `TOLERANCE` × the baseline p50.
  *
- * Differences from the core `libs/act/scripts/perf-check.ts`:
+ * Differences from the act-sqlite check:
  *
- *   - **TOLERANCE = 2.0** (vs 1.5 for the InMemory gate). A real
+ *   - **TOLERANCE = 2.0** (vs 1.5 for SQLite). A real
  *     Postgres over docker has a wider noise band than the in-process
  *     store — connection-pool scheduling, autovacuum, OS page cache, and
  *     CI neighbours all add jitter that the InMemory path never sees. A

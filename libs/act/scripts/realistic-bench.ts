@@ -1,13 +1,10 @@
 /**
  * Realistic-workload bench — measures end-to-end throughput for shapes
- * that resemble production apps. Distinct from `perf-bench.ts` (the CI
- * regression guard, which targets framework primitives in isolation).
+ * that resemble production apps.
  *
  * Each scenario exercises the full pipeline a real app pays for:
  * payload validation, invariant checking, multi-event commits, reaction
- * dispatch + drain, and projection updates. Numbers are typically lower
- * than the synthetic perf-bench numbers; the gap is what real apps
- * actually pay.
+ * dispatch + drain, and projection updates.
  *
  * Runs on-demand (not in CI). Document results in PERFORMANCE.md under
  * "Realistic workloads" so users can compare against their planning
@@ -26,7 +23,7 @@ import { state } from "../src/builders/state-builder.js";
 import { cache, dispose, store } from "../src/ports.js";
 
 // ---------------------------------------------------------------------------
-// Bench runner (same shape as perf-bench)
+// Bench runner
 // ---------------------------------------------------------------------------
 
 interface Scenario {

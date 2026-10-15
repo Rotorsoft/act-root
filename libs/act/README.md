@@ -155,7 +155,6 @@ Public API governed by the [Act Stability Charter](../../STABILITY.md). The char
 - **[Architecture](https://rotorsoft.github.io/act-root/docs/architecture)** — concurrency model, cache + snapshots, correlation + drain, cross-process reactions, priority lanes, close-cycle, schema evolution, extension points.
 - **[Guides](https://rotorsoft.github.io/act-root/docs/intro)** — production checklist, projections to database, external integration, writing a custom store/cache/logger, contributing a new package, contracts CLI.
 - **[PERFORMANCE.md](./PERFORMANCE.md)** — measured throughput numbers, optimization history, and the reaction-latency benchmark answering "how long from `do()` to reaction firing?"
-- **[BENCH.md](../../BENCH.md)** — index of every benchmark in the workspace with run commands.
 
 ## License
 

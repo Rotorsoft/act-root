@@ -1,8 +1,8 @@
 name: Store Conformance Matrix
 
 # Weekly (and on demand): the Store TCK against every supported backend
-# version, the full suite on the older supported Node lines, plus the
-# multi-process Postgres stress harness. Catches
+# version, the full suite on the older supported Node lines, the scenario
+# benchmarks, plus the multi-process Postgres stress harness. Catches
 # dialect-specific regressions (PG SKIP LOCKED behavior across majors,
 # libSQL release bumps) and lease/commit/drain races that single-process
 # tests cannot. ci-cd.yml already runs the full TCK against PG 18 and the
@@ -195,12 +195,82 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
+  # Scenario benchmarks, each with a built-in regression bound. Weekly
+  # rather than per PR: in about 70 per-PR runs they caught no regression,
+  # and they were the slowest job on a core PR. They run on the real
+  # Postgres adapter, so this job needs the same service.
+  scenarios:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.11.1
+          cache: "pnpm"
+      - run: pnpm install
+      # Scenario benchmarks (Shape C). Each one has a built-in
+      # regression assertion, so a real perf regression breaks the
+      # build. The captured stdout ends up in the workflow's step
+      # summary so reviewers see the numbers without scrolling logs.
+      - name: bench:scenarios
+        env:
+          # vitest/node emit ANSI color codes even when stdout is piped,
+          # which renders as `␛[32m'…'␛[39m` garbage inside the markdown
+          # code block we append to the step summary. NO_COLOR disables
+          # color emission at the Node level.
+          NO_COLOR: "1"
+          FORCE_COLOR: "0"
+        run: |
+          set -o pipefail
+          pnpm bench:scenarios 2>&1 | tee bench-scenarios.log
+      - name: Append scenario bench results to step summary
+        if: always()
+        run: |
+          {
+            echo "## Scenario benchmark results"
+            echo ""
+            echo '```'
+            # Extract the console.table blocks from the captured run.
+            # Scenario benches print `=== <header> ===` then the table;
+            # the closing `└` line is the bottom corner of the table.
+            # Single-process vitest keeps output prefix-free, so the
+            # match is purely structural. `sed` strips any stray ANSI
+            # escapes that slipped past NO_COLOR (belt and suspenders).
+            if grep -qE '=== .+ ===' bench-scenarios.log 2>/dev/null; then
+              awk '
+                /=== .+ ===/    { printing=1 }
+                printing        { print }
+                /└/ && printing { printing=0; print "" }
+              ' bench-scenarios.log \
+              | sed -E $'s/\x1b\\[[0-9;]*m//g'
+            else
+              tail -n 80 bench-scenarios.log
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
   summary:
     # Always runs so the workflow summary is populated even when a cell
     # fails. `if: always()` is required because the matrix jobs' failure
     # would otherwise mark this dependency as skipped.
     if: always()
-    needs: [pg, sqlite, node-compat]
+    needs: [pg, sqlite, node-compat, scenarios]
     runs-on: ubuntu-latest
     steps:
       - name: Compose conformance table
@@ -223,6 +293,7 @@ jobs:
             echo "| PostgreSQL | 14, 15, 16, 17 | $(status ${{ needs.pg.result }}) |"
             echo "| libSQL | latest | $(status ${{ needs.sqlite.result }}) |"
             echo "| Node | 22, 24 | $(status ${{ needs.node-compat.result }}) |"
+            echo "| Scenario benches | PG 18 | $(status ${{ needs.scenarios.result }}) |"
             echo ""
             echo "Per-version detail in the [run page](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
           } >> "$GITHUB_STEP_SUMMARY"

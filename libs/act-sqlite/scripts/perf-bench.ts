@@ -5,16 +5,18 @@
  * JSON report. The companion script `perf-check.ts` compares the report
  * to `perf-baseline.json` and exits non-zero on a budgeted regression.
  *
- * Mirrors `libs/act/scripts/perf-bench.ts` exactly in shape — same
- * `Scenario`/`BenchResult` types, same warmup + percentile math. The
- * difference is the store under test: a real SQLite file exercises the
+ * Shares its shape with the act-pg harness (same `Scenario` /
+ * `BenchResult` types, same warmup and percentile math). A real SQLite
+ * file exercises the
  * WAL writer, the prepared-statement cache, and the query planner over
  * real indexes — where adapter regressions (a lost index, a snapshot-
  * floor read that scans the whole stream) actually surface. SQLite needs
  * no docker, so this baseline is generated locally and checked in.
  *
- * Why a plain Node script instead of vitest bench: see the sibling note
- * in `libs/act/scripts/perf-bench.ts`. Same reasoning.
+ * Why a plain Node script instead of vitest bench: full control over the
+ * JSON output (vitest's json reporter doesn't load for `vitest bench`),
+ * straightforward per-iteration setup, and one file to measure, one to
+ * compare.
  *
  * The `notify` scenario from the act-pg harness is omitted here — SQLite
  * is single-node by design and does not implement `Store.notify`.
@@ -96,7 +98,7 @@ const resetStore = async () => {
 };
 
 // ---------------------------------------------------------------------------
-// Bench runner (identical shape to libs/act/scripts/perf-bench.ts)
+// Bench runner (same shape as the act-pg harness)
 // ---------------------------------------------------------------------------
 
 interface Scenario {
