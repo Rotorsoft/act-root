@@ -362,7 +362,8 @@ export class Act<
   private readonly _breaker: CircuitBreaker;
   private readonly _listen: boolean;
   private readonly _drain: boolean;
-  private readonly _reactive_events: ReadonlySet<string>;
+  /** Whether any event has a reaction; nothing arms without one. */
+  private readonly _reactive: boolean;
   private readonly _drain_controllers: Map<
     string,
     DrainController<TEvents, TActions, TSchemaReg>
@@ -535,7 +536,7 @@ export class Act<
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
     const classification = classify_registry(this.registry, this._states);
-    this._reactive_events = classification.reactive_events;
+    this._reactive = classification.event_to_lanes.size > 0;
     this._event_to_state = classification.event_to_state;
     this._event_to_lanes = classification.event_to_lanes;
     this._listen = options.listen !== false;
@@ -684,9 +685,8 @@ export class Act<
         this._drain_controllers.size < this._declared_lanes.length
           ? [...this._drain_controllers.keys()]
           : undefined,
-      on_init: () => {
-        if (this._drain && this._reactive_events.size > 0) this._arm_all();
-      },
+      // Only reached on a draining app: writer-only ones never correlate.
+      on_init: () => this._arm_all(),
       on_init_async: this._drain
         ? () => this._seed_persisted_defers()
         : undefined,
@@ -808,7 +808,7 @@ export class Act<
   private async _wire_notify(
     s: Store
   ): Promise<(() => void | Promise<void>) | undefined> {
-    if (this._reactive_events.size === 0) return undefined;
+    if (!this._reactive) return undefined;
     if (!s.notify) return undefined;
     // Only the subscriber side is gated; commits still notify.
     if (!this._listen) return undefined;
@@ -898,12 +898,11 @@ export class Act<
         payload,
         do_options
       );
-      // Arm only the lanes whose reactions match the committed events.
-      if (this._reactive_events.size > 0)
-        // `action()` snapshots always carry their event.
-        this._arm_for_event_names(
-          snapshots.map((s) => (s.event as { name: string }).name)
-        );
+      // Arm only the lanes whose reactions match the committed events
+      // (`action()` snapshots always carry their event).
+      this._arm_for_event_names(
+        snapshots.map((s) => (s.event as { name: string }).name)
+      );
       this.emit("committed", snapshots);
       return snapshots;
     });
@@ -1151,6 +1150,7 @@ export class Act<
   }
 
   private _arm_all(): void {
+    if (!this._reactive) return;
     // A commit may also give the next correlate scan something to find.
     this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
@@ -1248,8 +1248,7 @@ export class Act<
       const { subscribed, last_id, marked, scanned } =
         await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
-      if ((subscribed > 0 || marked > 0) && this._reactive_events.size > 0)
-        this._arm_all();
+      if (subscribed > 0 || marked > 0) this._arm_all();
       if (subscribed > 0) this._on_discovered?.(subscribed);
       return { subscribed, last_id, scanned };
     });
@@ -1363,7 +1362,7 @@ export class Act<
       // costs a query, and an extra clear costs one head load per stream.
       for (const handler of this._batch_handlers.values())
         (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
-      if (count > 0 && this._reactive_events.size > 0) this._arm_all();
+      if (count > 0) this._arm_all();
       return count;
     });
   }
@@ -1398,7 +1397,7 @@ export class Act<
   async unblock(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().unblock(input);
-      if (count > 0 && this._reactive_events.size > 0) this._arm_all();
+      if (count > 0) this._arm_all();
       return count;
     });
   }
@@ -1607,7 +1606,7 @@ export class Act<
   private async _run_close(targets: CloseTarget[]): Promise<CloseResult> {
     const close_actor = { id: "$close", name: "close" };
     const result = await run_close_cycle(targets, {
-      reactive_events_size: this._reactive_events.size,
+      reactive: this._reactive,
       catch_up_correlation: (until) =>
         catch_up_correlation(
           this._correlate,

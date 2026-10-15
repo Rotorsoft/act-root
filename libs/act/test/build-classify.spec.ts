@@ -30,7 +30,7 @@ describe("classify_registry", () => {
     const c = classify_registry(app.registry, app._states);
 
     expect(c.static_targets).toEqual([]);
-    expect(c.reactive_events.size).toBe(0);
+    expect(c.event_to_lanes.size).toBe(0);
     expect(c.event_to_state.get("Incremented")?.name).toBe("Counter");
     expect(c.event_to_state.get("Decremented")?.name).toBe("Counter");
   });
@@ -49,8 +49,8 @@ describe("classify_registry", () => {
     };
     const c = classify_registry(app.registry, app._states);
     expect(c.static_targets).toEqual([]);
-    expect(c.reactive_events.has("Incremented")).toBe(true);
-    expect(c.reactive_events.has("Decremented")).toBe(false);
+    expect(c.event_to_lanes.has("Incremented")).toBe(true);
+    expect(c.event_to_lanes.has("Decremented")).toBe(false);
   });
 
   it("dedupes static targets by target", () => {
@@ -76,8 +76,8 @@ describe("classify_registry", () => {
     expect(c.static_targets).toEqual([
       { stream: "dest", source: undefined, priority: 0 },
     ]);
-    expect(c.reactive_events.has("Incremented")).toBe(true);
-    expect(c.reactive_events.has("Decremented")).toBe(true);
+    expect(c.event_to_lanes.has("Incremented")).toBe(true);
+    expect(c.event_to_lanes.has("Decremented")).toBe(true);
   });
 
   it("collapses same-target reactions from different sources, keeping the max priority", () => {
