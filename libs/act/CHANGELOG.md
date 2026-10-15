@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.26](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.25...@rotorsoft/act-v1.32.26) (2026-10-15)
+
+
+### Bug Fixes
+
+* **act:** keep app code errors off the store circuit breaker ([#1913](https://github.com/Rotorsoft/act-root/issues/1913)) ([754be6c](https://github.com/Rotorsoft/act-root/commit/754be6c0c3b1ff817c418a94b385cce4a4d9393c)), closes [#1877](https://github.com/Rotorsoft/act-root/issues/1877) [#1877](https://github.com/Rotorsoft/act-root/issues/1877)
+
 # [@rotorsoft/act-v1.32.25](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.24...@rotorsoft/act-v1.32.25) (2026-10-15)
 
 # [@rotorsoft/act-v1.32.24](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.23...@rotorsoft/act-v1.32.24) (2026-10-15)
