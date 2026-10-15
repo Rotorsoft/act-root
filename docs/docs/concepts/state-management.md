@@ -159,13 +159,15 @@ import { projection } from "@rotorsoft/act";
 
 const TicketProjection = projection("tickets")
   .on({ TicketOpened })
-    .do(async ({ stream, data }) => {
+    .do(async function openTicket({ stream, data }) {
       await db.insert(tickets).values({ id: stream, ...data });
     })
   .build();
 ```
 
 Projection handlers receive `(event, stream)` — no dispatcher, no state mutations.
+
+Handlers are named functions (`async function openTicket(...)`): the name is the reaction's identity, so an arrow function throws when the projection is built, and two handlers for one event can't share a name. The same holds for slice and `act()` reactions.
 
 ## Slices
 
@@ -179,7 +181,7 @@ const TicketSlice = slice()
   .withState(TicketOperations)
   .withProjection(TicketProjection)
   .on("TicketOpened")
-    .do(async (event, stream, app) => {
+    .do(async function assignTicket(event, stream, app) {
       // reactingTo is auto-injected — no need to pass `event` explicitly
       await app.do("AssignTicket", { stream: event.stream, actor }, payload);
     })

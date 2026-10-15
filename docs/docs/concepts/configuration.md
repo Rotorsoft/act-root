@@ -36,7 +36,7 @@ import { z } from "zod";
 
 const CounterProjection = projection("counters")
   .on({ Incremented: z.object({ amount: z.number() }) })
-    .do(async ({ stream, data }) => { /* update read model */ })
+    .do(async function updateCounter({ stream, data }) { /* update read model */ })
   .build();
 ```
 
@@ -47,9 +47,9 @@ For high-throughput rebuilds (e.g. catching up after a long downtime, or project
 ```typescript no-check
 const TicketProjection = projection("tickets")
   .on({ TicketOpened: TicketOpenedSchema })
-    .do(async ({ stream, data }) => { /* per-event fallback */ })
+    .do(async function openTicket({ stream, data }) { /* per-event fallback */ })
   .on({ TicketClosed: TicketClosedSchema })
-    .do(async ({ stream, data }) => { /* per-event fallback */ })
+    .do(async function closeTicket({ stream, data }) { /* per-event fallback */ })
   .batch(async (events, stream) => {
     await db.transaction(async (tx) => {
       for (const e of events) {
@@ -82,14 +82,14 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 const CounterProjection = projection("counters")
   .on({ Incremented: z.object({ amount: z.number() }) })
-    .do(async ({ stream, data }) => { /* update read model */ })
+    .do(async function updateCounter({ stream, data }) { /* update read model */ })
   .build();
 
 const CounterSlice = slice()
   .withState(Counter)
   .withProjection(CounterProjection)
   .on("Incremented")
-    .do(async (event, stream, app) => { /* cross-state dispatch via app */ })
+    .do(async function dispatchCounter(event, stream, app) { /* cross-state dispatch via app */ })
     .to((event) => ({ target: event.stream }))
   .build();
 ```
@@ -216,7 +216,7 @@ const writer = act().withState(Order).build({ listen: false, drain: false });
 const reactor = act()
   .withState(Order)
   .on("OrderPlaced")
-    .do(async (event) => { /* reduce inventory */ })
+    .do(async function reduceInventory(event) { /* reduce inventory */ })
     .to("inventory")
   .build(); // defaults: listen + drain
 ```

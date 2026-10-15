@@ -153,11 +153,11 @@ const items = new Map<string, { name: string; status: string }>();
 
 export const ItemProjection = projection("items")
   .on({ ItemCreated })
-  .do(async (event) => {
+  .do(async function createItem(event) {
     items.set(event.stream, { name: event.data.name, status: "Open" });
   })
   .on({ ItemClosed })
-  .do(async (event) => {
+  .do(async function closeItem(event) {
     const item = items.get(event.stream);
     if (item) item.status = "Closed";
   })
@@ -232,7 +232,7 @@ import { db, items } from "./drizzle/index.js";
 
 export const ItemProjection = projection("items")
   .on({ ItemCreated })
-  .do(async ({ stream, data, created }) => {
+  .do(async function insertItem({ stream, data, created }) {
     await db().insert(items).values({
       stream, name: data.name, status: "open", createdBy: data.createdBy,
       createdAt: created.toISOString(),
@@ -242,7 +242,7 @@ export const ItemProjection = projection("items")
     });
   })
   .on({ ItemClosed })
-  .do(async ({ stream, data, created }) => {
+  .do(async function closeItem({ stream, data, created }) {
     await db().update(items).set({ status: "closed", updatedAt: created.toISOString() })
       .where(eq(items.stream, stream));
   })
@@ -265,12 +265,12 @@ export async function getItems() {
 ```typescript
 export const ItemProjection = projection("items")
   .on({ ItemCreated })
-  .do(async ({ stream, data, created }) => {
+  .do(async function insertItem({ stream, data, created }) {
     await db().insert(items).values({ stream, name: data.name, status: "open" })
       .onConflictDoUpdate({ target: items.id, set: { name: data.name } });
   })
   .on({ ItemClosed })
-  .do(async ({ stream, data, created }) => {
+  .do(async function closeItem({ stream, data, created }) {
     await db().update(items).set({ status: "closed" }).where(eq(items.stream, stream));
   })
   .batch(async (events, stream) => {

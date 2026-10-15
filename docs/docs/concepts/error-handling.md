@@ -412,7 +412,7 @@ The drain pipeline retries on any thrown error by default — `maxRetries` is a 
 import { NonRetryableError } from "@rotorsoft/act";
 
 .on("PaymentReceived")
-  .do(async (event) => {
+  .do(async function recordPayment(event) {
     const parsed = PaymentSchema.safeParse(event.data);
     if (!parsed.success) {
       throw new NonRetryableError("payment payload failed validation", {

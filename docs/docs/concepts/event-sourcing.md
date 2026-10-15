@@ -157,7 +157,7 @@ const app = act()
   .withState(Account)
   .withState(Audit)
   .on("Deposited")
-    .do(async (event, stream, app) => {
+    .do(async function auditDeposit(event, stream, app) {
       await app.do(
         "log",
         { stream, actor: { id: "system", name: "audit" } },

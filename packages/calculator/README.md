@@ -84,13 +84,13 @@ const app = act()
   .withState(CalculatorResult)
 
   .on("DigitPressed")
-  .do(async (event) => {
+  .do(async function countDigit(event) {
     await app.do("CountDigit", { stream: "Board", actor }, { digit: event.data.digit });
   })
   .to({ source: `^(${streams.join("|")})$`, target: "Board" })
 
   .on("OperatorPressed")
-  .do(async (event) => {
+  .do(async function computeResult(event) {
     const calc = await app.load(Calculator, event.stream);
     await app.do(
       "ProjectResult",

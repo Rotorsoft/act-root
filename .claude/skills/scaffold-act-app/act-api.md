@@ -146,7 +146,7 @@ export const LotAdded = z.object({ ticker: z.string(), lot: Lot });
 In projections, use `event.created` for the timestamp:
 ```typescript
 .on({ ItemCreated })
-.do(async (event) => {
+.do(async function insertItem(event) {
   await db().insert(items).values({
     id: event.stream,
     name: event.data.name,
@@ -504,11 +504,11 @@ import { projection } from "@rotorsoft/act";
 
 const ItemProjection = projection("items")
   .on({ ItemCreated })
-    .do(async ({ stream, data }) => {
+    .do(async function createItem({ stream, data }) {
       items.set(stream, { name: data.name, status: "Open" });
     })
   .on({ ItemClosed })
-    .do(async ({ stream, data }) => {
+    .do(async function closeItem({ stream, data }) {
       const item = items.get(stream);
       if (item) item.status = "Closed";
     })
@@ -536,7 +536,7 @@ const ItemSlice = slice()
   .withState(Item)
   .withProjection(ItemProjection)  // embed projection (events must be subset of slice events)
   .on("ItemCreated")  // plain string, NOT record shorthand
-    .do(async (event, stream, app) => {
+    .do(async function reactToItemCreated(event, stream, app) {
       // app is a scoped IAct proxy — reactingTo auto-injected for correlation
       await app.do("SomeAction", { stream, actor: systemActor }, payload);
       // To override with a custom event: app.do(action, target, payload, customEvent)

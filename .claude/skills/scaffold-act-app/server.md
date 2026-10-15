@@ -559,11 +559,11 @@ The projection registers handlers **only for lifecycle events**. Operational eve
 // Only lifecycle events — no operational handlers needed
 const OrderProjection = projection("orders")
   .on({ OrderCreated })
-  .do(async (event) => { await persistSummary(event.stream); })
+  .do(async function persistOrder(event) { await persistSummary(event.stream); })
   .on({ MemberAdded })
-  .do(async (event) => { await persistSummary(event.stream); })
+  .do(async function persistOrder(event) { await persistSummary(event.stream); })
   .on({ OrderCompleted })
-  .do(async (event) => { await persistSummary(event.stream); })
+  .do(async function persistOrder(event) { await persistSummary(event.stream); })
   .build();
 
 // Handler reads from broadcast cache (always hot after app.do())

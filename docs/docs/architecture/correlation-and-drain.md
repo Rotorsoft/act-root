@@ -18,7 +18,7 @@ A reaction is registered against an event name with a *resolver* and a handler:
 
 ```ts no-check
 .on("OrderPlaced")
-  .do(async (event, stream, app) => { /* handler */ })
+  .do(async function handleOrder(event, stream, app) { /* handler */ })
   .to((event) => ({ target: `order-${event.orderId}` }))   // dynamic resolver
   // or .to("inventory")                                   // static resolver
 ```
