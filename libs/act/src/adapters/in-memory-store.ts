@@ -1,10 +1,7 @@
 /**
  * @packageDocumentation
  * @module act/adapters
- * In-memory event store adapter for the Act Framework.
- *
- * This adapter implements the Store interface and is suitable for development, testing, and demonstration purposes.
- * All data is stored in memory and lost on process exit.
+ * In-memory event store adapter for development and tests.
  *
  * @category Adapters
  */
@@ -31,10 +28,7 @@ import type {
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
-/**
- * @internal
- * Represents an in-memory stream for event processing and leasing.
- */
+/** One subscription row: watermark, lease, retry and schedule. */
 class InMemoryStream {
   readonly stream: string;
   readonly source: string | undefined;
@@ -46,13 +40,9 @@ class InMemoryStream {
   private _leased_until: Date | undefined = undefined;
   private _priority = 0;
   private _lane: string = DEFAULT_LANE;
-  // Persisted next-visit time. When set and still in the future, the
-  // stream is held out of `claim` entirely — so a deferred reaction is not
-  // re-claimed (and `retry` is never bumped) until its due-time passes. Unlike
-  // in-process backoff, this is durable store state shared across workers.
+  // While in the future, the stream is held out of `claim`.
   private _deferred_at: number | undefined = undefined;
-  // Work mark: highest event id observed to resolve to this target.
-  // `undefined` means the row was never correlated, so `claim` skips it.
+  // Work mark; `undefined` = never correlated, so `claim` skips it.
   private _correlated_at: number | undefined = undefined;
 
   constructor(
@@ -75,15 +65,11 @@ class InMemoryStream {
     return this._lane;
   }
 
-  /** Replace on every subscribe — current builder config wins on restart. */
+  /** Replaced on every subscribe, so the current config wins on restart. */
   set lane(value: string) {
     this._lane = value;
   }
 
-  /**
-   * Bump the priority via {@link subscribe}: keeps the maximum across
-   * reactions so the highest-priority registrant wins.
-   */
   bump_priority(priority: number) {
     if (priority > this._priority) this._priority = priority;
   }
@@ -92,10 +78,7 @@ class InMemoryStream {
     return this._correlated_at;
   }
 
-  /**
-   * Raise the work mark via {@link subscribe}: keeps the maximum, for every
-   * value including zero and negatives, so a mark never regresses.
-   */
+  /** A mark never regresses, including at zero and negatives. */
   mark(correlated_at: number) {
     if (
       this._correlated_at === undefined ||
@@ -104,10 +87,7 @@ class InMemoryStream {
       this._correlated_at = correlated_at;
   }
 
-  /**
-   * Set the priority outright via {@link prioritize}: operator
-   * runtime override that ignores the build-time `max()` invariant.
-   */
+  /** Operator override; ignores the subscribe-time `max()`. */
   set_priority(priority: number) {
     this._priority = priority;
   }
@@ -116,20 +96,13 @@ class InMemoryStream {
     return (
       !this._blocked &&
       (!this._leased_until || this._leased_until <= new Date()) &&
-      // A stream deferred to a future time is not claimable until due.
       (!this._deferred_at || this._deferred_at <= Date.now())
     );
   }
 
-  /**
-   * Hold this stream out of `claim` until `deferred_at` (ms since epoch).
-   * Set by a deliberate `defer` outcome — not a failure, so retry/blocked
-   * state is untouched. Cleared by ack/block/reset/unblock.
-   */
   defer(deferred_at: number) {
     this._deferred_at = deferred_at;
-    // A defer is not a failure: reset retry so the redelivery after the
-    // due-time is a fresh attempt, never accumulating toward maxRetries.
+    // A defer is not a failure, so the redelivery is a fresh attempt.
     this._retry = -1;
   }
 
@@ -157,24 +130,13 @@ class InMemoryStream {
     return this._leased_until;
   }
 
-  /** Persisted next-visit time, or undefined when no active defer. */
   get deferred_at() {
     return this._deferred_at;
   }
 
-  /**
-   * Attempt to lease this stream for processing.
-   * @param lease - The lease request.
-   * @param millis - Lease duration in milliseconds.
-   * @returns The granted lease or undefined if blocked.
-   */
   lease(lease: Lease, millis: number): Lease {
-    // The holder is recorded whatever the duration, matching both SQL
-    // adapters. `millis` governs only how long the lease stands: a
-    // zero-length one expires the instant it is granted, so the stream is
-    // immediately re-claimable — but `ack` is gated on the holder, and a
-    // lease granted with no holder recorded is one whose every ack is
-    // dropped, leaving the watermark parked and every event redelivered.
+    // The holder is recorded even at zero `millis`: `ack` is gated on it,
+    // so a lease with no holder would drop every ack.
     this._leased_by = lease.by;
     this._leased_until = new Date(Date.now() + millis);
     this._retry = this._retry + 1;
@@ -189,31 +151,19 @@ class InMemoryStream {
     };
   }
 
-  /**
-   * Finalize this stream's lease: ack (advance the watermark) or, when the
-   * lease carries a `due` marker, defer (persist the schedule, hold the
-   * watermark) — see {@link Store.ack}.
-   * @param lease - The lease request.
-   */
+  /** Ack, or with `due`, also persist the schedule. See {@link Store.ack}. */
   ack(lease: Lease) {
     if (this._leased_by === lease.by) {
       this._leased_by = undefined;
       this._leased_until = undefined;
       if (lease.due !== undefined) {
-        // Due marker: advance the watermark past the events handled this cycle
-        // (`lease.at`) AND schedule the re-visit, persisting the caller's
-        // retry — advance and defer are independent legs. Advancing
-        // means the succeeded prefix never re-runs on redelivery. An explicit
-        // defer passes `retry: -1` (a defer is not a failure); a backoff retry
-        // passes the climbing counter so it keeps accruing toward the block
-        // threshold across windows. Deferred entries are not part of
-        // ack's return value.
+        // Advance past the handled prefix and schedule the re-visit with the
+        // caller's retry (-1 for a defer, the climbing count for a backoff).
         this._at = lease.at;
         this._retry = lease.retry;
         this._deferred_at = lease.due;
         return undefined;
       }
-      // A successful ack clears the retry budget and any pending defer.
       this._retry = -1;
       this._at = lease.at;
       this._deferred_at = undefined;
@@ -229,20 +179,11 @@ class InMemoryStream {
     }
   }
 
-  /**
-   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
-   * @param lease - The lease request.
-   * @param error Blocked error message.
-   */
   block(lease: Lease, error: string) {
-    // Skip already-blocked streams so a redundant block is a no-op, mirroring
-    // the SQL adapters' `WHERE ... AND blocked = false` guard. Without
-    // this, re-blocking returns the lease again and emits a spurious duplicate
-    // `blocked` lifecycle event that the durable stores suppress.
+    // Re-blocking is a no-op, like the SQL `AND blocked = false` guard.
     if (this._leased_by === lease.by && !this._blocked) {
       this._blocked = true;
       this._error = error;
-      // A blocked stream is poison; clear any pending defer.
       this._deferred_at = undefined;
       return {
         stream: this.stream,
@@ -257,11 +198,7 @@ class InMemoryStream {
     }
   }
 
-  /**
-   * Reset this stream's watermark and state for replay. The retry counter
-   * resets to -1 to match the constructor + ack() invariant ("released
-   * stream"); the next claim() bumps it to 0 (first attempt).
-   */
+  /** Retry resets to -1 (released); the next claim makes it 0. */
   reset() {
     this._at = -1;
     this._retry = -1;
@@ -272,11 +209,7 @@ class InMemoryStream {
     this._deferred_at = undefined;
   }
 
-  /**
-   * Clear the blocked flag and lease bookkeeping without touching the
-   * watermark. Returns true if the stream was actually blocked (and is
-   * now flipped); false otherwise.
-   */
+  /** True only when the stream was blocked. */
   unblock(): boolean {
     if (!this._blocked) return false;
     this._blocked = false;
@@ -290,29 +223,12 @@ class InMemoryStream {
 }
 
 /**
- * In-memory event store implementation.
+ * In-memory event store: the default when no other store is injected.
+ * For development, tests and examples; all data is lost when the process
+ * exits. Use {@link PostgresStore} in production.
  *
- * This is the default store used by Act when no other store is injected.
- * It stores all events in memory and is suitable for:
- * - Development and prototyping
- * - Unit and integration testing
- * - Demonstrations and examples
- *
- * **Not suitable for production** - all data is lost when the process exits.
- * Use {@link PostgresStore} for production deployments.
- *
- * The in-memory store provides:
- * - Full {@link Store} interface implementation
- * - Optimistic concurrency control
- * - Stream leasing for distributed processing simulation
- * - Snapshot support
- * - Fast performance (no I/O overhead)
- *
- * **`Store.notify` is intentionally not implemented.** The notify hook is a
- * cross-process wake-up signal — local commits already arm the drain via
- * `do()`. An in-memory store is single-process by definition, so there is
- * no remote writer to be notified of. The {@link Act} orchestrator
- * detects the absence and falls back to the existing debounce/poll path.
+ * `Store.notify` is not implemented: a single process has no remote writer
+ * to hear from, and local commits already arm the drain.
  *
  * @example Using in tests
  * ```typescript
@@ -360,36 +276,20 @@ class InMemoryStream {
  * @category Adapters
  */
 export class InMemoryStore implements Store {
-  // stored events
   private _events: Committed<Schemas, keyof Schemas>[] = [];
-  // next event id — monotonic, never reused. Deletions (truncate, windowed
-  // prune) punch holes in the id sequence, so ids are NOT array indexes and
-  // NOT `_events.length`; they only stay sorted ascending in `_events`.
+  // Never reused. Deletions punch holes, so ids are not array indexes.
   private _next_id = 0;
-  // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   /** Correlate checkpoint: how far the log has been READ. */
   private _correlated_at = -1;
-  /**
-   * Per-correlator checkpoint and lease, keyed by correlator.
-   *
-   * Keyed rather than singular because correlators that look for different
-   * things read the log for different reasons: sharing one position lets a
-   * partial-behaviour worker inherit another's, and sharing one lease lets
-   * one starve the other. Callers that supply no correlator use
-   * `_correlated_at` instead, the shared checkpoint.
-   */
+  /** Per-correlator checkpoint and lease; keyless callers use `_correlated_at`. */
   private _correlators = new Map<
     string,
     { at: number; by: string; until: number }
   >();
-  // last committed version per stream — O(1) replacement for filter-on-commit
   private _stream_versions: Map<string, number> = new Map();
-  // stream → (event_id → cloned sensitive payload). Two-level so `forget_pii`
-  // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
-  // the `DELETE WHERE stream = ?` scope that durable adapters get from their
-  // stream index. Entries exist only for events committed with a non-null
-  // `pii` field; absence means "no PII" (returned as `null` on load).
+  // stream → (event_id → cloned pii). Two levels so `forget_pii` drops one
+  // inner Map. Absence means no PII.
   private _pii: Map<string, Map<number, Record<string, unknown>>> = new Map();
 
   private _reset_indexes() {
@@ -410,10 +310,7 @@ export class InMemoryStore implements Store {
     per_stream.set(id, structuredClone(pii));
   }
 
-  // First index whose event id is greater than `after`. `_events` stays
-  // sorted ascending by id (append-only commits; deletions preserve
-  // order), so id-bounded scans binary-search their start instead of
-  // assuming id === index — an invariant that truncation breaks.
+  // First index whose id is greater than `after` (ids are sorted, not dense).
   private _first_index_after(after: number): number {
     let lo = 0;
     let hi = this._events.length;
@@ -425,8 +322,7 @@ export class InMemoryStore implements Store {
     return lo;
   }
 
-  // Attach the isolated PII payload (or null) to an event before handing it to
-  // a caller. Allocation-free for events without PII — by far the common case.
+  // Allocation-free for events without PII, the common case.
   private _with_pii<E extends Schemas>(
     e: Committed<E, keyof E>,
     wanted = true
@@ -436,27 +332,15 @@ export class InMemoryStore implements Store {
     return pii ? ({ ...e, pii } as Committed<E, keyof E>) : e;
   }
 
-  /**
-   * Dispose of the store and clear all events.
-   * @returns Promise that resolves when disposal is complete.
-   */
   async dispose() {
     await sleep();
     this._reset_indexes();
   }
 
-  /**
-   * Seed the store with initial data (no-op for in-memory).
-   * @returns Promise that resolves when seeding is complete.
-   */
   async seed() {
     await sleep();
   }
 
-  /**
-   * Drop all data from the store.
-   * @returns Promise that resolves when the store is cleared.
-   */
   async drop() {
     await sleep();
     this._reset_indexes();
@@ -473,9 +357,8 @@ export class InMemoryStore implements Store {
     if (query.correlation && e.meta?.correlation !== query.correlation)
       return false;
     if (e.name === SNAP_EVENT && !query.with_snaps) return false;
-    // `created` is not monotonic with `id` (restore keeps source timestamps),
-    // so time bounds filter events like PG/SQLite's WHERE; they never end
-    // the scan.
+    // `created` is not monotonic with `id` (restore keeps it), so time
+    // bounds filter; they never end the scan.
     if (query.created_after && e.created <= query.created_after) return false;
     if (query.created_before && e.created >= query.created_before) return false;
     return true;
@@ -487,12 +370,7 @@ export class InMemoryStore implements Store {
       : RegExp(pattern).test(stream);
   }
 
-  /**
-   * Index of the latest snapshot of the queried stream, or -1. `with_snaps`
-   * on an exact single stream resumes there, so earlier events aren't read.
-   * The orchestrator asks only for unbounded current-state loads, so the
-   * floor applies whenever asked; an explicit `after` wins over it.
-   */
+  /** Index of the stream's latest snapshot, or -1; an explicit `after` wins. */
   private _snap_floor(query: Query | undefined): number {
     if (
       !query?.with_snaps ||
@@ -508,12 +386,6 @@ export class InMemoryStore implements Store {
     return -1;
   }
 
-  /**
-   * Query events in the store, optionally filtered by query options.
-   * @param callback - Function to call for each event.
-   * @param query - Optional query options.
-   * @returns The number of events processed.
-   */
   async query<E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
     query?: Query
@@ -541,15 +413,6 @@ export class InMemoryStore implements Store {
     return count;
   }
 
-  /**
-   * Commit one or more events to a stream.
-   * @param stream - The stream name.
-   * @param msgs - The events/messages to commit.
-   * @param meta - Event metadata.
-   * @param expectedVersion - Optional optimistic concurrency check.
-   * @returns The committed events with metadata.
-   * @throws ConcurrencyError if expectedVersion does not match.
-   */
   async commit<E extends Schemas>(
     stream: string,
     msgs: Message<E, keyof E>[],
@@ -581,8 +444,7 @@ export class InMemoryStore implements Store {
         data,
         meta,
       };
-      // The stored event is the pii-less view — `forget_pii` only has to
-      // drop the inner Map for the stream, never the event row.
+      // Stored pii-less, so `forget_pii` never touches the event row.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
       if (pii != null) this._put_pii(stream, c.id, pii);
       version++;
@@ -592,15 +454,6 @@ export class InMemoryStore implements Store {
     return committed;
   }
 
-  /**
-   * Atomically discovers and leases streams for processing.
-   * Fuses poll + lease into a single operation.
-   * @param lagging - Max streams from lagging frontier.
-   * @param leading - Max streams from leading frontier.
-   * @param by - Lease holder identifier.
-   * @param millis - Lease duration in milliseconds.
-   * @returns Granted leases.
-   */
   async claim(
     lagging: number,
     leading: number,
@@ -609,29 +462,17 @@ export class InMemoryStore implements Store {
     lane?: string
   ) {
     await sleep();
-    // Eligibility is a pure subscription-row predicate. `claim`
-    // never looks at the event log: `correlate` records the highest event id
-    // that resolves to a target, and `at < correlated_at` is the whole
-    // question. Matching `source` happens in correlate, when it decides what
-    // to mark.
-    //
-    // An unmarked row is not claimable, by definition: `undefined`
-    // means the row has never been correlated, not that it has no work.
+    // Eligibility is `at < correlated_at` on the row alone; the event log
+    // is never read. An unmarked row is not claimable.
     const has_work = (s: InMemoryStream): boolean =>
       s.correlated_at !== undefined && s.at < s.correlated_at;
     const available = [...this._streams.values()].filter(
       (s) =>
         s.is_available && has_work(s) && (lane === undefined || s.lane === lane)
     );
-    // Lagging frontier orders by priority DESC (higher first), then by
-    // watermark ASC (most-behind first). Mirrors the PG `claim()` SQL
-    // — see `libs/act-pg/PERFORMANCE.md` for the benchmark that
-    // motivated the priority dimension. A fairness reserve
-    // carves `fair` slots off the budget and fills them by pure watermark
-    // order (priority ignored) so a default-priority lagging stream can
-    // never be starved out of the frontier by sustained higher-priority
-    // load. With everyone at the same priority both slices order by `at`,
-    // so this is a behavioral no-op for existing workloads.
+    // Lagging: priority DESC, then watermark ASC, like the PG SQL. The
+    // `fair` slots ignore priority so sustained high-priority load can't
+    // starve a default-priority stream.
     const fair = lagging >= 2 ? Math.max(1, Math.floor(lagging / 4)) : 0;
     const by_priority = [...available].sort(
       (a, b) => b.priority - a.priority || a.at - b.at
@@ -657,14 +498,12 @@ export class InMemoryStore implements Store {
         at: s.at,
         lagging: false,
       }));
-    // deduplicate (a stream can appear in both frontiers)
     const seen = new Set<string>();
     const combined = [...lag, ...lead].filter((p) => {
       if (seen.has(p.stream)) return false;
       seen.add(p.stream);
       return true;
     });
-    // lease each atomically
     return combined
       .map((p) =>
         this._streams.get(p.stream)?.lease({ ...p, by, retry: 0 }, millis)
@@ -672,15 +511,6 @@ export class InMemoryStore implements Store {
       .filter((l) => !!l);
   }
 
-  /**
-   * Registers streams for event processing. When the same stream is
-   * resubscribed with a different priority, the **maximum** wins — so
-   * the highest-priority registered reaction sets the scheduling lane.
-   * Use {@link prioritize} for operator runtime overrides.
-   *
-   * @param streams - Streams to register with optional source + priority.
-   * @returns subscribed count and current max watermark.
-   */
   async subscribe(
     streams: SubscribeInput[],
     correlated_at?: number,
@@ -688,14 +518,9 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
 
-    // The correlate checkpoint is written by its own producer, in the call
-    // correlate already makes. Monotonic: a lower value is ignored.
-    //
-    // With a correlator the position and the lease are per-key; a key
-    // with no row yet inherits the shared value, so an upgrade does not
-    // re-read history.
+    // The checkpoint is monotonic. With a correlator, position and lease
+    // are per key.
     let correlating: boolean | undefined;
-    /** This correlator's position, once known — always set when keyed. */
     let keyed_at: number | undefined;
     if (correlator) {
       const now = Date.now();
@@ -709,22 +534,16 @@ export class InMemoryStore implements Store {
         this._correlators.set(correlator.key, {
           at,
           by: correlator.by,
-          // A non-positive `millis` releases outright rather than setting an
-          // expiry a hair in the future: a successor asking inside the same
-          // millisecond would otherwise still be refused.
+          // Release outright, or a successor in the same ms is still refused.
           until: correlator.millis > 0 ? now + correlator.millis : 0,
         });
       } else {
-        // Refused, which is only possible when a live holder exists — so the
-        // row is here to keep. The position still advances: this caller may
-        // already have scanned, and dropping how far it read would leave its
-        // marks ahead of its recorded position.
+        // Refused, but the position still advances: this caller may already
+        // have scanned and marked.
         correlating = false;
         held.at = at;
       }
-      // The shared position tracks how far *any* correlator has read: the
-      // floor a brand-new key inherits, and what a caller reading without a
-      // correlator still sees.
+      // How far any correlator has read.
       if (correlated_at !== undefined && correlated_at > this._correlated_at)
         this._correlated_at = correlated_at;
     } else if (
@@ -743,11 +562,8 @@ export class InMemoryStore implements Store {
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
-        // The lane rides the priority max: compared before the
-        // bump, so a subscribe at or above the stored priority sets the
-        // lane and one below leaves it alone. A caller that has forgotten
-        // what a stream carries — an evicted LRU record, a fresh process —
-        // then cannot re-lane it by resolving to it at a lower priority.
+        // The lane rides the priority max (compared before the bump), so a
+        // lower-priority resolution can't re-lane the stream.
         if (priority >= existing.priority) existing.lane = lane;
         existing.bump_priority(priority);
         if (correlated_at !== undefined) existing.mark(correlated_at);
@@ -770,27 +586,14 @@ export class InMemoryStore implements Store {
     };
   }
 
-  /**
-   * Acknowledge completion of processing for leased streams.
-   * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
-   */
   async ack(leases: Lease[]) {
     await sleep();
-    // Acks and defer schedules land in one synchronous pass — the
-    // in-memory equivalent of the single-transaction contract on
-    // {@link Store.ack}: no await between entries, so a caller
-    // never observes a cycle's acks without its schedules. `due`-carrying
-    // entries defer (and return undefined), the rest ack.
+    // One synchronous pass: the in-memory form of the single transaction.
     return leases
       .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);
   }
 
-  /**
-   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
-   * @param leases - Leases to block, including lease holder and last error message.
-   * @returns Blocked leases.
-   */
   async block(leases: BlockedLease[]) {
     await sleep();
     return leases
@@ -798,15 +601,6 @@ export class InMemoryStore implements Store {
       .filter((l) => !!l);
   }
 
-  /**
-   * Hold the matched streams out of {@link claim} until `deferred_at`
-   * (ms since epoch) — see {@link Store.defer}. Accepts an explicit list
-   * of names or a {@link StreamFilter}, mirroring {@link reset}/{@link unblock}.
-   * Persisted store state (unlike in-process backoff), so the skip is honored
-   * by every competing worker. Unknown names are silently skipped.
-   *
-   * @returns Count of streams whose `deferred_at` was set.
-   */
   async defer(input: string[] | StreamFilter, deferred_at: number) {
     await sleep();
     const selected = this._select(input);
@@ -814,11 +608,7 @@ export class InMemoryStore implements Store {
     return selected.length;
   }
 
-  /**
-   * The streams named by `input`: an explicit list (de-duplicated, so a
-   * repeated name counts once, matching the SQL adapters' set-based
-   * `stream = ANY(...)`; unknown names are skipped) or a {@link StreamFilter}.
-   */
+  /** De-duplicated like the SQL `stream = ANY(...)`; unknown names skipped. */
   private _select(input: string[] | StreamFilter): InMemoryStream[] {
     if (Array.isArray(input))
       return [...new Set(input)]
@@ -827,11 +617,6 @@ export class InMemoryStore implements Store {
     return [...this._streams.values()].filter(this._filter_predicate(input));
   }
 
-  /**
-   * Build a predicate from a {@link StreamFilter}. Compiled regexes are
-   * cached in the closure so callers can apply it across the streams
-   * map without re-compiling per iteration.
-   */
   private _filter_predicate(
     filter: StreamFilter
   ): (s: InMemoryStream) => boolean {
@@ -868,14 +653,6 @@ export class InMemoryStore implements Store {
     };
   }
 
-  /**
-   * Reset watermarks to -1, clearing retry, blocked, error, and lease
-   * state so the matched streams can be replayed from the beginning.
-   * Accepts either an explicit list of names or a {@link StreamFilter}.
-   *
-   * @param input - Stream names or a filter selecting the streams to reset.
-   * @returns Count of streams that were actually reset.
-   */
   async reset(input: string[] | StreamFilter) {
     await sleep();
     const selected = this._select(input);
@@ -883,15 +660,6 @@ export class InMemoryStore implements Store {
     return selected.length;
   }
 
-  /**
-   * Wipe the sensitive-data payload for every event on the stream — see
-   * {@link Store.forget_pii}. O(1) drop of the stream's inner Map; the size of
-   * that Map is the count of events that had PII. Idempotent: a second call
-   * finds no inner Map and returns `0`.
-   *
-   * @param stream - Target stream.
-   * @returns Count of events whose isolated PII payload was deleted.
-   */
   async forget_pii(stream: string): Promise<number> {
     await sleep();
     const count = this._pii.get(stream)?.size ?? 0;
@@ -899,36 +667,14 @@ export class InMemoryStore implements Store {
     return count;
   }
 
-  /**
-   * Clear the blocked flag (and retry / error / lease) on the matched
-   * streams without touching the watermark. Streams that aren't blocked
-   * at call time are silently skipped. Accepts either an explicit list
-   * of names or a {@link StreamFilter}. The filter form always restricts
-   * to blocked streams — passing `blocked: false` matches nothing.
-   * See {@link Store.unblock}.
-   *
-   * @param input - Stream names or a filter selecting the streams to unblock.
-   * @returns Count of streams that were actually flipped (were blocked).
-   */
   async unblock(input: string[] | StreamFilter) {
     await sleep();
-    // An explicit `blocked: false` in the filter is overridden: there is no
-    // use case for "unblock unblocked streams."
     const selected = this._select(
       Array.isArray(input) ? input : { ...input, blocked: true }
     );
     return selected.filter((s) => s.unblock()).length;
   }
 
-  /**
-   * Bulk-update priority of streams matching `filter`. Mirrors
-   * {@link query_streams}'s filter semantics — see {@link Store.prioritize}.
-   * Unlike {@link subscribe} (which keeps `max()` of registered
-   * priorities), this sets the priority outright — operator override
-   * for the build-time scheduling policy.
-   *
-   * @returns Count of streams whose priority changed.
-   */
   async prioritize(filter: StreamFilter, priority: number) {
     await sleep();
     const changed = this._select(filter).filter((s) => s.priority !== priority);
@@ -936,11 +682,6 @@ export class InMemoryStore implements Store {
     return changed.length;
   }
 
-  /**
-   * Streams registered subscription positions to the callback, ordered by
-   * stream name. Returns the highest event id in the store and the count
-   * of positions emitted.
-   */
   async query_streams(
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
@@ -950,9 +691,7 @@ export class InMemoryStore implements Store {
     const after = query?.after;
     const source_matches = query?.source_matches;
     const matches = this._filter_predicate(query ?? {});
-    // Reverse-match: a stream qualifies when its stored `source` pattern
-    // matches at least one of the requested names. Patterns are compiled
-    // once and cached — many subscriptions share one source pattern.
+    // Reverse-match: the stored `source` pattern must match a requested name.
     const reverse_cache = new Map<string, RegExp>();
     const reverse_match = (source: string): boolean => {
       let re = reverse_cache.get(source);
@@ -963,16 +702,8 @@ export class InMemoryStore implements Store {
       return source_matches!.some((name) => re!.test(name));
     };
 
-    // Order by stream name so `after`/`limit` keyset-paginate
-    // deterministically. The sort MUST agree with the `after` cursor below
-    // (JS `<=`, i.e. UTF-16 code-unit order) — `localeCompare` disagrees
-    // with `<=` on mixed-case/accented names (`B`=66 < `a`=97 by code unit,
-    // but `a` < `B` by locale), which let the cursor skip streams the sort
-    // placed after it (the `query_streams` twin of the `query` fix).
-    // The default `Array.sort()` comparator IS code-unit order, so it
-    // matches `<=` exactly — and PG/SQLite, which paginate under their
-    // binary collation. Sorting the keys (rather than comparing values)
-    // keeps that default in play.
+    // The default sort is code-unit order, which agrees with the `<=`
+    // cursor and the SQL binary collation; `localeCompare` would not.
     const sorted = [...this._streams.keys()]
       .sort()
       .map((stream) => this._streams.get(stream) as InMemoryStream);
@@ -982,14 +713,10 @@ export class InMemoryStore implements Store {
       if (after !== undefined && s.stream <= after) continue;
       if (!matches(s)) continue;
       if (source_matches !== undefined) {
-        // Absent/empty source = no source constraint = consumes from
-        // every stream, so it matches any requested name. Only a
-        // present source that matches none of them is excluded.
+        // No source consumes every stream, so it matches any name.
         if (s.source && !reverse_match(s.source)) continue;
       }
-      // Checked before emitting, not after: a bound applied afterwards
-      // lets `limit: 0` through as exactly one row, where both SQL
-      // adapters return none.
+      // Before emitting, so `limit: 0` returns none.
       if (count >= limit) break;
       callback({
         stream: s.stream,
@@ -1010,19 +737,6 @@ export class InMemoryStore implements Store {
     return { maxEventId: this._events.at(-1)?.id ?? -1, count };
   }
 
-  /**
-   * Per-stream aggregated stats — see {@link Store.query_stats}.
-   *
-   * Single forward scan over the in-memory event list, accumulating per
-   * stream. The "cheap heads" cost tier from durable adapters doesn't
-   * apply here (InMemory has no indexes); correctness is the goal, perf
-   * is a non-issue.
-   *
-   * Scope rules:
-   * - Array `input` — explicit stream names, regardless of subscription.
-   * - Filter `input` — `stream`/`stream_exact` match against event-bearing
-   *   stream names. Empty filter `{}` matches every event-bearing stream.
-   */
   async query_stats<E extends Schemas>(
     input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
     options?: QueryStatsOptions<E>
@@ -1036,8 +750,6 @@ export class InMemoryStore implements Store {
     const after = options?.after;
     const limit = options?.limit;
 
-    // Pre-compile per-stream scope predicate, cached as we go so each
-    // distinct stream evaluates the regex once.
     const array_targets = Array.isArray(input) ? new Set(input) : null;
     const filter = Array.isArray(input) ? null : input;
     const stream_re =
@@ -1084,23 +796,14 @@ export class InMemoryStore implements Store {
       a.count++;
       if (want_names) {
         const n = String(e.name);
-        // a.names initialized above when want_names
         a.names![n] = (a.names![n] ?? 0) + 1;
       }
     }
 
-    // Order by stream name so `after`/`limit` keyset-paginate
-    // deterministically. The sort MUST agree with the `after` cursor below
-    // (JS `<=`, i.e. UTF-16 code-unit order) — `localeCompare` disagrees with
-    // `<=` on mixed-case/accented names (`B`=66 < `a`=97 by code unit, but
-    // `a` < `B` by locale), which would let the cursor skip streams the sort
-    // placed after it. The default `Array.sort()` comparator IS
-    // code-unit order, so it matches `<=` exactly — and PG/SQLite, which
-    // paginate `query_stats` under their binary collation.
+    // Code-unit order, to agree with the `<=` cursor (see query_streams).
     const ordered = [...acc.keys()].sort();
     const out = new Map<string, StreamStats<E>>();
     for (const stream of ordered) {
-      // Before the row, not after it — `limit: 0` means none.
       if (limit !== undefined && out.size >= limit) break;
       if (after !== undefined && stream <= after) continue;
       const a = acc.get(stream)!;
@@ -1118,15 +821,6 @@ export class InMemoryStore implements Store {
     return out;
   }
 
-  /**
-   * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * Windowed targets (`before` set) prune the prefix below the closest safe
-   * `__snapshot__` instead — no seed, subscriptions untouched, no-op when no
-   * snapshot qualifies.
-   * @param targets - Streams to truncate with optional snapshot state and meta,
-   *   or a `before`/`max_id` boundary for a windowed prefix delete.
-   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
-   */
   async truncate(
     targets: Array<{
       stream: string;
@@ -1146,7 +840,6 @@ export class InMemoryStore implements Store {
       }
     >();
 
-    // Windowed targets: pure prefix delete behind the closest safe snapshot.
     const windowed = targets.filter((t) => t.before !== undefined);
     if (windowed.length) {
       const drop = new Set<number>();
@@ -1177,13 +870,7 @@ export class InMemoryStore implements Store {
     }
 
     const full = targets.filter((t) => t.before === undefined);
-    // Count / delete / insert per target, not once for the whole set. The
-    // SQL adapters cannot do otherwise — their per-target `DELETE WHERE
-    // stream = $1` sees the seed a previous pass wrote — and the unique
-    // `(stream, version)` constraint makes the alternative impossible there.
-    // Deleting once from a deduped Set and then inserting once per array
-    // entry left this store with two `version: 0` seeds for a stream listed
-    // twice, both reporting the pre-delete count.
+    // Per target, like the SQL adapters, so a stream listed twice gets one seed.
     for (const { stream, snapshot, meta } of full) {
       let deleted = 0;
       this._events = this._events.filter((e) => {
@@ -1191,13 +878,8 @@ export class InMemoryStore implements Store {
         deleted++;
         return false;
       });
-      // Subscriptions are deliberately untouched, for restart *and* retire
-      // targets alike — see the note in truncate's contract. A tombstoned
-      // stream's subscription is inert, and reaping it is maintenance that
-      // `seed()` performs.
+      // Subscriptions untouched; `seed()` reaps inert ones.
       this._stream_versions.delete(stream);
-      // The pii payloads die with the event rows, matching the durable
-      // adapters' `DELETE WHERE stream = ?` scope.
       this._pii.delete(stream);
       const event: Committed<Schemas, keyof Schemas> = {
         id: this._next_id++,
@@ -1215,25 +897,13 @@ export class InMemoryStore implements Store {
     return result;
   }
 
-  /**
-   * Atomically wipe-and-rebuild the store under an in-process snapshot.
-   *
-   * Captures every index state up front, clears it, then hands the
-   * orchestrator a per-event insert `callback` via the driver. Any
-   * throw inside the driver restores the snapshot, leaving the store
-   * byte-for-byte unchanged from the operator's perspective.
-   *
-   * `id`s are reassigned `0..N-1` as events arrive (dense — the
-   * monotonic id counter restarts at 0 for the rebuild). `created` is
-   * preserved verbatim from the source.
-   */
+  /** A throw inside the driver restores the captured state. Ids restart at 0. */
   async restore(
     driver: (
       callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
     ) => Promise<void>
   ): Promise<void> {
     await sleep();
-    // Snapshot every index so we can roll back on throw.
     const prev_events = this._events;
     const prev_next_id = this._next_id;
     const prev_streams = this._streams;
@@ -1243,13 +913,9 @@ export class InMemoryStore implements Store {
     const prev_correlators = new Map(
       [...this._correlators].map(([k, v]) => [k, { ...v }])
     );
-    // The restored log is renumbered from 0, so every correlate checkpoint
-    // (an event id) must start over too, or correlate would resume above the
-    // restored events and never resolve their reactions. Correlator
-    // leases are kept: they say who may correlate, not how far.
+    // Renumbered from 0, so checkpoints restart too; leases are kept.
     this._correlated_at = -1;
     for (const c of this._correlators.values()) c.at = -1;
-    // Swap in fresh state for the duration of the rebuild.
     this._events = [];
     this._next_id = 0;
     this._streams = new Map();
@@ -1258,25 +924,16 @@ export class InMemoryStore implements Store {
     try {
       await driver(async (event) => {
         const id = this._next_id++;
-        // Split `pii` out of the stored row into the isolated `_pii` map,
-        // mirroring `commit`. The stored event is the pii-less view so
-        // `forget_pii` — which only drops the `_pii` entry — actually
-        // erases restored PII (durable adapters restore into their
-        // isolated column for the same reason).
+        // Split `pii` out like `commit`, so `forget_pii` erases restored PII.
         const { pii, ...rest } = event;
         const committed: Committed<Schemas, keyof Schemas> = { ...rest, id };
         this._events.push(committed);
         if (pii != null) this._put_pii(event.stream, id, pii);
-        // Last event per stream wins for the version watermark — the
-        // source is expected to be in commit order, so this is also
-        // the highest version. Out-of-order sources get last-wins,
-        // matching the legacy raw-SQL restore.
+        // Last event per stream wins.
         this._stream_versions.set(event.stream, event.version);
         return id;
       });
     } catch (err) {
-      // Roll back to the captured snapshot — every index restored
-      // exactly as it was before the call started.
       this._events = prev_events;
       this._next_id = prev_next_id;
       this._streams = prev_streams;
