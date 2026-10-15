@@ -1,3 +1,10 @@
+# [@rotorsoft/act-otel-v0.1.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.9...@rotorsoft/act-otel-v0.1.10) (2026-10-15)
+
+
+### Bug Fixes
+
+* **act:** keep app code errors off the store circuit breaker ([#1913](https://github.com/Rotorsoft/act-root/issues/1913)) ([754be6c](https://github.com/Rotorsoft/act-root/commit/754be6c0c3b1ff817c418a94b385cce4a4d9393c)), closes [#1877](https://github.com/Rotorsoft/act-root/issues/1877) [#1877](https://github.com/Rotorsoft/act-root/issues/1877)
+
 # [@rotorsoft/act-otel-v0.1.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.8...@rotorsoft/act-otel-v0.1.9) (2026-10-01)
 
 
