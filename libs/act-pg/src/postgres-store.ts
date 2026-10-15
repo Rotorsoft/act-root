@@ -329,85 +329,31 @@ export class PostgresStore implements Store {
   private _fqs: string;
   /** Correlate checkpoint table — one row, id 0. */
   private _fqc: string;
-  /**
-   * Per-instance writer identifier embedded in every NOTIFY payload. The
-   * `notify()` LISTEN handler skips payloads where `by === this._by`,
-   * giving the `"notified"` lifecycle event a clean cross-process
-   * semantic — local commits never echo back through this channel.
-   */
+  /** Rides every NOTIFY payload so this store's own commits never echo back. */
   private readonly _by: string = randomUUID();
-  /**
-   * Effective NOTIFY channel for this store. Computed from `(schema,
-   * table)` at construction so multiple stores in the same database
-   * stay isolated.
-   */
+  /** Per `(schema, table)`, so stores sharing a database stay isolated. */
   private readonly _channel: string;
   /** Active LISTEN client (one per `notify()` subscription). */
   private _listen_client: pg.PoolClient | undefined;
-  /**
-   * Notification listener attached to the active LISTEN client. Tracked
-   * separately so the re-subscribe / dispose paths can detach it before
-   * destroying the client — without this, a pool that reused the
-   * connection would re-fire the stale handler.
-   */
+  /** Detached before destroy, or a reused connection re-fires a stale handler. */
   private _listen_handler: ((msg: pg.Notification) => void) | undefined;
-  /**
-   * Error listener attached to the active LISTEN client. node-postgres
-   * removes its idle-error guard on checkout, so a checked-out client
-   * that emits `error` (backend restart, failover, network drop) with no
-   * listener is an uncaught exception — a process crash. Tracked
-   * alongside `_listen_handler` so teardown detaches it in lockstep.
-   */
+  /** A checked-out client with no `error` listener crashes the process on a blip. */
   private _listen_error_handler: ((err: Error) => void) | undefined;
-  /**
-   * The caller's notification handler for the active subscription, kept
-   * so the self-healing reconnect path can re-establish LISTEN
-   * on a fresh client after the dedicated one emits `error`. Cleared by
-   * `_teardown_listen`, which is what makes disposal cancel any pending
-   * reconnect.
-   */
+  /** Kept for reconnects; clearing it is what cancels a pending one. */
   private _notify_handler:
     | ((notification: StoreNotification) => void)
     | undefined;
-  /**
-   * Pending reconnect timer, if a LISTEN client error scheduled one.
-   * Tracked so `_teardown_listen` (and therefore `dispose()`) can cancel
-   * it — a reconnect must never fire after teardown.
-   */
   private _reconnect_timer: ReturnType<typeof setTimeout> | undefined;
-  /**
-   * Consecutive reconnect attempts since the last healthy LISTEN, used to
-   * grow the capped exponential backoff. Reset to 0 once a re-LISTEN
-   * succeeds.
-   */
+  /** Consecutive reconnect attempts; grows the backoff. */
   private _reconnect_attempts = 0;
-  /**
-   * Cross-process commit subscription. **Present only when
-   * `config.notify === true`** — the orchestrator's auto-wire path
-   * checks `if (store.notify)`, so omitting the method keeps
-   * single-instance deployments free of any LISTEN/NOTIFY overhead
-   * (no dedicated client, no per-commit `pg_notify`).
-   *
-   * @see {@link Config.notify} for the rationale and the multi-process
-   *   contract.
-   */
+  /** Present only when `config.notify` is set. See {@link Config.notify}. */
   notify?: (
     handler: (notification: StoreNotification) => void
   ) => Promise<NotifyDisposer>;
 
-  /**
-   * Memoized key resolver for the optional `pii_encryption` envelope.
-   * Initialized in the constructor when encryption is configured;
-   * `undefined` otherwise. The resolver caches the operator's key on
-   * first use — rotation means restarting the store with a fresh
-   * provider.
-   */
+  /** Caches the key on first use; rotating it takes a restart. */
   private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
-  /**
-   * Create a new PostgresStore instance.
-   * @param config Partial configuration (host, port, user, password, schema, table, etc.)
-   */
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     assert_safe_identifier(this.config.schema, "schema");
@@ -424,9 +370,6 @@ export class PostgresStore implements Store {
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
     this._channel = notify_channel(this.config.schema, this.config.table);
-    // Attach the notify subscriber only when the user opted in. With
-    // notify off, `this.notify` is `undefined`, the orchestrator skips
-    // its auto-wire, and no LISTEN client is ever allocated.
     if (this.config.notify) {
       this.notify = this._subscribe_notifications.bind(this);
     }
@@ -435,14 +378,7 @@ export class PostgresStore implements Store {
       : undefined;
   }
 
-  /**
-   * Acquire a pooled client, translating acquisition failures into
-   * {@link StoreError} with the calling operation as context. With the
-   * default `connectionTimeoutMillis`, a saturated pool fails here
-   * after 10s with `Store operation "<operation>" failed` (driver
-   * error preserved as `cause`) instead of hanging indefinitely.
-   * Every method that checks out a client routes through this helper.
-   */
+  /** A saturated pool fails here as a {@link StoreError} naming the operation. */
   private async _client(operation: string): Promise<pg.PoolClient> {
     try {
       return await this._pool.connect();
@@ -451,36 +387,16 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Dispose of the store and close all database connections.
-   * Releases any active LISTEN client first so the pool can drain cleanly.
-   * @returns Promise that resolves when all connections are closed
-   */
   async dispose() {
     await this._teardown_listen();
     await this._pool.end();
   }
 
   /**
-   * Tear down the active LISTEN subscription if any: cancel any pending
-   * reconnect, forget the caller's handler (so no reconnect can fire
-   * after teardown), detach the notification + error listeners, run
-   * UNLISTEN, and destroy the dedicated client (do not return it to the
-   * pool — its listeners are removed but destroying belt-and-braces
-   * guards against any future change in pg-pool semantics that could
-   * re-issue a half-clean client).
-   *
-   * Clearing `_notify_handler` and the reconnect timer here is what makes
-   * `dispose()` safe during a pending reconnect: a scheduled
-   * `_reconnect` bails the moment it finds no handler.
-   *
-   * A pending reconnect has two states, and that covers one of them. An
-   * open already *in flight* has passed every handler check, and it holds
-   * no `_listen_client` yet — so the early return above fires and this
-   * releases nothing, leaving `pool.end()` waiting on the client that open
-   * is about to take. The other half of the guard therefore lives
-   * at the end of `_open_listen`, which re-reads `_notify_handler` before
-   * assigning and hands the client back when disposal won the race.
+   * Cancels any reconnect, forgets the handler, UNLISTENs and destroys the
+   * client (never returned to the pool). Clearing the handler makes a
+   * scheduled `_reconnect` bail; an open already in flight is caught at
+   * the end of `_open_listen` instead.
    */
   private async _teardown_listen() {
     if (this._reconnect_timer) {
@@ -490,9 +406,7 @@ export class PostgresStore implements Store {
     this._notify_handler = undefined;
     this._reconnect_attempts = 0;
     if (!this._listen_client) return;
-    // _listen_handler and _listen_error_handler are set in lockstep with
-    // _listen_client in _open_listen, so if the client is present, both
-    // handlers are too.
+    // Both handlers are set in lockstep with the client.
     this._listen_client.removeListener("notification", this._listen_handler!);
     this._listen_client.removeListener("error", this._listen_error_handler!);
     this._listen_handler = undefined;
@@ -506,11 +420,6 @@ export class PostgresStore implements Store {
     this._listen_client = undefined;
   }
 
-  /**
-   * Seed the database with required tables, indexes, and schema for event storage.
-   * @returns Promise that resolves when seeding is complete
-   * @throws Error if seeding fails
-   */
   async seed() {
     const client = await this._client("seed");
 
@@ -833,10 +742,6 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Drop all tables and schema created by the store (for testing or cleanup).
-   * @returns Promise that resolves when the schema is dropped
-   */
   async drop() {
     await this._pool.query(
       `
@@ -857,16 +762,6 @@ export class PostgresStore implements Store {
     );
   }
 
-  /**
-   * Query events from the store, optionally filtered by stream, event name, time, etc.
-   *
-   * @param callback Function called for each event found
-   * @param query (Optional) Query filter (stream, names, before, after, etc.)
-   * @returns The number of events found
-   *
-   * @example
-   * await store.query((event) => console.log(event), { stream: "A" });
-   */
   async query<E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
     query?: Query
@@ -989,16 +884,6 @@ export class PostgresStore implements Store {
     return result.rowCount ?? 0;
   }
 
-  /**
-   * Commit new events to the store for a given stream, with concurrency control.
-   *
-   * @param stream The stream name
-   * @param msgs Array of messages (event name and data)
-   * @param meta Event metadata (correlation, causation, etc.)
-   * @param expectedVersion (Optional) Expected stream version for concurrency control
-   * @returns Array of committed events
-   * @throws ConcurrencyError if the expected version does not match
-   */
   async commit<E extends Schemas>(
     stream: string,
     msgs: Message<E, keyof E>[],
@@ -1169,20 +1054,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Atomically discovers and leases streams for reaction processing.
-   *
-   * Uses `FOR UPDATE SKIP LOCKED` to implement zero-contention competing consumers:
-   * - Workers never block each other — locked rows are silently skipped
-   * - Discovery and locking happen in a single atomic transaction
-   * - No wasted polls — every returned stream is exclusively owned
-   *
-   * @param lagging - Max streams from lagging frontier (ascending watermark)
-   * @param leading - Max streams from leading frontier (descending watermark)
-   * @param by - Lease holder identifier (UUID)
-   * @param millis - Lease duration in milliseconds
-   * @returns Leased streams with metadata
-   */
+  /** `FOR UPDATE SKIP LOCKED`: workers never block each other. */
   async claim(
     lagging: number,
     leading: number,
@@ -1343,13 +1215,6 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Registers streams for event processing.
-   * Upserts stream entries so they become visible to claim().
-   * Also returns the current max watermark across all subscriptions.
-   * @param streams - Streams to register with optional source.
-   * @returns subscribed count and current max watermark.
-   */
   async subscribe(
     streams: SubscribeInput[],
     correlated_at?: number,
@@ -1496,12 +1361,6 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Acknowledge and release leases after processing, updating stream positions.
-   *
-   * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
-   * @returns Acked leases.
-   */
   async ack(leases: Lease[]): Promise<Lease[]> {
     const client = await this._client("ack");
     try {
@@ -1566,11 +1425,6 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
-   * @param leases - Leases to block, including lease holder and last error message.
-   * @returns Blocked leases.
-   */
   async block(leases: BlockedLease[]): Promise<BlockedLease[]> {
     const client = await this._client("block");
     try {
@@ -1618,17 +1472,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Hold the matched streams out of {@link claim} until `deferred_at`
-   * (ms since epoch) — see {@link Store.defer}. Persists `deferred_at`
-   * (as a `timestamptz`) so the skip is honored by every competing
-   * worker; `claim` filters on `deferred_at` against the claiming worker's
-   * clock, the same clock its defer timer runs on. Accepts an
-   * explicit list of names or a {@link StreamFilter}, mirroring
-   * {@link reset}/{@link prioritize}. Cleared by ack/block/reset/unblock.
-   *
-   * @returns Count of streams whose `deferred_at` was set.
-   */
+  /** `claim` compares `deferred_at` with the worker's clock, the one its defer timer uses. */
   async defer(
     input: string[] | StreamFilter,
     deferred_at: number
@@ -1643,12 +1487,8 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Runs `UPDATE ... <set>` on the streams named by `input`: an explicit
-   * list (an empty one updates nothing) or a {@link StreamFilter}. `set`
-   * and `where` may use `$1..$n` for `params`; the selection's own
-   * parameters are numbered after them.
-   *
-   * @returns Count of rows updated.
+   * `UPDATE ... <set>` on the selected streams. `set`/`where` use `$1..$n`
+   * for `params`; the selection's parameters are numbered after them.
    */
   private async _update(
     input: string[] | StreamFilter,
@@ -1667,12 +1507,7 @@ export class PostgresStore implements Store {
     return rowCount ?? 0;
   }
 
-  /**
-   * Translate a {@link StreamFilter} to a `WHERE` clause fragment and
-   * the corresponding parameter values. The fragment never starts with
-   * `WHERE` — callers compose it with any other predicates they need.
-   * Returns an always-true clause (`true`) when the filter is empty.
-   */
+  /** A `WHERE` fragment (without the keyword); `true` for an empty filter. */
   private _filter_clause(
     filter: StreamFilter,
     start: number
@@ -1710,12 +1545,6 @@ export class PostgresStore implements Store {
     };
   }
 
-  /**
-   * Reset watermarks to -1, clearing retry, blocked, error, and lease
-   * state so the matched streams can be replayed from the beginning.
-   *
-   * @returns Count of streams that were actually reset.
-   */
   reset(input: string[] | StreamFilter): Promise<number> {
     return this._update(
       input,
@@ -1724,21 +1553,7 @@ export class PostgresStore implements Store {
     );
   }
 
-  /**
-   * Clear blocked flag (and retry / error / lease state) on streams
-   * without touching the `at` watermark. `blocked = true` is always
-   * applied, so the return count reflects only streams that were
-   * actually flipped — already-unblocked rows, unknown streams, and
-   * filter matches that aren't blocked are silently skipped.
-   *
-   * `retry = -1` matches the InMemoryStore convention: claim() bumps
-   * retry on every acquisition, so storing -1 means the first claim
-   * after unblock returns retry=0 ("first attempt"). Storing 0 would
-   * mis-report the post-recovery attempt as a continuation of the
-   * failed sequence. See {@link Store.unblock}.
-   *
-   * @returns Count of streams that were actually flipped (were blocked).
-   */
+  /** `retry = -1`, so the first claim after unblock reports attempt 0. */
   unblock(input: string[] | StreamFilter): Promise<number> {
     // Always restricted to blocked rows, whatever the filter says: there is
     // no use case for "unblock unblocked streams."
@@ -1751,20 +1566,6 @@ export class PostgresStore implements Store {
     );
   }
 
-  /**
-   * Bulk-update priority of streams matching `filter`.
-   *
-   * Filter semantics mirror {@link query_streams}: regex on `stream` /
-   * `source` by default, exact match with the `_exact` flags,
-   * `blocked` restricts to blocked or unblocked rows. Empty filter
-   * (`{}`) updates every registered stream.
-   *
-   * Unlike {@link subscribe} (which keeps `max()` of registered
-   * priorities), this sets the priority outright — operator override
-   * for the build-time scheduling policy.
-   *
-   * @returns Count of streams whose priority changed.
-   */
   prioritize(filter: StreamFilter, priority: number): Promise<number> {
     return this._update(
       filter,
@@ -1774,16 +1575,6 @@ export class PostgresStore implements Store {
     );
   }
 
-  /**
-   * Streams subscription positions to a callback, ordered by stream name,
-   * along with the highest event id in the store.
-   *
-   * Filters (`stream`, `source`, `blocked`, `after`, `limit`) are applied
-   * server-side. `stream`/`source` are regex by default (`~`), or exact
-   * with `*_exact: true` — same convention as {@link Store.query}.
-   *
-   * @returns `maxEventId` and the `count` of positions emitted.
-   */
   async query_streams(
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
@@ -1863,31 +1654,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Per-stream aggregated stats — see {@link Store.query_stats}.
-   *
-   * Two code paths chosen by the requested stats:
-   *
-   * - **Heads-only path** (no `count`, no `names`): one or two
-   *   `SELECT DISTINCT ON (stream) ... ORDER BY stream, version DESC|ASC`
-   *   queries, executed in parallel when `tail: true`. The
-   *   `(stream, version)` unique index gives index-only access — K rows
-   *   touched per query (K = matched streams), not N (events).
-   *   Ordering by `version` (not `id`) is equivalent within a stream
-   *   (versions are monotonic per stream and events are committed
-   *   sequentially) and is the column actually indexed.
-   *
-   * - **Full-scan path** (`count` or `names` set): one CTE materializes
-   *   the filtered events, then `GROUP BY stream, name` →
-   *   `jsonb_object_agg(name, n)` for the `names` map plus per-stream
-   *   `COUNT(*)` for `count`. Heads (and `tails` when requested) come
-   *   from `DISTINCT ON` over the same CTE — they ride free on the
-   *   already-paid scan.
-   *
-   * The stream universe is derived from the events table: the filter
-   * (`stream` / `stream_exact` only) matches event-bearing streams, not
-   * subscription rows.
-   */
+  /** Heads only when no `count`/`names` is asked for; otherwise one full scan. */
   async query_stats<E extends Schemas>(
     input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
     options?: QueryStatsOptions<E>
@@ -1967,9 +1734,8 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Cheap path: index-only DISTINCT ON for the head per stream, plus an
-   * optional second query (in parallel) for the tail. K rows touched
-   * per query, not N events.
+   * Index-only `DISTINCT ON` over `(stream, version)`: one row per stream,
+   * not per event. Version order equals id order within a stream.
    */
   private async _query_stats_heads_only<E extends Schemas>(
     from_clause: string,
@@ -2016,11 +1782,7 @@ export class PostgresStore implements Store {
     return out;
   }
 
-  /**
-   * Full-scan path: one CTE-based query computes the per-stream
-   * `COUNT(*)` and `jsonb_object_agg(name, n)` map alongside the head
-   * (and tail when requested). All extras share the single events scan.
-   */
+  /** One CTE scan gives counts, the name map, heads and tails together. */
   private async _query_stats_full_scan<E extends Schemas>(
     from_clause: string,
     where_clause: string,
@@ -2129,32 +1891,10 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Implementation of the optional `Store.notify` hook. Bound onto
-   * `this.notify` in the constructor when `config.notify === true`,
-   * left detached otherwise — see {@link Config.notify}.
-   *
-   * Checks out a dedicated long-lived client from the pool, runs
-   * `LISTEN act_commit_<schema>_<table>`, and parses each incoming
-   * notification payload. The handler is invoked exactly once per
-   * **remote** commit — payloads originating from this same store
-   * instance (matched by the per-instance `_by` UUID) are silently
-   * skipped, giving callers a clean cross-process semantic.
-   *
-   * Multiple subscriptions on the same store instance are not supported —
-   * this method releases any prior LISTEN client before opening a new one.
-   * The returned disposer cleanly UNLISTENs and releases the dedicated
-   * client; pool disposal also tears the subscription down as a safety
-   * net.
-   *
-   * The subscription is **self-healing**: the dedicated client
-   * has an `error` listener that, on a connection blip (backend restart,
-   * failover, network drop), tears the dead client down and re-LISTENs
-   * on a fresh one with capped exponential backoff — degrading to the
-   * poll path in between. A pending reconnect is cancelled by disposal,
-   * so no reconnect fires after teardown.
-   *
-   * @param handler Called for each cross-process commit notification.
-   * @returns Disposer that releases the LISTEN client.
+   * `Store.notify`, bound only when `config.notify` is set. One dedicated
+   * LISTEN client per store (a new call replaces the old); this store's own
+   * commits are skipped by `_by`. Self-heals after a client `error` with
+   * capped backoff, polling in between.
    */
   private async _subscribe_notifications(
     handler: (notification: StoreNotification) => void
@@ -2183,14 +1923,7 @@ export class PostgresStore implements Store {
     };
   }
 
-  /**
-   * Check out a dedicated client, attach the notification + error
-   * listeners, and run `LISTEN`. Shared by the initial subscription and
-   * every reconnect. On any failure before `LISTEN` succeeds the
-   * client is detached and destroyed so nothing leaks — the caller
-   * decides whether to propagate (initial subscribe) or reschedule
-   * (reconnect).
-   */
+  /** Shared by subscribe and reconnect; a failure destroys the client so nothing leaks. */
   private async _open_listen(
     handler: (notification: StoreNotification) => void
   ): Promise<void> {
@@ -2299,14 +2032,7 @@ export class PostgresStore implements Store {
     this._reconnect_attempts = 0;
   }
 
-  /**
-   * Self-heal the LISTEN subscription after the dedicated client emitted
-   * `error`. Detaches and destroys the dead client, then
-   * reconnects on a fresh one with capped exponential backoff. Bails
-   * immediately if the subscription was disposed while a reconnect was
-   * pending (`_notify_handler` cleared by `_teardown_listen`), so no
-   * reconnect ever fires after teardown.
-   */
+  /** Bails once disposed (`_notify_handler` cleared), so nothing fires after teardown. */
   private _reconnect(): void {
     const handler = this._notify_handler;
     // Disposed (or torn down by a re-subscribe) while the error fired —
@@ -2356,15 +2082,6 @@ export class PostgresStore implements Store {
     this._reconnect_timer.unref?.();
   }
 
-  /**
-   * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * Windowed targets (`before` set) prune the prefix below the closest safe
-   * `__snapshot__` instead — no seed, subscriptions untouched, no-op when no
-   * snapshot qualifies.
-   * @param targets - Streams to truncate with optional snapshot state and meta,
-   *   or a `before`/`max_id` boundary for a windowed prefix delete.
-   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
-   */
   async truncate(
     targets: Array<{
       stream: string;
@@ -2474,18 +2191,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Atomically wipe-and-rebuild the store inside a single
-   * `BEGIN`/`COMMIT` transaction.
-   *
-   * On any throw inside the driver the transaction rolls back and the
-   * store ends byte-for-byte unchanged. `TRUNCATE ... RESTART
-   * IDENTITY CASCADE` wipes events + resets the serial sequence to 1;
-   * the streams table is cleared in the same statement via
-   * `CASCADE`-like `DELETE`. Events are inserted one at a time with
-   * explicit columns (skipping `id`) so the serial assigns dense ids
-   * from 1. `created` is preserved verbatim from the source.
-   */
+  /** One transaction; `RESTART IDENTITY` makes the serial assign dense ids from 1. */
   async restore(
     driver: (
       callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
@@ -2541,22 +2247,7 @@ export class PostgresStore implements Store {
     }
   }
 
-  /**
-   * Wipe the sensitive-data payload for every event on the stream — the
-   * physical-erasure side of the sensitive-data epic. Sets
-   * `events.pii` to `NULL` for the stream's events; `events.data` and
-   * the rest of the row are never touched.
-   *
-   * Row-level locks (no table lock), bounded by events-per-stream.
-   * Idempotent — a second call on an already-wiped stream returns `0`.
-   *
-   * Disk reclamation is autovacuum-driven; for strict-deletion
-   * jurisdictions the production checklist documents `VACUUM FULL` as
-   * the operator step.
-   *
-   * @param stream Target stream
-   * @returns Count of events whose `pii` was set to `NULL`
-   */
+  /** Row-level locks only. Disk space returns via autovacuum (`VACUUM FULL` for strict deletion). */
   async forget_pii(stream: string): Promise<number> {
     const r = await this._pool.query(
       `UPDATE ${this._fqt} SET pii = NULL WHERE stream = $1 AND pii IS NOT NULL`,
