@@ -36,11 +36,11 @@ Each lens is one way of looking for things to remove. The retrospective retires 
 
 **Mutation evidence (monthly, CI only).** Retired: the Stryker setup was removed because its vitest runner can't run on vitest 5. Revive it only once upstream supports vitest 5, as one root config run in CI, and compare with the baselines in `history.md`. Surviving mutants are code no test pins down: either behavior that needs one assertion, or code that can go.
 
-**Core or decorator?** For each feature in `@rotorsoft/act` (close and autoclose, archives, audit, restore and transfer, lanes, priority, the breaker), ask whether it could be a `Store` decorator, a builder add-on or a leaf package, the way `act-notify`'s `withBroker` and `act-otel`'s `instrument` are. What does every app pay for it (port methods, `Store` columns, `IAct` methods, options, TCK cases) whether or not it uses it? Moving a shipped feature out is breaking, so the output is a finding and a design question for the user, not a deprecation. PII was examined 2026-10-08 (see `learnings.md`).
+**Core or decorator?** (retired 2026-10-15: three runs, findings only.) For each feature in `@rotorsoft/act` (close and autoclose, archives, audit, restore and transfer, lanes, priority, the breaker), ask whether it could be a `Store` decorator, a builder add-on or a leaf package, the way `act-notify`'s `withBroker` and `act-otel`'s `instrument` are. What does every app pay for it (port methods, `Store` columns, `IAct` methods, options, TCK cases) whether or not it uses it? Moving a shipped feature out is breaking, so the output is a finding and a design question for the user, not a deprecation. PII was examined 2026-10-08 (see `learnings.md`).
 
 ## Packages
 
-**Packages earn their place.** For each of the published `libs/`: who uses it, how often it changes, whether it could fold into a sibling, whether it is still maintained. A published package is public surface (rule 2): the finding is a package that should stop growing or a new one that shouldn't be added, not a removal.
+**Packages earn their place.** (retired 2026-10-15: four runs, no proposal.) For each of the published `libs/`: who uses it, how often it changes, whether it could fold into a sibling, whether it is still maintained. A published package is public surface (rule 2): the finding is a package that should stop growing or a new one that shouldn't be added, not a removal.
 
 ## Infra
 
@@ -75,3 +75,5 @@ Check for these by name; the retrospective adds recurring rejection reasons here
 - A feature that reads another feature's configuration to decide its own behavior (retry timing from the lease length, a stream's lane from its priority, a lease key from the lane set). Each is an edge in the interaction matrix; give the fact one owner.
 - A rule in the store and a guard in the orchestrator that cancels it (or the reverse): two owners for one field.
 - A schedule entry removed before the work it schedules is done (the defer timer dropped due streams before its drain ran). Remove it only once a pass that started after it came due finds nothing.
+- An idle or done test that counts what succeeded instead of what is left to claim: a pass whose claims all defer or fail still has work (2026-10-15: 5 of 12 reactions ran).
+- A recovery promise that rests on another mechanism's threshold or timer (a failed finalize "re-driven by the breaker", which only re-drives once it opens). Probe the single-failure case.

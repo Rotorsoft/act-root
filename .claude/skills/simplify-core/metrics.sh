@@ -39,14 +39,12 @@ echo "| ActOptions fields | $act_options |"
 specs=$(git ls-files '*.spec.ts' | wc -l | tr -d ' ')
 test_lines=$(git ls-files '*.spec.ts' | xargs cat | wc -l | tr -d ' ')
 lib_lines=$(git ls-files 'libs/*/src/*.ts' 'libs/*/src/**/*.ts' | xargs cat | wc -l | tr -d ' ')
-packages=$(git ls-files 'libs/*/package.json' | wc -l | tr -d ' ')
 workflows=$(ls .github/workflows/*.yml | wc -l | tr -d ' ')
 workflow_lines=$(cat .github/workflows/*.yml | wc -l | tr -d ' ')
 doc_lines=$(find docs/docs -name '*.md' -not -path '*/api/*' | xargs cat | wc -l | tr -d ' ')
 claude_md=$(( $(wc -c < CLAUDE.md) / 1024 ))
 
 echo "| spec files / test lines (all libs: $lib_lines src lines) | $specs / $test_lines |"
-echo "| published packages (libs/) | $packages |"
 echo "| CI workflows / lines | $workflows / $workflow_lines |"
 echo "| docs lines (excl. generated API) / CLAUDE.md KB | $doc_lines / $claude_md |"
 echo
