@@ -18,6 +18,7 @@ import type {
   ReactionOptions,
   ReactionPayload,
   Registry,
+  Resolved,
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
@@ -117,6 +118,38 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
+/** A resolver's error message, and the options of the reaction it belongs to. */
+type ResolverFailure = { error: string; options: ReactionOptions };
+
+/**
+ * A resolver threw while matching a leased stream's events. Only that
+ * stream fails: it retries on the reaction's backoff and blocks when the
+ * reaction's budget is spent, like a failing handler.
+ */
+function resolver_failed(
+  lease: Lease,
+  { error, options }: ResolverFailure
+): HandleResult {
+  log().error(error);
+  const block = options.blockOnError && lease.retry >= options.maxRetries;
+  return {
+    lease,
+    handled: 0,
+    acked_at: lease.at,
+    error,
+    ...(block
+      ? { block: true }
+      : {
+          next_attempt_at:
+            Date.now() +
+            compute_backoff_delay(
+              lease.retry,
+              options.backoff ?? DEFAULT_BACKOFF
+            ),
+        }),
+  };
+}
+
 /** Reported once per declaration; every key part is declared, so it stays bounded. */
 function warn_misrouted(
   seen: Set<string>,
@@ -174,7 +207,11 @@ async function run_drain_cycle<
   type FetchEntry = (typeof fetched)[number];
   const fetch_map = new Map<
     string,
-    { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
+    {
+      fetch: FetchEntry;
+      payloads: ReactionPayload<TEvents>[];
+      failed?: ResolverFailure;
+    }
   >();
 
   const fetch_window_at = fetched.reduce(
@@ -184,6 +221,7 @@ async function run_drain_cycle<
 
   for (const f of fetched) {
     const { stream, events } = f;
+    let failed: ResolverFailure | undefined;
     const payloads = events.flatMap((event) => {
       const register = registry.events[event.name];
       if (!register) return [];
@@ -191,7 +229,16 @@ async function run_drain_cycle<
         .filter((reaction) => {
           const resolver = reaction.resolver;
           const dynamic = typeof resolver === "function";
-          const resolved = dynamic ? resolver(event) : resolver;
+          let resolved: Resolved | undefined;
+          try {
+            resolved = dynamic ? resolver(event) : resolver;
+          } catch (error) {
+            failed ??= {
+              error: `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}"): ${String(error)}`,
+              options: reaction.options,
+            };
+            return false;
+          }
           if (!resolved || resolved.target !== stream) return false;
           // A dynamic resolution onto a projection's target: skip and report.
           // Not a throw, which would read as a store failure.
@@ -206,7 +253,7 @@ async function run_drain_cycle<
         })
         .map((reaction) => ({ ...reaction, event }));
     });
-    fetch_map.set(stream, { fetch: f, payloads });
+    fetch_map.set(stream, { fetch: f, payloads, failed });
   }
 
   const handled = await Promise.all(
@@ -237,6 +284,9 @@ async function run_drain_cycle<
         };
         return Promise.resolve(failed);
       }
+      // A resolver threw: this stream fails like a handler would.
+      if (entry.failed)
+        return Promise.resolve(resolver_failed(lease, entry.failed));
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
@@ -466,8 +516,8 @@ export class DrainController<
 
       // Listener throws are contained in `Act.emit`.
       if (acked.length) this._deps.on_acked(acked);
-      // Not contained: a store error inside the close machinery is a real
-      // store failure and must reach the breaker.
+      // The orchestrator contains close failures; anything that still
+      // throws here reaches the breaker.
       if (closeable.length) await this._deps.on_close(closeable);
 
       // After `on_close`, so a failed close never counts as a store success.

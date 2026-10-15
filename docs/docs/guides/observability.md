@@ -52,7 +52,7 @@ It maintains these series (prefix `act_` by default; see the [act-otel README](h
 | Metric | Type | Labels | Use |
 |---|---|---|---|
 | `act_streams_blocked` | gauge | — | **Page on > 0**: poison messages are parked. Polled from `app.blocked_streams()` on each scrape. |
-| `act_errors_total` | counter | `circuit` | **Page on `circuit="open"` growth**: the store is failing |
+| `act_errors_total` | counter | `circuit` | **Page on `circuit="open"` growth**, and on sustained growth in any state: the store is failing |
 | `act_events_committed_total` | counter | `name` | Throughput per event type |
 | `act_reactions_acked_total` | counter | `lane` | Reaction progress per lane |
 | `act_reactions_blocked_total` | counter | `lane` | Quarantine rate per lane |
@@ -149,6 +149,7 @@ The `act-inspector` workspace package is **incident forensics, not continuous mo
 |---|---|---|
 | `act_streams_blocked > 0` for more than a minute | **Page** | A blocked stream means a reaction has stopped making progress and will not self-heal — every minute widens the gap between the event log and its consumers. Recovery is a human decision (`unblock` vs fix-then-unblock). |
 | `act_errors_total{circuit="open"}` growing | **Page** | The drain loop's store is down and the orchestrator has backed off. Commits may still be failing at the edge too. |
+| `act_errors_total` growing for 10+ minutes, whatever `circuit` says | **Page** | A store that fails only one kind of call can keep the breaker closed while every failure still emits `error` — see [What the breaker does not detect](../concepts/error-handling.md#store-failures-only). |
 | `act_commit_concurrency_errors_total` (hand-wired) rate sustained above ~1% of commits | Dashboard, ticket | Occasional conflicts are optimistic concurrency working as designed. A sustained rate means contention on hot streams — an aggregate-boundary design question, not an outage. |
 | `act_settle_duration_ms` (hand-wired) p99 above your lag tolerance | Dashboard, ticket | Reactions are falling behind. Look at lane sizing and handler latency before anything else. |
 | `act_reactions_acked_total` / `act_events_committed_total` throughput | Dashboard only | Capacity planning and anomaly spotting ("why did commits drop to zero at 3am?") — alert on the business symptom, not these numbers directly. |

@@ -705,6 +705,7 @@ import {
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import { cache, default_scope, log, type Scoped, store } from "./ports.js";
+import { StoreError } from "./types/errors.js";
 import type {
   Actor,
   AsOf,
@@ -1254,8 +1255,18 @@ export class Act<
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close: the same machinery as \`app.close\`.
+        // A store failure reaches the breaker; anything else (the archive
+        // callback is app code) is logged here, never counted.
         on_close: async (targets) => {
-          await this._run_close(targets);
+          try {
+            await this._run_close(targets);
+          } catch (error) {
+            if (error instanceof StoreError) throw error;
+            this._logger.error(
+              error,
+              \`Reaction-requested close of \${targets.map((t) => \`"\${t.stream}"\`).join(", ")} failed and was not retried; close it with app.close(...) once the cause is fixed.\`
+            );
+          }
         },
         breaker: this._breaker,
         run_scoped: this._scoped,
@@ -6906,6 +6917,7 @@ import type {
   EventRegister,
   Query,
   Registry,
+  Resolved,
   SchemaRegister,
   Schemas,
   StreamPosition,
@@ -7221,16 +7233,31 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
+    // A resolver threw: the scan stops before that event, so the next one
+    // retries it and nothing past it is lost.
+    let stopped = false;
     const found = await store().query<TEvents>(
       (event) => {
-        last_id = event.id;
+        if (stopped) return;
         const register = this._registry.events[event.name];
         if (register) {
           for (const reaction of register.reactions.values()) {
-            const resolved =
-              typeof reaction.resolver === "function"
-                ? reaction.resolver(event)
-                : reaction.resolver;
+            let resolved: Resolved | undefined;
+            try {
+              resolved =
+                typeof reaction.resolver === "function"
+                  ? reaction.resolver(event)
+                  : reaction.resolver;
+            } catch (error) {
+              stopped = true;
+              report_once(
+                this._reported,
+                \`resolver|\${reaction.handler.name}|\${event.id}\`,
+                \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}"): \${String(error)}. \` +
+                  "Correlation stops before this event until the resolver stops throwing; work already found keeps draining."
+              );
+              return;
+            }
             if (!resolved) continue;
             let lane = resolved.lane;
             if (lane !== undefined && !this._declared_lanes.has(lane)) {
@@ -7289,6 +7316,7 @@ export class CorrelateCycle<
             correlated.set(resolved.target, entry);
           }
         }
+        last_id = event.id;
       },
       // Resolvers see \`pii: null\`: correlate runs actor-less, and one
       // undecryptable row would otherwise stop every stream's reactions.
@@ -7340,7 +7368,7 @@ export class CorrelateCycle<
     }
     // Only a short page proves the log is exhausted; resolving nothing does not.
     this._checkpoint = last_id;
-    this._armed = found === query.limit;
+    this._armed = stopped || found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
@@ -8061,6 +8089,7 @@ import type {
   ReactionOptions,
   ReactionPayload,
   Registry,
+  Resolved,
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
@@ -8160,6 +8189,38 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
+/** A resolver's error message, and the options of the reaction it belongs to. */
+type ResolverFailure = { error: string; options: ReactionOptions };
+
+/**
+ * A resolver threw while matching a leased stream's events. Only that
+ * stream fails: it retries on the reaction's backoff and blocks when the
+ * reaction's budget is spent, like a failing handler.
+ */
+function resolver_failed(
+  lease: Lease,
+  { error, options }: ResolverFailure
+): HandleResult {
+  log().error(error);
+  const block = options.blockOnError && lease.retry >= options.maxRetries;
+  return {
+    lease,
+    handled: 0,
+    acked_at: lease.at,
+    error,
+    ...(block
+      ? { block: true }
+      : {
+          next_attempt_at:
+            Date.now() +
+            compute_backoff_delay(
+              lease.retry,
+              options.backoff ?? DEFAULT_BACKOFF
+            ),
+        }),
+  };
+}
+
 /** Reported once per declaration; every key part is declared, so it stays bounded. */
 function warn_misrouted(
   seen: Set<string>,
@@ -8217,7 +8278,11 @@ async function run_drain_cycle<
   type FetchEntry = (typeof fetched)[number];
   const fetch_map = new Map<
     string,
-    { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
+    {
+      fetch: FetchEntry;
+      payloads: ReactionPayload<TEvents>[];
+      failed?: ResolverFailure;
+    }
   >();
 
   const fetch_window_at = fetched.reduce(
@@ -8227,6 +8292,7 @@ async function run_drain_cycle<
 
   for (const f of fetched) {
     const { stream, events } = f;
+    let failed: ResolverFailure | undefined;
     const payloads = events.flatMap((event) => {
       const register = registry.events[event.name];
       if (!register) return [];
@@ -8234,7 +8300,16 @@ async function run_drain_cycle<
         .filter((reaction) => {
           const resolver = reaction.resolver;
           const dynamic = typeof resolver === "function";
-          const resolved = dynamic ? resolver(event) : resolver;
+          let resolved: Resolved | undefined;
+          try {
+            resolved = dynamic ? resolver(event) : resolver;
+          } catch (error) {
+            failed ??= {
+              error: \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}"): \${String(error)}\`,
+              options: reaction.options,
+            };
+            return false;
+          }
           if (!resolved || resolved.target !== stream) return false;
           // A dynamic resolution onto a projection's target: skip and report.
           // Not a throw, which would read as a store failure.
@@ -8249,7 +8324,7 @@ async function run_drain_cycle<
         })
         .map((reaction) => ({ ...reaction, event }));
     });
-    fetch_map.set(stream, { fetch: f, payloads });
+    fetch_map.set(stream, { fetch: f, payloads, failed });
   }
 
   const handled = await Promise.all(
@@ -8280,6 +8355,9 @@ async function run_drain_cycle<
         };
         return Promise.resolve(failed);
       }
+      // A resolver threw: this stream fails like a handler would.
+      if (entry.failed)
+        return Promise.resolve(resolver_failed(lease, entry.failed));
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
@@ -8509,8 +8587,8 @@ export class DrainController<
 
       // Listener throws are contained in \`Act.emit\`.
       if (acked.length) this._deps.on_acked(acked);
-      // Not contained: a store error inside the close machinery is a real
-      // store failure and must reach the breaker.
+      // The orchestrator contains close failures; anything that still
+      // throws here reaches the breaker.
       if (closeable.length) await this._deps.on_close(closeable);
 
       // After \`on_close\`, so a failed close never counts as a store success.
@@ -27236,8 +27314,9 @@ function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
  * would blow up a Prometheus instance.
  *
  * The alerting split from the observability guide applies: a non-zero
- * \`act_streams_blocked\` and \`act_errors_total{circuit="open"}\` growth are
- * page-worthy; the rest are dashboard material.
+ * \`act_streams_blocked\`, \`act_errors_total{circuit="open"}\` growth, and
+ * sustained \`act_errors_total\` growth in any state are page-worthy; the
+ * rest are dashboard material.
  *
  * **Scrape resilience.** The \`act_streams_blocked\` gauge reads
  * \`blocked_streams()\` inside its per-scrape \`collect()\`. A rejection there
@@ -28719,6 +28798,11 @@ export class PostgresStore implements Store {
         }
         throw error;
       }
+    } catch (error) {
+      // Every other driver error is a StoreError, per the port contract.
+      if (error instanceof ConcurrencyError || error instanceof ValidationError)
+        throw error;
+      throw new StoreError("commit", { cause: error });
     } finally {
       client.release();
     }

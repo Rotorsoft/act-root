@@ -38,7 +38,7 @@ The metric set, all prefixed `act_` (configurable via `prefix`):
 | Metric | Type | Labels | Watch it because |
 |---|---|---|---|
 | `act_streams_blocked` | gauge | — | **Page on > 0** — poison messages are parked |
-| `act_errors_total` | counter | `circuit` | **Page on `circuit="open"` growth** — the store is failing |
+| `act_errors_total` | counter | `circuit` | **Page on `circuit="open"` growth**, and on sustained growth in any state — the store is failing |
 | `act_events_committed_total` | counter | `name` | Throughput per event type |
 | `act_reactions_acked_total` | counter | `lane` | Reaction progress per lane |
 | `act_reactions_blocked_total` | counter | `lane` | Quarantine rate per lane |

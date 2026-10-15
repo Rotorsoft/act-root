@@ -174,6 +174,18 @@ app.on("error", ({ error, circuit }) => {
 
 The framework logs the error regardless of listeners; the event is emitted only when a listener is registered (Node's `EventEmitter` rethrows an unhandled `"error"`).
 
+### Store failures only
+
+The breaker counts store failures, not errors in your code. When application code fails inside one of the loops, the error stays in the loop that ran it, stops only what it breaks, and is logged a bounded number of times. It never emits `error` or opens the breaker:
+
+- **A resolver throws while correlate reads new events.** The scan stops just before that event and is logged once per reaction and event. New events behind it are not matched to reactions; work already found keeps draining. Every later trigger (a commit, a settle) retries from that event, so nothing is lost: once the resolver stops throwing, correlation picks up where it stopped.
+- **A resolver throws while the drain matches a leased stream's events.** Only that stream fails, exactly like a failing handler: it retries on the reaction's backoff and blocks once `maxRetries` is spent (with `blockOnError`). A dynamic target without a `source` reads every stream's events, so one bad event fails every such target. Give resolvers a `source` where you can.
+- **A reaction-requested close fails for any reason other than a `StoreError`** (its archive callback throws, say). It is logged once and not retried; close the stream with `app.close(...)` once the cause is fixed.
+
+Reaction handlers were already contained this way: a throwing handler retries and blocks its own stream.
+
+All the loops share one count of consecutive store failures, and a success from any of them resets it. A store that fails only one kind of call (a single query timing out, say) while the others work can therefore keep the breaker closed. Each failure still logs and emits `error`, so alert on the **rate** of `error` events, broken down by `error.operation`, not on `circuit === "open"` alone.
+
 ## Error Constants
 
 Each error class sets its `name` to one of these constants, which is what serialized or logged errors carry. Match a thrown error in code with `instanceof`; the constants are on `name`, not `message`.

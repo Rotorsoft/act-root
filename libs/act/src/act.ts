@@ -55,6 +55,7 @@ import {
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import { cache, default_scope, log, type Scoped, store } from "./ports.js";
+import { StoreError } from "./types/errors.js";
 import type {
   Actor,
   AsOf,
@@ -604,8 +605,18 @@ export class Act<
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close: the same machinery as `app.close`.
+        // A store failure reaches the breaker; anything else (the archive
+        // callback is app code) is logged here, never counted.
         on_close: async (targets) => {
-          await this._run_close(targets);
+          try {
+            await this._run_close(targets);
+          } catch (error) {
+            if (error instanceof StoreError) throw error;
+            this._logger.error(
+              error,
+              `Reaction-requested close of ${targets.map((t) => `"${t.stream}"`).join(", ")} failed and was not retried; close it with app.close(...) once the cause is fixed.`
+            );
+          }
         },
         breaker: this._breaker,
         run_scoped: this._scoped,
