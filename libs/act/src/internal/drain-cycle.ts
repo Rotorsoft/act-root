@@ -22,7 +22,6 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
-import { AppCodeError } from "./app-code-error.js";
 import { compute_backoff_delay } from "./backoff.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import {
@@ -119,6 +118,9 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
+/** A resolver's error message, and the options of the reaction it belongs to. */
+type ResolverFailure = { error: string; options: ReactionOptions };
+
 /**
  * A resolver threw while matching a leased stream's events. Only that
  * stream fails: it retries on the reaction's backoff and blocks when the
@@ -126,7 +128,7 @@ function fetch_failure_policy<
  */
 function resolver_failed(
   lease: Lease,
-  { error, options }: { error: AppCodeError; options: ReactionOptions }
+  { error, options }: ResolverFailure
 ): HandleResult {
   log().error(error);
   const block = options.blockOnError && lease.retry >= options.maxRetries;
@@ -134,7 +136,7 @@ function resolver_failed(
     lease,
     handled: 0,
     acked_at: lease.at,
-    error: error.message,
+    error,
     ...(block
       ? { block: true }
       : {
@@ -208,7 +210,7 @@ async function run_drain_cycle<
     {
       fetch: FetchEntry;
       payloads: ReactionPayload<TEvents>[];
-      failed?: { error: AppCodeError; options: ReactionOptions };
+      failed?: ResolverFailure;
     }
   >();
 
@@ -219,7 +221,7 @@ async function run_drain_cycle<
 
   for (const f of fetched) {
     const { stream, events } = f;
-    let failed: { error: AppCodeError; options: ReactionOptions } | undefined;
+    let failed: ResolverFailure | undefined;
     const payloads = events.flatMap((event) => {
       const register = registry.events[event.name];
       if (!register) return [];
@@ -232,10 +234,7 @@ async function run_drain_cycle<
             resolved = dynamic ? resolver(event) : resolver;
           } catch (error) {
             failed ??= {
-              error: new AppCodeError(
-                `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}")`,
-                error
-              ),
+              error: `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}"): ${String(error)}`,
               options: reaction.options,
             };
             return false;
@@ -517,8 +516,8 @@ export class DrainController<
 
       // Listener throws are contained in `Act.emit`.
       if (acked.length) this._deps.on_acked(acked);
-      // Not contained: a store error inside the close machinery is a real
-      // store failure and must reach the breaker.
+      // The orchestrator contains close failures; anything that still
+      // throws here reaches the breaker.
       if (closeable.length) await this._deps.on_close(closeable);
 
       // After `on_close`, so a failed close never counts as a store success.
@@ -530,11 +529,8 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      // App code (a close's archive callback) is logged, never counted as a
-      // store failure. A store op that threw: stay armed, retry after the
-      // cooldown.
-      if (error instanceof AppCodeError) this._deps.logger.error(error);
-      else this._deps.breaker.failed(Date.now(), error);
+      // A store op threw: stay armed, retry after the cooldown.
+      this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       // Re-aim at the earliest stream still parked.

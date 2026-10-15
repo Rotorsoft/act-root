@@ -17,7 +17,6 @@
  * @internal
  */
 
-export { AppCodeError } from "./app-code-error.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,

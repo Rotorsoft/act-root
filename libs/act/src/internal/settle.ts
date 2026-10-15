@@ -20,7 +20,6 @@ import type {
   Schemas,
   SettleOptions,
 } from "../types/index.js";
-import { AppCodeError } from "./app-code-error.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 
 /**
@@ -46,12 +45,6 @@ export type SettleDeps<TEvents extends Schemas> = {
    * to the `error` lifecycle event.
    */
   readonly breaker: CircuitBreaker;
-  /**
-   * Opens when app code (a resolver) failed the scan. Correlate is skipped
-   * while it is open, so a broken resolver retries once per cooldown
-   * instead of on every commit; draining work already found carries on.
-   */
-  readonly paused: CircuitBreaker;
 };
 
 /**
@@ -128,22 +121,16 @@ export class SettleLoop<TEvents extends Schemas> {
         // `maxPasses` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const after_before = this._deps.checkpoint();
-          const { subscribed, last_id, scanned } =
-            this._deps.paused.state(Date.now()) === "open"
-              ? { subscribed: 0, last_id: after_before, scanned: false }
-              : await this._deps.correlate({
-                  ...correlate_query,
-                  after: after_before,
-                });
+          const { subscribed, last_id, scanned } = await this._deps.correlate({
+            ...correlate_query,
+            after: after_before,
+          });
           // A scan that reached the store and came back is a real health
           // signal; a disarmed pass that returned without touching it is not.
           // Recording the latter would re-close an OPEN breaker mid-outage and
           // let the drain below hammer a store nobody has heard from — so the
           // question is asked per pass.
-          if (scanned) {
-            this._deps.breaker.passed();
-            this._deps.paused.passed();
-          }
+          if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           settled_drain = settled_drain
             ? {
@@ -168,11 +155,10 @@ export class SettleLoop<TEvents extends Schemas> {
         if (settled_drain) this._deps.on_settled(settled_drain);
       })()
         .catch((err) => {
-          // App code failing is not the store failing: pause discovery
-          // instead of counting it on the store breaker.
-          if (err instanceof AppCodeError)
-            this._deps.paused.failed(Date.now(), err);
-          else this._deps.breaker.failed(Date.now(), err);
+          // correlate / init failed (a store op). Record on the shared
+          // breaker, which logs it and surfaces the `error` event; the
+          // drain loop reads the same breaker to pace itself.
+          this._deps.breaker.failed(Date.now(), err);
         })
         .finally(() => {
           this._running = false;

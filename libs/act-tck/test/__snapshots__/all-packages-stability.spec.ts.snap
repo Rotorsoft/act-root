@@ -660,7 +660,6 @@ import {
 } from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
-  AppCodeError,
   type AuditDeps,
   audit,
   bare_patch,
@@ -706,6 +705,7 @@ import {
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
 import { cache, default_scope, log, type Scoped, store } from "./ports.js";
+import { StoreError } from "./types/errors.js";
 import type {
   Actor,
   AsOf,
@@ -959,25 +959,6 @@ export type ActOptions<TLanes extends string = string> = {
 };
 
 /** Reject \`onlyLanes\` entries that reference undeclared lanes. */
-/**
- * A reaction-requested close runs the app's archive callback inside the
- * drain; tag its failure as app code so it never counts as a store failure.
- */
-function tag_archive_errors(target: CloseTarget): CloseTarget {
-  const { archive } = target;
-  if (!archive) return target;
-  return {
-    ...target,
-    archive: () =>
-      archive().catch((error: unknown) => {
-        throw new AppCodeError(
-          \`Archive callback for close of "\${target.stream}" threw\`,
-          error
-        );
-      }),
-  };
-}
-
 function validate_only_lanes(
   options: ActOptions,
   lanes: ReadonlyArray<LaneConfig>
@@ -1029,8 +1010,6 @@ export class Act<
 {
   private _emitter = new EventEmitter();
   private readonly _breaker: CircuitBreaker;
-  /** Opens when a resolver fails correlate; see {@link SettleLoop}. */
-  private readonly _correlation_paused: CircuitBreaker;
   private readonly _listen: boolean;
   private readonly _drain: boolean;
   private readonly _reactive_events: ReadonlySet<string>;
@@ -1215,7 +1194,6 @@ export class Act<
     // Order matters: controllers read the breaker, the audit bag reads the
     // controller set, settle reads the correlate cycle.
     this._breaker = this._build_breaker(options);
-    this._correlation_paused = this._build_correlation_pause(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
     this._advise_orphaned_lanes(options);
     this._audit_deps = this._build_audit_deps();
@@ -1238,27 +1216,6 @@ export class Act<
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // When the cooldown elapses, settle once: its scan or claim is the
         // half-open probe that closes or re-opens the breaker.
-        on_retry: () => {
-          this.settle({ debounceMs: 0 });
-        },
-      }
-    );
-  }
-
-  /**
-   * Opens on the first app-code failure in correlate and retries once per
-   * cooldown, so a broken resolver logs once per retry, not per commit.
-   */
-  private _build_correlation_pause(options: ActOptions): CircuitBreaker {
-    const { cooldownMs } = resolveCircuitBreakerConfig(options.circuitBreaker);
-    return new CircuitBreaker(
-      { failureThreshold: 1, cooldownMs },
-      {
-        on_error: (error) =>
-          this._logger.error(
-            error,
-            \`Correlation paused: new events are not matched to reactions until this is fixed. Work already found keeps draining. Retrying in \${cooldownMs}ms.\`
-          ),
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
@@ -1298,8 +1255,18 @@ export class Act<
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close: the same machinery as \`app.close\`.
+        // A store failure reaches the breaker; anything else (the archive
+        // callback is app code) is logged here, never counted.
         on_close: async (targets) => {
-          await this._run_close(targets.map(tag_archive_errors));
+          try {
+            await this._run_close(targets);
+          } catch (error) {
+            if (error instanceof StoreError) throw error;
+            this._logger.error(
+              error,
+              \`Reaction-requested close of \${targets.map((t) => \`"\${t.stream}"\`).join(", ")} failed and was not retried; close it with app.close(...) once the cause is fixed.\`
+            );
+          }
         },
         breaker: this._breaker,
         run_scoped: this._scoped,
@@ -1396,7 +1363,6 @@ export class Act<
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
-        paused: this._correlation_paused,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -1435,7 +1401,6 @@ export class Act<
         if (disposer) await disposer();
         this._settle.stop();
         this._breaker.stop();
-        this._correlation_paused.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
         // Hand the correlation lease back last, after the wait (a settle
@@ -3756,22 +3721,6 @@ export interface IAct<
    * @returns Count of events whose PII column was set to NULL.
    */
   forget(stream: string): Promise<{ eventCount: number }>;
-}
-
-// === app-code-error.ts ===
-/**
- * An error thrown by application code (a resolver, a close archive callback)
- * while a framework loop was running it. The loops keep it off the store
- * circuit breaker: the store is healthy, the code is not.
- */
-export class AppCodeError extends Error {
-  constructor(context: string, cause: unknown) {
-    super(
-      \`\${context}: \${cause instanceof Error ? cause.message : String(cause)}\`,
-      { cause }
-    );
-    this.name = "AppCodeError";
-  }
 }
 
 // === audit.ts ===
@@ -6975,7 +6924,6 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
-import { AppCodeError } from "./app-code-error.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -7285,9 +7233,12 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
+    // A resolver threw: the scan stops before that event, so the next one
+    // retries it and nothing past it is lost.
+    let stopped = false;
     const found = await store().query<TEvents>(
       (event) => {
-        last_id = event.id;
+        if (stopped) return;
         const register = this._registry.events[event.name];
         if (register) {
           for (const reaction of register.reactions.values()) {
@@ -7298,11 +7249,14 @@ export class CorrelateCycle<
                   ? reaction.resolver(event)
                   : reaction.resolver;
             } catch (error) {
-              // Stops the scan at this event; settle pauses discovery.
-              throw new AppCodeError(
-                \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}")\`,
-                error
+              stopped = true;
+              report_once(
+                this._reported,
+                \`resolver|\${reaction.handler.name}|\${event.id}\`,
+                \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}"): \${String(error)}. \` +
+                  "Correlation stops before this event until the resolver stops throwing; work already found keeps draining."
               );
+              return;
             }
             if (!resolved) continue;
             let lane = resolved.lane;
@@ -7362,6 +7316,7 @@ export class CorrelateCycle<
             correlated.set(resolved.target, entry);
           }
         }
+        last_id = event.id;
       },
       // Resolvers see \`pii: null\`: correlate runs actor-less, and one
       // undecryptable row would otherwise stop every stream's reactions.
@@ -7413,7 +7368,7 @@ export class CorrelateCycle<
     }
     // Only a short page proves the log is exhausted; resolving nothing does not.
     this._checkpoint = last_id;
-    this._armed = found === query.limit;
+    this._armed = stopped || found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
@@ -8138,7 +8093,6 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
-import { AppCodeError } from "./app-code-error.js";
 import { compute_backoff_delay } from "./backoff.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import {
@@ -8235,6 +8189,9 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
+/** A resolver's error message, and the options of the reaction it belongs to. */
+type ResolverFailure = { error: string; options: ReactionOptions };
+
 /**
  * A resolver threw while matching a leased stream's events. Only that
  * stream fails: it retries on the reaction's backoff and blocks when the
@@ -8242,7 +8199,7 @@ function fetch_failure_policy<
  */
 function resolver_failed(
   lease: Lease,
-  { error, options }: { error: AppCodeError; options: ReactionOptions }
+  { error, options }: ResolverFailure
 ): HandleResult {
   log().error(error);
   const block = options.blockOnError && lease.retry >= options.maxRetries;
@@ -8250,7 +8207,7 @@ function resolver_failed(
     lease,
     handled: 0,
     acked_at: lease.at,
-    error: error.message,
+    error,
     ...(block
       ? { block: true }
       : {
@@ -8324,7 +8281,7 @@ async function run_drain_cycle<
     {
       fetch: FetchEntry;
       payloads: ReactionPayload<TEvents>[];
-      failed?: { error: AppCodeError; options: ReactionOptions };
+      failed?: ResolverFailure;
     }
   >();
 
@@ -8335,7 +8292,7 @@ async function run_drain_cycle<
 
   for (const f of fetched) {
     const { stream, events } = f;
-    let failed: { error: AppCodeError; options: ReactionOptions } | undefined;
+    let failed: ResolverFailure | undefined;
     const payloads = events.flatMap((event) => {
       const register = registry.events[event.name];
       if (!register) return [];
@@ -8348,10 +8305,7 @@ async function run_drain_cycle<
             resolved = dynamic ? resolver(event) : resolver;
           } catch (error) {
             failed ??= {
-              error: new AppCodeError(
-                \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}")\`,
-                error
-              ),
+              error: \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}"): \${String(error)}\`,
               options: reaction.options,
             };
             return false;
@@ -8633,8 +8587,8 @@ export class DrainController<
 
       // Listener throws are contained in \`Act.emit\`.
       if (acked.length) this._deps.on_acked(acked);
-      // Not contained: a store error inside the close machinery is a real
-      // store failure and must reach the breaker.
+      // The orchestrator contains close failures; anything that still
+      // throws here reaches the breaker.
       if (closeable.length) await this._deps.on_close(closeable);
 
       // After \`on_close\`, so a failed close never counts as a store success.
@@ -8646,11 +8600,8 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      // App code (a close's archive callback) is logged, never counted as a
-      // store failure. A store op that threw: stay armed, retry after the
-      // cooldown.
-      if (error instanceof AppCodeError) this._deps.logger.error(error);
-      else this._deps.breaker.failed(Date.now(), error);
+      // A store op threw: stay armed, retry after the cooldown.
+      this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       // Re-aim at the earliest stream still parked.
@@ -10946,7 +10897,6 @@ export * from "./utils.js";
  * @internal
  */
 
-export { AppCodeError } from "./app-code-error.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutoclosePolicy,
@@ -15020,7 +14970,6 @@ import type {
   Schemas,
   SettleOptions,
 } from "../types/index.js";
-import { AppCodeError } from "./app-code-error.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 
 /**
@@ -15046,12 +14995,6 @@ export type SettleDeps<TEvents extends Schemas> = {
    * to the \`error\` lifecycle event.
    */
   readonly breaker: CircuitBreaker;
-  /**
-   * Opens when app code (a resolver) failed the scan. Correlate is skipped
-   * while it is open, so a broken resolver retries once per cooldown
-   * instead of on every commit; draining work already found carries on.
-   */
-  readonly paused: CircuitBreaker;
 };
 
 /**
@@ -15128,22 +15071,16 @@ export class SettleLoop<TEvents extends Schemas> {
         // \`maxPasses\` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const after_before = this._deps.checkpoint();
-          const { subscribed, last_id, scanned } =
-            this._deps.paused.state(Date.now()) === "open"
-              ? { subscribed: 0, last_id: after_before, scanned: false }
-              : await this._deps.correlate({
-                  ...correlate_query,
-                  after: after_before,
-                });
+          const { subscribed, last_id, scanned } = await this._deps.correlate({
+            ...correlate_query,
+            after: after_before,
+          });
           // A scan that reached the store and came back is a real health
           // signal; a disarmed pass that returned without touching it is not.
           // Recording the latter would re-close an OPEN breaker mid-outage and
           // let the drain below hammer a store nobody has heard from — so the
           // question is asked per pass.
-          if (scanned) {
-            this._deps.breaker.passed();
-            this._deps.paused.passed();
-          }
+          if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           settled_drain = settled_drain
             ? {
@@ -15168,11 +15105,10 @@ export class SettleLoop<TEvents extends Schemas> {
         if (settled_drain) this._deps.on_settled(settled_drain);
       })()
         .catch((err) => {
-          // App code failing is not the store failing: pause discovery
-          // instead of counting it on the store breaker.
-          if (err instanceof AppCodeError)
-            this._deps.paused.failed(Date.now(), err);
-          else this._deps.breaker.failed(Date.now(), err);
+          // correlate / init failed (a store op). Record on the shared
+          // breaker, which logs it and surfaces the \`error\` event; the
+          // drain loop reads the same breaker to pace itself.
+          this._deps.breaker.failed(Date.now(), err);
         })
         .finally(() => {
           this._running = false;

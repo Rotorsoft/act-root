@@ -17,7 +17,6 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
-import { AppCodeError } from "./app-code-error.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -327,9 +326,12 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
+    // A resolver threw: the scan stops before that event, so the next one
+    // retries it and nothing past it is lost.
+    let stopped = false;
     const found = await store().query<TEvents>(
       (event) => {
-        last_id = event.id;
+        if (stopped) return;
         const register = this._registry.events[event.name];
         if (register) {
           for (const reaction of register.reactions.values()) {
@@ -340,11 +342,14 @@ export class CorrelateCycle<
                   ? reaction.resolver(event)
                   : reaction.resolver;
             } catch (error) {
-              // Stops the scan at this event; settle pauses discovery.
-              throw new AppCodeError(
-                `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}")`,
-                error
+              stopped = true;
+              report_once(
+                this._reported,
+                `resolver|${reaction.handler.name}|${event.id}`,
+                `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}"): ${String(error)}. ` +
+                  "Correlation stops before this event until the resolver stops throwing; work already found keeps draining."
               );
+              return;
             }
             if (!resolved) continue;
             let lane = resolved.lane;
@@ -404,6 +409,7 @@ export class CorrelateCycle<
             correlated.set(resolved.target, entry);
           }
         }
+        last_id = event.id;
       },
       // Resolvers see `pii: null`: correlate runs actor-less, and one
       // undecryptable row would otherwise stop every stream's reactions.
@@ -455,7 +461,7 @@ export class CorrelateCycle<
     }
     // Only a short page proves the log is exhausted; resolving nothing does not.
     this._checkpoint = last_id;
-    this._armed = found === query.limit;
+    this._armed = stopped || found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 

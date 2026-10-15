@@ -1,14 +1,13 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, log, state, store } from "../src/index.js";
-import { AppCodeError } from "../src/internal/app-code-error.js";
 import { CloseSignal } from "../src/internal/close-signal.js";
 
 /**
  * App code failing inside a framework loop (a resolver, a close's archive
- * callback) is not the store failing. It never counts on the store circuit
- * breaker and never emits `error`; it stops only what it breaks, and its
- * logs stay bounded.
+ * callback) never leaves the loop that ran it: it stops only what it
+ * breaks, logs a bounded number of lines, and never emits `error` or counts
+ * on the store circuit breaker.
  */
 
 const Counter = state({ Counter: z.object({ n: z.number() }) })
@@ -20,7 +19,11 @@ const Counter = state({ Counter: z.object({ n: z.number() }) })
   .build();
 
 const actor = { id: "a", name: "a" };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const messages = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.map(([e, msg]) =>
+    String(msg ?? (e instanceof Error ? e.message : e))
+  );
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -28,7 +31,7 @@ afterEach(async () => {
 });
 
 describe("a resolver that throws during correlate", () => {
-  it("pauses discovery, stays off the store breaker, and resumes without losing the event", async () => {
+  it("stops the scan before that event, logs once, and resumes without losing it", async () => {
     store(new InMemoryStore());
     let broken = true;
     let calls = 0;
@@ -41,43 +44,34 @@ describe("a resolver that throws during correlate", () => {
       })
       .to((event) => {
         calls++;
-        if (broken) throw new Error("resolver bug");
+        if (broken && event.stream === "s1") throw new Error("resolver bug");
         return { target: `t-${event.stream}` };
       })
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 100 } });
+      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
     const errors: unknown[] = [];
     app.on("error", (e) => errors.push(e));
-    const logged = vi.spyOn(log(), "error");
+    const logged = vi.spyOn(log(), "error").mockImplementation(() => {});
 
-    await app.do("bump", { stream: "s1", actor }, {});
-    app.settle({ debounceMs: 0 });
-    await vi.waitFor(() =>
-      expect(logged).toHaveBeenCalledWith(
-        expect.any(AppCodeError),
-        expect.stringContaining("Correlation paused")
-      )
-    );
-    const first = logged.mock.calls[0][0] as unknown as AppCodeError;
-    expect(first.message).toContain('Resolver of reaction "react" threw');
-    expect(first.message).toContain("resolver bug");
-
-    // While paused, more commits don't run the resolver again.
-    const paused_at = calls;
-    for (const stream of ["s2", "s3"]) {
+    // s1 fails; s2 and s3 sit behind it and must wait, not be skipped.
+    for (const stream of ["s1", "s2", "s3"]) {
       await app.do("bump", { stream, actor }, {});
-      app.settle({ debounceMs: 0 });
+      await app.correlate();
+      await app.drain();
     }
-    await sleep(30);
-    expect(calls).toBe(paused_at);
-
-    // Fixed: the pause's own retry resumes at the failing event.
-    broken = false;
-    await vi.waitFor(
-      () => expect(handled.sort()).toEqual(["t-s1", "t-s2", "t-s3"]),
-      { timeout: 2000 }
+    expect(handled).toEqual([]);
+    expect(calls).toBeGreaterThan(1); // retried on every trigger...
+    const reports = messages(logged).filter((m) =>
+      m.includes('Resolver of reaction "react" threw on Bumped')
     );
+    expect(reports).toHaveLength(1); // ...but logged once
+    expect(reports[0]).toContain("resolver bug");
     // A threshold-1 store breaker would have opened on the first failure.
     expect(errors).toHaveLength(0);
+
+    broken = false;
+    await app.correlate();
+    await app.drain();
+    expect(handled.sort()).toEqual(["t-s1", "t-s2", "t-s3"]);
   });
 });
 
@@ -134,7 +128,7 @@ describe("a resolver that throws during drain", () => {
       .on("Bumped")
       .do(async function react() {}, { maxRetries: 3, blockOnError: true })
       .to((event) => {
-        if (fail) throw new Error("drain-time bug");
+        if (fail) throw "drain-time bug";
         return { target: `t-${event.stream}`, source: event.stream };
       })
       .build();
@@ -160,7 +154,7 @@ describe("a resolver that throws during drain", () => {
 });
 
 describe("a reaction-requested close whose archive callback throws", () => {
-  it("is logged as app code and never counts on the store breaker", async () => {
+  it("is logged and never counts on the store breaker", async () => {
     store(new InMemoryStore());
     const app = act()
       .withState(Counter)
@@ -182,23 +176,10 @@ describe("a reaction-requested close whose archive callback throws", () => {
     await app.drain();
 
     expect(errors).toHaveLength(0);
-    const app_errors = logged.mock.calls
-      .map(([e]) => e as unknown)
-      .filter((e) => e instanceof AppCodeError);
-    expect(app_errors).toHaveLength(1);
-    expect((app_errors[0] as Error).message).toContain(
-      'Archive callback for close of "c1" threw: s3 down'
-    );
-  });
-});
-
-describe("AppCodeError", () => {
-  it("names the context and keeps the cause, whatever was thrown", () => {
-    const from_error = new AppCodeError("ctx", new Error("boom"));
-    expect(from_error.message).toBe("ctx: boom");
-    expect(from_error.name).toBe("AppCodeError");
-    const from_string = new AppCodeError("ctx", "boom");
-    expect(from_string.message).toBe("ctx: boom");
-    expect(from_string.cause).toBe("boom");
+    expect(
+      messages(logged).filter((m) =>
+        m.includes('Reaction-requested close of "c1" failed')
+      )
+    ).toHaveLength(1);
   });
 });

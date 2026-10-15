@@ -176,11 +176,11 @@ The framework logs the error regardless of listeners; the event is emitted only 
 
 ### Store failures only
 
-The breaker counts store failures, not errors in your code. When application code fails inside one of the loops, Act stops only what that code breaks and keeps the logs bounded. It never emits `error` or opens the breaker:
+The breaker counts store failures, not errors in your code. When application code fails inside one of the loops, the error stays in the loop that ran it, stops only what it breaks, and is logged a bounded number of times. It never emits `error` or opens the breaker:
 
-- **A resolver throws while correlate reads new events.** Correlation pauses at that event: new events are not matched to reactions, while work already found keeps draining. It retries once per `cooldownMs` and logs one `Correlation paused` line per retry, naming the reaction and the event. Nothing is lost. Once the resolver is fixed, the next retry resumes from the event that failed.
+- **A resolver throws while correlate reads new events.** The scan stops just before that event and is logged once per reaction and event. New events behind it are not matched to reactions; work already found keeps draining. Every later trigger (a commit, a settle) retries from that event, so nothing is lost: once the resolver stops throwing, correlation picks up where it stopped.
 - **A resolver throws while the drain matches a leased stream's events.** Only that stream fails, exactly like a failing handler: it retries on the reaction's backoff and blocks once `maxRetries` is spent (with `blockOnError`). A dynamic target without a `source` reads every stream's events, so one bad event fails every such target. Give resolvers a `source` where you can.
-- **The archive callback of a reaction-requested close throws.** It is logged once; the close does not happen.
+- **A reaction-requested close fails for any reason other than a `StoreError`** (its archive callback throws, say). It is logged once and not retried; close the stream with `app.close(...)` once the cause is fixed.
 
 Reaction handlers were already contained this way: a throwing handler retries and blocks its own stream.
 

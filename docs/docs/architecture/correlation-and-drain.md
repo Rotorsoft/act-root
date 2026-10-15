@@ -31,7 +31,7 @@ The resolver answers "for this event, which target stream processes the reaction
 :::caution Resolvers must be pure
 A dynamic resolver is evaluated **more than once for the same event**: once in `correlate()` to discover and subscribe the target stream, and again in `run_drain_cycle()` to match an event back to the leased stream it belongs to. Those two passes run over separately-fetched event instances and, under competing consumers, often in **different processes** — so the result is never cached or shared between them. A resolver must therefore be a pure function of the event: same event in, same `{ target, source? }` out, with no side effects and no dependence on wall-clock time, external state, or call count. A non-deterministic resolver can subscribe one stream and then match a different one, silently stranding the reaction. Keep resolvers cheap, too — the per-event cost is paid in both phases.
 
-A resolver that throws pauses correlation at that event (or, during the drain, fails just the stream it was matching); see [Error handling § Store failures only](../concepts/error-handling.md#store-failures-only).
+A resolver that throws stops correlation just before that event until it stops throwing (or, during the drain, fails just the stream it was matching); see [Error handling § Store failures only](../concepts/error-handling.md#store-failures-only).
 :::
 
 Build-time classification (`builders/build-classify.ts`) walks the registry, partitions resolvers by kind, and stashes:
