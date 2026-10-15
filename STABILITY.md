@@ -114,7 +114,7 @@ We remove public surface slowly and with warning. The general rule: **a deprecat
 
 Every breaking (major) release ships a migration guide in the **same PR** that lands the breaking change, so the upgrade path is documented before the version is cut. The conventions, page template, and release-PR checklist live in [MIGRATING.md](MIGRATING.md).
 
-The documentation site is [versioned](https://docusaurus.io/docs/versioning): the live `docs/` folder is the **Current** set and tracks the latest API, while each released line is snapshotted under `docs/versioned_docs/` and selectable from the navbar version dropdown. Older-major users get a pinned reference; the migration guide for a release sits next to the API docs it describes.
+The live `docs/` folder tracks the latest API and is not frozen with releases. When a new major ships, the previous line is [snapshotted](https://docusaurus.io/docs/versioning) under `docs/versioned_docs/` and a version dropdown appears, so older-major users keep a pinned reference. Until then there is one set of docs.
 
 The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md): the `1.x` line ships no breaking change, so the guide documents the upgrade-within-major policy and how to read the versioned docs, and proves the template end to end for the next breaking release to fill in.
 

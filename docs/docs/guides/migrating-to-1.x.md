@@ -12,7 +12,7 @@ sidebar_position: 20
 
 ## TL;DR
 
-The `1.x` line is the first versioned snapshot of Act, and nothing inside it breaks. The [Stability Charter](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md) took effect here: every covered surface — the builder DSL, the `IAct` runtime, the `Store`/`Cache`/`Logger` contracts, the lifecycle events, and the public types — is frozen against breaking changes for the life of the major. So upgrading from one `1.x` release to a newer `1.x` release is the boring kind of upgrade: bump the version, reinstall, run your tests. There is no code to rewrite, because by definition a minor or patch release cannot ask you to.
+The `1.x` line is the first stable line of Act, and nothing inside it breaks. The [Stability Charter](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md) took effect here: every covered surface — the builder DSL, the `IAct` runtime, the `Store`/`Cache`/`Logger` contracts, the lifecycle events, and the public types — is frozen against breaking changes for the life of the major. So upgrading from one `1.x` release to a newer `1.x` release is the boring kind of upgrade: bump the version, reinstall, run your tests. There is no code to rewrite, because by definition a minor or patch release cannot ask you to.
 
 This page exists for two reasons. The first is to say that plainly, so you don't go hunting for a migration you don't have to perform. The second is to prove the migration convention end to end while the stakes are zero — when the first breaking release does land, the author fills in the template below instead of inventing the format under pressure.
 
@@ -20,7 +20,7 @@ This page exists for two reasons. The first is to say that plainly, so you don't
 
 Act follows semantic versioning the strict way the charter describes it. A new feature — a new optional builder method, a new optional field on an options bag, a new lifecycle event name — is additive, ships in a **minor**, and leaves every existing call site compiling and behaving exactly as before. A bug fix that doesn't change a documented contract ships in a **patch**. Only a change that renames a method, removes an export, narrows an output type, or alters the meaning of an existing call counts as breaking, and a breaking change is the one thing a `1.x` release is not allowed to contain. It would force the version to `2.0.0`, and a new major is the only place a migration guide like this one carries instructions.
 
-That guarantee is not aspirational. The public surface is snapshotted by `runStabilityTck` in every package's `test/stability.spec.ts`, so any rename, removal, or signature change shows up as a failing snapshot in the pull request that introduced it — long before it could reach you. If you want to know exactly what that net is stretched over, the charter enumerates it category by category.
+That guarantee is not aspirational. The public surface is snapshotted by `runStabilityTck` in the repo's `test/stability.spec.ts`, which covers every package, so any rename, removal, or signature change shows up as a failing snapshot in the pull request that introduced it — long before it could reach you. If you want to know exactly what that net is stretched over, the charter enumerates it category by category.
 
 ## How to upgrade within the line
 
@@ -34,9 +34,9 @@ Then the same three checks you'd run after any dependency bump, in order of how 
 
 The support window is the backdrop for all of this. While `1.x` is the active line it receives features, fixes, and security patches; there are no long-lived patch branches behind the latest minor, which is exactly why staying current is the recommendation rather than a chore. When a future `2.0` ships, `1.x` enters a maintenance window of at least six months for security and critical-correctness fixes only, and that is the moment this page stops being a formality. The full policy lives in [STABILITY.md § Support window](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#support-window).
 
-## Reading the versioned docs
+## Which docs to read
 
-The documentation site is [versioned](https://docusaurus.io/docs/versioning), and the distinction matters once more than one major exists. The live docs you're reading — the **Current** set — always track the latest API on `master`; they are intentionally *not* frozen with library releases, so a concept page can be corrected or expanded without cutting a new version. Each released line is also snapshotted under `docs/versioned_docs/` and selectable from the **version dropdown** in the navbar. When a `2.x` arrives, a reader still on `1.x` picks `1.x` from that dropdown to get the API reference pinned to the release they actually run, and the `2.x` migration guide sits in the navbar right next to the docs it describes. Today the dropdown offers `1.x` and Current; the mechanism is in place and waiting for the next snapshot.
+The live docs you're reading track the latest API on `master`; they are intentionally *not* frozen with library releases, so a concept page can be corrected or expanded without cutting a new version. While `1.x` is the only line, there is one set of docs. When a `2.x` arrives, the `1.x` docs are [snapshotted](https://docusaurus.io/docs/versioning) and a version dropdown appears in the navbar, so a reader still on `1.x` keeps the reference pinned to the release they run, next to the `2.x` migration guide.
 
 ## Breaking changes
 
