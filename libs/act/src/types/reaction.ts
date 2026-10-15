@@ -41,13 +41,6 @@ import type {
  * };
  * ```
  *
- * @example Triggering another action
- * ```typescript
- * const reduceInventory: ReactionHandler<Events, "OrderPlaced"> = async (event) => {
- *   return ["reduceStock", { amount: event.data.items.length }];
- * };
- * ```
- *
  * @see {@link Reaction} for complete reaction configuration
  */
 export type ReactionHandler<
@@ -82,32 +75,6 @@ export type ReactionHandler<
  * .on("UserCreated")
  *   .do(sendWelcomeEmail)
  *   .to("email-queue") // Static target
- * ```
- *
- * @example Dynamic target per user
- * ```typescript
- * .on("UserLoggedIn")
- *   .do(incrementLoginCount)
- *   .to((event) => ({
- *     target: `stats-${event.stream}` // Dynamic per user
- *   }))
- * ```
- *
- * @example With source optimization
- * ```typescript
- * .on("UserUpdated")
- *   .do(updateReadModel)
- *   .to(({ stream }) => ({
- *     source: stream,           // Only fetch from this user's stream
- *     target: `cache-${stream}` // Update corresponding cache
- *   }))
- * ```
- *
- * @example With priority (saturated worker scheduling)
- * ```typescript
- * .on("OrderConfirmed")
- *   .do(sendCriticalNotification)
- *   .to({ target: "notifications-out", priority: 10 })
  * ```
  *
  * @see {@link Reaction} for complete reaction configuration

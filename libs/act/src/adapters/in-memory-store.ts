@@ -248,27 +248,6 @@ class InMemoryStream {
  * });
  * ```
  *
- * @example Explicit instantiation
- * ```typescript
- * import { InMemoryStore } from "@rotorsoft/act";
- *
- * const testStore = new InMemoryStore();
- * await testStore.seed();
- *
- * // Use for specific test scenarios
- * await testStore.commit("test-stream", events, meta);
- * ```
- *
- * @example Querying events
- * ```typescript
- * const events: any[] = [];
- * await store().query(
- *   (event) => events.push(event),
- *   { stream: "test-stream" }
- * );
- * console.log(`Found ${events.length} events`);
- * ```
- *
  * @see {@link Store} for the interface definition
  * @see {@link PostgresStore} for production use
  * @see {@link store} for injecting stores

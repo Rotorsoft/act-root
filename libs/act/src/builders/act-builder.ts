@@ -243,31 +243,6 @@ export interface ActBuilder<
  *   .build();
  * ```
  *
- * @example Application with custom actor type
- * ```typescript
- * type MyActor = { id: string; name: string; role: string };
- *
- * const app = act()
- *   .withActor<MyActor>()
- *   .withState(Counter)
- *   .build();
- * ```
- *
- * @example Application with slices (vertical slice architecture)
- * ```typescript
- * const CounterSlice = slice()
- *   .withState(Counter)
- *   .on("Incremented")
- *     .do(async (event) => { console.log("incremented!"); })
- *     .to("counter-target")
- *   .build();
- *
- * const app = act()
- *   .withSlice(CounterSlice)
- *   .build();
- * ```
- *
- *
  * @see {@link ActBuilder} for available builder methods
  * @see {@link Act} for orchestrator API methods
  * @see {@link state} for defining states

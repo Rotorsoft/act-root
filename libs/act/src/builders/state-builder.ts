@@ -59,11 +59,6 @@ export type StateBuilder<
    * ```typescript
    * .init(() => ({ count: 0, created: new Date() }))
    * ```
-   *
-   * @example With initial data
-   * ```typescript
-   * .init((data) => ({ ...data, createdAt: new Date() }))
-   * ```
    */
   init: (init: () => Readonly<TState>) => {
     /**
@@ -187,35 +182,6 @@ export type ActionBuilder<
    * .on({ increment: z.object({ by: z.number() }) })
    *   .emit((action) => ["Incremented", { amount: action.by }])
    * ```
-   *
-   * @example Hot-stream action with retry + jittered exponential backoff
-   * ```typescript
-   * .on(
-   *   { transfer: z.object({ amount: z.number() }) },
-   *   {
-   *     maxRetries: 5,
-   *     backoff: { strategy: "exponential", baseMs: 10, maxMs: 200, jitter: true },
-   *   }
-   * )
-   *   .emit((action) => ["Transferred", { amount: action.amount }])
-   * ```
-   *
-   * @example Action with business rules
-   * ```typescript
-   * .on({ withdraw: z.object({ amount: z.number() }) })
-   *   .given([
-   *     { description: "Account must be open", valid: (state) => state.status === "open" },
-   *     { description: "Funds must be available", valid: (state) => state.balance > 0 }
-   *   ])
-   *   .emit((action) => ["Withdrawn", { amount: action.amount }])
-   * ```
-   *
-   * @example Action with shorthand (variable name matches action name)
-   * ```typescript
-   * const OpenTicket = z.object({ title: z.string() });
-   * .on({ OpenTicket })
-   *   .emit((action) => ["TicketOpened", { title: action.title }])
-   * ```
    */
   on: <TKey extends string, TNewActions extends Schema>(
     entry: ActionEntry<TKey, TNewActions>,
@@ -261,11 +227,6 @@ export type ActionBuilder<
        *   const newBalance = snapshot.state.balance + action.amount;
        *   return ["Deposited", { amount: action.amount, newBalance }];
        * })
-       * ```
-       *
-       * @example Passthrough (action payload = event data)
-       * ```typescript
-       * .emit("TicketAssigned")
        * ```
        */
       emit: {
@@ -317,19 +278,6 @@ export type ActionBuilder<
      * ```typescript
      * .emit("Incremented")
      * ```
-     *
-     * @example Single event
-     * ```typescript
-     * .emit((action) => ["Incremented", { amount: action.by }])
-     * ```
-     *
-     * @example Multiple events
-     * ```typescript
-     * .emit((action) => [
-     *   ["Incremented", { amount: action.by }],
-     *   ["LogUpdated", { message: `Incremented by ${action.by}` }]
-     * ])
-     * ```
      */
     emit: {
       (
@@ -370,22 +318,6 @@ export type ActionBuilder<
    * @example Snapshot every 10 events
    * ```typescript
    * .snap((snapshot) => snapshot.patches >= 10)
-   * ```
-   *
-   * @example Snapshot based on state size
-   * ```typescript
-   * .snap((snapshot) => {
-   *   const estimatedSize = JSON.stringify(snapshot.state).length;
-   *   return estimatedSize > 10000 || snapshot.patches >= 50;
-   * })
-   * ```
-   *
-   * @example Time-based snapshotting
-   * ```typescript
-   * .snap((snapshot) => {
-   *   const hoursSinceLastSnapshot = snapshot.patches * 0.1; // Estimate
-   *   return hoursSinceLastSnapshot >= 24;
-   * })
    * ```
    */
   snap: (
@@ -460,54 +392,6 @@ export type ActionBuilder<
    *   90 days after resolution).
    * ```typescript
    * .autocloses({ is: "TicketResolved", after: { days: 90 } })
-   * ```
-   *
-   * @example Declarative — multi-terminal (an Order closes on any of
-   *   three terminal events, no cooldown).
-   * ```typescript
-   * .autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
-   * ```
-   *
-   * @example Declarative — time-only retention (a Session closes
-   *   after 24h regardless of head event).
-   * ```typescript
-   * .autocloses({ after: { days: 1 } })
-   * ```
-   *
-   * @example Declarative — pure cardinality cap.
-   * ```typescript
-   * .autocloses({ reaches: 10_000 })
-   * ```
-   *
-   * @example Declarative — primary cooldown + safety-net backstop.
-   * ```typescript
-   * .autocloses({
-   *   is: "TicketResolved",     // primary trigger
-   *   after: { days: 90 },      // AND aged 90 days
-   *   or: { reaches: 10_000 },  // OR cardinality safety net
-   * })
-   * ```
-   *
-   * @example Declarative — pure OR (only backstops, no primary
-   *   cooldown).
-   * ```typescript
-   * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
-   * ```
-   *
-   * @example Rolling window — keep the last 180 days of real events on a
-   *   live stream (requires `.snap(...)` earlier in the chain; `keep`
-   *   won't typecheck without it). Each eligible cycle prunes the prefix
-   *   below the closest safe snapshot older than `now − keep`.
-   * ```typescript
-   * .snap((s) => s.patches >= 100)
-   * .autocloses({ keep: { days: 180 } })
-   * ```
-   *
-   * @example Terminate AND prune — close 90 days after resolution,
-   *   meanwhile keep open streams pruned to a 180-day window.
-   * ```typescript
-   * .snap((s) => s.patches >= 100)
-   * .autocloses({ is: "TicketResolved", after: { days: 90 }, keep: { days: 180 } })
    * ```
    */
   autocloses: (
@@ -618,79 +502,6 @@ export type ActionBuilder<
  *   })
  *   .on({ increment: z.object({ by: z.number() }) })
  *     .emit((action) => ["Incremented", { amount: action.by }])
- *   .build();
- * ```
- *
- * @example Passthrough state (no custom patch or emit needed)
- * ```typescript
- * const DigitBoard = state({ DigitBoard: z.object({ digit: z.string() }) })
- *   .init(() => ({ digit: "" }))
- *   .emits({ DigitCounted: z.object({ digit: z.string() }) })
- *   // no .patch() — passthrough is the default (event data merges into state)
- *   .on({ CountDigit: z.object({ digit: z.string() }) })
- *     .emit("DigitCounted")  // string passthrough — action payload becomes event data
- *   .build();
- * ```
- *
- * @example State with multiple events and invariants
- * ```typescript
- * const BankAccount = state({ BankAccount: z.object({
- *   balance: z.number(),
- *   currency: z.string(),
- *   status: z.enum(["open", "closed"])
- * }) })
- *   .init(() => ({ balance: 0, currency: "USD", status: "open" }))
- *   .emits({
- *     Deposited: z.object({ amount: z.number() }),
- *     Withdrawn: z.object({ amount: z.number() }),
- *     Closed: z.object({})
- *   })
- *   .patch({  // only override events needing custom logic
- *     Deposited: ({ data }, state) => ({ balance: state.balance + data.amount }),
- *     Withdrawn: ({ data }, state) => ({ balance: state.balance - data.amount }),
- *     Closed: () => ({ status: "closed", balance: 0 })
- *   })
- *   .on({ deposit: z.object({ amount: z.number() }) })
- *     .given([
- *       { description: "Account must be open", valid: (state) => state.status === "open" }
- *     ])
- *     .emit("Deposited")  // passthrough — action payload { amount } becomes event data
- *   .on({ withdraw: z.object({ amount: z.number() }) })
- *     .given([
- *       { description: "Account must be open", valid: (state) => state.status === "open" },
- *       { description: "Funds must be available", valid: (state) => state.balance > 0 }
- *     ])
- *     .emit("Withdrawn")
- *   .on({ close: z.object({}) })
- *     .given([
- *       { description: "Account must be open", valid: (state) => state.status === "open" },
- *       { description: "Balance must be zero", valid: (state) => state.balance === 0 }
- *     ])
- *     .emit("Closed")
- *   .build();
- * ```
- *
- * @example State with snapshotting
- * ```typescript
- * const User = state({ User: z.object({
- *   name: z.string(),
- *   email: z.string(),
- *   loginCount: z.number()
- * }) })
- *   .init((data) => ({ ...data, loginCount: 0 }))
- *   .emits({
- *     UserCreated: z.object({ name: z.string(), email: z.string() }),
- *     UserLoggedIn: z.object({})
- *   })
- *   .patch({  // only override events needing custom logic
- *     UserLoggedIn: (_, state) => ({ loginCount: state.loginCount + 1 })
- *   })
- *   // UserCreated uses passthrough — event data merges into state
- *   .on({ createUser: z.object({ name: z.string(), email: z.string() }) })
- *     .emit("UserCreated")  // passthrough
- *   .on({ login: z.object({}) })
- *     .emit("UserLoggedIn")
- *   .snap((snap) => snap.patches >= 10) // Snapshot every 10 events
  *   .build();
  * ```
  *

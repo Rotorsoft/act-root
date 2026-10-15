@@ -73,13 +73,6 @@ export type Sandbox<TApp> = {
  *   await dispose();
  * });
  * ```
- *
- * @example Custom store factory (PG per-test schema)
- * ```ts
- * const { app, dispose } = await sandbox(builder, {
- *   store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
- * });
- * ```
  */
 export async function sandbox<TApp>(
   builder: AnyActBuilder<TApp>,
@@ -136,13 +129,6 @@ export async function sandbox<TApp>(
  * test.concurrent("isolated from concurrent peers", async ({ app }) => {
  *   // Each concurrent invocation gets its own store + cache — no
  *   // singleton contention, no flake.
- * });
- * ```
- *
- * @example Custom store factory
- * ```ts
- * const test = fixture(builder, {
- *   store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
  * });
  * ```
  */

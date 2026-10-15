@@ -1039,11 +1039,6 @@ export interface Store extends Disposable, EventSource {
    * );
    * ```
    *
-   * @example De-prioritize all background projections
-   * ```typescript
-   * await store().prioritize({ source: "^audit-" }, -5);
-   * ```
-   *
    * @see {@link Act.prioritize} for the orchestrator-level wrapper
    * @see {@link claim} for how priority biases stream scheduling
    */
@@ -1207,21 +1202,6 @@ export interface Store extends Disposable, EventSource {
    *   { blocked: true, limit: 50 }
    * );
    * ```
-   *
-   * @example Page through all positions
-   * ```typescript
-   * let after: string | undefined;
-   * for (;;) {
-   *   const page: StreamPosition[] = [];
-   *   const { count } = await store().query_streams(
-   *     (s) => page.push(s),
-   *     { after, limit: 100 }
-   *   );
-   *   if (!count) break;
-   *   // ... use page ...
-   *   after = page.at(-1)?.stream;
-   * }
-   * ```
    */
   query_streams: (
     callback: (position: StreamPosition) => void,
@@ -1284,56 +1264,6 @@ export interface Store extends Disposable, EventSource {
    * });
    * for (const [stream, { head }] of stats) {
    *   // head.id, head.version, head.name
-   * }
-   * ```
-   *
-   * @example Full stats — inspector / admin dashboard (one full scan)
-   * ```typescript
-   * const stats = await store().query_stats<MyEvents>(
-   *   { stream: "^orders-" },
-   *   { count: true, tail: true, names: true,
-   *     exclude: [TOMBSTONE_EVENT] }
-   * );
-   * for (const [stream, s] of stats) {
-   *   const snaps = s.names?.[SNAP_EVENT] ?? 0;
-   *   const domain = (s.count ?? 0) - snaps;
-   *   console.log(stream, { snaps, domain, tail: s.tail?.created });
-   * }
-   * ```
-   *
-   * @example Schema-evolution — surface deprecated events per stream
-   * ```typescript
-   * const stats = await store().query_stats<TicketEvents>(
-   *   { stream: "^ticket-" },
-   *   { names: true }
-   * );
-   * for (const [stream, { names = {} }] of stats) {
-   *   if ((names["TicketOpened"] ?? 0) > 0) {
-   *     console.log(`${stream}: ${names["TicketOpened"]} legacy events`);
-   *   }
-   * }
-   * ```
-   *
-   * @example Time travel — stream state at a historical cutoff
-   * ```typescript
-   * const stats = await store().query_stats(["order-42"], {
-   *   before: 100_000, // events up to (not including) id 100000
-   *   tail: true,
-   * });
-   * const { head, tail } = stats.get("order-42") ?? {};
-   * // head = latest event with id < 100_000; tail = earliest in range
-   * ```
-   *
-   * @example Page through every stream a bounded chunk at a time
-   * ```typescript
-   * let after: string | undefined;
-   * for (;;) {
-   *   const page = await store().query_stats({}, { after, limit: 500 });
-   *   if (page.size === 0) break;
-   *   for (const [stream, { head }] of page) {
-   *     // ... process stream ...
-   *   }
-   *   after = [...page.keys()].at(-1);
    * }
    * ```
    *

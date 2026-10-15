@@ -147,33 +147,6 @@ let _validated: Config | undefined;
  * console.log(`Log level: ${cfg.logLevel}`);
  * ```
  *
- * @example Environment-specific behavior
- * ```typescript
- * import { config } from "@rotorsoft/act";
- *
- * const cfg = config();
- *
- * if (cfg.env === "production") {
- *   // Use PostgreSQL in production
- *   store(new PostgresStore(prodConfig));
- * } else {
- *   // Use in-memory store for dev/test
- *   store(new InMemoryStore());
- * }
- * ```
- *
- * @example Adjusting log levels
- * ```typescript
- * // Set via environment variable:
- * // LOG_LEVEL=debug npm start
- *
- * // Or check in code:
- * const cfg = config();
- * if (cfg.logLevel === "trace") {
- *   logger.trace("Detailed debugging enabled");
- * }
- * ```
- *
  * @see {@link Config} for configuration type
  */
 export const config = (): Config => {
