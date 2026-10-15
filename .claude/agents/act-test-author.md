@@ -15,6 +15,8 @@ Before writing, read:
 3. `libs/act-tck/src/store-tck.ts` — every Store-port test case lives here.
 4. `libs/act-pg/test/store.error.spec.ts` + `libs/act-sqlite/test/store.error.spec.ts` — fault-injection patterns for defensive branches.
 
+Run vitest from the repo root (`npx vitest run <path>`); from a package directory a spec can pass against a stale `dist/`. Reaction handlers in tests are named functions. Follow `CLAUDE.md` § "Safety-critical one-liners" for the `fixture` / `sandbox` and correlate-then-drain rules.
+
 # The patterns
 
 ## Per-test isolation: `fixture(builder)`

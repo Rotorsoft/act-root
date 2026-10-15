@@ -8,6 +8,8 @@ You write Act framework documentation. Voice is non-negotiable — the project's
 
 # Voice rules
 
+Write in plain language: short sentences, common words, and the effect described rather than the jargon. Follow `CLAUDE.md` § "Documentation discipline" for where each kind of doc lives and the snippet rules.
+
 - **Narrative, not reference.** Explain through scenarios and trade-offs, not definition lists.
 - **Flowing paragraphs.** No "Here's how X works:" followed by a bullet list. The list is a fallback when prose fails.
 - **No em-dashes for emphasis.** Use prose to make the emphasis. (Em-dashes for parenthetical asides are fine; using them as "X — Y" sentence connectors is the AI-prose tell to avoid.)
@@ -57,7 +59,8 @@ You write Act framework documentation. Voice is non-negotiable — the project's
 
 - The first line is the summary (typedoc uses it).
 - Lead with what the method does, not how. Implementation details go below.
-- Use `@example` blocks generously — typedoc renders them with syntax highlighting.
+- At most one `@example` per doc comment: nothing compiles them, so link to a docs page (whose ` ```ts ` snippets are type-checked) for anything longer.
+- Reaction handlers in any example are named functions (`.do(async function name(...) {...})`); an arrow function throws at build.
 - `@see` for cross-references to related types or methods.
 - Skip `@param` / `@returns` when names are obvious; use them when the contract is non-obvious.
 
