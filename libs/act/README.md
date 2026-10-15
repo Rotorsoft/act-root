@@ -71,7 +71,7 @@ import { projection, slice } from "@rotorsoft/act";
 // Projection — read-model updater. Handlers receive (event, stream).
 const CounterProjection = projection("counters")
   .on({ Incremented: z.object({ amount: z.number() }) })
-    .do(async ({ stream, data }) => { /* update read model */ })
+    .do(async function updateCounter({ stream, data }) { /* update read model */ })
   .build();
 
 // Slice — partial state + scoped reactions. Handlers receive (event, stream, app).
@@ -79,7 +79,7 @@ const CounterSlice = slice()
   .withState(Counter)
   .withProjection(CounterProjection)
   .on("Incremented")
-    .do(async (event, _stream, app) => { /* dispatch via app */ })
+    .do(async function dispatchCounter(event, _stream, app) { /* dispatch via app */ })
     .to("counter-target")
   .build();
 

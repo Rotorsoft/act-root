@@ -95,9 +95,9 @@ A standalone projection (registered at the `act()` level, not embedded in any sl
 
 ```ts
 export const TicketProjection = projection("tickets")
-  .on({ TicketOpened }).do(async ({ stream, data }) => { /* insert */ })
-  .on({ MessageAdded }).do(async ({ stream }) => { /* messages += 1 */ })
-  .on({ TicketAssigned }).do(async ({ stream, data }) => { /* update */ })
+  .on({ TicketOpened }).do(async function insertTicket({ stream, data }) { /* insert */ })
+  .on({ MessageAdded }).do(async function countMessage({ stream }) { /* messages += 1 */ })
+  .on({ TicketAssigned }).do(async function assignTicket({ stream, data }) { /* update */ })
   .on({ TicketEscalated }).do(...)
   .on({ TicketReassigned }).do(...)
   .on({ TicketClosed }).do(...)
