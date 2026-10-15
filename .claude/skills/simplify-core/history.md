@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-10 | 2 | 0 | active (finding: four published exports tagged @internal) |
+| Public surface | 2026-10-15 | 3 | 0 | active (this run: r-3, r-5 pending; retire next run if neither is accepted) |
 | Dead code (tool) | 2026-10-11 | 3 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
 | Hotspots (tool) | 2026-10-11 | 3 | 1 | active |
-| File budget | 2026-10-10 | 3 | 1 | active (counts code lines now; most long files are doc comments) |
+| File budget | 2026-10-15 | 4 | 1 | active (lane wiring move re-measured: −171 code lines from act.ts, no repo shrink) |
 | Comment noise | 2026-10-08 | 2 | 2 | active (25% bar unreachable while public type docs stay; see P2026-10-08d-6) |
-| Concepts and options | 2026-10-11 | 3 | 1 | active (found the defer wake bug) |
-| Core or decorator? | 2026-10-10 | 2 | 0 | active (audit, breaker, lanes stay; priority is a design question for a major) |
+| Concepts and options | 2026-10-15 | 4 | 1 | active (found the lag/lead ratio serves no row) |
+| Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
 | DRY across adapters and builders | 2026-10-11 | 3 | 1 | active |
-| Reading path | 2026-10-10 | 2 | 1 | active (found the onlyLanes lease bug) |
+| Reading path | 2026-10-15 | 3 | 1 | active (found the broken `@example` blocks) |
 | Newcomer test (quarterly) | 2026-10-08 | 1 | 0 | active (baseline: 22 concepts, 3 imports) |
 | Tests by concept | 2026-10-11 | 3 | 3 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
-| Packages earn their place | 2026-10-10 | 3 | 0 | active (no removal; act-tck release churn found) |
-| Infra | 2026-10-11 | 3 | 1 | active (found the no-op snippet gate) |
-| One source of truth | 2026-10-10 | 3 | 3 | active |
-| Examples | 2026-10-10 | 2 | 1 | active |
-| Process | 2026-10-10 | 2 | 3 | active |
-| Feature interactions | 2026-10-10 | 1 | 3 | active (added 2026-10-10; o-1, o-2, o-3 accepted) |
+| Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
+| Infra | 2026-10-15 | 4 | 1 | active |
+| One source of truth | 2026-10-15 | 4 | 3 | active |
+| Examples | 2026-10-15 | 3 | 1 | active (found 31 arrow-function handlers that throw at build) |
+| Process | 2026-10-15 | 3 | 3 | active |
+| Feature interactions | 2026-10-15 | 3 | 5 | active (found the idle-rule bug) |
 
 ## Interaction register
 
@@ -42,7 +42,9 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | lanes, priority | `subscribe` re-lanes on priority ≥ stored (how a restart applies an edited declared lane); correlate reads the row when it has no record, so the row owns a dynamic target's lane and the LRU only caches it | justified once #1878 merges | P2026-10-10o-3, #1876; the coupling itself goes only if priority does (major-version question) |
 | breaker, drain / settle | five places feed one consecutive-failure count of **store** failures; a success in one loop resets failures in another | justified | #1877: app code never leaves the loop that ran it (correlate stops before a throwing resolver's event and logs once, drain fails the stream, a reaction close logs non-store failures), so only store and framework errors reach the breaker; a real outage fails every loop; a store failing one kind of call can keep it closed, still visible as `error` events |
 | defer wake, breaker | fixed by #1872: the breaker check sits inside the drain's `try`, so `finally` re-aims the wake | resolved | P2026-10-10o-1, #1874 |
-| defer wake, drain lock / streamLimit | the timer drops every due entry before its one bounded drain runs; a drain already in flight, or more due streams than `streamLimit`, strands the rest until a commit | accidental, and a bug | P2026-10-11a-1 (probed: 1 of 2 and 10 of 15 ran; controls ran all) |
+| defer wake, drain lock / streamLimit | #1892 keeps a due entry until a drain reaches it; but a pass whose claims all defer or back off still counts as idle (controller disarms, settle stops, the wake re-fires only for due entries), so marked streams never claimed wait for a commit | accidental, and a bug | P2026-10-15o-1 (probed: 5 of 12 ran; control 12/12) |
+| drain failure, wake | a failed finalize leaves no wake: the breaker re-drives only once it opens (threshold 5), so a deferred reaction never re-fires on an idle app | accidental, and a bug | P2026-10-15d-2 (probed: 1 run; control 2) |
+| app errors, correlation | one throwing resolver stops the scan before its event, so discovery stops for every reaction until it stops throwing | justified | #1913, the user's choice: nothing is lost; isolating one reaction needs per-reaction checkpoints |
 | lease, lanes | background drains (wake, settle, `cycleMs`, `start_correlations`) claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call, and the default lane can't be configured | justified, under-documented | P2026-10-11b-2 |
 
 ## Mutation baselines
@@ -64,19 +66,12 @@ The last trusted Stryker scores, recorded when the setup was removed (#1805) bec
 
 Sound proposals that missed a run's cut. The next run ranks these before looking for new ones.
 
-- Move lane wiring out of `act.ts` into `internal/lanes.ts`: 4 fields, 8 private methods and `validate_only_lanes` become one `_lanes` field with ~5 methods (−230 lines from act.ts; `validate_only_lanes` becomes a Zod refinement in `resolveActConfig`). Move restore's `scan` from `event-sourcing.ts` to `internal/restore.ts` (−185 there).
-- Move `all-packages-stability.spec.ts` and its snapshot out of `libs/act-tck` to a repo-level test dir: 94 of 137 act-tck releases since Jul 10 published identical code because a snapshot change counts as a package change.
-- Delete `docs/versioned_docs/version-1.x` (33 files, 7,256 lines): the library is still 1.x, so "current" is the 1.x docs, and the frozen copy still describes pre-#1811 polling.
-- `act-code-reviewer` contradicts CLAUDE.md (says fields are snake_case; public fields are camelCase) and cites a removed section and two dead paths. Fix or delete the three subagents and `.claude/README.md` (209 lines, restates settings).
 - Move CLAUDE.md's naming, config-validation and detailed pre-handoff sections to CONTRIBUTING.md, one-line rule + link each (~9 KB); fix CONTRIBUTING's two dead pointers.
 - Drop the pre-push hook (CI tests every push; 3 of 341 master commits were direct pushes) and the unmaintained RFC "Status:" lines.
 - Four published exports are tagged `@internal` (`default_scope`, `ExitCodes`, `PackageSchema`, `pii_fields`; the last was made public on purpose by RFC 1228). Remove the wrong tag, record the other three in STABILITY.md as published-but-not-for-use. `export *` over `ports.ts`, `utils.ts`, `config.ts` publishes anything added there without an RFC.
 - act-tck README and tck-conformance.md hand-copy stale peer versions (vitest >=3.0.9, zod ^4.4.3) and carry history banners.
 - Design finding, no action: every runnable example needs `app.on("committed", () => app.settle())` (~10 copies, each with a caveat); worth asking whether that should be a default.
 - Design finding for a future major: priority (required `prioritize` port method, a column and two indexes per SQL adapter, a fairness reserve in 3 claims, the lane-rides-priority rule in 3 subscribes, 7 bugs) has no example user in this repo and no counterpart in other ES frameworks, which use separate processors (Act's lanes). Removing it is breaking; it is the user's question. 2026-10-11: Marten (per shard), Axon (per processor/segment), Kurrent (per group) and Emmett (per processor) all answer "a slow reaction must not block a fast one" with separate processors and none orders claims by priority; priority touches 13 source and 26 test files, and dropping it also drops the lane/priority coupling behind #1599 and #1876.
-- Drop the in-memory core perf gate from CI (0 failures in 400 runs; its baseline was never made on CI hardware; pg and sqlite gates stay): −2 steps, 3 files (~390 lines).
-- Delete `BENCH.md` (lists 25 of 50 bench files; claims scenario benches run on every PR): −85 lines.
-- README quickstart: use `.emit("Incremented")` like `hello.ts`, link `hello.ts` first, replace "dead-lettering" with "blocked streams", cut the 9-term "What it is" paragraph (newcomer count 22 → 20).
 - `ci-cd.yml` comments: ~100 of 158 comment lines are history; one misplaced.
 - act-http tests: drop the tRPC and Hono error tables that repeat the parity table and `api/errors.spec.ts` (~170 lines); `audit.spec.ts` collector helper and shared `meta` (~140 lines).
 
@@ -84,9 +79,16 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - act-pg / act-sqlite `pii-encryption.spec.ts` run the same 9 cases (~238 shared lines): delete the sqlite `query_stats` duplicate of a TCK case now; moving the rest into a TCK capability adds act-tck surface and needs an RFC (~−400 net, unprobed). (P2026-10-11c-5)
 - PostgresStore `commit`'s single-event SQL fork (4 statement variants → 2) if a CI bench shows it doesn't pay; `commit` is the most-changed function in the most-changed adapter. (P2026-10-11a-5)
 - Delete the renovate rule guarding a `pnpm.overrides` block that doesn't exist (`jq .pnpm package.json` → null; −6 lines). (P2026-10-11d-3)
+- Move lane wiring out of act.ts into `internal/lanes.ts` (re-measured 2026-10-15: −171 code lines from act.ts, 841 → ~620; no repo shrink) and restore's `scan` to `internal/restore.ts` (~−153 from event-sourcing.ts); the settle loop stops calling the public `drain()` (drops a Zod re-parse per pass). Do after r-1. (P2026-10-15r-4)
+- Drop `Subscription.floor` in correlate: it equals `priority` for every dynamic record and differs only for statics, which have their own map (~−4 lines, one concept). (P2026-10-15o-4)
+- configuration.md § Circuit breaker restates error-handling.md and misses "Store failures only"; observability.md:29 says `error` fires only in the drain loop; act-tck README and tck-conformance.md hand-copy stale peer versions. Link instead. (P2026-10-15d-5)
+- Leftovers: the `pre-push` hook (3 of 368 commits were direct pushes; CLAUDE.md:203 describes it wrongly), ~18 history comment lines in ci-cd.yml, two dead pointers in CONTRIBUTING.md. (P2026-10-15p-5)
+- Four published exports tagged `@internal` (re-checked 2026-10-15, unchanged), plus act.ts:99-104 pointing operators at a deprecated constant. (P2026-10-15r-5)
 
 ## Self-changes
 
+- 2026-10-15: specialists probe in their own file (`_probe-<lens>.spec.ts`). Two specialists used `_probe.spec.ts` at the same time and overwrote each other's probe once; one result was recorded before the file vanished.
+- 2026-10-15: retired Core or decorator? (three runs, findings only) and Packages earn their place (four runs, no proposal); `metrics.sh` drops "published packages" (12 in every run, informed no decision). Two smells added from this run's probes: an idle test that counts successes, and a recovery promise resting on another mechanism's threshold.
 - 2026-10-11: step 2 now asks, for a PR that changed a default or a timing, to grep docs, recipes and examples for the old behavior and run the recipes it touches; the Examples lens covers `recipes/**/examples/*.ts`; one smell added (a schedule entry removed before its work is done). #1872 changed retry timing and this run found three things it missed: the Prometheus recipe no longer blocks its poison stream (probed against the commit before), four doc and comment passages still describe lease-paced retries, and the defer timer drops due streams before its drain runs (probed).
 Every change the retrospective made to `SKILL.md`, `lenses.md` or `metrics.sh`, with the evidence that prompted it.
 
@@ -352,3 +354,43 @@ Proposals (pending), ranked. Defects first:
 - P2026-10-11d-2. Move `node-compat` (Node 22 + 24) to the weekly conformance workflow: 3 failures in 100 runs, none `ci` missed; ~4 runner-minutes per run. Only 5 days of history.
 
 Tickets (user: "open tickets for all of them, and take care of the regression in master"): #1889 (b-1, fixed in #1891), #1890 (a-1), #1882 (a-3 + b-2 + b-4), #1883 (d-1), #1884 (c-1), #1885 (b-3), #1886 (a-4 + a-2), #1887 (c-2 + c-3), #1888 (d-2).
+
+### 2026-10-15 — full run (four specialists: feature interactions + concepts, reading path + file budget + public surface, source of truth + examples, process + packages + core or decorator + infra)
+
+| metric | 2026-10-11 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 20293 | 18934 | #1909–#1911 comment trims (~−1,600 incl. act-pg), #1907, #1908, #1912; +84 #1913, +57 #1878, +18 #1892 (bug fixes) |
+| comments | 49% | 46% (internal/ 33%, adapters/ 14%; bar 30%) | #1909–#1911; the user closed #1867 before internal/ reached the bar |
+| spec files / test lines | 231 / 60166 | 225 / 59564 | #1896, #1897, #1879, #1907 |
+| CI workflows / lines | 5 / 874 | 5 / 850 | #1893, #1894 |
+| docs lines / CLAUDE.md | 9408 / 36 KB | 9278 / 36 KB | #1880, #1898 |
+| everything else | | unchanged | 54 exports, 8 / 20 methods, 18 Store methods, 14 ActOptions, 9 files touching 5+ features |
+
+Audit: 23 PRs since the last run, every code PR one of its tickets. Three added mechanism, each for a probed bug: #1878 (+57, correlate reads the row on an LRU miss), #1892 (+18, keep a due entry until a drain reaches it), #1913 (+84, app errors contained where they run). #1913 went through three designs in one PR (document it; tag app errors and add a pause breaker; contain them at the source); the third was smallest. It also copied `finalize`'s retry-or-block rule instead of calling it (o-2 below).
+
+Decisions on P2026-10-11*: all accepted and shipped. a-1 → #1890/#1892; b-1 → #1889/#1891; a-3 + b-2 + b-4 → #1882/#1898; d-1 → #1883/#1893; c-1 → #1884/#1896; b-3 → #1885/#1899; a-4 + a-2 → #1886/#1895; c-2 + c-3 → #1887/#1897; d-2 → #1888/#1894. From 2026-10-08/10: d-3 → #1907, d-5 → #1908, d-6 → #1909–#1911 (user then closed #1867: rest of internal/ not trimmed), d-7 → #1912, o-3 → #1878, o-4 → #1913 (became a bug fix: app code errors had been counted as store failures).
+
+Promises kept: d-1 −22 → −25; c-1 ~−235 → −229; a-4 ~−242 → −253; c-2/3 ~−200 → −333; d-3 ~−70 → −112; d-5 ~−190 → −162; d-6 ~−1,380 → ~−1,600 lines, 49% → 46% as estimated; d-7 ~−50 → −47. b-3 removed literals, not lines (net 0), as promised. All within or beyond the estimate.
+
+Verified in the main loop before ranking (red + control each): a burst of 12 commits wired as the README shows (`app.on("committed", () => app.settle())`) whose handler defers once ran 5 of 12 reactions after 3.5 s idle (plain control 12/12; the "fails once" variant ran 12/12 here and 10/12 for the specialist: timing-dependent); one rejected `ack` while a reaction defers leaves it never re-firing on an idle app (control fires); a writer and an idle worker sharing a store without notify: the worker runs 0 reactions in 1 s (control with `start_correlations` runs 1), against README.md:70's "falls back to a polling debounce"; arrow-function handlers throw "must be a named function" at build (control: named function builds); the `correlate` and `query` `@example` blocks in act.ts name fields that don't exist (`leased`, `name`); `_reactive_events` is read only for `.size` (7 reads).
+
+Field: Marten's daemon runs each shard to the high-water mark, so "idle" means no more events, never "nothing succeeded" (martendb.io async daemon docs). Marten pauses only the failing projection on a code error; Act can't without per-reaction checkpoints, so a throwing resolver stops discovery for every reaction (#1913, the user's choice).
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-15o-1 + d-2. Pending work goes idle. (a) A pass counts as idle only when its claim returned nothing: the controller disarms only in the `!cycle` branch, settle's progress uses `drain.leased`, and the defer wake drains until a pass leases nothing (simulated: 6/6, 23/23, 12/12; one internal-flag test rewritten). (b) A failed finalize keeps a wake at the leased streams' lease expiry, so close-cycle.md:283 ("the breaker's paced retry probe re-drives settle()") becomes true; or, the user's call, correct the three passages that promise it. Two idle rules become one.
+- P2026-10-15d-1. 31 doc, README and scaffold-skill examples pass arrow functions to `.do(...)`, which throws at build; rewrite as named functions and state the rule once in state-management.md.
+- P2026-10-15d-4. README.md:70's polling fallback doesn't exist; with it, the backlog's quickstart cut (22 → 20 concepts, link `hello.ts`) and the ticket-cooldown recipe's broken Run line.
+- P2026-10-15r-3. Fix the three `@example` blocks in act.ts that don't compile; then keep at most one example per public method where docs/docs has no checked equivalent, `@see` the rest (up to ~1,270 lines across 147 blocks; how many to keep is the user's call).
+- P2026-10-15d-3. correlation-and-drain.md:102 says the store keeps a forgotten target's lane (stale since #1878); configuration.md § Re-laning at restart owns the rule, the other two pages link (~3 KB).
+Simplifications:
+- P2026-10-15o-2 (= r-2). One retry-or-block decision: `resolver_failed` and the fetch-failure branch call `finalize` (moved to internal/) instead of copying it (−35 lines, 2 names; #1913's copy).
+- P2026-10-15p-1. Move `all-packages-stability.spec.ts` and its snapshot out of act-tck to a root `test/` (77 of 130 act-tck releases in 3 months published identical code; 5 of 7 since 10-11).
+- P2026-10-15r-1. One "this app reacts" boolean instead of the `_reactive_events` Set and five call-site guards (−12 lines, one concept).
+- P2026-10-15o-3. Replace the adaptive lag/lead ratio with a fixed split: −`drain-ratio.ts`, its spec, a field and a doc section (~−125 lines); serves no contract row, forcing 0.5 fails only its own unit tests. Needs a CI pg bench before merge.
+- P2026-10-15p-2. Scenario benches weekly; drop the in-memory core perf gate (0 failures in ~887 runs, laptop baseline) and BENCH.md (~−500 lines, ~250 runner-minutes per two weeks off PRs); pg and sqlite gates stay.
+- P2026-10-15p-4. Delete docs/versioned_docs/version-1.x (33 files, 7,256 lines; still describes pre-#1811 polling) and the version dropdown.
+- P2026-10-15p-3. Delete .claude/README.md (209 lines) and point the three subagents at CLAUDE.md instead of restating it (act-code-reviewer checks public fields against the wrong casing rule).
+
+Design findings, not proposed: one throwing resolver stops discovery for every reaction (documented, #1913); every runnable example needs `app.on("committed", () => app.settle())` (13 copies; making `do()` settle would change what apps observe); priority (required `prioritize`, 13 TCK cases) stays a question for a future major.
+
+Tickets (user: "all"): #1915 (o-1 + d-2), #1916 (d-1), #1917 (d-4), #1918 (r-3), #1919 (d-3), #1920 (o-2), #1921 (p-1), #1922 (r-1), #1923 (o-3), #1924 (p-2), #1925 (p-4), #1926 (p-3).

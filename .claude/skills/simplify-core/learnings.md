@@ -21,6 +21,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A field with two owners shows up as a rule in one layer and a guard in another that cancels it, and if the guard lives in a bounded memory, eviction breaks the rule. Before removing either owner, find why each exists: the store's re-lane on equal priority is how a restart applies an edited lane. (#1876, 2026-10-10)
 - Probe every claim in a proposal, not only bug claims: of four interaction findings, one was a real bug, one proposed fix was wrong, and one count was off (9 → 7). (2026-10-10)
 - A shared lease is sound only between interchangeable workers. Anything that narrows what a worker runs (`onlyLanes`) belongs in the lease key, or the holder does work for a lane it can't drain and the lane's own worker never wakes. (2026-10-10 review)
+- Contain an error where it is raised, not where it lands. Classifying app errors at the breaker needed a new error class and a second breaker; a try/catch at each place app code runs (resolvers, archive callbacks) needed neither, and left the breaker untouched. When the new failure path needs a decision that already exists (retry or block), call it; #1913 copied `finalize` a third time. (#1913)
 
 ## State and invariants
 
@@ -49,6 +50,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Progress tracking and delivery guarantees sharing a variable must agree on its unit (event vs reaction). (#1179)
 - Derive defaults from relevant configuration, not new constants; and only from what is active now. (#1442, #1175)
 - Distrust a guard that duplicates a condition already expressed downstream; it is usually narrower than the real rule. (#1445)
+- Idle means nothing left to claim, not nothing succeeded. A pass whose claims all deferred or failed disarmed the drain and ended settle, so streams marked but never claimed waited for the next commit. (2026-10-15 probe: 5 of 12 reactions ran)
 - A window that one-based ids happened to paper over should be removed, not propagated. (#1446)
 
 ## Contracts and tests
@@ -64,6 +66,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A convenience is a promise; an unexercised default decays into silent loss. Refuse a default you can't honor. (#1443)
 - A test that skips by default is no contract. (#1441)
 - A gate whose self-test checks only that something failed can pass for the wrong reason. The snippet check type-checked zero files for 2.5 months while its self-test passed on a missing-module error. (2026-10-08 review)
+- A type check can't see a rule enforced at build: 31 doc and skill examples passed `check:snippets` while passing arrow functions to `.do(...)`, which throws "must be a named function" when the app is built. (2026-10-15 review)
 - A test whose verdict depends on the machine it runs on teaches people to ignore red. (#1443)
 - Trust boundaries pool around user code; enforce the contract the user already declared (opt-in when it costs). (#1238)
 - Type quality is judged at the weakest boundary; prefer generics with defaults, and the widest true type over a cast. (#1185)
