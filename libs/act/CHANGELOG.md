@@ -1,3 +1,5 @@
+# [@rotorsoft/act-v1.32.25](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.24...@rotorsoft/act-v1.32.25) (2026-10-15)
+
 # [@rotorsoft/act-v1.32.24](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.23...@rotorsoft/act-v1.32.24) (2026-10-15)
 
 # [@rotorsoft/act-v1.32.23](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.22...@rotorsoft/act-v1.32.23) (2026-10-14)
