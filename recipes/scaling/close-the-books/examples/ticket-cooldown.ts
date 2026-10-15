@@ -19,7 +19,7 @@
  * a year. This file is a minimal harness that confirms the policy is
  * wired on the real model.
  *
- * Run:  pnpm tsx recipes/scaling/close-the-books/examples/ticket-cooldown.ts
+ * Run:  cd recipes && pnpm tsx scaling/close-the-books/examples/ticket-cooldown.ts
  */
 
 import { app } from "@act/wolfdesk";

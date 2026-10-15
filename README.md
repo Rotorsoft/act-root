@@ -19,7 +19,7 @@
 
 ## What it is
 
-Act is an event-sourcing framework for TypeScript. The domain is expressed through three composable primitives: actions, state, and reactions. An action validates input against a Zod schema, commits one or more events under optimistic concurrency, and reduces them into derived state via a patch handler. Reactions fire on commit, drain in order, retry under back-pressure, and surface to the operator when something downstream wedges. The framework wires the rest of the pipeline: snapshots and a cache layer for fast cold loads, correlation across stream boundaries, a recovery API for blocked streams, time-travel queries against the same log. Pick a store at bootstrap. Postgres for production, SQLite for embedded, in-memory for tests. The application code stays the same.
+Act is an event-sourcing framework for TypeScript built on three primitives: actions, state, and reactions. An action commits events, state folds them, and reactions run on what was committed. Pick a store at bootstrap (Postgres for production, SQLite for embedded, in-memory for tests); the application code stays the same.
 
 ```
    ┌─────────────┐    action     ┌─────────────────┐    reaction      ┌──────────────┐
@@ -48,10 +48,10 @@ import { z } from "zod";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
-  .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })
+  .emits({ Incremented: z.object({ by: z.number() }) })
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.by }) })
   .on({ increment: z.object({ by: z.number() }) })
-  .emit((action) => ["Incremented", { amount: action.by }])
+  .emit("Incremented")
   .build();
 
 const app = act().withState(Counter).build();
@@ -61,13 +61,15 @@ const snap = await app.load(Counter, "c1");
 console.log(snap.state); // { count: 5 }
 ```
 
+Next, [`hello.ts`](packages/calculator/src/hello.ts) adds a reaction to this counter (`pnpm -F calculator dev:hello`).
+
 ## What's in the box
 
 | | |
 |---|---|
 | Production stores | Postgres, SQLite, and in-memory all pass the same `runStoreTck`. Application code doesn't change between them; only the bootstrap line differs. |
 | Zod end to end | Schemas define every action, event, and state shape at runtime and generate the TypeScript types at compile time. One source of truth, full inference into reducers, projections, and queries. |
-| No external broker | The event store carries the message-bus role. Postgres exposes cross-process wakeups via `LISTEN`/`NOTIFY`; the orchestrator falls back to a polling debounce when the hook isn't there, so correctness is preserved either way. |
+| No external broker | The event store carries the message-bus role. Other processes see a commit through `notify` (Postgres `LISTEN`/`NOTIFY`), or through an opt-in poll (`start_correlations`, or a lane's `cycleMs`); without either, an idle worker waits for its own next commit. See [cross-process reactions](https://rotorsoft.github.io/act-root/docs/architecture/cross-process-reactions). |
 | HTTP integrations | Outbound `webhook` reaction helper with auto Idempotency-Key, status-classified retries, and a published receiver-side dedup contract. SSE for incremental state broadcast lives on the same subpath. |
 | Live inspector | A web app you point at any Act store. Browse the event log, watch correlation and drain in real time, inspect blocked streams, page through subscription positions. |
 | Interactive diagrams | An SVG of the domain model with click-through to source, plus the `act` CLI that walks the same content in the terminal. |
