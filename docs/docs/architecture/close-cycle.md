@@ -7,7 +7,7 @@ title: Close cycle
 
 `app.close(targets)` archives, tombstones, and truncates streams from the operational store. The event-sourcing equivalent of "closing the books" in accounting: summarize the period, archive the detail, optionally restart with a fresh opening balance.
 
-`Act.close()` first runs `correlate({ limit: 1000 })` so the safety probe in Phase 2 sees dynamic reaction targets, then hands off to `run_close_cycle` which executes six gating phases (1 through 6 below). Phase 0 is the preparatory correlate. Failures at each phase have well-defined recovery characteristics — the goal is that any partial-failure state is *safe* (no data loss, no inconsistent state, retryable).
+`Act.close()` hands off to `run_close_cycle`, which executes six gating phases (1 through 6 below). The safety probe in Phase 2 correlates the tail it needs before judging, so dynamic reaction targets are discovered there; `close()` runs no separate correlate first. Failures at each phase have well-defined recovery characteristics — the goal is that any partial-failure state is *safe* (no data loss, no inconsistent state, retryable).
 
 Targets carrying a `before` cutoff never enter this pipeline. `run_close_cycle` splits the target list up front: `before` and `restart` are mutually exclusive (the call throws before touching the store), windowed targets take a dedicated branch (see [Windowed close](#windowed-close--prune-behind-a-snapshot) below), and the remaining full targets run the phases unchanged.
 
@@ -17,12 +17,6 @@ Targets carrying a `before` cutoff never enter this pipeline. `run_close_cycle` 
             close(targets)
                   │
                   ▼
-          ┌───────────────────────────┐
-          │ Phase 0: Correlate        │  Discover dynamic reaction targets so the safety check
-          │   correlate(limit:1000)   │  in Phase 2 can see them.
-          └───────────┬───────────────┘
-                      │
-                      ▼
           ┌───────────────────────────┐
           │ Phase 1: Scan stream heads│  For each target, find the latest non-tombstone event in
           │   query_stats             │  a single indexed round trip; snapshots filtered out.
@@ -78,12 +72,6 @@ Targets carrying a `before` cutoff never enter this pipeline. `run_close_cycle` 
 ## Phase-by-phase failure semantics
 
 The framework's invariant: **at every stable state during close, the stream is in a coherent, retryable shape.** No matter where you crash, re-running close on the same target produces the same final result (idempotent) or skips it cleanly (already done).
-
-### Phase 0 — Correlate
-
-If `app.close()` is called and dynamic-resolver streams haven't been correlated yet, the safety check in Phase 2 would miss them. So we explicitly correlate first with a generous limit.
-
-- **If correlate fails**: close() throws to caller. Nothing has been written. Idempotent retry.
 
 ### Phase 1 — Scan stream heads
 

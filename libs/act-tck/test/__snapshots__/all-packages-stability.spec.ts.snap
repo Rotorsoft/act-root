@@ -668,7 +668,6 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
-  CLOSE_CATCH_UP_LIMIT,
   CloseLock,
   CorrelateCycle,
   catch_up_correlation,
@@ -2454,12 +2453,7 @@ export class Act<
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
-    return this._scoped(async () => {
-      // Correlate first so dynamic reaction targets are discovered before
-      // the safety check examines subscription positions.
-      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
-      return this._run_close(targets);
-    });
+    return this._scoped(() => this._run_close(targets));
   }
 
   /**
@@ -5274,6 +5268,7 @@ import type {
   State,
 } from "../types/index.js";
 import type { EsOps } from "./event-sourcing.js";
+import { walk_streams } from "./walk-streams.js";
 
 /**
  * Dependencies the close cycle needs from the Act orchestrator. Decoupled
@@ -5338,7 +5333,7 @@ export type CloseCycleDeps = {
  *
  * @internal
  */
-export const CLOSE_CATCH_UP_LIMIT = 1000;
+const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
 /**
@@ -5709,44 +5704,47 @@ async function probe_min_watermarks(
   checkpoint: number
 ): Promise<Map<string, number>> {
   const min_at = new Map<string, number>();
-  const source_regex = new Map<string, RegExp>();
-  const get_regex = (source: string): RegExp => {
-    let re = source_regex.get(source);
+  const matches = source_matcher();
+  await walk_streams(
+    store(),
+    (position) => {
+      // Pending work caps at the watermark; caught up caps at the
+      // checkpoint; an unmarked row keeps the conservative watermark.
+      const pending =
+        position.correlated_at === undefined ||
+        position.at < position.correlated_at;
+      const cap = pending ? position.at : Math.max(position.at, checkpoint);
+      for (const stream of streams) {
+        if (matches(position.source, stream)) {
+          const prev = min_at.get(stream);
+          if (prev === undefined || cap < prev) min_at.set(stream, cap);
+        }
+      }
+    },
+    { limit: page_size, source_matches: streams }
+  );
+  return min_at;
+}
+
+/**
+ * Does a subscription with this \`source\` consume from \`stream\`? No source
+ * consumes every stream; a literal source matches itself as a regex.
+ * Compiled patterns are cached per matcher.
+ */
+function source_matcher(): (
+  source: string | undefined,
+  stream: string
+) => boolean {
+  const compiled = new Map<string, RegExp>();
+  return (source, stream) => {
+    if (!source) return true;
+    let re = compiled.get(source);
     if (!re) {
       re = new RegExp(source);
-      source_regex.set(source, re);
+      compiled.set(source, re);
     }
-    return re;
+    return re.test(stream);
   };
-
-  let after: string | undefined;
-  for (;;) {
-    let last: string | undefined;
-    const { count } = await store().query_streams(
-      (position) => {
-        last = position.stream;
-        const source_re = position.source
-          ? get_regex(position.source)
-          : undefined;
-        // Pending work caps at the watermark; caught up caps at the
-        // checkpoint; an unmarked row keeps the conservative watermark.
-        const pending =
-          position.correlated_at === undefined ||
-          position.at < position.correlated_at;
-        const cap = pending ? position.at : Math.max(position.at, checkpoint);
-        for (const stream of streams) {
-          if (!source_re || source_re.test(stream)) {
-            const prev = min_at.get(stream);
-            if (prev === undefined || cap < prev) min_at.set(stream, cap);
-          }
-        }
-      },
-      { after, limit: page_size, source_matches: streams }
-    );
-    if (count < page_size) break;
-    after = last;
-  }
-  return min_at;
 }
 
 // ---------------------------------------------------------------------------
@@ -5815,19 +5813,9 @@ async function partition_by_safety(
     if (checkpoint < info.max_id) uncorrelated.add(stream);
   }
 
-  // Read-only. A subscription's \`source\` is matched as a regex either way
-  // (a literal matches itself); over-matching only widens the pending set,
-  // the safe direction. Compiled patterns are cached.
+  // Over-matching a source only widens the pending set, the safe direction.
   const pending_set = new Set<string>();
-  const source_regex = new Map<string, RegExp>();
-  const get_regex = (source: string): RegExp => {
-    let re = source_regex.get(source);
-    if (!re) {
-      re = new RegExp(source);
-      source_regex.set(source, re);
-    }
-    return re;
-  };
+  const matches = source_matcher();
 
   // \`source_matches\` narrows the probe server-side to subscriptions that
   // could consume from a stream we're closing — a best-effort hint, so
@@ -5835,41 +5823,24 @@ async function partition_by_safety(
   // the result correct even when a store returns a superset.
   const targets = [...stream_info.keys()];
 
-  // Keyset-paginate the (narrowed) subscriptions on the \`after\` cursor —
-  // \`query_streams\` caps each call at \`limit\` rows, so every page is
-  // inspected until a short page signals the last one. A lagging reaction
-  // marks its close target pending regardless of how far its subscription
-  // sorts past the first page.
-  let after: string | undefined;
-  for (;;) {
-    let last: string | undefined;
-    const { count } = await store().query_streams(
-      (position) => {
-        last = position.stream;
-        const source_re = position.source
-          ? get_regex(position.source)
-          : undefined;
-        // Pending means what \`claim\` means: a mark above the watermark. An
-        // unmarked row has nothing to wait for; the catch-up above has landed
-        // every mark that was owed.
-        const has_work =
-          position.correlated_at !== undefined &&
-          position.at < position.correlated_at;
-        if (!has_work) return;
-        for (const [stream, info] of stream_info) {
-          if (
-            (!source_re || source_re.test(stream)) &&
-            position.at < info.max_id
-          ) {
-            pending_set.add(stream);
-          }
-        }
-      },
-      { after, limit: page_size, source_matches: targets }
-    );
-    if (count < page_size) break;
-    after = last;
-  }
+  // Every page, so a lagging reaction past the first one still counts.
+  await walk_streams(
+    store(),
+    (position) => {
+      // Pending means what \`claim\` means: a mark above the watermark. An
+      // unmarked row has nothing to wait for; the catch-up above has landed
+      // every mark that was owed.
+      const has_work =
+        position.correlated_at !== undefined &&
+        position.at < position.correlated_at;
+      if (!has_work) return;
+      for (const [stream, info] of stream_info) {
+        if (matches(position.source, stream) && position.at < info.max_id)
+          pending_set.add(stream);
+      }
+    },
+    { limit: page_size, source_matches: targets }
+  );
 
   const safe: string[] = [];
   for (const [stream] of stream_info) {
@@ -9112,6 +9083,7 @@ import {
   StreamClosedError,
 } from "../types/errors.js";
 import type {
+  CacheEntry,
   Committed,
   DoOptions,
   Emitted,
@@ -9185,6 +9157,31 @@ export interface EsOps {
   action: BoundAction;
   tombstone: typeof tombstone;
 }
+
+/** Writes a cache checkpoint. A failure only costs the next load a re-fold. */
+const cache_put = <TState extends Schema>(
+  stream: string,
+  entry: CacheEntry<TState>
+): Promise<void> =>
+  cache()
+    .set(stream, entry)
+    .catch((err) =>
+      log().warn(
+        err,
+        "cache set skipped; the next load re-folds from the store"
+      )
+    );
+
+/** Drops a cache checkpoint. A failure leaves a stale one, which re-folds. */
+const cache_drop = (stream: string): Promise<void> =>
+  cache()
+    .invalidate(stream)
+    .catch((err) =>
+      log().warn(
+        err,
+        "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
+      )
+    );
 
 /** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
@@ -9461,21 +9458,14 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache()
-      .set(stream, {
-        stream,
-        state,
-        version: event.version,
-        event_id: event.id,
-        patches,
-        snaps,
-      })
-      .catch((err) =>
-        log().warn(
-          err,
-          "cache set skipped; the next load re-folds from the store"
-        )
-      );
+    await cache_put(stream, {
+      stream,
+      state,
+      version: event.version,
+      event_id: event.id,
+      patches,
+      snaps,
+    });
   }
 
   return {
@@ -9604,16 +9594,7 @@ export async function action<
         );
       } catch (error) {
         // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
-        if (error instanceof ConcurrencyError) {
-          cache()
-            .invalidate(stream)
-            .catch((err) =>
-              log().warn(
-                err,
-                "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
-              )
-            );
-        }
+        if (error instanceof ConcurrencyError) void cache_drop(stream);
         throw error;
       }
 
@@ -9649,30 +9630,15 @@ export async function action<
       // Sensitive states depend on the actor, so they aren't cached.
       if (!me.pii_aware) {
         if (contiguous)
-          cache()
-            .set<TState>(stream, {
-              stream,
-              state: last.state,
-              version: snap_event?.version ?? last.event.version,
-              event_id: snap_event?.id ?? last.event.id,
-              patches: snap_event ? 0 : last.patches,
-              snaps: snap_event ? last.snaps + 1 : last.snaps,
-            })
-            .catch((err) =>
-              log().warn(
-                err,
-                "cache set skipped; the next load re-folds from the store"
-              )
-            );
-        else
-          cache()
-            .invalidate(stream)
-            .catch((err) =>
-              log().warn(
-                err,
-                "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
-              )
-            );
+          void cache_put<TState>(stream, {
+            stream,
+            state: last.state,
+            version: snap_event?.version ?? last.event.version,
+            event_id: snap_event?.id ?? last.event.id,
+            patches: snap_event ? 0 : last.patches,
+            snaps: snap_event ? last.snaps + 1 : last.snaps,
+          });
+        else void cache_drop(stream);
       }
 
       return snapshots;
@@ -10864,7 +10830,6 @@ export { synthesize_autoclose_reactions } from "./autoclose-reaction.js";
 export { compute_backoff_delay } from "./backoff.js";
 export { CircuitBreaker, type CircuitState } from "./circuit-breaker.js";
 export {
-  CLOSE_CATCH_UP_LIMIT,
   CloseLock,
   catch_up_correlation,
   run_close_cycle,

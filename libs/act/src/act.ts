@@ -18,7 +18,6 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
-  CLOSE_CATCH_UP_LIMIT,
   CloseLock,
   CorrelateCycle,
   catch_up_correlation,
@@ -1804,12 +1803,7 @@ export class Act<
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
-    return this._scoped(async () => {
-      // Correlate first so dynamic reaction targets are discovered before
-      // the safety check examines subscription positions.
-      await this.correlate({ limit: CLOSE_CATCH_UP_LIMIT });
-      return this._run_close(targets);
-    });
+    return this._scoped(() => this._run_close(targets));
   }
 
   /**
