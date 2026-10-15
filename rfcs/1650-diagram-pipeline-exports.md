@@ -117,7 +117,7 @@ That is the cost of the RFC being accepted, and it is why `buildModel`,
 governs `@rotorsoft/act` and the port contracts.
 
 **It is not covered by the stability snapshot either, and that is a gap this
-RFC opens.** `all-packages-stability.spec.ts` excludes the package by name via
+RFC opens.** `test/stability.spec.ts` excludes the package by name via
 `UI_PACKAGES`, on the stated reasoning that it "is mostly a UI tool (React
 components, `.tsx`)" and that "React-component public types … don't belong in a
 snake-case-or-camelCase rename gate."

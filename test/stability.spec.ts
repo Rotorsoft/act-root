@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runStabilityTck } from "../src/stability-tck.js";
+import { runStabilityTck } from "@rotorsoft/act-tck";
 
 /**
  * Workspace-level stability gate. Auto-discovers every `@rotorsoft/*`
@@ -9,15 +9,17 @@ import { runStabilityTck } from "../src/stability-tck.js";
  * point declared in the package's `exports` field. New packages and new
  * subpath exports get picked up automatically — no per-package wiring.
  *
- * Snapshots live next to this file (`__snapshots__/all-packages-stability.spec.ts.snap`).
+ * Snapshots live next to this file (`__snapshots__/stability.spec.ts.snap`).
  * One snapshot key per `package + subpath` pair; a public-surface change
- * to package X surfaces as a one-block diff in that single file.
+ * to package X surfaces as a one-block diff in that single file. It lives
+ * at the repo root, not in a published package, so a snapshot change
+ * never releases one.
  */
 
 const libs_dir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
-  ".."
+  "libs"
 );
 
 type ExportMap = Record<string, string | { import?: string }>;

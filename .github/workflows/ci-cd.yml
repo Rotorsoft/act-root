@@ -45,6 +45,7 @@ jobs:
             src:
               - 'libs/*/src/**'
               - 'libs/*/test/**'
+              - 'test/**'
               - 'libs/*/package.json'
               - 'libs/*/tsconfig*.json'
               - 'libs/*/tsup.config.ts'
