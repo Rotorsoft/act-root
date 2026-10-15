@@ -60,6 +60,7 @@ describe("settle loop wake-up during a running cycle", () => {
         },
         on_settled: () => {},
         breaker,
+        paused: new CircuitBreaker({ failureThreshold: 1, cooldownMs: 1000 }),
       },
       0
     );
@@ -127,6 +128,7 @@ describe("settle loop paginates past inert windows", () => {
         drain: async () => empty_drain(),
         on_settled: () => settled_signal(),
         breaker,
+        paused: new CircuitBreaker({ failureThreshold: 1, cooldownMs: 1000 }),
       },
       0
     );
@@ -191,6 +193,7 @@ describe("settle breaker success rides a real correlate probe", () => {
         drain: async () => empty_drain(),
         on_settled: () => done(),
         breaker,
+        paused: new CircuitBreaker({ failureThreshold: 1, cooldownMs: 1000 }),
       },
       0
     );

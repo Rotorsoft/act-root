@@ -174,11 +174,17 @@ app.on("error", ({ error, circuit }) => {
 
 The framework logs the error regardless of listeners; the event is emitted only when a listener is registered (Node's `EventEmitter` rethrows an unhandled `"error"`).
 
-### What the breaker does not detect
+### Store failures only
 
-The breaker detects a store that is down for every loop, not one that is only partly broken. All the loops share one count of consecutive failures, and a success from any of them resets it. So if one kind of call keeps failing while another keeps working (say correlate's event reads fail but `claim` succeeds, and a lane drains often), the breaker can stay closed for the whole failure. Reactions stop picking up new work, yet every `error` event reports `circuit: "closed"`.
+The breaker counts store failures, not errors in your code. When application code fails inside one of the loops, Act stops only what that code breaks and keeps the logs bounded. It never emits `error` or opens the breaker:
 
-Each failure still logs and still emits `error`. Alert on the **rate** of `error` events, broken down by `error.operation`, rather than on `circuit === "open"` alone.
+- **A resolver throws while correlate reads new events.** Correlation pauses at that event: new events are not matched to reactions, while work already found keeps draining. It retries once per `cooldownMs` and logs one `Correlation paused` line per retry, naming the reaction and the event. Nothing is lost. Once the resolver is fixed, the next retry resumes from the event that failed.
+- **A resolver throws while the drain matches a leased stream's events.** Only that stream fails, exactly like a failing handler: it retries on the reaction's backoff and blocks once `maxRetries` is spent (with `blockOnError`). A dynamic target without a `source` reads every stream's events, so one bad event fails every such target. Give resolvers a `source` where you can.
+- **The archive callback of a reaction-requested close throws.** It is logged once; the close does not happen.
+
+Reaction handlers were already contained this way: a throwing handler retries and blocks its own stream.
+
+All the loops share one count of consecutive store failures, and a success from any of them resets it. A store that fails only one kind of call (a single query timing out, say) while the others work can therefore keep the breaker closed. Each failure still logs and emits `error`, so alert on the **rate** of `error` events, broken down by `error.operation`, not on `circuit === "open"` alone.
 
 ## Error Constants
 

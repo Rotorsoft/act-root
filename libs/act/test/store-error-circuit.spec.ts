@@ -157,6 +157,10 @@ describe("settle loop store-error handling", () => {
             }),
             on_settled: () => {},
             breaker,
+            paused: new CircuitBreaker({
+              failureThreshold: 1,
+              cooldownMs: 1000,
+            }),
           },
           0
         );

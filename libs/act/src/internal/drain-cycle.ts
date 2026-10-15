@@ -18,9 +18,11 @@ import type {
   ReactionOptions,
   ReactionPayload,
   Registry,
+  Resolved,
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
+import { AppCodeError } from "./app-code-error.js";
 import { compute_backoff_delay } from "./backoff.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import {
@@ -117,6 +119,35 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
+/**
+ * A resolver threw while matching a leased stream's events. Only that
+ * stream fails: it retries on the reaction's backoff and blocks when the
+ * reaction's budget is spent, like a failing handler.
+ */
+function resolver_failed(
+  lease: Lease,
+  { error, options }: { error: AppCodeError; options: ReactionOptions }
+): HandleResult {
+  log().error(error);
+  const block = options.blockOnError && lease.retry >= options.maxRetries;
+  return {
+    lease,
+    handled: 0,
+    acked_at: lease.at,
+    error: error.message,
+    ...(block
+      ? { block: true }
+      : {
+          next_attempt_at:
+            Date.now() +
+            compute_backoff_delay(
+              lease.retry,
+              options.backoff ?? DEFAULT_BACKOFF
+            ),
+        }),
+  };
+}
+
 /** Reported once per declaration; every key part is declared, so it stays bounded. */
 function warn_misrouted(
   seen: Set<string>,
@@ -174,7 +205,11 @@ async function run_drain_cycle<
   type FetchEntry = (typeof fetched)[number];
   const fetch_map = new Map<
     string,
-    { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
+    {
+      fetch: FetchEntry;
+      payloads: ReactionPayload<TEvents>[];
+      failed?: { error: AppCodeError; options: ReactionOptions };
+    }
   >();
 
   const fetch_window_at = fetched.reduce(
@@ -184,6 +219,7 @@ async function run_drain_cycle<
 
   for (const f of fetched) {
     const { stream, events } = f;
+    let failed: { error: AppCodeError; options: ReactionOptions } | undefined;
     const payloads = events.flatMap((event) => {
       const register = registry.events[event.name];
       if (!register) return [];
@@ -191,7 +227,19 @@ async function run_drain_cycle<
         .filter((reaction) => {
           const resolver = reaction.resolver;
           const dynamic = typeof resolver === "function";
-          const resolved = dynamic ? resolver(event) : resolver;
+          let resolved: Resolved | undefined;
+          try {
+            resolved = dynamic ? resolver(event) : resolver;
+          } catch (error) {
+            failed ??= {
+              error: new AppCodeError(
+                `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}")`,
+                error
+              ),
+              options: reaction.options,
+            };
+            return false;
+          }
           if (!resolved || resolved.target !== stream) return false;
           // A dynamic resolution onto a projection's target: skip and report.
           // Not a throw, which would read as a store failure.
@@ -206,7 +254,7 @@ async function run_drain_cycle<
         })
         .map((reaction) => ({ ...reaction, event }));
     });
-    fetch_map.set(stream, { fetch: f, payloads });
+    fetch_map.set(stream, { fetch: f, payloads, failed });
   }
 
   const handled = await Promise.all(
@@ -237,6 +285,9 @@ async function run_drain_cycle<
         };
         return Promise.resolve(failed);
       }
+      // A resolver threw: this stream fails like a handler would.
+      if (entry.failed)
+        return Promise.resolve(resolver_failed(lease, entry.failed));
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
@@ -479,8 +530,11 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      // A store op threw: stay armed, retry after the cooldown.
-      this._deps.breaker.failed(Date.now(), error);
+      // App code (a close's archive callback) is logged, never counted as a
+      // store failure. A store op that threw: stay armed, retry after the
+      // cooldown.
+      if (error instanceof AppCodeError) this._deps.logger.error(error);
+      else this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       // Re-aim at the earliest stream still parked.

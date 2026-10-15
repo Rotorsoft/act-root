@@ -10,6 +10,7 @@ import {
 } from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
 import {
+  AppCodeError,
   type AuditDeps,
   audit,
   bare_patch,
@@ -308,6 +309,25 @@ export type ActOptions<TLanes extends string = string> = {
 };
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
+/**
+ * A reaction-requested close runs the app's archive callback inside the
+ * drain; tag its failure as app code so it never counts as a store failure.
+ */
+function tag_archive_errors(target: CloseTarget): CloseTarget {
+  const { archive } = target;
+  if (!archive) return target;
+  return {
+    ...target,
+    archive: () =>
+      archive().catch((error: unknown) => {
+        throw new AppCodeError(
+          `Archive callback for close of "${target.stream}" threw`,
+          error
+        );
+      }),
+  };
+}
+
 function validate_only_lanes(
   options: ActOptions,
   lanes: ReadonlyArray<LaneConfig>
@@ -359,6 +379,8 @@ export class Act<
 {
   private _emitter = new EventEmitter();
   private readonly _breaker: CircuitBreaker;
+  /** Opens when a resolver fails correlate; see {@link SettleLoop}. */
+  private readonly _correlation_paused: CircuitBreaker;
   private readonly _listen: boolean;
   private readonly _drain: boolean;
   private readonly _reactive_events: ReadonlySet<string>;
@@ -543,6 +565,7 @@ export class Act<
     // Order matters: controllers read the breaker, the audit bag reads the
     // controller set, settle reads the correlate cycle.
     this._breaker = this._build_breaker(options);
+    this._correlation_paused = this._build_correlation_pause(options);
     this._drain_controllers = this._build_drain_controllers(options, lanes);
     this._advise_orphaned_lanes(options);
     this._audit_deps = this._build_audit_deps();
@@ -565,6 +588,27 @@ export class Act<
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // When the cooldown elapses, settle once: its scan or claim is the
         // half-open probe that closes or re-opens the breaker.
+        on_retry: () => {
+          this.settle({ debounceMs: 0 });
+        },
+      }
+    );
+  }
+
+  /**
+   * Opens on the first app-code failure in correlate and retries once per
+   * cooldown, so a broken resolver logs once per retry, not per commit.
+   */
+  private _build_correlation_pause(options: ActOptions): CircuitBreaker {
+    const { cooldownMs } = resolveCircuitBreakerConfig(options.circuitBreaker);
+    return new CircuitBreaker(
+      { failureThreshold: 1, cooldownMs },
+      {
+        on_error: (error) =>
+          this._logger.error(
+            error,
+            `Correlation paused: new events are not matched to reactions until this is fixed. Work already found keeps draining. Retrying in ${cooldownMs}ms.`
+          ),
         on_retry: () => {
           this.settle({ debounceMs: 0 });
         },
@@ -605,7 +649,7 @@ export class Act<
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close: the same machinery as `app.close`.
         on_close: async (targets) => {
-          await this._run_close(targets);
+          await this._run_close(targets.map(tag_archive_errors));
         },
         breaker: this._breaker,
         run_scoped: this._scoped,
@@ -702,6 +746,7 @@ export class Act<
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
+        paused: this._correlation_paused,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -740,6 +785,7 @@ export class Act<
         if (disposer) await disposer();
         this._settle.stop();
         this._breaker.stop();
+        this._correlation_paused.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
         // Hand the correlation lease back last, after the wait (a settle

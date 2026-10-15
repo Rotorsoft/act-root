@@ -10,12 +10,14 @@ import type {
   EventRegister,
   Query,
   Registry,
+  Resolved,
   SchemaRegister,
   Schemas,
   StreamPosition,
   SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
+import { AppCodeError } from "./app-code-error.js";
 import type { DrainOps } from "./drain.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -331,10 +333,19 @@ export class CorrelateCycle<
         const register = this._registry.events[event.name];
         if (register) {
           for (const reaction of register.reactions.values()) {
-            const resolved =
-              typeof reaction.resolver === "function"
-                ? reaction.resolver(event)
-                : reaction.resolver;
+            let resolved: Resolved | undefined;
+            try {
+              resolved =
+                typeof reaction.resolver === "function"
+                  ? reaction.resolver(event)
+                  : reaction.resolver;
+            } catch (error) {
+              // Stops the scan at this event; settle pauses discovery.
+              throw new AppCodeError(
+                `Resolver of reaction "${reaction.handler.name}" threw on ${String(event.name)} #${event.id} (stream "${event.stream}")`,
+                error
+              );
+            }
             if (!resolved) continue;
             let lane = resolved.lane;
             if (lane !== undefined && !this._declared_lanes.has(lane)) {
