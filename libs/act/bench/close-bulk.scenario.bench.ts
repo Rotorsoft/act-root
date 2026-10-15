@@ -7,7 +7,7 @@
  * for both shapes against an `InMemoryStore` so the comparison
  * isolates framework + Map allocation overhead from disk I/O.
  *
- * **Regression bound (Shape C, per BENCH.md):**
+ * **Regression bound:**
  * - At N=1000 streams, `query_stats` must be at least 2× faster than
  *   the per-stream loop. In practice the microbench shows ~20-30× at
  *   this N for InMemory; the 2× bound is intentionally loose so the

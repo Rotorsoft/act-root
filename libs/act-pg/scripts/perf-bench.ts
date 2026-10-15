@@ -6,16 +6,17 @@
  * the report to `perf-baseline.json` and exits non-zero on a budgeted
  * regression.
  *
- * Mirrors `libs/act/scripts/perf-bench.ts` exactly in shape — same
- * `Scenario`/`BenchResult` types, same warmup + percentile math — so the
- * two harnesses stay legible side by side. The difference is the store
- * under test: this one runs on the real planner, real indexes, and real
+ * Shares its shape with the act-sqlite harness (same `Scenario` /
+ * `BenchResult` types, same warmup and percentile math). The store under
+ * test runs on the real planner, real indexes, and real
  * network round-trips, which is where adapter-level regressions (a lost
  * index, an accidental N+1 query, a snapshot-floor read that scans the
  * whole stream) actually show up. InMemory can never surface those.
  *
- * Why a plain Node script instead of vitest bench: see the sibling note
- * in `libs/act/scripts/perf-bench.ts`. Same reasoning.
+ * Why a plain Node script instead of vitest bench: full control over the
+ * JSON output (vitest's json reporter doesn't load for `vitest bench`),
+ * straightforward per-iteration setup, and one file to measure, one to
+ * compare.
  *
  * Requires a running Postgres on `localhost:5431` (user/password/database
  * all `postgres`) — the docker service CI already provides. With no DB
@@ -89,7 +90,7 @@ const resetStore = async () => {
 };
 
 // ---------------------------------------------------------------------------
-// Bench runner (identical shape to libs/act/scripts/perf-bench.ts)
+// Bench runner (same shape as the act-sqlite harness)
 // ---------------------------------------------------------------------------
 
 interface Scenario {

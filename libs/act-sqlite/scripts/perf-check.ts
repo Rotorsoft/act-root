@@ -3,9 +3,9 @@
  * baseline. Exits non-zero if any scenario's p50 regresses past
  * `TOLERANCE` × the baseline p50.
  *
- * Differences from the core `libs/act/scripts/perf-check.ts`:
+ * Differences from the act-pg check:
  *
- *   - **TOLERANCE = 1.5** — the same budget as the core InMemory gate.
+ *   - **TOLERANCE = 1.5**.
  *     Embedded SQLite has no network and no connection pool, so its
  *     noise band is far tighter than act-pg's; a 1.5× budget catches
  *     real regressions without the 2.0× headroom Postgres needs.
