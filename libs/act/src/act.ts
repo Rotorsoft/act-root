@@ -873,46 +873,6 @@ export class Act<
    * console.log(snapshots[0].state.count); // Current count after increment
    * ```
    *
-   * @example With error handling
-   * ```typescript
-   * try {
-   *   await app.do(
-   *     "withdraw",
-   *     { stream: "account-123", actor: { id: "user1", name: "Alice" } },
-   *     { amount: 1000 }
-   *   );
-   * } catch (error) {
-   *   if (error instanceof InvariantError) {
-   *     console.error("Business rule violated:", error.description);
-   *   } else if (error instanceof ConcurrencyError) {
-   *     console.error("Concurrent modification detected, retry...");
-   *   } else if (error instanceof ValidationError) {
-   *     console.error("Invalid payload:", error.details);
-   *   }
-   * }
-   * ```
-   *
-   * @example Reaction triggering another action (reactingTo auto-injected)
-   * ```typescript
-   * const app = act()
-   *   .withState(Order)
-   *   .withState(Inventory)
-   *   .on("OrderPlaced")
-   *     .do(async function reduceInventory(event, _stream, app) {
-   *       // Inside reaction handlers, reactingTo is auto-injected when omitted.
-   *       // The triggering event is used by default, maintaining the correlation chain.
-   *       await app.do(
-   *         "reduceStock",
-   *         { stream: "inventory-1", actor: { id: "sys", name: "system" } },
-   *         { amount: event.data.items.length }
-   *       );
-   *       // To use a different correlation, pass reactingTo explicitly:
-   *       // await app.do("reduceStock", target, payload, { reactingTo: customEvent });
-   *     })
-   *     .to("inventory-1")
-   *   .build();
-   * ```
-   *
    * @see {@link Target} for target structure
    * @see {@link Snapshot} for return value structure
    * @see {@link ValidationError}, {@link InvariantError}, {@link ConcurrencyError}
@@ -972,20 +932,6 @@ export class Act<
    * const snapshot = await app.load(Counter, "counter-1");
    * console.log(snapshot.state.count);    // Current count
    * console.log(snapshot.patches);        // Events since last snapshot
-   * ```
-   *
-   * @example Load by state name (useful with partial states)
-   * ```typescript
-   * const snapshot = await app.load("Ticket", "ticket-123");
-   * console.log(snapshot.state.title);    // Merged state from all partials
-   * ```
-   *
-   * @example Load multiple states
-   * ```typescript
-   * const [user, account] = await Promise.all([
-   *   app.load(User, "user-123"),
-   *   app.load(BankAccount, "account-456")
-   * ]);
    * ```
    *
    * @see {@link Snapshot} for snapshot structure
@@ -1076,26 +1022,6 @@ export class Act<
    * console.log(`Found ${count} events from ${first?.id} to ${last?.id}`);
    * ```
    *
-   * @example Query specific event types
-   * ```typescript
-   * const { count } = await app.query(
-   *   { name: "UserCreated", limit: 100 },
-   *   (event) => {
-   *     console.log("User created:", event.data.email);
-   *   }
-   * );
-   * ```
-   *
-   * @example Query events in time range
-   * ```typescript
-   * const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-   * const { count } = await app.query({
-   *   created_after: yesterday,
-   *   stream: "user-123"
-   * });
-   * console.log(`User had ${count} events in last 24 hours`);
-   * ```
-   *
    * @see {@link query_array} for loading events into memory
    */
   async query(
@@ -1133,14 +1059,6 @@ export class Act<
    * const events = await app.query_array({ stream: "counter-1" });
    * console.log(`Loaded ${events.length} events`);
    * events.forEach(event => console.log(event.name, event.data));
-   * ```
-   *
-   * @example Get recent events
-   * ```typescript
-   * const recent = await app.query_array({
-   *   stream: "user-123",
-   *   limit: 10
-   * });
    * ```
    *
    * @see {@link query} for large result sets
@@ -1216,12 +1134,6 @@ export class Act<
    * await app.do("createUser", target, payload);
    * await app.correlate();
    * await app.drain();
-   * ```
-   *
-   * @example In production, prefer settle()
-   * ```typescript
-   * await app.do("CreateItem", target, input);
-   * app.settle(); // debounced correlate→drain, emits "settled"
    * ```
    *
    * @see {@link settle} for debounced correlate→drain with lifecycle events
@@ -1300,35 +1212,18 @@ export class Act<
    * on reaction resolvers. It then registers these streams so they'll be picked up by
    * the next drain cycle.
    *
-   * @param query - Query filter to scan for new correlations
    * @param query - Scan filter — see {@link Query} for fields (typically
    *   `{ after: <event-id>, limit: <count> }`)
-   * @returns Object with newly leased streams and last scanned event ID
+   * @returns The number of newly subscribed streams and the last scanned event id
    *
    * @example Manual correlation
    * ```typescript
    * // Scan for new streams
-   * const { leased, last_id } = await app.correlate({ after: 0, limit: 100 });
-   * console.log(`Found ${leased.length} new streams`);
+   * const { subscribed, last_id } = await app.correlate({ after: 0, limit: 100 });
+   * console.log(`Subscribed ${subscribed} new streams`);
    *
    * // Save last_id for next scan
    * await saveCheckpoint(last_id);
-   * ```
-   *
-   * @example Dynamic stream creation
-   * ```typescript
-   * const app = act()
-   *   .withState(User)
-   *   .withState(UserStats)
-   *   .on("UserLoggedIn")
-   *     .do(async (event) => ["incrementLoginCount", {}])
-   *     .to((event) => ({
-   *       target: `stats-${event.stream}` // Dynamic target per user
-   *     }))
-   *   .build();
-   *
-   * // Discover stats streams as users log in
-   * await app.correlate();
    * ```
    *
    * @see {@link start_correlations} for automatic periodic correlation
@@ -1457,12 +1352,6 @@ export class Act<
    * app.settle({ eventLimit: 1000 });   // emits "settled" when fully replayed
    * ```
    *
-   * @example Rebuild a projection (tests / scripts)
-   * ```typescript
-   * await app.reset(["my-projection"]);
-   * await app.drain({ eventLimit: 1000 });   // small streams: one pass is enough
-   * ```
-   *
    * @see {@link Store.reset} for the underlying store primitive
    * @see {@link settle} for the debounced full-catch-up loop
    */
@@ -1544,11 +1433,6 @@ export class Act<
    * const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
    * console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
    * await cache().clear();   // operator's responsibility
-   * ```
-   *
-   * @example Copy one store into another
-   * ```typescript
-   * await app.restore(pg, {}, sqlite);
    * ```
    *
    * @see {@link Store.restore} for the underlying driver-pattern primitive.
@@ -1712,16 +1596,6 @@ export class Act<
    * await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
    * ```
    *
-   * @example Drop all audit projections to background
-   * ```typescript
-   * await app.prioritize({ source: "^audit-" }, -5);
-   * ```
-   *
-   * @example Reset everyone to default
-   * ```typescript
-   * await app.prioritize({}, 0);
-   * ```
-   *
    * @see {@link Store.prioritize} for the underlying primitive
    * @see {@link claim} for how priority biases scheduling
    */
@@ -1787,27 +1661,6 @@ export class Act<
    * await app.close([
    *   { stream: "order-123", archive: async () => { await archiveToS3("order-123"); } },
    *   { stream: "order-456" },
-   * ]);
-   * ```
-   *
-   * @example Close with restart (state loaded automatically after guard)
-   * ```typescript
-   * await app.close([
-   *   { stream: "counter-1", restart: true },
-   *   { stream: "counter-2" },  // tombstoned
-   * ]);
-   * ```
-   *
-   * @example Windowed close — keep the last 180 days of real events
-   * ```typescript
-   * const cutoff = new Date();
-   * cutoff.setDate(cutoff.getDate() - 180);
-   * await app.close([
-   *   {
-   *     stream: "ledger-acme",
-   *     before: cutoff,
-   *     archive: async () => { await archiveToS3("ledger-acme", cutoff); },
-   *   },
    * ]);
    * ```
    */

@@ -51,7 +51,7 @@ export type TryOkOptions = {
  * would otherwise write into one line:
  *
  * ```ts
- * .on("OrderConfirmed").do(async (event) => {
+ * .on("OrderConfirmed").do(async function deliverOrder(event) {
  *   const response = await my_sdk.deliver(event);
  *   await try_ok(response, { url: my_sdk.url, label: "my_sdk" });
  *   // ...response was 2xx; continue with downstream work...

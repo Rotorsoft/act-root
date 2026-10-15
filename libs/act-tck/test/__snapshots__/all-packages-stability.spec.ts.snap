@@ -247,31 +247,6 @@ export interface ActBuilder<
  *   .build();
  * \`\`\`
  *
- * @example Application with custom actor type
- * \`\`\`typescript
- * type MyActor = { id: string; name: string; role: string };
- *
- * const app = act()
- *   .withActor<MyActor>()
- *   .withState(Counter)
- *   .build();
- * \`\`\`
- *
- * @example Application with slices (vertical slice architecture)
- * \`\`\`typescript
- * const CounterSlice = slice()
- *   .withState(Counter)
- *   .on("Incremented")
- *     .do(async (event) => { console.log("incremented!"); })
- *     .to("counter-target")
- *   .build();
- *
- * const app = act()
- *   .withSlice(CounterSlice)
- *   .build();
- * \`\`\`
- *
- *
  * @see {@link ActBuilder} for available builder methods
  * @see {@link Act} for orchestrator API methods
  * @see {@link state} for defining states
@@ -1523,46 +1498,6 @@ export class Act<
    * console.log(snapshots[0].state.count); // Current count after increment
    * \`\`\`
    *
-   * @example With error handling
-   * \`\`\`typescript
-   * try {
-   *   await app.do(
-   *     "withdraw",
-   *     { stream: "account-123", actor: { id: "user1", name: "Alice" } },
-   *     { amount: 1000 }
-   *   );
-   * } catch (error) {
-   *   if (error instanceof InvariantError) {
-   *     console.error("Business rule violated:", error.description);
-   *   } else if (error instanceof ConcurrencyError) {
-   *     console.error("Concurrent modification detected, retry...");
-   *   } else if (error instanceof ValidationError) {
-   *     console.error("Invalid payload:", error.details);
-   *   }
-   * }
-   * \`\`\`
-   *
-   * @example Reaction triggering another action (reactingTo auto-injected)
-   * \`\`\`typescript
-   * const app = act()
-   *   .withState(Order)
-   *   .withState(Inventory)
-   *   .on("OrderPlaced")
-   *     .do(async function reduceInventory(event, _stream, app) {
-   *       // Inside reaction handlers, reactingTo is auto-injected when omitted.
-   *       // The triggering event is used by default, maintaining the correlation chain.
-   *       await app.do(
-   *         "reduceStock",
-   *         { stream: "inventory-1", actor: { id: "sys", name: "system" } },
-   *         { amount: event.data.items.length }
-   *       );
-   *       // To use a different correlation, pass reactingTo explicitly:
-   *       // await app.do("reduceStock", target, payload, { reactingTo: customEvent });
-   *     })
-   *     .to("inventory-1")
-   *   .build();
-   * \`\`\`
-   *
    * @see {@link Target} for target structure
    * @see {@link Snapshot} for return value structure
    * @see {@link ValidationError}, {@link InvariantError}, {@link ConcurrencyError}
@@ -1622,20 +1557,6 @@ export class Act<
    * const snapshot = await app.load(Counter, "counter-1");
    * console.log(snapshot.state.count);    // Current count
    * console.log(snapshot.patches);        // Events since last snapshot
-   * \`\`\`
-   *
-   * @example Load by state name (useful with partial states)
-   * \`\`\`typescript
-   * const snapshot = await app.load("Ticket", "ticket-123");
-   * console.log(snapshot.state.title);    // Merged state from all partials
-   * \`\`\`
-   *
-   * @example Load multiple states
-   * \`\`\`typescript
-   * const [user, account] = await Promise.all([
-   *   app.load(User, "user-123"),
-   *   app.load(BankAccount, "account-456")
-   * ]);
    * \`\`\`
    *
    * @see {@link Snapshot} for snapshot structure
@@ -1726,26 +1647,6 @@ export class Act<
    * console.log(\`Found \${count} events from \${first?.id} to \${last?.id}\`);
    * \`\`\`
    *
-   * @example Query specific event types
-   * \`\`\`typescript
-   * const { count } = await app.query(
-   *   { name: "UserCreated", limit: 100 },
-   *   (event) => {
-   *     console.log("User created:", event.data.email);
-   *   }
-   * );
-   * \`\`\`
-   *
-   * @example Query events in time range
-   * \`\`\`typescript
-   * const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-   * const { count } = await app.query({
-   *   created_after: yesterday,
-   *   stream: "user-123"
-   * });
-   * console.log(\`User had \${count} events in last 24 hours\`);
-   * \`\`\`
-   *
    * @see {@link query_array} for loading events into memory
    */
   async query(
@@ -1783,14 +1684,6 @@ export class Act<
    * const events = await app.query_array({ stream: "counter-1" });
    * console.log(\`Loaded \${events.length} events\`);
    * events.forEach(event => console.log(event.name, event.data));
-   * \`\`\`
-   *
-   * @example Get recent events
-   * \`\`\`typescript
-   * const recent = await app.query_array({
-   *   stream: "user-123",
-   *   limit: 10
-   * });
    * \`\`\`
    *
    * @see {@link query} for large result sets
@@ -1866,12 +1759,6 @@ export class Act<
    * await app.do("createUser", target, payload);
    * await app.correlate();
    * await app.drain();
-   * \`\`\`
-   *
-   * @example In production, prefer settle()
-   * \`\`\`typescript
-   * await app.do("CreateItem", target, input);
-   * app.settle(); // debounced correlate→drain, emits "settled"
    * \`\`\`
    *
    * @see {@link settle} for debounced correlate→drain with lifecycle events
@@ -1950,35 +1837,18 @@ export class Act<
    * on reaction resolvers. It then registers these streams so they'll be picked up by
    * the next drain cycle.
    *
-   * @param query - Query filter to scan for new correlations
    * @param query - Scan filter — see {@link Query} for fields (typically
    *   \`{ after: <event-id>, limit: <count> }\`)
-   * @returns Object with newly leased streams and last scanned event ID
+   * @returns The number of newly subscribed streams and the last scanned event id
    *
    * @example Manual correlation
    * \`\`\`typescript
    * // Scan for new streams
-   * const { leased, last_id } = await app.correlate({ after: 0, limit: 100 });
-   * console.log(\`Found \${leased.length} new streams\`);
+   * const { subscribed, last_id } = await app.correlate({ after: 0, limit: 100 });
+   * console.log(\`Subscribed \${subscribed} new streams\`);
    *
    * // Save last_id for next scan
    * await saveCheckpoint(last_id);
-   * \`\`\`
-   *
-   * @example Dynamic stream creation
-   * \`\`\`typescript
-   * const app = act()
-   *   .withState(User)
-   *   .withState(UserStats)
-   *   .on("UserLoggedIn")
-   *     .do(async (event) => ["incrementLoginCount", {}])
-   *     .to((event) => ({
-   *       target: \`stats-\${event.stream}\` // Dynamic target per user
-   *     }))
-   *   .build();
-   *
-   * // Discover stats streams as users log in
-   * await app.correlate();
    * \`\`\`
    *
    * @see {@link start_correlations} for automatic periodic correlation
@@ -2107,12 +1977,6 @@ export class Act<
    * app.settle({ eventLimit: 1000 });   // emits "settled" when fully replayed
    * \`\`\`
    *
-   * @example Rebuild a projection (tests / scripts)
-   * \`\`\`typescript
-   * await app.reset(["my-projection"]);
-   * await app.drain({ eventLimit: 1000 });   // small streams: one pass is enough
-   * \`\`\`
-   *
    * @see {@link Store.reset} for the underlying store primitive
    * @see {@link settle} for the debounced full-catch-up loop
    */
@@ -2194,11 +2058,6 @@ export class Act<
    * const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
    * console.log(\`Restored \${result.kept} events in \${result.duration_ms}ms\`);
    * await cache().clear();   // operator's responsibility
-   * \`\`\`
-   *
-   * @example Copy one store into another
-   * \`\`\`typescript
-   * await app.restore(pg, {}, sqlite);
    * \`\`\`
    *
    * @see {@link Store.restore} for the underlying driver-pattern primitive.
@@ -2362,16 +2221,6 @@ export class Act<
    * await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
    * \`\`\`
    *
-   * @example Drop all audit projections to background
-   * \`\`\`typescript
-   * await app.prioritize({ source: "^audit-" }, -5);
-   * \`\`\`
-   *
-   * @example Reset everyone to default
-   * \`\`\`typescript
-   * await app.prioritize({}, 0);
-   * \`\`\`
-   *
    * @see {@link Store.prioritize} for the underlying primitive
    * @see {@link claim} for how priority biases scheduling
    */
@@ -2437,27 +2286,6 @@ export class Act<
    * await app.close([
    *   { stream: "order-123", archive: async () => { await archiveToS3("order-123"); } },
    *   { stream: "order-456" },
-   * ]);
-   * \`\`\`
-   *
-   * @example Close with restart (state loaded automatically after guard)
-   * \`\`\`typescript
-   * await app.close([
-   *   { stream: "counter-1", restart: true },
-   *   { stream: "counter-2" },  // tombstoned
-   * ]);
-   * \`\`\`
-   *
-   * @example Windowed close — keep the last 180 days of real events
-   * \`\`\`typescript
-   * const cutoff = new Date();
-   * cutoff.setDate(cutoff.getDate() - 180);
-   * await app.close([
-   *   {
-   *     stream: "ledger-acme",
-   *     before: cutoff,
-   *     archive: async () => { await archiveToS3("ledger-acme", cutoff); },
-   *   },
    * ]);
    * \`\`\`
    */
@@ -2540,14 +2368,6 @@ import type {
  *   name: "Alice Smith"
  * };
  * \`\`\`
- *
- * @example System actor
- * \`\`\`typescript
- * const systemActor: Actor = {
- *   id: "system",
- *   name: "Background Job"
- * };
- * \`\`\`
  */
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -2568,15 +2388,6 @@ export type Actor = z.infer<typeof ActorSchema>;
  * };
  *
  * await app.do("updateProfile", target, { email: "new@example.com" });
- * \`\`\`
- *
- * @example Dynamic stream ID
- * \`\`\`typescript
- * const userId = "user-" + Date.now();
- * await app.do("createUser", {
- *   stream: userId,
- *   actor: currentUser
- * }, userData);
  * \`\`\`
  */
 export type Target<TActor extends Actor = Actor> = {
@@ -2839,16 +2650,6 @@ export type Committed<
  * console.log(snapshot.patches);   // 8 (events since last snapshot)
  * console.log(snapshot.snaps);     // 1 (1 snapshot taken)
  * console.log(snapshot.event);     // Last event that created this snapshot
- * \`\`\`
- *
- * @example Using snapshot in action handler
- * \`\`\`typescript
- * .on({ increment: z.object({ by: z.number() }) })
- *   .emit((action, snapshot) => {
- *     console.log("Current count:", snapshot.state.count);
- *     console.log("Events applied:", snapshot.patches);
- *     return ["Incremented", { amount: action.by }];
- *   })
  * \`\`\`
  */
 export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
@@ -6662,33 +6463,6 @@ let _validated: Config | undefined;
  * console.log(\`Log level: \${cfg.logLevel}\`);
  * \`\`\`
  *
- * @example Environment-specific behavior
- * \`\`\`typescript
- * import { config } from "@rotorsoft/act";
- *
- * const cfg = config();
- *
- * if (cfg.env === "production") {
- *   // Use PostgreSQL in production
- *   store(new PostgresStore(prodConfig));
- * } else {
- *   // Use in-memory store for dev/test
- *   store(new InMemoryStore());
- * }
- * \`\`\`
- *
- * @example Adjusting log levels
- * \`\`\`typescript
- * // Set via environment variable:
- * // LOG_LEVEL=debug npm start
- *
- * // Or check in code:
- * const cfg = config();
- * if (cfg.logLevel === "trace") {
- *   logger.trace("Detailed debugging enabled");
- * }
- * \`\`\`
- *
  * @see {@link Config} for configuration type
  */
 export const config = (): Config => {
@@ -8780,19 +8554,6 @@ export const Errors = {
  * }
  * \`\`\`
  *
- * @example Logging validation details
- * \`\`\`typescript
- * try {
- *   await app.do("updateProfile", target, payload);
- * } catch (error) {
- *   if (error instanceof ValidationError) {
- *     error.details.errors.forEach((err) => {
- *       console.error(\`Field \${err.path.join(".")}: \${err.message}\`);
- *     });
- *   }
- * }
- * \`\`\`
- *
  * @see {@link https://zod.dev | Zod documentation} for validation details
  */
 export class ValidationError extends Error {
@@ -8841,40 +8602,6 @@ export class ValidationError extends Error {
  *     console.error("Reason:", error.description);
  *     console.error("Current state:", error.snapshot.state);
  *     console.error("Attempted payload:", error.payload);
- *   }
- * }
- * \`\`\`
- *
- * @example User-friendly error messages
- * \`\`\`typescript
- * try {
- *   await app.do("closeTicket", target, payload);
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     // Present friendly message to user
- *     if (error.description === "Ticket must be open") {
- *       return { error: "This ticket is already closed" };
- *     } else if (error.description === "Not authorized") {
- *       return { error: "You don't have permission to close this ticket" };
- *     }
- *   }
- * }
- * \`\`\`
- *
- * @example Logging with context
- * \`\`\`typescript
- * try {
- *   await app.do("transfer", target, { to: "account2", amount: 500 });
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     logger.error({
- *       action: error.action,
- *       stream: error.target.stream,
- *       actor: error.target.actor,
- *       reason: error.description,
- *       balance: error.snapshot.state.balance,
- *       attempted: error.payload.amount
- *     }, "Invariant violation");
  *   }
  * }
  * \`\`\`
@@ -8950,36 +8677,6 @@ export class InvariantError<
  *     }
  *   }
  *   return { success: false, reason: "Too many concurrent modifications" };
- * }
- * \`\`\`
- *
- * @example Logging concurrency conflicts
- * \`\`\`typescript
- * try {
- *   await app.do("updateInventory", target, payload);
- * } catch (error) {
- *   if (error instanceof ConcurrencyError) {
- *     logger.warn({
- *       stream: error.stream,
- *       expectedVersion: error.expectedVersion,
- *       actualVersion: error.lastVersion,
- *       events: error.events.map(e => e.name)
- *     }, "Concurrent modification detected");
- *   }
- * }
- * \`\`\`
- *
- * @example User feedback for conflicts
- * \`\`\`typescript
- * try {
- *   await app.do("editDocument", target, { content: newContent });
- * } catch (error) {
- *   if (error instanceof ConcurrencyError) {
- *     return {
- *       error: "This document was modified by another user. Please refresh and try again.",
- *       code: "CONCURRENT_MODIFICATION"
- *     };
- *   }
  * }
  * \`\`\`
  *
@@ -9110,7 +8807,7 @@ export class StoreError extends Error {
  * import { NonRetryableError } from "@rotorsoft/act";
  *
  * .on("OrderConfirmed")
- *   .do(async (event) => {
+ *   .do(async function notifyPartner(event) {
  *     const res = await fetch(url, ...);
  *     if (res.status >= 400 && res.status < 500) {
  *       throw new NonRetryableError(
@@ -9119,20 +8816,6 @@ export class StoreError extends Error {
  *       );
  *     }
  *     if (!res.ok) throw new Error(\`webhook \${url} responded \${res.status}\`);
- *   })
- * \`\`\`
- *
- * @example Marking validation failures as non-retryable
- * \`\`\`typescript
- * .on("PaymentReceived")
- *   .do(async (event) => {
- *     const parsed = Schema.safeParse(event.data);
- *     if (!parsed.success) {
- *       throw new NonRetryableError("payment payload failed validation", {
- *         cause: parsed.error,
- *       });
- *     }
- *     // ... handle parsed payload
  *   })
  * \`\`\`
  */
@@ -10158,27 +9841,6 @@ class InMemoryStream {
  * });
  * \`\`\`
  *
- * @example Explicit instantiation
- * \`\`\`typescript
- * import { InMemoryStore } from "@rotorsoft/act";
- *
- * const testStore = new InMemoryStore();
- * await testStore.seed();
- *
- * // Use for specific test scenarios
- * await testStore.commit("test-stream", events, meta);
- * \`\`\`
- *
- * @example Querying events
- * \`\`\`typescript
- * const events: any[] = [];
- * await store().query(
- *   (event) => events.push(event),
- *   { stream: "test-stream" }
- * );
- * console.log(\`Found \${events.length} events\`);
- * \`\`\`
- *
  * @see {@link Store} for the interface definition
  * @see {@link PostgresStore} for production use
  * @see {@link store} for injecting stores
@@ -11177,13 +10839,6 @@ export function port<Port extends Disposable>(injector: Injector<Port>) {
  * logger.info("Application started");
  * \`\`\`
  *
- * @example Injecting pino
- * \`\`\`typescript
- * import { log } from "@rotorsoft/act";
- * import { PinoLogger } from "@rotorsoft/act-pino";
- * log(new PinoLogger({ level: "debug", pretty: true }));
- * \`\`\`
- *
  * @see {@link Logger} for the interface contract
  * @see {@link ConsoleLogger} for the default implementation
  */
@@ -11215,20 +10870,6 @@ export const log = port(function log(adapter?: Logger) {
  * \`\`\`typescript
  * import { store } from "@rotorsoft/act";
  * const s = store();
- * \`\`\`
- *
- * @example Injecting PostgreSQL
- * \`\`\`typescript
- * import { store } from "@rotorsoft/act";
- * import { PostgresStore } from "@rotorsoft/act-pg";
- *
- * store(new PostgresStore({
- *   host: "localhost",
- *   port: 5432,
- *   database: "myapp",
- *   user: "postgres",
- *   password: "secret",
- * }));
  * \`\`\`
  *
  * @see {@link Store} for the interface contract
@@ -12445,11 +12086,6 @@ export interface Store extends Disposable, EventSource {
    * );
    * \`\`\`
    *
-   * @example De-prioritize all background projections
-   * \`\`\`typescript
-   * await store().prioritize({ source: "^audit-" }, -5);
-   * \`\`\`
-   *
    * @see {@link Act.prioritize} for the orchestrator-level wrapper
    * @see {@link claim} for how priority biases stream scheduling
    */
@@ -12613,21 +12249,6 @@ export interface Store extends Disposable, EventSource {
    *   { blocked: true, limit: 50 }
    * );
    * \`\`\`
-   *
-   * @example Page through all positions
-   * \`\`\`typescript
-   * let after: string | undefined;
-   * for (;;) {
-   *   const page: StreamPosition[] = [];
-   *   const { count } = await store().query_streams(
-   *     (s) => page.push(s),
-   *     { after, limit: 100 }
-   *   );
-   *   if (!count) break;
-   *   // ... use page ...
-   *   after = page.at(-1)?.stream;
-   * }
-   * \`\`\`
    */
   query_streams: (
     callback: (position: StreamPosition) => void,
@@ -12690,56 +12311,6 @@ export interface Store extends Disposable, EventSource {
    * });
    * for (const [stream, { head }] of stats) {
    *   // head.id, head.version, head.name
-   * }
-   * \`\`\`
-   *
-   * @example Full stats — inspector / admin dashboard (one full scan)
-   * \`\`\`typescript
-   * const stats = await store().query_stats<MyEvents>(
-   *   { stream: "^orders-" },
-   *   { count: true, tail: true, names: true,
-   *     exclude: [TOMBSTONE_EVENT] }
-   * );
-   * for (const [stream, s] of stats) {
-   *   const snaps = s.names?.[SNAP_EVENT] ?? 0;
-   *   const domain = (s.count ?? 0) - snaps;
-   *   console.log(stream, { snaps, domain, tail: s.tail?.created });
-   * }
-   * \`\`\`
-   *
-   * @example Schema-evolution — surface deprecated events per stream
-   * \`\`\`typescript
-   * const stats = await store().query_stats<TicketEvents>(
-   *   { stream: "^ticket-" },
-   *   { names: true }
-   * );
-   * for (const [stream, { names = {} }] of stats) {
-   *   if ((names["TicketOpened"] ?? 0) > 0) {
-   *     console.log(\`\${stream}: \${names["TicketOpened"]} legacy events\`);
-   *   }
-   * }
-   * \`\`\`
-   *
-   * @example Time travel — stream state at a historical cutoff
-   * \`\`\`typescript
-   * const stats = await store().query_stats(["order-42"], {
-   *   before: 100_000, // events up to (not including) id 100000
-   *   tail: true,
-   * });
-   * const { head, tail } = stats.get("order-42") ?? {};
-   * // head = latest event with id < 100_000; tail = earliest in range
-   * \`\`\`
-   *
-   * @example Page through every stream a bounded chunk at a time
-   * \`\`\`typescript
-   * let after: string | undefined;
-   * for (;;) {
-   *   const page = await store().query_stats({}, { after, limit: 500 });
-   *   if (page.size === 0) break;
-   *   for (const [stream, { head }] of page) {
-   *     // ... process stream ...
-   *   }
-   *   after = [...page.keys()].at(-1);
    * }
    * \`\`\`
    *
@@ -13133,25 +12704,13 @@ export type ProjectionBuilder<
  * \`\`\`typescript
  * const TicketProjection = projection("tickets")
  *   .on({ TicketOpened })
- *     .do(async ({ stream, data }) => {
+ *     .do(async function openTicket({ stream, data }) {
  *       await db.insert(tickets).values({ id: stream, ...data });
  *     })
  *   .on({ TicketClosed })
- *     .do(async ({ stream, data }) => {
+ *     .do(async function closeTicket({ stream, data }) {
  *       await db.update(tickets).set(data).where(eq(tickets.id, stream));
  *     })
- *   .build();
- * \`\`\`
- *
- * @example Per-handler routing
- * \`\`\`typescript
- * const MultiProjection = projection()
- *   .on({ OrderPlaced })
- *     .do(async (event) => { ... })
- *     .to("orders")
- *   .on({ PaymentReceived })
- *     .do(async (event) => { ... })
- *     .to("payments")
  *   .build();
  * \`\`\`
  *
@@ -13631,13 +13190,6 @@ import type {
  * };
  * \`\`\`
  *
- * @example Triggering another action
- * \`\`\`typescript
- * const reduceInventory: ReactionHandler<Events, "OrderPlaced"> = async (event) => {
- *   return ["reduceStock", { amount: event.data.items.length }];
- * };
- * \`\`\`
- *
  * @see {@link Reaction} for complete reaction configuration
  */
 export type ReactionHandler<
@@ -13672,32 +13224,6 @@ export type ReactionHandler<
  * .on("UserCreated")
  *   .do(sendWelcomeEmail)
  *   .to("email-queue") // Static target
- * \`\`\`
- *
- * @example Dynamic target per user
- * \`\`\`typescript
- * .on("UserLoggedIn")
- *   .do(incrementLoginCount)
- *   .to((event) => ({
- *     target: \`stats-\${event.stream}\` // Dynamic per user
- *   }))
- * \`\`\`
- *
- * @example With source optimization
- * \`\`\`typescript
- * .on("UserUpdated")
- *   .do(updateReadModel)
- *   .to(({ stream }) => ({
- *     source: stream,           // Only fetch from this user's stream
- *     target: \`cache-\${stream}\` // Update corresponding cache
- *   }))
- * \`\`\`
- *
- * @example With priority (saturated worker scheduling)
- * \`\`\`typescript
- * .on("OrderConfirmed")
- *   .do(sendCriticalNotification)
- *   .to({ target: "notifications-out", priority: 10 })
  * \`\`\`
  *
  * @see {@link Reaction} for complete reaction configuration
@@ -15295,21 +14821,10 @@ export interface SliceBuilder<
  * const CounterSlice = slice()
  *   .withState(Counter)
  *   .on("Incremented")
- *     .do(async (event, _stream, app) => {
+ *     .do(async function resetCounter(event, _stream, app) {
  *       await app.do("reset", target, {});
  *     })
  *     .to("counter-target")
- *   .build();
- * \`\`\`
- *
- * @example Cross-state dispatch (include both states)
- * \`\`\`typescript
- * const CreationSlice = slice()
- *   .withState(TicketCreation)
- *   .withState(TicketOperations) // handler can dispatch AssignTicket
- *   .on("TicketOpened").do(async (event, _stream, app) => {
- *     await app.do("AssignTicket", target, payload, { reactingTo: event });
- *   })
  *   .build();
  * \`\`\`
  *
@@ -15434,11 +14949,6 @@ export type StateBuilder<
    * \`\`\`typescript
    * .init(() => ({ count: 0, created: new Date() }))
    * \`\`\`
-   *
-   * @example With initial data
-   * \`\`\`typescript
-   * .init((data) => ({ ...data, createdAt: new Date() }))
-   * \`\`\`
    */
   init: (init: () => Readonly<TState>) => {
     /**
@@ -15562,35 +15072,6 @@ export type ActionBuilder<
    * .on({ increment: z.object({ by: z.number() }) })
    *   .emit((action) => ["Incremented", { amount: action.by }])
    * \`\`\`
-   *
-   * @example Hot-stream action with retry + jittered exponential backoff
-   * \`\`\`typescript
-   * .on(
-   *   { transfer: z.object({ amount: z.number() }) },
-   *   {
-   *     maxRetries: 5,
-   *     backoff: { strategy: "exponential", baseMs: 10, maxMs: 200, jitter: true },
-   *   }
-   * )
-   *   .emit((action) => ["Transferred", { amount: action.amount }])
-   * \`\`\`
-   *
-   * @example Action with business rules
-   * \`\`\`typescript
-   * .on({ withdraw: z.object({ amount: z.number() }) })
-   *   .given([
-   *     { description: "Account must be open", valid: (state) => state.status === "open" },
-   *     { description: "Funds must be available", valid: (state) => state.balance > 0 }
-   *   ])
-   *   .emit((action) => ["Withdrawn", { amount: action.amount }])
-   * \`\`\`
-   *
-   * @example Action with shorthand (variable name matches action name)
-   * \`\`\`typescript
-   * const OpenTicket = z.object({ title: z.string() });
-   * .on({ OpenTicket })
-   *   .emit((action) => ["TicketOpened", { title: action.title }])
-   * \`\`\`
    */
   on: <TKey extends string, TNewActions extends Schema>(
     entry: ActionEntry<TKey, TNewActions>,
@@ -15636,11 +15117,6 @@ export type ActionBuilder<
        *   const newBalance = snapshot.state.balance + action.amount;
        *   return ["Deposited", { amount: action.amount, newBalance }];
        * })
-       * \`\`\`
-       *
-       * @example Passthrough (action payload = event data)
-       * \`\`\`typescript
-       * .emit("TicketAssigned")
        * \`\`\`
        */
       emit: {
@@ -15692,19 +15168,6 @@ export type ActionBuilder<
      * \`\`\`typescript
      * .emit("Incremented")
      * \`\`\`
-     *
-     * @example Single event
-     * \`\`\`typescript
-     * .emit((action) => ["Incremented", { amount: action.by }])
-     * \`\`\`
-     *
-     * @example Multiple events
-     * \`\`\`typescript
-     * .emit((action) => [
-     *   ["Incremented", { amount: action.by }],
-     *   ["LogUpdated", { message: \`Incremented by \${action.by}\` }]
-     * ])
-     * \`\`\`
      */
     emit: {
       (
@@ -15745,22 +15208,6 @@ export type ActionBuilder<
    * @example Snapshot every 10 events
    * \`\`\`typescript
    * .snap((snapshot) => snapshot.patches >= 10)
-   * \`\`\`
-   *
-   * @example Snapshot based on state size
-   * \`\`\`typescript
-   * .snap((snapshot) => {
-   *   const estimatedSize = JSON.stringify(snapshot.state).length;
-   *   return estimatedSize > 10000 || snapshot.patches >= 50;
-   * })
-   * \`\`\`
-   *
-   * @example Time-based snapshotting
-   * \`\`\`typescript
-   * .snap((snapshot) => {
-   *   const hoursSinceLastSnapshot = snapshot.patches * 0.1; // Estimate
-   *   return hoursSinceLastSnapshot >= 24;
-   * })
    * \`\`\`
    */
   snap: (
@@ -15835,54 +15282,6 @@ export type ActionBuilder<
    *   90 days after resolution).
    * \`\`\`typescript
    * .autocloses({ is: "TicketResolved", after: { days: 90 } })
-   * \`\`\`
-   *
-   * @example Declarative — multi-terminal (an Order closes on any of
-   *   three terminal events, no cooldown).
-   * \`\`\`typescript
-   * .autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
-   * \`\`\`
-   *
-   * @example Declarative — time-only retention (a Session closes
-   *   after 24h regardless of head event).
-   * \`\`\`typescript
-   * .autocloses({ after: { days: 1 } })
-   * \`\`\`
-   *
-   * @example Declarative — pure cardinality cap.
-   * \`\`\`typescript
-   * .autocloses({ reaches: 10_000 })
-   * \`\`\`
-   *
-   * @example Declarative — primary cooldown + safety-net backstop.
-   * \`\`\`typescript
-   * .autocloses({
-   *   is: "TicketResolved",     // primary trigger
-   *   after: { days: 90 },      // AND aged 90 days
-   *   or: { reaches: 10_000 },  // OR cardinality safety net
-   * })
-   * \`\`\`
-   *
-   * @example Declarative — pure OR (only backstops, no primary
-   *   cooldown).
-   * \`\`\`typescript
-   * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
-   * \`\`\`
-   *
-   * @example Rolling window — keep the last 180 days of real events on a
-   *   live stream (requires \`.snap(...)\` earlier in the chain; \`keep\`
-   *   won't typecheck without it). Each eligible cycle prunes the prefix
-   *   below the closest safe snapshot older than \`now − keep\`.
-   * \`\`\`typescript
-   * .snap((s) => s.patches >= 100)
-   * .autocloses({ keep: { days: 180 } })
-   * \`\`\`
-   *
-   * @example Terminate AND prune — close 90 days after resolution,
-   *   meanwhile keep open streams pruned to a 180-day window.
-   * \`\`\`typescript
-   * .snap((s) => s.patches >= 100)
-   * .autocloses({ is: "TicketResolved", after: { days: 90 }, keep: { days: 180 } })
    * \`\`\`
    */
   autocloses: (
@@ -15993,79 +15392,6 @@ export type ActionBuilder<
  *   })
  *   .on({ increment: z.object({ by: z.number() }) })
  *     .emit((action) => ["Incremented", { amount: action.by }])
- *   .build();
- * \`\`\`
- *
- * @example Passthrough state (no custom patch or emit needed)
- * \`\`\`typescript
- * const DigitBoard = state({ DigitBoard: z.object({ digit: z.string() }) })
- *   .init(() => ({ digit: "" }))
- *   .emits({ DigitCounted: z.object({ digit: z.string() }) })
- *   // no .patch() — passthrough is the default (event data merges into state)
- *   .on({ CountDigit: z.object({ digit: z.string() }) })
- *     .emit("DigitCounted")  // string passthrough — action payload becomes event data
- *   .build();
- * \`\`\`
- *
- * @example State with multiple events and invariants
- * \`\`\`typescript
- * const BankAccount = state({ BankAccount: z.object({
- *   balance: z.number(),
- *   currency: z.string(),
- *   status: z.enum(["open", "closed"])
- * }) })
- *   .init(() => ({ balance: 0, currency: "USD", status: "open" }))
- *   .emits({
- *     Deposited: z.object({ amount: z.number() }),
- *     Withdrawn: z.object({ amount: z.number() }),
- *     Closed: z.object({})
- *   })
- *   .patch({  // only override events needing custom logic
- *     Deposited: ({ data }, state) => ({ balance: state.balance + data.amount }),
- *     Withdrawn: ({ data }, state) => ({ balance: state.balance - data.amount }),
- *     Closed: () => ({ status: "closed", balance: 0 })
- *   })
- *   .on({ deposit: z.object({ amount: z.number() }) })
- *     .given([
- *       { description: "Account must be open", valid: (state) => state.status === "open" }
- *     ])
- *     .emit("Deposited")  // passthrough — action payload { amount } becomes event data
- *   .on({ withdraw: z.object({ amount: z.number() }) })
- *     .given([
- *       { description: "Account must be open", valid: (state) => state.status === "open" },
- *       { description: "Funds must be available", valid: (state) => state.balance > 0 }
- *     ])
- *     .emit("Withdrawn")
- *   .on({ close: z.object({}) })
- *     .given([
- *       { description: "Account must be open", valid: (state) => state.status === "open" },
- *       { description: "Balance must be zero", valid: (state) => state.balance === 0 }
- *     ])
- *     .emit("Closed")
- *   .build();
- * \`\`\`
- *
- * @example State with snapshotting
- * \`\`\`typescript
- * const User = state({ User: z.object({
- *   name: z.string(),
- *   email: z.string(),
- *   loginCount: z.number()
- * }) })
- *   .init((data) => ({ ...data, loginCount: 0 }))
- *   .emits({
- *     UserCreated: z.object({ name: z.string(), email: z.string() }),
- *     UserLoggedIn: z.object({})
- *   })
- *   .patch({  // only override events needing custom logic
- *     UserLoggedIn: (_, state) => ({ loginCount: state.loginCount + 1 })
- *   })
- *   // UserCreated uses passthrough — event data merges into state
- *   .on({ createUser: z.object({ name: z.string(), email: z.string() }) })
- *     .emit("UserCreated")  // passthrough
- *   .on({ login: z.object({}) })
- *     .emit("UserLoggedIn")
- *   .snap((snap) => snap.patches >= 10) // Snapshot every 10 events
  *   .build();
  * \`\`\`
  *
@@ -16990,13 +16316,6 @@ export type Sandbox<TApp> = {
  *   await dispose();
  * });
  * \`\`\`
- *
- * @example Custom store factory (PG per-test schema)
- * \`\`\`ts
- * const { app, dispose } = await sandbox(builder, {
- *   store: () => new PostgresStore({ schema: \`t_\${nanoid()}\` }),
- * });
- * \`\`\`
  */
 export async function sandbox<TApp>(
   builder: AnyActBuilder<TApp>,
@@ -17053,13 +16372,6 @@ export async function sandbox<TApp>(
  * test.concurrent("isolated from concurrent peers", async ({ app }) => {
  *   // Each concurrent invocation gets its own store + cache — no
  *   // singleton contention, no flake.
- * });
- * \`\`\`
- *
- * @example Custom store factory
- * \`\`\`ts
- * const test = fixture(builder, {
- *   store: () => new PostgresStore({ schema: \`t_\${nanoid()}\` }),
  * });
  * \`\`\`
  */
@@ -17119,14 +16431,6 @@ import type {
  *   name: "Alice Smith"
  * };
  * \`\`\`
- *
- * @example System actor
- * \`\`\`typescript
- * const systemActor: Actor = {
- *   id: "system",
- *   name: "Background Job"
- * };
- * \`\`\`
  */
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -17147,15 +16451,6 @@ export type Actor = z.infer<typeof ActorSchema>;
  * };
  *
  * await app.do("updateProfile", target, { email: "new@example.com" });
- * \`\`\`
- *
- * @example Dynamic stream ID
- * \`\`\`typescript
- * const userId = "user-" + Date.now();
- * await app.do("createUser", {
- *   stream: userId,
- *   actor: currentUser
- * }, userData);
  * \`\`\`
  */
 export type Target<TActor extends Actor = Actor> = {
@@ -17418,16 +16713,6 @@ export type Committed<
  * console.log(snapshot.patches);   // 8 (events since last snapshot)
  * console.log(snapshot.snaps);     // 1 (1 snapshot taken)
  * console.log(snapshot.event);     // Last event that created this snapshot
- * \`\`\`
- *
- * @example Using snapshot in action handler
- * \`\`\`typescript
- * .on({ increment: z.object({ by: z.number() }) })
- *   .emit((action, snapshot) => {
- *     console.log("Current count:", snapshot.state.count);
- *     console.log("Events applied:", snapshot.patches);
- *     return ["Incremented", { amount: action.by }];
- *   })
  * \`\`\`
  */
 export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
@@ -18525,19 +17810,6 @@ export const Errors = {
  * }
  * \`\`\`
  *
- * @example Logging validation details
- * \`\`\`typescript
- * try {
- *   await app.do("updateProfile", target, payload);
- * } catch (error) {
- *   if (error instanceof ValidationError) {
- *     error.details.errors.forEach((err) => {
- *       console.error(\`Field \${err.path.join(".")}: \${err.message}\`);
- *     });
- *   }
- * }
- * \`\`\`
- *
  * @see {@link https://zod.dev | Zod documentation} for validation details
  */
 export class ValidationError extends Error {
@@ -18586,40 +17858,6 @@ export class ValidationError extends Error {
  *     console.error("Reason:", error.description);
  *     console.error("Current state:", error.snapshot.state);
  *     console.error("Attempted payload:", error.payload);
- *   }
- * }
- * \`\`\`
- *
- * @example User-friendly error messages
- * \`\`\`typescript
- * try {
- *   await app.do("closeTicket", target, payload);
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     // Present friendly message to user
- *     if (error.description === "Ticket must be open") {
- *       return { error: "This ticket is already closed" };
- *     } else if (error.description === "Not authorized") {
- *       return { error: "You don't have permission to close this ticket" };
- *     }
- *   }
- * }
- * \`\`\`
- *
- * @example Logging with context
- * \`\`\`typescript
- * try {
- *   await app.do("transfer", target, { to: "account2", amount: 500 });
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     logger.error({
- *       action: error.action,
- *       stream: error.target.stream,
- *       actor: error.target.actor,
- *       reason: error.description,
- *       balance: error.snapshot.state.balance,
- *       attempted: error.payload.amount
- *     }, "Invariant violation");
  *   }
  * }
  * \`\`\`
@@ -18695,36 +17933,6 @@ export class InvariantError<
  *     }
  *   }
  *   return { success: false, reason: "Too many concurrent modifications" };
- * }
- * \`\`\`
- *
- * @example Logging concurrency conflicts
- * \`\`\`typescript
- * try {
- *   await app.do("updateInventory", target, payload);
- * } catch (error) {
- *   if (error instanceof ConcurrencyError) {
- *     logger.warn({
- *       stream: error.stream,
- *       expectedVersion: error.expectedVersion,
- *       actualVersion: error.lastVersion,
- *       events: error.events.map(e => e.name)
- *     }, "Concurrent modification detected");
- *   }
- * }
- * \`\`\`
- *
- * @example User feedback for conflicts
- * \`\`\`typescript
- * try {
- *   await app.do("editDocument", target, { content: newContent });
- * } catch (error) {
- *   if (error instanceof ConcurrencyError) {
- *     return {
- *       error: "This document was modified by another user. Please refresh and try again.",
- *       code: "CONCURRENT_MODIFICATION"
- *     };
- *   }
  * }
  * \`\`\`
  *
@@ -18855,7 +18063,7 @@ export class StoreError extends Error {
  * import { NonRetryableError } from "@rotorsoft/act";
  *
  * .on("OrderConfirmed")
- *   .do(async (event) => {
+ *   .do(async function notifyPartner(event) {
  *     const res = await fetch(url, ...);
  *     if (res.status >= 400 && res.status < 500) {
  *       throw new NonRetryableError(
@@ -18864,20 +18072,6 @@ export class StoreError extends Error {
  *       );
  *     }
  *     if (!res.ok) throw new Error(\`webhook \${url} responded \${res.status}\`);
- *   })
- * \`\`\`
- *
- * @example Marking validation failures as non-retryable
- * \`\`\`typescript
- * .on("PaymentReceived")
- *   .do(async (event) => {
- *     const parsed = Schema.safeParse(event.data);
- *     if (!parsed.success) {
- *       throw new NonRetryableError("payment payload failed validation", {
- *         cause: parsed.error,
- *       });
- *     }
- *     // ... handle parsed payload
  *   })
  * \`\`\`
  */
@@ -19991,11 +19185,6 @@ export interface Store extends Disposable, EventSource {
    * );
    * \`\`\`
    *
-   * @example De-prioritize all background projections
-   * \`\`\`typescript
-   * await store().prioritize({ source: "^audit-" }, -5);
-   * \`\`\`
-   *
    * @see {@link Act.prioritize} for the orchestrator-level wrapper
    * @see {@link claim} for how priority biases stream scheduling
    */
@@ -20159,21 +19348,6 @@ export interface Store extends Disposable, EventSource {
    *   { blocked: true, limit: 50 }
    * );
    * \`\`\`
-   *
-   * @example Page through all positions
-   * \`\`\`typescript
-   * let after: string | undefined;
-   * for (;;) {
-   *   const page: StreamPosition[] = [];
-   *   const { count } = await store().query_streams(
-   *     (s) => page.push(s),
-   *     { after, limit: 100 }
-   *   );
-   *   if (!count) break;
-   *   // ... use page ...
-   *   after = page.at(-1)?.stream;
-   * }
-   * \`\`\`
    */
   query_streams: (
     callback: (position: StreamPosition) => void,
@@ -20236,56 +19410,6 @@ export interface Store extends Disposable, EventSource {
    * });
    * for (const [stream, { head }] of stats) {
    *   // head.id, head.version, head.name
-   * }
-   * \`\`\`
-   *
-   * @example Full stats — inspector / admin dashboard (one full scan)
-   * \`\`\`typescript
-   * const stats = await store().query_stats<MyEvents>(
-   *   { stream: "^orders-" },
-   *   { count: true, tail: true, names: true,
-   *     exclude: [TOMBSTONE_EVENT] }
-   * );
-   * for (const [stream, s] of stats) {
-   *   const snaps = s.names?.[SNAP_EVENT] ?? 0;
-   *   const domain = (s.count ?? 0) - snaps;
-   *   console.log(stream, { snaps, domain, tail: s.tail?.created });
-   * }
-   * \`\`\`
-   *
-   * @example Schema-evolution — surface deprecated events per stream
-   * \`\`\`typescript
-   * const stats = await store().query_stats<TicketEvents>(
-   *   { stream: "^ticket-" },
-   *   { names: true }
-   * );
-   * for (const [stream, { names = {} }] of stats) {
-   *   if ((names["TicketOpened"] ?? 0) > 0) {
-   *     console.log(\`\${stream}: \${names["TicketOpened"]} legacy events\`);
-   *   }
-   * }
-   * \`\`\`
-   *
-   * @example Time travel — stream state at a historical cutoff
-   * \`\`\`typescript
-   * const stats = await store().query_stats(["order-42"], {
-   *   before: 100_000, // events up to (not including) id 100000
-   *   tail: true,
-   * });
-   * const { head, tail } = stats.get("order-42") ?? {};
-   * // head = latest event with id < 100_000; tail = earliest in range
-   * \`\`\`
-   *
-   * @example Page through every stream a bounded chunk at a time
-   * \`\`\`typescript
-   * let after: string | undefined;
-   * for (;;) {
-   *   const page = await store().query_stats({}, { after, limit: 500 });
-   *   if (page.size === 0) break;
-   *   for (const [stream, { head }] of page) {
-   *     // ... process stream ...
-   *   }
-   *   after = [...page.keys()].at(-1);
    * }
    * \`\`\`
    *
@@ -20462,13 +19586,6 @@ import type {
  * };
  * \`\`\`
  *
- * @example Triggering another action
- * \`\`\`typescript
- * const reduceInventory: ReactionHandler<Events, "OrderPlaced"> = async (event) => {
- *   return ["reduceStock", { amount: event.data.items.length }];
- * };
- * \`\`\`
- *
  * @see {@link Reaction} for complete reaction configuration
  */
 export type ReactionHandler<
@@ -20503,32 +19620,6 @@ export type ReactionHandler<
  * .on("UserCreated")
  *   .do(sendWelcomeEmail)
  *   .to("email-queue") // Static target
- * \`\`\`
- *
- * @example Dynamic target per user
- * \`\`\`typescript
- * .on("UserLoggedIn")
- *   .do(incrementLoginCount)
- *   .to((event) => ({
- *     target: \`stats-\${event.stream}\` // Dynamic per user
- *   }))
- * \`\`\`
- *
- * @example With source optimization
- * \`\`\`typescript
- * .on("UserUpdated")
- *   .do(updateReadModel)
- *   .to(({ stream }) => ({
- *     source: stream,           // Only fetch from this user's stream
- *     target: \`cache-\${stream}\` // Update corresponding cache
- *   }))
- * \`\`\`
- *
- * @example With priority (saturated worker scheduling)
- * \`\`\`typescript
- * .on("OrderConfirmed")
- *   .do(sendCriticalNotification)
- *   .to({ target: "notifications-out", priority: 10 })
  * \`\`\`
  *
  * @see {@link Reaction} for complete reaction configuration
@@ -25766,7 +24857,7 @@ export type TryOkOptions = {
  * would otherwise write into one line:
  *
  * \`\`\`ts
- * .on("OrderConfirmed").do(async (event) => {
+ * .on("OrderConfirmed").do(async function deliverOrder(event) {
  *   const response = await my_sdk.deliver(event);
  *   await try_ok(response, { url: my_sdk.url, label: "my_sdk" });
  *   // ...response was 2xx; continue with downstream work...

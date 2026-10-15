@@ -121,13 +121,6 @@ export function port<Port extends Disposable>(injector: Injector<Port>) {
  * logger.info("Application started");
  * ```
  *
- * @example Injecting pino
- * ```typescript
- * import { log } from "@rotorsoft/act";
- * import { PinoLogger } from "@rotorsoft/act-pino";
- * log(new PinoLogger({ level: "debug", pretty: true }));
- * ```
- *
  * @see {@link Logger} for the interface contract
  * @see {@link ConsoleLogger} for the default implementation
  */
@@ -159,20 +152,6 @@ export const log = port(function log(adapter?: Logger) {
  * ```typescript
  * import { store } from "@rotorsoft/act";
  * const s = store();
- * ```
- *
- * @example Injecting PostgreSQL
- * ```typescript
- * import { store } from "@rotorsoft/act";
- * import { PostgresStore } from "@rotorsoft/act-pg";
- *
- * store(new PostgresStore({
- *   host: "localhost",
- *   port: 5432,
- *   database: "myapp",
- *   user: "postgres",
- *   password: "secret",
- * }));
  * ```
  *
  * @see {@link Store} for the interface contract

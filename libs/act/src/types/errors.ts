@@ -52,19 +52,6 @@ export const Errors = {
  * }
  * ```
  *
- * @example Logging validation details
- * ```typescript
- * try {
- *   await app.do("updateProfile", target, payload);
- * } catch (error) {
- *   if (error instanceof ValidationError) {
- *     error.details.errors.forEach((err) => {
- *       console.error(`Field ${err.path.join(".")}: ${err.message}`);
- *     });
- *   }
- * }
- * ```
- *
  * @see {@link https://zod.dev | Zod documentation} for validation details
  */
 export class ValidationError extends Error {
@@ -113,40 +100,6 @@ export class ValidationError extends Error {
  *     console.error("Reason:", error.description);
  *     console.error("Current state:", error.snapshot.state);
  *     console.error("Attempted payload:", error.payload);
- *   }
- * }
- * ```
- *
- * @example User-friendly error messages
- * ```typescript
- * try {
- *   await app.do("closeTicket", target, payload);
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     // Present friendly message to user
- *     if (error.description === "Ticket must be open") {
- *       return { error: "This ticket is already closed" };
- *     } else if (error.description === "Not authorized") {
- *       return { error: "You don't have permission to close this ticket" };
- *     }
- *   }
- * }
- * ```
- *
- * @example Logging with context
- * ```typescript
- * try {
- *   await app.do("transfer", target, { to: "account2", amount: 500 });
- * } catch (error) {
- *   if (error instanceof InvariantError) {
- *     logger.error({
- *       action: error.action,
- *       stream: error.target.stream,
- *       actor: error.target.actor,
- *       reason: error.description,
- *       balance: error.snapshot.state.balance,
- *       attempted: error.payload.amount
- *     }, "Invariant violation");
  *   }
  * }
  * ```
@@ -222,36 +175,6 @@ export class InvariantError<
  *     }
  *   }
  *   return { success: false, reason: "Too many concurrent modifications" };
- * }
- * ```
- *
- * @example Logging concurrency conflicts
- * ```typescript
- * try {
- *   await app.do("updateInventory", target, payload);
- * } catch (error) {
- *   if (error instanceof ConcurrencyError) {
- *     logger.warn({
- *       stream: error.stream,
- *       expectedVersion: error.expectedVersion,
- *       actualVersion: error.lastVersion,
- *       events: error.events.map(e => e.name)
- *     }, "Concurrent modification detected");
- *   }
- * }
- * ```
- *
- * @example User feedback for conflicts
- * ```typescript
- * try {
- *   await app.do("editDocument", target, { content: newContent });
- * } catch (error) {
- *   if (error instanceof ConcurrencyError) {
- *     return {
- *       error: "This document was modified by another user. Please refresh and try again.",
- *       code: "CONCURRENT_MODIFICATION"
- *     };
- *   }
  * }
  * ```
  *
@@ -382,7 +305,7 @@ export class StoreError extends Error {
  * import { NonRetryableError } from "@rotorsoft/act";
  *
  * .on("OrderConfirmed")
- *   .do(async (event) => {
+ *   .do(async function notifyPartner(event) {
  *     const res = await fetch(url, ...);
  *     if (res.status >= 400 && res.status < 500) {
  *       throw new NonRetryableError(
@@ -391,20 +314,6 @@ export class StoreError extends Error {
  *       );
  *     }
  *     if (!res.ok) throw new Error(`webhook ${url} responded ${res.status}`);
- *   })
- * ```
- *
- * @example Marking validation failures as non-retryable
- * ```typescript
- * .on("PaymentReceived")
- *   .do(async (event) => {
- *     const parsed = Schema.safeParse(event.data);
- *     if (!parsed.success) {
- *       throw new NonRetryableError("payment payload failed validation", {
- *         cause: parsed.error,
- *       });
- *     }
- *     // ... handle parsed payload
  *   })
  * ```
  */

@@ -30,14 +30,6 @@ import type {
  *   name: "Alice Smith"
  * };
  * ```
- *
- * @example System actor
- * ```typescript
- * const systemActor: Actor = {
- *   id: "system",
- *   name: "Background Job"
- * };
- * ```
  */
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -58,15 +50,6 @@ export type Actor = z.infer<typeof ActorSchema>;
  * };
  *
  * await app.do("updateProfile", target, { email: "new@example.com" });
- * ```
- *
- * @example Dynamic stream ID
- * ```typescript
- * const userId = "user-" + Date.now();
- * await app.do("createUser", {
- *   stream: userId,
- *   actor: currentUser
- * }, userData);
  * ```
  */
 export type Target<TActor extends Actor = Actor> = {
@@ -329,16 +312,6 @@ export type Committed<
  * console.log(snapshot.patches);   // 8 (events since last snapshot)
  * console.log(snapshot.snaps);     // 1 (1 snapshot taken)
  * console.log(snapshot.event);     // Last event that created this snapshot
- * ```
- *
- * @example Using snapshot in action handler
- * ```typescript
- * .on({ increment: z.object({ by: z.number() }) })
- *   .emit((action, snapshot) => {
- *     console.log("Current count:", snapshot.state.count);
- *     console.log("Events applied:", snapshot.patches);
- *     return ["Incremented", { amount: action.by }];
- *   })
  * ```
  */
 export type Snapshot<TState extends Schema, TEvents extends Schemas> = {

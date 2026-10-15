@@ -146,21 +146,10 @@ export interface SliceBuilder<
  * const CounterSlice = slice()
  *   .withState(Counter)
  *   .on("Incremented")
- *     .do(async (event, _stream, app) => {
+ *     .do(async function resetCounter(event, _stream, app) {
  *       await app.do("reset", target, {});
  *     })
  *     .to("counter-target")
- *   .build();
- * ```
- *
- * @example Cross-state dispatch (include both states)
- * ```typescript
- * const CreationSlice = slice()
- *   .withState(TicketCreation)
- *   .withState(TicketOperations) // handler can dispatch AssignTicket
- *   .on("TicketOpened").do(async (event, _stream, app) => {
- *     await app.do("AssignTicket", target, payload, { reactingTo: event });
- *   })
  *   .build();
  * ```
  *

@@ -258,25 +258,13 @@ export type ProjectionBuilder<
  * ```typescript
  * const TicketProjection = projection("tickets")
  *   .on({ TicketOpened })
- *     .do(async ({ stream, data }) => {
+ *     .do(async function openTicket({ stream, data }) {
  *       await db.insert(tickets).values({ id: stream, ...data });
  *     })
  *   .on({ TicketClosed })
- *     .do(async ({ stream, data }) => {
+ *     .do(async function closeTicket({ stream, data }) {
  *       await db.update(tickets).set(data).where(eq(tickets.id, stream));
  *     })
- *   .build();
- * ```
- *
- * @example Per-handler routing
- * ```typescript
- * const MultiProjection = projection()
- *   .on({ OrderPlaced })
- *     .do(async (event) => { ... })
- *     .to("orders")
- *   .on({ PaymentReceived })
- *     .do(async (event) => { ... })
- *     .to("payments")
  *   .build();
  * ```
  *
