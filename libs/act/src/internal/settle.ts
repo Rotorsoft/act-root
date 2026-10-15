@@ -78,7 +78,8 @@ export class SettleLoop<TEvents extends Schemas> {
   /**
    * Schedule a settle pass. Multiple calls inside the debounce window
    * coalesce into one cycle. The cycle runs correlate→drain in a loop
-   * until no progress is made (no new subscriptions, no acks, no blocks)
+   * until no progress is made (no new subscriptions, no events read, no
+   * streams leased)
    * or `maxPasses` is reached, then emits the `"settled"` lifecycle event
    * via {@link SettleDeps.on_settled}.
    */
@@ -140,14 +141,12 @@ export class SettleLoop<TEvents extends Schemas> {
                 blocked: [...settled_drain.blocked, ...drain.blocked],
               }
             : drain;
-          // Reading events counts as progress even when nothing reacted, so a
-          // window of inert events can't stop the loop short. It still ends:
-          // ids are finite.
+          // Only a pass that read no events and leased nothing is idle: a
+          // leased stream that deferred or failed may leave work behind. It
+          // still ends, because ids are finite and every leased stream either
+          // advances or leaves the claimable set (acked, blocked, scheduled).
           const made_progress =
-            subscribed > 0 ||
-            drain.acked.length > 0 ||
-            drain.blocked.length > 0 ||
-            last_id > after_before;
+            subscribed > 0 || drain.leased.length > 0 || last_id > after_before;
           if (!made_progress) break;
         }
         // `Act.emit` contains listener throws, so the store-failure catch

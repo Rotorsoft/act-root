@@ -66,6 +66,11 @@ export class CircuitBreaker {
     return this._failures > 0;
   }
 
+  /** How long the store is left alone after a failure before a retry. */
+  get cooldown_ms(): number {
+    return this._cooldown_ms;
+  }
+
   /** Current state given the wall-clock `now`. */
   state(now: number): CircuitState {
     if (this._opened_at === undefined) return "closed";

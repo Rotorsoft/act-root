@@ -1676,7 +1676,8 @@ export class Act<
    * Call this after `app.do()` (or `app.reset()`) to schedule a background
    * drain. Multiple rapid calls within the debounce window are coalesced
    * into a single cycle. Runs correlate→drain in a loop until a pass makes
-   * no progress — no new subscriptions, no acks, no blocks — then emits
+   * no progress — no new subscriptions, no events read, no streams leased —
+   * then emits
    * the `"settled"` lifecycle event. This means a single `settle()` call
    * fully catches up paginated streams (e.g. after `reset()` on a long
    * projection) without forcing callers to loop.

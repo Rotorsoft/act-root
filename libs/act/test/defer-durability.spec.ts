@@ -17,8 +17,8 @@ import { DeferSignal } from "../src/internal/defer-signal.js";
  * **atomically with the acks** in a single `Store.ack` call, so a drain
  * cycle's outcomes can never land partially. A failed finalize acks
  * nothing — close requests stay pending and redeliver, the deferred
- * stream stays claimable and redelivers, and the ordinary
- * catch → breaker → redeliver path covers every outcome uniformly.
+ * stream stays claimable and redelivers once the drain retries after the
+ * breaker's cooldown.
  */
 describe("defer durability", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })

@@ -390,7 +390,7 @@ export type Drain<TEvents extends Schemas> = {
  * @property correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
  * @property maxPasses - Cap on correlate→drain loops (default: `Infinity`).
  *   Settle exits early as soon as a pass makes no progress (no new
- *   subscriptions, no acks, no blocks), so the cap only matters in
+ *   subscriptions, no events read, no streams leased), so the cap only matters in
  *   pathological cases.
  */
 export type SettleOptions = DrainOptions & {
