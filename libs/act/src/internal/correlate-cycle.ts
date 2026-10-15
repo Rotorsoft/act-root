@@ -1,20 +1,7 @@
 /**
- * @module correlate-cycle
- * @category Internal
- *
- * Correlation — the discovery half of the correlate→drain pair. Owns the
- * lazy init (subscribe static targets, read cold-start watermark) and the
- * scan that resolves each event to its target streams.
- *
- * The scan is also the **producer of the work mark**: every target
- * an event resolves to is subscribed with `correlated_at` = that event's
- * id, which is how `claim` answers "does this stream have work?" off the
- * subscription row instead of probing the event log.
- *
- * The Act orchestrator passes registry + classification (which static
- * targets to subscribe) at build time; everything past that lives here.
- *
- * @internal
+ * Correlation, the discovery half of correlate→drain: resolves each event to
+ * its target streams and raises each target's work mark (`correlated_at`),
+ * which is what `claim` reads. See docs/architecture/correlation-and-drain.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -34,54 +21,22 @@ import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
 
 /**
- * Cold-start back-scan window, used only when no durable checkpoint exists.
- * An event committed but not correlated before a crash can sit below the
- * store watermark (`max(at)`) once a busier stream has advanced, so the
- * first scan starts at `watermark - BACK_SCAN` to re-discover it.
- * Re-scanning correlated events is harmless: `subscribe` is an idempotent
- * upsert and a mark never regresses.
- *
- * @internal
+ * First-boot scan starts this far below the watermark, so an event committed
+ * but not correlated before a crash is found again. Re-scanning is harmless:
+ * `subscribe` is an idempotent upsert and a mark never regresses.
  */
 const COLD_START_BACK_SCAN = 10_000;
 
 /**
- * Default correlation lease duration. Too short and a slow scan outruns its
- * lease, so a second worker scans the same range (duplicate work, still
- * safe). Too long and a crashed holder stalls discovery for the whole lease.
+ * Too short and a slow scan outruns its lease (duplicate work, still safe);
+ * too long and a crashed holder stalls discovery.
  */
 const CORRELATION_LEASE_MS = 5_000;
 
 /**
- * A stable identity for "which correlator is this?".
- *
- * The correlation lease lets one worker scan on behalf of others, which is
- * only sound when they are interchangeable. Two processes running the same
- * application are; two different applications sharing one database are not —
- * leasing across those would let one starve the other, and its reactions
- * would silently stop.
- *
- * The key is every event name this correlator reacts to, each with the names
- * of the handlers registered for it. Event names alone would do if reacting
- * to an event implied doing the same thing with it, and it does not: two
- * applications can both react to `Placed` and resolve it to entirely
- * different targets, so a shared lease would mark one's targets and never the
- * other's. Handler names cost nothing — the registry already keys reactions
- * by them — and separate exactly that case.
- *
- * Sorted before hashing so identical workers agree regardless of declaration
- * order. Truncated to 32 hex characters: a collision means two applications
- * with identical event *and* handler names share a lease, and those are
- * interchangeable by construction.
- *
- * Workers sharded by `onlyLanes` are not interchangeable either: the lease
- * holder would mark targets on lanes it cannot drain while the refused
- * worker found nothing. The cycle appends the shard's lanes to this key.
- *
- * This separates leases; it does not make two applications over one store
- * supported. They still share one read cursor, so the second would never
- * correlate what the first had already read past. One store belongs to one
- * application (see the split-stores recipe).
+ * The correlation lease key: a hash of every reacted-to event name with its
+ * handler names, so only interchangeable workers share a lease. See
+ * docs/architecture/correlation-and-drain § The correlation lease.
  */
 const registry_key = <TEvents extends Schemas>(
   events: EventRegister<TEvents>
@@ -96,25 +51,10 @@ const registry_key = <TEvents extends Schemas>(
     .slice(0, 32);
 };
 
-/**
- * How many distinct pattern sources keep a compiled `RegExp` around. A
- * pattern source is declared on a resolver, so the live set is tiny; the
- * bound only guards a dynamic resolver that mints one per event.
- *
- * @internal
- */
+/** Bound on compiled pattern sources; guards a resolver that mints one per event. */
 const PATTERN_CACHE_SIZE = 32;
 
-/**
- * Static resolver target collected at build time. Subscribed once during
- * init, then marked by every scan whose events resolve to it.
- *
- * @property priority - Scheduling priority for the resolved target stream.
- *   Combined with peers via `max()` at build time when multiple reactions
- *   target the same stream — see `build-classify.ts`.
- *
- * @internal
- */
+/** Static resolver target collected at build time and subscribed at init. */
 export type StaticTarget = {
   readonly stream: string;
   readonly source?: string;
@@ -123,30 +63,10 @@ export type StaticTarget = {
 };
 
 /**
- * What a target was last subscribed at, remembered per target so a scan
- * knows what its subscription row already holds.
- *
- * `floor` guards priority upgrades: a resolution re-subscribes its
- * own priority/lane only when it beats the floor, and a static target sits
- * at `+Infinity` so a dynamic resolution never re-opens what the build-time
- * subscribe owns. `priority`/`lane` are what the row holds, re-sent
- * verbatim by a resolution that does *not* beat the floor, so the work mark
- * riding the same `subscribe` carries the row's own values rather than a
- * losing resolution's.
- *
- * A record can go missing — eviction here, an empty map after a restart.
- * The store can't keep a forgotten target on its lane: `subscribe` writes
- * the lane whenever the incoming priority is at or above the stored one,
- * which is how a restart re-lanes declared targets. So when more than one
- * lane is declared, a scan that resolves a target it has no record of reads
- * the target's row and uses it as the record. The store owns the lane; this
- * map only caches it.
- *
- * Where the record lives decides whether the floor survives: dynamic
- * targets are unbounded and go in the evictable LRU, static targets are a
- * bounded build-time list and go in a plain map that never evicts.
- *
- * @internal
+ * What a target's subscription row holds. A resolution sends its own
+ * priority/lane only when it beats `floor` (`+Infinity` for static targets);
+ * otherwise it re-sends these values with the mark. The store owns the lane;
+ * this only caches it, so a missing record is re-read from the row.
  */
 type Subscription = {
   readonly floor: number;
@@ -154,13 +74,7 @@ type Subscription = {
   readonly lane: string | undefined;
 };
 
-/**
- * One target accumulated during a scan: the values to subscribe it with,
- * and the highest event id observed to resolve to it — its work mark,
- * `undefined` when no scanned event fell inside the target's fetch window.
- *
- * @internal
- */
+/** One target accumulated during a scan; `correlated_at` is its work mark. */
 type Correlated = {
   source: string | undefined;
   priority: number;
@@ -184,35 +98,18 @@ export type CorrelateCycleDeps<
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
   max_subscribed_streams: number;
-  /**
-   * Every lane a controller exists for — `"default"` plus each
-   * `.withLane({name})`. Injected rather than derived: `internal/` receives
-   * what it needs. A resolution naming anything outside this set has no
-   * claimant, so correlate reroutes it here.
-   */
+  /** Every lane a controller exists for; others are rerouted to default. */
   declared_lanes: ReadonlySet<string>;
-  /**
-   * The lanes this worker drains, set only when `onlyLanes` leaves some
-   * declared lane out. Workers on different shards are not interchangeable,
-   * so each shard gets its own correlation lease.
-   */
+  /** Set when `onlyLanes` leaves a lane out; each shard gets its own lease. */
   shard?: ReadonlyArray<string>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
 };
 
 /**
- * A dynamic resolution named a lane no controller claims.
- *
- * Reroutes to `"default"` rather than skipping: the target is legitimate and
- * only its lane is wrong, so stranding the stream at watermark `-1` — where
- * no health surface can see it — loses work that the operator never asked to
- * lose. `"default"` is where the reaction would have run had the lane been
- * omitted, which makes this the smallest correction that keeps it running.
- *
- * Reported once per reaction and lane name, not per target: a resolver
- * mints one target per aggregate, so the target is only an example in the
- * message.
+ * A dynamic resolution named an undeclared lane. Rerouted to `"default"`
+ * rather than skipped, so the work still runs. Reported once per reaction
+ * and lane, since a resolver mints one target per aggregate.
  */
 function report_undeclared_lane(
   seen: Set<string>,
@@ -232,19 +129,9 @@ function report_undeclared_lane(
 }
 
 /**
- * Two resolutions disagreed on one target's lane.
- *
- * Reported, not corrected. The lane a target already carries is the one its
- * in-flight leases were taken under, so re-laning it mid-run would move a
- * stream out from under a worker holding it; re-laning is restart-driven by
- * design. What the operator loses meanwhile is lane discipline — the losing
- * reaction runs inside the winner's `leaseMillis` and `streamLimit` — and
- * under `onlyLanes` sharding, a process provisioned for the losing lane never
- * runs it at all.
- *
- * Reported once per losing reaction and lane pair, not per target. The
- * winner is "first discovered", so the same pair can land either way on
- * different targets; keeping the orientation in the key reports both.
+ * Two resolutions disagreed on one target's lane. Reported, not corrected:
+ * re-laning a live stream would move it out from under a lease holder.
+ * Keyed by orientation, since "first discovered" can land either way.
  */
 function report_lane_conflict(
   seen: Set<string>,
@@ -264,12 +151,7 @@ function report_lane_conflict(
   );
 }
 
-/**
- * Drives correlation for one Act instance. Owns the checkpoint, the
- * correlation lease and the subscription records.
- *
- * @internal
- */
+/** Drives correlation for one Act: the checkpoint, the lease, the subscription records. */
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -277,71 +159,27 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
-  /**
-   * This worker's identity for the correlation lease. A per-instance
-   * UUID, matching the drain's convention, so a renewal is recognised as the
-   * same holder and a restarted process never inherits a stale claim.
-   */
+  /** Lease holder id; per instance, so a restart never inherits a stale claim. */
   private readonly _by = randomUUID();
-  /**
-   * Which correlator this is. Computed once from the registry so identical
-   * workers share a lease and unrelated applications never do.
-   */
   private readonly _key: string;
-  /**
-   * When this worker's correlation lease runs out, as a local clock reading,
-   * or 0 when it holds none.
-   *
-   * Cached so the holder doesn't ask the store on every pass. A stale belief
-   * can only cause a duplicate scan, and marks are idempotent, so it costs
-   * work, never correctness.
-   */
+  /** Local expiry of the held lease (0 = none); stale only costs a duplicate scan. */
   private _lease_until = 0;
-  /**
-   * Whether a scan might find anything, like the drain's flag: a commit or
-   * notification raises it, a short page lowers it, and a disarmed scan
-   * returns without touching the store.
-   *
-   * Starts armed: the log may already hold events this process has never
-   * correlated, and only a scan can find out.
-   */
+  /** Raised by a commit or notification, lowered by a short page. Starts armed. */
   private _armed = true;
-  /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
-  // Dynamically discovered targets → what each was last subscribed at,
-  // bounded by `maxSubscribedStreams`. It decides *what* a scan sends with a
-  // target: priority/lane only when the resolution beats the recorded floor,
-  // otherwise the row's own values. See {@link Subscription}.
+  // Bounded by `maxSubscribedStreams`; static records live apart so eviction
+  // never drops their +Infinity floor.
   private readonly _dynamic_subscriptions: LruMap<string, Subscription>;
-  /**
-   * What each static target was subscribed at by `init`. A plain map, never
-   * evicted: the collection is the build-time `_static_targets` list, so it
-   * is already bounded by the registry and costs nothing the registry does
-   * not already hold.
-   *
-   * Kept out of the LRU so eviction can never drop a static target's
-   * `+Infinity` floor and let a dynamic resolution re-lane it.
-   */
   private readonly _static_subscriptions = new Map<string, Subscription>();
-  /** Compiled pattern sources, bounded by {@link PATTERN_CACHE_SIZE}. */
   private readonly _patterns = new LruMap<string, RegExp>(PATTERN_CACHE_SIZE);
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
-  /**
-   * Async cold-start hook, run once after `on_init` inside `init()`. The
-   * orchestrator re-seeds its defer timers from the persisted `deferred_at`
-   * here, so an idle deferred stream re-arms across a restart.
-   */
+  /** Runs once after `on_init`; re-seeds defer timers across a restart. */
   private readonly _on_init_async: (() => Promise<void>) | undefined;
-  /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
   private readonly _declared_lanes: ReadonlySet<string>;
-  /**
-   * Offending declarations already reported, so a resolver firing for every
-   * matching event reports once. Owned by the instance rather than the
-   * module: `internal/` holds no module-level state.
-   */
+  /** Report-once keys; per instance because `internal/` holds no module state. */
   private readonly _reported = new Set<string>();
 
   constructor({
@@ -366,35 +204,18 @@ export class CorrelateCycle<
     this._on_init_async = on_init_async;
   }
 
-  /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
   }
 
-  /**
-   * Signal that a commit (local or remote) may have produced events this
-   * process has not correlated. Cheap and idempotent — the orchestrator calls
-   * it on every commit and every notification.
-   */
+  /** A commit (local or remote) may have produced uncorrelated events. */
   arm(): void {
     this._armed = true;
   }
 
-  /**
-   * Initialize correlation state on first call.
-   * - Reads the durable correlate checkpoint (and max(at)) from the store,
-   *   flooring a first boot at `watermark - back_scan` so an event
-   *   committed-but-not-correlated before a crash is re-scanned on
-   *   restart instead of skipped
-   * - Subscribes static resolver targets (idempotent upsert)
-   * - Populates the subscribed-streams LRU
-   * - Fires `on_init` once (Act uses this to flag a cold-start drain)
-   */
   async init(): Promise<void> {
     if (this._initialized) return;
-    // Single-flight but retryable: concurrent callers share one run, and a
-    // failure clears the promise so the next call tries again instead of
-    // leaving static targets unsubscribed for the process lifetime.
+    // Single-flight, but a failure clears the promise so the next call retries.
     if (!this._init_promise) {
       this._init_promise = this._run_init().catch((error) => {
         this._init_promise = undefined;
@@ -409,38 +230,23 @@ export class CorrelateCycle<
     const { watermark, correlated_at } = await this._cd.subscribe([
       ...this._static_targets,
     ]);
-    // Resume from the durable checkpoint. On a first boot it is -1 and a full
-    // scan of an existing log would be unbounded, so start a bounded window
-    // below the watermark instead (see COLD_START_BACK_SCAN).
     this._checkpoint =
       correlated_at >= 0
         ? correlated_at
         : Math.max(-1, watermark - COLD_START_BACK_SCAN);
     this._on_init?.();
     for (const { stream, priority = 0, lane } of this._static_targets) {
-      // Floor +Infinity: no dynamic resolution can re-open a static target;
-      // a scan that marks it re-sends the build-time priority/lane.
       this._static_subscriptions.set(stream, {
         floor: Number.POSITIVE_INFINITY,
         priority,
         lane,
       });
     }
-    // Cold-start defer re-seed — after the static targets are
-    // subscribed, so a walk of the streams table sees them.
+    // After the static subscribe, so the streams walk sees them.
     await this._on_init_async?.();
   }
 
-  /**
-   * Start correlation over after the event log was replaced wholesale
-   * (`restore`). The restored log is renumbered from the start and its
-   * subscription rows are gone, so the in-memory scan position and both
-   * subscription records describe a log that no longer exists. Dropping them
-   * and the init latch makes the next pass run cold-start again: static
-   * targets are re-subscribed, the checkpoint is re-read from the store
-   * (which `restore` reset), and dynamic targets are rediscovered by the
-   * scan.
-   */
+  /** After `restore` replaced the log: forget everything and cold-start again. */
   restart(): void {
     this._initialized = false;
     this._init_promise = undefined;
@@ -450,22 +256,12 @@ export class CorrelateCycle<
     this._armed = true;
   }
 
-  /**
-   * Forget dynamic targets whose subscription rows no longer exist (a full
-   * close deletes the row), so a later scan re-subscribes them. Static
-   * targets keep their records.
-   */
+  /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
   forget_subscribed(streams: Iterable<string>): void {
     for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }
 
-  /**
-   * Would an event from `stream` be fetched for a target subscribed with
-   * `source`? The subscription's source is the filter `fetch` queries with
-   * — literal names by equality, patterns compiled as a `RegExp` — so an
-   * event outside it is not work for that target and must not mark it.
-   * No source means the target consumes every stream.
-   */
+  /** Would the target's own `fetch` (filtered by `source`) return this event? */
   private _in_fetch_window(
     source: string | undefined,
     stream: string
@@ -480,45 +276,23 @@ export class CorrelateCycle<
     return pattern.test(stream);
   }
 
-  /**
-   * Scan the events past the checkpoint, resolve each to its target
-   * streams, and record what it found through `cd.subscribe` — new dynamic
-   * targets get registered, and every target an event resolved to gets its
-   * **work mark** raised to that event's id.
-   *
-   * Both resolver kinds are walked. A static target is already subscribed
-   * at init, but marking it is what makes it claimable without probing the
-   * event log, so the scan runs for every app.
-   */
+  /** Scan past the checkpoint, subscribe new targets and raise their work marks. */
   async correlate(
     query: Query = { after: -1, limit: 10 },
     /**
-     * Whether to honour the correlation lease.
-     *
-     * True only on the automatic paths — the settle loop and the poller —
-     * where the question is "should *someone* scan?" and one worker doing it
-     * serves all of them.
-     *
-     * An explicit `app.correlate()` means "scan now" and ignores the lease:
-     * `close` catches up by looping until the checkpoint moves, and a
-     * lease-blocked scan would cap its prune at a stale position.
+     * Honour the correlation lease. Only the settle loop and poller do; an
+     * explicit `app.correlate()` scans now, since `close` loops on it.
      */
     lease = false
   ): Promise<{
     subscribed: number;
     last_id: number;
     marked: number;
-    /** False when the pass was disarmed and returned without a store read. */
     scanned: boolean;
   }> {
     await this.init();
 
-    // Nothing has happened since the last scan reached the end of the log, so
-    // there is nothing to find.
-    //
-    // The flag means "a local signal says there may be work", not "the log
-    // is unchanged": a remote writer on a store without notify leaves this
-    // process disarmed, which is why the poller arms on every tick.
+    // A remote writer without notify leaves this disarmed; the poller re-arms.
     if (!this._armed)
       return {
         subscribed: 0,
@@ -527,11 +301,9 @@ export class CorrelateCycle<
         scanned: false,
       };
 
-    // One worker per registry scans at a time; otherwise W workers each read
-    // and mark every committed event. The lease rides `subscribe` (no streams,
-    // no advance = "may I scan?"). The answer's checkpoint is ignored: it is a
-    // floor shared by every correlator, and adopting it would skip events this
-    // worker never read. Renew at the halfway mark so the holder never lapses.
+    // The lease rides `subscribe` with no streams ("may I scan?"). Its shared
+    // checkpoint is ignored: adopting it would skip events this worker never
+    // read. Renew at the halfway mark.
     const now = Date.now();
     if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
@@ -540,13 +312,8 @@ export class CorrelateCycle<
         millis: CORRELATION_LEASE_MS,
       });
       this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
-      // `undefined` means the store does not implement leasing, so every
-      // worker scans exactly as before.
+      // `undefined` = store without leasing. Refused: stay armed, look again.
       if (correlating === false)
-        // Another worker with the same registry is scanning, so this one need
-        // not. Stay armed: the work still needs doing, and this worker should
-        // look again next pass rather than disarm and wait for an unrelated
-        // commit to wake it.
         return {
           subscribed: 0,
           last_id: this._checkpoint,
@@ -555,7 +322,6 @@ export class CorrelateCycle<
         };
     }
 
-    // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
@@ -563,7 +329,6 @@ export class CorrelateCycle<
       (event) => {
         last_id = event.id;
         const register = this._registry.events[event.name];
-        // skip events with no registered reactions
         if (register) {
           for (const reaction of register.reactions.values()) {
             const resolved =
@@ -571,9 +336,6 @@ export class CorrelateCycle<
                 ? reaction.resolver(event)
                 : reaction.resolver;
             if (!resolved) continue;
-            // A lane no controller claims has no claimant, so the stream
-            // would sit at watermark -1 forever. Reroute to "default" and
-            // say so — the build-time guard sees only static lanes.
             let lane = resolved.lane;
             if (lane !== undefined && !this._declared_lanes.has(lane)) {
               report_undeclared_lane(
@@ -585,10 +347,6 @@ export class CorrelateCycle<
               );
               lane = undefined;
             }
-            // Raise priority/lane only when this resolution beats what the
-            // target was last subscribed at (the runtime `max()` rule); a
-            // never-seen target always wins, a static one never does.
-            // Otherwise the row's own values ride along with the mark.
             const recorded =
               this._static_subscriptions.get(resolved.target) ??
               this._dynamic_subscriptions.get(resolved.target);
@@ -606,10 +364,8 @@ export class CorrelateCycle<
               handler: reaction.handler.name,
               correlated_at: undefined,
             };
-            // Report an equal-priority lane disagreement (the build-time guard
-            // rejects the static equivalent). Compare against what the target
-            // already carries, from this scan or a past one. An omitted lane
-            // is "default"; a never-seen target holds no lane at all.
+            // Compare against what the target already carries, from this
+            // scan or a past one.
             const seen_in_scan = correlated.has(resolved.target);
             const held_lane =
               (seen_in_scan ? entry.lane : recorded?.lane) ?? DEFAULT_LANE;
@@ -625,38 +381,27 @@ export class CorrelateCycle<
                 held_lane,
                 resolved_lane
               );
-            // Multiple reactions targeting the same stream within a
-            // single correlate scan — keep the max priority, and carry the
-            // winning reaction's lane so the highest-priority reaction sets
-            // the lane (matches the subscribe-side `max()` invariant).
+            // Within one scan the highest priority sets the lane.
             if (carried.priority > entry.priority) {
               entry.priority = carried.priority;
               entry.lane = carried.lane;
               entry.upgraded = upgraded;
               entry.handler = reaction.handler.name;
             }
-            // The mark is an assertion about the log: only an event the
-            // target's own fetch would return may raise it. Ids ascend
-            // through the scan, so the last one wins.
             if (this._in_fetch_window(resolved.source, event.stream))
               entry.correlated_at = event.id;
             correlated.set(resolved.target, entry);
           }
         }
       },
-      // Decline the sensitive payload: the scan only needs name/stream/id,
-      // and one undecryptable row would otherwise stop every stream's
-      // reactions. Resolvers therefore see `pii: null`; correlate runs
-      // actor-less, so plaintext here would be un-gated disclosure.
+      // Resolvers see `pii: null`: correlate runs actor-less, and one
+      // undecryptable row would otherwise stop every stream's reactions.
       { ...query, after, with_pii: false }
     );
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
 
-    // A target rides the batch when it has something to say: a mark to
-    // raise, or priority/lane to register. A re-seen target that this scan
-    // found no work for (its source filtered every event out) says neither,
-    // and is left alone.
+    // Only targets with a mark to raise or priority/lane to register.
     const streams: SubscribeInput[] = [];
     for (const [stream, entry] of correlated) {
       if (entry.upgraded || entry.correlated_at !== undefined)
@@ -670,9 +415,7 @@ export class CorrelateCycle<
     }
 
     if (streams.length) {
-      // Persist the read cursor with the targets found. Send the correlator
-      // only when leasing, so it renews for free; an explicit
-      // `app.correlate()` keeps the cheaper single checkpoint update.
+      // Leasing renews for free on the same call.
       const renewed_at = Date.now();
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
@@ -683,18 +426,12 @@ export class CorrelateCycle<
       );
       if (lease && correlating !== false)
         this._lease_until = renewed_at + CORRELATION_LEASE_MS;
-      // A raised mark makes work claimable just like a new target, so the
-      // orchestrator arms on both (`subscribed` alone misses re-marks).
+      // The orchestrator arms on re-marks too, not just new subscriptions.
       const marked = streams.filter(
         (entry) => entry.correlated_at !== undefined
       ).length;
-      // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
-      // Record what each upgraded target was just subscribed at (the
-      // within-scan max), so a later lower-or-equal resolution carries these
-      // values forward and a strictly-higher one re-opens the guard.
-      // Only dynamic targets reach here — a static sits at +Infinity, so no
-      // resolution to one is ever `upgraded`.
+      // Only dynamic targets can be upgraded (statics sit at +Infinity).
       for (const { stream, priority, lane } of streams) {
         if (correlated.get(stream)?.upgraded)
           this._dynamic_subscriptions.set(stream, {
@@ -705,22 +442,16 @@ export class CorrelateCycle<
       }
       return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance. Only a short page proves the
-    // log is exhausted; resolving no target does not.
+    // Only a short page proves the log is exhausted; resolving nothing does not.
     this._checkpoint = last_id;
     this._armed = found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
   /**
-   * Give each target this scan had no record of the record its row holds.
-   *
-   * A target with no record is either new or forgotten. Its row, when it
-   * has one, says what lane and priority it was subscribed at; a resolution
-   * that doesn't beat that priority carries the row's values, exactly as if
-   * the record had never been evicted. One read per target with no record,
-   * and only when more than one lane is declared: with one lane there is no
-   * lane to lose, and the store already keeps the higher priority.
+   * Read the row of each target this scan had no record of (new or evicted),
+   * so a resolution that doesn't beat its priority keeps the row's lane.
+   * Only called with more than one lane declared.
    */
   private async _recall(correlated: Map<string, Correlated>): Promise<void> {
     const missed = [...correlated].filter(([, entry]) => entry.missed);
@@ -757,13 +488,7 @@ export class CorrelateCycle<
     );
   }
 
-  /**
-   * Hand the correlation lease back early.
-   *
-   * The port has no release verb; re-acquiring as the same holder with a
-   * zero duration releases it. Best-effort: a failure costs the lease's
-   * remaining lifetime, as a crash would.
-   */
+  /** Release the lease early by re-acquiring it for zero ms. Best-effort. */
   async release_correlation(): Promise<void> {
     try {
       this._lease_until = 0;
@@ -773,8 +498,6 @@ export class CorrelateCycle<
         millis: 0,
       });
     } catch (error) {
-      // `warn`, not `error`: this runs during shutdown, nothing is lost, and
-      // the lease expires on its own.
       log().warn(
         `Could not hand back the correlation lease during shutdown; it expires on its own within ${CORRELATION_LEASE_MS}ms and correlation resumes normally after that. ` +
           "On a single-writer store this usually means another connection holds the database. " +

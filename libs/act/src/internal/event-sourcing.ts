@@ -1,18 +1,6 @@
 /**
- * @module event-sourcing
- * @category Internal
- *
- * Pure event-sourcing primitives: `snap` persists state checkpoints, `load`
- * reconstructs state by folding events through reducers, and `action`
- * validates an action, runs invariants, emits events, and commits them
- * atomically. `tombstone` commits the close-the-books guard with optimistic
- * concurrency.
- *
- * These are the bare implementations — observability is layered on top in
- * {@link "tracing"} and wired by the orchestrator at construction time.
- * No tracing imports here, no module-level mutable state.
- *
- * @internal
+ * Event-sourcing primitives: `snap`, `load`, `action`, `tombstone`, `scan`.
+ * Bare implementations; tracing wraps them in `tracing.ts`.
  */
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
@@ -24,7 +12,6 @@ import {
 } from "../types/errors.js";
 import type {
   Committed,
-  Correlator,
   DoOptions,
   Emitted,
   EventMeta,
@@ -43,33 +30,9 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
- * The reduction pipeline names three distinct things, and each word means
- * exactly one of them:
- *
- * - a **reducer** is a state's `.patch()` handler — it takes one event and
- *   returns a {@link Patch} *partial*;
- * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
- *   that partial into the current state, yielding the next full state;
- * - the **fold** is the loop that applies the patch step across a stream's
- *   events (the reader loop in {@link load} / {@link action}, and the
- *   projection engine in {@link "projection-fold"}).
- *
- * `PatchFn` is the per-event patch step. The fold loop calls one of two
- * implementations, selected **once** at construction (in
- * {@link "tracing".build_es}) — never branched per event:
- *
- * - {@link bare_patch} — the default. Literally `patch(state, partial)`,
- *   no wrapper. No validation cost on the hot path.
- * - {@link validating_patch} — the opt-in `ActOptions.validateFoldedState`
- *   path. Merges, then parses the merged full state against the state's
- *   declared Zod schema.
- *
- * The `me`/`event` arguments are unused by the bare implementation but
- * carried on the shared signature so the fold loop is call-shape-identical
- * regardless of which patch step was selected — the validating
- * implementation needs them to name the failing reduction.
- *
- * @internal
+ * The patch step: merges a reducer's partial into state. Chosen once at
+ * construction (`build_es`), never per event. `me`/`event` only serve
+ * {@link validating_patch}, to name the failing reduction.
  */
 export type PatchFn = <
   TState extends Schema,
@@ -82,32 +45,13 @@ export type PatchFn = <
   event: Committed<TEvents, keyof TEvents>
 ) => TState;
 
-/**
- * The default patch step: a bare `patch()` merge with no wrapper and no
- * branch. The off-path is a plain reduction, so an
- * app that leaves `validateFoldedState` off pays nothing — not even a
- * comparison.
- *
- * @internal
- */
+/** The default patch step: a bare merge, so the hot path pays nothing. */
 export const bare_patch: PatchFn = (_me, state, partial) =>
   patch(state, partial) as typeof state;
 
 /**
- * The opt-in patch step: merge the partial into state, then
- * parse the merged full state against the owning state's declared Zod
- * schema. A reducer that produces schema-violating state (the calculator
- * divide-by-zero NaN class) fails here, at the triggering event,
- * instead of propagating and surfacing hops later as a confusing
- * downstream error.
- *
- * The `target` string names the state and the triggering event
- * (`"<state>.<event>#<id>"`) so the resulting {@link ValidationError}
- * points straight at the reduction that produced bad state. A debugging /
- * CI aid, not a production guard — selected only when the operator opts
- * in.
- *
- * @internal
+ * `validateFoldedState`: merge, then parse against the state schema, so a
+ * bad reducer fails at its own event. A debugging aid, not a production guard.
  */
 export const validating_patch: PatchFn = (me, state, partial, event) => {
   const next = patch(state, partial) as typeof state;
@@ -118,20 +62,9 @@ export const validating_patch: PatchFn = (me, state, partial, event) => {
   );
 };
 
-/**
- * Default per-batch row count for the {@link scan} pagination loop.
- * Callers override via {@link ScanOptions.batch_size}.
- *
- * @internal
- */
 const DEFAULT_BATCH = 500;
 
-/**
- * Internal action signature seen by the orchestrator — the {@link Correlator}
- * is bound at `build_es` time, so callers don't pass it through.
- *
- * @internal
- */
+/** `action` with the correlator and patch step bound by `build_es`. */
 type BoundAction = <
   TState extends Schema,
   TEvents extends Schemas,
@@ -145,7 +78,6 @@ type BoundAction = <
   options?: DoOptions<TEvents>
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
-/** @internal */
 export interface EsOps {
   snap: typeof snap;
   load: typeof load;
@@ -153,24 +85,7 @@ export interface EsOps {
   tombstone: typeof tombstone;
 }
 
-/**
- * Event sourcing utilities for snapshotting, loading, and committing actions/events.
- * Used internally by Act and state machines.
- */
-
-/**
- * Saves a snapshot of the state to the store.
- *
- * Snapshots are used to optimize state reconstruction for aggregates with long event streams.
- *
- * @template TState The type of state
- * @template TEvents The type of events
- * @param snapshot The snapshot to save
- * @returns Promise that resolves when the snapshot is saved
- *
- * @example
- * await snap(snapshot);
- */
+/** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
 ): Promise<Committed<TEvents, keyof TEvents> | undefined> {
@@ -187,9 +102,6 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
     );
     return committed as Committed<TEvents, keyof TEvents>;
   } catch (error) {
-    // Swallow by design — a failed snapshot must never fail the action.
-    // But surface an operator signal: a persistently failing snapshot
-    // write silently degrades every cold start to full replay.
     const reason = error instanceof Error ? error.message : String(error);
     log().warn(
       `Snapshot write failed on stream "${stream}": ${reason} — cold starts will replay full history until snapshots succeed.`
@@ -198,16 +110,8 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
 }
 
 /**
- * Commits a tombstone event with optimistic concurrency, returning the
- * committed record on success or `undefined` if the stream moved past
- * `expectedVersion` (concurrent write detected). Other store errors
- * propagate.
- *
- * Used by `close()` to guard a stream while archive/truncate runs:
- * subsequent `action()` calls see the tombstone at head and reject with
- * {@link StreamClosedError} until the close completes.
- *
- * @internal
+ * Commits the close guard at `expectedVersion`; `undefined` when the stream
+ * moved. Actions then see the tombstone at head and throw {@link StreamClosedError}.
  */
 export async function tombstone(
   stream: string,
@@ -229,18 +133,8 @@ export async function tombstone(
 }
 
 /**
- * Per-event blocker check. Categories:
- *
- * - **Negative `version`** — versions are unsigned in the framework
- *   contract.
- * - **Malformed `created`** — `event.created` must be a valid Date
- *   instance. Restore sources stream parsed events; the orchestrator
- *   trusts the caller's iterator did the parsing.
- *
- * Cross-event invariants (duplicate ids, version gaps) are left to the
- * sink's unique constraint and to the caller (partial backups have gaps).
- *
- * @internal
+ * Rejects a negative version or an invalid `created` Date. Duplicate ids and
+ * version gaps are left to the sink (partial backups have gaps).
  */
 function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {
   if (event.version < 0) return false;
@@ -250,17 +144,10 @@ function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {
 }
 
 /**
- * Scan a restore source event by event. Owns pagination, validation,
- * the `drop_snapshots` filter, the `on_progress` callback, and the
- * causation remap; adapters supply only the per-event insert
- * `callback` via the driver pattern (see {@link Store.restore}).
- *
- * Pages the source with `limit`/`after`; a source that ignores the
- * filter (`CsvFile`) returns everything at once and the loop ends. Throws
- * on the first invalid event. Returns the result without `duration_ms`,
- * which {@link Act.restore} adds.
- *
- * @internal
+ * Pages a restore source: validation, drop filters, migrations, progress and
+ * causation remap. Adapters supply only the per-event insert `callback`
+ * (see {@link Store.restore}). A source that ignores `limit` (`CsvFile`)
+ * returns everything in one page.
  */
 export async function scan(
   source: EventSource,
@@ -325,18 +212,11 @@ export async function scan(
           closed_streams.has(event.stream) &&
           event.name !== TOMBSTONE_EVENT
         ) {
-          // Drop pre-close events but KEEP the tombstone — it's what
-          // makes the stream "closed" in the rebuilt store. Without
-          // it, a future `app.do(...)` against this stream name would
-          // succeed because nothing gates it.
+          // Keep the tombstone: it is what keeps the stream closed.
           dropped_closed++;
           return;
         }
-        // Migration overlay: rename + schema-guarded data
-        // transform, then optional stream rename. Applied BEFORE the
-        // causation remap so the id_map (keyed by source id) stays
-        // valid and migrated events land at the new name/data with
-        // their causation chains intact.
+        // Before the causation remap, so `id_map` stays keyed by source id.
         let migrated: typeof event = event;
         const migration = event_migrations?.[event.name as string];
         if (migration) {
@@ -359,19 +239,12 @@ export async function scan(
           kept++;
           return;
         }
-        // Causation remap — rewrite `meta.causation.event.id` to the
-        // new id space if the source pointed at an earlier event's
-        // old id.
         let remapped = migrated;
         const caused_by = migrated.meta.causation.event?.id;
         if (caused_by !== undefined) {
           const new_caused_by = id_map.get(caused_by);
           if (new_caused_by !== undefined && new_caused_by !== caused_by) {
-            // Spread `migrated`, not the original `event`.
-            // Migration + stream_rename already ran above; rebuilding from
-            // `event` here would revert the new name/data/stream for any
-            // event whose causation id shifted — silently undoing the
-            // migration for most rows after the first id shift.
+            // Spread `migrated`, not `event`, or the migration is undone.
             remapped = {
               ...migrated,
               meta: {
@@ -411,27 +284,8 @@ export async function scan(
 }
 
 /**
- * Loads a snapshot of the state from the store by folding events through the
- * state's patch reducers.
- *
- * First checks the cache for a checkpoint, then queries the store for events
- * committed after the cached position. On cache miss, replays from the store
- * (using snapshots if available to avoid full replay).
- *
- * @template TState The type of state
- * @template TEvents The type of events
- * @template TActions The type of actions
- * @param me The state machine definition.
- * @param stream The stream (instance) to load
- * @param callback (Optional) Callback to receive the loaded snapshot as it is built
- * @param asOf (Optional) Time-travel cursor; bypasses the cache.
- * @param actor (Optional) Passed through to the state's `view` delegate
- *   when constructing the snapshot.event — semantics are the state's to
- *   define (see {@link state}).
- * @returns The snapshot of the loaded state
- *
- * @example
- * const snapshot = await load(Counter, "counter1");
+ * Folds a stream into state, from the cached checkpoint or the latest
+ * snapshot. `asOf` time-travels and bypasses the cache.
  */
 export async function load<
   TState extends Schema,
@@ -451,9 +305,7 @@ export async function load<
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
-  // replayed counts events processed by THIS load only (snap or patch);
-  // distinct from `patches` (the snap-distance accumulator carried over
-  // from the cache).
+  // Events this load processed; `patches` is the snap distance from the cache.
   let replayed = 0;
   let event: Committed<TEvents, keyof TEvents> | undefined;
 
@@ -470,10 +322,7 @@ export async function load<
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
-        // Unknown event — not in this state's reducer map. Causes:
-        // deleted/renamed event in a versioned schema, load() called with
-        // the wrong state, or stream contamination. Skipping silently
-        // would corrupt replay; warn so the operator can investigate.
+        // A renamed event, the wrong state, or a contaminated stream.
         log().warn(
           `Skipping unknown event "${String(event.name)}" on stream "${stream}" (id=${event.id}) — no reducer in state "${me.name}"`
         );
@@ -492,24 +341,17 @@ export async function load<
     {
       stream,
       stream_exact: true,
-      // `with_snaps` on every non-time-travel load. Cold, it resumes from the
-      // latest snapshot (this is the only place that decides it; stores just
-      // apply it). Warm, it keeps a snapshot above a stale checkpoint in the
-      // result, so a windowed close that pruned the events in between can't
-      // make the fold apply the tail onto stale state.
+      // `with_snaps` on every non-time-travel load: cold, it resumes from the
+      // latest snapshot; warm, it keeps a snapshot above a stale checkpoint,
+      // so a windowed close's prune can't fold the tail onto stale state.
       ...(cached
         ? { after: cached.event_id, with_snaps: true }
         : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
 
-  // Warm the cache when this load replayed events, so read-heavy paths
-  // benefit too. A stale write from a slower concurrent load self-corrects:
-  // the next load replays past its `event_id`. Time-travel loads skip it.
-  //
-  // Not when the head is the tombstone (a close in progress): the cached
-  // entry would carry no event, and `action()`'s tombstone check would
-  // pass vacuously.
+  // A stale write self-corrects: the next load replays past its `event_id`.
+  // Not at a tombstone head, or `action()`'s closed check would pass vacuously.
   const head_is_tombstone = event?.name === TOMBSTONE_EVENT;
   if (
     replayed > 0 &&
@@ -518,7 +360,6 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    // Fire-and-forget: a cache failure must not fail the read.
     await cache()
       .set(stream, {
         stream,
@@ -540,10 +381,7 @@ export async function load<
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
-    // Head event id, captured atomically with `state`: the last replayed
-    // event's id on a cache miss, or the cached checkpoint's event_id on a
-    // warm hit with no new events. Consumers read this instead of a
-    // separate cache lookup that could race a concurrent commit.
+    // Captured with `state`, so consumers never race a separate cache lookup.
     id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
@@ -553,35 +391,9 @@ export async function load<
 }
 
 /**
- * Executes an action and emits an event to be committed by the store.
- *
- * Validates the action, applies business invariants, emits events, and
- * commits them to the event store. When the action's
- * {@link ActionOptions} declare a retry budget, the orchestrator owns
- * the loop on {@link ConcurrencyError}: cache is invalidated, optional
- * `backoff` delay is applied, and the action re-runs from `load`. Any
- * other error rethrows immediately and does not consume the budget.
- *
- * Reactions skip optimistic concurrency (commit below passes
- * `undefined` as `expectedVersion` when `reactingTo` is set), so
- * `ConcurrencyError` cannot fire on the reaction-driven path — the
- * loop is naturally a no-op there.
- *
- * @template TState The type of state
- * @template TEvents The type of events
- * @template TActions The type of action_schemas
- * @template TKey The type of action to execute
- * @param me The state machine definition
- * @param action The action to execute
- * @param target The target (stream, actor, etc.)
- * @param payload The payload of the action
- * @param options Per-call dispatch options ({@link DoOptions}) —
- *   `reactingTo` to thread correlation, `correlator` to override the
- *   framework or orchestrator-level correlator for this call only.
- * @returns The snapshot of the committed event
- *
- * @example
- * const snapshot = await action(Counter, "increment", { stream: "counter1", actor }, { by: 1 });
+ * Validates, checks invariants, emits and commits. On {@link ConcurrencyError}
+ * it re-runs from `load` within the action's `maxRetries`; any other error
+ * rethrows. Reactions commit without the inferred version guard.
  */
 export async function action<
   TState extends Schema,
@@ -598,9 +410,7 @@ export async function action<
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
-  // Resolved by the caller. `Act.do` supplies the ambient reaction context
-  // when a handler dispatched without naming one; nothing is read from
-  // outside this call.
+  // `Act.do` already filled in the ambient reaction context.
   const reactingTo = options?.reactingTo;
   const correlator = options?.correlator ?? default_correlator;
 
@@ -619,10 +429,8 @@ export async function action<
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      // snapshot.version is the head version even on a warm cache hit,
-      // where snapshot.event is undefined — using the event would
-      // silently drop the optimistic guard for every cached stream.
-      // A brand-new stream (-1) stays unguarded: creations append.
+      // `version`, not `event`: on a warm hit `event` is undefined. A new
+      // stream (-1) stays unguarded.
       const expected =
         expectedVersion ??
         (snapshot.version >= 0 ? snapshot.version : undefined);
@@ -644,7 +452,6 @@ export async function action<
       const result = me.on[action](validated, snapshot, target);
       if (!result) return [snapshot];
 
-      // An empty array means no events were emitted
       if (Array.isArray(result) && result.length === 0) {
         return [snapshot];
       }
@@ -672,8 +479,7 @@ export async function action<
           action: {
             name: action as string,
             ...target,
-            // payload intentionally omitted from causation metadata —
-            // callers correlate via the correlation id when they need it.
+            // payload intentionally omitted
           },
           event: reactingTo
             ? {
@@ -696,8 +502,7 @@ export async function action<
           reactingTo ? expectedVersion : expected
         );
       } catch (error) {
-        // Invalidate the stale cache entry, fire-and-forget: a cache failure
-        // must not replace the `ConcurrencyError` the retry loop expects.
+        // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
         if (error instanceof ConcurrencyError) {
           cache()
             .invalidate(stream)
@@ -713,11 +518,7 @@ export async function action<
 
       let { state, patches } = snapshot;
       const snapshots = committed.map((row, i) => {
-        // Actions originate from the caller — they already hold the
-        // plaintext payload they sent. No view/gate round-trip is
-        // useful; the reducer and the returned snapshot see the
-        // pre-split event directly. pii_split (in `me.message`) above
-        // is the only PII operation on the action path.
+        // The caller sent the plaintext, so no view/gate round-trip.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch_fn(me, state, p, event);
@@ -735,23 +536,16 @@ export async function action<
         };
       });
 
-      // fire and forget snaps
       const last = snapshots.at(-1)!;
-      // Guardless commits (reactions append at head by design) can land
-      // past events this fold never saw. A gapped fold must not become
-      // a snapshot event or a cache entry — both would lie at the head
-      // position. Contiguity is cheap to prove: the first committed
-      // version extends the loaded one.
+      // A guardless (reaction) commit can land past events this fold never
+      // saw; a gapped fold must not become a snapshot or a cache entry.
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
-      // Awaited: the snapshot takes the next version, so the cache must hold
-      // the post-snap checkpoint before a sequential caller loads it.
-      // `snap()` swallows its own failures.
+      // Awaited, so the cache holds the post-snap checkpoint for the next caller.
       const snap_event = snapped ? await snap(last) : undefined;
 
-      // States with sensitive fields aren't cached (their state depends on
-      // the actor). Fire-and-forget otherwise.
+      // Sensitive states depend on the actor, so they aren't cached.
       if (!me.pii_aware) {
         if (contiguous)
           cache()
@@ -769,9 +563,6 @@ export async function action<
                 "cache set skipped; the next load re-folds from the store"
               )
             );
-        // A gapped entry would sit at the head position with unfolded
-        // events baked in — drop the checkpoint and let the next load
-        // replay to truth instead.
         else
           cache()
             .invalidate(stream)
@@ -786,8 +577,7 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
-      // A caller-pinned expectedVersion would conflict again on every
-      // retry, so rethrow; retries are for framework-derived versions.
+      // A caller-pinned version would conflict again on every retry.
       if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {

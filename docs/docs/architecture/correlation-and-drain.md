@@ -81,6 +81,14 @@ The checkpoint advances only after `subscribe` succeeds. If `subscribe` throws, 
 
 **Cold-start floor (ACT-1207).** A restart resumes from the durable correlate checkpoint ([#1484](https://github.com/Rotorsoft/act-root/issues/1484)). On a *first* boot there is none, and the checkpoint would naively jump to the store watermark (`max(at)` across every subscribed stream) — which overshoots any event committed but not correlated before a crash, since a busier stream can have acked past it. The cold-start checkpoint is therefore floored at `watermark - back_scan` so the crash-window tail is re-scanned. Re-scanning already-correlated events is harmless: `subscribe` is an idempotent UPSERT and a re-issued mark never regresses.
 
+### The correlation lease
+
+On the automatic paths (the settle loop and the poller), one worker scans on behalf of the others, so W workers don't each read and mark every committed event. The lease rides `subscribe` with no streams ("may I scan?") and is renewed at its halfway mark. An explicit `app.correlate()` ignores it and scans now: `close` catches up by looping until the checkpoint moves, and a lease-blocked scan would cap its prune at a stale position.
+
+Leasing is only sound between interchangeable workers. Two processes running the same application are; two applications sharing one database are not, and a shared lease would let one starve the other. So the lease key is a hash of every event name the correlator reacts to, each with the names of its handlers, sorted so declaration order doesn't matter. Event names alone are not enough: two applications can both react to `Placed` and resolve it to different targets. Workers sharded by `onlyLanes` append their lanes to the key, because a holder would mark targets on lanes it cannot drain.
+
+Separate leases do not make two applications over one store supported. They still share one read cursor, so the second would never correlate what the first had already read past. One store belongs to one application (see the split-stores recipe).
+
 ### The subscribed-streams LRU
 
 `CorrelateCycle` remembers what each target was last subscribed at, in an LRU capped at 1000 entries (configurable via `ActOptions.maxSubscribedStreams`). Apps that mint millions of dynamic targets — e.g., one stream per user activity — would otherwise grow this map unbounded.

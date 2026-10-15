@@ -25,7 +25,7 @@ Files: `lenses.md` (what to look at), `metrics.sh` (how to measure), `history.md
 
 Targets the retrospective tracks (adjust them only with the user):
 
-- comments under 25% of core lines; no ticket numbers in source or test names
+- comments under 30% of `internal/` and `adapters/` lines (public type docs in `types/` are exempt); no ticket numbers in source or test names
 - no core file over 300 lines; one concept per file
 - runtime exports of `@rotorsoft/act` don't grow (54 today); `IAct` stays the small surface handlers see, and each `Act` method beyond it is documented as operator surface
 - one implementation per idea: adapter logic shared through the orchestrator or the TCK, config validated once in `internal/config.ts`

@@ -3861,37 +3861,10 @@ export interface IAct<
 
 // === audit.ts ===
 /**
- * @module audit
- * @category Internal
- *
- * Operator-driven store audit.
- *
- * Walks the connected store and yields per-category {@link AuditFinding}s.
- * Each category answers a different "what should I do with this store?"
- * question and pairs with a remediation:
- *
- *   - \`schema\` → fix the data model (poison events, unknown names)
- *   - \`close-candidate\` → \`app.close([...])\`
- *   - \`restart-candidate\` → \`app.close([{stream, restart:true}, …])\`
- *   - \`deprecated-load\` → \`app.close([...])\` on the heaviest carriers
- *   - \`reaction-health\` → \`app.unblock(...)\` / \`app.reset(...)\`
- *   - \`snapshot-drift\` → manual \`load({snap:true})\` or wait for policy
- *   - \`routing-health\` → restart-with-new-config to re-lane
- *   - \`correlation-gaps\` → fix upstream correlator misconfig
- *   - \`clock-anomalies\` → infra remediation (clock skew)
- *
- * ## Single-scan multiplex
- *
- * Each category is an {@link AuditPass} with optional per-row callbacks
- * (\`on_event\` / \`on_stream\` / \`on_stat\`) and a \`finalize\` hook. The
+ * Operator-driven store audit. Each category is an {@link AuditPass}; the
  * dispatcher runs each needed scan once and broadcasts rows to every pass,
- * so an audit costs at most three scans however many categories run.
- * Follow-up lookups happen in \`finalize\`.
- *
- * Reads only the {@link AuditDeps} bag and the public \`Store\`; never the
- * orchestration internals.
- *
- * @internal
+ * so an audit costs at most three scans. Reads only {@link AuditDeps} and
+ * the public \`Store\`, never orchestration internals.
  */
 
 import { SNAP_EVENT } from "../ports.js";
@@ -3921,20 +3894,11 @@ export type AuditDeps = {
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** Declared drain lanes (for routing-health unknown-lane). */
   readonly declared_lanes: ReadonlySet<string>;
-  /**
-   * Event names that the registry has at least one reaction for —
-   * used by routing-health to detect "registered but unrouted"
-   * events. Normalized down from the internal \`event_to_lanes\` map
-   * (which carries lane-set details audit doesn't need).
-   */
+  /** Event names with at least one reaction (routing-health \`unrouted\`). */
   readonly routed_events: ReadonlySet<string>;
 };
 
-/**
- * Defaults applied when the operator doesn't override via
- * {@link AuditOptions.thresholds}. Values land where most workloads
- * find them operationally useful — operators can tune per call.
- */
+/** Defaults for {@link AuditOptions.thresholds}. */
 const DEFAULTS = {
   idle_days: 90,
   restart_min: 10_000,
@@ -3958,16 +3922,9 @@ const ALL_CATEGORIES = [
 ] as const satisfies readonly AuditCategory[];
 
 /**
- * A single audit category, expressed as a stream-consumer:
- *
- * - \`on_event\` / \`on_stream\` / \`on_stat\` are called by the dispatcher
- *   during the shared scans. Each is optional; the dispatcher uses
- *   the presence/absence to decide which scans to run.
- * - \`finalize\` runs after all shared scans complete. Categories that
- *   need targeted follow-up store calls (snapshot-drift fetches the
- *   last \`__snapshot__\` per drifted stream; correlation-gaps cross-
- *   checks causations against the collected id set) do that here.
- * - \`drain\` is called last and returns the accumulated findings.
+ * One audit category. Which \`on_*\` callbacks it has decides which shared
+ * scans run; \`finalize\` does targeted follow-up reads; \`drain\` returns
+ * the findings.
  */
 type AuditPass = {
   category: AuditCategory;
@@ -3981,35 +3938,21 @@ type AuditPass = {
 
 type PassFactory = (deps: AuditDeps, options: AuditOptions) => AuditPass;
 
-/**
- * Top-level audit dispatcher. Single-scan multiplex: each requested
- * category contributes a \`AuditPass\`, the dispatcher determines the
- * union of required data sources (events / streams / stats), runs
- * each once, broadcasts rows, and yields per-category findings in
- * the order the categories were requested.
- * Scans finish before the first yield; bound the work with
- * \`options.query\`.
- */
+/** Scans finish before the first yield; bound the work with \`options.query\`. */
 export async function* audit(
   deps: AuditDeps,
   categories?: AuditCategory[],
   options: AuditOptions = {}
 ): AsyncIterable<AuditFinding> {
   const requested = new Set<AuditCategory>(categories ?? [...ALL_CATEGORIES]);
-  // Preserve a deterministic category order (matches ALL_CATEGORIES
-  // declaration) so output ordering doesn't depend on the order
-  // operators list categories in their call.
+  // Declaration order, not the caller's.
   const ordered_categories = ALL_CATEGORIES.filter((c) => requested.has(c));
   const passes: AuditPass[] = ordered_categories.map((c) =>
     PASS_FACTORIES[c](deps, options)
   );
 
-  // Determine scan needs. \`some(...)\` short-circuits — three trivial
-  // walks at worst.
   const need_stats = passes.some((p) => p.on_stat !== undefined);
   const need_streams = passes.some((p) => p.on_stream !== undefined);
-  // An \`on_unreadable\`-only pass still needs the scan: the row it reports is
-  // what the scan trips on.
   const need_events = passes.some(
     (p) => p.on_event !== undefined || p.on_unreadable !== undefined
   );
@@ -4029,9 +3972,7 @@ export async function* audit(
   }
 
   if (need_streams) {
-    // Paged — \`query_streams\` defaults to 100, and an audit that inspects
-    // only the first page reports a false all-clear for every stream that
-    // sorts past it.
+    // Paged: \`query_streams\` defaults to 100 rows.
     await walk_streams(deps.store(), (pos) => {
       for (const p of passes) p.on_stream?.(pos);
     });
@@ -4050,12 +3991,9 @@ export async function* audit(
     );
   }
 
-  // Async post-processing (per-stream queries, second-pass orphan
-  // detection). Serial to avoid pool contention; categories are
-  // independent so order doesn't matter semantically.
+  // Serial to avoid pool contention.
   for (const p of passes) await p.finalize?.(deps);
 
-  // Yield findings in requested-category order.
   for (const p of passes) {
     for (const f of p.drain()) yield f;
   }
@@ -4102,8 +4040,6 @@ async function scan_events_resiliently(
       return;
     } catch (error) {
       if (query?.backward) throw error;
-      // Ask for the one row the scan stopped at, without its payload. This
-      // read cannot trip on the same cause, and it is what names the row.
       let row: UnreadableRow | undefined;
       await deps.store().query<Schemas>(
         (e) => {
@@ -4111,8 +4047,7 @@ async function scan_events_resiliently(
         },
         { ...query, after: cursor, limit: 1, with_pii: false }
       );
-      // Nothing came back, so the failure was not one unreadable row — a
-      // dropped connection, a timeout. It is not ours to swallow.
+      // Not one unreadable row (a dropped connection, a timeout): rethrow.
       if (!row) throw error;
       on_unreadable(row);
       // The tripping row is never delivered, so \`seen\` is at most
@@ -4124,17 +4059,7 @@ async function scan_events_resiliently(
 }
 
 // =================== Pass factories ===================
-//
-// Each factory returns an \`AuditPass\` that buffers its findings and
-// returns them from \`drain()\`.
 
-/**
- * \`schema\` — every event in the audit window is parsed against the
- * Zod schema the registry currently declares for its name. Two
- * failure modes: \`unknown_event_name\` (event sits on disk, registry
- * has no entry) and \`schema_validation_failed\` (event matches a
- * known name but fails the current Zod schema).
- */
 const make_schema_pass: PassFactory = (deps) => {
   const findings: AuditFinding[] = [];
   return {
@@ -4143,7 +4068,6 @@ const make_schema_pass: PassFactory = (deps) => {
       const name = String(event.name);
       const state = deps.event_to_state.get(name);
       if (!state) {
-        // Skip framework markers — they're not user-declared.
         if (name.startsWith("__")) return;
         findings.push({
           category: "schema",
@@ -4155,12 +4079,7 @@ const make_schema_pass: PassFactory = (deps) => {
         return;
       }
       const schema = state.events[name];
-      // \`sensitive()\` keys are split out of \`data\` into the pii sidecar at
-      // commit — their absence from \`data\` is correct, not corruption. The
-      // pass reads raw stored rows, so parsing against the full schema
-      // reported every healthy sensitive event as invalid, one finding per
-      // event, burying the real ones. Omit those keys instead; the
-      // rest of the payload is still validated.
+      // \`sensitive()\` keys live in the pii sidecar, so omit them from the parse.
       const sensitive = pii_fields(schema);
       let parse_schema = schema;
       if (sensitive.length > 0) {
@@ -4170,9 +4089,7 @@ const make_schema_pass: PassFactory = (deps) => {
           }
         ).omit;
         if (typeof omitter !== "function") {
-          // A non-object schema (e.g. a union) whose variants carry pii —
-          // the split keys can't be masked off, so any parse here is a
-          // guaranteed false positive. Skip rather than cry wolf.
+          // A non-object schema with pii can't be masked; any parse is a false positive.
           return;
         }
         parse_schema = omitter.call(
@@ -4196,10 +4113,7 @@ const make_schema_pass: PassFactory = (deps) => {
   };
 };
 
-/**
- * Deprecated event name → its current sibling, grouped per state like
- * \`registry.deprecated_events\` (never across unrelated states).
- */
+/** Deprecated event name → its current sibling, within one state only. */
 const classify_deprecated_by_state = (
   deps: AuditDeps
 ): ReadonlyMap<string, string> => {
@@ -4215,21 +4129,12 @@ const classify_deprecated_by_state = (
   const deprecated_to_current = new Map<string, string>();
   for (const names of names_by_state.values()) {
     for (const name of deprecated_event_names(names)) {
-      // \`current_version_of\` is guaranteed defined for a deprecated name
-      // within its own state's family.
       deprecated_to_current.set(name, current_version_of(name, names)!);
     }
   }
   return deprecated_to_current;
 };
 
-/**
- * \`deprecated-load\` — workspace-wide event-name histogram classified
- * by the framework's \`_v<digits>\` rule. Built from the shared \`on_stat\`
- * stream — accumulates per-name + per-stream totals in memory, then
- * emits one finding per deprecated event above the threshold during
- * \`drain\`.
- */
 const make_deprecated_load_pass: PassFactory = (deps, options) => {
   const share_min =
     options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
@@ -4238,9 +4143,6 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
   return {
     category: "deprecated-load",
     on_stat(stream, { names }) {
-      // Contract: query_stats was called with \`{names: true}\`,
-      // so adapter populates \`names\` with positive integer counts.
-      // No runtime fallback needed.
       for (const [name, count] of Object.entries(names!)) {
         totals.set(name, (totals.get(name) ?? 0) + count!);
         let m = per_stream.get(name);
@@ -4255,8 +4157,6 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
       const findings: AuditFinding[] = [];
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
-      // Per-state deprecation classification (not on-disk-driven, and not
-      // over the global event-name union).
       const deprecated = classify_deprecated_by_state(deps);
       const sorted = [...deprecated.keys()]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))
@@ -4264,10 +4164,7 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
       for (const { name, count } of sorted) {
         if (count === 0) continue;
         if (count / grand < share_min) continue;
-        // \`classify_deprecated_by_state\` maps every deprecated name to its
-        // current (highest-version) sibling within the same state.
         const current_version = deprecated.get(name)!;
-        // per_stream is populated in lockstep with totals — name is guaranteed present.
         const top_streams = [...per_stream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))
           .sort((a, b) => b.count - a.count)
@@ -4285,12 +4182,6 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
   };
 };
 
-/**
- * \`close-candidate\` — flags streams ripe for \`app.close(...)\`. Two
- * flavours: \`idle\` (head older than \`idle_days\`) and \`terminal\` (head
- * event name in operator-supplied \`terminal_events\` list). Each
- * finding carries \`restart_supported\` (state has \`.snap()\`).
- */
 const make_close_candidate_pass: PassFactory = (deps, options) => {
   const idle_days = options.thresholds?.idle_days ?? DEFAULTS.idle_days;
   const terminal_events = new Set(options.thresholds?.terminal_events ?? []);
@@ -4301,9 +4192,6 @@ const make_close_candidate_pass: PassFactory = (deps, options) => {
     on_stat(stream, { head }) {
       const head_name = String(head.name);
       if (head_name.startsWith("__")) return; // already-closed or mid-truncate
-      // All in-tree adapters return \`created\` as Date; the Date
-      // constructor passes Date instances through unchanged, so a
-      // single call shape works regardless.
       const head_time = head.created.getTime();
       const is_idle = head_time < idle_cutoff;
       const is_terminal = terminal_events.has(head_name);
@@ -4323,22 +4211,15 @@ const make_close_candidate_pass: PassFactory = (deps, options) => {
   };
 };
 
-/**
- * \`restart-candidate\` — streams above \`event_count_for_restart\` whose
- * state declares \`.snap()\`. Reads from the shared \`on_stat\` stream.
- */
 const make_restart_candidate_pass: PassFactory = (deps, options) => {
   const threshold = options.thresholds?.restart_min ?? DEFAULTS.restart_min;
-  // Resolved in finalize — the shared stat scan excludes \`__snapshot__\`
-  // (so heads and counts are domain figures), which means the snapshot
-  // tally isn't in \`names\`. Candidates are streams above \`restart_min\`,
-  // so this is a handful of targeted counts, not a second table walk.
+  // Snapshot counts are resolved in finalize: the shared stat scan excludes
+  // \`__snapshot__\`, and only a handful of candidates need them.
   const candidates: Array<{ stream: string; count: number }> = [];
   const findings: AuditFinding[] = [];
   return {
     category: "restart-candidate",
     on_stat(stream, { head, count }) {
-      // \`count\` always populated — query_stats is called with the flag set.
       if (count! < threshold) return;
       const head_name = String(head.name);
       if (head_name.startsWith("__")) return;
@@ -4371,11 +4252,6 @@ const make_restart_candidate_pass: PassFactory = (deps, options) => {
   };
 };
 
-/**
- * \`reaction-health\` — surfaces blocked / near-block / stuck-backoff
- * streams. Reads from the shared \`on_stream\` stream-positions
- * broadcast.
- */
 const make_reaction_health_pass: PassFactory = (_deps, options) => {
   const near_block = options.thresholds?.near_block ?? DEFAULTS.near_block;
   const stuck_minutes =
@@ -4426,16 +4302,8 @@ const make_reaction_health_pass: PassFactory = (_deps, options) => {
   };
 };
 
-/**
- * \`snapshot-drift\` — buffers candidate streams from the shared
- * \`on_stat\` pass (skipping non-snap states + tombstoned heads), then
- * does targeted per-stream lookups in \`finalize\` to find the last
- * \`__snapshot__\` event id and count events past it.
- */
 const make_snapshot_drift_pass: PassFactory = (deps, options) => {
   const drift_min = options.thresholds?.drift_min ?? DEFAULTS.drift_min;
-  // Streams the workspace pass identifies as drift candidates —
-  // resolved in finalize with per-stream queries.
   const candidates: Array<{
     stream: string;
     total: number;
@@ -4444,9 +4312,7 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
   return {
     category: "snapshot-drift",
     on_stat(stream, { head, count }) {
-      // restart_is_supported() already filters out framework markers
-      // (__snapshot__, __tombstone__) — neither name appears in any
-      // user state's events map, so the snap check rejects them.
+      // Also rejects framework markers, which no user state declares.
       if (!restart_is_supported(deps, String(head.name))) return;
       if (count! < drift_min) return; // upper-bound short-circuit
       candidates.push({
@@ -4458,11 +4324,7 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
       for (const { stream, total } of candidates) {
         let events_since_snap = total;
         let snap_at: number | undefined;
-        // The shared stat scan excludes \`__snapshot__\` so every other
-        // pass sees domain heads, which means the snapshot count isn't
-        // in \`names\` — resolve it from this targeted lookup instead. A
-        // stream with no snapshot yields nothing here and keeps
-        // \`events_since_snap = total\`, the same answer as before.
+        // The shared stat scan excludes \`__snapshot__\`, so look it up here.
         const collected: Array<{ id: number }> = [];
         await deps.store().query(
           (e) => {
@@ -4501,10 +4363,6 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
   };
 };
 
-/**
- * \`routing-health\` — \`unknown-lane\` from the streams-table pass +
- * \`unrouted\` from the stats pass. Reads from BOTH shared streams.
- */
 const make_routing_health_pass: PassFactory = (deps) => {
   const findings: AuditFinding[] = [];
   const seen_event_names = new Set<string>();
@@ -4541,11 +4399,6 @@ const make_routing_health_pass: PassFactory = (deps) => {
   };
 };
 
-/**
- * \`correlation-gaps\` — collects ids + parent_ids during the shared
- * event pass; flags orphans in \`drain\`. No second store walk — the
- * id-set + the (id, parent) buffer are both populated in one pass.
- */
 const make_correlation_gaps_pass: PassFactory = () => {
   const seen_ids = new Set<number>();
   const checks: Array<{ stream: string; id: number; parent_id: number }> = [];
@@ -4577,18 +4430,12 @@ const make_correlation_gaps_pass: PassFactory = () => {
   };
 };
 
-/**
- * \`clock-anomalies\` — flags future timestamps + per-stream out-of-
- * order \`created\`. Single pass, per-stream "last seen" state in a
- * Map. Cheap.
- */
 const make_clock_anomalies_pass: PassFactory = () => {
   const findings: AuditFinding[] = [];
   const last_per_stream = new Map<string, number>();
   return {
     category: "clock-anomalies",
     on_event(e) {
-      // \`created\` is a Date instance per the Store contract.
       const created = e.created.getTime();
       if (created > Date.now()) {
         findings.push({
@@ -4613,7 +4460,6 @@ const make_clock_anomalies_pass: PassFactory = () => {
   };
 };
 
-/** Does the stream's owning state declare a \`.snap()\` reducer? */
 function restart_is_supported(
   deps: AuditDeps,
   head_event_name: string
@@ -4622,14 +4468,7 @@ function restart_is_supported(
   return state?.snap !== undefined;
 }
 
-/**
- * \`unreadable-events\` — rows the store could not hand back.
- *
- * Contributes no scan callback of its own: the dispatcher feeds it the rows
- * the event scan tripped on, since a row that cannot be read never reaches an
- * \`on_event\`. Requesting this category alone still runs the event scan, which
- * is the only thing that surfaces such a row.
- */
+/** Fed by the dispatcher with rows the event scan tripped on; never reaches \`on_event\`. */
 function make_unreadable_events_pass(): AuditPass {
   const findings: AuditFinding[] = [];
   return {
@@ -4647,7 +4486,6 @@ function make_unreadable_events_pass(): AuditPass {
   };
 }
 
-/** Factory registry — pass-creation indexed by category name. */
 const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
   schema: make_schema_pass,
   "deprecated-load": make_deprecated_load_pass,
@@ -7227,22 +7065,9 @@ export class ConsoleLogger implements Logger {
 
 // === correlate-cycle.ts ===
 /**
- * @module correlate-cycle
- * @category Internal
- *
- * Correlation — the discovery half of the correlate→drain pair. Owns the
- * lazy init (subscribe static targets, read cold-start watermark) and the
- * scan that resolves each event to its target streams.
- *
- * The scan is also the **producer of the work mark**: every target
- * an event resolves to is subscribed with \`correlated_at\` = that event's
- * id, which is how \`claim\` answers "does this stream have work?" off the
- * subscription row instead of probing the event log.
- *
- * The Act orchestrator passes registry + classification (which static
- * targets to subscribe) at build time; everything past that lives here.
- *
- * @internal
+ * Correlation, the discovery half of correlate→drain: resolves each event to
+ * its target streams and raises each target's work mark (\`correlated_at\`),
+ * which is what \`claim\` reads. See docs/architecture/correlation-and-drain.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -7262,54 +7087,22 @@ import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
 
 /**
- * Cold-start back-scan window, used only when no durable checkpoint exists.
- * An event committed but not correlated before a crash can sit below the
- * store watermark (\`max(at)\`) once a busier stream has advanced, so the
- * first scan starts at \`watermark - BACK_SCAN\` to re-discover it.
- * Re-scanning correlated events is harmless: \`subscribe\` is an idempotent
- * upsert and a mark never regresses.
- *
- * @internal
+ * First-boot scan starts this far below the watermark, so an event committed
+ * but not correlated before a crash is found again. Re-scanning is harmless:
+ * \`subscribe\` is an idempotent upsert and a mark never regresses.
  */
 const COLD_START_BACK_SCAN = 10_000;
 
 /**
- * Default correlation lease duration. Too short and a slow scan outruns its
- * lease, so a second worker scans the same range (duplicate work, still
- * safe). Too long and a crashed holder stalls discovery for the whole lease.
+ * Too short and a slow scan outruns its lease (duplicate work, still safe);
+ * too long and a crashed holder stalls discovery.
  */
 const CORRELATION_LEASE_MS = 5_000;
 
 /**
- * A stable identity for "which correlator is this?".
- *
- * The correlation lease lets one worker scan on behalf of others, which is
- * only sound when they are interchangeable. Two processes running the same
- * application are; two different applications sharing one database are not —
- * leasing across those would let one starve the other, and its reactions
- * would silently stop.
- *
- * The key is every event name this correlator reacts to, each with the names
- * of the handlers registered for it. Event names alone would do if reacting
- * to an event implied doing the same thing with it, and it does not: two
- * applications can both react to \`Placed\` and resolve it to entirely
- * different targets, so a shared lease would mark one's targets and never the
- * other's. Handler names cost nothing — the registry already keys reactions
- * by them — and separate exactly that case.
- *
- * Sorted before hashing so identical workers agree regardless of declaration
- * order. Truncated to 32 hex characters: a collision means two applications
- * with identical event *and* handler names share a lease, and those are
- * interchangeable by construction.
- *
- * Workers sharded by \`onlyLanes\` are not interchangeable either: the lease
- * holder would mark targets on lanes it cannot drain while the refused
- * worker found nothing. The cycle appends the shard's lanes to this key.
- *
- * This separates leases; it does not make two applications over one store
- * supported. They still share one read cursor, so the second would never
- * correlate what the first had already read past. One store belongs to one
- * application (see the split-stores recipe).
+ * The correlation lease key: a hash of every reacted-to event name with its
+ * handler names, so only interchangeable workers share a lease. See
+ * docs/architecture/correlation-and-drain § The correlation lease.
  */
 const registry_key = <TEvents extends Schemas>(
   events: EventRegister<TEvents>
@@ -7324,25 +7117,10 @@ const registry_key = <TEvents extends Schemas>(
     .slice(0, 32);
 };
 
-/**
- * How many distinct pattern sources keep a compiled \`RegExp\` around. A
- * pattern source is declared on a resolver, so the live set is tiny; the
- * bound only guards a dynamic resolver that mints one per event.
- *
- * @internal
- */
+/** Bound on compiled pattern sources; guards a resolver that mints one per event. */
 const PATTERN_CACHE_SIZE = 32;
 
-/**
- * Static resolver target collected at build time. Subscribed once during
- * init, then marked by every scan whose events resolve to it.
- *
- * @property priority - Scheduling priority for the resolved target stream.
- *   Combined with peers via \`max()\` at build time when multiple reactions
- *   target the same stream — see \`build-classify.ts\`.
- *
- * @internal
- */
+/** Static resolver target collected at build time and subscribed at init. */
 export type StaticTarget = {
   readonly stream: string;
   readonly source?: string;
@@ -7351,30 +7129,10 @@ export type StaticTarget = {
 };
 
 /**
- * What a target was last subscribed at, remembered per target so a scan
- * knows what its subscription row already holds.
- *
- * \`floor\` guards priority upgrades: a resolution re-subscribes its
- * own priority/lane only when it beats the floor, and a static target sits
- * at \`+Infinity\` so a dynamic resolution never re-opens what the build-time
- * subscribe owns. \`priority\`/\`lane\` are what the row holds, re-sent
- * verbatim by a resolution that does *not* beat the floor, so the work mark
- * riding the same \`subscribe\` carries the row's own values rather than a
- * losing resolution's.
- *
- * A record can go missing — eviction here, an empty map after a restart.
- * The store can't keep a forgotten target on its lane: \`subscribe\` writes
- * the lane whenever the incoming priority is at or above the stored one,
- * which is how a restart re-lanes declared targets. So when more than one
- * lane is declared, a scan that resolves a target it has no record of reads
- * the target's row and uses it as the record. The store owns the lane; this
- * map only caches it.
- *
- * Where the record lives decides whether the floor survives: dynamic
- * targets are unbounded and go in the evictable LRU, static targets are a
- * bounded build-time list and go in a plain map that never evicts.
- *
- * @internal
+ * What a target's subscription row holds. A resolution sends its own
+ * priority/lane only when it beats \`floor\` (\`+Infinity\` for static targets);
+ * otherwise it re-sends these values with the mark. The store owns the lane;
+ * this only caches it, so a missing record is re-read from the row.
  */
 type Subscription = {
   readonly floor: number;
@@ -7382,13 +7140,7 @@ type Subscription = {
   readonly lane: string | undefined;
 };
 
-/**
- * One target accumulated during a scan: the values to subscribe it with,
- * and the highest event id observed to resolve to it — its work mark,
- * \`undefined\` when no scanned event fell inside the target's fetch window.
- *
- * @internal
- */
+/** One target accumulated during a scan; \`correlated_at\` is its work mark. */
 type Correlated = {
   source: string | undefined;
   priority: number;
@@ -7412,35 +7164,18 @@ export type CorrelateCycleDeps<
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
   max_subscribed_streams: number;
-  /**
-   * Every lane a controller exists for — \`"default"\` plus each
-   * \`.withLane({name})\`. Injected rather than derived: \`internal/\` receives
-   * what it needs. A resolution naming anything outside this set has no
-   * claimant, so correlate reroutes it here.
-   */
+  /** Every lane a controller exists for; others are rerouted to default. */
   declared_lanes: ReadonlySet<string>;
-  /**
-   * The lanes this worker drains, set only when \`onlyLanes\` leaves some
-   * declared lane out. Workers on different shards are not interchangeable,
-   * so each shard gets its own correlation lease.
-   */
+  /** Set when \`onlyLanes\` leaves a lane out; each shard gets its own lease. */
   shard?: ReadonlyArray<string>;
   on_init?: () => void;
   on_init_async?: () => Promise<void>;
 };
 
 /**
- * A dynamic resolution named a lane no controller claims.
- *
- * Reroutes to \`"default"\` rather than skipping: the target is legitimate and
- * only its lane is wrong, so stranding the stream at watermark \`-1\` — where
- * no health surface can see it — loses work that the operator never asked to
- * lose. \`"default"\` is where the reaction would have run had the lane been
- * omitted, which makes this the smallest correction that keeps it running.
- *
- * Reported once per reaction and lane name, not per target: a resolver
- * mints one target per aggregate, so the target is only an example in the
- * message.
+ * A dynamic resolution named an undeclared lane. Rerouted to \`"default"\`
+ * rather than skipped, so the work still runs. Reported once per reaction
+ * and lane, since a resolver mints one target per aggregate.
  */
 function report_undeclared_lane(
   seen: Set<string>,
@@ -7460,19 +7195,9 @@ function report_undeclared_lane(
 }
 
 /**
- * Two resolutions disagreed on one target's lane.
- *
- * Reported, not corrected. The lane a target already carries is the one its
- * in-flight leases were taken under, so re-laning it mid-run would move a
- * stream out from under a worker holding it; re-laning is restart-driven by
- * design. What the operator loses meanwhile is lane discipline — the losing
- * reaction runs inside the winner's \`leaseMillis\` and \`streamLimit\` — and
- * under \`onlyLanes\` sharding, a process provisioned for the losing lane never
- * runs it at all.
- *
- * Reported once per losing reaction and lane pair, not per target. The
- * winner is "first discovered", so the same pair can land either way on
- * different targets; keeping the orientation in the key reports both.
+ * Two resolutions disagreed on one target's lane. Reported, not corrected:
+ * re-laning a live stream would move it out from under a lease holder.
+ * Keyed by orientation, since "first discovered" can land either way.
  */
 function report_lane_conflict(
   seen: Set<string>,
@@ -7492,12 +7217,7 @@ function report_lane_conflict(
   );
 }
 
-/**
- * Drives correlation for one Act instance. Owns the checkpoint, the
- * correlation lease and the subscription records.
- *
- * @internal
- */
+/** Drives correlation for one Act: the checkpoint, the lease, the subscription records. */
 export class CorrelateCycle<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -7505,71 +7225,27 @@ export class CorrelateCycle<
 > {
   private _checkpoint = -1;
   private _initialized = false;
-  /**
-   * This worker's identity for the correlation lease. A per-instance
-   * UUID, matching the drain's convention, so a renewal is recognised as the
-   * same holder and a restarted process never inherits a stale claim.
-   */
+  /** Lease holder id; per instance, so a restart never inherits a stale claim. */
   private readonly _by = randomUUID();
-  /**
-   * Which correlator this is. Computed once from the registry so identical
-   * workers share a lease and unrelated applications never do.
-   */
   private readonly _key: string;
-  /**
-   * When this worker's correlation lease runs out, as a local clock reading,
-   * or 0 when it holds none.
-   *
-   * Cached so the holder doesn't ask the store on every pass. A stale belief
-   * can only cause a duplicate scan, and marks are idempotent, so it costs
-   * work, never correctness.
-   */
+  /** Local expiry of the held lease (0 = none); stale only costs a duplicate scan. */
   private _lease_until = 0;
-  /**
-   * Whether a scan might find anything, like the drain's flag: a commit or
-   * notification raises it, a short page lowers it, and a disarmed scan
-   * returns without touching the store.
-   *
-   * Starts armed: the log may already hold events this process has never
-   * correlated, and only a scan can find out.
-   */
+  /** Raised by a commit or notification, lowered by a short page. Starts armed. */
   private _armed = true;
-  /** In-flight init, memoized for single-flight and cleared on failure. */
   private _init_promise: Promise<void> | undefined;
-  // Dynamically discovered targets → what each was last subscribed at,
-  // bounded by \`maxSubscribedStreams\`. It decides *what* a scan sends with a
-  // target: priority/lane only when the resolution beats the recorded floor,
-  // otherwise the row's own values. See {@link Subscription}.
+  // Bounded by \`maxSubscribedStreams\`; static records live apart so eviction
+  // never drops their +Infinity floor.
   private readonly _dynamic_subscriptions: LruMap<string, Subscription>;
-  /**
-   * What each static target was subscribed at by \`init\`. A plain map, never
-   * evicted: the collection is the build-time \`_static_targets\` list, so it
-   * is already bounded by the registry and costs nothing the registry does
-   * not already hold.
-   *
-   * Kept out of the LRU so eviction can never drop a static target's
-   * \`+Infinity\` floor and let a dynamic resolution re-lane it.
-   */
   private readonly _static_subscriptions = new Map<string, Subscription>();
-  /** Compiled pattern sources, bounded by {@link PATTERN_CACHE_SIZE}. */
   private readonly _patterns = new LruMap<string, RegExp>(PATTERN_CACHE_SIZE);
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _cd: DrainOps<TEvents>;
   private readonly _on_init: (() => void) | undefined;
-  /**
-   * Async cold-start hook, run once after \`on_init\` inside \`init()\`. The
-   * orchestrator re-seeds its defer timers from the persisted \`deferred_at\`
-   * here, so an idle deferred stream re-arms across a restart.
-   */
+  /** Runs once after \`on_init\`; re-seeds defer timers across a restart. */
   private readonly _on_init_async: (() => Promise<void>) | undefined;
-  /** Lanes a controller exists for. See {@link CorrelateCycleDeps}. */
   private readonly _declared_lanes: ReadonlySet<string>;
-  /**
-   * Offending declarations already reported, so a resolver firing for every
-   * matching event reports once. Owned by the instance rather than the
-   * module: \`internal/\` holds no module-level state.
-   */
+  /** Report-once keys; per instance because \`internal/\` holds no module state. */
   private readonly _reported = new Set<string>();
 
   constructor({
@@ -7594,35 +7270,18 @@ export class CorrelateCycle<
     this._on_init_async = on_init_async;
   }
 
-  /** Last correlated event id. */
   get checkpoint(): number {
     return this._checkpoint;
   }
 
-  /**
-   * Signal that a commit (local or remote) may have produced events this
-   * process has not correlated. Cheap and idempotent — the orchestrator calls
-   * it on every commit and every notification.
-   */
+  /** A commit (local or remote) may have produced uncorrelated events. */
   arm(): void {
     this._armed = true;
   }
 
-  /**
-   * Initialize correlation state on first call.
-   * - Reads the durable correlate checkpoint (and max(at)) from the store,
-   *   flooring a first boot at \`watermark - back_scan\` so an event
-   *   committed-but-not-correlated before a crash is re-scanned on
-   *   restart instead of skipped
-   * - Subscribes static resolver targets (idempotent upsert)
-   * - Populates the subscribed-streams LRU
-   * - Fires \`on_init\` once (Act uses this to flag a cold-start drain)
-   */
   async init(): Promise<void> {
     if (this._initialized) return;
-    // Single-flight but retryable: concurrent callers share one run, and a
-    // failure clears the promise so the next call tries again instead of
-    // leaving static targets unsubscribed for the process lifetime.
+    // Single-flight, but a failure clears the promise so the next call retries.
     if (!this._init_promise) {
       this._init_promise = this._run_init().catch((error) => {
         this._init_promise = undefined;
@@ -7637,38 +7296,23 @@ export class CorrelateCycle<
     const { watermark, correlated_at } = await this._cd.subscribe([
       ...this._static_targets,
     ]);
-    // Resume from the durable checkpoint. On a first boot it is -1 and a full
-    // scan of an existing log would be unbounded, so start a bounded window
-    // below the watermark instead (see COLD_START_BACK_SCAN).
     this._checkpoint =
       correlated_at >= 0
         ? correlated_at
         : Math.max(-1, watermark - COLD_START_BACK_SCAN);
     this._on_init?.();
     for (const { stream, priority = 0, lane } of this._static_targets) {
-      // Floor +Infinity: no dynamic resolution can re-open a static target;
-      // a scan that marks it re-sends the build-time priority/lane.
       this._static_subscriptions.set(stream, {
         floor: Number.POSITIVE_INFINITY,
         priority,
         lane,
       });
     }
-    // Cold-start defer re-seed — after the static targets are
-    // subscribed, so a walk of the streams table sees them.
+    // After the static subscribe, so the streams walk sees them.
     await this._on_init_async?.();
   }
 
-  /**
-   * Start correlation over after the event log was replaced wholesale
-   * (\`restore\`). The restored log is renumbered from the start and its
-   * subscription rows are gone, so the in-memory scan position and both
-   * subscription records describe a log that no longer exists. Dropping them
-   * and the init latch makes the next pass run cold-start again: static
-   * targets are re-subscribed, the checkpoint is re-read from the store
-   * (which \`restore\` reset), and dynamic targets are rediscovered by the
-   * scan.
-   */
+  /** After \`restore\` replaced the log: forget everything and cold-start again. */
   restart(): void {
     this._initialized = false;
     this._init_promise = undefined;
@@ -7678,22 +7322,12 @@ export class CorrelateCycle<
     this._armed = true;
   }
 
-  /**
-   * Forget dynamic targets whose subscription rows no longer exist (a full
-   * close deletes the row), so a later scan re-subscribes them. Static
-   * targets keep their records.
-   */
+  /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
   forget_subscribed(streams: Iterable<string>): void {
     for (const stream of streams) this._dynamic_subscriptions.delete(stream);
   }
 
-  /**
-   * Would an event from \`stream\` be fetched for a target subscribed with
-   * \`source\`? The subscription's source is the filter \`fetch\` queries with
-   * — literal names by equality, patterns compiled as a \`RegExp\` — so an
-   * event outside it is not work for that target and must not mark it.
-   * No source means the target consumes every stream.
-   */
+  /** Would the target's own \`fetch\` (filtered by \`source\`) return this event? */
   private _in_fetch_window(
     source: string | undefined,
     stream: string
@@ -7708,45 +7342,23 @@ export class CorrelateCycle<
     return pattern.test(stream);
   }
 
-  /**
-   * Scan the events past the checkpoint, resolve each to its target
-   * streams, and record what it found through \`cd.subscribe\` — new dynamic
-   * targets get registered, and every target an event resolved to gets its
-   * **work mark** raised to that event's id.
-   *
-   * Both resolver kinds are walked. A static target is already subscribed
-   * at init, but marking it is what makes it claimable without probing the
-   * event log, so the scan runs for every app.
-   */
+  /** Scan past the checkpoint, subscribe new targets and raise their work marks. */
   async correlate(
     query: Query = { after: -1, limit: 10 },
     /**
-     * Whether to honour the correlation lease.
-     *
-     * True only on the automatic paths — the settle loop and the poller —
-     * where the question is "should *someone* scan?" and one worker doing it
-     * serves all of them.
-     *
-     * An explicit \`app.correlate()\` means "scan now" and ignores the lease:
-     * \`close\` catches up by looping until the checkpoint moves, and a
-     * lease-blocked scan would cap its prune at a stale position.
+     * Honour the correlation lease. Only the settle loop and poller do; an
+     * explicit \`app.correlate()\` scans now, since \`close\` loops on it.
      */
     lease = false
   ): Promise<{
     subscribed: number;
     last_id: number;
     marked: number;
-    /** False when the pass was disarmed and returned without a store read. */
     scanned: boolean;
   }> {
     await this.init();
 
-    // Nothing has happened since the last scan reached the end of the log, so
-    // there is nothing to find.
-    //
-    // The flag means "a local signal says there may be work", not "the log
-    // is unchanged": a remote writer on a store without notify leaves this
-    // process disarmed, which is why the poller arms on every tick.
+    // A remote writer without notify leaves this disarmed; the poller re-arms.
     if (!this._armed)
       return {
         subscribed: 0,
@@ -7755,11 +7367,9 @@ export class CorrelateCycle<
         scanned: false,
       };
 
-    // One worker per registry scans at a time; otherwise W workers each read
-    // and mark every committed event. The lease rides \`subscribe\` (no streams,
-    // no advance = "may I scan?"). The answer's checkpoint is ignored: it is a
-    // floor shared by every correlator, and adopting it would skip events this
-    // worker never read. Renew at the halfway mark so the holder never lapses.
+    // The lease rides \`subscribe\` with no streams ("may I scan?"). Its shared
+    // checkpoint is ignored: adopting it would skip events this worker never
+    // read. Renew at the halfway mark.
     const now = Date.now();
     if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
       const { correlating } = await this._cd.subscribe([], undefined, {
@@ -7768,13 +7378,8 @@ export class CorrelateCycle<
         millis: CORRELATION_LEASE_MS,
       });
       this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
-      // \`undefined\` means the store does not implement leasing, so every
-      // worker scans exactly as before.
+      // \`undefined\` = store without leasing. Refused: stay armed, look again.
       if (correlating === false)
-        // Another worker with the same registry is scanning, so this one need
-        // not. Stay armed: the work still needs doing, and this worker should
-        // look again next pass rather than disarm and wait for an unrelated
-        // commit to wake it.
         return {
           subscribed: 0,
           last_id: this._checkpoint,
@@ -7783,7 +7388,6 @@ export class CorrelateCycle<
         };
     }
 
-    // Use checkpoint as floor, allow explicit query.after to override upward
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<string, Correlated>();
     let last_id = after;
@@ -7791,7 +7395,6 @@ export class CorrelateCycle<
       (event) => {
         last_id = event.id;
         const register = this._registry.events[event.name];
-        // skip events with no registered reactions
         if (register) {
           for (const reaction of register.reactions.values()) {
             const resolved =
@@ -7799,9 +7402,6 @@ export class CorrelateCycle<
                 ? reaction.resolver(event)
                 : reaction.resolver;
             if (!resolved) continue;
-            // A lane no controller claims has no claimant, so the stream
-            // would sit at watermark -1 forever. Reroute to "default" and
-            // say so — the build-time guard sees only static lanes.
             let lane = resolved.lane;
             if (lane !== undefined && !this._declared_lanes.has(lane)) {
               report_undeclared_lane(
@@ -7813,10 +7413,6 @@ export class CorrelateCycle<
               );
               lane = undefined;
             }
-            // Raise priority/lane only when this resolution beats what the
-            // target was last subscribed at (the runtime \`max()\` rule); a
-            // never-seen target always wins, a static one never does.
-            // Otherwise the row's own values ride along with the mark.
             const recorded =
               this._static_subscriptions.get(resolved.target) ??
               this._dynamic_subscriptions.get(resolved.target);
@@ -7834,10 +7430,8 @@ export class CorrelateCycle<
               handler: reaction.handler.name,
               correlated_at: undefined,
             };
-            // Report an equal-priority lane disagreement (the build-time guard
-            // rejects the static equivalent). Compare against what the target
-            // already carries, from this scan or a past one. An omitted lane
-            // is "default"; a never-seen target holds no lane at all.
+            // Compare against what the target already carries, from this
+            // scan or a past one.
             const seen_in_scan = correlated.has(resolved.target);
             const held_lane =
               (seen_in_scan ? entry.lane : recorded?.lane) ?? DEFAULT_LANE;
@@ -7853,38 +7447,27 @@ export class CorrelateCycle<
                 held_lane,
                 resolved_lane
               );
-            // Multiple reactions targeting the same stream within a
-            // single correlate scan — keep the max priority, and carry the
-            // winning reaction's lane so the highest-priority reaction sets
-            // the lane (matches the subscribe-side \`max()\` invariant).
+            // Within one scan the highest priority sets the lane.
             if (carried.priority > entry.priority) {
               entry.priority = carried.priority;
               entry.lane = carried.lane;
               entry.upgraded = upgraded;
               entry.handler = reaction.handler.name;
             }
-            // The mark is an assertion about the log: only an event the
-            // target's own fetch would return may raise it. Ids ascend
-            // through the scan, so the last one wins.
             if (this._in_fetch_window(resolved.source, event.stream))
               entry.correlated_at = event.id;
             correlated.set(resolved.target, entry);
           }
         }
       },
-      // Decline the sensitive payload: the scan only needs name/stream/id,
-      // and one undecryptable row would otherwise stop every stream's
-      // reactions. Resolvers therefore see \`pii: null\`; correlate runs
-      // actor-less, so plaintext here would be un-gated disclosure.
+      // Resolvers see \`pii: null\`: correlate runs actor-less, and one
+      // undecryptable row would otherwise stop every stream's reactions.
       { ...query, after, with_pii: false }
     );
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
 
-    // A target rides the batch when it has something to say: a mark to
-    // raise, or priority/lane to register. A re-seen target that this scan
-    // found no work for (its source filtered every event out) says neither,
-    // and is left alone.
+    // Only targets with a mark to raise or priority/lane to register.
     const streams: SubscribeInput[] = [];
     for (const [stream, entry] of correlated) {
       if (entry.upgraded || entry.correlated_at !== undefined)
@@ -7898,9 +7481,7 @@ export class CorrelateCycle<
     }
 
     if (streams.length) {
-      // Persist the read cursor with the targets found. Send the correlator
-      // only when leasing, so it renews for free; an explicit
-      // \`app.correlate()\` keeps the cheaper single checkpoint update.
+      // Leasing renews for free on the same call.
       const renewed_at = Date.now();
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
@@ -7911,18 +7492,12 @@ export class CorrelateCycle<
       );
       if (lease && correlating !== false)
         this._lease_until = renewed_at + CORRELATION_LEASE_MS;
-      // A raised mark makes work claimable just like a new target, so the
-      // orchestrator arms on both (\`subscribed\` alone misses re-marks).
+      // The orchestrator arms on re-marks too, not just new subscriptions.
       const marked = streams.filter(
         (entry) => entry.correlated_at !== undefined
       ).length;
-      // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
-      // Record what each upgraded target was just subscribed at (the
-      // within-scan max), so a later lower-or-equal resolution carries these
-      // values forward and a strictly-higher one re-opens the guard.
-      // Only dynamic targets reach here — a static sits at +Infinity, so no
-      // resolution to one is ever \`upgraded\`.
+      // Only dynamic targets can be upgraded (statics sit at +Infinity).
       for (const { stream, priority, lane } of streams) {
         if (correlated.get(stream)?.upgraded)
           this._dynamic_subscriptions.set(stream, {
@@ -7933,22 +7508,16 @@ export class CorrelateCycle<
       }
       return { subscribed, last_id, marked, scanned: true };
     }
-    // Nothing to subscribe — safe to advance. Only a short page proves the
-    // log is exhausted; resolving no target does not.
+    // Only a short page proves the log is exhausted; resolving nothing does not.
     this._checkpoint = last_id;
     this._armed = found === query.limit;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
   /**
-   * Give each target this scan had no record of the record its row holds.
-   *
-   * A target with no record is either new or forgotten. Its row, when it
-   * has one, says what lane and priority it was subscribed at; a resolution
-   * that doesn't beat that priority carries the row's values, exactly as if
-   * the record had never been evicted. One read per target with no record,
-   * and only when more than one lane is declared: with one lane there is no
-   * lane to lose, and the store already keeps the higher priority.
+   * Read the row of each target this scan had no record of (new or evicted),
+   * so a resolution that doesn't beat its priority keeps the row's lane.
+   * Only called with more than one lane declared.
    */
   private async _recall(correlated: Map<string, Correlated>): Promise<void> {
     const missed = [...correlated].filter(([, entry]) => entry.missed);
@@ -7985,13 +7554,7 @@ export class CorrelateCycle<
     );
   }
 
-  /**
-   * Hand the correlation lease back early.
-   *
-   * The port has no release verb; re-acquiring as the same holder with a
-   * zero duration releases it. Best-effort: a failure costs the lease's
-   * remaining lifetime, as a crash would.
-   */
+  /** Release the lease early by re-acquiring it for zero ms. Best-effort. */
   async release_correlation(): Promise<void> {
     try {
       this._lease_until = 0;
@@ -8001,8 +7564,6 @@ export class CorrelateCycle<
         millis: 0,
       });
     } catch (error) {
-      // \`warn\`, not \`error\`: this runs during shutdown, nothing is lost, and
-      // the lease expires on its own.
       log().warn(
         \`Could not hand back the correlation lease during shutdown; it expires on its own within \${CORRELATION_LEASE_MS}ms and correlation resumes normally after that. \` +
           "On a single-writer store this usually means another connection holds the database. " +
@@ -8651,19 +8212,9 @@ export class DeferSignal extends Error {
 
 // === drain-cycle.ts ===
 /**
- * @module drain-cycle
- * @category Internal
- *
- * Two layers of the drain pipeline:
- *
- * - {@link run_drain_cycle} — pure function for one round-trip of
- *   claim → fetch → group → dispatch → ack/block. No orchestrator state.
- *   Reusable for property tests and standalone benchmarks.
- *
- * - {@link DrainController} — stateful driver that owns the armed flag,
- *   the concurrency lock, and the adaptive lag/lead ratio.
- *
- * @internal
+ * The drain pipeline: {@link run_drain_cycle} is one stateless
+ * claim → fetch → dispatch → ack/block round-trip; {@link DrainController}
+ * owns the armed flag, the lock, the lag/lead ratio and the defer wake.
  */
 
 import { randomUUID } from "node:crypto";
@@ -8697,102 +8248,51 @@ import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";
 
-/**
- * Outcome of processing a single leased stream — produced by Act's \`handle\`
- * / \`handle_batch\` dispatchers, consumed by \`run_drain_cycle\` to drive ack/block.
- *
- * @internal
- */
+/** Outcome of handling one leased stream; drives its ack/block. */
 export type HandleResult = Readonly<{
   lease: Lease;
   handled: number;
-  /**
-   * Event id at which the ack would land: the last *successful* event id,
-   * or \`lease.at\` when the batch had no work.
-   */
+  /** Last successful event id, or \`lease.at\` when there was no work. */
   acked_at: number;
   error?: string;
   block?: boolean;
-  /**
-   * Wall-clock timestamp (ms since epoch) at which the next attempt on
-   * this stream may run, from the reaction's backoff (or the default).
-   * Set on every retry; absent on success, block and defer.
-   */
+  /** Epoch ms of the next retry, from the backoff. Only set on a retry. */
   next_attempt_at?: number;
-  /**
-   * Wall-clock timestamp (ms since epoch) at which to re-visit a stream
-   * whose handler *deferred*: the triggering events stay pending, \`retry\`
-   * is not bumped, and the drain redelivers once \`defer\` elapses. Unlike
-   * {@link next_attempt_at}, a defer carries no error and never blocks.
-   */
+  /** Epoch ms to redeliver a deferred stream; no error, no retry bump. */
   defer?: number;
-  /**
-   * Close request from a handler that threw \`CloseSignal\`. The triggering
-   * event is acked (so the close guard doesn't see the reaction as in
-   * flight), then the drain hands this {@link CloseTarget} to \`on_close\`.
-   */
+  /** From a \`CloseSignal\`; acked first so the close guard sees it caught up. */
   close?: CloseTarget;
-  /**
-   * Event id that threw, when a handler error occurred. Distinct from
-   * {@link acked_at}: \`failed_at = acked_at + 1\` in dense streams, but
-   * adapters with sparse ids give the trace the exact position. Always
-   * set on the per-event error path; absent in batch mode (where no
-   * single event id can be attributed to the failure).
-   */
+  /** Event id that threw (sparse ids make it differ from \`acked_at + 1\`); never in batch mode. */
   failed_at?: number;
 }>;
 
-/**
- * Per-event reaction dispatcher signature (matches \`Act.handle\`).
- * @internal
- */
+/** \`Act.handle\`. */
 export type Handle<TEvents extends Schemas> = (
   lease: Lease,
   payloads: ReactionPayload<TEvents>[]
 ) => Promise<HandleResult>;
 
-/**
- * Bulk reaction dispatcher signature (matches \`Act.handle_batch\`).
- * @internal
- */
+/** \`Act.handle_batch\`. */
 export type HandleBatch<TEvents extends Schemas> = (
   lease: Lease,
   payloads: ReactionPayload<TEvents>[],
   batchHandler: BatchHandler<TEvents>
 ) => Promise<HandleResult>;
 
-/**
- * One drain cycle's results. Returned by {@link run_drain_cycle}; consumed by
- * \`Act.drain()\` to update lifecycle state, the lag/lead ratio, and emit the
- * \`acked\` / \`blocked\` lifecycle events.
- *
- * @internal
- */
 type DrainCycle<TEvents extends Schemas> = {
   readonly leased: Lease[];
   readonly fetched: Fetch<TEvents>;
   readonly handled: HandleResult[];
   readonly acked: Lease[];
   readonly blocked: BlockedLease[];
-  /** Streams a handler asked to close this cycle — handed to \`on_close\`. */
   readonly closeable: CloseTarget[];
 };
 
 /**
- * Terminal result for a stream whose retry budget was spent without a single
- * attempt ever reaching the block decision — or \`undefined\` when the stream
- * still has budget.
- *
- * Catches a handler that loses its lease every round: it never throws, its
- * ack is dropped, and \`retry\` climbs while the watermark never moves. The
- * threshold is strictly \`> maxRetries\` because a stream legitimately reaches
- * \`retry === maxRetries\` on its final attempt, which \`finalize\` may still run.
- *
- * Honors \`blockOnError: false\` like \`finalize\`, and stands down while the
- * store is failing: \`claim\` raises \`retry\` before any handler runs, so a
- * pass that dies on a store call leaves a count no handler earned.
- *
- * @internal
+ * Blocks a stream whose retries were all spent losing the lease (no handler
+ * error ever reached the block decision). Strictly \`> maxRetries\`: the final
+ * attempt runs at \`=== maxRetries\`. Stands down while the store is failing,
+ * since \`claim\` counts retries no handler earned.
  */
 function budget_exhausted<TEvents extends Schemas>(
   lease: Lease,
@@ -8811,16 +8311,9 @@ function budget_exhausted<TEvents extends Schemas>(
 }
 
 /**
- * The retry policy for a stream whose fetch failed. Retry options
- * belong to reactions and are normally read from the fetched payloads, but
- * a failed fetch has none, so there is no way to tell which reaction the
- * events were for. Take the most conservative policy across every
- * registered reaction: block only if all of them block on error (an
- * operator who opted any reaction out chose "retry forever", and this
- * stream might be its), and only once the largest budget is spent (so no
- * reaction's budget is cut short).
- *
- * @internal
+ * A failed fetch has no payloads to say which reaction it was for, so take
+ * the most conservative policy: block only if every reaction does, after
+ * the largest budget.
  */
 function fetch_failure_policy<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -8837,11 +8330,7 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
-/**
- * Report a misrouted resolution once per offending declaration. Every key
- * part is declared, not resolved (\`stream\` is a projection's static target),
- * so the report count stays bounded by the build.
- */
+/** Reported once per declaration; every key part is declared, so it stays bounded. */
 function warn_misrouted(
   seen: Set<string>,
   stream: string,
@@ -8857,30 +8346,16 @@ function warn_misrouted(
   );
 }
 
-/** One cycle's sizing and per-pass state, from {@link DrainController}. */
 type CycleInput = {
   readonly lagging: number;
   readonly leading: number;
   readonly eventLimit: number;
   readonly leaseMillis: number;
   readonly misrouted: Set<string>;
-  /** The store failed on the previous pass — see {@link budget_exhausted}. */
   readonly store_failing: boolean;
 };
 
-/**
- * Run one drain cycle: claim streams, fetch their events, dispatch
- * matching reactions, ack the successes, block the retries-exhausted.
- *
- * Returns \`undefined\` when nothing was claimed — caller can short-circuit
- * the rest of the drain pass.
- *
- * **Deferred streams** (backoff windows and explicit defers) are excluded
- * upstream by \`claim\`: their persisted \`deferred_at\` gates re-dispatch, so
- * they never reach this cycle until the schedule elapses.
- *
- * @internal
- */
+/** One drain cycle; \`undefined\` when nothing was claimed. */
 async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -8907,7 +8382,6 @@ async function run_drain_cycle<
   );
   if (!leased.length) return undefined;
 
-  // Streams in a backoff or defer window were already excluded by \`claim\`.
   const fetched = await ops.fetch(leased, eventLimit);
 
   type FetchEntry = (typeof fetched)[number];
@@ -8916,7 +8390,6 @@ async function run_drain_cycle<
     { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
   >();
 
-  // compute fetch window max event id
   const fetch_window_at = fetched.reduce(
     (max, { at, events }) => Math.max(max, events.at(-1)?.id || at),
     0
@@ -8933,11 +8406,8 @@ async function run_drain_cycle<
           const dynamic = typeof resolver === "function";
           const resolved = dynamic ? resolver(event) : resolver;
           if (!resolved || resolved.target !== stream) return false;
-          // A projection's target is served by its batch handler alone. A
-          // static reaction onto it is rejected at build, so a dynamic one
-          // landing here is the misrouting the build couldn't see: skip it
-          // and report once. Not a throw: anything thrown in the cycle reads
-          // as a store failure and would stall the drain on the breaker.
+          // A dynamic resolution onto a projection's target: skip and report.
+          // Not a throw, which would read as a store failure.
           if (!dynamic || !batch_handlers.has(stream)) return true;
           warn_misrouted(
             misrouted,
@@ -8955,10 +8425,8 @@ async function run_drain_cycle<
   const handled = await Promise.all(
     leased.map((lease) => {
       const entry = fetch_map.get(lease.stream)!;
-      // This stream's read failed: a no-progress failure for this stream
-      // alone, retried after the default backoff. It blocks once the retry
-      // budget is spent, like a failing handler, except while the whole
-      // store is failing, which is the breaker's job.
+      // Retried after the default backoff; blocks once the budget is spent,
+      // unless the whole store is failing (the breaker's job).
       if (entry.fetch.error !== undefined) {
         const error = \`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`;
         log().error(error);
@@ -8999,23 +8467,16 @@ async function run_drain_cycle<
     })
   );
 
-  // Finalize in one atomic \`ack\`: each entry advances to its last fully
-  // handled event (\`acked_at\`), or stays at the claim watermark when it made
-  // no progress. Deferred and backing-off entries carry \`due\`, so the same
-  // call persists the schedule; a backoff keeps the climbing \`retry\`, a defer
-  // passes \`retry: -1\`.
-  //
-  // \`block\` runs before \`ack\`, because \`block\` requires the lease and \`ack\`
-  // releases it. A partial-progress-then-block entry goes to both: \`block\`
-  // marks it poison, then \`ack\` advances past the handled prefix.
+  // \`block\` before \`ack\`: block needs the lease, ack releases it. A
+  // partial-progress block goes to both. Deferred and backing-off entries
+  // carry \`due\`, so one \`ack\` also persists the schedule (defer: retry -1).
   const blocked = await ops.block(
     handled
       .filter(({ block }) => block)
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
 
-  // Emitted before the \`ack\`: a block is terminal, so an \`ack\` failure in
-  // between would otherwise lose the \`blocked\` event for good.
+  // Before the \`ack\`, so an ack failure can't lose the terminal event.
   if (blocked.length) deps.on_blocked(blocked);
 
   const submitted = handled.flatMap((h, i) => {
@@ -9030,18 +8491,14 @@ async function run_drain_cycle<
   });
   const acked = await ops.ack(submitted);
 
-  // \`ack\` silently drops entries whose lease another worker took, so compare
-  // what was submitted with what landed (deferred entries are never
-  // returned). \`warn\`: the work is redelivered, but persistent drops mean
-  // the lease is too short.
+  // \`ack\` drops entries whose lease another worker took (deferred entries
+  // are never returned).
   const expected = submitted.filter((l) => l.due === undefined).length;
   if (acked.length < expected)
     log().warn(
       \`drain: \${expected - acked.length} of \${expected} acks were dropped — the lease was taken by another worker mid-handler. That work will be redelivered (at-least-once), but persistent drops mean leaseMillis is too short for this handler.\`
     );
 
-  // Close requests, already acked above so the close guard sees the
-  // requesting reaction as caught up.
   const closeable = handled
     .filter((h) => h.close !== undefined)
     .map((h) => h.close!);
@@ -9049,13 +8506,6 @@ async function run_drain_cycle<
   return { leased, fetched, handled, acked, blocked, closeable };
 }
 
-/**
- * Empty drain result returned when the controller short-circuits (not
- * armed, locked out by a concurrent caller, claim returned nothing,
- * cycle threw).
- *
- * @internal
- */
 const EMPTY_DRAIN: Drain<Schemas> = {
   fetched: [],
   leased: [],
@@ -9063,13 +8513,6 @@ const EMPTY_DRAIN: Drain<Schemas> = {
   blocked: [],
 };
 
-/**
- * Dependencies the {@link DrainController} needs from the orchestrator.
- * The lifecycle event sinks (\`on_acked\` / \`on_blocked\`) are callbacks so
- * this module doesn't reach back into Act's emitter.
- *
- * @internal
- */
 export type DrainControllerDeps<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -9083,20 +8526,10 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
-  /**
-   * Runs the cycle's reaction-requested closes after acks/blocks land.
-   * Awaited so a slow close doesn't overlap the next claim.
-   */
+  /** Awaited, so a slow close doesn't overlap the next claim. */
   readonly on_close: (targets: CloseTarget[]) => Promise<void>;
-  /**
-   * Shared circuit breaker. Opens after repeated store failures so the
-   * drain stops hammering a down backend, and surfaces each failure.
-   */
   readonly breaker: CircuitBreaker;
-  /**
-   * Runs a body in the Act's ports frame. The per-lane worker ticks outside
-   * any caller frame, so its drain must be re-scoped.
-   */
+  /** The worker ticks outside any caller frame, so its drain is re-scoped. */
   readonly run_scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Lane this controller drains. Undefined spans all lanes. */
   readonly lane?: string;
@@ -9107,19 +8540,6 @@ export type DrainControllerDeps<
   };
 };
 
-/**
- * Stateful driver around {@link run_drain_cycle}. Owns:
- *
- * - \`_armed\`  — has any commit / reset / cold-start signaled work to do?
- * - \`_locked\` — concurrent-call guard (overlapping \`drain()\` calls return
- *               an empty result instead of running twice)
- * - \`_ratio\`  — adaptive lag-to-lead frontier split, updated per cycle
- *
- * The orchestrator owns commits, lifecycle emission, and \`arm()\` triggers
- * — the controller owns everything between those edges.
- *
- * @internal
- */
 export class DrainController<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -9129,33 +8549,18 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Local wake for streams this worker parked (backoff or defer). The
-   * schedule itself is persisted in the store; this runs the drain at the
-   * earliest pending visit. A parked stream already carries its mark, so
-   * the drain alone finds it, and on an idle app nothing else would.
-   * Every drain re-aims it when it ends, and a due entry stays until a pass
-   * handles it or a pass that started after it came due claims nothing, so
-   * the wake keeps draining until every due stream is reached.
-   * \`stop()\` cancels the timer and a stopped drain never re-schedules it,
-   * so a wake never runs after a stop.
+   * Local wake at the earliest parked (backoff or defer) visit; the schedule
+   * itself is persisted. On an idle app nothing else would drain it. A due
+   * entry stays until handled or until a later pass claims nothing.
    */
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
     void this._deps.run_scoped(() => this.drain());
   });
-  /** Worker timer. Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
-  /**
-   * Misroutings this controller has reported. A resolver returning a
-   * projection's target does so for every matching event; one line per event
-   * would bury the signal it exists to raise.
-   */
   private readonly _misrouted = new Set<string>();
   private _stopped = false;
-  /**
-   * Resolves when the cycle in flight finishes, so a graceful shutdown can
-   * wait for it. Never rejects.
-   */
+  /** Never rejects; graceful shutdown waits on it. */
   private _inflight: Promise<void> | undefined;
   private _inflight_done: (() => void) | undefined;
 
@@ -9165,31 +8570,20 @@ export class DrainController<
     this._deps = deps;
   }
 
-  /**
-   * Signal that a commit (or reset / cold-start) may have produced work.
-   * Subsequent \`drain()\` calls will run the pipeline; once the pipeline
-   * settles to no-progress, the controller disarms itself.
-   */
   arm(): void {
     this._armed = true;
   }
 
-  /**
-   * Re-seed a persisted \`deferred_at\` into the local wake at cold start, so
-   * an idle deferred stream re-arms at its due-time with no new commit.
-   * Seeds collapse into one timer; the earliest wins.
-   */
+  /** Cold start: re-seed a persisted \`deferred_at\` into the local wake. */
   seed_defer(stream: string, at: number): void {
     this._defer.set(stream, at);
     this._defer.schedule();
   }
 
-  /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
   }
 
-  /** The cycle in flight, or \`undefined\` when idle. */
   get inflight(): Promise<void> | undefined {
     return this._inflight;
   }
@@ -9199,24 +8593,14 @@ export class DrainController<
     return this._deps.defaults?.leaseMillis;
   }
 
-  /** Lane this controller drains (undefined spans all lanes). */
   get lane(): string | undefined {
     return this._deps.lane;
   }
 
-  /**
-   * Start a per-lane worker that drains at the lane's \`cycleMs\`
-   * cadence. When armed, the worker calls \`drain()\` on every
-   * tick and re-schedules; when not armed, it still re-schedules at
-   * \`cycleMs\` so a future \`arm()\` is picked up on the next tick.
-   *
-   * The setTimeout chain uses \`unref()\` so it doesn't keep the process
-   * alive on its own.
-   */
+  /** Drains every \`cycleMs\` while armed; the unref'd timer never holds the process. */
   start(cycleMs: number): void {
     if (this._worker || this._stopped) return;
-    // \`drain()\` never throws. The \`_stopped\` check stops re-scheduling after
-    // a mid-tick \`stop()\`.
+    // \`drain()\` never throws.
     const run = this._deps.run_scoped;
     const tick = async () => {
       if (this._armed) await run(() => this.drain());
@@ -9228,7 +8612,6 @@ export class DrainController<
     this._worker.unref();
   }
 
-  /** Stop the per-lane worker. Idempotent. */
   stop(): void {
     this._stopped = true;
     if (this._worker) {
@@ -9238,25 +8621,20 @@ export class DrainController<
     this._defer.stop();
   }
 
-  /** Run one drain pass. Short-circuits when not armed or already running. */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
-    // Per-lane config wins over caller options: a lane's own budget is the
-    // point of \`withLane({leaseMillis})\`.
+    // A lane's own budget wins over caller options.
     const streamLimit =
       d.streamLimit ?? options.streamLimit ?? DEFAULT_STREAM_LIMIT;
     const eventLimit = options.eventLimit ?? DEFAULT_EVENT_LIMIT;
     const leaseMillis =
       d.leaseMillis ?? options.leaseMillis ?? DEFAULT_LEASE_MILLIS;
 
-    // Circuit open: the store is failing, skip the claim entirely so we
-    // don't hammer a down backend. \`_armed\` stays set, and the wake is not
-    // re-aimed, which would fire at once for any stream already due: the
-    // breaker's own wake settles after the cooldown, and that drain re-aims
-    // it. Parked entries stay until then.
+    // Circuit open: stay armed and leave the wake alone (re-aiming would fire
+    // at once for anything due); the breaker's own wake re-aims it.
     if (this._deps.breaker.state(Date.now()) === "open")
       return EMPTY_DRAIN as Drain<TEvents>;
 
@@ -9279,8 +8657,7 @@ export class DrainController<
       });
 
       if (!cycle) {
-        // Nothing claimed: caught up, and the store answered. Whatever was
-        // due when this pass started was handled elsewhere or has no work.
+        // Caught up: whatever was due when this pass started has no work.
         this._defer.prune(started);
         this._deps.breaker.passed();
         this._armed = false;
@@ -9289,14 +8666,10 @@ export class DrainController<
 
       const { leased, fetched, handled, acked, blocked, closeable } = cycle;
 
-      // One trace line per cycle (no-op unless the logger is at trace).
       trace_cycle(this._deps.logger, leased, fetched, handled, acked, blocked);
 
-      // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = compute_lag_lead_ratio(handled, lagging, leading);
 
-      // Refresh the local wake: acks and blocks clear a stream; a retry
-      // (\`next_attempt_at\`) or defer parks it until its next visit.
       for (const lease of acked) this._defer.delete(lease.stream);
       for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
@@ -9304,32 +8677,26 @@ export class DrainController<
         if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
 
-      // Listener throws are contained in \`Act.emit\`, so they never reach the
-      // store-error catch below.
+      // Listener throws are contained in \`Act.emit\`.
       if (acked.length) this._deps.on_acked(acked);
       // Not contained: a store error inside the close machinery is a real
       // store failure and must reach the breaker.
       if (closeable.length) await this._deps.on_close(closeable);
 
-      // Recorded after \`on_close\` so a cycle whose close failed is never
-      // counted as a store success.
+      // After \`on_close\`, so a failed close never counts as a store success.
       this._deps.breaker.passed();
 
-      // Disarm only when fully caught up. Errors keep the flag set so
-      // retries flow through the next drain.
+      // Errors keep the flag set so retries flow through the next drain.
       const has_errors = handled.some(({ error }) => error);
       if (!acked.length && !blocked.length && !has_errors) this._armed = false;
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      // A store op threw. The breaker logs and surfaces it; \`_armed\` stays
-      // set so the next pass retries after the cooldown.
+      // A store op threw: stay armed, retry after the cooldown.
       this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
-      // Re-aim the wake at the earliest stream still parked: one still due
-      // fires again at once, and one whose wake fired early at the timer
-      // ceiling waits out the rest of its span.
+      // Re-aim at the earliest stream still parked.
       if (!this._stopped) this._defer.schedule();
       this._locked = false;
       this._inflight = undefined;
@@ -9874,20 +9241,8 @@ export class NonRetryableError extends Error {
 
 // === event-sourcing.ts ===
 /**
- * @module event-sourcing
- * @category Internal
- *
- * Pure event-sourcing primitives: \`snap\` persists state checkpoints, \`load\`
- * reconstructs state by folding events through reducers, and \`action\`
- * validates an action, runs invariants, emits events, and commits them
- * atomically. \`tombstone\` commits the close-the-books guard with optimistic
- * concurrency.
- *
- * These are the bare implementations — observability is layered on top in
- * {@link "tracing"} and wired by the orchestrator at construction time.
- * No tracing imports here, no module-level mutable state.
- *
- * @internal
+ * Event-sourcing primitives: \`snap\`, \`load\`, \`action\`, \`tombstone\`, \`scan\`.
+ * Bare implementations; tracing wraps them in \`tracing.ts\`.
  */
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
@@ -9899,7 +9254,6 @@ import {
 } from "../types/errors.js";
 import type {
   Committed,
-  Correlator,
   DoOptions,
   Emitted,
   EventMeta,
@@ -9918,33 +9272,9 @@ import { compute_backoff_delay } from "./backoff.js";
 import { default_correlator } from "./correlator.js";
 
 /**
- * The reduction pipeline names three distinct things, and each word means
- * exactly one of them:
- *
- * - a **reducer** is a state's \`.patch()\` handler — it takes one event and
- *   returns a {@link Patch} *partial*;
- * - a **patch step** ({@link bare_patch} / {@link validating_patch}) merges
- *   that partial into the current state, yielding the next full state;
- * - the **fold** is the loop that applies the patch step across a stream's
- *   events (the reader loop in {@link load} / {@link action}, and the
- *   projection engine in {@link "projection-fold"}).
- *
- * \`PatchFn\` is the per-event patch step. The fold loop calls one of two
- * implementations, selected **once** at construction (in
- * {@link "tracing".build_es}) — never branched per event:
- *
- * - {@link bare_patch} — the default. Literally \`patch(state, partial)\`,
- *   no wrapper. No validation cost on the hot path.
- * - {@link validating_patch} — the opt-in \`ActOptions.validateFoldedState\`
- *   path. Merges, then parses the merged full state against the state's
- *   declared Zod schema.
- *
- * The \`me\`/\`event\` arguments are unused by the bare implementation but
- * carried on the shared signature so the fold loop is call-shape-identical
- * regardless of which patch step was selected — the validating
- * implementation needs them to name the failing reduction.
- *
- * @internal
+ * The patch step: merges a reducer's partial into state. Chosen once at
+ * construction (\`build_es\`), never per event. \`me\`/\`event\` only serve
+ * {@link validating_patch}, to name the failing reduction.
  */
 export type PatchFn = <
   TState extends Schema,
@@ -9957,32 +9287,13 @@ export type PatchFn = <
   event: Committed<TEvents, keyof TEvents>
 ) => TState;
 
-/**
- * The default patch step: a bare \`patch()\` merge with no wrapper and no
- * branch. The off-path is a plain reduction, so an
- * app that leaves \`validateFoldedState\` off pays nothing — not even a
- * comparison.
- *
- * @internal
- */
+/** The default patch step: a bare merge, so the hot path pays nothing. */
 export const bare_patch: PatchFn = (_me, state, partial) =>
   patch(state, partial) as typeof state;
 
 /**
- * The opt-in patch step: merge the partial into state, then
- * parse the merged full state against the owning state's declared Zod
- * schema. A reducer that produces schema-violating state (the calculator
- * divide-by-zero NaN class) fails here, at the triggering event,
- * instead of propagating and surfacing hops later as a confusing
- * downstream error.
- *
- * The \`target\` string names the state and the triggering event
- * (\`"<state>.<event>#<id>"\`) so the resulting {@link ValidationError}
- * points straight at the reduction that produced bad state. A debugging /
- * CI aid, not a production guard — selected only when the operator opts
- * in.
- *
- * @internal
+ * \`validateFoldedState\`: merge, then parse against the state schema, so a
+ * bad reducer fails at its own event. A debugging aid, not a production guard.
  */
 export const validating_patch: PatchFn = (me, state, partial, event) => {
   const next = patch(state, partial) as typeof state;
@@ -9993,20 +9304,9 @@ export const validating_patch: PatchFn = (me, state, partial, event) => {
   );
 };
 
-/**
- * Default per-batch row count for the {@link scan} pagination loop.
- * Callers override via {@link ScanOptions.batch_size}.
- *
- * @internal
- */
 const DEFAULT_BATCH = 500;
 
-/**
- * Internal action signature seen by the orchestrator — the {@link Correlator}
- * is bound at \`build_es\` time, so callers don't pass it through.
- *
- * @internal
- */
+/** \`action\` with the correlator and patch step bound by \`build_es\`. */
 type BoundAction = <
   TState extends Schema,
   TEvents extends Schemas,
@@ -10020,7 +9320,6 @@ type BoundAction = <
   options?: DoOptions<TEvents>
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
-/** @internal */
 export interface EsOps {
   snap: typeof snap;
   load: typeof load;
@@ -10028,24 +9327,7 @@ export interface EsOps {
   tombstone: typeof tombstone;
 }
 
-/**
- * Event sourcing utilities for snapshotting, loading, and committing actions/events.
- * Used internally by Act and state machines.
- */
-
-/**
- * Saves a snapshot of the state to the store.
- *
- * Snapshots are used to optimize state reconstruction for aggregates with long event streams.
- *
- * @template TState The type of state
- * @template TEvents The type of events
- * @param snapshot The snapshot to save
- * @returns Promise that resolves when the snapshot is saved
- *
- * @example
- * await snap(snapshot);
- */
+/** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
 ): Promise<Committed<TEvents, keyof TEvents> | undefined> {
@@ -10062,9 +9344,6 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
     );
     return committed as Committed<TEvents, keyof TEvents>;
   } catch (error) {
-    // Swallow by design — a failed snapshot must never fail the action.
-    // But surface an operator signal: a persistently failing snapshot
-    // write silently degrades every cold start to full replay.
     const reason = error instanceof Error ? error.message : String(error);
     log().warn(
       \`Snapshot write failed on stream "\${stream}": \${reason} — cold starts will replay full history until snapshots succeed.\`
@@ -10073,16 +9352,8 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
 }
 
 /**
- * Commits a tombstone event with optimistic concurrency, returning the
- * committed record on success or \`undefined\` if the stream moved past
- * \`expectedVersion\` (concurrent write detected). Other store errors
- * propagate.
- *
- * Used by \`close()\` to guard a stream while archive/truncate runs:
- * subsequent \`action()\` calls see the tombstone at head and reject with
- * {@link StreamClosedError} until the close completes.
- *
- * @internal
+ * Commits the close guard at \`expectedVersion\`; \`undefined\` when the stream
+ * moved. Actions then see the tombstone at head and throw {@link StreamClosedError}.
  */
 export async function tombstone(
   stream: string,
@@ -10104,18 +9375,8 @@ export async function tombstone(
 }
 
 /**
- * Per-event blocker check. Categories:
- *
- * - **Negative \`version\`** — versions are unsigned in the framework
- *   contract.
- * - **Malformed \`created\`** — \`event.created\` must be a valid Date
- *   instance. Restore sources stream parsed events; the orchestrator
- *   trusts the caller's iterator did the parsing.
- *
- * Cross-event invariants (duplicate ids, version gaps) are left to the
- * sink's unique constraint and to the caller (partial backups have gaps).
- *
- * @internal
+ * Rejects a negative version or an invalid \`created\` Date. Duplicate ids and
+ * version gaps are left to the sink (partial backups have gaps).
  */
 function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {
   if (event.version < 0) return false;
@@ -10125,17 +9386,10 @@ function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {
 }
 
 /**
- * Scan a restore source event by event. Owns pagination, validation,
- * the \`drop_snapshots\` filter, the \`on_progress\` callback, and the
- * causation remap; adapters supply only the per-event insert
- * \`callback\` via the driver pattern (see {@link Store.restore}).
- *
- * Pages the source with \`limit\`/\`after\`; a source that ignores the
- * filter (\`CsvFile\`) returns everything at once and the loop ends. Throws
- * on the first invalid event. Returns the result without \`duration_ms\`,
- * which {@link Act.restore} adds.
- *
- * @internal
+ * Pages a restore source: validation, drop filters, migrations, progress and
+ * causation remap. Adapters supply only the per-event insert \`callback\`
+ * (see {@link Store.restore}). A source that ignores \`limit\` (\`CsvFile\`)
+ * returns everything in one page.
  */
 export async function scan(
   source: EventSource,
@@ -10200,18 +9454,11 @@ export async function scan(
           closed_streams.has(event.stream) &&
           event.name !== TOMBSTONE_EVENT
         ) {
-          // Drop pre-close events but KEEP the tombstone — it's what
-          // makes the stream "closed" in the rebuilt store. Without
-          // it, a future \`app.do(...)\` against this stream name would
-          // succeed because nothing gates it.
+          // Keep the tombstone: it is what keeps the stream closed.
           dropped_closed++;
           return;
         }
-        // Migration overlay: rename + schema-guarded data
-        // transform, then optional stream rename. Applied BEFORE the
-        // causation remap so the id_map (keyed by source id) stays
-        // valid and migrated events land at the new name/data with
-        // their causation chains intact.
+        // Before the causation remap, so \`id_map\` stays keyed by source id.
         let migrated: typeof event = event;
         const migration = event_migrations?.[event.name as string];
         if (migration) {
@@ -10234,19 +9481,12 @@ export async function scan(
           kept++;
           return;
         }
-        // Causation remap — rewrite \`meta.causation.event.id\` to the
-        // new id space if the source pointed at an earlier event's
-        // old id.
         let remapped = migrated;
         const caused_by = migrated.meta.causation.event?.id;
         if (caused_by !== undefined) {
           const new_caused_by = id_map.get(caused_by);
           if (new_caused_by !== undefined && new_caused_by !== caused_by) {
-            // Spread \`migrated\`, not the original \`event\`.
-            // Migration + stream_rename already ran above; rebuilding from
-            // \`event\` here would revert the new name/data/stream for any
-            // event whose causation id shifted — silently undoing the
-            // migration for most rows after the first id shift.
+            // Spread \`migrated\`, not \`event\`, or the migration is undone.
             remapped = {
               ...migrated,
               meta: {
@@ -10286,27 +9526,8 @@ export async function scan(
 }
 
 /**
- * Loads a snapshot of the state from the store by folding events through the
- * state's patch reducers.
- *
- * First checks the cache for a checkpoint, then queries the store for events
- * committed after the cached position. On cache miss, replays from the store
- * (using snapshots if available to avoid full replay).
- *
- * @template TState The type of state
- * @template TEvents The type of events
- * @template TActions The type of actions
- * @param me The state machine definition.
- * @param stream The stream (instance) to load
- * @param callback (Optional) Callback to receive the loaded snapshot as it is built
- * @param asOf (Optional) Time-travel cursor; bypasses the cache.
- * @param actor (Optional) Passed through to the state's \`view\` delegate
- *   when constructing the snapshot.event — semantics are the state's to
- *   define (see {@link state}).
- * @returns The snapshot of the loaded state
- *
- * @example
- * const snapshot = await load(Counter, "counter1");
+ * Folds a stream into state, from the cached checkpoint or the latest
+ * snapshot. \`asOf\` time-travels and bypasses the cache.
  */
 export async function load<
   TState extends Schema,
@@ -10326,9 +9547,7 @@ export async function load<
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
-  // replayed counts events processed by THIS load only (snap or patch);
-  // distinct from \`patches\` (the snap-distance accumulator carried over
-  // from the cache).
+  // Events this load processed; \`patches\` is the snap distance from the cache.
   let replayed = 0;
   let event: Committed<TEvents, keyof TEvents> | undefined;
 
@@ -10345,10 +9564,7 @@ export async function load<
         patches++;
         replayed++;
       } else if (event.name !== TOMBSTONE_EVENT) {
-        // Unknown event — not in this state's reducer map. Causes:
-        // deleted/renamed event in a versioned schema, load() called with
-        // the wrong state, or stream contamination. Skipping silently
-        // would corrupt replay; warn so the operator can investigate.
+        // A renamed event, the wrong state, or a contaminated stream.
         log().warn(
           \`Skipping unknown event "\${String(event.name)}" on stream "\${stream}" (id=\${event.id}) — no reducer in state "\${me.name}"\`
         );
@@ -10367,24 +9583,17 @@ export async function load<
     {
       stream,
       stream_exact: true,
-      // \`with_snaps\` on every non-time-travel load. Cold, it resumes from the
-      // latest snapshot (this is the only place that decides it; stores just
-      // apply it). Warm, it keeps a snapshot above a stale checkpoint in the
-      // result, so a windowed close that pruned the events in between can't
-      // make the fold apply the tail onto stale state.
+      // \`with_snaps\` on every non-time-travel load: cold, it resumes from the
+      // latest snapshot; warm, it keeps a snapshot above a stale checkpoint,
+      // so a windowed close's prune can't fold the tail onto stale state.
       ...(cached
         ? { after: cached.event_id, with_snaps: true }
         : { ...(time_travel ? {} : { with_snaps: true }), ...asOf }),
     }
   );
 
-  // Warm the cache when this load replayed events, so read-heavy paths
-  // benefit too. A stale write from a slower concurrent load self-corrects:
-  // the next load replays past its \`event_id\`. Time-travel loads skip it.
-  //
-  // Not when the head is the tombstone (a close in progress): the cached
-  // entry would carry no event, and \`action()\`'s tombstone check would
-  // pass vacuously.
+  // A stale write self-corrects: the next load replays past its \`event_id\`.
+  // Not at a tombstone head, or \`action()\`'s closed check would pass vacuously.
   const head_is_tombstone = event?.name === TOMBSTONE_EVENT;
   if (
     replayed > 0 &&
@@ -10393,7 +9602,6 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    // Fire-and-forget: a cache failure must not fail the read.
     await cache()
       .set(stream, {
         stream,
@@ -10415,10 +9623,7 @@ export async function load<
     event,
     state,
     version: event?.version ?? cached?.version ?? -1,
-    // Head event id, captured atomically with \`state\`: the last replayed
-    // event's id on a cache miss, or the cached checkpoint's event_id on a
-    // warm hit with no new events. Consumers read this instead of a
-    // separate cache lookup that could race a concurrent commit.
+    // Captured with \`state\`, so consumers never race a separate cache lookup.
     id: event?.id ?? cached?.event_id ?? -1,
     patches,
     snaps,
@@ -10428,35 +9633,9 @@ export async function load<
 }
 
 /**
- * Executes an action and emits an event to be committed by the store.
- *
- * Validates the action, applies business invariants, emits events, and
- * commits them to the event store. When the action's
- * {@link ActionOptions} declare a retry budget, the orchestrator owns
- * the loop on {@link ConcurrencyError}: cache is invalidated, optional
- * \`backoff\` delay is applied, and the action re-runs from \`load\`. Any
- * other error rethrows immediately and does not consume the budget.
- *
- * Reactions skip optimistic concurrency (commit below passes
- * \`undefined\` as \`expectedVersion\` when \`reactingTo\` is set), so
- * \`ConcurrencyError\` cannot fire on the reaction-driven path — the
- * loop is naturally a no-op there.
- *
- * @template TState The type of state
- * @template TEvents The type of events
- * @template TActions The type of action_schemas
- * @template TKey The type of action to execute
- * @param me The state machine definition
- * @param action The action to execute
- * @param target The target (stream, actor, etc.)
- * @param payload The payload of the action
- * @param options Per-call dispatch options ({@link DoOptions}) —
- *   \`reactingTo\` to thread correlation, \`correlator\` to override the
- *   framework or orchestrator-level correlator for this call only.
- * @returns The snapshot of the committed event
- *
- * @example
- * const snapshot = await action(Counter, "increment", { stream: "counter1", actor }, { by: 1 });
+ * Validates, checks invariants, emits and commits. On {@link ConcurrencyError}
+ * it re-runs from \`load\` within the action's \`maxRetries\`; any other error
+ * rethrows. Reactions commit without the inferred version guard.
  */
 export async function action<
   TState extends Schema,
@@ -10473,9 +9652,7 @@ export async function action<
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
-  // Resolved by the caller. \`Act.do\` supplies the ambient reaction context
-  // when a handler dispatched without naming one; nothing is read from
-  // outside this call.
+  // \`Act.do\` already filled in the ambient reaction context.
   const reactingTo = options?.reactingTo;
   const correlator = options?.correlator ?? default_correlator;
 
@@ -10494,10 +9671,8 @@ export async function action<
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
-      // snapshot.version is the head version even on a warm cache hit,
-      // where snapshot.event is undefined — using the event would
-      // silently drop the optimistic guard for every cached stream.
-      // A brand-new stream (-1) stays unguarded: creations append.
+      // \`version\`, not \`event\`: on a warm hit \`event\` is undefined. A new
+      // stream (-1) stays unguarded.
       const expected =
         expectedVersion ??
         (snapshot.version >= 0 ? snapshot.version : undefined);
@@ -10519,7 +9694,6 @@ export async function action<
       const result = me.on[action](validated, snapshot, target);
       if (!result) return [snapshot];
 
-      // An empty array means no events were emitted
       if (Array.isArray(result) && result.length === 0) {
         return [snapshot];
       }
@@ -10547,8 +9721,7 @@ export async function action<
           action: {
             name: action as string,
             ...target,
-            // payload intentionally omitted from causation metadata —
-            // callers correlate via the correlation id when they need it.
+            // payload intentionally omitted
           },
           event: reactingTo
             ? {
@@ -10571,8 +9744,7 @@ export async function action<
           reactingTo ? expectedVersion : expected
         );
       } catch (error) {
-        // Invalidate the stale cache entry, fire-and-forget: a cache failure
-        // must not replace the \`ConcurrencyError\` the retry loop expects.
+        // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
         if (error instanceof ConcurrencyError) {
           cache()
             .invalidate(stream)
@@ -10588,11 +9760,7 @@ export async function action<
 
       let { state, patches } = snapshot;
       const snapshots = committed.map((row, i) => {
-        // Actions originate from the caller — they already hold the
-        // plaintext payload they sent. No view/gate round-trip is
-        // useful; the reducer and the returned snapshot see the
-        // pre-split event directly. pii_split (in \`me.message\`) above
-        // is the only PII operation on the action path.
+        // The caller sent the plaintext, so no view/gate round-trip.
         const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch_fn(me, state, p, event);
@@ -10610,23 +9778,16 @@ export async function action<
         };
       });
 
-      // fire and forget snaps
       const last = snapshots.at(-1)!;
-      // Guardless commits (reactions append at head by design) can land
-      // past events this fold never saw. A gapped fold must not become
-      // a snapshot event or a cache entry — both would lie at the head
-      // position. Contiguity is cheap to prove: the first committed
-      // version extends the loaded one.
+      // A guardless (reaction) commit can land past events this fold never
+      // saw; a gapped fold must not become a snapshot or a cache entry.
       const contiguous = committed[0].version === snapshot.version + 1;
       const snapped = contiguous && me.snap?.(last);
 
-      // Awaited: the snapshot takes the next version, so the cache must hold
-      // the post-snap checkpoint before a sequential caller loads it.
-      // \`snap()\` swallows its own failures.
+      // Awaited, so the cache holds the post-snap checkpoint for the next caller.
       const snap_event = snapped ? await snap(last) : undefined;
 
-      // States with sensitive fields aren't cached (their state depends on
-      // the actor). Fire-and-forget otherwise.
+      // Sensitive states depend on the actor, so they aren't cached.
       if (!me.pii_aware) {
         if (contiguous)
           cache()
@@ -10644,9 +9805,6 @@ export async function action<
                 "cache set skipped; the next load re-folds from the store"
               )
             );
-        // A gapped entry would sit at the head position with unfolded
-        // events baked in — drop the checkpoint and let the next load
-        // replay to truth instead.
         else
           cache()
             .invalidate(stream)
@@ -10661,8 +9819,7 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
-      // A caller-pinned expectedVersion would conflict again on every
-      // retry, so rethrow; retries are for framework-derived versions.
+      // A caller-pinned version would conflict again on every retry.
       if (expectedVersion !== undefined) throw error;
       if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
