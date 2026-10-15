@@ -24,6 +24,8 @@ echo "| metric | value |"
 echo "|---|---|"
 echo "| core lines (libs/act/src) | $lines |"
 echo "| code lines / comment lines | $code / $comments ($((comments * 100 / lines))% comments) |"
+pct() { local l c; l=$(find "$SRC/$1" -name '*.ts' -exec cat {} + | wc -l | tr -d ' '); c=$(find "$SRC/$1" -name '*.ts' -exec cat {} + | grep -cE '^\s*(//|\*|/\*)' || true); echo "$((c * 100 / l))%"; }
+echo "| comments in internal/ / adapters/ (bar: under 30%) | $(pct internal) / $(pct adapters) |"
 ticket_tests=$(git ls-files '*.spec.ts' | xargs grep -hE '(it|describe|test)\(.*(#[0-9]{3,4}|ACT-[0-9]+)' | wc -l | tr -d ' ' || true)
 echo "| ticket refs in source / in test names | $tickets / $ticket_tests |"
 echo "| core files touching 5+ features | $coupled |"
