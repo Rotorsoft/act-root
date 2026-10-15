@@ -23,6 +23,7 @@ import type {
   State,
 } from "../types/index.js";
 import type { EsOps } from "./event-sourcing.js";
+import { walk_streams } from "./walk-streams.js";
 
 /**
  * Dependencies the close cycle needs from the Act orchestrator. Decoupled
@@ -87,7 +88,7 @@ export type CloseCycleDeps = {
  *
  * @internal
  */
-export const CLOSE_CATCH_UP_LIMIT = 1000;
+const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
 
 /**
@@ -458,44 +459,47 @@ async function probe_min_watermarks(
   checkpoint: number
 ): Promise<Map<string, number>> {
   const min_at = new Map<string, number>();
-  const source_regex = new Map<string, RegExp>();
-  const get_regex = (source: string): RegExp => {
-    let re = source_regex.get(source);
+  const matches = source_matcher();
+  await walk_streams(
+    store(),
+    (position) => {
+      // Pending work caps at the watermark; caught up caps at the
+      // checkpoint; an unmarked row keeps the conservative watermark.
+      const pending =
+        position.correlated_at === undefined ||
+        position.at < position.correlated_at;
+      const cap = pending ? position.at : Math.max(position.at, checkpoint);
+      for (const stream of streams) {
+        if (matches(position.source, stream)) {
+          const prev = min_at.get(stream);
+          if (prev === undefined || cap < prev) min_at.set(stream, cap);
+        }
+      }
+    },
+    { limit: page_size, source_matches: streams }
+  );
+  return min_at;
+}
+
+/**
+ * Does a subscription with this `source` consume from `stream`? No source
+ * consumes every stream; a literal source matches itself as a regex.
+ * Compiled patterns are cached per matcher.
+ */
+function source_matcher(): (
+  source: string | undefined,
+  stream: string
+) => boolean {
+  const compiled = new Map<string, RegExp>();
+  return (source, stream) => {
+    if (!source) return true;
+    let re = compiled.get(source);
     if (!re) {
       re = new RegExp(source);
-      source_regex.set(source, re);
+      compiled.set(source, re);
     }
-    return re;
+    return re.test(stream);
   };
-
-  let after: string | undefined;
-  for (;;) {
-    let last: string | undefined;
-    const { count } = await store().query_streams(
-      (position) => {
-        last = position.stream;
-        const source_re = position.source
-          ? get_regex(position.source)
-          : undefined;
-        // Pending work caps at the watermark; caught up caps at the
-        // checkpoint; an unmarked row keeps the conservative watermark.
-        const pending =
-          position.correlated_at === undefined ||
-          position.at < position.correlated_at;
-        const cap = pending ? position.at : Math.max(position.at, checkpoint);
-        for (const stream of streams) {
-          if (!source_re || source_re.test(stream)) {
-            const prev = min_at.get(stream);
-            if (prev === undefined || cap < prev) min_at.set(stream, cap);
-          }
-        }
-      },
-      { after, limit: page_size, source_matches: streams }
-    );
-    if (count < page_size) break;
-    after = last;
-  }
-  return min_at;
 }
 
 // ---------------------------------------------------------------------------
@@ -564,19 +568,9 @@ async function partition_by_safety(
     if (checkpoint < info.max_id) uncorrelated.add(stream);
   }
 
-  // Read-only. A subscription's `source` is matched as a regex either way
-  // (a literal matches itself); over-matching only widens the pending set,
-  // the safe direction. Compiled patterns are cached.
+  // Over-matching a source only widens the pending set, the safe direction.
   const pending_set = new Set<string>();
-  const source_regex = new Map<string, RegExp>();
-  const get_regex = (source: string): RegExp => {
-    let re = source_regex.get(source);
-    if (!re) {
-      re = new RegExp(source);
-      source_regex.set(source, re);
-    }
-    return re;
-  };
+  const matches = source_matcher();
 
   // `source_matches` narrows the probe server-side to subscriptions that
   // could consume from a stream we're closing — a best-effort hint, so
@@ -584,41 +578,24 @@ async function partition_by_safety(
   // the result correct even when a store returns a superset.
   const targets = [...stream_info.keys()];
 
-  // Keyset-paginate the (narrowed) subscriptions on the `after` cursor —
-  // `query_streams` caps each call at `limit` rows, so every page is
-  // inspected until a short page signals the last one. A lagging reaction
-  // marks its close target pending regardless of how far its subscription
-  // sorts past the first page.
-  let after: string | undefined;
-  for (;;) {
-    let last: string | undefined;
-    const { count } = await store().query_streams(
-      (position) => {
-        last = position.stream;
-        const source_re = position.source
-          ? get_regex(position.source)
-          : undefined;
-        // Pending means what `claim` means: a mark above the watermark. An
-        // unmarked row has nothing to wait for; the catch-up above has landed
-        // every mark that was owed.
-        const has_work =
-          position.correlated_at !== undefined &&
-          position.at < position.correlated_at;
-        if (!has_work) return;
-        for (const [stream, info] of stream_info) {
-          if (
-            (!source_re || source_re.test(stream)) &&
-            position.at < info.max_id
-          ) {
-            pending_set.add(stream);
-          }
-        }
-      },
-      { after, limit: page_size, source_matches: targets }
-    );
-    if (count < page_size) break;
-    after = last;
-  }
+  // Every page, so a lagging reaction past the first one still counts.
+  await walk_streams(
+    store(),
+    (position) => {
+      // Pending means what `claim` means: a mark above the watermark. An
+      // unmarked row has nothing to wait for; the catch-up above has landed
+      // every mark that was owed.
+      const has_work =
+        position.correlated_at !== undefined &&
+        position.at < position.correlated_at;
+      if (!has_work) return;
+      for (const [stream, info] of stream_info) {
+        if (matches(position.source, stream) && position.at < info.max_id)
+          pending_set.add(stream);
+      }
+    },
+    { limit: page_size, source_matches: targets }
+  );
 
   const safe: string[] = [];
   for (const [stream] of stream_info) {

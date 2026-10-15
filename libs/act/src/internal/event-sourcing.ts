@@ -11,6 +11,7 @@ import {
   StreamClosedError,
 } from "../types/errors.js";
 import type {
+  CacheEntry,
   Committed,
   DoOptions,
   Emitted,
@@ -84,6 +85,31 @@ export interface EsOps {
   action: BoundAction;
   tombstone: typeof tombstone;
 }
+
+/** Writes a cache checkpoint. A failure only costs the next load a re-fold. */
+const cache_put = <TState extends Schema>(
+  stream: string,
+  entry: CacheEntry<TState>
+): Promise<void> =>
+  cache()
+    .set(stream, entry)
+    .catch((err) =>
+      log().warn(
+        err,
+        "cache set skipped; the next load re-folds from the store"
+      )
+    );
+
+/** Drops a cache checkpoint. A failure leaves a stale one, which re-folds. */
+const cache_drop = (stream: string): Promise<void> =>
+  cache()
+    .invalidate(stream)
+    .catch((err) =>
+      log().warn(
+        err,
+        "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
+      )
+    );
 
 /** Commits a snapshot event. Never throws: a failed snapshot must not fail the action. */
 export async function snap<TState extends Schema, TEvents extends Schemas>(
@@ -360,21 +386,14 @@ export async function load<
     !me.pii_aware &&
     !head_is_tombstone
   ) {
-    await cache()
-      .set(stream, {
-        stream,
-        state,
-        version: event.version,
-        event_id: event.id,
-        patches,
-        snaps,
-      })
-      .catch((err) =>
-        log().warn(
-          err,
-          "cache set skipped; the next load re-folds from the store"
-        )
-      );
+    await cache_put(stream, {
+      stream,
+      state,
+      version: event.version,
+      event_id: event.id,
+      patches,
+      snaps,
+    });
   }
 
   return {
@@ -503,16 +522,7 @@ export async function action<
         );
       } catch (error) {
         // Fire-and-forget, so a cache failure can't replace the ConcurrencyError.
-        if (error instanceof ConcurrencyError) {
-          cache()
-            .invalidate(stream)
-            .catch((err) =>
-              log().warn(
-                err,
-                "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
-              )
-            );
-        }
+        if (error instanceof ConcurrencyError) void cache_drop(stream);
         throw error;
       }
 
@@ -548,30 +558,15 @@ export async function action<
       // Sensitive states depend on the actor, so they aren't cached.
       if (!me.pii_aware) {
         if (contiguous)
-          cache()
-            .set<TState>(stream, {
-              stream,
-              state: last.state,
-              version: snap_event?.version ?? last.event.version,
-              event_id: snap_event?.id ?? last.event.id,
-              patches: snap_event ? 0 : last.patches,
-              snaps: snap_event ? last.snaps + 1 : last.snaps,
-            })
-            .catch((err) =>
-              log().warn(
-                err,
-                "cache set skipped; the next load re-folds from the store"
-              )
-            );
-        else
-          cache()
-            .invalidate(stream)
-            .catch((err) =>
-              log().warn(
-                err,
-                "cache invalidate skipped; a stale checkpoint re-folds from its event_id"
-              )
-            );
+          void cache_put<TState>(stream, {
+            stream,
+            state: last.state,
+            version: snap_event?.version ?? last.event.version,
+            event_id: snap_event?.id ?? last.event.id,
+            patches: snap_event ? 0 : last.patches,
+            snaps: snap_event ? last.snaps + 1 : last.snaps,
+          });
+        else void cache_drop(stream);
       }
 
       return snapshots;
