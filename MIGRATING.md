@@ -13,11 +13,10 @@ Each major release gets its own page in the versioned documentation site, so the
 guide stays pinned next to the API reference it describes:
 
 - `docs/docs/guides/migrating-to-<major>.md` — authored against the **current**
-  (unreleased) docs while the breaking change lands, then snapshotted into
-  `docs/versioned_docs/version-<line>/` when the release is cut.
-
-The Docusaurus version dropdown lets a user reading the old `1.x` docs jump
-straight to the `2.x` migration page, and vice-versa.
+  docs while the breaking change lands. When the release is cut, the previous
+  line is snapshotted into `docs/versioned_docs/version-<line>/` and the
+  Docusaurus version dropdown appears, so a user reading the old docs can jump
+  to the new migration page.
 
 ## Available guides
 
@@ -25,7 +24,7 @@ straight to the `2.x` migration page, and vice-versa.
 
 | From → To | Guide | Highlights |
 |---|---|---|
-| → `1.x` | [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md) | First versioned snapshot. No breaking changes to migrate — the page documents the upgrade-within-major policy, how to read the versioned docs, and proves this template end to end. |
+| → `1.x` | [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md) | First stable line. No breaking changes to migrate — the page documents the upgrade-within-major policy, how the docs are versioned, and proves this template end to end. |
 
 ## Writing a migration guide (the convention)
 
