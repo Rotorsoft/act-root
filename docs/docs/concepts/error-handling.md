@@ -174,6 +174,12 @@ app.on("error", ({ error, circuit }) => {
 
 The framework logs the error regardless of listeners; the event is emitted only when a listener is registered (Node's `EventEmitter` rethrows an unhandled `"error"`).
 
+### What the breaker does not detect
+
+The breaker detects a store that is down for every loop, not one that is only partly broken. All the loops share one count of consecutive failures, and a success from any of them resets it. So if one kind of call keeps failing while another keeps working (say correlate's event reads fail but `claim` succeeds, and a lane drains often), the breaker can stay closed for the whole failure. Reactions stop picking up new work, yet every `error` event reports `circuit: "closed"`.
+
+Each failure still logs and still emits `error`. Alert on the **rate** of `error` events, broken down by `error.operation`, rather than on `circuit === "open"` alone.
+
 ## Error Constants
 
 Each error class sets its `name` to one of these constants, which is what serialized or logged errors carry. Match a thrown error in code with `instanceof`; the constants are on `name`, not `message`.

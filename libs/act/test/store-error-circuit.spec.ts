@@ -168,3 +168,55 @@ describe("settle loop store-error handling", () => {
     expect(e.circuit).toBe("closed"); // 1 failure < threshold 5
   });
 });
+
+describe("breaker scope: a whole-store outage detector", () => {
+  // Correlate's scan is the only store read with `with_pii: false`; failing
+  // it alone leaves `claim`, `ack` and commits healthy.
+  const partly_broken = () => {
+    const s = new InMemoryStore();
+    const real_query = s.query.bind(s);
+    s.query = ((callback: never, query?: { with_pii?: boolean }) =>
+      query?.with_pii === false
+        ? Promise.reject(new StoreError("query"))
+        : real_query(callback, query as never)) as never;
+    store(s);
+    const app = act()
+      .withState(Counter)
+      .on("Bumped")
+      .do(async function react() {})
+      .build({ circuitBreaker: { failureThreshold: 3, cooldownMs: 60_000 } });
+    const errors: { error: unknown; circuit: string }[] = [];
+    app.on("error", (e) => errors.push(e));
+    return { app, errors };
+  };
+
+  const fail_correlate_once = async (
+    app: ReturnType<typeof partly_broken>["app"],
+    errors: unknown[]
+  ) => {
+    const before = errors.length;
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    app.settle({ debounceMs: 0 });
+    await vi.waitFor(() => expect(errors.length).toBe(before + 1));
+  };
+
+  it("stays closed while another loop's store calls keep succeeding", async () => {
+    const { app, errors } = partly_broken();
+    for (let i = 0; i < 6; i++) {
+      await fail_correlate_once(app, errors);
+      // A drain whose claim succeeds resets the shared failure count.
+      await app.drain();
+    }
+    expect(errors).toHaveLength(6);
+    expect(errors.every((e) => e.error instanceof StoreError)).toBe(true);
+    expect(errors.every((e) => e.circuit === "closed")).toBe(true);
+    await dispose()();
+  });
+
+  it("control — opens when nothing else touches the store", async () => {
+    const { app, errors } = partly_broken();
+    for (let i = 0; i < 3; i++) await fail_correlate_once(app, errors);
+    expect(errors.map((e) => e.circuit)).toEqual(["closed", "closed", "open"]);
+    await dispose()();
+  });
+});

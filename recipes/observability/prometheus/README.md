@@ -71,6 +71,12 @@ The split from the [observability guide](https://rotorsoft.github.io/act-root/do
 # Page: the store is failing and the breaker opened.
 - alert: ActCircuitOpen
   expr: increase(act_errors_total{circuit="open"}[5m]) > 0
+
+# Page: store errors keep coming with the breaker closed. A partly broken
+# store (one kind of call failing, others working) never opens it.
+- alert: ActStoreErrorsSustained
+  expr: sum(rate(act_errors_total[5m])) > 0
+  for: 10m
 ```
 
 Dashboard material: `rate(act_events_committed_total[5m])` per event name for throughput, `rate(act_reactions_acked_total[5m])` per lane for reaction progress, `act_reactions_blocked_total` growth per lane for quarantine trends.

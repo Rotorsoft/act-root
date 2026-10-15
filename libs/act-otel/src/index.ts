@@ -155,8 +155,9 @@ function resolveInstrumentConfig(options: InstrumentOptions): InstrumentConfig {
  * would blow up a Prometheus instance.
  *
  * The alerting split from the observability guide applies: a non-zero
- * `act_streams_blocked` and `act_errors_total{circuit="open"}` growth are
- * page-worthy; the rest are dashboard material.
+ * `act_streams_blocked`, `act_errors_total{circuit="open"}` growth, and
+ * sustained `act_errors_total` growth in any state are page-worthy; the
+ * rest are dashboard material.
  *
  * **Scrape resilience.** The `act_streams_blocked` gauge reads
  * `blocked_streams()` inside its per-scrape `collect()`. A rejection there
