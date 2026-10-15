@@ -14,7 +14,7 @@
  * enumerated one by one. Hand-maintaining that enumeration is exactly what
  * let it drift (#1036); this generator owns it instead.
  *
- * Discovery mirrors `libs/act-tck/test/all-packages-stability.spec.ts`: walk
+ * Discovery mirrors `test/stability.spec.ts`: walk
  * every `libs/<pkg>/package.json` whose name is under `@rotorsoft/`, and map
  * each `exports` subpath whose `import` target ends in `.js` to its `src`
  * entry (`./dist/api/index.js` -> `src/api/index.ts`). UI packages
