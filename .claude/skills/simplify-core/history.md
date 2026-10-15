@@ -392,3 +392,5 @@ Simplifications:
 - P2026-10-15p-3. Delete .claude/README.md (209 lines) and point the three subagents at CLAUDE.md instead of restating it (act-code-reviewer checks public fields against the wrong casing rule).
 
 Design findings, not proposed: one throwing resolver stops discovery for every reaction (documented, #1913); every runnable example needs `app.on("committed", () => app.settle())` (13 copies; making `do()` settle would change what apps observe); priority (required `prioritize`, 13 TCK cases) stays a question for a future major.
+
+Tickets (user: "all"): #1915 (o-1 + d-2), #1916 (d-1), #1917 (d-4), #1918 (r-3), #1919 (d-3), #1920 (o-2), #1921 (p-1), #1922 (r-1), #1923 (o-3), #1924 (p-2), #1925 (p-4), #1926 (p-3).
