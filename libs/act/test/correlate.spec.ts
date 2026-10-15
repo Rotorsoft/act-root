@@ -1018,17 +1018,10 @@ describe("correlate: dynamic lanes", () => {
       });
     });
     /**
-     * The dynamic twin of #1582. A dynamic target's record lives in the
-     * evictable LRU, and a missing record used to read as never-seen — so a
-     * later, lower-priority resolution won the lane it had already lost. The
-     * LRU calls itself "a memory bound, not a correctness mechanism", which
-     * was true of a target's priority (the store merges that with max) and
-     * false of its lane (the store overwrote that unconditionally).
-     *
-     * The repair is in the store: the lane now rides the priority max, so the
-     * durable row holds the invariant and forgetting cannot break it. That
-     * also covers the case no LRU bound reaches — a fresh process, whose
-     * records are all missing by definition.
+     * A dynamic target's record lives in the evictable LRU, and a fresh
+     * process has none. Forgetting must not re-lane the target: the store's
+     * lane rides the priority max, and at equal priority correlate reads the
+     * row (configuration.md § Re-laning at restart).
      */
     describe("dynamic targets survive a forgotten record", () => {
       const ranker = state({ Ranker: z.object({ count: z.number() }) })
