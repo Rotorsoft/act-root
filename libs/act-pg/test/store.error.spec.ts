@@ -62,17 +62,21 @@ describe("PostgresStore", () => {
       ).resolves.toEqual([]);
     });
 
-    it("throws on DB error", async () => {
+    it("wraps a driver error from the head probe in StoreError('commit')", async () => {
+      const cause = new Error("db error");
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
         // @ts-expect-error mock
-        makeClient(vi.fn().mockRejectedValue(new Error("db error")))
+        makeClient(vi.fn().mockRejectedValue(cause))
       );
-      await expect(
-        store.commit("stream", [{ name: "E", data: {} }], {
+      const error = await store
+        .commit("stream", [{ name: "E", data: {} }], {
           correlation: "c",
           causation: {},
         })
-      ).rejects.toThrow("db error");
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(StoreError);
+      expect((error as StoreError).operation).toBe("commit");
+      expect((error as StoreError).cause).toBe(cause);
     });
 
     it("a notify-side failure aborts the commit statement", async () => {
@@ -94,12 +98,17 @@ describe("PostgresStore", () => {
         table: "store_error_test",
         notify: true,
       });
-      await expect(
-        notifying.commit("stream", [{ name: "E", data: {} }], {
+      const error = await notifying
+        .commit("stream", [{ name: "E", data: {} }], {
           correlation: "c",
           causation: {},
         })
-      ).rejects.toThrow("notify fail");
+        .catch((e: unknown) => e);
+      // Wrapped like any other driver error from the insert statement.
+      expect(error).toBeInstanceOf(StoreError);
+      expect(((error as StoreError).cause as Error).message).toBe(
+        "notify fail"
+      );
     });
 
     it("converts a unique violation on INSERT into ConcurrencyError", async () => {

@@ -28862,6 +28862,11 @@ export class PostgresStore implements Store {
         }
         throw error;
       }
+    } catch (error) {
+      // Every other driver error is a StoreError, per the port contract.
+      if (error instanceof ConcurrencyError || error instanceof ValidationError)
+        throw error;
+      throw new StoreError("commit", { cause: error });
     } finally {
       client.release();
     }
