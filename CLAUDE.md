@@ -290,7 +290,7 @@ Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `a
 - Internal helper functions: `run_close_cycle`, `classify_registry`, `compute_backoff_delay`, `build_handle`, `merge_event_register`, `current_version_of`.
 - Local variables: `event_to_state`, `last_event_name`, `stream_info`, `raw_body`, `headers_bag`.
 - Function parameters: TS doesn't enforce parameter names as part of the public contract (callers pass positional args), so parameters are snake_case even on public method signatures — `event_name`, `state_name`, `skip_validation`.
-- Private/protected class fields and methods: `_snake_case` with underscore prefix — `_drain_controllers`, `_reactive_events`, `_arm_all`, `_wire_notify`, `_max_event_id_by_stream`.
+- Private/protected class fields and methods: `_snake_case` with underscore prefix — `_drain_controllers`, `_event_to_lanes`, `_arm_all`, `_wire_notify`, `_max_event_id_by_stream`.
 - Internal type fields (types not re-exported through any `src/index.ts`): `Classification.static_targets`, `HandleResult.next_attempt_at`, `AuditPass.on_event`, `SettleDeps.on_settled`.
 - Grouping prefixes/postfixes when several related identifiers share a structural role: `pii_*`, `make_*`, `is_*`, `compute_*`, `*_by_stream`.
 

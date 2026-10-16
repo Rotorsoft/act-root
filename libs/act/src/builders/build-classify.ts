@@ -3,14 +3,15 @@
  * @category Internal
  *
  * Build-time classification of the registry + state map. The Act constructor
- * needs four pre-computed inputs to wire its runtime subsystems:
+ * needs three pre-computed inputs to wire its runtime subsystems:
  *
  * - `static_targets`     — known-up-front reaction targets, subscribed once
  *                         at init (correlate marks them from then on)
- * - `reactive_events`    — event names with at least one reaction (drives
- *                         the drain skip-flag in `do()` and `reset()`)
  * - `event_to_state`      — event-name → owning state, for `close({restart})`
  *                         seed loading in multi-state apps
+ * - `event_to_lanes`      — event-name → the lanes its reactions run on, for
+ *                         selective arming; its keys are exactly the events
+ *                         that have a reaction
  *
  * Pure function — single pass over events + states, fully testable without
  * instantiating Act.
@@ -56,7 +57,6 @@ export type EventLaneSet = ReadonlySet<string> | typeof ALL_LANES;
 
 export type Classification = {
   readonly static_targets: StaticTarget[];
-  readonly reactive_events: ReadonlySet<string>;
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   readonly event_to_lanes: ReadonlyMap<string, EventLaneSet>;
 };
@@ -84,11 +84,9 @@ export function classify_registry<
   // `(target, source)` scoping of `statics` is too narrow to catch a
   // same-target/different-source lane disagreement.
   const target_lanes = new Map<string, string>();
-  const reactive_events = new Set<string>();
   const event_to_lanes = new Map<string, EventLaneSet>();
 
   for (const [name, register] of Object.entries(registry.events)) {
-    if (register.reactions.size > 0) reactive_events.add(name);
     for (const reaction of register.reactions.values()) {
       if (typeof reaction.resolver === "function") {
         // Dynamic resolver — lane is opaque until runtime. Mark the
@@ -151,7 +149,6 @@ export function classify_registry<
 
   return {
     static_targets: [...statics.values()],
-    reactive_events,
     event_to_state,
     event_to_lanes,
   };

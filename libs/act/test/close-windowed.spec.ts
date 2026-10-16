@@ -259,7 +259,7 @@ describe("windowed close", () => {
         { stream: "w12", before: future() },
       ],
       {
-        reactive_events_size: 1,
+        reactive: true,
         event_to_state: new Map(),
         load: (() => {
           throw new Error("unused");

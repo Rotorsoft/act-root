@@ -469,10 +469,9 @@ describe("close", () => {
     await pagedApp.correlate();
 
     const a = pagedApp as unknown as Record<string, unknown>;
-    const reactive = a._reactive_events as { size: number };
     const es = a._es as Record<string, never>;
     const result = await run_close_cycle([{ stream: "paged-src" }], {
-      reactive_events_size: reactive.size,
+      reactive: a._reactive as boolean,
       event_to_state: a._event_to_state as never,
       load: es.load,
       tombstone: es.tombstone,
@@ -508,10 +507,9 @@ describe("close", () => {
     await stalledApp.correlate();
 
     const a = stalledApp as unknown as Record<string, unknown>;
-    const reactive = a._reactive_events as { size: number };
     const es = a._es as Record<string, never>;
     const result = await run_close_cycle([{ stream: "stalled-src" }], {
-      reactive_events_size: reactive.size,
+      reactive: a._reactive as boolean,
       event_to_state: a._event_to_state as never,
       load: es.load,
       tombstone: es.tombstone,

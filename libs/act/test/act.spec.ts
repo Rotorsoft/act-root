@@ -700,7 +700,7 @@ describe("act", () => {
   });
 
   it("never arms the drain in an app with no reactions", async () => {
-    // App with no reactions — _reactive_events is empty
+    // App with no reactions
     const s = state({ NoRx: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
       .emits({ NoRxEvt: ZodEmpty })
@@ -710,7 +710,7 @@ describe("act", () => {
       .build();
 
     const noRxApp = act().withState(s).build();
-    expect((noRxApp as any)._reactive_events.size).toBe(0);
+    expect((noRxApp as any)._reactive).toBe(false);
     // correlate initializes but does not arm the drain
     await noRxApp.correlate();
     expect((noRxApp as any)._drain_controllers.get("default").armed).toBe(

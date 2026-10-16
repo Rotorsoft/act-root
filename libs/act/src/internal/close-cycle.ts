@@ -32,7 +32,8 @@ import { walk_streams } from "./walk-streams.js";
  * @internal
  */
 export type CloseCycleDeps = {
-  readonly reactive_events_size: number;
+  /** Whether any event has a reaction; without one nothing can be pending. */
+  readonly reactive: boolean;
   readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   readonly load: EsOps["load"];
   readonly tombstone: EsOps["tombstone"];
@@ -280,7 +281,7 @@ async function run_full_closes(
   // 2. Partition: skip streams with pending reactions in flight
   const safe = await partition_by_safety(
     stream_info,
-    deps.reactive_events_size,
+    deps.reactive,
     skipped,
     deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE,
     deps.catch_up_correlation
@@ -363,18 +364,16 @@ async function run_windowed_closes(
   // watermark; a caught-up one caps at the correlate checkpoint, since a
   // reaction to only some event types sits below the head with nothing
   // pending. Catching up first makes that cap as high as it can be.
-  const checkpoint =
-    deps.reactive_events_size > 0
-      ? await deps.catch_up_correlation(Number.MAX_SAFE_INTEGER)
-      : -1;
-  const min_at =
-    deps.reactive_events_size > 0
-      ? await probe_min_watermarks(
-          windowed.map((t) => t.stream),
-          deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE,
-          checkpoint
-        )
-      : new Map<string, number>();
+  const checkpoint = deps.reactive
+    ? await deps.catch_up_correlation(Number.MAX_SAFE_INTEGER)
+    : -1;
+  const min_at = deps.reactive
+    ? await probe_min_watermarks(
+        windowed.map((t) => t.stream),
+        deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE,
+        checkpoint
+      )
+    : new Map<string, number>();
 
   // 2 + 3. Per stream, under its lock: archive only when the prune would
   // delete a prefix, then truncate. The lock plus that check make the
@@ -550,12 +549,12 @@ async function scan_stream_heads(
 
 async function partition_by_safety(
   stream_info: Map<string, StreamHead>,
-  reactive_events_size: number,
+  reactive: boolean,
   skipped: string[],
   page_size: number,
   catch_up_correlation: (until: number) => Promise<number>
 ): Promise<string[]> {
-  if (reactive_events_size === 0) return [...stream_info.keys()];
+  if (!reactive) return [...stream_info.keys()];
 
   // Correlate the tail first (see `catch_up_correlation`); anything still
   // above the cursor afterwards is held back.
