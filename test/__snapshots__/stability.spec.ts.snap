@@ -7849,6 +7849,7 @@ export class DeferSignal extends Error {
 
 import { randomUUID } from "node:crypto";
 import { log } from "../ports.js";
+import { NonRetryableError } from "../types/errors.js";
 import type {
   BatchHandler,
   BlockedLease,
@@ -7961,35 +7962,55 @@ function fetch_failure_policy<
   return { blockOnError, maxRetries };
 }
 
-/** A resolver's error message, and the options of the reaction it belongs to. */
-type ResolverFailure = { error: string; options: ReactionOptions };
+/** A resolver's error, and the options of the reaction it belongs to. */
+type ResolverFailure = { error: Error; options: ReactionOptions };
 
 /**
- * A resolver threw while matching a leased stream's events. Only that
- * stream fails: it retries on the reaction's backoff and blocks when the
- * reaction's budget is spent, like a failing handler.
+ * The one retry-or-block decision for a stream that failed: a handler,
+ * a resolver, or the stream's own fetch. The error string always rides
+ * the result; the drain decides whether to ack partial progress from
+ * \`handled > 0\`, not from the error.
  */
-function resolver_failed(
+export function finalize(
   lease: Lease,
-  { error, options }: ResolverFailure
+  handled: number,
+  at: number,
+  error: Error | undefined,
+  options: ReactionOptions,
+  logger: Logger,
+  failed_at?: number
 ): HandleResult {
-  log().error(error);
-  const block = options.blockOnError && lease.retry >= options.maxRetries;
+  if (!error) return { lease, handled, acked_at: at };
+  logger.error(error);
+  // A \`NonRetryableError\` from the handler short-circuits the retry
+  // budget — block on first attempt when the operator has opted in via
+  // \`blockOnError\`. When \`blockOnError\` is false, the operator has
+  // explicitly chosen "retry forever," so we don't override that.
+  const non_retryable = error instanceof NonRetryableError;
+  const block =
+    options.blockOnError &&
+    (non_retryable || lease.retry >= options.maxRetries);
+  if (block)
+    logger.error(
+      non_retryable
+        ? \`Blocking \${lease.stream} on non-retryable error.\`
+        : \`Blocking \${lease.stream} after \${lease.retry} retries.\`
+    );
+  // Every retry is paced by the reaction's backoff, or the default one;
+  // terminal blocks never defer. \`lease.retry\` here is the just-failed
+  // attempt's counter, so the delay paces the *next* attempt.
+  const next_attempt_at = block
+    ? undefined
+    : Date.now() +
+      compute_backoff_delay(lease.retry, options.backoff ?? DEFAULT_BACKOFF);
   return {
     lease,
-    handled: 0,
-    acked_at: lease.at,
-    error,
-    ...(block
-      ? { block: true }
-      : {
-          next_attempt_at:
-            Date.now() +
-            compute_backoff_delay(
-              lease.retry,
-              options.backoff ?? DEFAULT_BACKOFF
-            ),
-        }),
+    handled,
+    acked_at: at,
+    error: error.message,
+    block,
+    next_attempt_at,
+    failed_at,
   };
 }
 
@@ -8077,7 +8098,9 @@ async function run_drain_cycle<
             resolved = dynamic ? resolver(event) : resolver;
           } catch (error) {
             failed ??= {
-              error: \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}"): \${String(error)}\`,
+              error: new Error(
+                \`Resolver of reaction "\${reaction.handler.name}" threw on \${String(event.name)} #\${event.id} (stream "\${event.stream}"): \${String(error)}\`
+              ),
               options: reaction.options,
             };
             return false;
@@ -8105,31 +8128,30 @@ async function run_drain_cycle<
       // Retried after the default backoff; blocks once the budget is spent,
       // unless the whole store is failing (the breaker's job).
       if (entry.fetch.error !== undefined) {
-        const error = \`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`;
-        log().error(error);
         const policy = fetch_failure_policy(registry);
-        const block =
-          !store_failing &&
-          policy.blockOnError &&
-          lease.retry >= policy.maxRetries;
-        const failed: HandleResult = {
-          lease,
-          handled: 0,
-          acked_at: lease.at,
-          error,
-          ...(block
-            ? { block: true }
-            : {
-                next_attempt_at:
-                  Date.now() +
-                  compute_backoff_delay(lease.retry, DEFAULT_BACKOFF),
-              }),
-        };
-        return Promise.resolve(failed);
+        return Promise.resolve(
+          finalize(
+            lease,
+            0,
+            lease.at,
+            new Error(\`Fetch failed for \${lease.stream}: \${entry.fetch.error}\`),
+            store_failing ? { ...policy, blockOnError: false } : policy,
+            deps.logger
+          )
+        );
       }
       // A resolver threw: this stream fails like a handler would.
       if (entry.failed)
-        return Promise.resolve(resolver_failed(lease, entry.failed));
+        return Promise.resolve(
+          finalize(
+            lease,
+            0,
+            lease.at,
+            entry.failed.error,
+            entry.failed.options,
+            deps.logger
+          )
+        );
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
@@ -10614,6 +10636,7 @@ export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
+  finalize,
   type Handle,
   type HandleBatch,
   type HandleResult,

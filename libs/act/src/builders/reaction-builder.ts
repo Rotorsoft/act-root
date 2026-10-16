@@ -10,34 +10,30 @@
  * - bulk `handle_batch`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
- * Both share `_finalize`, which collapses the retry-vs-block decision and
- * the "report error only when nothing was handled" rule.
+ * Both finish through the drain's `finalize`, the one retry-or-block
+ * decision for every per-stream failure.
  *
  * @internal
  */
 
 import {
   CloseSignal,
-  compute_backoff_delay,
-  DEFAULT_BACKOFF,
   DeferSignal,
+  finalize,
   type Handle,
   type HandleBatch,
-  type HandleResult,
   resolve_defer_at,
 } from "../internal/index.js";
 
 import type { ReactionScope } from "../scoped.js";
-import {
-  type Actor,
-  type BatchHandler,
-  type Committed,
-  type Lease,
-  type Logger,
-  NonRetryableError,
-  type ReactionOptions,
-  type ReactionPayload,
-  type Schemas,
+import type {
+  Actor,
+  BatchHandler,
+  Committed,
+  Lease,
+  Logger,
+  ReactionPayload,
+  Schemas,
 } from "../types/index.js";
 
 /**
@@ -59,56 +55,6 @@ export type ReactionDeps<
    */
   readonly reaction_scope: ReactionScope<TEvents, TActions, TActor>;
 };
-
-/**
- * Shared finalization: log the error and decide retry vs. block. The
- * error string is *always* surfaced on the failure path — drain-cycle
- * uses `handled > 0` (not `error` presence) to decide whether to ack
- * the partial progress, so the message can travel for trace + blocked
- * record without affecting the ack/skip choice.
- */
-function finalize(
-  lease: Lease,
-  handled: number,
-  at: number,
-  error: Error | undefined,
-  options: ReactionOptions,
-  logger: Logger,
-  failed_at?: number
-): HandleResult {
-  if (!error) return { lease, handled, acked_at: at };
-  logger.error(error);
-  // A `NonRetryableError` from the handler short-circuits the retry
-  // budget — block on first attempt when the operator has opted in via
-  // `blockOnError`. When `blockOnError` is false, the operator has
-  // explicitly chosen "retry forever," so we don't override that.
-  const non_retryable = error instanceof NonRetryableError;
-  const block =
-    options.blockOnError &&
-    (non_retryable || lease.retry >= options.maxRetries);
-  if (block)
-    logger.error(
-      non_retryable
-        ? `Blocking ${lease.stream} on non-retryable error.`
-        : `Blocking ${lease.stream} after ${lease.retry} retries.`
-    );
-  // Every retry is paced by the reaction's backoff, or the default one;
-  // terminal blocks never defer. `lease.retry` here is the just-failed
-  // attempt's counter, so the delay paces the *next* attempt.
-  const next_attempt_at = block
-    ? undefined
-    : Date.now() +
-      compute_backoff_delay(lease.retry, options.backoff ?? DEFAULT_BACKOFF);
-  return {
-    lease,
-    handled,
-    acked_at: at,
-    error: error.message,
-    block,
-    next_attempt_at,
-    failed_at,
-  };
-}
 
 /**
  * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.

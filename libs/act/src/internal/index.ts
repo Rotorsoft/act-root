@@ -74,6 +74,7 @@ export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
+  finalize,
   type Handle,
   type HandleBatch,
   type HandleResult,
