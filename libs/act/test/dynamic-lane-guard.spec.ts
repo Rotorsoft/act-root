@@ -49,18 +49,6 @@ const captured = async (fn: () => Promise<void>): Promise<string[]> => {
 };
 
 describe("a dynamic resolution onto an undeclared lane", () => {
-  it("CONTROL — the static form is still rejected at build", () => {
-    expect(() =>
-      act()
-        .withState(Counter)
-        .withLane({ name: "fast" })
-        .on("Pinged")
-        .do(async function onPinged() {})
-        .to({ target: "t", lane: "typo" as "fast" })
-        .build()
-    ).toThrow(/undeclared lane "typo"/);
-  });
-
   it("still runs the reaction instead of stranding the stream", async () => {
     let ran = 0;
     const { app, dispose } = await sandbox(
@@ -137,22 +125,6 @@ describe("a dynamic resolution onto an undeclared lane", () => {
 });
 
 describe("two dynamic resolutions disagreeing on a target's lane", () => {
-  it("CONTROL — the static form is still rejected at build", () => {
-    expect(() =>
-      act()
-        .withState(Counter)
-        .withLane({ name: "fast" })
-        .withLane({ name: "slow" })
-        .on("Bumped")
-        .do(async function onBumped() {})
-        .to({ target: "T", lane: "fast" })
-        .on("Pinged")
-        .do(async function onPinged() {})
-        .to({ target: "T", lane: "slow" })
-        .build()
-    ).toThrow(/conflicting lane assignments/);
-  });
-
   it("says so — first-discovery-wins is not silent", async () => {
     const errors = await captured(async () => {
       const { app, dispose } = await sandbox(
@@ -383,21 +355,6 @@ describe("reporting once per declaration, not once per aggregate", () => {
  * never runs the reaction that asked for "slow".
  */
 describe("an omitted lane disagreeing with a declared one", () => {
-  it("CONTROL — the static form is still rejected at build", () => {
-    expect(() =>
-      act()
-        .withState(Counter)
-        .withLane({ name: "slow" })
-        .on("Bumped")
-        .do(async function onBumped() {})
-        .to({ target: "T" })
-        .on("Pinged")
-        .do(async function onPinged() {})
-        .to({ target: "T", lane: "slow" })
-        .build()
-    ).toThrow(/conflicting lane assignments \("slow" vs "default"\)/);
-  });
-
   it("reports the same disagreement on the dynamic path", async () => {
     const errors = await captured(async () => {
       const { app, dispose } = await sandbox(

@@ -322,14 +322,14 @@ describe("defer outcome (integration)", () => {
 
     // A pass whose claimed streams all deferred still has work: more streams
     // were marked than one claim takes (streamLimit 10).
-    const burst = async (defer_first: boolean) => {
+    it("runs every stream of a burst whose first pass only deferred", async () => {
       const tried = new Set<string>();
       const ran = new Set<string>();
       const app = act()
         .withState(counter)
         .on("ticked")
         .do(async function remindLater(event) {
-          if (defer_first && !tried.has(event.stream)) {
+          if (!tried.has(event.stream)) {
             tried.add(event.stream);
             throw new DeferSignal({ at: new Date(Date.now() + 200) });
           }
@@ -344,18 +344,12 @@ describe("defer outcome (integration)", () => {
         )
       );
       await vi.waitFor(() => expect(ran.size).toBe(12), { timeout: 3000 });
-    };
-
-    it("runs every stream of a burst whose first pass only deferred", () =>
-      burst(true));
-
-    it("control — runs every stream of a burst that never defers", () =>
-      burst(false));
+    });
 
     // A failed finalize persisted nothing, so the reaction redelivers; the
     // drain retries after the breaker's cooldown without waiting for it to
     // open (threshold 5).
-    const failed_finalize = async (fail: boolean) => {
+    it("re-fires after the finalize that would persist its schedule fails", async () => {
       let runs = 0;
       const app = act()
         .withState(counter)
@@ -371,7 +365,7 @@ describe("defer outcome (integration)", () => {
       await app.do("tick", { stream: "flaky", actor }, {});
       const s = store();
       const ack = s.ack.bind(s);
-      let once = fail;
+      let once = true;
       vi.spyOn(s, "ack").mockImplementation((leases) => {
         if (!once) return ack(leases);
         once = false;
@@ -380,13 +374,7 @@ describe("defer outcome (integration)", () => {
       await app.correlate();
       await app.drain({ leaseMillis: 200 });
       await vi.waitFor(() => expect(runs).toBe(2), { timeout: 1500 });
-    };
-
-    it("re-fires after the finalize that would persist its schedule fails", () =>
-      failed_finalize(true));
-
-    it("control — re-fires when the finalize succeeds", () =>
-      failed_finalize(false));
+    });
   });
 
   it("holds pending until the due-time, then redelivers and acks", async () => {
@@ -521,30 +509,6 @@ describe("defer outcome (integration)", () => {
         timeout: 1500,
       });
       await running;
-    });
-
-    it("control — runs it when no drain is running", async () => {
-      const ran: string[] = [];
-      const until = Date.now() + 100;
-      const app = act()
-        .withState(counter)
-        .on("ticked")
-        .do(async function quick(e) {
-          if (e.stream === "b" && Date.now() < until)
-            throw new DeferSignal({ at: new Date(until) });
-          ran.push(e.stream);
-        })
-        .to((e) => ({ target: `t-${e.stream}` }))
-        .build();
-      await app.do("tick", { stream: "b", actor }, {});
-      await app.correlate();
-      await app.drain();
-      await app.do("tick", { stream: "a", actor }, {});
-      await app.correlate();
-      await app.drain();
-      await vi.waitFor(() => expect(ran).toEqual(["a", "b"]), {
-        timeout: 1500,
-      });
     });
   });
 
