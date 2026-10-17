@@ -19,8 +19,6 @@ const DEFAULT_STREAM_PAGE = 500;
  * @param query - Optional filter. A caller-supplied `limit` sets the page
  *   size (the walk still visits every match); `after` seeds the cursor.
  * @returns The total number of positions emitted.
- *
- * @internal
  */
 export async function walk_streams(
   store: Store,

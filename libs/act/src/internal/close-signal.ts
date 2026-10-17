@@ -1,7 +1,4 @@
 /**
- * @module close-signal
- * @category Internal
- *
  * The control-flow signal a reaction handler throws to *close* a stream.
  * Like {@link "defer-signal".DeferSignal} it rides the dispatcher's
  * `try/catch`, but where a defer holds the stream for later, a close asks the
@@ -21,8 +18,6 @@
  * *target* distinct from the reaction's lease stream, so the signal carries the
  * stream to close explicitly (`stream`); when omitted (a user reaction closing
  * its own stream) it defaults to the lease stream.
- *
- * @internal
  */
 export class CloseSignal extends Error {
   /**

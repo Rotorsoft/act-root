@@ -1,43 +1,11 @@
 /**
- * @module internal/config
- * @category Internal
- *
- * **The single home for every builder-facing config bag in act-core.** Any
- * options object an operator hands to `act().build()`, a builder method
- * (`.on(...)`, `.do(...)`, `.withLane(...)`), or a runtime cycle
- * (`drain(...)` / `settle(...)`) is validated here with Zod — never with a
- * hand-written `if (x < min) throw` ladder — so misconfiguration surfaces as
- * a `ZodError` at the entry point, not as `NaN` arithmetic on the first cycle
- * tick.
- *
- * Layout: one section per bag, each with its `DEFAULT_*` constants, an
- * internal `<Type>OptionsSchema`, an inferred `<Type>Config`, and a
- * `resolve<Type>Config(options): <Type>Config`. The schema is never
- * re-exported — the public surface is the inferred type + resolver.
- *
- * Index of bags owned here:
- * - **Backoff** — retry pacing (`BackoffOptions`), nested in reaction/action.
- * - **Reaction** — `.do(handler, options)` (`blockOnError` / `maxRetries` / `backoff`).
- * - **Action** — `.on(entry, options)` (`maxRetries` / `backoff`).
- * - **Lane** — `.withLane({...})` (`leaseMillis` / `streamLimit` / `cycleMs`).
- * - **Drain / Settle** — `drain(...)` / `settle(...)` runtime knobs.
- * - **Autoclose** — the `.autocloses` / `ActOptions` autoclose knobs (+ window).
- * - **CircuitBreaker** — the store-op breaker on `ActOptions`.
- * - **Fold** — `projection(...).of(...)` batch-fold knobs.
- *
- * Sibling env/package config (`config()`, `NODE_ENV`, log level) lives in the
- * public `../config.ts` — a different concern (process environment, not
- * builder input). The `@rotorsoft/act-http` transport bags (`SseOptions`,
- * `OpenAPIOptions`) live in that package; core cannot own another package's
- * surface.
- *
- * Validation philosophy: reject only what is genuinely broken — `NaN`,
- * `±Infinity` (Zod 4's `z.number()` rejects both by default), and negatives
- * where nonsensical. A value that works today is never newly rejected. The
- * real strictness lands on `maxRetries` and `backoff`, the knobs whose bad
- * values silently corrupt the poison-quarantine and retry-loop-exit gates.
- *
- * @internal
+ * The single home for every builder-facing config bag in act-core: one
+ * section per bag, each with its `DEFAULT_*` constants, an internal
+ * `<Type>OptionsSchema`, the inferred `<Type>Config` and a
+ * `resolve<Type>Config`, so misconfiguration throws a `ZodError` at the
+ * entry point. Validation rejects only what is broken (`NaN`, `±Infinity`,
+ * nonsensical negatives) and never newly rejects a value that works. The
+ * rules are in CLAUDE.md § Config-validation schemas.
  */
 
 import { z } from "zod";
@@ -53,10 +21,8 @@ import type {
   ShutdownOptions,
 } from "../types/index.js";
 
-// ---------------------------------------------------------------------------
 // Backoff — retry pacing. Nested inside the reaction/action bags below; also
 // resolvable on its own (`resolveBackoffConfig`) for direct callers.
-// ---------------------------------------------------------------------------
 
 /**
  * Rejects an off-union `strategy`, a non-finite/negative `baseMs`, or a
@@ -64,7 +30,6 @@ import type {
  * `NaN`/`±Infinity` by default, so `.min(0)` / `.gt(0)` also close the
  * non-finite gap. No `maxMs >= baseMs` constraint — a sub-`baseMs` cap on
  * `exponential` is documented behavior, not an error.
- * @internal
  */
 const BackoffOptionsSchema = z.object({
   strategy: z.enum(["fixed", "linear", "exponential"]),
@@ -92,11 +57,9 @@ export function resolveBackoffConfig(
     : BackoffOptionsSchema.parse(options);
 }
 
-// ---------------------------------------------------------------------------
 // Reaction — `.do(handler, options)`. `maxRetries` gates the poison-quarantine
 // decision (`retry >= maxRetries`), so a `NaN` here silently disables
 // `blockOnError` (a poison message retries forever). Validate the whole bag.
-// ---------------------------------------------------------------------------
 
 /** Retries a reaction gets before it blocks, unless `.do()` says otherwise. */
 export const DEFAULT_MAX_RETRIES = 3;
@@ -119,11 +82,9 @@ export function resolveReactionConfig(
   return ReactionOptionsSchema.parse(options);
 }
 
-// ---------------------------------------------------------------------------
 // Action — `.on(entry, options)`. `maxRetries` gates the command retry loop's
 // exit (`attempt >= maxRetries`), so a `NaN` here can spin the loop forever on
 // a contended stream. All fields optional (the argument itself is optional).
-// ---------------------------------------------------------------------------
 
 const ActionOptionsSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
@@ -138,11 +99,9 @@ export function resolveActionConfig(options: ActionOptions): ActionConfig {
   return ActionOptionsSchema.parse(options);
 }
 
-// ---------------------------------------------------------------------------
 // Lane — `.withLane({...})`. Per-lane overrides of the drain budget. Time
 // knobs (`leaseMillis` / `cycleMs`) accept any non-negative ms; `streamLimit`
 // is an integer count. Reject NaN/Infinity/negative; allow 0 (as today).
-// ---------------------------------------------------------------------------
 
 const LaneConfigSchema = z.object({
   name: z.string().min(1),
@@ -159,11 +118,9 @@ export function resolveLaneConfig<TName extends string>(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Drain / Settle — runtime knobs for `drain(...)` / `settle(...)`. Parsed once
 // per call (cheap). Reject NaN/Infinity/negative; allow 0. `correlate` is a
 // pass-through query filter (validated by the store), so it is not reshaped.
-// ---------------------------------------------------------------------------
 
 /** Streams a drain claims per cycle. */
 export const DEFAULT_STREAM_LIMIT = 10;
@@ -226,9 +183,7 @@ export function resolveSettleConfig(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Shutdown — the grace budget `shutdown(...)` gives in-flight drain cycles.
-// ---------------------------------------------------------------------------
 
 /**
  * Ceiling on the derived shutdown grace budget. Without a cap, a lane
@@ -257,12 +212,10 @@ export function resolveShutdownConfig(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Act — the top-level `act().build(options)` scalar knobs. The nested bags
 // (`autocloseWindow`, `circuitBreaker`) are resolved by their own resolvers
 // below; the `scoped`/`correlator` fields are objects/functions passed
 // through untouched (`.loose()`), so only the scalar knobs are checked here.
-// ---------------------------------------------------------------------------
 
 const ActOptionsSchema = z
   .object({
@@ -280,11 +233,9 @@ export function resolveActConfig(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Autoclose — the autoclose knobs on `ActOptions` (+ the off-hours window).
 // The window *logic* (DST, hour math) stays in `autoclose-window.ts`; only
 // the schema, defaults, and resolver live here.
-// ---------------------------------------------------------------------------
 
 /**
  * @deprecated The cadence knob is derived from `autocloseWindow` now;
@@ -298,7 +249,7 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
 /** Default IANA zone for `autocloseWindow` when the operator omits one. */
 const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
 
-/** True when `tz` is a zone the runtime's `Intl` accepts. @internal */
+/** True when `tz` is a zone the runtime's `Intl` accepts. */
 function is_valid_time_zone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });
@@ -366,10 +317,8 @@ export function resolveAutocloseConfig(
   });
 }
 
-// ---------------------------------------------------------------------------
 // CircuitBreaker — the store-op breaker on `ActOptions`. The `CircuitBreaker`
 // state machine stays in `circuit-breaker.ts` and imports the resolved type.
-// ---------------------------------------------------------------------------
 
 const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
 const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
@@ -399,9 +348,7 @@ export const resolveCircuitBreakerConfig = (
   options?: CircuitBreakerOptions
 ): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
 
-// ---------------------------------------------------------------------------
 // Fold — `projection(name).of(state)` batch-fold knobs.
-// ---------------------------------------------------------------------------
 
 const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 const DEFAULT_MAX_CACHED_STATES = 10_000;

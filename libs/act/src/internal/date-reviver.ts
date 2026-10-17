@@ -1,7 +1,4 @@
 /**
- * @module date-reviver
- * @category Internal
- *
  * Turning stored text back into `Date`s, driven by the declared schema.
  *
  * JSON has no date type, so a `Date` is stored as its ISO form and something
@@ -19,8 +16,6 @@
  * The shape-based {@link dateReviver} in `utils.ts` is the predecessor this
  * replaced — it revived anything ISO-8601-looking, including fields declared
  * `z.string()`.
- *
- * @internal
  */
 
 import { z } from "zod";

@@ -1,7 +1,4 @@
 /**
- * @module defer-timer
- * @category Internal
- *
  * The shared "next visit time" primitive. A `DeferTimer` holds a
  * `stream → due-time` map and a single collapsed wake timer: it parks
  * streams that should be re-visited later and fires one `on_wake` callback
@@ -25,26 +22,15 @@
  * onto the owning lane's timer via {@link "drain-cycle".DrainController.seed_defer},
  * so an idle deferred stream re-arms at its due-time with no
  * intervening commit.
- *
- * @internal
- */
-
-/**
- * A min-heap-free scheduler over a small `stream → due-time` map. The maps
- * are bounded by the worker's claim/stream limits, so a linear scan for the
- * earliest entry is cheaper than maintaining a heap.
- *
- * @internal
  */
 
 /**
  * Node's `setTimeout` delay is a 32-bit signed int (~24.8 days). A larger
  * delay overflows and fires immediately, so we cap at this and re-arm.
- *
- * @internal
  */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
+/** A linear scan finds the earliest entry: the map is bounded by claim limits. */
 export class DeferTimer {
   private readonly _due = new Map<string, number>();
   private _timer: ReturnType<typeof setTimeout> | undefined;
@@ -105,12 +91,8 @@ export class DeferTimer {
     }
     let earliest = Number.POSITIVE_INFINITY;
     for (const t of this._due.values()) if (t < earliest) earliest = t;
-    // Clamp to setTimeout's 32-bit ceiling (~24.8 days). A longer due-time
-    // (e.g. a 90-day autoclose cooldown) would otherwise overflow and Node
-    // fires it immediately, busy-looping. Instead we wake at the ceiling: the
-    // still-future entry stays, the consumer re-schedules for the remaining
-    // span, and (for persisted defers) `claim` skips the stream until its
-    // real due-time anyway.
+    // A longer due-time (a 90-day autoclose cooldown) wakes at the ceiling;
+    // the entry stays and the consumer re-schedules for the rest.
     const delay = Math.min(
       Math.max(0, earliest - Date.now()),
       MAX_TIMER_DELAY_MS

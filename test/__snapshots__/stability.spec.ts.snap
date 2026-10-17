@@ -4334,45 +4334,12 @@ export type AuditFinding =
 
 // === autoclose-policy.ts ===
 /**
- * @module autoclose-policy
- * @category Internal
- *
- * Declarative close-policy options consumed by \`.autocloses({...})\`
- * Three optional fields cover the three
- * operational pressure points every real close policy traces back to:
- *
- *   - \`after\`   — time / compliance ("autocloses **after** N days")
- *   - \`is\`      — domain lifecycle ("autocloses ... **is** Resolved")
- *   - \`reaches\` — resource ("autocloses ... **reaches** 10k events")
- *
- * Top-level fields combine with **AND** semantics. This captures the
- * common cooldown-after-terminal pattern that runs through almost
- * every business app — *"close 90 days after \`Resolved\`"*, *"close 14
- * days after \`Delivered\`"*, *"close 30 days after a GDPR deletion
- * request"*. All conditions must hold for the cycle to truncate.
- *
- * A separate \`or: {...}\` block opens an alternative path: when
- * present, the policy fires if **either** the top-level AND group
- * matches **or** any field inside \`or\` matches. Use it for safety
- * nets — *"close (Resolved AND aged 90 days) OR if event count
- * reaches 10k"*. The two-axis split mirrors the two ways close
- * policies appear in practice: primary close logic (AND-shaped) and
- * defensive backstops (OR-shaped).
- *
- * The state builder's \`.autocloses(...)\` overload distinguishes
- * function (predicate) from object (policy) and routes the latter
- * through {@link compile_autoclose_policy}, which validates via
- * {@link AutoclosePolicySchema} and returns the compiled predicate.
- * Operators with custom needs (per-stream metadata, multi-branch
- * AND/OR like "(\`Resolved\` + 90d) OR (\`Cancelled\` + 30d)") keep the
- * function form; the declarative form covers the 90% case.
- *
- * Validation runs at the builder call (\`act().build()\` time), so
- * misconfiguration — empty bag, sub-1 \`reaches\`, sub-minute \`after\`,
- * empty \`is\`, empty \`or\`, nested \`or\` inside \`or\`, unknown keys —
- * throws at build, not on the first cycle tick.
- *
- * @internal
+ * Compiles the declarative \`.autocloses({...})\` policy into a predicate.
+ * Top-level \`after\` / \`is\` / \`reaches\` combine with AND; an \`or: {...}\`
+ * block adds an alternative path. Validated with
+ * {@link AutoclosePolicySchema} when the app builds, so a bad policy throws
+ * then, not on the first cycle. Semantics and examples:
+ * docs/docs/guides/close-policies.md.
  */
 
 import { z } from "zod";
@@ -4403,12 +4370,12 @@ const MIN_AFTER_DAYS = 1 / 1440;
  */
 const MIN_KEEP_DAYS = 1;
 
-/** The \`Date\` that lies \`days\` after \`date\`. @internal */
+/** The \`Date\` that lies \`days\` after \`date\`. */
 export function days_after(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
 }
 
-/** The \`Date\` that lies \`days\` in the past. @internal */
+/** The \`Date\` that lies \`days\` in the past. */
 export function days_before_now(days: number): Date {
   return new Date(Date.now() - days * DAY_MS);
 }
@@ -4417,8 +4384,6 @@ export function days_before_now(days: number): Date {
  * Day-denominated window shared by \`after\` (terminate cooldown) and
  * \`keep\` (rolling retention). Fractional days accepted; windows below
  * the field's floor reject at build.
- *
- * @internal
  */
 const window_schema = (
   field: "after" | "keep",
@@ -4459,8 +4424,6 @@ const ReachesSchema = z
  * Same field set as the top-level policy minus \`or\` itself (so nested
  * \`or\` inside \`or\` rejects via \`.strict()\` instead of recursing). At
  * least one field required; empty \`{}\` is a misconfiguration.
- *
- * @internal
  */
 const OrBlockSchema = z
   .object({
@@ -4485,8 +4448,6 @@ const OrBlockSchema = z
  * {@link AutoclosePolicy} type and the \`.autocloses({...})\` overload,
  * never this schema. \`.strict()\` rejects unknown keys so typos surface
  * at build instead of being silently ignored.
- *
- * @internal
  */
 const AutoclosePolicySchema = z
   .object({
@@ -4542,14 +4503,14 @@ const AutoclosePolicySchema = z
  */
 export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 
-/** Compile a single \`after\` field into its predicate slice. @internal */
+/** Compile a single \`after\` field into its predicate slice. */
 function compile_after(
   after: NonNullable<AutoclosePolicy["after"]>
 ): AutoclosePredicate<Schemas> {
   return (_stream, head) => days_after(head.created, after.days) <= new Date();
 }
 
-/** Compile a single \`is\` field into its predicate slice. @internal */
+/** Compile a single \`is\` field into its predicate slice. */
 function compile_is(
   is: NonNullable<AutoclosePolicy["is"]>
 ): AutoclosePredicate<Schemas> {
@@ -4557,7 +4518,7 @@ function compile_is(
   return (_stream, head) => set.has(head.name as string);
 }
 
-/** Compile a single \`reaches\` field into its predicate slice. @internal */
+/** Compile a single \`reaches\` field into its predicate slice. */
 function compile_reaches(
   reaches: NonNullable<AutoclosePolicy["reaches"]>
 ): AutoclosePredicate<Schemas> {
@@ -4589,8 +4550,6 @@ function compile_reaches(
  * Throws \`ZodError\` at call time when the options are invalid (empty
  * bag, non-positive \`reaches\`, sub-minute \`after\`, empty \`is\`, empty
  * \`or\`, nested \`or\`, unknown keys).
- *
- * @internal
  */
 /**
  * The smallest \`after\` window (in days) anywhere in a policy — across
@@ -4604,8 +4563,6 @@ function compile_reaches(
  * just waits for the next event to re-trigger rather than parking on a
  * due-time. Conservative — the min across branches never defers past
  * the soonest a branch could fire.
- *
- * @internal
  */
 export function policy_min_after_days(
   options: AutoclosePolicy
@@ -4624,8 +4581,6 @@ export function policy_min_after_days(
  * window (via a windowed close) and derives its prune due-time as
  * \`tail.created\` plus this many days — the earliest the oldest
  * surviving domain event can age out of the window.
- *
- * @internal
  */
 export function policy_keep_days(options: AutoclosePolicy): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);
@@ -4671,9 +4626,6 @@ export function compile_autoclose_policy(
 
 // === autoclose-reaction.ts ===
 /**
- * @module autoclose-reaction
- * @category Internal
- *
  * Synthesis of the online close-the-books reaction. \`.autocloses(policy)\`
  * is not a sweep: it is a reaction on every event the declaring state owns
  * that evaluates the policy against the LIVE head (so a reopened stream
@@ -4686,8 +4638,6 @@ export function compile_autoclose_policy(
  * discovered by \`classify_registry\` and its target stream subscribed. The
  * registry is complete once the builder finishes; the orchestrator never
  * mutates it.
- *
- * @internal
  */
 
 import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
@@ -4720,8 +4670,6 @@ const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
  * The reactions are synthesized once into the shared registry, so nothing
  * per-Act is captured here — the off-hours window is read from the running
  * Act at resolution time via the injected \`read_window\`.
- *
- * @internal
  */
 export function synthesize_autoclose_reactions<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -4856,20 +4804,11 @@ export function synthesize_autoclose_reactions<
 
 // === backoff.ts ===
 /**
- * @module backoff
- * @category Internal
- *
  * Per-reaction retry backoff delay computation. Pure function — keeps
  * \`DrainController\` and \`finalize\` (in \`drain-cycle.ts\`) testable in isolation.
- *
- * @internal
  */
 
 import type { BackoffOptions } from "../types/action.js";
-
-// The \`BackoffOptions\` config schema + resolver live in \`./config.ts\` (the
-// single home for every builder-facing config bag). This module keeps only
-// the runtime delay math, which stays hot-path and dependency-free.
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on
@@ -4913,8 +4852,6 @@ export function compute_backoff_delay(
 
 // === circuit-breaker.ts ===
 /**
- * @module internal/circuit-breaker
- *
  * Orchestrator-level circuit breaker for store operations. The drain loop
  * polls \`claim()\` continuously; when the backing store goes down every poll
  * throws a {@link StoreError}, and without a breaker the orchestrator would
@@ -4936,10 +4873,6 @@ import type { CircuitBreakerConfig } from "./config.js";
 
 /** Circuit breaker state. */
 export type CircuitState = "closed" | "open" | "half-open";
-
-// The circuit-breaker config schema, defaults, and resolver live in
-// \`./config.js\` (the single home for builder-facing config bags). This
-// module keeps only the state machine that consumes the resolved config.
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers
@@ -5062,9 +4995,6 @@ export class CircuitBreaker {
 
 // === close-cycle.ts ===
 /**
- * @module close-cycle
- * @category Internal
- *
  * Pure orchestration of the close-the-books flow: scan stream heads,
  * partition by reaction safety, guard with tombstones, optionally seed
  * restart state, run user archive callbacks, atomically truncate, and
@@ -5073,8 +5003,6 @@ export class CircuitBreaker {
  * Also home to the pieces a closer needs around the cycle: the per-stream
  * {@link CloseLock} and the bounded {@link catch_up_correlation}. The Act
  * orchestrator only wires its ports in and emits \`"closed"\`.
- *
- * @internal
  */
 
 import { cache, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
@@ -5091,8 +5019,6 @@ import { walk_streams } from "./walk-streams.js";
 /**
  * Dependencies the close cycle needs from the Act orchestrator. Decoupled
  * from \`Act\` itself so the cycle can be exercised from tests in isolation.
- *
- * @internal
  */
 export type CloseCycleDeps = {
   /** Whether any event has a reaction; without one nothing can be pending. */
@@ -5149,8 +5075,6 @@ export type CloseCycleDeps = {
  * Scan window and pass cap for {@link catch_up_correlation}. Bounded, so a
  * close behind a large backlog skips the stream (the documented retryable
  * outcome) rather than scanning the whole log inside an operator call.
- *
- * @internal
  */
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
@@ -5162,8 +5086,6 @@ const CLOSE_CATCH_UP_PASSES = 20;
  *
  * Stops as soon as a pass makes no progress (the log has no more to give),
  * and after {@link CLOSE_CATCH_UP_PASSES} windows.
- *
- * @internal
  */
 export async function catch_up_correlation(
   cursor: { readonly checkpoint: number; arm(): void },
@@ -5188,8 +5110,6 @@ export async function catch_up_correlation(
  * Per-stream serialization for close critical sections: two closers of the
  * same stream never prune or archive concurrently, while different streams
  * proceed in parallel. One instance per Act.
- *
- * @internal
  */
 export class CloseLock {
   private readonly _tails = new Map<string, Promise<unknown>>();
@@ -5214,8 +5134,6 @@ export class CloseLock {
  * Page size for the safety probe's keyset pagination over the
  * subscriptions table. Above \`query_streams\`'s default \`limit\` of 100
  * to keep the round-trip count low while bounding per-page work.
- *
- * @internal
  */
 const SAFETY_PROBE_PAGE_SIZE = 1000;
 
@@ -5248,8 +5166,6 @@ type StreamHead = {
  * pure prefix delete behind an existing snapshot (see
  * {@link run_windowed_closes}); the rest run the guarded
  * tombstone/restart pipeline below.
- *
- * @internal
  */
 export async function run_close_cycle(
   targets: CloseTarget[],
@@ -5397,9 +5313,7 @@ async function run_full_closes(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Windowed branch — prune the prefix behind an existing snapshot
-// ---------------------------------------------------------------------------
 
 /**
  * Run the windowed closes: probe the min consumer watermark per stream
@@ -5414,8 +5328,6 @@ async function run_full_closes(
  * at the head, above the boundary. Current state is unchanged, so the
  * cache stays warm. Streams the store skips (no qualifying snapshot)
  * are reported in \`skipped\`.
- *
- * @internal
  */
 async function run_windowed_closes(
   windowed: CloseTarget[],
@@ -5446,11 +5358,8 @@ async function run_windowed_closes(
   for (const t of windowed) {
     const entry = await with_lock(t.stream, async () => {
       const max_id = min_at.get(t.stream);
-      // Boundary probe: will a windowed truncate prune anything? The
-      // store deletes events with \`id < boundary.id\`, where \`boundary\`
-      // is the latest \`__snapshot__\` with \`created < before\` (and, when
-      // capped, \`id <= max_id\`). No such prefix ⇒ archive is skipped and
-      // the stream is reported skipped, exactly as a no-op truncate would.
+      // Nothing to prune (see windowed_prune_pending): skip the archive
+      // and report the stream skipped, as a no-op truncate would.
       if (!(await windowed_prune_pending(t.stream, t.before!, max_id)))
         return undefined;
       // Archive: user callback against the cutoff, run while the prefix
@@ -5478,8 +5387,6 @@ async function run_windowed_closes(
  * no-op truncate) or when the boundary is already the earliest event
  * (the prefix was pruned by a prior closer). This is the guard that
  * makes the windowed archive fire at most once per pruned range.
- *
- * @internal
  */
 async function windowed_prune_pending(
   stream: string,
@@ -5512,8 +5419,6 @@ async function windowed_prune_pending(
  * matching mirror {@link partition_by_safety}; instead of flagging
  * pending streams it folds \`min(at)\` per stream. Streams with no
  * matching subscriptions are absent (no cap).
- *
- * @internal
  */
 async function probe_min_watermarks(
   streams: string[],
@@ -5564,9 +5469,7 @@ function source_matcher(): (
   };
 }
 
-// ---------------------------------------------------------------------------
 // Phase 1 — scan stream heads
-// ---------------------------------------------------------------------------
 
 async function scan_stream_heads(
   streams: string[]
@@ -5606,9 +5509,7 @@ async function scan_stream_heads(
   return out;
 }
 
-// ---------------------------------------------------------------------------
 // Phase 2 — partition by safety
-// ---------------------------------------------------------------------------
 
 async function partition_by_safety(
   stream_info: Map<string, StreamHead>,
@@ -5668,9 +5569,7 @@ async function partition_by_safety(
   return safe;
 }
 
-// ---------------------------------------------------------------------------
 // Phase 3 — guard with tombstones
-// ---------------------------------------------------------------------------
 
 async function guard_with_tombstones(
   safe: string[],
@@ -5707,9 +5606,7 @@ async function guard_with_tombstones(
   return { guarded, guard_events };
 }
 
-// ---------------------------------------------------------------------------
 // Phase 4 — load restart seeds
-// ---------------------------------------------------------------------------
 
 async function load_restart_seeds(
   guarded: string[],
@@ -5743,9 +5640,7 @@ async function load_restart_seeds(
   return seed_states;
 }
 
-// ---------------------------------------------------------------------------
 // Phase 5 — archive callbacks
-// ---------------------------------------------------------------------------
 
 async function run_archive_callbacks(
   guarded: string[],
@@ -5759,9 +5654,7 @@ async function run_archive_callbacks(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Phase 5b — confirm the guard is still the head
-// ---------------------------------------------------------------------------
 
 async function heads_still_guarded(
   guarded: string[],
@@ -5779,9 +5672,7 @@ async function heads_still_guarded(
   });
 }
 
-// ---------------------------------------------------------------------------
 // Phase 6 — atomic truncate + cache warm
-// ---------------------------------------------------------------------------
 
 async function truncate_and_warm_cache(
   guarded: string[],
@@ -5830,9 +5721,6 @@ async function truncate_and_warm_cache(
 
 // === close-signal.ts ===
 /**
- * @module close-signal
- * @category Internal
- *
  * The control-flow signal a reaction handler throws to *close* a stream.
  * Like {@link "defer-signal".DeferSignal} it rides the dispatcher's
  * \`try/catch\`, but where a defer holds the stream for later, a close asks the
@@ -5852,8 +5740,6 @@ async function truncate_and_warm_cache(
  * *target* distinct from the reaction's lease stream, so the signal carries the
  * stream to close explicitly (\`stream\`); when omitted (a user reaction closing
  * its own stream) it defaults to the lease stream.
- *
- * @internal
  */
 export class CloseSignal extends Error {
   /**
@@ -5898,45 +5784,13 @@ export class CloseSignal extends Error {
 
 // === config.ts ===
 /**
- * @module internal/config
- * @category Internal
- *
- * **The single home for every builder-facing config bag in act-core.** Any
- * options object an operator hands to \`act().build()\`, a builder method
- * (\`.on(...)\`, \`.do(...)\`, \`.withLane(...)\`), or a runtime cycle
- * (\`drain(...)\` / \`settle(...)\`) is validated here with Zod — never with a
- * hand-written \`if (x < min) throw\` ladder — so misconfiguration surfaces as
- * a \`ZodError\` at the entry point, not as \`NaN\` arithmetic on the first cycle
- * tick.
- *
- * Layout: one section per bag, each with its \`DEFAULT_*\` constants, an
- * internal \`<Type>OptionsSchema\`, an inferred \`<Type>Config\`, and a
- * \`resolve<Type>Config(options): <Type>Config\`. The schema is never
- * re-exported — the public surface is the inferred type + resolver.
- *
- * Index of bags owned here:
- * - **Backoff** — retry pacing (\`BackoffOptions\`), nested in reaction/action.
- * - **Reaction** — \`.do(handler, options)\` (\`blockOnError\` / \`maxRetries\` / \`backoff\`).
- * - **Action** — \`.on(entry, options)\` (\`maxRetries\` / \`backoff\`).
- * - **Lane** — \`.withLane({...})\` (\`leaseMillis\` / \`streamLimit\` / \`cycleMs\`).
- * - **Drain / Settle** — \`drain(...)\` / \`settle(...)\` runtime knobs.
- * - **Autoclose** — the \`.autocloses\` / \`ActOptions\` autoclose knobs (+ window).
- * - **CircuitBreaker** — the store-op breaker on \`ActOptions\`.
- * - **Fold** — \`projection(...).of(...)\` batch-fold knobs.
- *
- * Sibling env/package config (\`config()\`, \`NODE_ENV\`, log level) lives in the
- * public \`../config.ts\` — a different concern (process environment, not
- * builder input). The \`@rotorsoft/act-http\` transport bags (\`SseOptions\`,
- * \`OpenAPIOptions\`) live in that package; core cannot own another package's
- * surface.
- *
- * Validation philosophy: reject only what is genuinely broken — \`NaN\`,
- * \`±Infinity\` (Zod 4's \`z.number()\` rejects both by default), and negatives
- * where nonsensical. A value that works today is never newly rejected. The
- * real strictness lands on \`maxRetries\` and \`backoff\`, the knobs whose bad
- * values silently corrupt the poison-quarantine and retry-loop-exit gates.
- *
- * @internal
+ * The single home for every builder-facing config bag in act-core: one
+ * section per bag, each with its \`DEFAULT_*\` constants, an internal
+ * \`<Type>OptionsSchema\`, the inferred \`<Type>Config\` and a
+ * \`resolve<Type>Config\`, so misconfiguration throws a \`ZodError\` at the
+ * entry point. Validation rejects only what is broken (\`NaN\`, \`±Infinity\`,
+ * nonsensical negatives) and never newly rejects a value that works. The
+ * rules are in CLAUDE.md § Config-validation schemas.
  */
 
 import { z } from "zod";
@@ -5952,10 +5806,8 @@ import type {
   ShutdownOptions,
 } from "../types/index.js";
 
-// ---------------------------------------------------------------------------
 // Backoff — retry pacing. Nested inside the reaction/action bags below; also
 // resolvable on its own (\`resolveBackoffConfig\`) for direct callers.
-// ---------------------------------------------------------------------------
 
 /**
  * Rejects an off-union \`strategy\`, a non-finite/negative \`baseMs\`, or a
@@ -5963,7 +5815,6 @@ import type {
  * \`NaN\`/\`±Infinity\` by default, so \`.min(0)\` / \`.gt(0)\` also close the
  * non-finite gap. No \`maxMs >= baseMs\` constraint — a sub-\`baseMs\` cap on
  * \`exponential\` is documented behavior, not an error.
- * @internal
  */
 const BackoffOptionsSchema = z.object({
   strategy: z.enum(["fixed", "linear", "exponential"]),
@@ -5991,11 +5842,9 @@ export function resolveBackoffConfig(
     : BackoffOptionsSchema.parse(options);
 }
 
-// ---------------------------------------------------------------------------
 // Reaction — \`.do(handler, options)\`. \`maxRetries\` gates the poison-quarantine
 // decision (\`retry >= maxRetries\`), so a \`NaN\` here silently disables
 // \`blockOnError\` (a poison message retries forever). Validate the whole bag.
-// ---------------------------------------------------------------------------
 
 /** Retries a reaction gets before it blocks, unless \`.do()\` says otherwise. */
 export const DEFAULT_MAX_RETRIES = 3;
@@ -6018,11 +5867,9 @@ export function resolveReactionConfig(
   return ReactionOptionsSchema.parse(options);
 }
 
-// ---------------------------------------------------------------------------
 // Action — \`.on(entry, options)\`. \`maxRetries\` gates the command retry loop's
 // exit (\`attempt >= maxRetries\`), so a \`NaN\` here can spin the loop forever on
 // a contended stream. All fields optional (the argument itself is optional).
-// ---------------------------------------------------------------------------
 
 const ActionOptionsSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
@@ -6037,11 +5884,9 @@ export function resolveActionConfig(options: ActionOptions): ActionConfig {
   return ActionOptionsSchema.parse(options);
 }
 
-// ---------------------------------------------------------------------------
 // Lane — \`.withLane({...})\`. Per-lane overrides of the drain budget. Time
 // knobs (\`leaseMillis\` / \`cycleMs\`) accept any non-negative ms; \`streamLimit\`
 // is an integer count. Reject NaN/Infinity/negative; allow 0 (as today).
-// ---------------------------------------------------------------------------
 
 const LaneConfigSchema = z.object({
   name: z.string().min(1),
@@ -6058,11 +5903,9 @@ export function resolveLaneConfig<TName extends string>(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Drain / Settle — runtime knobs for \`drain(...)\` / \`settle(...)\`. Parsed once
 // per call (cheap). Reject NaN/Infinity/negative; allow 0. \`correlate\` is a
 // pass-through query filter (validated by the store), so it is not reshaped.
-// ---------------------------------------------------------------------------
 
 /** Streams a drain claims per cycle. */
 export const DEFAULT_STREAM_LIMIT = 10;
@@ -6125,9 +5968,7 @@ export function resolveSettleConfig(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Shutdown — the grace budget \`shutdown(...)\` gives in-flight drain cycles.
-// ---------------------------------------------------------------------------
 
 /**
  * Ceiling on the derived shutdown grace budget. Without a cap, a lane
@@ -6156,12 +5997,10 @@ export function resolveShutdownConfig(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Act — the top-level \`act().build(options)\` scalar knobs. The nested bags
 // (\`autocloseWindow\`, \`circuitBreaker\`) are resolved by their own resolvers
 // below; the \`scoped\`/\`correlator\` fields are objects/functions passed
 // through untouched (\`.loose()\`), so only the scalar knobs are checked here.
-// ---------------------------------------------------------------------------
 
 const ActOptionsSchema = z
   .object({
@@ -6179,11 +6018,9 @@ export function resolveActConfig(
   return options;
 }
 
-// ---------------------------------------------------------------------------
 // Autoclose — the autoclose knobs on \`ActOptions\` (+ the off-hours window).
 // The window *logic* (DST, hour math) stays in \`autoclose-window.ts\`; only
 // the schema, defaults, and resolver live here.
-// ---------------------------------------------------------------------------
 
 /**
  * @deprecated The cadence knob is derived from \`autocloseWindow\` now;
@@ -6197,7 +6034,7 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
 /** Default IANA zone for \`autocloseWindow\` when the operator omits one. */
 const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
 
-/** True when \`tz\` is a zone the runtime's \`Intl\` accepts. @internal */
+/** True when \`tz\` is a zone the runtime's \`Intl\` accepts. */
 function is_valid_time_zone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });
@@ -6265,10 +6102,8 @@ export function resolveAutocloseConfig(
   });
 }
 
-// ---------------------------------------------------------------------------
 // CircuitBreaker — the store-op breaker on \`ActOptions\`. The \`CircuitBreaker\`
 // state machine stays in \`circuit-breaker.ts\` and imports the resolved type.
-// ---------------------------------------------------------------------------
 
 const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
 const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
@@ -6298,9 +6133,7 @@ export const resolveCircuitBreakerConfig = (
   options?: CircuitBreakerOptions
 ): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
 
-// ---------------------------------------------------------------------------
 // Fold — \`projection(name).of(state)\` batch-fold knobs.
-// ---------------------------------------------------------------------------
 
 const DEFAULT_FOLD_FLUSH_EVERY = 1_000;
 const DEFAULT_MAX_CACHED_STATES = 10_000;
@@ -7224,9 +7057,6 @@ export class CorrelateCycle<
 
 // === correlator.ts ===
 /**
- * @module correlator
- * @category Internal
- *
  * Correlation-id generator and the default implementation.
  *
  * The default produces a readable, time-monotonic-within-window, lowercase
@@ -7236,8 +7066,6 @@ export class CorrelateCycle<
  *
  * Apps override via {@link ActOptions.correlator} to plug in any scheme
  * (tenant-prefixed, trace-id-propagated, DB-sequence-backed, etc.).
- *
- * @internal
  */
 
 import { randomInt } from "node:crypto";
@@ -7280,8 +7108,6 @@ export const default_correlator: Correlator = ({ state, action }) => {
  * Close runs outside any user action, so we synthesize a context with
  * sentinel state/action names — visible in the id when overrides aren't
  * configured.
- *
- * @internal
  */
 export function close_correlation(
   correlator: Correlator,
@@ -7524,9 +7350,6 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
 
 // === date-reviver.ts ===
 /**
- * @module date-reviver
- * @category Internal
- *
  * Turning stored text back into \`Date\`s, driven by the declared schema.
  *
  * JSON has no date type, so a \`Date\` is stored as its ISO form and something
@@ -7544,8 +7367,6 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
  * The shape-based {@link dateReviver} in \`utils.ts\` is the predecessor this
  * replaced — it revived anything ISO-8601-looking, including fields declared
  * \`z.string()\`.
- *
- * @internal
  */
 
 import { z } from "zod";
@@ -7676,9 +7497,6 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
 
 // === defer-config.ts ===
 /**
- * @module defer-config
- * @category Internal
- *
  * The \`when\` options for the public \`defer\` surface. A
  * reaction defers itself to a future time either declaratively (the
  * \`.defer(when)\` builder step) or imperatively (\`throw new DeferSignal(when)\`
@@ -7695,8 +7513,6 @@ export function date_reviver_schema(schema: unknown): z.ZodType | undefined {
  * Validation follows the config-schema standard (CLAUDE.md): an internal
  * \`*OptionsSchema\` const, a public inferred type, and a resolver. Slice 2
  * ships \`after\` / \`at\`; recurrence (\`every\`) extends this in Slice 3.
- *
- * @internal
  */
 
 import { z } from "zod";
@@ -7723,8 +7539,6 @@ const DeferDurationSchema = z
  * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`;
  * \`at\` is an absolute \`Date\`. Internal per the config standard; the public
  * surface is {@link DeferWhen} and {@link resolve_defer_at}.
- *
- * @internal
  */
 const DeferWhenSchema = z
   .object({
@@ -7736,7 +7550,7 @@ const DeferWhenSchema = z
     message: "defer: specify exactly one of \`after\` or \`at\`",
   });
 
-/** Sum a duration bag to milliseconds. @internal */
+/** Sum a duration bag to milliseconds. */
 function duration_ms(d: {
   days?: number;
   hours?: number;
@@ -7755,8 +7569,6 @@ function duration_ms(d: {
  * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
  * from its absolute \`Date\`. Never reads \`Date.now()\`, so the result is stable
  * across re-delivery.
- *
- * @internal
  */
 export function resolve_defer_at<E extends Schemas>(
   when: DeferWhen,
@@ -7771,8 +7583,6 @@ export function resolve_defer_at<E extends Schemas>(
  * The schedule handed to the declarative \`.defer\` builder step: either a
  * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
  * triggering event (read the payload to choose the schedule).
- *
- * @internal
  */
 export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
 
@@ -7781,8 +7591,6 @@ export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
  * standard) — throws \`ZodError\` on a bad shape (both/neither of \`after\`/\`at\`,
  * an empty or non-positive duration). The function form of a \`.defer\` schedule
  * can only be checked when it runs, so builders pass just the literal here.
- *
- * @internal
  */
 export function assert_defer_when(when: DeferWhen): void {
   DeferWhenSchema.parse(when);
@@ -7796,8 +7604,6 @@ export function assert_defer_when(when: DeferWhen): void {
  * real handler. The wrapper keeps the original handler's \`name\` so reaction
  * registration and de-dup are unaffected, and preserves the handler's exact
  * type so the builder step is transparent.
- *
- * @internal
  */
 export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
   handler: H,
@@ -7819,9 +7625,6 @@ export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
 
 // === defer-signal.ts ===
 /**
- * @module defer-signal
- * @category Internal
- *
  * The control-flow signal a reaction handler throws to *defer* itself.
  * Unlike an error, a defer is not a failure: the dispatcher
  * ({@link "reaction-builder".build_handle}) catches it and produces a
@@ -8438,9 +8241,6 @@ export class DrainController<
 
 // === drain.ts ===
 /**
- * @module drain
- * @category Internal
- *
  * Pipeline operations consumed by the drain/correlate loop. Each op is a
  * single async step the orchestrator invokes per drain cycle:
  *
@@ -8454,8 +8254,6 @@ export class DrainController<
  * mirroring the shape of {@link "event-sourcing"}. Trace decoration is
  * layered on top in {@link "tracing"} and selected by the orchestrator at
  * construction time. No tracing imports here.
- *
- * @internal
  */
 
 import { store } from "../ports.js";
@@ -8470,7 +8268,6 @@ import type {
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
 
-/** @internal */
 export interface DrainOps<TEvents extends Schemas> {
   claim: typeof claim;
   fetch: typeof fetch<TEvents>;
@@ -9466,9 +9263,6 @@ export async function action<
 
 // === event-versions.ts ===
 /**
- * @module event-versions
- * @category Internal
- *
  * Auto-deprecation of legacy event versions via the \`_v<digits>\` naming
  * convention.
  *
@@ -9481,8 +9275,6 @@ export async function action<
  * Convention pin: only \`_v<digits>\` with digits ≥ 2 counts as a version
  * suffix. \`Foo_v1\` is just a literal event name (the base \`Foo\` is
  * implicitly v1). Pinning here keeps the contract surface small.
- *
- * @internal
  */
 
 const VERSION_SUFFIX = /^(.+?)_v(\\d+)$/;
@@ -9511,8 +9303,6 @@ function parse(name: string): { base: string; version: number } {
  * current. The framework picks the max regardless of contiguity.
  *
  * Single-version groups (no siblings) yield no deprecations.
- *
- * @internal
  */
 export function deprecated_event_names(names: Iterable<string>): Set<string> {
   const groups = new Map<string, Versioned[]>();
@@ -9556,8 +9346,6 @@ export function deprecated_event_names(names: Iterable<string>): Set<string> {
  *
  * Returns \`undefined\` if the event has no higher-versioned sibling (which
  * means the caller's classification is stale or wrong).
- *
- * @internal
  */
 export function current_version_of(
   deprecated_name: string,
@@ -10589,9 +10377,6 @@ export * from "./utils.js";
 
 // === index.ts ===
 /**
- * @module internal
- * @category Internal
- *
  * Barrel for framework-internal modules. These exports are not part of the
  * public package API and may change between minors. Anything reachable from
  * \`@rotorsoft/act\`'s top-level barrel (\`src/index.ts\`) is the public surface;
@@ -10603,8 +10388,6 @@ export * from "./utils.js";
  * directly by file path; production code in \`adapters/\` and tests that
  * need bare ops (e.g., \`action\`, \`load\`, \`LruMap\`) likewise import from
  * the specific source file.
- *
- * @internal
  */
 
 export { type AuditDeps, audit } from "./audit.js";
@@ -12964,9 +12747,6 @@ export function projection<TEvents extends Schemas = {}>(
 
 // === projection-fold.ts ===
 /**
- * @module projection-fold
- * @category Internal
- *
  * Fold engine behind \`projection(name).of(state)\` — maintains per-stream
  * folded states in a bounded in-memory cache and flushes one row per dirty
  * stream per round, so write amplification tracks the distinct-key count
@@ -13000,10 +12780,6 @@ import type {
 import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 import { pii_strip } from "./sensitive.js";
-
-// The fold config schema, defaults, and resolver live in \`./config.js\` (the
-// single home for builder-facing config bags). This module keeps the fold
-// engine that consumes the resolved config.
 
 /**
  * A stream's in-flight fold: a mutable {@link CacheEntry} plus the
@@ -14175,26 +13951,10 @@ export function make_reaction_scope<
 
 // === sensitive.ts ===
 /**
- * @module sensitive
- * @category Internal
- *
- * Internal mechanics for the sensitive-data foundation.
- * The public surface (\`sensitive(zodType)\`) lives at \`libs/act/src/sensitive.ts\`
- * and re-exports \`REDACTED\` / \`SHREDDED\` from here; this module holds the
- * registry plus the helpers the orchestrator calls during commit, load, and
- * handler dispatch.
- *
- * - \`_registry\` — process-global \`z.registry<{ sensitive: true }>()\`. Public
- *   \`sensitive()\` adds to it; the helpers in this module read it.
- * - \`pii_fields(schema)\` — walk a Zod schema's top-level shape, return the
- *   keys marked via \`sensitive(...)\`.
- * - \`pii_gate(event, fields, predicate, actor)\` — produce the external
- *   view: plaintext when authorized, \`[REDACTED]\` when not, \`[SHREDDED]\`
- *   when the underlying pii column is null.
- * - \`pii_strip(event, fields)\` — remove sensitive keys entirely
- *   before invoking projection / reaction handlers.
- *
- * @internal
+ * Internal mechanics for sensitive data: the registry the public
+ * \`sensitive(zodType)\` (in \`types/schemas.ts\`) marks, and the helpers the
+ * orchestrator calls during commit, load and handler dispatch to gate,
+ * redact, shred or strip those fields.
  */
 
 import { z } from "zod";
@@ -14206,7 +13966,7 @@ import type { Actor, Committed, Schemas } from "../types/index.js";
  * or no predicate was declared (framework default-deny). Recoverable: a
  * properly-authorized read returns the plaintext.
  *
- * Re-exported from \`libs/act/src/sensitive.ts\` as part of the public surface.
+ * Re-exported from \`types/schemas.ts\` as part of the public surface.
  */
 export const REDACTED = "[REDACTED]" as const;
 
@@ -14215,7 +13975,7 @@ export const REDACTED = "[REDACTED]" as const;
  * been wiped via \`Store.forget_pii(stream)\` — the row's pii column is \`NULL\`
  * and the original plaintext is gone forever. Irrecoverable.
  *
- * Re-exported from \`libs/act/src/sensitive.ts\` as part of the public surface.
+ * Re-exported from \`types/schemas.ts\` as part of the public surface.
  */
 export const SHREDDED = "[SHREDDED]" as const;
 
@@ -14227,8 +13987,6 @@ export const SHREDDED = "[SHREDDED]" as const;
  *
  * Exported so the public \`sensitive(zodType)\` wrapper can call \`_registry.add\`.
  * Underscore prefix marks "framework-private, don't touch from user code."
- *
- * @internal
  */
 export const _registry = z.registry<{ sensitive: true }>();
 
@@ -14242,16 +14000,12 @@ export const _registry = z.registry<{ sensitive: true }>();
  * The registry is still populated and still consulted: it covers schemas
  * marked before this key existed, and it is the mechanism the public
  * \`sensitive()\` doc-comment describes.
- *
- * @internal
  */
 const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
  * \`_registry.add\`.
- *
- * @internal
  */
 export function _mark_sensitive(schema: z.ZodType): void {
   const def = (
@@ -14270,8 +14024,6 @@ export function _mark_sensitive(schema: z.ZodType): void {
  * a non-wrapper schema, then checks the registry. Wrappers create new schema
  * instances; the marker lives on the *inner* schema the user wrapped, so we
  * test that one.
- *
- * @internal
  */
 function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
@@ -14312,8 +14064,6 @@ function is_pii(schema: z.ZodType): boolean {
  * Returning the schemas rather than just the names is what lets a caller do
  * something per field — the event builder asks each one whether it holds a
  * date, so the \`pii\` sidecar's dates can be revived like any other.
- *
- * @internal
  */
 export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
@@ -14356,8 +14106,6 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  * spread-and-delete-free implementation in slice 3, just hoisted out of the
  * orchestrator hot path so it's only invoked when the State actually has a
  * sensitive event.
- *
- * @internal
  */
 export function pii_split<TName, TData extends Record<string, unknown>>(
   emitted: { name: TName; data: TData },
@@ -14391,8 +14139,6 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  * - Event with a \`pii\` payload, predicate returns \`false\` OR no predicate
  *   declared (framework default-deny) → substitute {@link REDACTED} for each
  *   declared field.
- *
- * @internal
  */
 function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
@@ -14440,8 +14186,6 @@ function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
  * lookup nor allocates per event.
  *
  * The \`actor\` is optional so the actor-less surfaces can call \`gate(event)\`.
- *
- * @internal
  */
 export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
@@ -14453,8 +14197,6 @@ export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
  * single frozen reference the builder hands back for non-sensitive events, so
  * the common path is one \`Map\` miss and an identity call, no allocation. This
  * is the "by default, return the event" half of the prebuilt per-event gate.
- *
- * @internal
  */
 export const IDENTITY_GATE: EventGate = (event) => event;
 
@@ -14471,8 +14213,6 @@ export const IDENTITY_GATE: EventGate = (event) => event;
  * Either way the isolated \`pii\` sidecar is dropped. The builder stores one gate
  * per sensitive event (per state for the load path; predicate-less for the
  * query path); non-sensitive events fall back to {@link IDENTITY_GATE}.
- *
- * @internal
  */
 export function make_gate(
   fields: readonly string[],
@@ -14496,8 +14236,6 @@ export function make_gate(
  * \`email\`) opt back in by explicitly calling \`app.load(stream, { actor:
  * system_actor })\` inside the handler — pulling PII through the gate at the
  * call site makes the security-relevant path visible in code review.
- *
- * @internal
  */
 export function pii_strip<
   TEvents extends Schemas,
@@ -14524,9 +14262,6 @@ export function pii_strip<
 
 // === settle.ts ===
 /**
- * @module settle
- * @category Internal
- *
  * Debounced correlate→drain loop. Sits one level above both correlation
  * and drain: schedule() coalesces rapid callers into a single cycle, then
  * runs correlate+drain in a loop until a pass produces no progress.
@@ -14534,8 +14269,6 @@ export function pii_strip<
  * Owns the debounce timer and the reentrancy flag. Everything else is
  * supplied via the \`SettleDeps\` callbacks so this module stays free of
  * orchestrator state.
- *
- * @internal
  */
 
 import type {
@@ -14551,8 +14284,6 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
  * input bag so this file doesn't import \`Act\` (avoids a cycle) and stays
  * independently testable.
- *
- * @internal
  */
 export type SettleDeps<TEvents extends Schemas> = {
   readonly init: () => Promise<void>;
@@ -14575,8 +14306,6 @@ export type SettleDeps<TEvents extends Schemas> = {
 /**
  * Drives the debounced correlate→drain catch-up cycle. One instance per
  * Act orchestrator.
- *
- * @internal
  */
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
@@ -14635,11 +14364,8 @@ export class SettleLoop<TEvents extends Schemas> {
 
       (async () => {
         await this._deps.init();
-        // Accumulated across every pass, so \`settled\` reports what the
-        // SETTLE did rather than what its last pass did. The loop only
-        // exits on a pass that made no progress, so emitting that pass
-        // alone meant the payload was always empty — while the guide tells
-        // operators to sum \`drain.fetched\` for throughput.
+        // Accumulated across every pass, so \`settled\` reports what the whole
+        // settle did; its last pass made no progress and is always empty.
         let settled_drain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after \`reset()\` on a long
@@ -15669,9 +15395,6 @@ function action_builder<
 
 // === tracing.ts ===
 /**
- * @module tracing
- * @category Internal
- *
  * Centralized observability for the framework's internal pipelines.
  *
  * Trace decorators wrap a bare implementation with \`logger.trace(...)\` calls
@@ -15692,8 +15415,6 @@ function action_builder<
  * orchestrator choose bare or traced variants once at \`.build()\` time based
  * on the configured log level. Outside this module, no other source file
  * imports tracing primitives.
- *
- * @internal
  */
 
 import { config } from "../config.js";
@@ -15815,8 +15536,6 @@ const as_of_marker = (asOf: AsOf | undefined): string => {
  * callback fires at the corresponding phase; both receive the call args, and
  * \`exit\` additionally receives the resolved result. Used to layer
  * \`logger.trace\` calls onto bare ops without changing their signatures.
- *
- * @internal
  */
 const traced = <F extends AsyncFn>(
   inner: F,
@@ -15833,8 +15552,6 @@ const traced = <F extends AsyncFn>(
 /**
  * Selects bare or traced event-sourcing handlers. Called once by the
  * orchestrator constructor.
- *
- * @internal
  */
 export function build_es(
   logger: Logger,
@@ -15937,8 +15654,6 @@ export function build_es(
 /**
  * Selects bare or traced drain-pipeline ops. Called once by the orchestrator
  * constructor.
- *
- * @internal
  */
 export function build_drain<TEvents extends Schemas>(
   logger: Logger
@@ -16002,8 +15717,6 @@ export function build_drain<TEvents extends Schemas>(
  * marker and its adjacent post-state share the marker's color so the
  * eye reads "outcome + where it landed" as one unit. Per-stream
  * \`[events]\` and \`(error)\` stay dim — secondary context.
- *
- * @internal
  */
 export function trace_cycle<TEvents extends Schemas>(
   logger: Logger,
@@ -16254,8 +15967,6 @@ const DEFAULT_STREAM_PAGE = 500;
  * @param query - Optional filter. A caller-supplied \`limit\` sets the page
  *   size (the walk still visits every match); \`after\` seeds the cursor.
  * @returns The total number of positions emitted.
- *
- * @internal
  */
 export async function walk_streams(
   store: Store,
@@ -20361,26 +20072,10 @@ export const QuerySchema = z
 
 // === sensitive.ts ===
 /**
- * @module sensitive
- * @category Internal
- *
- * Internal mechanics for the sensitive-data foundation.
- * The public surface (\`sensitive(zodType)\`) lives at \`libs/act/src/sensitive.ts\`
- * and re-exports \`REDACTED\` / \`SHREDDED\` from here; this module holds the
- * registry plus the helpers the orchestrator calls during commit, load, and
- * handler dispatch.
- *
- * - \`_registry\` — process-global \`z.registry<{ sensitive: true }>()\`. Public
- *   \`sensitive()\` adds to it; the helpers in this module read it.
- * - \`pii_fields(schema)\` — walk a Zod schema's top-level shape, return the
- *   keys marked via \`sensitive(...)\`.
- * - \`pii_gate(event, fields, predicate, actor)\` — produce the external
- *   view: plaintext when authorized, \`[REDACTED]\` when not, \`[SHREDDED]\`
- *   when the underlying pii column is null.
- * - \`pii_strip(event, fields)\` — remove sensitive keys entirely
- *   before invoking projection / reaction handlers.
- *
- * @internal
+ * Internal mechanics for sensitive data: the registry the public
+ * \`sensitive(zodType)\` (in \`types/schemas.ts\`) marks, and the helpers the
+ * orchestrator calls during commit, load and handler dispatch to gate,
+ * redact, shred or strip those fields.
  */
 
 import { z } from "zod";
@@ -20392,7 +20087,7 @@ import type { Actor, Committed, Schemas } from "../types/index.js";
  * or no predicate was declared (framework default-deny). Recoverable: a
  * properly-authorized read returns the plaintext.
  *
- * Re-exported from \`libs/act/src/sensitive.ts\` as part of the public surface.
+ * Re-exported from \`types/schemas.ts\` as part of the public surface.
  */
 export const REDACTED = "[REDACTED]" as const;
 
@@ -20401,7 +20096,7 @@ export const REDACTED = "[REDACTED]" as const;
  * been wiped via \`Store.forget_pii(stream)\` — the row's pii column is \`NULL\`
  * and the original plaintext is gone forever. Irrecoverable.
  *
- * Re-exported from \`libs/act/src/sensitive.ts\` as part of the public surface.
+ * Re-exported from \`types/schemas.ts\` as part of the public surface.
  */
 export const SHREDDED = "[SHREDDED]" as const;
 
@@ -20413,8 +20108,6 @@ export const SHREDDED = "[SHREDDED]" as const;
  *
  * Exported so the public \`sensitive(zodType)\` wrapper can call \`_registry.add\`.
  * Underscore prefix marks "framework-private, don't touch from user code."
- *
- * @internal
  */
 export const _registry = z.registry<{ sensitive: true }>();
 
@@ -20428,16 +20121,12 @@ export const _registry = z.registry<{ sensitive: true }>();
  * The registry is still populated and still consulted: it covers schemas
  * marked before this key existed, and it is the mechanism the public
  * \`sensitive()\` doc-comment describes.
- *
- * @internal
  */
 const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public \`sensitive()\` alongside
  * \`_registry.add\`.
- *
- * @internal
  */
 export function _mark_sensitive(schema: z.ZodType): void {
   const def = (
@@ -20456,8 +20145,6 @@ export function _mark_sensitive(schema: z.ZodType): void {
  * a non-wrapper schema, then checks the registry. Wrappers create new schema
  * instances; the marker lives on the *inner* schema the user wrapped, so we
  * test that one.
- *
- * @internal
  */
 function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
@@ -20498,8 +20185,6 @@ function is_pii(schema: z.ZodType): boolean {
  * Returning the schemas rather than just the names is what lets a caller do
  * something per field — the event builder asks each one whether it holds a
  * date, so the \`pii\` sidecar's dates can be revived like any other.
- *
- * @internal
  */
 export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
@@ -20542,8 +20227,6 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  * spread-and-delete-free implementation in slice 3, just hoisted out of the
  * orchestrator hot path so it's only invoked when the State actually has a
  * sensitive event.
- *
- * @internal
  */
 export function pii_split<TName, TData extends Record<string, unknown>>(
   emitted: { name: TName; data: TData },
@@ -20577,8 +20260,6 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  * - Event with a \`pii\` payload, predicate returns \`false\` OR no predicate
  *   declared (framework default-deny) → substitute {@link REDACTED} for each
  *   declared field.
- *
- * @internal
  */
 function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
@@ -20626,8 +20307,6 @@ function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
  * lookup nor allocates per event.
  *
  * The \`actor\` is optional so the actor-less surfaces can call \`gate(event)\`.
- *
- * @internal
  */
 export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
@@ -20639,8 +20318,6 @@ export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
  * single frozen reference the builder hands back for non-sensitive events, so
  * the common path is one \`Map\` miss and an identity call, no allocation. This
  * is the "by default, return the event" half of the prebuilt per-event gate.
- *
- * @internal
  */
 export const IDENTITY_GATE: EventGate = (event) => event;
 
@@ -20657,8 +20334,6 @@ export const IDENTITY_GATE: EventGate = (event) => event;
  * Either way the isolated \`pii\` sidecar is dropped. The builder stores one gate
  * per sensitive event (per state for the load path; predicate-less for the
  * query path); non-sensitive events fall back to {@link IDENTITY_GATE}.
- *
- * @internal
  */
 export function make_gate(
   fields: readonly string[],
@@ -20682,8 +20357,6 @@ export function make_gate(
  * \`email\`) opt back in by explicitly calling \`app.load(stream, { actor:
  * system_actor })\` inside the handler — pulling PII through the gate at the
  * call site makes the security-relevant path visible in code review.
- *
- * @internal
  */
 export function pii_strip<
   TEvents extends Schemas,

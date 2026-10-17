@@ -1,43 +1,10 @@
 /**
- * @module autoclose-policy
- * @category Internal
- *
- * Declarative close-policy options consumed by `.autocloses({...})`
- * Three optional fields cover the three
- * operational pressure points every real close policy traces back to:
- *
- *   - `after`   — time / compliance ("autocloses **after** N days")
- *   - `is`      — domain lifecycle ("autocloses ... **is** Resolved")
- *   - `reaches` — resource ("autocloses ... **reaches** 10k events")
- *
- * Top-level fields combine with **AND** semantics. This captures the
- * common cooldown-after-terminal pattern that runs through almost
- * every business app — *"close 90 days after `Resolved`"*, *"close 14
- * days after `Delivered`"*, *"close 30 days after a GDPR deletion
- * request"*. All conditions must hold for the cycle to truncate.
- *
- * A separate `or: {...}` block opens an alternative path: when
- * present, the policy fires if **either** the top-level AND group
- * matches **or** any field inside `or` matches. Use it for safety
- * nets — *"close (Resolved AND aged 90 days) OR if event count
- * reaches 10k"*. The two-axis split mirrors the two ways close
- * policies appear in practice: primary close logic (AND-shaped) and
- * defensive backstops (OR-shaped).
- *
- * The state builder's `.autocloses(...)` overload distinguishes
- * function (predicate) from object (policy) and routes the latter
- * through {@link compile_autoclose_policy}, which validates via
- * {@link AutoclosePolicySchema} and returns the compiled predicate.
- * Operators with custom needs (per-stream metadata, multi-branch
- * AND/OR like "(`Resolved` + 90d) OR (`Cancelled` + 30d)") keep the
- * function form; the declarative form covers the 90% case.
- *
- * Validation runs at the builder call (`act().build()` time), so
- * misconfiguration — empty bag, sub-1 `reaches`, sub-minute `after`,
- * empty `is`, empty `or`, nested `or` inside `or`, unknown keys —
- * throws at build, not on the first cycle tick.
- *
- * @internal
+ * Compiles the declarative `.autocloses({...})` policy into a predicate.
+ * Top-level `after` / `is` / `reaches` combine with AND; an `or: {...}`
+ * block adds an alternative path. Validated with
+ * {@link AutoclosePolicySchema} when the app builds, so a bad policy throws
+ * then, not on the first cycle. Semantics and examples:
+ * docs/docs/guides/close-policies.md.
  */
 
 import { z } from "zod";
@@ -68,12 +35,12 @@ const MIN_AFTER_DAYS = 1 / 1440;
  */
 const MIN_KEEP_DAYS = 1;
 
-/** The `Date` that lies `days` after `date`. @internal */
+/** The `Date` that lies `days` after `date`. */
 export function days_after(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
 }
 
-/** The `Date` that lies `days` in the past. @internal */
+/** The `Date` that lies `days` in the past. */
 export function days_before_now(days: number): Date {
   return new Date(Date.now() - days * DAY_MS);
 }
@@ -82,8 +49,6 @@ export function days_before_now(days: number): Date {
  * Day-denominated window shared by `after` (terminate cooldown) and
  * `keep` (rolling retention). Fractional days accepted; windows below
  * the field's floor reject at build.
- *
- * @internal
  */
 const window_schema = (
   field: "after" | "keep",
@@ -124,8 +89,6 @@ const ReachesSchema = z
  * Same field set as the top-level policy minus `or` itself (so nested
  * `or` inside `or` rejects via `.strict()` instead of recursing). At
  * least one field required; empty `{}` is a misconfiguration.
- *
- * @internal
  */
 const OrBlockSchema = z
   .object({
@@ -150,8 +113,6 @@ const OrBlockSchema = z
  * {@link AutoclosePolicy} type and the `.autocloses({...})` overload,
  * never this schema. `.strict()` rejects unknown keys so typos surface
  * at build instead of being silently ignored.
- *
- * @internal
  */
 const AutoclosePolicySchema = z
   .object({
@@ -207,14 +168,14 @@ const AutoclosePolicySchema = z
  */
 export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
 
-/** Compile a single `after` field into its predicate slice. @internal */
+/** Compile a single `after` field into its predicate slice. */
 function compile_after(
   after: NonNullable<AutoclosePolicy["after"]>
 ): AutoclosePredicate<Schemas> {
   return (_stream, head) => days_after(head.created, after.days) <= new Date();
 }
 
-/** Compile a single `is` field into its predicate slice. @internal */
+/** Compile a single `is` field into its predicate slice. */
 function compile_is(
   is: NonNullable<AutoclosePolicy["is"]>
 ): AutoclosePredicate<Schemas> {
@@ -222,7 +183,7 @@ function compile_is(
   return (_stream, head) => set.has(head.name as string);
 }
 
-/** Compile a single `reaches` field into its predicate slice. @internal */
+/** Compile a single `reaches` field into its predicate slice. */
 function compile_reaches(
   reaches: NonNullable<AutoclosePolicy["reaches"]>
 ): AutoclosePredicate<Schemas> {
@@ -254,8 +215,6 @@ function compile_reaches(
  * Throws `ZodError` at call time when the options are invalid (empty
  * bag, non-positive `reaches`, sub-minute `after`, empty `is`, empty
  * `or`, nested `or`, unknown keys).
- *
- * @internal
  */
 /**
  * The smallest `after` window (in days) anywhere in a policy — across
@@ -269,8 +228,6 @@ function compile_reaches(
  * just waits for the next event to re-trigger rather than parking on a
  * due-time. Conservative — the min across branches never defers past
  * the soonest a branch could fire.
- *
- * @internal
  */
 export function policy_min_after_days(
   options: AutoclosePolicy
@@ -289,8 +246,6 @@ export function policy_min_after_days(
  * window (via a windowed close) and derives its prune due-time as
  * `tail.created` plus this many days — the earliest the oldest
  * surviving domain event can age out of the window.
- *
- * @internal
  */
 export function policy_keep_days(options: AutoclosePolicy): number | undefined {
   const parsed = AutoclosePolicySchema.parse(options);

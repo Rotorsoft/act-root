@@ -1,7 +1,4 @@
 /**
- * @module drain-ratio
- * @category Internal
- *
  * Adaptive lag-to-lead ratio for the dual-frontier drain strategy.
  *
  * The orchestrator splits its per-cycle stream budget between two frontiers:
@@ -13,8 +10,6 @@
  * handled in each frontier and shifts the next cycle's split toward
  * whichever frontier had the higher per-stream throughput. The result is
  * clamped to `[0.2, 0.8]` so neither frontier can be starved.
- *
- * @internal
  */
 
 import type { HandleResult } from "./drain-cycle.js";

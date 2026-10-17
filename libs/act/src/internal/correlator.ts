@@ -1,7 +1,4 @@
 /**
- * @module correlator
- * @category Internal
- *
  * Correlation-id generator and the default implementation.
  *
  * The default produces a readable, time-monotonic-within-window, lowercase
@@ -11,8 +8,6 @@
  *
  * Apps override via {@link ActOptions.correlator} to plug in any scheme
  * (tenant-prefixed, trace-id-propagated, DB-sequence-backed, etc.).
- *
- * @internal
  */
 
 import { randomInt } from "node:crypto";
@@ -55,8 +50,6 @@ export const default_correlator: Correlator = ({ state, action }) => {
  * Close runs outside any user action, so we synthesize a context with
  * sentinel state/action names — visible in the id when overrides aren't
  * configured.
- *
- * @internal
  */
 export function close_correlation(
   correlator: Correlator,

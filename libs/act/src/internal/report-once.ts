@@ -1,7 +1,4 @@
 /**
- * @module report-once
- * @category Internal
- *
  * One-shot reporting for a misdeclaration that a build-time guard could not
  * catch.
  *
@@ -29,8 +26,6 @@
  * Never throws. A throw inside correlate pins the checkpoint for the whole app;
  * inside drain it reaches the circuit breaker as a store failure and
  * stalls every stream.
- *
- * @internal
  */
 
 import { log } from "../ports.js";
@@ -46,8 +41,6 @@ import { log } from "../ports.js";
  * @param key - Identifies the offending declaration, not the occurrence —
  *   declared identifiers only, never a runtime-resolved target.
  * @param message - Wrapped in an `Error` so the logger renders a stack.
- *
- * @internal
  */
 export function report_once(
   seen: Set<string>,

@@ -1,7 +1,4 @@
 /**
- * @module close-cycle
- * @category Internal
- *
  * Pure orchestration of the close-the-books flow: scan stream heads,
  * partition by reaction safety, guard with tombstones, optionally seed
  * restart state, run user archive callbacks, atomically truncate, and
@@ -10,8 +7,6 @@
  * Also home to the pieces a closer needs around the cycle: the per-stream
  * {@link CloseLock} and the bounded {@link catch_up_correlation}. The Act
  * orchestrator only wires its ports in and emits `"closed"`.
- *
- * @internal
  */
 
 import { cache, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
@@ -28,8 +23,6 @@ import { walk_streams } from "./walk-streams.js";
 /**
  * Dependencies the close cycle needs from the Act orchestrator. Decoupled
  * from `Act` itself so the cycle can be exercised from tests in isolation.
- *
- * @internal
  */
 export type CloseCycleDeps = {
   /** Whether any event has a reaction; without one nothing can be pending. */
@@ -86,8 +79,6 @@ export type CloseCycleDeps = {
  * Scan window and pass cap for {@link catch_up_correlation}. Bounded, so a
  * close behind a large backlog skips the stream (the documented retryable
  * outcome) rather than scanning the whole log inside an operator call.
- *
- * @internal
  */
 const CLOSE_CATCH_UP_LIMIT = 1000;
 const CLOSE_CATCH_UP_PASSES = 20;
@@ -99,8 +90,6 @@ const CLOSE_CATCH_UP_PASSES = 20;
  *
  * Stops as soon as a pass makes no progress (the log has no more to give),
  * and after {@link CLOSE_CATCH_UP_PASSES} windows.
- *
- * @internal
  */
 export async function catch_up_correlation(
   cursor: { readonly checkpoint: number; arm(): void },
@@ -125,8 +114,6 @@ export async function catch_up_correlation(
  * Per-stream serialization for close critical sections: two closers of the
  * same stream never prune or archive concurrently, while different streams
  * proceed in parallel. One instance per Act.
- *
- * @internal
  */
 export class CloseLock {
   private readonly _tails = new Map<string, Promise<unknown>>();
@@ -151,8 +138,6 @@ export class CloseLock {
  * Page size for the safety probe's keyset pagination over the
  * subscriptions table. Above `query_streams`'s default `limit` of 100
  * to keep the round-trip count low while bounding per-page work.
- *
- * @internal
  */
 const SAFETY_PROBE_PAGE_SIZE = 1000;
 
@@ -185,8 +170,6 @@ type StreamHead = {
  * pure prefix delete behind an existing snapshot (see
  * {@link run_windowed_closes}); the rest run the guarded
  * tombstone/restart pipeline below.
- *
- * @internal
  */
 export async function run_close_cycle(
   targets: CloseTarget[],
@@ -334,9 +317,7 @@ async function run_full_closes(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Windowed branch — prune the prefix behind an existing snapshot
-// ---------------------------------------------------------------------------
 
 /**
  * Run the windowed closes: probe the min consumer watermark per stream
@@ -351,8 +332,6 @@ async function run_full_closes(
  * at the head, above the boundary. Current state is unchanged, so the
  * cache stays warm. Streams the store skips (no qualifying snapshot)
  * are reported in `skipped`.
- *
- * @internal
  */
 async function run_windowed_closes(
   windowed: CloseTarget[],
@@ -383,11 +362,8 @@ async function run_windowed_closes(
   for (const t of windowed) {
     const entry = await with_lock(t.stream, async () => {
       const max_id = min_at.get(t.stream);
-      // Boundary probe: will a windowed truncate prune anything? The
-      // store deletes events with `id < boundary.id`, where `boundary`
-      // is the latest `__snapshot__` with `created < before` (and, when
-      // capped, `id <= max_id`). No such prefix ⇒ archive is skipped and
-      // the stream is reported skipped, exactly as a no-op truncate would.
+      // Nothing to prune (see windowed_prune_pending): skip the archive
+      // and report the stream skipped, as a no-op truncate would.
       if (!(await windowed_prune_pending(t.stream, t.before!, max_id)))
         return undefined;
       // Archive: user callback against the cutoff, run while the prefix
@@ -415,8 +391,6 @@ async function run_windowed_closes(
  * no-op truncate) or when the boundary is already the earliest event
  * (the prefix was pruned by a prior closer). This is the guard that
  * makes the windowed archive fire at most once per pruned range.
- *
- * @internal
  */
 async function windowed_prune_pending(
   stream: string,
@@ -449,8 +423,6 @@ async function windowed_prune_pending(
  * matching mirror {@link partition_by_safety}; instead of flagging
  * pending streams it folds `min(at)` per stream. Streams with no
  * matching subscriptions are absent (no cap).
- *
- * @internal
  */
 async function probe_min_watermarks(
   streams: string[],
@@ -501,9 +473,7 @@ function source_matcher(): (
   };
 }
 
-// ---------------------------------------------------------------------------
 // Phase 1 — scan stream heads
-// ---------------------------------------------------------------------------
 
 async function scan_stream_heads(
   streams: string[]
@@ -543,9 +513,7 @@ async function scan_stream_heads(
   return out;
 }
 
-// ---------------------------------------------------------------------------
 // Phase 2 — partition by safety
-// ---------------------------------------------------------------------------
 
 async function partition_by_safety(
   stream_info: Map<string, StreamHead>,
@@ -605,9 +573,7 @@ async function partition_by_safety(
   return safe;
 }
 
-// ---------------------------------------------------------------------------
 // Phase 3 — guard with tombstones
-// ---------------------------------------------------------------------------
 
 async function guard_with_tombstones(
   safe: string[],
@@ -644,9 +610,7 @@ async function guard_with_tombstones(
   return { guarded, guard_events };
 }
 
-// ---------------------------------------------------------------------------
 // Phase 4 — load restart seeds
-// ---------------------------------------------------------------------------
 
 async function load_restart_seeds(
   guarded: string[],
@@ -680,9 +644,7 @@ async function load_restart_seeds(
   return seed_states;
 }
 
-// ---------------------------------------------------------------------------
 // Phase 5 — archive callbacks
-// ---------------------------------------------------------------------------
 
 async function run_archive_callbacks(
   guarded: string[],
@@ -696,9 +658,7 @@ async function run_archive_callbacks(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Phase 5b — confirm the guard is still the head
-// ---------------------------------------------------------------------------
 
 async function heads_still_guarded(
   guarded: string[],
@@ -716,9 +676,7 @@ async function heads_still_guarded(
   });
 }
 
-// ---------------------------------------------------------------------------
 // Phase 6 — atomic truncate + cache warm
-// ---------------------------------------------------------------------------
 
 async function truncate_and_warm_cache(
   guarded: string[],

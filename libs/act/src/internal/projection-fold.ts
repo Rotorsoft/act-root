@@ -1,7 +1,4 @@
 /**
- * @module projection-fold
- * @category Internal
- *
  * Fold engine behind `projection(name).of(state)` — maintains per-stream
  * folded states in a bounded in-memory cache and flushes one row per dirty
  * stream per round, so write amplification tracks the distinct-key count
@@ -35,10 +32,6 @@ import type {
 import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
 import { pii_strip } from "./sensitive.js";
-
-// The fold config schema, defaults, and resolver live in `./config.js` (the
-// single home for builder-facing config bags). This module keeps the fold
-// engine that consumes the resolved config.
 
 /**
  * A stream's in-flight fold: a mutable {@link CacheEntry} plus the

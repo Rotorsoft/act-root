@@ -1,7 +1,4 @@
 /**
- * @module internal
- * @category Internal
- *
  * Barrel for framework-internal modules. These exports are not part of the
  * public package API and may change between minors. Anything reachable from
  * `@rotorsoft/act`'s top-level barrel (`src/index.ts`) is the public surface;
@@ -13,8 +10,6 @@
  * directly by file path; production code in `adapters/` and tests that
  * need bare ops (e.g., `action`, `load`, `LruMap`) likewise import from
  * the specific source file.
- *
- * @internal
  */
 
 export { type AuditDeps, audit } from "./audit.js";
