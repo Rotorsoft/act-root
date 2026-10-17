@@ -4860,7 +4860,7 @@ export function synthesize_autoclose_reactions<
  * @category Internal
  *
  * Per-reaction retry backoff delay computation. Pure function — keeps
- * \`DrainController\` and \`reactions._finalize\` testable in isolation.
+ * \`DrainController\` and \`finalize\` (in \`drain-cycle.ts\`) testable in isolation.
  *
  * @internal
  */
@@ -12039,7 +12039,7 @@ export interface Store extends Disposable, EventSource {
 
   /**
    * Clears the blocked flag on streams without replaying their history.
-   * Sets \`blocked = false\`, \`retry_count = 0\`, \`error = null\`, and
+   * Sets \`blocked = false\`, \`retry = -1\` (no attempt yet), \`error = null\`, and
    * clears any lease bookkeeping. The \`at\` watermark stays where it
    * was — the stream resumes from the next event after the last
    * successful ack, not from zero.
@@ -14655,8 +14655,9 @@ export class SettleLoop<TEvents extends Schemas> {
             : drain;
           // Only a pass that read no events and leased nothing is idle: a
           // leased stream that deferred or failed may leave work behind. It
-          // still ends, because ids are finite and every leased stream either
-          // advances or leaves the claimable set (acked, blocked, scheduled).
+          // ends because ids are finite and a leased stream advances or
+          // leaves the claimable set (acked, blocked, scheduled); a zero
+          // backoff keeps it claimable until it blocks or succeeds.
           const made_progress =
             subscribed > 0 || drain.leased.length > 0 || last_id > after_before;
           if (!made_progress) break;
@@ -19137,7 +19138,7 @@ export interface Store extends Disposable, EventSource {
 
   /**
    * Clears the blocked flag on streams without replaying their history.
-   * Sets \`blocked = false\`, \`retry_count = 0\`, \`error = null\`, and
+   * Sets \`blocked = false\`, \`retry = -1\` (no attempt yet), \`error = null\`, and
    * clears any lease bookkeeping. The \`at\` watermark stays where it
    * was — the stream resumes from the next event after the last
    * successful ack, not from zero.

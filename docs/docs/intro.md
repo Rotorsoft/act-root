@@ -25,12 +25,10 @@ import { z } from "zod";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
-  .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({
-    Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
-  })
+  .emits({ Incremented: z.object({ by: z.number() }) })
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.by }) })
   .on({ increment: z.object({ by: z.number() }) })
-    .emit((action) => ["Incremented", { amount: action.by }])
+  .emit("Incremented")
   .build();
 
 const app = act().withState(Counter).build();

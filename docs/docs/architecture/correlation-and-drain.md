@@ -36,8 +36,8 @@ A resolver that throws stops correlation just before that event until it stops t
 
 Build-time classification (`builders/build-classify.ts`) walks the registry, partitions resolvers by kind, and stashes:
 
-- `staticTargets[]` — subscribed once at init
-- `reactiveEvents: Set<string>` — events with at least one reaction; drives the drain skip-flag in `do()` and `reset()`
+- `static_targets[]` — subscribed once at init
+- `event_to_lanes` — each event with at least one reaction, mapped to the lanes its reactions run on; `do()` arms only those lanes, and an app whose map is empty never arms a drain (the `_reactive` flag)
 
 ## Correlation — discovering targets and marking their work
 
@@ -165,8 +165,8 @@ If lagging streams produced more work this cycle, the next cycle leans toward la
 
 A naive drain would query the store on every call. For apps where most actions don't have reactions, that's wasted I/O. The framework keeps an `_armed` boolean on `DrainController`:
 
-- `do()` sets `_armed = true` if any committed event is in `reactiveEvents`
-- `reset()` sets `_armed = true` if there are any reactive events
+- `do()` sets `_armed = true` on the lanes whose reactions match a committed event (`event_to_lanes`)
+- `reset()` sets `_armed = true` on every lane when it reset any stream and the app has reactions
 - `correlate.init()` sets `_armed = true` on cold start (might have historical reactive events to process)
 - `drain()` clears `_armed` only when `claim()` returned no leases. A pass that leased streams is never idle, even if every one of them deferred, backed off or failed: more marked streams may be waiting behind the claim's budget. A pass whose store call fails stays armed and retries after the breaker's `cooldownMs` (never before its leases expire), so an idle app recovers without waiting for the breaker to open
 

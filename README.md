@@ -39,6 +39,10 @@ The primitives:
 
 ## 30-second demo
 
+```sh
+npm i @rotorsoft/act zod   # ESM only: "type": "module" in package.json
+```
+
 Prefer a running project over a snippet? `npx degit rotorsoft/act-starter my-app` — a minimal, commented starter with a state, a projection, a reaction, a generated REST API, and tests ([Rotorsoft/act-starter](https://github.com/Rotorsoft/act-starter)).
 
 

@@ -956,7 +956,7 @@ export interface Store extends Disposable, EventSource {
 
   /**
    * Clears the blocked flag on streams without replaying their history.
-   * Sets `blocked = false`, `retry_count = 0`, `error = null`, and
+   * Sets `blocked = false`, `retry = -1` (no attempt yet), `error = null`, and
    * clears any lease bookkeeping. The `at` watermark stays where it
    * was — the stream resumes from the next event after the last
    * successful ack, not from zero.

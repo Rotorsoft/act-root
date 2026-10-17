@@ -8,7 +8,7 @@ _Event-sourcing framework for TypeScript — three primitives, Zod end to end, n
 
 ## Why this package
 
-This is the framework core: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. Around three primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — it provides input validation against Zod schemas, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions with backoff and dead-lettering, blocked-stream recovery, time-travel queries against the same log.
+This is the framework core: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. Around three primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — it provides input validation against Zod schemas, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions with backoff, blocked-stream recovery, time-travel queries against the same log.
 
 Your domain stays in TypeScript; your schemas stay in Zod. Pick a store at bootstrap — Postgres (`@rotorsoft/act-pg`), SQLite (`@rotorsoft/act-sqlite`), or the bundled in-memory default — and the application code stays the same. The published surface is stable under [SemVer](../../STABILITY.md) as of 1.0.0.
 
@@ -17,8 +17,10 @@ For the project-level overview, see the [root README](../../README.md).
 ## Installation
 
 ```bash
-pnpm add @rotorsoft/act
+pnpm add @rotorsoft/act zod
 ```
+
+The package is ESM only (`"type": "module"`); the examples use top-level `await`.
 
 For production, also install one of the durable stores: [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) (Postgres) or [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) (SQLite). The bundled `InMemoryStore` is used by default and is intended for development and tests.
 
@@ -30,16 +32,16 @@ import { z } from "zod";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
-  .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })
+  .emits({ Incremented: z.object({ by: z.number() }) })
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.by }) })
   .on({ increment: z.object({ by: z.number() }) })
-  .emit((action) => ["Incremented", { amount: action.by }])
+  .emit("Incremented")
   .build();
 
 const app = act().withState(Counter).build();
+await app.do("increment", { stream: "c1", actor: { id: "1", name: "u" } }, { by: 5 });
 
-await app.do("increment", { stream: "counter1", actor: { id: "1", name: "u" } }, { by: 5 });
-const snap = await app.load(Counter, "counter1");
+const snap = await app.load(Counter, "c1");
 console.log(snap.state); // { count: 5 }
 ```
 
@@ -70,7 +72,7 @@ import { projection, slice } from "@rotorsoft/act";
 
 // Projection — read-model updater. Handlers receive (event, stream).
 const CounterProjection = projection("counters")
-  .on({ Incremented: z.object({ amount: z.number() }) })
+  .on({ Incremented: z.object({ by: z.number() }) })
     .do(async function updateCounter({ stream, data }) { /* update read model */ })
   .build();
 
