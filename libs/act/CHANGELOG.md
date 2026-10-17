@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.32.28](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.27...@rotorsoft/act-v1.32.28) (2026-10-17)
+
+
+### Bug Fixes
+
+* **act:** keep draining while work is pending, and retry a failed pass on the breaker's cooldown ([#1928](https://github.com/Rotorsoft/act-root/issues/1928)) ([d04aeeb](https://github.com/Rotorsoft/act-root/commit/d04aeeb738c7fe6d753ff666c4bd8477cf794ee1)), closes [#1915](https://github.com/Rotorsoft/act-root/issues/1915)
+
 # [@rotorsoft/act-v1.32.27](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.26...@rotorsoft/act-v1.32.27) (2026-10-16)
 
 # [@rotorsoft/act-v1.32.26](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.25...@rotorsoft/act-v1.32.26) (2026-10-15)
