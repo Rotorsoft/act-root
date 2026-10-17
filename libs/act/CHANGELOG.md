@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.32.29](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.28...@rotorsoft/act-v1.32.29) (2026-10-17)
+
+
+### Bug Fixes
+
+* **act:** a package.json without name or version must not crash the first log ([#1951](https://github.com/Rotorsoft/act-root/issues/1951)) ([50e1fbe](https://github.com/Rotorsoft/act-root/commit/50e1fbebd022deffb0d1a1d1cf40fee81d88ed16)), closes [#1940](https://github.com/Rotorsoft/act-root/issues/1940)
+* **act:** retry a failed settle pass and stop the defer wake loop at shutdown ([#1950](https://github.com/Rotorsoft/act-root/issues/1950)) ([0e4a843](https://github.com/Rotorsoft/act-root/commit/0e4a843baf025ac396e572ac0a4f5f658aa1203d)), closes [#1939](https://github.com/Rotorsoft/act-root/issues/1939)
+
 # [@rotorsoft/act-v1.32.28](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.32.27...@rotorsoft/act-v1.32.28) (2026-10-17)
 
 
