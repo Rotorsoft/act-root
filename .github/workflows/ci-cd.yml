@@ -71,8 +71,8 @@ jobs:
           #     lru-map, etc.). The right home for perf-sensitive
           #     helpers that aren't public API.
           #   - `libs/*/src/adapters/**` — Store/Cache/Logger impls.
-          #   - `libs/*/{bench,scripts}/**` — bench files and the
-          #     bench-runner scripts themselves.
+          #   - `libs/*/scripts/**` — the bench-runner scripts the
+          #     per-PR gates run (scenario benches run weekly).
           #   - `libs/*/perf-baseline.json` — baseline refreshes.
           # Code that doesn't fit a convention either lives in
           # `internal/` (the right place for perf-sensitive helpers)
@@ -83,7 +83,6 @@ jobs:
             perf:
               - 'libs/*/src/internal/**'
               - 'libs/*/src/adapters/**'
-              - 'libs/*/bench/**'
               - 'libs/*/scripts/**'
               - 'libs/*/perf-baseline.json'
       - uses: dorny/paths-filter@v4
