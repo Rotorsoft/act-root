@@ -1,24 +1,8 @@
 /**
- * @module sensitive
- * @category Internal
- *
- * Internal mechanics for the sensitive-data foundation.
- * The public surface (`sensitive(zodType)`) lives at `libs/act/src/sensitive.ts`
- * and re-exports `REDACTED` / `SHREDDED` from here; this module holds the
- * registry plus the helpers the orchestrator calls during commit, load, and
- * handler dispatch.
- *
- * - `_registry` — process-global `z.registry<{ sensitive: true }>()`. Public
- *   `sensitive()` adds to it; the helpers in this module read it.
- * - `pii_fields(schema)` — walk a Zod schema's top-level shape, return the
- *   keys marked via `sensitive(...)`.
- * - `pii_gate(event, fields, predicate, actor)` — produce the external
- *   view: plaintext when authorized, `[REDACTED]` when not, `[SHREDDED]`
- *   when the underlying pii column is null.
- * - `pii_strip(event, fields)` — remove sensitive keys entirely
- *   before invoking projection / reaction handlers.
- *
- * @internal
+ * Internal mechanics for sensitive data: the registry the public
+ * `sensitive(zodType)` (in `types/schemas.ts`) marks, and the helpers the
+ * orchestrator calls during commit, load and handler dispatch to gate,
+ * redact, shred or strip those fields.
  */
 
 import { z } from "zod";
@@ -30,7 +14,7 @@ import type { Actor, Committed, Schemas } from "../types/index.js";
  * or no predicate was declared (framework default-deny). Recoverable: a
  * properly-authorized read returns the plaintext.
  *
- * Re-exported from `libs/act/src/sensitive.ts` as part of the public surface.
+ * Re-exported from `types/schemas.ts` as part of the public surface.
  */
 export const REDACTED = "[REDACTED]" as const;
 
@@ -39,7 +23,7 @@ export const REDACTED = "[REDACTED]" as const;
  * been wiped via `Store.forget_pii(stream)` — the row's pii column is `NULL`
  * and the original plaintext is gone forever. Irrecoverable.
  *
- * Re-exported from `libs/act/src/sensitive.ts` as part of the public surface.
+ * Re-exported from `types/schemas.ts` as part of the public surface.
  */
 export const SHREDDED = "[SHREDDED]" as const;
 
@@ -51,8 +35,6 @@ export const SHREDDED = "[SHREDDED]" as const;
  *
  * Exported so the public `sensitive(zodType)` wrapper can call `_registry.add`.
  * Underscore prefix marks "framework-private, don't touch from user code."
- *
- * @internal
  */
 export const _registry = z.registry<{ sensitive: true }>();
 
@@ -66,16 +48,12 @@ export const _registry = z.registry<{ sensitive: true }>();
  * The registry is still populated and still consulted: it covers schemas
  * marked before this key existed, and it is the mechanism the public
  * `sensitive()` doc-comment describes.
- *
- * @internal
  */
 const _SENSITIVE = Symbol.for("act.sensitive");
 
 /**
  * Stamp the def-level marker. Called by the public `sensitive()` alongside
  * `_registry.add`.
- *
- * @internal
  */
 export function _mark_sensitive(schema: z.ZodType): void {
   const def = (
@@ -94,8 +72,6 @@ export function _mark_sensitive(schema: z.ZodType): void {
  * a non-wrapper schema, then checks the registry. Wrappers create new schema
  * instances; the marker lives on the *inner* schema the user wrapped, so we
  * test that one.
- *
- * @internal
  */
 function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
@@ -136,8 +112,6 @@ function is_pii(schema: z.ZodType): boolean {
  * Returning the schemas rather than just the names is what lets a caller do
  * something per field — the event builder asks each one whether it holds a
  * date, so the `pii` sidecar's dates can be revived like any other.
- *
- * @internal
  */
 export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
@@ -180,8 +154,6 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  * spread-and-delete-free implementation in slice 3, just hoisted out of the
  * orchestrator hot path so it's only invoked when the State actually has a
  * sensitive event.
- *
- * @internal
  */
 export function pii_split<TName, TData extends Record<string, unknown>>(
   emitted: { name: TName; data: TData },
@@ -215,8 +187,6 @@ export function pii_split<TName, TData extends Record<string, unknown>>(
  * - Event with a `pii` payload, predicate returns `false` OR no predicate
  *   declared (framework default-deny) → substitute {@link REDACTED} for each
  *   declared field.
- *
- * @internal
  */
 function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
@@ -264,8 +234,6 @@ function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
  * lookup nor allocates per event.
  *
  * The `actor` is optional so the actor-less surfaces can call `gate(event)`.
- *
- * @internal
  */
 export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
@@ -277,8 +245,6 @@ export type EventGate = <TEvents extends Schemas, TKey extends keyof TEvents>(
  * single frozen reference the builder hands back for non-sensitive events, so
  * the common path is one `Map` miss and an identity call, no allocation. This
  * is the "by default, return the event" half of the prebuilt per-event gate.
- *
- * @internal
  */
 export const IDENTITY_GATE: EventGate = (event) => event;
 
@@ -295,8 +261,6 @@ export const IDENTITY_GATE: EventGate = (event) => event;
  * Either way the isolated `pii` sidecar is dropped. The builder stores one gate
  * per sensitive event (per state for the load path; predicate-less for the
  * query path); non-sensitive events fall back to {@link IDENTITY_GATE}.
- *
- * @internal
  */
 export function make_gate(
   fields: readonly string[],
@@ -320,8 +284,6 @@ export function make_gate(
  * `email`) opt back in by explicitly calling `app.load(stream, { actor:
  * system_actor })` inside the handler — pulling PII through the gate at the
  * call site makes the security-relevant path visible in code review.
- *
- * @internal
  */
 export function pii_strip<
   TEvents extends Schemas,

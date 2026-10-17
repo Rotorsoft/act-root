@@ -1,6 +1,4 @@
 /**
- * @module internal/circuit-breaker
- *
  * Orchestrator-level circuit breaker for store operations. The drain loop
  * polls `claim()` continuously; when the backing store goes down every poll
  * throws a {@link StoreError}, and without a breaker the orchestrator would
@@ -22,10 +20,6 @@ import type { CircuitBreakerConfig } from "./config.js";
 
 /** Circuit breaker state. */
 export type CircuitState = "closed" | "open" | "half-open";
-
-// The circuit-breaker config schema, defaults, and resolver live in
-// `./config.js` (the single home for builder-facing config bags). This
-// module keeps only the state machine that consumes the resolved config.
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers

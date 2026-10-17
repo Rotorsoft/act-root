@@ -1,7 +1,4 @@
 /**
- * @module event-versions
- * @category Internal
- *
  * Auto-deprecation of legacy event versions via the `_v<digits>` naming
  * convention.
  *
@@ -14,8 +11,6 @@
  * Convention pin: only `_v<digits>` with digits ≥ 2 counts as a version
  * suffix. `Foo_v1` is just a literal event name (the base `Foo` is
  * implicitly v1). Pinning here keeps the contract surface small.
- *
- * @internal
  */
 
 const VERSION_SUFFIX = /^(.+?)_v(\d+)$/;
@@ -44,8 +39,6 @@ function parse(name: string): { base: string; version: number } {
  * current. The framework picks the max regardless of contiguity.
  *
  * Single-version groups (no siblings) yield no deprecations.
- *
- * @internal
  */
 export function deprecated_event_names(names: Iterable<string>): Set<string> {
   const groups = new Map<string, Versioned[]>();
@@ -89,8 +82,6 @@ export function deprecated_event_names(names: Iterable<string>): Set<string> {
  *
  * Returns `undefined` if the event has no higher-versioned sibling (which
  * means the caller's classification is stale or wrong).
- *
- * @internal
  */
 export function current_version_of(
   deprecated_name: string,

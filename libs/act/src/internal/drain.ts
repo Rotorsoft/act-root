@@ -1,7 +1,4 @@
 /**
- * @module drain
- * @category Internal
- *
  * Pipeline operations consumed by the drain/correlate loop. Each op is a
  * single async step the orchestrator invokes per drain cycle:
  *
@@ -15,8 +12,6 @@
  * mirroring the shape of {@link "event-sourcing"}. Trace decoration is
  * layered on top in {@link "tracing"} and selected by the orchestrator at
  * construction time. No tracing imports here.
- *
- * @internal
  */
 
 import { store } from "../ports.js";
@@ -31,7 +26,6 @@ import type {
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
 
-/** @internal */
 export interface DrainOps<TEvents extends Schemas> {
   claim: typeof claim;
   fetch: typeof fetch<TEvents>;

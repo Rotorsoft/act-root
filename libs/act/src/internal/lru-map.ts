@@ -1,7 +1,4 @@
 /**
- * @module lru-map
- * @category Internal
- *
  * Tiny bounded LRU map / set built on insertion-ordered `Map`. Used to cap
  * memory in long-running orchestrators that mint large numbers of keys —
  * notably:
@@ -11,15 +8,11 @@
  *
  * Apps with millions of dynamic streams (one target per aggregate) can't
  * afford an unbounded `Set<string>` — eviction is required.
- *
- * @internal
  */
 
 /**
  * Bounded LRU map. `get()` promotes; `has()` does not. `set()` always
  * promotes and evicts the oldest entry when at capacity.
- *
- * @internal
  */
 export class LruMap<K, V> {
   private readonly _entries = new Map<K, V>();
@@ -70,8 +63,6 @@ export class LruMap<K, V> {
  * Bounded LRU set built on top of {@link LruMap}. `has()` does not promote;
  * `add()` does (re-inserting if already present, evicting the oldest at
  * capacity).
- *
- * @internal
  */
 export class LruSet<T> {
   private readonly _map: LruMap<T, true>;

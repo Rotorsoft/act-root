@@ -1,7 +1,4 @@
 /**
- * @module defer-config
- * @category Internal
- *
  * The `when` options for the public `defer` surface. A
  * reaction defers itself to a future time either declaratively (the
  * `.defer(when)` builder step) or imperatively (`throw new DeferSignal(when)`
@@ -18,8 +15,6 @@
  * Validation follows the config-schema standard (CLAUDE.md): an internal
  * `*OptionsSchema` const, a public inferred type, and a resolver. Slice 2
  * ships `after` / `at`; recurrence (`every`) extends this in Slice 3.
- *
- * @internal
  */
 
 import { z } from "zod";
@@ -46,8 +41,6 @@ const DeferDurationSchema = z
  * Zod schema for the `defer(when)` options bag. Exactly one of `after` / `at`;
  * `at` is an absolute `Date`. Internal per the config standard; the public
  * surface is {@link DeferWhen} and {@link resolve_defer_at}.
- *
- * @internal
  */
 const DeferWhenSchema = z
   .object({
@@ -59,7 +52,7 @@ const DeferWhenSchema = z
     message: "defer: specify exactly one of `after` or `at`",
   });
 
-/** Sum a duration bag to milliseconds. @internal */
+/** Sum a duration bag to milliseconds. */
 function duration_ms(d: {
   days?: number;
   hours?: number;
@@ -78,8 +71,6 @@ function duration_ms(d: {
  * on a bad shape), then derives the time: `after` from `event.created`, `at`
  * from its absolute `Date`. Never reads `Date.now()`, so the result is stable
  * across re-delivery.
- *
- * @internal
  */
 export function resolve_defer_at<E extends Schemas>(
   when: DeferWhen,
@@ -94,8 +85,6 @@ export function resolve_defer_at<E extends Schemas>(
  * The schedule handed to the declarative `.defer` builder step: either a
  * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
  * triggering event (read the payload to choose the schedule).
- *
- * @internal
  */
 export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
 
@@ -104,8 +93,6 @@ export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
  * standard) — throws `ZodError` on a bad shape (both/neither of `after`/`at`,
  * an empty or non-positive duration). The function form of a `.defer` schedule
  * can only be checked when it runs, so builders pass just the literal here.
- *
- * @internal
  */
 export function assert_defer_when(when: DeferWhen): void {
   DeferWhenSchema.parse(when);
@@ -119,8 +106,6 @@ export function assert_defer_when(when: DeferWhen): void {
  * real handler. The wrapper keeps the original handler's `name` so reaction
  * registration and de-dup are unaffected, and preserves the handler's exact
  * type so the builder step is transparent.
- *
- * @internal
  */
 export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
   handler: H,

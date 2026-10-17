@@ -1,7 +1,4 @@
 /**
- * @module autoclose-reaction
- * @category Internal
- *
  * Synthesis of the online close-the-books reaction. `.autocloses(policy)`
  * is not a sweep: it is a reaction on every event the declaring state owns
  * that evaluates the policy against the LIVE head (so a reopened stream
@@ -14,8 +11,6 @@
  * discovered by `classify_registry` and its target stream subscribed. The
  * registry is complete once the builder finishes; the orchestrator never
  * mutates it.
- *
- * @internal
  */
 
 import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
@@ -48,8 +43,6 @@ const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
  * The reactions are synthesized once into the shared registry, so nothing
  * per-Act is captured here — the off-hours window is read from the running
  * Act at resolution time via the injected `read_window`.
- *
- * @internal
  */
 export function synthesize_autoclose_reactions<
   TSchemaReg extends SchemaRegister<TActions>,

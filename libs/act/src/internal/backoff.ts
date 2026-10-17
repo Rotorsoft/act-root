@@ -1,18 +1,9 @@
 /**
- * @module backoff
- * @category Internal
- *
  * Per-reaction retry backoff delay computation. Pure function — keeps
  * `DrainController` and `finalize` (in `drain-cycle.ts`) testable in isolation.
- *
- * @internal
  */
 
 import type { BackoffOptions } from "../types/action.js";
-
-// The `BackoffOptions` config schema + resolver live in `./config.ts` (the
-// single home for every builder-facing config bag). This module keeps only
-// the runtime delay math, which stays hot-path and dependency-free.
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on

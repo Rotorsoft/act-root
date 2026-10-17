@@ -1,7 +1,4 @@
 /**
- * @module defer-signal
- * @category Internal
- *
  * The control-flow signal a reaction handler throws to *defer* itself.
  * Unlike an error, a defer is not a failure: the dispatcher
  * ({@link "reaction-builder".build_handle}) catches it and produces a

@@ -1,13 +1,6 @@
 /**
- * @module autoclose-window
- * @category Internal
- *
  * Off-hours window math for autoclose — hour-in-zone, DST-gap handling, and
- * "next time the window opens". The autoclose **config** (defaults, schema,
- * resolver) lives in `./config.js`, the single home for builder-facing config
- * bags; this module is the runtime window logic those knobs drive.
- *
- * @internal
+ * "next time the window opens".
  */
 
 import type { AutocloseConfig } from "./config.js";
@@ -16,8 +9,6 @@ import type { AutocloseConfig } from "./config.js";
  * The current hour `[0, 23]` in the given IANA time zone, DST-correct
  * via `Intl`. Split out so the window check can be unit-tested without
  * spinning a controller.
- *
- * @internal
  */
 export function hour_in_zone(now: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -32,8 +23,6 @@ export function hour_in_zone(now: Date, timeZone: string): number {
  * True when a plain `[start, end)` hour comparison places `hour` inside
  * the window. Half-open on hour boundaries and wrapping past midnight
  * when `start > end`.
- *
- * @internal
  */
 function hour_in_range(hour: number, start: number, end: number): boolean {
   return start < end
@@ -50,8 +39,6 @@ function hour_in_range(hour: number, start: number, end: number): boolean {
  * `start` to above it; that boundary instant is the window's replacement
  * opening. Detected by comparing the hour at `now` with the hour one
  * hour earlier: a jump of more than one hour that steps over `start`.
- *
- * @internal
  */
 function is_dst_gap_open(now: Date, timeZone: string, start: number): boolean {
   const hour = hour_in_zone(now, timeZone);
@@ -74,8 +61,6 @@ function is_dst_gap_open(now: Date, timeZone: string, start: number): boolean {
  * would otherwise be closed for the whole day (the `start` hour never
  * occurs). The gap's replacement instant is admitted so autoclose still
  * runs — see {@link is_dst_gap_open}.
- *
- * @internal
  */
 export function in_autoclose_window(
   window: AutocloseConfig["autocloseWindow"],
@@ -116,8 +101,6 @@ export function in_autoclose_window(
  * that boundary instant — deferring ~1 h to the replacement instant
  * rather than a full day. The boundary is returned as-is (no minute
  * offset): the gap opening is a single transition instant, not a range.
- *
- * @internal
  */
 export function next_window_open(
   window: NonNullable<AutocloseConfig["autocloseWindow"]>,

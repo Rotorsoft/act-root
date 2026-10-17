@@ -1,7 +1,4 @@
 /**
- * @module tracing
- * @category Internal
- *
  * Centralized observability for the framework's internal pipelines.
  *
  * Trace decorators wrap a bare implementation with `logger.trace(...)` calls
@@ -22,8 +19,6 @@
  * orchestrator choose bare or traced variants once at `.build()` time based
  * on the configured log level. Outside this module, no other source file
  * imports tracing primitives.
- *
- * @internal
  */
 
 import { config } from "../config.js";
@@ -145,8 +140,6 @@ const as_of_marker = (asOf: AsOf | undefined): string => {
  * callback fires at the corresponding phase; both receive the call args, and
  * `exit` additionally receives the resolved result. Used to layer
  * `logger.trace` calls onto bare ops without changing their signatures.
- *
- * @internal
  */
 const traced = <F extends AsyncFn>(
   inner: F,
@@ -163,8 +156,6 @@ const traced = <F extends AsyncFn>(
 /**
  * Selects bare or traced event-sourcing handlers. Called once by the
  * orchestrator constructor.
- *
- * @internal
  */
 export function build_es(
   logger: Logger,
@@ -267,8 +258,6 @@ export function build_es(
 /**
  * Selects bare or traced drain-pipeline ops. Called once by the orchestrator
  * constructor.
- *
- * @internal
  */
 export function build_drain<TEvents extends Schemas>(
   logger: Logger
@@ -332,8 +321,6 @@ export function build_drain<TEvents extends Schemas>(
  * marker and its adjacent post-state share the marker's color so the
  * eye reads "outcome + where it landed" as one unit. Per-stream
  * `[events]` and `(error)` stay dim — secondary context.
- *
- * @internal
  */
 export function trace_cycle<TEvents extends Schemas>(
   logger: Logger,

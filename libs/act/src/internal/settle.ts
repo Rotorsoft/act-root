@@ -1,7 +1,4 @@
 /**
- * @module settle
- * @category Internal
- *
  * Debounced correlate→drain loop. Sits one level above both correlation
  * and drain: schedule() coalesces rapid callers into a single cycle, then
  * runs correlate+drain in a loop until a pass produces no progress.
@@ -9,8 +6,6 @@
  * Owns the debounce timer and the reentrancy flag. Everything else is
  * supplied via the `SettleDeps` callbacks so this module stays free of
  * orchestrator state.
- *
- * @internal
  */
 
 import type {
@@ -26,8 +21,6 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
  * input bag so this file doesn't import `Act` (avoids a cycle) and stays
  * independently testable.
- *
- * @internal
  */
 export type SettleDeps<TEvents extends Schemas> = {
   readonly init: () => Promise<void>;
@@ -50,8 +43,6 @@ export type SettleDeps<TEvents extends Schemas> = {
 /**
  * Drives the debounced correlate→drain catch-up cycle. One instance per
  * Act orchestrator.
- *
- * @internal
  */
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
@@ -110,11 +101,8 @@ export class SettleLoop<TEvents extends Schemas> {
 
       (async () => {
         await this._deps.init();
-        // Accumulated across every pass, so `settled` reports what the
-        // SETTLE did rather than what its last pass did. The loop only
-        // exits on a pass that made no progress, so emitting that pass
-        // alone meant the payload was always empty — while the guide tells
-        // operators to sum `drain.fetched` for throughput.
+        // Accumulated across every pass, so `settled` reports what the whole
+        // settle did; its last pass made no progress and is always empty.
         let settled_drain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
