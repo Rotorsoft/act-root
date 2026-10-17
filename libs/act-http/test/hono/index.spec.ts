@@ -7,16 +7,7 @@
  * paths. Round-trips run through `app.request()` so no live server
  * is needed.
  */
-import {
-  act,
-  ConcurrencyError,
-  InvariantError,
-  NonRetryableError,
-  StreamClosedError,
-  state,
-  ValidationError,
-  ZodEmpty,
-} from "@rotorsoft/act";
+import { act, state, ZodEmpty } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { Hono } from "hono";
@@ -211,6 +202,8 @@ describe("hono(app, options) — generated REST surface", () => {
     });
   });
 
+  // Each framework error's status and code is pinned once in
+  // api/errors.spec.ts; this proves the routes go through toApiError.
   describe("framework error mapping (via toApiError)", () => {
     const cases: ReadonlyArray<{
       readonly label: string;
@@ -218,46 +211,6 @@ describe("hono(app, options) — generated REST surface", () => {
       readonly status: number;
       readonly code: string;
     }> = [
-      {
-        label: "ConcurrencyError → 412 / CONCURRENCY",
-        throws: () => new ConcurrencyError("tenant-acme", 0, [], 1),
-        status: 412,
-        code: "CONCURRENCY",
-      },
-      {
-        label: "InvariantError → 409 / INVARIANT",
-        throws: () =>
-          new InvariantError(
-            "PressKey",
-            { key: "5" },
-            { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },
-            {} as never,
-            "calculator must be open"
-          ),
-        status: 409,
-        code: "INVARIANT",
-      },
-      {
-        label: "StreamClosedError → 410 / STREAM_CLOSED",
-        throws: () => new StreamClosedError("tenant-acme"),
-        status: 410,
-        code: "STREAM_CLOSED",
-      },
-      {
-        label: "NonRetryableError → 400 / NON_RETRYABLE",
-        throws: () => new NonRetryableError("permanently busted"),
-        status: 400,
-        code: "NON_RETRYABLE",
-      },
-      {
-        label: "ValidationError → 422 / VALIDATION",
-        throws: () =>
-          new ValidationError("PressKey", { key: "5" }, {
-            issues: [],
-          } as never),
-        status: 422,
-        code: "VALIDATION",
-      },
       {
         label: "unknown Error → 500 / INTERNAL (with detail)",
         throws: () => new Error("disk on fire"),

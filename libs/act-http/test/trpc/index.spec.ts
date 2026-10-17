@@ -228,64 +228,6 @@ describe("trpc(app, options) — generated router", () => {
     });
   });
 
-  describe("framework error mapping (via toApiError)", () => {
-    const cases: ReadonlyArray<{
-      readonly label: string;
-      readonly throws: () => Error;
-      readonly code: string;
-    }> = [
-      {
-        label: "ConcurrencyError → PRECONDITION_FAILED (412, matches Hono)",
-        throws: () => new ConcurrencyError("tenant-acme", 0, [], 1),
-        code: "PRECONDITION_FAILED",
-      },
-      {
-        label: "InvariantError → CONFLICT (409)",
-        throws: () =>
-          new InvariantError(
-            "PressKey",
-            { key: "5" },
-            { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },
-            {} as never,
-            "calculator must be open"
-          ),
-        code: "CONFLICT",
-      },
-      {
-        label: "StreamClosedError → NOT_FOUND (410 Gone; tRPC has no 410)",
-        throws: () => new StreamClosedError("tenant-acme"),
-        code: "NOT_FOUND",
-      },
-      {
-        label: "NonRetryableError → BAD_REQUEST (400)",
-        throws: () => new NonRetryableError("permanently busted"),
-        code: "BAD_REQUEST",
-      },
-      {
-        label: "ValidationError → UNPROCESSABLE_CONTENT (422)",
-        throws: () =>
-          new ValidationError("PressKey", { key: "5" }, {
-            issues: [],
-          } as never),
-        code: "UNPROCESSABLE_CONTENT",
-      },
-    ];
-
-    for (const { label, throws, code } of cases) {
-      test(label, async ({ app }) => {
-        const router = trpc<Ctx>(app as never, default_options());
-        const t = initTRPC.context<Ctx>().create();
-        const caller = t.createCallerFactory(router)(
-          make_ctx()
-        ) as unknown as AnyCaller;
-        vi.spyOn(app, "do").mockRejectedValueOnce(throws());
-        await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
-          code,
-        });
-      });
-    }
-  });
-
   test("wraps unknown thrown values as INTERNAL_SERVER_ERROR", async ({
     app,
   }) => {
@@ -368,12 +310,14 @@ describe("trpc(app, options) — generated router", () => {
       label: string;
       throws: () => Error;
       trpcStatus: number;
+      trpcCode: string;
       sameAsHono: boolean;
     }> = [
       {
         label: "ConcurrencyError",
         throws: () => new ConcurrencyError("tenant-acme", 0, [], 1),
         trpcStatus: 412,
+        trpcCode: "PRECONDITION_FAILED",
         sameAsHono: true,
       },
       {
@@ -387,6 +331,7 @@ describe("trpc(app, options) — generated router", () => {
             "calculator must be open"
           ),
         trpcStatus: 409,
+        trpcCode: "CONFLICT",
         sameAsHono: true,
       },
       {
@@ -396,24 +341,29 @@ describe("trpc(app, options) — generated router", () => {
             issues: [],
           } as never),
         trpcStatus: 422,
+        trpcCode: "UNPROCESSABLE_CONTENT",
         sameAsHono: true,
       },
       {
         label: "NonRetryableError",
         throws: () => new NonRetryableError("permanently busted"),
         trpcStatus: 400,
+        trpcCode: "BAD_REQUEST",
         sameAsHono: true,
       },
       {
         label: "StreamClosedError (410 → 404, the documented exception)",
         throws: () => new StreamClosedError("tenant-acme"),
         trpcStatus: 404,
+        trpcCode: "NOT_FOUND",
         sameAsHono: false,
       },
     ];
 
-    for (const { label, throws, trpcStatus, sameAsHono } of parity) {
-      test(`${label} → tRPC HTTP ${trpcStatus}`, async ({ app }) => {
+    for (const { label, throws, trpcStatus, trpcCode, sameAsHono } of parity) {
+      test(`${label} → tRPC ${trpcCode} (HTTP ${trpcStatus})`, async ({
+        app,
+      }) => {
         const router = trpc<Ctx>(app as never, default_options());
         const t = initTRPC.context<Ctx>().create();
         const caller = t.createCallerFactory(router)(
@@ -423,6 +373,7 @@ describe("trpc(app, options) — generated router", () => {
         vi.spyOn(app, "do").mockRejectedValueOnce(thrown);
         const err = await caller.PressKey({ key: "5" }).catch((e) => e);
         expect(err).toBeInstanceOf(TRPCError);
+        expect(err.code).toBe(trpcCode);
         const wire = getHTTPStatusCodeFromError(err as TRPCError);
         expect(wire).toBe(trpcStatus);
         // Parity with the Hono/OpenAPI wire status via the shared table.
