@@ -89,9 +89,7 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Four published exports tagged `@internal` (re-checked 2026-10-15, unchanged), plus act.ts:99-104 pointing operators at a deprecated constant. (P2026-10-15r-5)
 - act-sqlite specs use the existing `tmp-db.ts` instead of 11 hand-rolled WAL/SHM cleanups (~−85 lines, −4 `.gitignore` lines; `test-autoclose.db` sidecars from a deleted spec still sit on disk). (P2026-10-17c-5)
 - `register_lane` resolves its own config; both builders drop their copy of the call and comment (~−7). (P2026-10-17b-5)
-- InMemoryStore awaits a simulated-latency `sleep()` in 18 methods outside `NODE_ENV=test` (100 ms each by default): `hello.ts` takes 2.4 s, 0.2 s without. Undocumented; whether it earns its place (it surfaces interleavings in demos) is the user's call. (P2026-10-17d-4, recounted: the specialist counted 4)
 - Spec comments carry 281 ticket references in 124 files (test names are clean); a comment sweep like #1909–#1911 for tests. 53 core specs define their own `Counter` (~−140 with a shared fixture, but shared fixtures couple tests).
-- Root `package.json` lists `@rotorsoft/act-pg` only because `recipes/scaling/hybrid-store` imports it and `recipes/package.json` doesn't; move it.
 - Design finding: the defer wake's "drain until a pass leases nothing" loop repeats settle's loop without correlate (the background-copies-foreground smell); routing it through settle adds `settled` events and a correlate per wake, so it doesn't subtract today.
 - Design question (P2026-10-17d-2): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
@@ -444,3 +442,5 @@ Simplifications:
 - P2026-10-17a-3. Dead dependencies and #1935 leftovers: `autoprefixer`, `postcss` (inspector), `clsx` (docs), `.gitignore`'s `perf-result.json`, the ci-cd `perf` filter's `libs/*/bench/**`, `Disclosure`'s `export` keyword.
 - P2026-10-17c-4. act-http: drop the tRPC and Hono framework-error tables that repeat the parity table (~−100 lines, 10 tests; coverage probed identical).
 - P2026-10-17b-4. Comment boilerplate in `internal/`: 82 `@internal` and 45 `@module`/`@category` tags with no typedoc effect (internal/ is not an entry point), plus the `config.ts` and `autoclose-policy.ts` header essays (~−220; internal/ 33% → ~31%). The 30% bar needs why-comments cut too; the user's call.
+
+Tickets (user: "create the tickets for the findings"): #1939 (P2026-10-17-1 + -2), #1940 (-3), #1941 (-4), #1942 (a-2), #1943 (c-2), #1944 (c-1), #1945 (c-3), #1946 (a-3, plus moving the root act-pg dependency to `recipes/`), #1947 (c-4), #1948 (b-4). Rejected: drop InMemoryStore's simulated latency (P2026-10-17d-4; user: "leave the simulated latency in the in-memory store"); don't re-propose. Under discussion: settle after a local commit (P2026-10-17d-2).
