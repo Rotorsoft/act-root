@@ -8,24 +8,24 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
-| Public surface | 2026-10-15 | 3 | 0 | active (this run: r-3, r-5 pending; retire next run if neither is accepted) |
-| Dead code (tool) | 2026-10-11 | 3 | 2 | active (second run found only export keywords; see its false positives in lenses.md) |
-| Hotspots (tool) | 2026-10-11 | 3 | 1 | active |
-| File budget | 2026-10-15 | 4 | 1 | active (lane wiring move re-measured: −171 code lines from act.ts, no repo shrink) |
-| Comment noise | 2026-10-08 | 2 | 2 | active (25% bar unreachable while public type docs stay; see P2026-10-08d-6) |
-| Concepts and options | 2026-10-15 | 4 | 1 | active (found the lag/lead ratio serves no row) |
+| Public surface | 2026-10-15 | 3 | 1 | active (r-3 accepted, #1930) |
+| Dead code (tool) | 2026-10-17 | 4 | 2 | active (found #1935's leftovers and the internal barrel's cost) |
+| Hotspots (tool) | 2026-10-17 | 4 | 1 | active (no proposal this run: the top four are linear or already in the backlog; retire if the next run finds none) |
+| File budget | 2026-10-15 | 4 | 1 | active |
+| Comment noise | 2026-10-17 | 3 | 2 | active (internal/ 33%; boilerplate tags alone get it to ~31%) |
+| Concepts and options | 2026-10-15 | 4 | 1 | active (o-3 rejected: a performance mechanism serves a bench, not a row) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-11 | 3 | 1 | active |
-| Reading path | 2026-10-15 | 3 | 1 | active (found the broken `@example` blocks) |
-| Newcomer test (quarterly) | 2026-10-08 | 1 | 0 | active (baseline: 22 concepts, 3 imports) |
-| Tests by concept | 2026-10-11 | 3 | 3 | active |
+| DRY across adapters and builders | 2026-10-17 | 4 | 1 | active (no new triple implementation; the backlog holds the best two) |
+| Reading path | 2026-10-15 | 3 | 3 | active |
+| Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
+| Tests by concept | 2026-10-17 | 4 | 3 | active |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-10-15 | 4 | 1 | active |
-| One source of truth | 2026-10-15 | 4 | 3 | active |
-| Examples | 2026-10-15 | 3 | 1 | active (found 31 arrow-function handlers that throw at build) |
-| Process | 2026-10-15 | 3 | 3 | active |
-| Feature interactions | 2026-10-15 | 3 | 5 | active (found the idle-rule bug) |
+| One source of truth | 2026-10-15 | 4 | 5 | active |
+| Examples | 2026-10-15 | 3 | 2 | active |
+| Process | 2026-10-15 | 3 | 7 | active |
+| Feature interactions | 2026-10-17 | 4 | 7 | active (found two bugs #1928 left) |
 
 ## Interaction register
 
@@ -37,15 +37,18 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | retry budget, breaker | `claim` raises `retry`; the drain skips the block while `store_failing` | justified | counting at claim makes a handler that crashes the worker spend its budget; a store outage must not |
 | close, drain | a reaction's close request runs after the drain's `ack` | justified | the close guard must see the requesting reaction caught up |
 | correlation lease, lanes / explicit correlate / shutdown / checkpoint | lease key includes the `onlyLanes` shard; `app.correlate()` skips the lease; shutdown hands it back last; the key selects the checkpoint row | justified | N workers otherwise read and mark every event N times (#1532) |
-| defer, retry count | an explicit defer acks with `retry: -1` | accidental, low value | a sentinel in a public port field; cheap to keep |
+| defer, retry count | ack, reset, unblock and defer store `retry: -1` | justified | -1 is the stored "no attempt yet" value in all three adapters, pinned by the TCK and documented in `ports.ts`; not a one-off sentinel (re-checked 2026-10-17) |
 | retry timing, lease | removed by #1872: every retry is paced by the reaction's backoff (default fixed 10 s); the lease only keeps workers apart | resolved | P2026-10-10o-2, #1875 |
 | lanes, priority | `subscribe` re-lanes on priority ≥ stored (how a restart applies an edited declared lane); correlate reads the row when it has no record, so the row owns a dynamic target's lane and the LRU only caches it | justified once #1878 merges | P2026-10-10o-3, #1876; the coupling itself goes only if priority does (major-version question) |
 | breaker, drain / settle | five places feed one consecutive-failure count of **store** failures; a success in one loop resets failures in another | justified | #1877: app code never leaves the loop that ran it (correlate stops before a throwing resolver's event and logs once, drain fails the stream, a reaction close logs non-store failures), so only store and framework errors reach the breaker; a real outage fails every loop; a store failing one kind of call can keep it closed, still visible as `error` events |
 | defer wake, breaker | fixed by #1872: the breaker check sits inside the drain's `try`, so `finally` re-aims the wake | resolved | P2026-10-10o-1, #1874 |
-| defer wake, drain lock / streamLimit | #1892 keeps a due entry until a drain reaches it; but a pass whose claims all defer or back off still counts as idle (controller disarms, settle stops, the wake re-fires only for due entries), so marked streams never claimed wait for a commit | accidental, and a bug | P2026-10-15o-1 (probed: 5 of 12 ran; control 12/12) |
-| drain failure, wake | a failed finalize leaves no wake: the breaker re-drives only once it opens (threshold 5), so a deferred reaction never re-fires on an idle app | accidental, and a bug | P2026-10-15d-2 (probed: 1 run; control 2) |
+| defer wake, drain lock / streamLimit | resolved by #1928: only an empty claim is idle; the wake drains until a pass leases nothing | resolved | P2026-10-15o-1 |
+| drain failure, wake | resolved for the drain by #1928 (a `RETRY` wake at `max(leaseMillis, cooldownMs)`); settle's failure still waits for the breaker to open | accidental, and a bug (settle half) | P2026-10-17-1 (probed: 0 runs; control 1) |
 | app errors, correlation | one throwing resolver stops the scan before its event, so discovery stops for every reaction until it stops throwing | justified | #1913, the user's choice: nothing is lost; isolating one reaction needs per-reaction checkpoints |
-| lease, lanes | background drains (wake, settle, `cycleMs`, `start_correlations`) claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call, and the default lane can't be configured | justified, under-documented | P2026-10-11b-2 |
+| lease, lanes | background drains claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call | resolved | documented by #1898 (`error-handling.md`, `configuration.md`) |
+| drain `RETRY` wake, breaker cooldown | the drain reads `breaker.cooldown_ms` and retries at `max(leaseMillis, cooldownMs)` | justified | the breaker doesn't know the failed pass's leases (dropping the lease floor fails a defer-outcome case), and a lease-only retry spins with a 1 ms lease (two `store-failure-budget` cases) |
+| defer wake loop, shutdown | the wake drains in a loop that never checks `_stopped`; shutdown waits for one pass | accidental, and a bug | P2026-10-17-2 (probed: 2 handlers ran after `shutdown()` resolved; control 0) |
+| `_reactive`, lane arming | `_reactive` is `event_to_lanes.size > 0` | shared primitive | #1937 |
 
 ## Mutation baselines
 
@@ -75,7 +78,7 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - `ci-cd.yml` comments: ~100 of 158 comment lines are history; one misplaced.
 - act-http tests: drop the tRPC and Hono error tables that repeat the parity table and `api/errors.spec.ts` (~170 lines); `audit.spec.ts` collector helper and shared `meta` (~140 lines).
 
-- Tests: replace `sleep`-then-`expect` with `vi.waitFor` (~18 sites; thin margins in public-defer, backoff, intra-event-ack) and drop the two hand-written `until` helpers; `action-retry` asserts `elapsed < 50`. (P2026-10-11c-4)
+- Tests: replace `sleep`-then-`expect` with `vi.waitFor` (recounted 2026-10-17: 61 sites, many negative waits `waitFor` can't replace; positive ones in act.spec 10, backoff 8, defer-outcome 6, public-defer 4, act-pg notify 4; thin margins in public-defer, backoff, intra-event-ack) and drop the two hand-written `until` helpers; `action-retry` asserts `elapsed < 50`. (P2026-10-11c-4)
 - act-pg / act-sqlite `pii-encryption.spec.ts` run the same 9 cases (~238 shared lines): delete the sqlite `query_stats` duplicate of a TCK case now; moving the rest into a TCK capability adds act-tck surface and needs an RFC (~−400 net, unprobed). (P2026-10-11c-5)
 - PostgresStore `commit`'s single-event SQL fork (4 statement variants → 2) if a CI bench shows it doesn't pay; `commit` is the most-changed function in the most-changed adapter. (P2026-10-11a-5)
 - Delete the renovate rule guarding a `pnpm.overrides` block that doesn't exist (`jq .pnpm package.json` → null; −6 lines). (P2026-10-11d-3)
@@ -84,9 +87,19 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - configuration.md § Circuit breaker restates error-handling.md and misses "Store failures only"; observability.md:29 says `error` fires only in the drain loop; act-tck README and tck-conformance.md hand-copy stale peer versions. Link instead. (P2026-10-15d-5)
 - Leftovers: the `pre-push` hook (3 of 368 commits were direct pushes; CLAUDE.md:203 describes it wrongly), ~18 history comment lines in ci-cd.yml, two dead pointers in CONTRIBUTING.md. (P2026-10-15p-5)
 - Four published exports tagged `@internal` (re-checked 2026-10-15, unchanged), plus act.ts:99-104 pointing operators at a deprecated constant. (P2026-10-15r-5)
+- act-sqlite specs use the existing `tmp-db.ts` instead of 11 hand-rolled WAL/SHM cleanups (~−85 lines, −4 `.gitignore` lines; `test-autoclose.db` sidecars from a deleted spec still sit on disk). (P2026-10-17c-5)
+- `register_lane` resolves its own config; both builders drop their copy of the call and comment (~−7). (P2026-10-17b-5)
+- InMemoryStore awaits a simulated-latency `sleep()` in 18 methods outside `NODE_ENV=test` (100 ms each by default): `hello.ts` takes 2.4 s, 0.2 s without. Undocumented; whether it earns its place (it surfaces interleavings in demos) is the user's call. (P2026-10-17d-4, recounted: the specialist counted 4)
+- Spec comments carry 281 ticket references in 124 files (test names are clean); a comment sweep like #1909–#1911 for tests. 53 core specs define their own `Counter` (~−140 with a shared fixture, but shared fixtures couple tests).
+- Root `package.json` lists `@rotorsoft/act-pg` only because `recipes/scaling/hybrid-store` imports it and `recipes/package.json` doesn't; move it.
+- Design finding: the defer wake's "drain until a pass leases nothing" loop repeats settle's loop without correlate (the background-copies-foreground smell); routing it through settle adds `settled` events and a correlate per wake, so it doesn't subtract today.
+- Design question (P2026-10-17d-2): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
 ## Self-changes
 
+- 2026-10-17: specialists simulate source edits only in their own `git clone --shared` under the scratchpad. One specialist edited `circuit-breaker.ts` in the shared tree while another was running the quickstart against it.
+- 2026-10-17: the bar's "every feature serves a contract row" now exempts performance mechanisms, which a real-adapter bench judges. P2026-10-15o-3 (drop the adaptive lag/lead ratio, "serves no row") was rejected because removing it could break a performance feature.
+- 2026-10-17: two smells added from this run's probes on #1928: a loop in a background path that doesn't check the stop flag each turn, and a fix for one failure path that leaves its sibling loops. The Dead code lens drops the deleted `BENCH.md` and lists three more knip false positives. `metrics.sh` merges IAct / Act / Store / ActOptions into one guard row: unchanged in all seven runs.
 - 2026-10-15: specialists probe in their own file (`_probe-<lens>.spec.ts`). Two specialists used `_probe.spec.ts` at the same time and overwrote each other's probe once; one result was recorded before the file vanished.
 - 2026-10-15: retired Core or decorator? (three runs, findings only) and Packages earn their place (four runs, no proposal); `metrics.sh` drops "published packages" (12 in every run, informed no decision). Two smells added from this run's probes: an idle test that counts successes, and a recovery promise resting on another mechanism's threshold.
 - 2026-10-11: step 2 now asks, for a PR that changed a default or a timing, to grep docs, recipes and examples for the old behavior and run the recipes it touches; the Examples lens covers `recipes/**/examples/*.ts`; one smell added (a schedule entry removed before its work is done). #1872 changed retry timing and this run found three things it missed: the Prometheus recipe no longer blocks its poison stream (probed against the commit before), four doc and comment passages still describe lease-paced retries, and the defer timer drops due streams before its drain runs (probed).
@@ -394,3 +407,40 @@ Simplifications:
 Design findings, not proposed: one throwing resolver stops discovery for every reaction (documented, #1913); every runnable example needs `app.on("committed", () => app.settle())` (13 copies; making `do()` settle would change what apps observe); priority (required `prioritize`, 13 TCK cases) stays a question for a future major.
 
 Tickets (user: "all"): #1915 (o-1 + d-2), #1916 (d-1), #1917 (d-4), #1918 (r-3), #1919 (d-3), #1920 (o-2), #1921 (p-1), #1922 (r-1), #1923 (o-3), #1924 (p-2), #1925 (p-4), #1926 (p-3).
+
+### 2026-10-17 — full run (four specialists: dead code + hotspots, DRY + comment noise + feature interactions, tests by concept, newcomer + field)
+
+| metric | 2026-10-15 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 18934 | 18224 | #1930 (−1,597 `@example` lines), #1936 (−31), #1937 (−5); +14 #1928 |
+| comments | 46% (internal/ 33%, adapters/ 14%) | 44% (33% / 12%) | #1930 |
+| spec files / test lines | 225 / 59564 | 225 / 59638 | #1928 tests (+81) |
+| CI workflows / lines | 5 / 850 | 5 / 829 | #1935 |
+| docs lines / CLAUDE.md | 9278 / 36 KB | 9275 / 36 KB | #1932; #1933 removed 7,389 lines of versioned docs (not counted by the metric) |
+| everything else | | unchanged | 54 exports, 8 / 20 / 18 / 14, 9 files touching 5+ features, 21 / 8 files over 300 |
+
+Audit: 10 PRs since the last run, all its tickets. Only #1928 added mechanism (+14 source lines: a `RETRY` wake, a `cooldown_ms` getter, a wake loop), and it is a fix on #1892 in the same file. This run found two bugs it left: the new wake loop ignores shutdown, and it fixed the "failure leaves no wake" bug only in the drain, not in settle, which feeds the same breaker.
+
+Decisions on P2026-10-15*: o-1 + d-2 → #1915/#1928; d-1 → #1916/#1927; d-4 → #1917/#1929; r-3 → #1918/#1930 (one example per doc comment); d-3 → #1919/#1932; o-2 → #1920/#1936; p-1 → #1921/#1931; r-1 → #1922/#1937; p-2 → #1924/#1935; p-4 → #1925/#1933; p-3 → #1926/#1934. o-3 rejected (#1923 closed): "your proposal can actually break a feature"; the adaptive ratio is a performance mechanism, and "serves no contract row" doesn't apply to those (now in the bar).
+
+Promises kept: o-2 promised −35 source lines, delivered −31; r-1 promised −12, delivered −5 (source; −9 with tests); r-3 promised up to ~1,270, delivered −1,597; p-2 ~−500 → −511; p-4 7,256 → −7,389; p-3 209 → −206; d-3 ~3 KB → 13 lines; p-1 moved files (+3), as promised. o-1 + d-2 promised "two idle rules become one" and kept it, but shipped two new defects (P2026-10-17-1, -2): probe the shutdown and every sibling loop when a fix adds a loop or a retry.
+
+Verified in the main loop before ranking (red + control each, my own probe file): one rejected `store.query` during settle's correlate with `cooldownMs: 100` → 0 runs in 800 ms (control 1); three streams deferred to one due-time on a `streamLimit: 1` lane with an 80 ms handler, `shutdown()` during the woken pass → 2 handlers ran after shutdown resolved (control with `streamLimit: 10` → 0); both one-line fixes together turn both green and `libs/act` passes 1,533/1,533. The README quickstart in a project whose package.json is `{"type":"module"}` throws `ERR_VALIDATION … name` (with name and version: runs). `correlation-and-drain.md:40,168` and `close-cycle.md:92` still describe `reactiveEvents`; `backoff.ts:6` names `reactions._finalize`; `ports.ts:959` says `retry_count = 0` (adapters write -1); `libs/act/README.md` and `docs/docs/intro.md` keep the old lambda `.emit` quickstart and "dead-lettering"; wolfdesk wires `committed` to a bare `drain()`; act-pg's `scopedTypes` JSONB parser equals pg's default since #1570. Corrected: InMemoryStore has 18 simulated-latency sleeps, not 4.
+
+Newcomer test: the root README quickstart needs 21 concepts and 3 imports (was 22); two are hidden (installing the `zod` peer, package.json `name`/`version`). `hello.ts` about 27 and prints its result twice.
+
+Field: every framework checked owns its infrastructure retry in one place with one timer (Emmett fixed 100 ms resubscribe; Propulsion a fixed read-failure sleep; Axon 1 s doubling to 60 s, or a 5 s claim interval; Marten Polly per operation); none pairs a breaker with a second retry timer. None asks the app to trigger processors after a commit: Marten and Emmett run inline projections in the append transaction and async ones in a daemon; Axon starts processors with the app. Sources in the specialist notes.
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-17-1. After any store failure the breaker re-drives settle at `cooldownMs`, not only once open: drop `if (circuit === "open")` in `CircuitBreaker.failed` (one condition); one rule in `error-handling.md`, `configuration.md` and the `on_retry` doc; the probe becomes a test and a row. Keep the drain's `RETRY` (justified, register).
+- P2026-10-17-2. The defer wake loop stops at shutdown: `while (!this._stopped && …)`; the probe becomes a test under the shutdown row.
+- P2026-10-17-3. A package.json without `name`/`version` must not crash the first `log()`: `get_package` falls back field by field (`{ ...FALLBACK_PACKAGE, ...parsed }`), as it does for a missing file.
+- P2026-10-17-4. Prose that contradicts the code: the three `reactiveEvents` passages, `backoff.ts:6`, `ports.ts:959`, settle's termination comment (a zero backoff keeps a stream claimable); the two stale quickstart copies and "dead-lettering"; an install line in the root README; wolfdesk's `committed` listener settles (promised by #1842, never done); `hello.ts` prints once.
+Simplifications:
+- P2026-10-17a-2. Delete the internal barrel `internal/index.ts`, its biome rule and two architecture cases; import each module directly and re-export `DeferSignal` from its file (−131 lines; stability snapshot −4,986; 30 of 48 recent snapshot-changing commits touched only `internal/`). Challenges the #1839 decision ("the lint rule requires the barrel") by removing the rule with the barrel. Simulated: `libs/act` green, biome clean.
+- P2026-10-17c-2. Adapter suites: delete act-pg `store.spec.ts` + `app.ts` (move 2 fault cases to `store.error.spec.ts`, 3 constructor cases to `pool-defaults.spec.ts`), act-sqlite `store.spec.ts` + `app.ts`, the sqlite `query_stats` pii duplicate of a TCK case, and act-pg's dead `scopedTypes` with `date-roundtrip.spec.ts` (~−480 test lines, −3 specs, −2 helpers, −20 source; coverage probed identical).
+- P2026-10-17c-1. Delete 17 tests that pin nothing: 10 act.spec coverage tests (8 touch private state; one has no assertion), 4 static-form controls that repeat lanes.spec, 3 defer-outcome controls that repeat a positive test (~−300 lines; coverage probed identical; rows 103 and 132 keep their other tests).
+- P2026-10-17c-3. One spec per concept: four defer specs → `defer.spec.ts`, three fold specs → `state-projection.spec.ts` (~−180 lines, −6 files; rows change their file cell only).
+- P2026-10-17a-3. Dead dependencies and #1935 leftovers: `autoprefixer`, `postcss` (inspector), `clsx` (docs), `.gitignore`'s `perf-result.json`, the ci-cd `perf` filter's `libs/*/bench/**`, `Disclosure`'s `export` keyword.
+- P2026-10-17c-4. act-http: drop the tRPC and Hono framework-error tables that repeat the parity table (~−100 lines, 10 tests; coverage probed identical).
+- P2026-10-17b-4. Comment boilerplate in `internal/`: 82 `@internal` and 45 `@module`/`@category` tags with no typedoc effect (internal/ is not an entry point), plus the `config.ts` and `autoclose-policy.ts` header essays (~−220; internal/ 33% → ~31%). The 30% bar needs why-comments cut too; the user's call.

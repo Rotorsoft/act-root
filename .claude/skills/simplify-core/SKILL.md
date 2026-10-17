@@ -30,7 +30,7 @@ Targets the retrospective tracks (adjust them only with the user):
 - runtime exports of `@rotorsoft/act` don't grow (54 today); `IAct` stays the small surface handlers see, and each `Act` method beyond it is documented as operator surface
 - one implementation per idea: adapter logic shared through the orchestrator or the TCK, config validated once in `internal/config.ts`
 - features are orthogonal: no feature reads another's configuration or state to decide its own behavior, and no layer carries a guard whose job is to cancel another layer's rule; every interaction that remains is listed, with its reason, in the interaction register in `history.md`
-- every feature serves at least one contract row; a feature no row needs is a finding
+- every feature serves at least one contract row; a feature no row needs is a finding, except a performance mechanism, which a real-adapter bench judges, not a row
 - one spec per concept, not per ticket; adapter suites don't repeat the TCK
 - each behavior documented in one place and linked elsewhere
 - the README quickstart needs few concepts, and that count only goes down
@@ -75,6 +75,6 @@ The id lets the next retrospective find it.
 
 ## Specialists (monthly)
 
-When the month's lenses are independent, fan them out instead of running them in sequence: at most four agents, one message, read-only. Suggested owners: `act-code-reviewer` for code lenses, `act-test-author` for the tests lens, `act-doc-writer` for docs, general-purpose for infra, packages and the field. Every specialist gets ground rules 1–5, its lens text from `lenses.md`, the proposal template, a cap of five proposals, and this instruction first: *create your notes file at `<scratchpad>/simplify/<lens>.md` and append to it as you go*. Each specialist probes in its own file (`_probe-<lens>.spec.ts`), never a shared name. No edits, no tickets.
+When the month's lenses are independent, fan them out instead of running them in sequence: at most four agents, one message, read-only. Suggested owners: `act-code-reviewer` for code lenses, `act-test-author` for the tests lens, `act-doc-writer` for docs, general-purpose for infra, packages and the field. Every specialist gets ground rules 1–5, its lens text from `lenses.md`, the proposal template, a cap of five proposals, and this instruction first: *create your notes file at `<scratchpad>/simplify/<lens>.md` and append to it as you go*. Each specialist probes in its own file (`_probe-<lens>.spec.ts`), never a shared name, and simulates a source edit only in its own `git clone --shared` under the scratchpad, never in the shared working tree. No edits, no tickets.
 
 Then synthesize in the main loop: merge duplicates, drop anything that adds more than it removes or conflicts with another proposal, check the strongest claims yourself, and rank one list. A behavior claim (a bug, a broken promise) ranks only after the main loop reproduces it with an asserting test and a control. Specialists optimize their corner; the main loop decides.
