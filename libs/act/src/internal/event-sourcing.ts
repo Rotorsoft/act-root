@@ -28,7 +28,7 @@ import type {
 } from "../types/index.js";
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
-import { default_correlator } from "./correlator.js";
+import { default_correlator } from "./correlation-id.js";
 
 /**
  * The patch step: merges a reducer's partial into state. Chosen once at

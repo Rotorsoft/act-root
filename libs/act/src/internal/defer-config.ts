@@ -18,8 +18,8 @@
  */
 
 import { z } from "zod";
+import { DeferSignal } from "../defer-signal.js";
 import type { Committed, DeferWhen, Schemas } from "../types/index.js";
-import { DeferSignal } from "./defer-signal.js";
 
 /**
  * A relative span, measured from the triggering event's `created` time. At

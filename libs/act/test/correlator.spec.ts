@@ -7,7 +7,7 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
-import { default_correlator } from "../src/internal/correlator.js";
+import { default_correlator } from "../src/internal/correlation-id.js";
 
 describe("default_correlator (pure)", () => {
   const baseCtx = {

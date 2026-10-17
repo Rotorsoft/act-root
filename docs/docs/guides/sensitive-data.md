@@ -197,8 +197,9 @@ This is a deliberate performance trade-off rather than a bug. PII-aware states p
 
 ## Pointers
 
-- `libs/act/src/types/schemas.ts` — `sensitive(zodType)` public marker; `REDACTED` / `SHREDDED` sentinels
-- `libs/act/src/internal/sensitive.ts` — `pii_fields`, `pii_split`, `pii_gate`, `pii_strip` helpers the orchestrator calls
+- `libs/act/src/types/schemas.ts` — `sensitive(zodType)` public marker, which re-exports the sentinels
+- `libs/act/src/sensitive.ts` — the marker registry, `pii_fields`, and the `REDACTED` / `SHREDDED` sentinels
+- `libs/act/src/internal/pii.ts` — `pii_split`, `pii_gate`, `pii_strip`, the transforms the orchestrator calls
 - `libs/act/src/builders/state-builder.ts` — `.discloses(predicate)` builder method
 - `libs/act/src/builders/act-builder.ts` — three-pass PII wiring (events / states / batch handlers) at build time
 - `libs/act/src/act.ts` — `forget(stream)` orchestrator method and `forgotten` lifecycle event

@@ -34,7 +34,7 @@ A dynamic resolver is evaluated **more than once for the same event**: once in `
 A resolver that throws stops correlation just before that event until it stops throwing (or, during the drain, fails just the stream it was matching); see [Error handling § Store failures only](../concepts/error-handling.md#store-failures-only).
 :::
 
-Build-time classification (`builders/build-classify.ts`) walks the registry, partitions resolvers by kind, and stashes:
+Build-time classification (`internal/classify.ts`) walks the registry, partitions resolvers by kind, and stashes:
 
 - `static_targets[]` — subscribed once at init
 - `event_to_lanes` — each event with at least one reaction, mapped to the lanes its reactions run on; `do()` arms only those lanes, and an app whose map is empty never arms a drain (the `_reactive` flag)
@@ -223,5 +223,5 @@ Mixing them is fine — `settle()` doesn't acquire any global lock, just a per-c
 - `libs/act/src/internal/drain-cycle.ts` — `runDrainCycle` (pure cycle), `DrainController` (stateful driver)
 - `libs/act/src/internal/drain-ratio.ts` — adaptive lag/lead ratio
 - `libs/act/src/internal/settle.ts` — `SettleLoop` debounce + progress loop
-- `libs/act/src/builders/build-classify.ts` — registry classification at construction
-- `libs/act/src/builders/reaction-builder.ts` — `build_handle` / `build_handle_batch` — what runs inside a drain cycle for each leased stream
+- `libs/act/src/internal/classify.ts` — registry classification at construction
+- `libs/act/src/internal/handle.ts` — `build_handle` / `build_handle_batch` — what runs inside a drain cycle for each leased stream

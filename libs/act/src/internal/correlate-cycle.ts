@@ -17,7 +17,7 @@ import type {
   SubscribeInput,
 } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
-import type { DrainOps } from "./drain.js";
+import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
 

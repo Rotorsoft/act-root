@@ -5,8 +5,8 @@
  * Fluent interface for defining a strongly-typed state machine using Zod schemas.
  */
 import type { ZodType } from "zod";
+import type { AutoclosePolicy } from "../act.js";
 import {
-  type AutoclosePolicy,
   compile_autoclose_policy,
   policy_keep_days,
   policy_min_after_days,

@@ -1,5 +1,5 @@
 import { type ZodObject, type ZodRawShape, z } from "zod";
-import { _mark_sensitive, _registry } from "../internal/sensitive.js";
+import { _mark_sensitive, _registry } from "../sensitive.js";
 
 /**
  * @packageDocumentation
@@ -31,7 +31,7 @@ export const ZodEmpty = z.record(z.string(), z.never());
  *   Swagger UI don't echo PII freely. Returns `[]` for non-object
  *   schemas or objects with no sensitive fields; top-level shape only.
  */
-export { pii_fields, REDACTED, SHREDDED } from "../internal/sensitive.js";
+export { pii_fields, REDACTED, SHREDDED } from "../sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the

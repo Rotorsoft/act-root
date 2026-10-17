@@ -1,19 +1,12 @@
 import EventEmitter from "node:events";
+import { register_weak_disposer } from "./disposers.js";
+import { type AuditDeps, audit } from "./internal/audit.js";
+import { CircuitBreaker } from "./internal/circuit-breaker.js";
 import {
   ALL_LANES,
   classify_registry,
   type EventLaneSet,
-} from "./builders/build-classify.js";
-import {
-  build_handle,
-  build_handle_batch,
-} from "./builders/reaction-builder.js";
-import { register_weak_disposer } from "./disposers.js";
-import { type AuditDeps, audit } from "./internal/audit.js";
-import {
-  CircuitBreaker,
-  type CircuitState,
-} from "./internal/circuit-breaker.js";
+} from "./internal/classify.js";
 import {
   CloseLock,
   catch_up_correlation,
@@ -35,19 +28,20 @@ import { CorrelateCycle } from "./internal/correlate-cycle.js";
 import {
   close_correlation,
   default_correlator,
-} from "./internal/correlator.js";
-import type { DrainOps } from "./internal/drain.js";
+} from "./internal/correlation-id.js";
 import {
   DrainController,
   type Handle,
   type HandleBatch,
 } from "./internal/drain-cycle.js";
+import type { DrainOps } from "./internal/drain-ops.js";
 import {
   bare_patch,
   type EsOps,
   type PatchFn,
   scan,
 } from "./internal/event-sourcing.js";
+import { build_handle, build_handle_batch } from "./internal/handle.js";
 import {
   FOLD_RESET,
   type ResettableBatchHandler,
@@ -61,8 +55,9 @@ import {
   make_run_scoped,
 } from "./scoped.js";
 
-export type { CircuitState } from "./internal/circuit-breaker.js";
-// Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
+/** Circuit breaker state, reported with every `error` lifecycle event. */
+export type CircuitState = "closed" | "open" | "half-open";
+// A public config type; config bags live in internal/config.ts.
 export type { CircuitBreakerOptions } from "./internal/config.js";
 
 import { cache, default_scope, log, type Scoped, store } from "./ports.js";
@@ -107,7 +102,47 @@ import type {
   Target,
 } from "./types/index.js";
 
-export type { AutoclosePolicy } from "./internal/autoclose-policy.js";
+/**
+ * Declarative close-policy options consumed by `.autocloses({...})`.
+ * Top-level fields are AND-combined; the optional `or` block opens an
+ * alternative OR-path. Omitted fields contribute nothing — they do
+ * not mean "match everything."
+ *
+ * @property after - Close when `head.created` is at least the resolved
+ *   window in the past. Days are the close surface's only unit;
+ *   fractional `days` cover sub-day cooldowns (`{ days: 1/24 }` is one
+ *   hour) without introducing another denomination.
+ * @property is - Close when `head.name` matches. String for the
+ *   single-terminal-event case (the most common); `readonly string[]`
+ *   for multi-terminal states (`Order: Shipped | Delivered |
+ *   Cancelled`).
+ * @property reaches - Close when the stream's event count is `>= N`
+ *   (inclusive — fires the moment the threshold is reached).
+ * @property or - Alternative OR-path. When present, the policy fires
+ *   if EITHER the top-level AND group matches OR any field inside
+ *   `or` matches. Used for safety-net backstops layered onto a
+ *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
+ *   10k"*). Nested `or` inside `or` rejects at build time.
+ * @property keep - Rolling-window retention, **independent** of
+ *   the terminate fields: while the stream stays open, prune events
+ *   older than `now − keep` behind the closest safe snapshot via a
+ *   windowed close. Does not participate in the AND group or the `or`
+ *   block — a policy may terminate, prune, or both. Requires
+ *   `.snap(...)` earlier in the builder chain (type-gated) and a
+ *   window of at least one day — the close cycle is low-cadence
+ *   housekeeping, never sub-day realtime.
+ */
+export type AutoclosePolicy = {
+  after?: { days: number };
+  is?: string | readonly string[];
+  reaches?: number;
+  or?: {
+    after?: { days: number };
+    is?: string | readonly string[];
+    reaches?: number;
+  };
+  keep?: { days: number };
+};
 // Re-export the autoclose config surface so operators can
 // `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"`. The implementation lives in

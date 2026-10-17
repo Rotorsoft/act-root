@@ -191,11 +191,12 @@ Source-of-truth for what lives where:
 
 - `libs/act/src/builders/` (`state-builder.ts`, `slice-builder.ts`, `projection-builder.ts`, `act-builder.ts`) — public builder APIs
 - `libs/act/src/internal/event-sourcing.ts` — `load()`, `action()`, `snap()`
-- `libs/act/src/internal/correlate-cycle.ts`, `drain-cycle.ts`, `settle.ts` — reaction pipeline
+- `libs/act/src/internal/correlate-cycle.ts`, `drain-cycle.ts`, `handle.ts`, `settle.ts` — reaction pipeline
 - `libs/act/src/internal/close-cycle.ts` — close-the-books orchestration
 - `libs/act/src/ports.ts` + `libs/act/src/adapters/` — port singletons and in-memory defaults
 - `libs/act-pg/src/postgres-store.ts`, `libs/act-sqlite/src/sqlite-store.ts` — production adapters
 - `libs/act/src/types/` — public type contracts (`Store`, `Cache`, `Logger`, `Snapshot`, errors)
+- `libs/act/src/internal/` holds nothing public except the config bags in `internal/config.ts`; `types/` never imports from it (`architecture.spec.ts` enforces both)
 
 ## Development Workflow
 

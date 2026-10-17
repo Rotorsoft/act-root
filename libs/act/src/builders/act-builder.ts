@@ -16,12 +16,12 @@ import {
   current_version_of,
   deprecated_event_names,
 } from "../internal/event-versions.js";
+import { type EventGate, IDENTITY_GATE } from "../internal/pii.js";
 import {
   FOLD_RESET,
   make_fold_handler,
   type ResettableBatchHandler,
 } from "../internal/projection-fold.js";
-import { type EventGate, IDENTITY_GATE } from "../internal/sensitive.js";
 import { type DEFAULT_LANE, log } from "../ports.js";
 import { current_autoclose_window } from "../scoped.js";
 import type {

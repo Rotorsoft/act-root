@@ -13,6 +13,7 @@
  * mutates it.
  */
 
+import { DeferSignal } from "../defer-signal.js";
 import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Reaction,
@@ -23,9 +24,8 @@ import type {
 } from "../types/index.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
-import { CloseSignal } from "./close-signal.js";
 import { type AutocloseConfig, DEFAULT_MAX_RETRIES } from "./config.js";
-import { DeferSignal } from "./defer-signal.js";
+import { CloseSignal } from "./handle.js";
 
 /**
  * Prefix for the synthetic per-aggregate stream the autoclose reaction

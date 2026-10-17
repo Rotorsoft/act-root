@@ -16,9 +16,9 @@ import { join } from "node:path";
  * - `internal/` holds stateless implementations. They RECEIVE what they need
  *   (see `ReactionDeps.reaction_scope`, `DrainDeps.run_scoped`); they never
  *   reach for ambient state.
- * - PII is one module's business. `internal/sensitive.ts` owns the marker and
- *   the transforms; `builders/event-builder.ts` is the only place that
- *   composes them. Nothing else imports a `pii_*` helper.
+ * - PII is one module's business. `sensitive.ts` owns the marker,
+ *   `internal/pii.ts` the transforms, and `builders/event-builder.ts` is the
+ *   only place that composes them. Nothing else imports a `pii_*` helper.
  * - `scoped.ts` owns every `AsyncLocalStorage` and every operation on one.
  * - Ambient mechanisms are not public API.
  */
@@ -84,6 +84,37 @@ describe("architecture: internal/ is stateless", () => {
   });
 });
 
+describe("architecture: internal/ holds nothing public", () => {
+  // Public names live outside internal/, so the stability snapshot (which
+  // follows re-exports) never copies an internal module. The config bags
+  // are the one exception: CLAUDE.md gives them a single home there.
+  const outside = ts_files(SRC)
+    .filter((p) => !p.startsWith(INTERNAL))
+    .map((path) => ({
+      name: path.slice(SRC.length),
+      text: code_of(readFileSync(path, "utf8")),
+    }));
+
+  it("is re-exported only through internal/config.ts", () => {
+    const offenders = outside
+      .filter(({ text }) =>
+        [
+          ...text.matchAll(/^export [^;]*from "[./]*internal\/([\w-]+)\.js"/gm),
+        ].some((m) => m[1] !== "config")
+      )
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("is never imported by types/", () => {
+    const offenders = outside
+      .filter(({ name }) => name.startsWith("types/"))
+      .filter(({ text }) => /from "\.\.\/internal\//.test(text))
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("architecture: ambient context is owned by scoped.ts", () => {
   const outside_scoped = [
     ...ts_files(SRC)
@@ -128,11 +159,11 @@ describe("architecture: ambient mechanisms are not public API", () => {
 });
 
 describe("architecture: PII stays inside the modules that own it", () => {
-  const SENSITIVE = join(SRC, "internal", "sensitive.ts");
+  const SENSITIVE = join(SRC, "internal", "pii.ts");
   const OWNER = join(SRC, "builders", "event-builder.ts");
 
   it("is composed in exactly one place", () => {
-    // `sensitive.ts` declares the marker and the transforms;
+    // `internal/pii.ts` declares the transforms;
     // `event-builder.ts` composes them into readers at build. A third module
     // reaching for `pii_split` / `pii_strip` / `pii_gate` / `make_gate` means
     // the composition has leaked back out to a caller — which is how it was

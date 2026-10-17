@@ -16,10 +16,8 @@
  * machine is deterministic under test.
  */
 
+import type { CircuitState } from "../act.js";
 import type { CircuitBreakerConfig } from "./config.js";
-
-/** Circuit breaker state. */
-export type CircuitState = "closed" | "open" | "half-open";
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers

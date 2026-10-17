@@ -7,7 +7,7 @@ import {
   state,
   ZodEmpty,
 } from "../src/index.js";
-import { CloseSignal } from "../src/internal/close-signal.js";
+import { CloseSignal } from "../src/internal/handle.js";
 
 /**
  * Part 1 of #1090's autoclose port: the close mechanic. A reaction handler

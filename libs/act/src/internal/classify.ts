@@ -1,7 +1,4 @@
 /**
- * @module build-classify
- * @category Internal
- *
  * Build-time classification of the registry + state map. The Act constructor
  * needs three pre-computed inputs to wire its runtime subsystems:
  *
@@ -15,11 +12,8 @@
  *
  * Pure function — single pass over events + states, fully testable without
  * instantiating Act.
- *
- * @internal
  */
 
-import type { StaticTarget } from "../internal/correlate-cycle.js";
 import type {
   Registry,
   Schema,
@@ -27,20 +21,17 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
+import type { StaticTarget } from "./correlate-cycle.js";
 
 /**
  * Classification result. Returned by {@link classify_registry}; consumed
  * piecewise by Act's constructor.
- *
- * @internal
  */
 /**
  * Sentinel for "any reaction on this event has a dynamic resolver, so
  * the lane is opaque until correlate runs the function — arm every
  * controller." A Symbol rather than a string literal so it can't
  * collide with a user-declared lane named `"all"`.
- *
- * @internal
  */
 export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
 
@@ -50,8 +41,6 @@ export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
  * declared lanes — `do()` arms only those controllers on commit. For
  * events with at least one dynamic resolver, the value is
  * {@link ALL_LANES}; `do()` falls back to arming every controller.
- *
- * @internal
  */
 export type EventLaneSet = ReadonlySet<string> | typeof ALL_LANES;
 
@@ -66,8 +55,6 @@ export type Classification = {
  * reactive event names, the per-event lane fan-in, and the event-to-state
  * map. Static targets are deduplicated by (target, source) — two reactions
  * routing to the same projection produce one subscription.
- *
- * @internal
  */
 export function classify_registry<
   TSchemaReg extends SchemaRegister<TActions>,

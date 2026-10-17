@@ -2,7 +2,7 @@
  * ACT-102 — priority lanes, framework-level coverage.
  *
  * Tests the in-memory adapter (claim ordering, subscribe `max()`,
- * `prioritize` filter), the build-classify max-priority collection,
+ * `prioritize` filter), the classify max-priority collection,
  * the correlate-cycle priority threading, and the Act.prioritize
  * orchestrator wrapper.
  *
@@ -12,8 +12,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
-import { classify_registry } from "../src/builders/build-classify.js";
 import { act, state, ZodEmpty } from "../src/index.js";
+import { classify_registry } from "../src/internal/classify.js";
 import { dispose, store } from "../src/ports.js";
 
 /**

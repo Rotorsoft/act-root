@@ -31,7 +31,7 @@ import type {
 } from "../types/index.js";
 import type { FoldConfig } from "./config.js";
 import { bare_patch, load, type PatchFn } from "./event-sourcing.js";
-import { pii_strip } from "./sensitive.js";
+import { pii_strip } from "./pii.js";
 
 /**
  * A stream's in-flight fold: a mutable {@link CacheEntry} plus the

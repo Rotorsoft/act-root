@@ -1,7 +1,7 @@
 /**
  * The control-flow signal a reaction handler throws to *defer* itself.
  * Unlike an error, a defer is not a failure: the dispatcher
- * ({@link "reaction-builder".build_handle}) catches it and produces a
+ * (`build_handle`) catches it and produces a
  * `HandleResult.defer` — the triggering events stay pending (watermark not
  * advanced), `retry` is not bumped, and the drain re-visits the stream at the
  * resolved due-time.
@@ -20,7 +20,7 @@
  * return channel through every dispatcher signature. The compiled autoclose
  * reaction throws the same signal.
  */
-import type { DeferWhen } from "../types/index.js";
+import type { DeferWhen } from "./types/index.js";
 
 export class DeferSignal extends Error {
   /**

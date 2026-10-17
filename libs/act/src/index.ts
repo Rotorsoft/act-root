@@ -13,7 +13,7 @@ export * from "./csv.js";
 // The imperative defer escape hatch: a reaction throws this with a
 // `DeferWhen` (see ./types/action.ts) to hold itself until the resolved
 // due-time. The declarative `.defer(when)` builder step is the common path.
-export { DeferSignal } from "./internal/defer-signal.js";
+export { DeferSignal } from "./defer-signal.js";
 export * from "./ports.js";
 export * from "./types/index.js";
 export * from "./utils.js";
