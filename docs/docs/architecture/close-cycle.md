@@ -89,7 +89,7 @@ Before #639 this phase ran `N` parallel `query(backward: true, limit: 1)` calls 
 
 For apps with reactions, we can't tombstone a stream that still has pending reactions in flight — those reactions would never run after the truncate.
 
-Optimization: when `reactiveEvents.size === 0`, skip the safety probe entirely (every stream is safe). Most close operations on apps without reactions take this path.
+Optimization: when the app has no reactions (no event maps to a lane), skip the safety probe entirely (every stream is safe). Most close operations on apps without reactions take this path.
 
 Otherwise, walk `query_streams` (read-only — no leasing, no state mutation), keyset-paginating on the `after` cursor through every matching position so coverage doesn't depend on subscription count. The probe passes `source_matches` scoped to the streams being closed, narrowing the scan to subscriptions whose `source` could match a target; since that filter is best-effort, the probe re-checks source and target in process for each row. For each subscribed reader's position, it marks any target that still has **pending work** behind that reader.
 

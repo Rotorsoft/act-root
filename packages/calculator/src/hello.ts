@@ -40,8 +40,7 @@ const app = act()
   .to("totals")
   .build();
 
-// Run reactions after each commit, and print the result once they settle.
-app.on("committed", () => app.settle());
+// Print the result once the reactions have settled.
 app.on("settled", async () => {
   const a = await app.load(Counter, "a");
   const b = await app.load(Counter, "b");
@@ -52,3 +51,6 @@ app.on("settled", async () => {
 await app.do("increment", { stream: "a", actor }, { by: 1 });
 await app.do("increment", { stream: "b", actor }, { by: 2 });
 await app.do("increment", { stream: "a", actor }, { by: 3 });
+
+// Run the reactions. Prints { a: 4, b: 2, total: 6 }.
+app.settle();

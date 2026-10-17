@@ -3,7 +3,7 @@
  * @category Internal
  *
  * Per-reaction retry backoff delay computation. Pure function — keeps
- * `DrainController` and `reactions._finalize` testable in isolation.
+ * `DrainController` and `finalize` (in `drain-cycle.ts`) testable in isolation.
  *
  * @internal
  */

@@ -143,8 +143,9 @@ export class SettleLoop<TEvents extends Schemas> {
             : drain;
           // Only a pass that read no events and leased nothing is idle: a
           // leased stream that deferred or failed may leave work behind. It
-          // still ends, because ids are finite and every leased stream either
-          // advances or leaves the claimable set (acked, blocked, scheduled).
+          // ends because ids are finite and a leased stream advances or
+          // leaves the claimable set (acked, blocked, scheduled); a zero
+          // backoff keeps it claimable until it blocks or succeeds.
           const made_progress =
             subscribed > 0 || drain.leased.length > 0 || last_id > after_before;
           if (!made_progress) break;
