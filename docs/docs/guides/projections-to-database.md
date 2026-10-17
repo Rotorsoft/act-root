@@ -177,7 +177,7 @@ When you change the projection's logic — add a column, fix an aggregation, cha
 
 1. Truncate the projection's tables.
 2. Reset the projection's reaction watermark with `app.reset(["tickets"])`. For multiple related projections, you can also pass a `StreamFilter` — `app.reset({ stream: "^proj-" })` rebuilds every projection whose target stream starts with `proj-` in a single call.
-3. Call `app.settle()` once. The framework loops `correlate → drain` until every historical event has been replayed through the projection's handlers.
+3. The reset settles on its own: the framework loops `correlate → drain` until every historical event has been replayed through the projection's handlers. Call `app.settle({ eventLimit })` right after to replay in bigger batches.
 
 For long event streams, replaying one event per transaction is slow. Define a `.batch(handler)` and Act will call it with every event for a stream in a single pass:
 
@@ -227,7 +227,8 @@ async function rebuildTicketsProjection() {
   //    the flag, so a settled app won't pick the work up.
   await app.reset(["tickets"]);
 
-  // 3. settle() loops correlate→drain until no progress; emits "settled".
+  // 3. Replay in bigger batches; settle() replaces the reset's own pass
+  //    and emits "settled" when caught up.
   await new Promise<void>((resolve) => {
     app.once("settled", () => resolve());
     app.settle({ eventLimit: 1000 });

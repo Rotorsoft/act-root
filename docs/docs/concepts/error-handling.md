@@ -441,7 +441,7 @@ await app.unblock({ stream: "^webhooks-out-" });
 await app.unblock({});
 ```
 
-`unblock` clears the blocked flag, resets retry count, drops any stale lease, and arms the orchestrator's drain flag so a settled app picks up the now-free stream on the next cycle. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
+`unblock` clears the blocked flag, resets retry count, drops any stale lease, and settles the now-free stream on its own. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
 
 The filter form always restricts to `blocked = true` regardless of what the caller passes — there's no use case for "unblock unblocked streams." Already-unblocked streams and unknown names are silently skipped; the return count reflects only streams that were actually flipped.
 

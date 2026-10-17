@@ -222,8 +222,8 @@ await cache().clear();
 // 3. Rebuild projections. Restore replaces events; it does not replay them
 //    through reactions. If any projection lives in a database/cache outside
 //    the event log, you need an explicit reset for it.
-await app.reset({ stream: "^proj-" });
-app.settle({ eventLimit: 1000 });
+await app.reset({ stream: "^proj-" }); // settles the replay on its own
+app.settle({ eventLimit: 1000 });      // optional: bigger batches
 ```
 
 Operator-side guardrails:

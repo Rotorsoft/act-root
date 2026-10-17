@@ -264,7 +264,7 @@ The ratio adapts dynamically based on event pressure (clamped between 20-80%).
 
 `settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event.
 
-**It runs on its own.** A commit whose events have a reaction in this app schedules `settle()` with the default debounce (`ActOptions.settleDebounceMs`, 10ms); a commit from another process does the same through `Store.notify`. A writer-only app (`drain: false`) and a commit no reaction handles schedule nothing. Calling `correlate()` or `drain()` yourself right after `do()` cancels the scheduled pass, so tests that drive the pipeline stay deterministic. Calling `settle(options)` replaces it, which is how you pass custom drain options from a `"committed"` listener. Call `settle()` directly after `reset()` or to force a pass:
+**It runs on its own.** A commit whose events have a reaction in this app schedules `settle()`, and so do `app.reset()` and `app.unblock()` when they free work with the default debounce (`ActOptions.settleDebounceMs`, 10ms); a commit from another process does the same through `Store.notify`. A writer-only app (`drain: false`) and a commit no reaction handles schedule nothing. Calling `correlate()` or `drain()` yourself waits for a pass already running and cancels a scheduled one, so tests that drive the pipeline stay deterministic. Calling `settle(options)` replaces it, which is how you pass custom drain options from a `"committed"` listener. Call `settle()` directly at startup, to replay what was pending before a restart, or to force a pass:
 
 ```typescript
 import { act, state } from "@rotorsoft/act";
@@ -309,16 +309,16 @@ import { act } from "@rotorsoft/act";
 
 const app = act().build();
 
-// 1. Reset the projection's reaction watermarks AND arm the drain flag
+// Reset the projection's watermarks; the reset settles the replay on its own
 await app.reset(["my-projection"]);
 
-// 2. settle loops correlate→drain until caught up, then emits "settled"
+// Optional: replay in bigger batches (replaces the scheduled pass)
 app.settle({ eventLimit: 1000 });
 ```
 
 `reset` accepts either an explicit `string[]` of target stream names (above) or a `StreamFilter` for bulk operations — e.g., `app.reset({ stream: "^proj-" })` rebuilds every projection target matching the pattern in a single call, or `app.reset({ blocked: true })` rebuilds everything currently blocked. The filter shape (`stream`, `stream_exact`, `source`, `source_exact`, `blocked`) is shared with `app.unblock` and `app.prioritize`.
 
-Always go through `app.reset(...)` rather than `store().reset(...)` directly — the orchestrator's internal `_armed` flag has to be raised, otherwise a settled app short-circuits and skips the replay.
+Always go through `app.reset(...)` rather than `store().reset(...)` directly: `store().reset(...)` alone neither arms nor settles the drain, so a settled app skips the replay.
 
 Use `app.reset` for **rebuilds** (watermark → -1, every event replayed). Use [`app.unblock`](./error-handling.md#recovering-a-blocked-stream--appunblock) for **recovery** (watermark preserved, stream resumes from where it stopped). Don't conflate them — using `reset` to clear a blocked webhook stream would re-fire every historical webhook.
 

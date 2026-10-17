@@ -571,7 +571,7 @@ const ItemSlice = slice()
 
 ## 15. Projection Rebuild — Replay Events Through Updated Projections
 
-**Rule:** clear the read model, then `await app.reset(["projection-target"])` and `app.settle()`. Always use `app.reset(...)`, never `store().reset(...)`: on a settled app only `app.reset` wakes the drain, so the store call alone replays nothing. See [event sourcing § Projection Rebuild](https://rotorsoft.github.io/act-root/docs/concepts/event-sourcing#projection-rebuild).
+**Rule:** clear the read model, then `await app.reset(["projection-target"])`, which settles the replay on its own. Always use `app.reset(...)`, never `store().reset(...)`: on a settled app only `app.reset` wakes the drain, so the store call alone replays nothing. See [event sourcing § Projection Rebuild](https://rotorsoft.github.io/act-root/docs/concepts/event-sourcing#projection-rebuild).
 
 ## 16. Subscription Introspection — store().query_streams()
 

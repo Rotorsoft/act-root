@@ -57,8 +57,10 @@ export class SettleLoop<TEvents extends Schemas> {
    * `finally` schedules one more pass with these options, so it isn't lost.
    */
   private _pending: SettleOptions | undefined = undefined;
-  /** True while the pending timer came from a commit, not a caller. */
+  /** True while the scheduled pass came from a local change, not a caller. */
   private _auto = false;
+  /** Same mark for a pass that arrived while a cycle was running. */
+  private _pending_auto = false;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
   private readonly _default_debounce_ms: number;
@@ -69,12 +71,13 @@ export class SettleLoop<TEvents extends Schemas> {
   }
 
   /**
-   * Drops a pending pass that a local commit scheduled, because the caller
-   * is driving the pipeline with `correlate()` / `drain()`. A pass already
-   * running, or one a caller asked for with `settle()`, is left alone.
+   * Hands the pipeline to a caller driving it with `correlate()` /
+   * `drain()`: waits for a cycle already running, so its work is done
+   * when the caller continues, then drops a pending pass that a local
+   * change scheduled. A pass a caller asked for with `settle()` stays.
    */
-  cancel_auto(): void {
-    if (this._running) return;
+  async yield_to_caller(): Promise<void> {
+    if (this._inflight) await this._inflight;
     if (this._auto && this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;
@@ -108,6 +111,7 @@ export class SettleLoop<TEvents extends Schemas> {
       // re-schedules it so armed controllers always get one more drain.
       if (this._running) {
         this._pending = options;
+        this._pending_auto = auto;
         return;
       }
       this._running = true;
@@ -175,7 +179,7 @@ export class SettleLoop<TEvents extends Schemas> {
           const pending = this._pending;
           if (pending !== undefined) {
             this._pending = undefined;
-            this.schedule(pending);
+            this.schedule(pending, this._pending_auto);
           }
         });
     }, debounceMs);

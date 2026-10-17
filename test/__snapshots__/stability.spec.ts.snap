@@ -960,7 +960,7 @@ export class Act<
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
         correlate: (q) => this._correlate_scanned(q, true),
-        drain: (o) => this.drain(o),
+        drain: (o) => this._drain_pass(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
       },
@@ -1154,7 +1154,7 @@ export class Act<
       const armed = this._arm_for_event_names(
         snapshots.map((s) => (s.event as { name: string }).name)
       );
-      if (armed && this._drain) this._settle.schedule({}, true);
+      this._settle_armed(armed);
       this.emit("committed", snapshots);
       return snapshots;
     });
@@ -1395,10 +1395,20 @@ export class Act<
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
     // streamLimit / eventLimit throws ZodError here, not on the first cycle).
     resolveDrainConfig(options);
-    this._settle.cancel_auto();
+    await this._settle.yield_to_caller();
+    return this._drain_pass(options);
+  }
+
+  /** One drain pass, as settle runs it; the caller has validated \`options\`. */
+  private _drain_pass(options: DrainOptions): Promise<Drain<TEvents>> {
     // Writer-only instances run no reactions.
     if (!this._drain)
-      return { fetched: [], leased: [], acked: [], blocked: [] };
+      return Promise.resolve({
+        fetched: [],
+        leased: [],
+        acked: [],
+        blocked: [],
+      });
     return this._scoped(() => this._drain_all(options));
   }
 
@@ -1407,6 +1417,15 @@ export class Act<
     // A commit may also give the next correlate scan something to find.
     this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
+  }
+
+  /**
+   * Settles what a local change armed (a commit, a reset, an unblock), the
+   * way a commit from another process does. A caller that drives the
+   * pipeline with \`correlate()\` / \`drain()\` right after cancels the pass.
+   */
+  private _settle_armed(armed: boolean): void {
+    if (armed && this._drain) this._settle.schedule({}, true);
   }
 
   /** Arms only the lanes these events react on; true when any was armed. */
@@ -1485,7 +1504,7 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    this._settle.cancel_auto();
+    await this._settle.yield_to_caller();
     const { subscribed, last_id } = await this._correlate_scanned(query);
     return { subscribed, last_id };
   }
@@ -1572,8 +1591,8 @@ export class Act<
   }
 
   /**
-   * Reset reaction stream watermarks and request a drain on the next
-   * \`drain()\` / \`settle()\` cycle.
+   * Reset reaction stream watermarks and settle them, replaying their
+   * events through their reactions.
    *
    * Use this to replay events through projections (or other reaction targets)
    * after changing handler logic. Equivalent to calling \`store().reset(streams)\`
@@ -1581,10 +1600,10 @@ export class Act<
    * \`store().reset(...)\` alone leaves the flag untouched, so a settled app
    * would short-circuit and skip the replay.
    *
-   * Pair with \`app.settle()\` (or a single \`app.drain()\` for small streams).
-   * \`settle()\` loops correlate→drain until no progress is made, so one call
-   * fully catches up paginated streams without forcing callers to roll
-   * their own loop.
+   * The reset schedules a settle on its own, which loops correlate→drain
+   * until the replay catches up. Call \`app.settle(options)\` right after to
+   * pass batch options instead (it replaces the scheduled pass), or
+   * \`correlate()\` / \`drain()\` to drive the replay by hand.
    *
    * @param input - Reaction target streams (e.g., projection names) to reset, or a {@link StreamFilter} for bulk operations
    * @returns Count of streams that were actually reset
@@ -1592,7 +1611,7 @@ export class Act<
    * @example Rebuild a projection (production)
    * \`\`\`typescript
    * await app.reset(["my-projection"]);
-   * app.settle({ eventLimit: 1000 });   // emits "settled" when fully replayed
+   * app.settle({ eventLimit: 1000 }); // optional: bigger batches; emits "settled"
    * \`\`\`
    *
    * @see {@link Store.reset} for the underlying store primitive
@@ -1606,7 +1625,10 @@ export class Act<
       // costs a query, and an extra clear costs one head load per stream.
       for (const handler of this._batch_handlers.values())
         (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
-      if (count > 0) this._arm_all();
+      if (count > 0) {
+        this._arm_all();
+        this._settle_armed(this._reactive);
+      }
       return count;
     });
   }
@@ -1620,11 +1642,9 @@ export class Act<
    * {@link reset}, which rebuilds from event 0 (suitable for projection
    * rebuilds, wrong for "I fixed the bug, please retry").
    *
-   * Wraps \`store().unblock(streams)\` and raises the orchestrator's
-   * internal "needs drain" flag so a settled app picks up the now-free
-   * streams on the next cycle. Equivalent to calling \`store().unblock(...)\`
-   * directly, but \`store().unblock(...)\` alone leaves the flag
-   * untouched.
+   * Wraps \`store().unblock(streams)\` and settles the now-free streams on
+   * its own. \`store().unblock(...)\` alone leaves them waiting for the next
+   * commit.
    *
    * @param input - Stream names to unblock, or a {@link StreamFilter} for bulk recovery
    * @returns Count of streams that were actually flipped (were blocked)
@@ -1641,7 +1661,10 @@ export class Act<
   async unblock(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().unblock(input);
-      if (count > 0) this._arm_all();
+      if (count > 0) {
+        this._arm_all();
+        this._settle_armed(this._reactive);
+      }
       return count;
     });
   }
@@ -1854,7 +1877,7 @@ export class Act<
       catch_up_correlation: (until) =>
         catch_up_correlation(
           this._correlate,
-          (limit) => this.correlate({ limit }),
+          (limit) => this._correlate_scanned({ limit }),
           until
         ),
       event_to_state: this._event_to_state,
