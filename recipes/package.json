@@ -9,6 +9,7 @@
   "dependencies": {
     "@act/wolfdesk": "workspace:^",
     "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-pg": "workspace:^",
     "@rotorsoft/act-otel": "workspace:^"
   },
   "devDependencies": {

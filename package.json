@@ -57,8 +57,7 @@
     "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh"
   },
   "dependencies": {
-    "@rotorsoft/act": "workspace:^",
-    "@rotorsoft/act-pg": "workspace:^"
+    "@rotorsoft/act": "workspace:^"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
