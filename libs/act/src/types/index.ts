@@ -25,7 +25,6 @@ export * from "./errors.js";
 export type * from "./ports.js";
 export type * from "./reaction.js";
 export type * from "./registry.js";
-export type * from "./sandbox.js";
 export * from "./schemas.js";
 
 /**

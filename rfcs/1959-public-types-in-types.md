@@ -13,11 +13,12 @@ The framework now follows one pattern, by audience. `types/` declares every publ
 
 ## Public surface added
 
-No name is added to or removed from the package root except two type-only names, and no name is removed anywhere. Existing public names also appear on the `@rotorsoft/act/types` subpath:
+No name is added to or removed from the package root, and no name is removed anywhere. Existing public names also appear on the `@rotorsoft/act/types` subpath:
 
-- **Types on `./types`:** `ActOptions`, `ActLifecycleEvents`, `CircuitState`, `CircuitBreakerOptions`, `AutocloseConfig`, `AutoclosePolicy`, `ActBuilder`, `StateBuilder`, `ActionBuilder`, `SliceBuilder`, `Slice`, `ProjectionBuilder`, `Projection`, `Config`, `Package`, `CsvFileOptions`, `ExitCode`, `Scoped`, `Sandbox`, `SandboxOptions`.
+- **Types on `./types`:** `ActOptions`, `ActLifecycleEvents`, `CircuitState`, `CircuitBreakerOptions`, `AutocloseConfig`, `AutoclosePolicy`, `ActBuilder`, `StateBuilder`, `ActionBuilder`, `SliceBuilder`, `Slice`, `ProjectionBuilder`, `Projection`, `Config`, `Package`, `CsvFileOptions`, `ExitCode`, `Scoped`.
 - **Values on `./types`:** `DeferSignal`, `ExitCodes`, `DEFAULT_SETTLE_DEBOUNCE_MS`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_AUTOCLOSE_CYCLE_MINUTES`, `DEFAULT_CLOSE_BATCH_SIZE`, `DEFAULT_CLOSE_YIELD_MS`.
-- **Types on the root:** `Sandbox` and `SandboxOptions`, which were only on `./test` before. They stay on `./test`.
+
+The test-helper types `Sandbox` and `SandboxOptions` are declared in `types/sandbox.ts` but published only through `@rotorsoft/act/test`, as before: `types/index.ts` does not re-export them.
 
 ## Alternatives considered
 

@@ -1,5 +1,6 @@
 /**
- * Public contracts of the test helpers in `@rotorsoft/act/test`.
+ * Public contracts of the test helpers. Published only through
+ * `@rotorsoft/act/test`; `types/index.ts` does not re-export them.
  */
 import type { ActOptions } from "./act.js";
 import type { Cache, Store } from "./ports.js";

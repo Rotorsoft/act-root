@@ -2,13 +2,8 @@ import { test } from "vitest";
 import type { Act } from "../act.js";
 import { InMemoryCache } from "../adapters/in-memory-cache.js";
 import { InMemoryStore } from "../adapters/in-memory-store.js";
-import type {
-  ActOptions,
-  Cache,
-  Sandbox,
-  SandboxOptions,
-  Store,
-} from "../types/index.js";
+import type { ActOptions, Cache, Store } from "../types/index.js";
+import type { Sandbox, SandboxOptions } from "../types/sandbox.js";
 
 /**
  * Minimal structural shape — anything with a `.build()` that returns an
