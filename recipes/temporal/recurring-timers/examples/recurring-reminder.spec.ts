@@ -5,7 +5,7 @@ import { buildReminderTimer, startReminders } from "./recurring-reminder.js";
 /**
  * Unit test for the recurring-timer recipe. Uses a sub-second cadence (the
  * `(event) => { at }` form) so the loop is driven with plain waits, the way the
- * framework's `defer-outcome.spec` drives a single defer.
+ * framework's `defer.spec` drives a single defer.
  */
 describe("recurring reminder timer recipe", () => {
   const STEP = 40; // ms between ticks

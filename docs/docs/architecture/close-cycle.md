@@ -313,7 +313,7 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 - `libs/act/src/builders/state-builder.ts` — `.autocloses` / `.archives` declarators
 - `libs/act/test/autoclose-reaction.spec.ts` — synthesized-reaction behavior (immediate close, live-head reopen, cooldown park, threshold, off-hours defer, rolling-window prune/defer)
 - `libs/act/test/autoclose-policy.spec.ts` / `autoclose-builder.spec.ts` — policy compilation + declarator validation
-- `libs/act/test/defer-outcome.spec.ts` / `defer-timer.spec.ts` — the `defer` outcome and the wake timer
+- `libs/act/test/defer.spec.ts` / `defer-timer.spec.ts` — the `defer` outcome and the wake timer
 - `libs/act-tck/src/store-tck.ts` → "autoclose end-to-end" — adapter integration, run against every store
 - [Online close-the-books policies](../guides/close-policies.md) — operator-facing guide for writing policies
 
