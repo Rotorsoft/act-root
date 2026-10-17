@@ -20,22 +20,12 @@ import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import { createInterface } from "node:readline";
 import type {
   Committed,
+  CsvFileOptions,
   EventSink,
   EventSource,
   Query,
   Schemas,
 } from "./types/action.js";
-
-/**
- * Construct a {@link CsvFile} from either a filesystem path (for
- * reading and/or writing through the OS) or an in-memory blob (a
- * pre-loaded CSV string, used by the inspector when a CSV arrives
- * over the wire via tRPC).
- *
- * Both modes share the same on-disk format, so the same blob shape
- * can be round-tripped through the transfer pipeline.
- */
-export type CsvFileOptions = { path: string } | { blob: string };
 
 /**
  * Same column order as the inspector's backup endpoint, kept here

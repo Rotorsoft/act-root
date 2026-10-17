@@ -61,6 +61,7 @@ describe("correlation lease handback under a contended file", () => {
     };
 
     const { app, dispose } = await sandbox(act().withState(Counter), {
+      actOptions: { autoSettle: false },
       store: () => new SqliteStore({ url: `file:${DB_PATH}` }),
     });
     await app.do("bump", { stream: "c1", actor }, {});

@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { act, dispose, state, store, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  dispose,
+  NonRetryableError,
+  state,
+  store,
+  ZodEmpty,
+} from "../src/index.js";
 import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 import { SettleLoop } from "../src/internal/settle.js";
 import type { Drain, Schemas } from "../src/types/index.js";
@@ -417,5 +424,138 @@ describe("a throwing settled listener is contained", () => {
     );
     boom.mockRestore();
     await app.shutdown();
+  });
+});
+
+describe("a local change settles its own reactions", () => {
+  const Ping = state({ Ping: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Pinged: ZodEmpty, Noted: ZodEmpty })
+    .patch({ Pinged: (_, s) => ({ n: s.n + 1 }), Noted: (_, s) => s })
+    .on({ ping: ZodEmpty })
+    .emit(() => ["Pinged", {}])
+    .on({ note: ZodEmpty })
+    .emit(() => ["Noted", {}])
+    .build();
+  const actor = { id: "a", name: "a" };
+
+  const reacting = (ran: string[]) =>
+    act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track(event) {
+        ran.push(event.stream);
+      })
+      .to("tracker")
+      .build();
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("runs the reaction with no settle wiring", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.do("ping", { stream: "p1", actor }, {});
+    await vi.waitFor(() => expect(ran).toEqual(["p1"]));
+  });
+
+  it("runs nothing on its own with autoSettle: false, until the caller walks the pipeline", async () => {
+    const ran: string[] = [];
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track(event) {
+        ran.push(event.stream);
+      })
+      .to("tracker")
+      .build({ autoSettle: false });
+    await app.do("ping", { stream: "p2", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual([]);
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.map((l) => l.stream)).toEqual(["tracker"]);
+    expect(ran).toEqual(["p2"]);
+  });
+
+  it("runs no reaction for a commit after shutdown", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.shutdown();
+    await app.do("ping", { stream: "late", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual([]);
+  });
+
+  it("keeps a caller's settle when a commit lands before it runs", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    app.settle({ debounceMs: 80 });
+    await app.do("ping", { stream: "k1", actor }, {});
+    await new Promise((r) => setTimeout(r, 40));
+    expect(ran).toEqual([]); // the commit didn't swap in a 10ms pass
+    await vi.waitFor(() => expect(ran).toEqual(["k1"]));
+  });
+
+  it("doesn't put off a scheduled pass while commits keep landing", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    const until = Date.now() + 150;
+    let i = 0;
+    while (Date.now() < until) {
+      await app.do("ping", { stream: `w${i++}`, actor }, {});
+      await new Promise((r) => setTimeout(r, 3));
+    }
+    expect(ran.length).toBeGreaterThan(0); // some ran while commits kept coming
+  });
+
+  it("replays a reset target with no settle call", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.do("ping", { stream: "r1", actor }, {});
+    await vi.waitFor(() => expect(ran).toEqual(["r1"]));
+    expect(await app.reset(["tracker"])).toBe(1);
+    await vi.waitFor(() => expect(ran).toEqual(["r1", "r1"]));
+  });
+
+  it("resumes an unblocked stream with no settle call", async () => {
+    let fail = true;
+    const ran: string[] = [];
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function flaky(event) {
+        if (fail) throw new NonRetryableError("down");
+        ran.push(event.stream);
+      })
+      .to("flaky")
+      .build();
+    // Wait for the commit's own settle to finish, so nothing is running.
+    const idle = new Promise((r) => app.on("settled", r));
+    await app.do("ping", { stream: "u1", actor }, {});
+    await idle;
+    expect(await app.blocked_streams()).toHaveLength(1);
+    fail = false;
+    expect(await app.unblock(["flaky"])).toBe(1);
+    await vi.waitFor(() => expect(ran).toEqual(["u1"]));
+  });
+
+  it("control — a reset that resets nothing schedules nothing", async () => {
+    const settled = vi.fn();
+    const app = reacting([]);
+    app.on("settled", settled);
+    expect(await app.reset(["nobody"])).toBe(0);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).not.toHaveBeenCalled();
+  });
+
+  it("control — schedules nothing for an event no reaction handles", async () => {
+    const settled = vi.fn();
+    const app = reacting([]);
+    app.on("settled", settled);
+    await app.do("note", { stream: "p3", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).not.toHaveBeenCalled();
   });
 });

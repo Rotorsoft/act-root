@@ -35,8 +35,6 @@ async function main() {
     const all = await db.select().from(tickets).execute();
     console.table(all);
   });
-  app.on("committed", () => app.settle());
-  app.start_correlations({ limit: 10 }, 3000);
 
   const [t1] = await app.do(
     "OpenTicket",

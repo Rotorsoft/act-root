@@ -9,7 +9,11 @@
  */
 
 import { z } from "zod";
-import type { ActOptions } from "../act.js";
+import type {
+  ActOptions,
+  AutocloseConfig,
+  CircuitBreakerOptions,
+} from "../types/act.js";
 import type {
   ActionOptions,
   BackoffOptions,
@@ -128,18 +132,6 @@ export const DEFAULT_STREAM_LIMIT = 10;
 export const DEFAULT_EVENT_LIMIT = 10;
 /** How long a drain holds a stream's lease (ms). */
 export const DEFAULT_LEASE_MILLIS = 10_000;
-/**
- * Default debounce window (ms) for `settle()` when neither the per-call
- * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
- * Coalesces commits in the same tick and small bursts.
- */
-export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
-/**
- * Default LRU cap for the subscribed-streams cache. Apps that mint many
- * dynamic targets (one per aggregate) should override it with
- * `ActOptions.maxSubscribedStreams`.
- */
-export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 const DrainOptionsSchema = z.object({
   streamLimit: z.number().int().min(0).optional(),
@@ -221,6 +213,7 @@ const ActOptionsSchema = z
   .object({
     maxSubscribedStreams: z.number().int().min(1).optional(),
     settleDebounceMs: z.number().int().min(0).optional(),
+    autoSettle: z.boolean().optional(),
   })
   .loose();
 
@@ -233,19 +226,10 @@ export function resolveActConfig(
   return options;
 }
 
-// Autoclose — the autoclose knobs on `ActOptions` (+ the off-hours window).
+// Autoclose — the off-hours window on `ActOptions`.
 // The window *logic* (DST, hour math) stays in `autoclose-window.ts`; only
 // the schema, defaults, and resolver live here.
 
-/**
- * @deprecated The cadence knob is derived from `autocloseWindow` now;
- * nothing consumes it. Kept for compat; removed in the next major.
- */
-export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_YIELD_MS = 0;
 /** Default IANA zone for `autocloseWindow` when the operator omits one. */
 const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
 
@@ -284,35 +268,14 @@ const AutocloseWindowSchema = z
   });
 
 const AutocloseOptionsSchema = z.object({
-  autocloseCycleMinutes: z
-    .number()
-    .int()
-    .min(1)
-    .max(1440)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
-  closeBatchSize: z
-    .number()
-    .int()
-    .min(1)
-    .max(1024)
-    .default(DEFAULT_CLOSE_BATCH_SIZE),
-  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
-  closeOnError: z.boolean().default(false),
   autocloseWindow: AutocloseWindowSchema.optional(),
-});
-
-/** Resolved autoclose configuration after validation + default expansion. */
-export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
+}) satisfies z.ZodType<AutocloseConfig>;
 
 /** Validate + default the autoclose knobs on `ActOptions`. Throws `ZodError`. */
 export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
   return AutocloseOptionsSchema.parse({
-    autocloseCycleMinutes: options?.autocloseCycleMinutes,
-    closeBatchSize: options?.closeBatchSize,
-    closeYieldMs: options?.closeYieldMs,
-    closeOnError: options?.closeOnError,
     autocloseWindow: options?.autocloseWindow,
   });
 }
@@ -335,13 +298,10 @@ const CircuitBreakerOptionsSchema = z.object({
     .min(100)
     .max(3_600_000)
     .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
-});
-
-/** Public, all-optional circuit-breaker options bag for `act().build()`. */
-export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
+}) satisfies z.ZodType<CircuitBreakerConfig, CircuitBreakerOptions>;
 
 /** Resolved circuit-breaker configuration. */
-export type CircuitBreakerConfig = z.infer<typeof CircuitBreakerOptionsSchema>;
+export type CircuitBreakerConfig = Required<CircuitBreakerOptions>;
 
 /** Parse + apply defaults. Throws `ZodError` on out-of-range values. */
 export const resolveCircuitBreakerConfig = (

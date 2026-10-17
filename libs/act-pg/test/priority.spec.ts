@@ -63,7 +63,7 @@ describe("static-target batch after a lower stored priority", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB", priority: 7 })
-      .build();
+      .build({ autoSettle: false });
     // Forces correlate's init, which subscribes the static batch.
     await app.correlate();
 

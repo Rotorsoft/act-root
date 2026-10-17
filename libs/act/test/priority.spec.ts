@@ -2,7 +2,7 @@
  * ACT-102 — priority lanes, framework-level coverage.
  *
  * Tests the in-memory adapter (claim ordering, subscribe `max()`,
- * `prioritize` filter), the build-classify max-priority collection,
+ * `prioritize` filter), the classify max-priority collection,
  * the correlate-cycle priority threading, and the Act.prioritize
  * orchestrator wrapper.
  *
@@ -12,8 +12,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
-import { classify_registry } from "../src/builders/build-classify.js";
 import { act, state, ZodEmpty } from "../src/index.js";
+import { classify_registry } from "../src/internal/classify.js";
 import { dispose, store } from "../src/ports.js";
 
 /**
@@ -245,7 +245,7 @@ describe("priority lanes — framework", () => {
         .on("Inc")
         .do(async function r2() {})
         .to({ target: "shared", priority: 7 })
-        .build() as unknown as {
+        .build({ autoSettle: false }) as unknown as {
         registry: any;
         _states: any;
       };
@@ -269,7 +269,10 @@ describe("priority lanes — framework", () => {
         .on("Inc")
         .do(async function r() {})
         .to((e) => ({ target: `tgt-${e.stream}`, priority: 5 }))
-        .build() as unknown as { registry: any; _states: any };
+        .build({ autoSettle: false }) as unknown as {
+        registry: any;
+        _states: any;
+      };
 
       const c = classify_registry(app.registry, app._states);
       expect(c.static_targets).toEqual([]);
@@ -289,7 +292,7 @@ describe("priority lanes — framework", () => {
         .on("Inc")
         .do(async function r() {})
         .to("static-target")
-        .build();
+        .build({ autoSettle: false });
 
       // Trigger init so the static target is subscribed.
       await app.correlate();
@@ -323,7 +326,7 @@ describe("priority lanes — framework", () => {
           source: e.stream,
           priority: e.data.priority,
         }))
-        .build();
+        .build({ autoSettle: false });
 
       // Commit lower-priority first, then higher.
       await app.do(
@@ -360,7 +363,7 @@ describe("priority lanes — framework", () => {
           source: e.stream,
           priority: e.data.which === "urgent" ? 10 : 0,
         }))
-        .build();
+        .build({ autoSettle: false });
 
       await app.do(
         "hit",

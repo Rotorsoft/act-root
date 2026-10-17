@@ -123,7 +123,7 @@ This phase runs *after* the guard, not before, by design. Loading state requires
 
 After the guard, no concurrent writer can interfere. The load reflects the exact state at the moment the stream was guarded.
 
-The "owning state" for each stream is found via `eventToState.get(lastEventName)`. The build-classify pass at Act construction builds this map: event-name → state-definition that emits it. The duplicate-event guard in `merge.ts` ensures one event maps to at most one state.
+The "owning state" for each stream is found via `eventToState.get(lastEventName)`. The registry classification (`internal/classify.ts`) at Act construction builds this map: event-name → state-definition that emits it. The duplicate-event guard in `merge.ts` ensures one event maps to at most one state.
 
 - **No state owns the last event** (deleted state, schema versioning gone wrong): we can't seed. The stream still gets tombstoned (no `restart: true` semantics), but a warning is logged. This is a degraded state — cold path.
 - **The owning state carries `sensitive()` fields**: `restart: true` is refused for that stream *before* Phase 3, so nothing is written. The seed load is actorless, so every sensitive field would fold to the redaction sentinel and the truncate would then delete the real events and their `pii` sidecars — irreversible. Loading the seed *privileged* is not an alternative: that persists plaintext into `__snapshot__.data`, which `forget_pii` cannot reach (the reason `.snap()` is rejected at build time on such a state). Since the stream cannot be restarted, it is not closed either — the caller asked to keep the aggregate alive, and tombstoning it instead would be strictly more destructive than what was requested. The stream lands in `skipped` and an error is logged. Closing the same stream **without** `restart` works normally.
@@ -290,8 +290,7 @@ The crucial composition is the same as before: **online close doesn't reinvent a
 
 `.autocloses` still reads a handful of `ActOptions`, validated at `act().build()` (a `ZodError` at build, never on the first cycle):
 
-- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. When the current hour is outside `[start, end)` the handler defers to the exact instant the window next opens (`next_window_open`, DST-correct via `Intl`) — derived from the window itself, no polling cadence. This closed a real latency gap: the old poll (`autocloseCycleMinutes`, default 12 h) could oscillate around a short window and keep missing it. Hours are `[0, 23]` integers in `timeZone` (IANA, default UTC); `start > end` is an overnight window. Omit to evaluate on every commit. On a DST spring-forward day whose `start` hour is skipped (e.g. `start: 2` in `America/New_York` on the March transition, where 02:00 local never occurs), the window still opens at the gap's replacement instant — both `in_autoclose_window` and `next_window_open` admit it, so autoclose defers ~1 h to that instant rather than being disabled for the whole ~24 h day.
-- `autocloseCycleMinutes` / `closeBatchSize` / `closeYieldMs` / `closeOnError` — **deprecated since #1175** (decision record: `rfcs/1175-close-cadence-days.md`). Accepted and range-validated so existing configs keep building and typos keep failing loudly, but nothing consumes them — the last three had been dead since #1090 removed the sweep. Removal rides the next major.
+- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. When the current hour is outside `[start, end)` the handler defers to the exact instant the window next opens (`next_window_open`, DST-correct via `Intl`) — derived from the window itself, no polling cadence. A fixed polling cadence could keep missing a short window; deriving the instant from the window can't. Hours are `[0, 23]` integers in `timeZone` (IANA, default UTC); `start > end` is an overnight window. Omit to evaluate on every commit. On a DST spring-forward day whose `start` hour is skipped (e.g. `start: 2` in `America/New_York` on the March transition, where 02:00 local never occurs), the window still opens at the gap's replacement instant — both `in_autoclose_window` and `next_window_open` admit it, so autoclose defers ~1 h to that instant rather than being disabled for the whole ~24 h day.
 
 ### Latency
 
@@ -306,7 +305,7 @@ A stream closes shortly after it qualifies, not on a fixed sweep boundary: the r
 ### Pointers
 
 - `libs/act/src/act.ts` — autoclose-reaction synthesis (`__autoclose__:` synthetic stream, off-hours gate, defer-to-cooldown, `CloseSignal`) and the `DrainController.on_close` → `run_close_cycle` wiring
-- `libs/act/src/internal/defer-signal.ts` / `close-signal.ts` — the control-flow signals a reaction throws to defer or close
+- `libs/act/src/types/errors.ts` (`DeferSignal`) / `internal/reaction-dispatch.ts` (`CloseSignal`) — the control-flow signals a reaction throws to defer or close
 - `libs/act/src/internal/defer-timer.ts` — the per-worker wake optimization over `stream → due-time` (clamped to `setTimeout`'s ceiling)
 - `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_min_after_days`, `policy_keep_days`
 - `libs/act/src/internal/config.ts` — the `autocloseWindow` schema + resolver (the single home for builder-facing config bags); `libs/act/src/internal/autoclose-window.ts` — `in_autoclose_window` / `next_window_open`

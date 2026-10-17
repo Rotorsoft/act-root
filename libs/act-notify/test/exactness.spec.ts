@@ -58,7 +58,10 @@ describe("correlate→drain exactness under broker chaos", () => {
         handled.push(`${event.stream}@${event.version}`);
       })
       .to((e) => ({ target: `r:${e.stream}`, source: e.stream }));
-    const ctx = await sandbox(builder, { store: store_factory });
+    const ctx = await sandbox(builder, {
+      store: store_factory,
+      actOptions: { autoSettle: false },
+    });
     try {
       const app = ctx.app as unknown as {
         do: (a: string, t: object, p: object) => Promise<unknown>;

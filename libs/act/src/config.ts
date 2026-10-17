@@ -8,12 +8,17 @@
  */
 import * as fs from "node:fs";
 import { z } from "zod";
+import { resolveAutocloseConfig as resolve_autoclose } from "./internal/config.js";
 import { log } from "./ports.js";
 import {
+  type ActOptions,
+  type AutocloseConfig,
+  type Config,
   type Environment,
   Environments,
   type LogLevel,
   LogLevels,
+  type Package,
 } from "./types/index.js";
 import { extend } from "./utils.js";
 
@@ -32,14 +37,7 @@ export const PackageSchema = z.object({
     .optional(),
   license: z.string().min(1).optional(),
   dependencies: z.record(z.string(), z.string()).optional(),
-});
-
-/**
- * Type representing the validated package.json metadata.
- *
- * @internal
- */
-export type Package = z.infer<typeof PackageSchema>;
+}) satisfies z.ZodType<Package>;
 
 /**
  * Fallback package metadata when `package.json` can't be read at module
@@ -103,12 +101,7 @@ const BaseSchema = PackageSchema.extend({
   logLevel: z.enum(LogLevels),
   logSingleLine: z.boolean(),
   sleepMs: z.number().int().min(0).max(5000),
-});
-
-/**
- * Type representing the validated Act Framework configuration object.
- */
-export type Config = z.infer<typeof BaseSchema>;
+}) satisfies z.ZodType<Config>;
 
 const { NODE_ENV, LOG_LEVEL, LOG_SINGLE_LINE, SLEEP_MS } = process.env;
 
@@ -186,3 +179,13 @@ export const config = (): Config => {
   }
   return _validated;
 };
+
+/**
+ * Validates and defaults the autoclose knobs of `ActOptions`, the way
+ * `act().build()` does. Throws `ZodError` on an out-of-range value.
+ */
+export function resolveAutocloseConfig(
+  options: ActOptions | undefined
+): AutocloseConfig {
+  return resolve_autoclose(options);
+}

@@ -61,7 +61,7 @@ const parked_app = (g: ReturnType<typeof gate>) =>
       await g.wait();
     })
     .to({ target: "out" })
-    .build();
+    .build({ autoSettle: false });
 
 /** Same, but the reaction runs on a lane with its own lease budget. */
 const laned_parked_app = (g: ReturnType<typeof gate>, leaseMillis: number) =>
@@ -73,7 +73,7 @@ const laned_parked_app = (g: ReturnType<typeof gate>, leaseMillis: number) =>
       await g.wait();
     })
     .to({ target: "out", lane: "slow" })
-    .build();
+    .build({ autoSettle: false });
 
 /** A dynamic resolver is what makes correlate actually scan the log. */
 const scanning_app = () =>
@@ -82,7 +82,7 @@ const scanning_app = () =>
     .on("Ticked")
     .do(async function noop() {})
     .to((e) => ({ target: `dyn-${e.stream}` }))
-    .build();
+    .build({ autoSettle: false });
 
 /** Spin until `check` holds or the deadline passes. */
 const until = async (check: () => boolean, ms = 3_000) => {
@@ -448,7 +448,7 @@ describe("a notification during shutdown cannot arm a new cycle", () => {
         }
       })
       .to(() => ({ target: "t" }))
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
@@ -499,7 +499,7 @@ describe("the defer wake stops draining at shutdown", () => {
         if (down) after_shutdown.push(event.stream);
       })
       .to((event) => ({ target: `r-${event.stream}`, lane: "one" }))
-      .build();
+      .build({ autoSettle: false });
     for (const s of ["x1", "x2", "x3"])
       await app.do("tick", { stream: s, actor }, {});
     await app.correlate();

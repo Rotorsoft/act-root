@@ -8,7 +8,11 @@
  */
 
 import { z } from "zod";
-import type { AutoclosePredicate, Schemas } from "../types/action.js";
+import type {
+  AutoclosePolicy,
+  AutoclosePredicate,
+  Schemas,
+} from "../types/action.js";
 
 /**
  * One day in epoch milliseconds. The close surface is day-denominated
@@ -134,39 +138,7 @@ const AutoclosePolicySchema = z
       message:
         "autocloses: at least one of after / is / reaches / or / keep must be specified — empty `{}` is a misconfiguration",
     }
-  );
-
-/**
- * Declarative close-policy options consumed by `.autocloses({...})`.
- * Top-level fields are AND-combined; the optional `or` block opens an
- * alternative OR-path. Omitted fields contribute nothing — they do
- * not mean "match everything."
- *
- * @property after - Close when `head.created` is at least the resolved
- *   window in the past. Days are the close surface's only unit;
- *   fractional `days` cover sub-day cooldowns (`{ days: 1/24 }` is one
- *   hour) without introducing another denomination.
- * @property is - Close when `head.name` matches. String for the
- *   single-terminal-event case (the most common); `readonly string[]`
- *   for multi-terminal states (`Order: Shipped | Delivered |
- *   Cancelled`).
- * @property reaches - Close when the stream's event count is `>= N`
- *   (inclusive — fires the moment the threshold is reached).
- * @property or - Alternative OR-path. When present, the policy fires
- *   if EITHER the top-level AND group matches OR any field inside
- *   `or` matches. Used for safety-net backstops layered onto a
- *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
- *   10k"*). Nested `or` inside `or` rejects at build time.
- * @property keep - Rolling-window retention, **independent** of
- *   the terminate fields: while the stream stays open, prune events
- *   older than `now − keep` behind the closest safe snapshot via a
- *   windowed close. Does not participate in the AND group or the `or`
- *   block — a policy may terminate, prune, or both. Requires
- *   `.snap(...)` earlier in the builder chain (type-gated) and a
- *   window of at least one day — the close cycle is low-cadence
- *   housekeeping, never sub-day realtime.
- */
-export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
+  ) satisfies z.ZodType<AutoclosePolicy>;
 
 /** Compile a single `after` field into its predicate slice. */
 function compile_after(

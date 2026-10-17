@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryStore } from "../src/index.js";
-import { walk_streams } from "../src/internal/index.js";
+import { walk_streams } from "../src/internal/walk-streams.js";
 
 /**
  * `Store.query_streams` defaults to `limit: 100`, so any caller wanting

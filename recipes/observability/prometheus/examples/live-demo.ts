@@ -132,7 +132,6 @@ const app = act()
     lane: "delivery",
   }))
   .build();
-app.on("committed", () => app.settle());
 app.on("error", () => {}); // counted by the bridge; keep the console calm
 
 // The bridge — global registry, served below.

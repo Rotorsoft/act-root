@@ -32,7 +32,7 @@ import {
   DEFAULT_STREAM_LIMIT,
 } from "./config.js";
 import { DeferTimer } from "./defer-timer.js";
-import type { DrainOps } from "./drain.js";
+import type { DrainOps } from "./drain-ops.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { report_once } from "./report-once.js";
 import { trace_cycle } from "./tracing.js";

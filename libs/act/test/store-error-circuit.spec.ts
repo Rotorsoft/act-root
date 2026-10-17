@@ -39,7 +39,7 @@ describe("circuit breaker config validation", () => {
     expect(() =>
       act()
         .withState(Counter)
-        .build({ circuitBreaker: { failureThreshold: 0 } })
+        .build({ autoSettle: false, circuitBreaker: { failureThreshold: 0 } })
     ).toThrow();
   });
 
@@ -47,7 +47,7 @@ describe("circuit breaker config validation", () => {
     expect(() =>
       act()
         .withState(Counter)
-        .build({ circuitBreaker: { cooldownMs: 1 } })
+        .build({ autoSettle: false, circuitBreaker: { cooldownMs: 1 } })
     ).toThrow();
   });
 });
@@ -60,7 +60,10 @@ describe("drain circuit breaker", () => {
       .withState(Counter)
       .on("Bumped")
       .do(async function react() {})
-      .build({ circuitBreaker: { failureThreshold: 2, cooldownMs: 60_000 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 2, cooldownMs: 60_000 },
+      });
     // Commit a reactive event (arms the drain controller) and subscribe the
     // reaction target so a drain would claim it.
     await app.do("bump", { stream: nextStream(), actor }, {});
@@ -108,7 +111,10 @@ describe("drain circuit breaker", () => {
       .withState(Counter)
       .on("Bumped")
       .do(async function react() {})
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 100 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 100 },
+      });
     await app.do("bump", { stream: nextStream(), actor }, {});
     await app.correlate();
 
@@ -183,7 +189,7 @@ describe("a failed settle retries on an idle app", () => {
       .do(async function react() {
         ran++;
       })
-      .build({ circuitBreaker: { cooldownMs: 100 } });
+      .build({ autoSettle: false, circuitBreaker: { cooldownMs: 100 } });
     await app.do("bump", { stream: nextStream(), actor }, {});
     const real_query = s.query.bind(s);
     let failing = fail;
@@ -224,7 +230,10 @@ describe("breaker scope: a whole-store outage detector", () => {
       .withState(Counter)
       .on("Bumped")
       .do(async function react() {})
-      .build({ circuitBreaker: { failureThreshold: 3, cooldownMs: 60_000 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 3, cooldownMs: 60_000 },
+      });
     const errors: { error: unknown; circuit: string }[] = [];
     app.on("error", (e) => errors.push(e));
     return { app, errors };

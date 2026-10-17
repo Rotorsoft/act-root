@@ -111,9 +111,6 @@ async function main() {
   // marker is colored, post-ack watermark trails the ack mark. No
   // extra app.on("acked") listener needed.
 
-  // start the correlation pump
-  app.start_correlations();
-
   // Helper: print the calculator state after the digit board
   const printStreamStates = async () => {
     for (const stream of streams) {

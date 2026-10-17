@@ -7,7 +7,7 @@ import {
   state,
   ZodEmpty,
 } from "../src/index.js";
-import { CloseSignal } from "../src/internal/close-signal.js";
+import { CloseSignal } from "../src/internal/reaction-dispatch.js";
 
 /**
  * Part 1 of #1090's autoclose port: the close mechanic. A reaction handler
@@ -38,7 +38,11 @@ describe("close outcome (integration)", () => {
       throw new CloseSignal();
     };
 
-    const app = act().withState(counter).on("ticked").do(closing).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(closing)
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     await app.do("tick", { stream: "c1", actor }, {});
@@ -65,7 +69,11 @@ describe("close outcome (integration)", () => {
       });
     };
 
-    const app = act().withState(counter).on("ticked").do(closing).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(closing)
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "c2", actor }, {});
     await app.correlate();

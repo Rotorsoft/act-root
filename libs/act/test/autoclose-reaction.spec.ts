@@ -46,7 +46,7 @@ describe("autoclose as a synthesized reaction", () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(ticket({ is: "Resolved" }))
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     await app.do("open", { stream: "t1", actor }, {});
@@ -66,7 +66,7 @@ describe("autoclose as a synthesized reaction", () => {
     const errors: unknown[] = [];
     const app = act()
       .withState(ticket({ is: "Resolved" }))
-      .build();
+      .build({ autoSettle: false });
     app.on("error", (e) => errors.push(e));
     app.on("closed", () => {
       throw new Error("listener bug");
@@ -94,7 +94,7 @@ describe("autoclose as a synthesized reaction", () => {
           })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("open", { stream: "ta", actor }, {});
     await app.do("resolve", { stream: "ta", actor }, {});
@@ -113,7 +113,7 @@ describe("autoclose as a synthesized reaction", () => {
     const errors: unknown[] = [];
     const app = act()
       .withState(ticket({ is: "Resolved" }))
-      .build();
+      .build({ autoSettle: false });
     app.on("error", (e) => errors.push(e));
 
     const real = store().truncate.bind(store());
@@ -153,7 +153,7 @@ describe("autoclose as a synthesized reaction", () => {
           })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("open", { stream: "t-resume", actor }, {});
     await app.do("resolve", { stream: "t-resume", actor }, {});
@@ -195,7 +195,7 @@ describe("autoclose as a synthesized reaction", () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(ticket({ is: "Resolved" }))
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     // Resolved then reopened: the live head is `Opened`, so `is: Resolved`
@@ -215,7 +215,7 @@ describe("autoclose as a synthesized reaction", () => {
     // terminal event defers rather than closes.
     const app = act()
       .withState(ticket({ is: "Resolved", after: { days: 1 } }))
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     await app.do("open", { stream: "t3", actor }, {});
@@ -235,7 +235,7 @@ describe("autoclose as a synthesized reaction", () => {
   it("does not defer to a PAST due-time when `after` has elapsed but the predicate is unmet", async () => {
     const app = act()
       .withState(ticket({ is: "Resolved", after: { days: 1 } }))
-      .build();
+      .build({ autoSettle: false });
     // A non-terminal head (Opened) created 2 days ago — a long-lived open
     // ticket idle past the 1-day cooldown, restored with its source timestamp.
     const two_days_ago = new Date(Date.now() - 2 * 86_400_000);
@@ -269,7 +269,7 @@ describe("autoclose as a synthesized reaction", () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(ticket({ reaches: 3 }))
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     // Two events: below threshold — no close.
@@ -300,7 +300,7 @@ describe("autoclose as a synthesized reaction", () => {
           .autocloses({ is: "Resolved" })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     // Opened (patches=1), Resolved (patches=2 → a __snapshot__ trails Resolved).
@@ -322,7 +322,7 @@ describe("autoclose as a synthesized reaction", () => {
           .autocloses({ reaches: 3 })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     // Two domain events (a __snapshot__ trails the 2nd) — the domain count is
@@ -349,7 +349,7 @@ describe("autoclose as a synthesized reaction", () => {
     const closed: CloseResult[] = [];
     const app = act()
       .withState(ticket({ is: "Resolved" }))
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     await app.do("open", { stream: "tz", actor }, {});
@@ -377,7 +377,10 @@ describe("autoclose as a synthesized reaction", () => {
     const end = (h + 3) % 24;
     const app = act()
       .withState(ticket({ is: "Resolved" }))
-      .build({ autocloseWindow: { start, end, timeZone: "UTC" } });
+      .build({
+        autoSettle: false,
+        autocloseWindow: { start, end, timeZone: "UTC" },
+      });
     app.on("closed", (r) => closed.push(r));
 
     await app.do("open", { stream: "t5", actor }, {});
@@ -472,7 +475,10 @@ describe("autoclose as a synthesized reaction", () => {
       expect(() =>
         act()
           .withState(ticket({ is: "Resolved" }))
-          .build({ autocloseWindow: { start: 99, end: 3 } as never })
+          .build({
+            autoSettle: false,
+            autocloseWindow: { start: 99, end: 3 } as never,
+          })
       ).toThrow();
     });
   });
@@ -488,7 +494,10 @@ describe("autoclose as a synthesized reaction", () => {
       const closed: CloseResult[] = [];
       const app = act()
         .withState(ticket({ reaches: 2 }))
-        .build({ autocloseWindow: { start: 2, end: 6, timeZone: "UTC" } });
+        .build({
+          autoSettle: false,
+          autocloseWindow: { start: 2, end: 6, timeZone: "UTC" },
+        });
       app.on("closed", (r) => closed.push(r));
 
       await app.do("open", { stream: "t6", actor }, {});
@@ -553,7 +562,7 @@ describe("autoclose rolling window (keep)", () => {
           .autocloses({ keep: { days: 1 } })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     for (let i = 0; i < 4; i++)
@@ -610,7 +619,7 @@ describe("autoclose rolling window (keep)", () => {
           .autocloses({ keep: { days: 1 } })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     for (let i = 0; i < 4; i++)
@@ -639,7 +648,7 @@ describe("autoclose rolling window (keep)", () => {
           .autocloses({ keep: { days: 1 } })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     for (let i = 0; i < 4; i++)
@@ -681,7 +690,7 @@ describe("autoclose rolling window (keep)", () => {
           })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
 
     for (const stream of ["idle-3", "idle-4"])
       for (let i = 0; i < 4; i++) await app.do("bump", { stream, actor }, {});
@@ -726,7 +735,7 @@ describe("autoclose rolling window (keep)", () => {
           })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
 
     for (let i = 0; i < 4; i++)
       await app.do("bump", { stream: "k2", actor }, {});
@@ -751,7 +760,7 @@ describe("autoclose rolling window (keep)", () => {
           .autocloses({ is: "Resolved", keep: { days: 1 } })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     // Two bumps fire the snap predicate; the resolve lands after the
@@ -778,7 +787,7 @@ describe("autoclose rolling window (keep)", () => {
           .autocloses({ keep: { days: 1 } })
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     app.on("closed", (r) => closed.push(r));
 
     // A single event — the snap predicate (patches >= 2) never fired,

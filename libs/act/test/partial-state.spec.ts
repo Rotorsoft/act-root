@@ -43,7 +43,8 @@ describe("partial-state", () => {
 
   it("should merge two partials with the same name", async () => {
     const { app, dispose } = await sandbox(
-      act().withState(PartA).withState(PartB)
+      act().withState(PartA).withState(PartB),
+      { actOptions: { autoSettle: false } }
     );
     expect(app).toBeDefined();
     await dispose();
@@ -51,7 +52,8 @@ describe("partial-state", () => {
 
   it("should execute actions from both partials", async () => {
     const { app, dispose } = await sandbox(
-      act().withState(PartA).withState(PartB)
+      act().withState(PartA).withState(PartB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream: "s1", actor }, { by: 3 });
@@ -66,7 +68,8 @@ describe("partial-state", () => {
 
   it("should reconstruct state from events across all partials", async () => {
     const { app, dispose } = await sandbox(
-      act().withState(PartA).withState(PartB)
+      act().withState(PartA).withState(PartB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream: "s2", actor }, { by: 1 });
@@ -120,7 +123,8 @@ describe("partial-state", () => {
         .do(onIncremented)
         .withState(PartB)
         .on("Labeled")
-        .do(onLabeled)
+        .do(onLabeled),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream: "s3", actor }, { by: 1 });
@@ -153,7 +157,8 @@ describe("partial-state", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(WithSnap).withState(WithoutSnap)
+      act().withState(WithSnap).withState(WithoutSnap),
+      { actOptions: { autoSettle: false } }
     );
     expect(app).toBeDefined();
     await dispose();
@@ -178,9 +183,9 @@ describe("partial-state", () => {
       .snap(() => false)
       .build();
 
-    expect(() => act().withState(Snap1).withState(Snap2).build()).toThrow(
-      'Duplicate snap strategy for state "Snapped"'
-    );
+    expect(() =>
+      act().withState(Snap1).withState(Snap2).build({ autoSettle: false })
+    ).toThrow('Duplicate snap strategy for state "Snapped"');
   });
 
   it("should work with single-chain states (backward compat)", async () => {
@@ -192,7 +197,9 @@ describe("partial-state", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const { app, dispose } = await sandbox(act().withState(counter));
+    const { app, dispose } = await sandbox(act().withState(counter), {
+      actOptions: { autoSettle: false },
+    });
     await app.do("increment", { stream: "compat1", actor }, {});
     const snap = await app.load(counter, "compat1");
     expect(snap.state.count).toBe(1);
@@ -202,7 +209,8 @@ describe("partial-state", () => {
 
   it("should load merged state by name", async () => {
     const { app, dispose } = await sandbox(
-      act().withState(PartA).withState(PartB)
+      act().withState(PartA).withState(PartB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream: "n1", actor }, { by: 7 });
@@ -216,7 +224,9 @@ describe("partial-state", () => {
   });
 
   it("should throw when loading unknown state by name", async () => {
-    const { app, dispose } = await sandbox(act().withState(PartA));
+    const { app, dispose } = await sandbox(act().withState(PartA), {
+      actOptions: { autoSettle: false },
+    });
     // @ts-expect-error "Unknown" is not a registered state name
     await expect(app.load("Unknown", "s1")).rejects.toThrow(
       'State "Unknown" not found'
@@ -242,7 +252,8 @@ describe("partial-state", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(PartialA).withState(PartialB)
+      act().withState(PartialA).withState(PartialB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("setCount", { stream: "m1", actor }, { n: 42 });
@@ -273,7 +284,8 @@ describe("partial-state", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(PartialA).withState(PartialB)
+      act().withState(PartialA).withState(PartialB),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("doA", { stream: "i1", actor }, {});
     const snap = await app.load("InitMerge", "i1");
@@ -360,7 +372,10 @@ describe("partial-state", () => {
 
     it("accepts the same partial registered twice", () => {
       expect(() =>
-        act().withState(readonly).withState(readonly).build()
+        act()
+          .withState(readonly)
+          .withState(readonly)
+          .build({ autoSettle: false })
       ).not.toThrow();
     });
   });
@@ -383,7 +398,8 @@ describe("partial-state", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(PartialA).withState(PartialB)
+      act().withState(PartialA).withState(PartialB),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("add", { stream: "c1", actor }, { n: 1 });
     await app.do("tag", { stream: "c1", actor }, { tag: "a" });
@@ -443,7 +459,8 @@ describe("partial-state", () => {
         .build();
 
       const { app, dispose } = await sandbox(
-        act().withState(AutoArchive).withState(Audit)
+        act().withState(AutoArchive).withState(Audit),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("archiveList", { stream: "t1", actor }, { reason: "done" });
       const snap = await app.load("TodoList", "t1");
@@ -473,7 +490,8 @@ describe("partial-state", () => {
         .build();
 
       const { app, dispose } = await sandbox(
-        act().withState(Audit).withState(AutoArchive)
+        act().withState(Audit).withState(AutoArchive),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("archiveList", { stream: "t2", actor }, { reason: "done" });
       const snap = await app.load("TodoList", "t2");
@@ -576,7 +594,8 @@ describe("partial-state", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(PartWithInvariant).withState(PartWithGuardedAction)
+      act().withState(PartWithInvariant).withState(PartWithGuardedAction),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("lock", { stream: "g1", actor }, {});
@@ -626,7 +645,8 @@ describe("partial-state — policies declared on a later partial", () => {
       .build();
     // The options-bearing partial is registered SECOND.
     const { app, store, dispose } = await sandbox(
-      act().withState(plain()).withState(with_retry)
+      act().withState(plain()).withState(with_retry),
+      { actOptions: { autoSettle: false } }
     );
     const original = store.commit.bind(store);
     let thrown = false;
@@ -658,7 +678,9 @@ describe("partial-state — policies declared on a later partial", () => {
     const b = base()
       .emit(() => ["Resolved", {}])
       .build();
-    const { app, dispose } = await sandbox(act().withState(a).withState(b));
+    const { app, dispose } = await sandbox(act().withState(a).withState(b), {
+      actOptions: { autoSettle: false },
+    });
     // Both actions resolve through their own options entry.
     await app.do("open", { stream: "t2", actor }, {});
     await app.do("resolve", { stream: "t2", actor }, {});
@@ -685,7 +707,9 @@ describe("partial-state — policies declared on a later partial", () => {
 
     // Predicate-bearing partial registered SECOND: without the fix the
     // merged state default-denies and the actor reads "[REDACTED]".
-    const { app, dispose } = await sandbox(act().withState(a).withState(b));
+    const { app, dispose } = await sandbox(act().withState(a).withState(b), {
+      actOptions: { autoSettle: false },
+    });
     const snaps = await app.do(
       "register",
       { stream: "s1", actor },
@@ -701,7 +725,10 @@ describe("partial-state — policies declared on a later partial", () => {
       .snap(() => true)
       .autocloses({ keep: { days: 7 } })
       .build();
-    const app = act().withState(plain()).withState(closing).build();
+    const app = act()
+      .withState(plain())
+      .withState(closing)
+      .build({ autoSettle: false });
     expect(app.registry.autoclose_policy("Tkt")).toBeTruthy();
   });
 
@@ -712,7 +739,10 @@ describe("partial-state — policies declared on a later partial", () => {
       .autocloses({ is: "Resolved" })
       .archives(archive)
       .build();
-    const app = act().withState(plain()).withState(archiving).build();
+    const app = act()
+      .withState(plain())
+      .withState(archiving)
+      .build({ autoSettle: false });
     expect(app.registry.autoclose_archiver("Tkt")).toBe(archive);
   });
 
@@ -724,7 +754,7 @@ describe("partial-state — policies declared on a later partial", () => {
           .emit(() => ["Resolved", {}])
           .build()
       )
-      .build();
+      .build({ autoSettle: false });
     expect(app.registry.autoclose_policy("Tkt")).toBeFalsy();
   });
 
@@ -745,9 +775,9 @@ describe("partial-state — policies declared on a later partial", () => {
         .emit(() => ["Resolved", {}])
         .discloses(() => false)
         .build();
-      expect(() => act().withState(a).withState(c).build()).toThrow(
-        'Duplicate disclosure predicate for state "Tkt"'
-      );
+      expect(() =>
+        act().withState(a).withState(c).build({ autoSettle: false })
+      ).toThrow('Duplicate disclosure predicate for state "Tkt"');
     });
 
     it("throws on two archivers", () => {
@@ -759,9 +789,9 @@ describe("partial-state — policies declared on a later partial", () => {
         .autocloses({ is: "Resolved" })
         .archives(async () => {})
         .build();
-      expect(() => act().withState(a).withState(c).build()).toThrow(
-        /Duplicate (archiver|autoclose policy) for state "Tkt"/
-      );
+      expect(() =>
+        act().withState(a).withState(c).build({ autoSettle: false })
+      ).toThrow(/Duplicate (archiver|autoclose policy) for state "Tkt"/);
     });
 
     it("throws on two autoclose policies", () => {
@@ -770,9 +800,9 @@ describe("partial-state — policies declared on a later partial", () => {
         .emit(() => ["Resolved", {}])
         .autocloses({ is: "Resolved" })
         .build();
-      expect(() => act().withState(a).withState(c).build()).toThrow(
-        'Duplicate autoclose policy for state "Tkt"'
-      );
+      expect(() =>
+        act().withState(a).withState(c).build({ autoSettle: false })
+      ).toThrow('Duplicate autoclose policy for state "Tkt"');
     });
   });
 });

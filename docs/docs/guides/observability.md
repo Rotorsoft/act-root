@@ -81,7 +81,6 @@ const settleDuration = new Histogram({
 let commit_t0: number | undefined;
 app.on("committed", () => {
   commit_t0 ??= performance.now(); // first commit since the last settle
-  app.settle();
 });
 app.on("settled", () => {
   if (commit_t0 !== undefined) {

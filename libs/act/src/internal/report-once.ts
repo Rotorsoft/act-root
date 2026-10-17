@@ -2,7 +2,7 @@
  * One-shot reporting for a misdeclaration that a build-time guard could not
  * catch.
  *
- * The guards in `build_events` and `build-classify` can only inspect a static
+ * The guards in `build_events` and `classify` can only inspect a static
  * `.to({...})` — a `.to(fn)` target, lane and priority are a function until an
  * event arrives. The pipelines that resolve them (correlate for lane and
  * target, drain for the payload) are therefore where the same rules have to be

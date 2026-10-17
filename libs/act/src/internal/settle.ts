@@ -57,6 +57,8 @@ export class SettleLoop<TEvents extends Schemas> {
    * `finally` schedules one more pass with these options, so it isn't lost.
    */
   private _pending: SettleOptions | undefined = undefined;
+  /** Set at shutdown: nothing schedules again. */
+  private _stopped = false;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
   private readonly _default_debounce_ms: number;
@@ -72,9 +74,13 @@ export class SettleLoop<TEvents extends Schemas> {
    * until no progress is made (no new subscriptions, no events read, no
    * streams leased)
    * or `maxPasses` is reached, then emits the `"settled"` lifecycle event
-   * via {@link SettleDeps.on_settled}.
+   * via {@link SettleDeps.on_settled}. `auto` marks a pass a local change
+   * asked for: it never displaces or delays a pass already scheduled, so a
+   * caller's options win and steady commits can't starve settling.
    */
-  schedule(options: SettleOptions = {}): void {
+  schedule(options: SettleOptions = {}, auto = false): void {
+    if (this._stopped) return;
+    if (auto && (this._timer || this._pending)) return;
     const {
       debounceMs = this._default_debounce_ms,
       correlate: correlate_query = { after: -1, limit: 100 },
@@ -172,8 +178,12 @@ export class SettleLoop<TEvents extends Schemas> {
     return this._inflight;
   }
 
-  /** Cancel any pending or active settle cycle. Idempotent. */
-  stop(): void {
+  /**
+   * Cancel any pending settle pass. Idempotent. `final` (shutdown) also
+   * stops all later scheduling.
+   */
+  stop(final = false): void {
+    if (final) this._stopped = true;
     // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
     // the running cycle's `finally`.
     this._pending = undefined;

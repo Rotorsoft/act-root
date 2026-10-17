@@ -1,60 +1,68 @@
 import EventEmitter from "node:events";
+import { register_weak_disposer } from "./disposers.js";
+import { type AuditDeps, audit } from "./internal/audit.js";
+import { CircuitBreaker } from "./internal/circuit-breaker.js";
 import {
   ALL_LANES,
   classify_registry,
   type EventLaneSet,
-} from "./builders/build-classify.js";
+} from "./internal/classify.js";
 import {
-  build_handle,
-  build_handle_batch,
-} from "./builders/reaction-builder.js";
-import { register_weak_disposer } from "./disposers.js";
-import {
-  type AuditDeps,
-  audit,
-  bare_patch,
-  build_drain,
-  build_es,
-  CircuitBreaker,
-  type CircuitBreakerOptions,
-  type CircuitState,
   CloseLock,
-  CorrelateCycle,
   catch_up_correlation,
-  close_correlation,
+  run_close_cycle,
+} from "./internal/close-cycle.js";
+import {
   DEFAULT_LEASE_MILLIS,
-  DEFAULT_MAX_SUBSCRIBED_STREAMS,
-  DEFAULT_SETTLE_DEBOUNCE_MS,
-  DrainController,
-  type DrainOps,
-  default_correlator,
-  type EsOps,
-  FOLD_RESET,
-  type Handle,
-  type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
-  type PatchFn,
-  type ResettableBatchHandler,
   resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
   resolveShutdownConfig,
-  run_close_cycle,
-  SettleLoop,
+} from "./internal/config.js";
+import { CorrelateCycle } from "./internal/correlate-cycle.js";
+import {
+  close_correlation,
+  default_correlator,
+} from "./internal/correlation-id.js";
+import {
+  DrainController,
+  type Handle,
+  type HandleBatch,
+} from "./internal/drain-cycle.js";
+import type { DrainOps } from "./internal/drain-ops.js";
+import {
+  bare_patch,
+  type EsOps,
+  type PatchFn,
   scan,
-  walk_streams,
-} from "./internal/index.js";
+} from "./internal/event-sourcing.js";
+import {
+  FOLD_RESET,
+  type ResettableBatchHandler,
+} from "./internal/projection-fold.js";
+import {
+  build_handle,
+  build_handle_batch,
+} from "./internal/reaction-dispatch.js";
+import { SettleLoop } from "./internal/settle.js";
+import { build_drain, build_es } from "./internal/tracing.js";
+import { walk_streams } from "./internal/walk-streams.js";
+import { cache, default_scope, log, store } from "./ports.js";
 import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
 } from "./scoped.js";
-
-// Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
-export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
-
-import { cache, default_scope, log, type Scoped, store } from "./ports.js";
+import {
+  type ActLifecycleEvents,
+  type ActOptions,
+  type CircuitState,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
+  type Scoped,
+} from "./types/act.js";
 import { StoreError } from "./types/errors.js";
 import type {
   Actor,
@@ -90,223 +98,10 @@ import type {
   Snapshot,
   State,
   Store,
-  StoreNotification,
   StreamFilter,
   StreamPosition,
   Target,
 } from "./types/index.js";
-
-// Re-export the autoclose config surface so operators can
-// `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
-// from "@rotorsoft/act"`. The implementation lives in
-// `internal/config.ts` (the single home for builder-facing config bags)
-// to keep this orchestrator file focused on the `Act` class.
-export {
-  type AutocloseConfig,
-  type AutoclosePolicy,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  DEFAULT_MAX_SUBSCRIBED_STREAMS,
-  DEFAULT_SETTLE_DEBOUNCE_MS,
-  resolveAutocloseConfig,
-} from "./internal/index.js";
-
-/**
- * Lifecycle events emitted by {@link Act}, mapped to their payload type.
- * Drives the typing of `emit` / `on` / `off` — the event-name argument
- * narrows its payload at the call site.
- *
- * The first parameter is kept (unused) for arity compatibility: `committed`
- * carries snapshots of whichever state each action targeted, so its honest
- * element type is `Snapshot<Schema, TEvents>` — the register map itself was
- * never the shape of any snapshot's state.
- */
-export type ActLifecycleEvents<
-  _TSchemaReg extends SchemaRegister<TActions>,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-> = {
-  committed: Snapshot<Schema, TEvents>[];
-  acked: Lease[];
-  blocked: BlockedLease[];
-  settled: Drain<TEvents>;
-  closed: CloseResult;
-  /**
-   * A **different process** committed an event to the same backing store.
-   *
-   * Fires only when the configured store implements
-   * {@link Store.notify} and there is at least one registered reaction.
-   * The orchestrator uses the same signal internally to wake `settle()`
-   * — listeners get the raw payload for SSE fan-out, dashboards, and
-   * audit logs.
-   *
-   * Local commits do *not* fire `notified` (use `committed` for those):
-   * stores self-filter their own writes so this channel has a clean
-   * cross-process semantic.
-   */
-  notified: StoreNotification;
-  /**
-   * A stream's sensitive-data payload was wiped via {@link Act.forget}.
-   * Fires exactly once per successful `forget(stream)` call — idempotent
-   * second calls (no PII left on the stream) return `eventCount: 0` and
-   * do NOT re-emit. Apps that never call `forget()` never see this event.
-   *
-   * Listeners use it for the compliance side of GDPR / CCPA: audit log,
-   * downstream cache busts, projection-side wipes that the framework
-   * doesn't reach (e.g., search indexes, ETL caches). The framework's own
-   * cache is invalidated by `forget()` itself before the event fires.
-   */
-  forgotten: { stream: string; at: Date; eventCount: number };
-  /**
-   * A store operation failed during the drain loop. Fires on
-   * every failed drain cycle — typically a {@link StoreError} from a
-   * degraded backend — carrying the orchestrator circuit breaker's state
-   * after the failure (`open` means the drain loop has backed off and will
-   * retry after the cooldown). Listen to alert on a degraded store; the
-   * framework logs the same error regardless. Emitted only when a listener
-   * is registered (Node's `EventEmitter` throws on an unhandled `"error"`).
-   */
-  error: { error: unknown; circuit: CircuitState };
-};
-
-/**
- * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
- *
- * @property maxSubscribedStreams - Cap for the LRU tracking what each
- *   dynamically resolved reaction target was last subscribed at. Statically
- *   declared targets are held outside it and never evicted, so their lane
- *   and priority stay owned by the build-time subscribe.
- *   Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
- * @property settleDebounceMs - Debounce window (ms) used by `settle()` when
- *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
- *   Act instance instead of threading the value through every call site.
- *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
- */
-export type ActOptions<TLanes extends string = string> = {
-  readonly maxSubscribedStreams?: number;
-  readonly settleDebounceMs?: number;
-  /**
-   * Per-Act ports. When set, this Act runs against the
-   * provided store + cache instead of the singletons — threaded via
-   * AsyncLocalStorage so internals are unchanged. Both are required
-   * together (a shared cache across distinct stores would collide on
-   * stream keys). Omit for the singleton path.
-   */
-  readonly scoped?: Scoped;
-  /**
-   * Correlation-id generator for originating actions. When
-   * omitted, Act uses {@link default_correlator}, which produces a
-   * readable, time-monotonic-within-window, lowercase id of the form
-   * `{state[:4]}-{action[:4]}-{ts}{rnd}` (18 chars).
-   *
-   * Reactions inherit `reactingTo.meta.correlation` so the chain stays
-   * intact — the delegate is only consulted on originating commits and
-   * for the close-the-books transaction.
-   */
-  readonly correlator?: Correlator;
-  /** Restrict this process to a subset of declared lanes. */
-  readonly onlyLanes?: ReadonlyArray<TLanes>;
-  /**
-   * Subscribe to {@link Store.notify} on this instance. Defaults
-   * to `true`. Set `false` on instances that only commit and never
-   * react — the subscriber-connection budget is the practical scaling
-   * ceiling for the notify/listen pattern, and writer-only fleets
-   * spend it for nothing when they subscribe to a channel they never
-   * read. Commits still emit notifications (that's part of the
-   * store's commit protocol); only the subscriber side is gated.
-   */
-  readonly listen?: boolean;
-  /**
-   * Run the local reaction pipeline on this instance. Defaults
-   * to `true`. Set `false` on writer-only or sidecar instances: drain
-   * controllers' auto-cycle workers don't start, `correlate()` /
-   * `drain()` / `settle()` become no-ops, and the notify handler
-   * skips its drain-wakeup arm (but still emits the `notified`
-   * lifecycle event so observability sidecars work).
-   */
-  readonly drain?: boolean;
-  /**
-   * Orchestrator circuit breaker for the drain loop. After
-   * `failureThreshold` consecutive store failures the breaker opens and
-   * the drain loop skips `claim()` for `cooldownMs` instead of hammering a
-   * down backend, then allows a half-open trial. Out-of-range values throw
-   * a `ZodError` at `act().build()`. Defaults: threshold 5, cooldown 30s.
-   */
-  readonly circuitBreaker?: CircuitBreakerOptions;
-  /**
-   * @deprecated Accepted, validated, and ignored. It paced the off-hours
-   * re-check of the old autoclose sweep; the synthesized autoclose reaction now derives its re-check
-   * directly from `autocloseWindow` — a tick landing outside the window
-   * parks until the exact instant the window opens, so there is no
-   * polling cadence to configure (and nothing minute-denominated on the
-   * close surface). Still validated as an integer `[1, 1440]` so typos
-   * keep failing loudly at `act().build()`. Will be removed in the next
-   * major.
-   */
-  readonly autocloseCycleMinutes?: number;
-  /**
-   * @deprecated Unused since the autoclose sweep was replaced by a
-   * synthesized per-aggregate reaction — nothing pages the store in
-   * batches anymore, so nothing reads this. Accepted and validated
-   * (`[1, 1024]`) for compatibility; will be removed in the next major.
-   */
-  readonly closeBatchSize?: number;
-  /**
-   * @deprecated Unused: the sweep that yielded between
-   * successive `Store.truncate` calls no longer exists; closes are
-   * staged per stream by the autoclose reaction. Accepted and validated
-   * (`[0, 1000]`) for compatibility; will be removed in the next major.
-   */
-  readonly closeYieldMs?: number;
-  /**
-   * @deprecated Unused: the sweep-side predicate try/catch
-   * this flag steered no longer exists; a throwing policy predicate now
-   * follows the reaction retry path (`blockOnError: false`, three
-   * retries). Accepted for compatibility; will be removed in the next
-   * major.
-   */
-  readonly closeOnError?: boolean;
-  /**
-   * Optional off-hours window restricting when autoclose evaluates. A
-   * synthesized autoclose reaction that triggers outside the window
-   * defers to the next instant the window opens — derived from the
-   * window itself, no polling cadence. Hours are `[0, 23]` integers in
-   * `timeZone` (IANA, default `"UTC"`, DST-correct); `start > end` is
-   * an overnight window (e.g. `{ start: 22, end: 6 }`). Omit to
-   * evaluate regardless of clock time.
-   */
-  readonly autocloseWindow?: {
-    readonly start: number;
-    readonly end: number;
-    readonly timeZone?: string;
-  };
-  /**
-   * Validate folded state against its declared Zod schema after every
-   * reduction. Off by default.
-   *
-   * When `true`, each time an event is folded into state — on the
-   * command path (`do`), on `load`/replay, and inside projection-fold
-   * projections — the merged full state is parsed against the owning
-   * state's `state({ Name: schema })` schema. A reducer that produces
-   * schema-violating state (the calculator divide-by-zero NaN
-   * class) throws a {@link ValidationError} at the triggering event,
-   * whose `target` names the state and the event (`<state>.<event>#<id>`)
-   * — instead of the bad value propagating and surfacing hops later as a
-   * confusing downstream error.
-   *
-   * This is a **debugging / CI aid, not a production guard**. Turn it on
-   * in development and CI to catch total-reducer bugs at the source; the
-   * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. The per-event
-   * patch step is selected **once at `build()`** (the same way the
-   * orchestrator picks bare vs trace-decorated store ops from the log
-   * level): when `false` (the default) the fold loop is byte-identical to
-   * a bare reduction — the validating patch step is never selected, so
-   * there is no per-event cost, not even a branch.
-   */
-  readonly validateFoldedState?: boolean;
-};
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
 function validate_only_lanes(
@@ -362,6 +157,7 @@ export class Act<
   private readonly _breaker: CircuitBreaker;
   private readonly _listen: boolean;
   private readonly _drain: boolean;
+  private readonly _auto_settle: boolean;
   /** Whether any event has a reaction; nothing arms without one. */
   private readonly _reactive: boolean;
   private readonly _drain_controllers: Map<
@@ -371,8 +167,6 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   private readonly _settle: SettleLoop<TEvents>;
   private _poll: ReturnType<typeof setInterval> | undefined;
-  /** The deprecated `start_correlations` callback, while the poll runs. */
-  private _on_discovered: ((subscribed: number) => void) | undefined;
   /**
    * Wired at construction against the store current then, so a store
    * injected after `build()` is never notified.
@@ -541,6 +335,7 @@ export class Act<
     this._event_to_lanes = classification.event_to_lanes;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
+    this._auto_settle = options.autoSettle !== false;
 
     // Order matters: controllers read the breaker, the audit bag reads the
     // controller set, settle reads the correlate cycle.
@@ -749,7 +544,7 @@ export class Act<
         // notification would schedule a cycle nothing cancels. Never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
-        this._settle.stop();
+        this._settle.stop(true);
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
@@ -899,10 +694,12 @@ export class Act<
         do_options
       );
       // Arm only the lanes whose reactions match the committed events
-      // (`action()` snapshots always carry their event).
-      this._arm_for_event_names(
+      // (`action()` snapshots always carry their event), and settle them:
+      // a local commit runs its reactions the way a remote one does.
+      const armed = this._arm_for_event_names(
         snapshots.map((s) => (s.event as { name: string }).name)
       );
+      this._settle_armed(armed);
       this.emit("committed", snapshots);
       return snapshots;
     });
@@ -1156,6 +953,16 @@ export class Act<
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
+  /**
+   * Settles what a local change armed (a commit, a reset, an unblock, a
+   * restore), the way a commit from another process does, unless the app
+   * walks the pipeline itself (`autoSettle: false`).
+   */
+  private _settle_armed(armed: boolean): void {
+    if (armed && this._drain && this._auto_settle)
+      this._settle.schedule({}, true);
+  }
+
   /** Arms only the lanes these events react on; true when any was armed. */
   private _arm_for_event_names(names: Iterable<string>): boolean {
     const to_arm = new Set<string>();
@@ -1249,7 +1056,6 @@ export class Act<
         await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
       if (subscribed > 0 || marked > 0) this._arm_all();
-      if (subscribed > 0) this._on_discovered?.(subscribed);
       return { subscribed, last_id, scanned };
     });
   }
@@ -1270,9 +1076,6 @@ export class Act<
    *   reads (default 100). The scan always starts at the correlation
    *   checkpoint, so `after` is ignored.
    * @param frequency - Milliseconds between ticks (default: 10000)
-   * @param callback - Called with the number of newly subscribed streams
-   *   after each correlate pass that found some.
-   *   @deprecated Listen to the `"settled"` lifecycle event instead.
    * @returns `true` if the poll started, `false` if one is already running
    *
    * @example
@@ -1285,13 +1088,8 @@ export class Act<
    * @see {@link settle} for what each tick runs
    * @see {@link stop_correlations} to stop the poll
    */
-  start_correlations(
-    query: Query = {},
-    frequency = 10_000,
-    callback?: (subscribed: number) => void
-  ): boolean {
+  start_correlations(query: Query = {}, frequency = 10_000): boolean {
     if (this._poll) return false;
-    this._on_discovered = callback;
     const correlate = { limit: query.limit || 100 };
     this._poll = setInterval(() => {
       // No local signal says there is work, so look anyway.
@@ -1312,7 +1110,6 @@ export class Act<
       clearInterval(this._poll);
       this._poll = undefined;
     }
-    this._on_discovered = undefined;
     // Hand the correlation lease back, best-effort and not awaited (this
     // method is synchronous; the lease would expire anyway).
     void this._scoped(() => this._correlate.release_correlation());
@@ -1328,8 +1125,8 @@ export class Act<
   }
 
   /**
-   * Reset reaction stream watermarks and request a drain on the next
-   * `drain()` / `settle()` cycle.
+   * Reset reaction stream watermarks and settle them, replaying their
+   * events through their reactions.
    *
    * Use this to replay events through projections (or other reaction targets)
    * after changing handler logic. Equivalent to calling `store().reset(streams)`
@@ -1337,10 +1134,10 @@ export class Act<
    * `store().reset(...)` alone leaves the flag untouched, so a settled app
    * would short-circuit and skip the replay.
    *
-   * Pair with `app.settle()` (or a single `app.drain()` for small streams).
-   * `settle()` loops correlate→drain until no progress is made, so one call
-   * fully catches up paginated streams without forcing callers to roll
-   * their own loop.
+   * The reset schedules a settle on its own, which loops correlate→drain
+   * until the replay catches up. Call `app.settle(options)` right after to
+   * pass batch options instead (it replaces the scheduled pass), or
+   * `correlate()` / `drain()` to drive the replay by hand.
    *
    * @param input - Reaction target streams (e.g., projection names) to reset, or a {@link StreamFilter} for bulk operations
    * @returns Count of streams that were actually reset
@@ -1348,7 +1145,7 @@ export class Act<
    * @example Rebuild a projection (production)
    * ```typescript
    * await app.reset(["my-projection"]);
-   * app.settle({ eventLimit: 1000 });   // emits "settled" when fully replayed
+   * app.settle({ eventLimit: 1000 }); // optional: bigger batches; emits "settled"
    * ```
    *
    * @see {@link Store.reset} for the underlying store primitive
@@ -1362,7 +1159,10 @@ export class Act<
       // costs a query, and an extra clear costs one head load per stream.
       for (const handler of this._batch_handlers.values())
         (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
-      if (count > 0) this._arm_all();
+      if (count > 0) {
+        this._arm_all();
+        this._settle_armed(this._reactive);
+      }
       return count;
     });
   }
@@ -1376,11 +1176,9 @@ export class Act<
    * {@link reset}, which rebuilds from event 0 (suitable for projection
    * rebuilds, wrong for "I fixed the bug, please retry").
    *
-   * Wraps `store().unblock(streams)` and raises the orchestrator's
-   * internal "needs drain" flag so a settled app picks up the now-free
-   * streams on the next cycle. Equivalent to calling `store().unblock(...)`
-   * directly, but `store().unblock(...)` alone leaves the flag
-   * untouched.
+   * Wraps `store().unblock(streams)` and settles the now-free streams on
+   * its own. `store().unblock(...)` alone leaves them waiting for the next
+   * commit.
    *
    * @param input - Stream names to unblock, or a {@link StreamFilter} for bulk recovery
    * @returns Count of streams that were actually flipped (were blocked)
@@ -1397,7 +1195,10 @@ export class Act<
   async unblock(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().unblock(input);
-      if (count > 0) this._arm_all();
+      if (count > 0) {
+        this._arm_all();
+        this._settle_armed(this._reactive);
+      }
       return count;
     });
   }
@@ -1470,6 +1271,7 @@ export class Act<
       if (!sink) {
         this._correlate.restart();
         this._arm_all();
+        this._settle_armed(this._reactive);
       }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
     });
@@ -1672,14 +1474,15 @@ export class Act<
   /**
    * Debounced, non-blocking correlate→drain cycle.
    *
-   * Call this after `app.do()` (or `app.reset()`) to schedule a background
-   * drain. Multiple rapid calls within the debounce window are coalesced
-   * into a single cycle. Runs correlate→drain in a loop until a pass makes
-   * no progress — no new subscriptions, no events read, no streams leased —
-   * then emits
-   * the `"settled"` lifecycle event. This means a single `settle()` call
-   * fully catches up paginated streams (e.g. after `reset()` on a long
-   * projection) without forcing callers to loop.
+   * A local change that frees reaction work (a commit, `reset()`,
+   * `unblock()`, `restore()`) schedules this on its own unless the app
+   * sets `autoSettle: false`. Call it at startup, to run what was pending
+   * before a restart, or with options to replace the scheduled pass.
+   * Multiple rapid calls within the debounce window are coalesced into a
+   * single cycle. Runs correlate→drain in a loop until a pass makes no
+   * progress — no new subscriptions, no events read, no streams leased —
+   * then emits the `"settled"` lifecycle event, so one call fully catches
+   * up paginated streams without forcing callers to loop.
    *
    * @param options - Settle configuration — see {@link SettleOptions} for fields:
    *   `debounceMs` (default 10), `correlate` (default `{ after: -1, limit: 100 }`),
@@ -1687,10 +1490,9 @@ export class Act<
    *   `streamLimit` (default 10), `eventLimit` (default 10),
    *   `leaseMillis` (default 10000).
    *
-   * @example API mutations
+   * @example Startup
    * ```typescript
-   * await app.do("CreateItem", target, input);
-   * app.settle(); // non-blocking, returns immediately
+   * app.settle(); // run what was pending before the restart
    *
    * app.on("settled", (drain) => {
    *   // notify SSE clients, invalidate caches, etc.

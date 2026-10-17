@@ -4,10 +4,10 @@
  *
  * Everything `act().build()` derives from the registered events.
  *
- * This is the build-time half of the event lifecycle. `internal/sensitive.ts`
- * owns the other two halves — the `sensitive(...)` marker itself, and the
- * runtime transforms (`pii_gate`, `pii_strip`, `pii_split`) that a reader is
- * composed from. Nothing here runs per event at runtime; everything here runs
+ * This is the build-time half of the event lifecycle. The other two halves
+ * are the `sensitive(...)` marker (`sensitive.ts`) and the runtime
+ * transforms (`pii_gate`, `pii_strip`, `pii_split`, in `internal/pii.ts`)
+ * that a reader is composed from. Nothing here runs per event at runtime; everything here runs
  * once, at build, and hands the orchestrator a prebuilt function.
  *
  * Three things are derived, all in ONE walk over the registered events:
@@ -32,16 +32,16 @@
  */
 
 import { z } from "zod";
-import { date_reviver_schema } from "../internal/index.js";
+import { date_reviver_schema } from "../internal/date-reviver.js";
 import {
   type EventGate,
   IDENTITY_GATE,
   make_gate,
-  pii_schemas,
   pii_split,
   pii_strip,
-} from "../internal/sensitive.js";
+} from "../internal/pii.js";
 import { DEFAULT_LANE, SNAP_EVENT } from "../ports.js";
+import { pii_schemas } from "../sensitive.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
 
 /** What one pass over an event's schema resolves. @internal */

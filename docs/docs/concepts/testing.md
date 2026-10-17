@@ -169,12 +169,15 @@ it("should enforce business rules", async () => {
 
 ## Testing Reactions and Projections
 
-Reactions don't run as part of `app.do()` — they're processed by `drain()` after the orchestrator has discovered new target streams via `correlate()`. The two are explicit in tests so the test controls exactly when reactions fire. The pair is required, not a style choice: `drain()` claims only streams that `correlate()` has marked, so a bare `drain()` after a commit finds nothing.
+A commit settles its reactions in the background (`ActOptions.autoSettle`, on by default). A test checks them one of two ways:
+
+- **Walk the pipeline yourself.** Build the app with `autoSettle: false` (`fixture(builder, { actOptions: { autoSettle: false } })`), then call `correlate()` and `drain()`. Nothing runs until you do, so the steps and their counts are deterministic. The pair is required, not a style choice: `drain()` claims only streams that `correlate()` has marked, so a bare `drain()` after a commit finds nothing.
+- **Keep the default and wait for the outcome** with `vi.waitFor(...)`, the way the app itself would see it.
 
 ```typescript no-check
 it("should process reactions", async () => {
   const t = target();
-  await app.do("CreateItem", t, { name: "Test" });
+  await app.do("CreateItem", t, { name: "Test" }); // app built with autoSettle: false
 
   await app.correlate();   // discover targets, mark their work
   await app.drain();       // process what was marked
@@ -185,7 +188,7 @@ it("should process reactions", async () => {
 });
 ```
 
-For multi-hop reaction chains, repeat `correlate → drain` until a pass produces no work. `settle()` exists for production (debounced, non-blocking), but tests stick to the explicit pair to keep the cycle count deterministic and assertions easy to time.
+For multi-hop reaction chains, repeat `correlate → drain` until a pass produces no work.
 
 ### Projection Cleanup
 

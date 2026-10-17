@@ -133,7 +133,7 @@ describe("backoff config is validated at build", () => {
         .do(react, {
           backoff: { strategy: "expontential" as never, baseMs: 1 },
         })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow();
   });
 
@@ -183,7 +183,7 @@ describe("per-reaction backoff (integration)", () => {
         maxRetries: 5,
         backoff: { strategy: "fixed", baseMs: 200 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
@@ -232,7 +232,7 @@ describe("per-reaction backoff (integration)", () => {
           },
           { maxRetries: 5 }
         )
-        .build();
+        .build({ autoSettle: false });
 
       await app.do("tick", { stream: "s1", actor }, {});
       await app.correlate();
@@ -278,7 +278,7 @@ describe("per-reaction backoff (integration)", () => {
           },
           { maxRetries: 2, blockOnError: true }
         )
-        .build();
+        .build({ autoSettle: false });
       app.on("blocked", (leases) => {
         for (const l of leases as { stream: string }[]) blocked.push(l.stream);
       });
@@ -316,7 +316,7 @@ describe("per-reaction backoff (integration)", () => {
         maxRetries: 5,
         backoff: { strategy: "fixed", baseMs: 5000 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     const ack_spy = vi.spyOn(store(), "ack");
 
@@ -380,7 +380,7 @@ describe("per-reaction backoff (integration)", () => {
         maxRetries: 5,
         backoff: { strategy: "fixed", baseMs: 50 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s2", actor }, {});
     await app.correlate();
@@ -411,7 +411,7 @@ describe("per-reaction backoff (integration)", () => {
         maxRetries: 1,
         backoff: { strategy: "fixed", baseMs: 10 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s3", actor }, {});
     await app.correlate();
@@ -449,7 +449,7 @@ describe("per-reaction backoff (integration)", () => {
         maxRetries: 5,
         backoff: { strategy: "fixed", baseMs: 50 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     // Commit + correlate + drain "early" — backoff entry set at T+50.
     await app.do("tick", { stream: "early", actor }, {});
@@ -494,7 +494,7 @@ describe("per-reaction backoff (integration)", () => {
         maxRetries: 5,
         backoff: { strategy: "fixed", baseMs: 50 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     // A real worker/commit keeps the controller armed; once a drain claims
     // nothing (the stream is deferred) it self-disarms, so we re-arm before

@@ -23,9 +23,9 @@
 
 import { config } from "../config.js";
 import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
-import { default_correlator } from "./correlator.js";
-import type { DrainOps } from "./drain.js";
-import * as drain from "./drain.js";
+import { default_correlator } from "./correlation-id.js";
+import type { DrainOps } from "./drain-ops.js";
+import * as drain from "./drain-ops.js";
 import type { EsOps, PatchFn } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
 

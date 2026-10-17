@@ -37,7 +37,7 @@ describe("windowed close", () => {
       await Promise.resolve();
     })
     .to("w-reaction-target")
-    .build();
+    .build({ autoSettle: false });
 
   const actor = { id: "test", name: "Test" };
   const future = () => new Date(Date.now() + 60_000);
@@ -334,7 +334,7 @@ describe("windowed close", () => {
         .on("WPosted")
         .do(async function onPosted() {})
         .to((e) => ({ target: `wl-out-${e.stream}`, source: e.stream }))
-        .build();
+        .build({ autoSettle: false });
 
     it("prunes a stream whose trailing events resolve to no target", async () => {
       const app = build_ledger();
@@ -392,7 +392,7 @@ describe("windowed close", () => {
   });
 
   it("prunes purely by date when the app has no reactions", async () => {
-    const solo = act().withState(counter).build();
+    const solo = act().withState(counter).build({ autoSettle: false });
     for (let i = 0; i < 5; i++)
       await solo.do("tick", { stream: "w11", actor }, { by: 1 });
     const { truncated, skipped } = await solo.close([

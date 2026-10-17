@@ -48,7 +48,7 @@ describe("handler-side PII strip", () => {
       .on("UserRegistered")
       .do(onRegistered)
       .to(() => ({ target: "audit" }))
-      .build();
+      .build({ autoSettle: false });
     await app.do(
       "register",
       { stream: "user-1", actor },
@@ -76,7 +76,10 @@ describe("handler-side PII strip", () => {
       .do(noop)
       .batch(captureBatch)
       .build();
-    const app = act().withState(User).withProjection(Roster).build();
+    const app = act()
+      .withState(User)
+      .withProjection(Roster)
+      .build({ autoSettle: false });
     await app.do(
       "register",
       { stream: "user-1", actor },
@@ -115,7 +118,7 @@ describe("handler-side PII strip", () => {
       .on("UserRegistered")
       .do(onRegistered)
       .to(() => ({ target: "audit-defensive" }))
-      .build();
+      .build({ autoSettle: false });
     // Bypass the orchestrator's split — commit with the sensitive keys still
     // present on data. Mirrors what a misuse of the raw Store would produce.
     await store().commit(
@@ -155,7 +158,7 @@ describe("handler-side PII strip", () => {
       .on("Incremented")
       .do(onIncremented)
       .to(() => ({ target: "audit" }))
-      .build();
+      .build({ autoSettle: false });
     await app.do("increment", { stream: "c-1", actor }, { by: 5 });
     await app.correlate();
     await app.drain();
