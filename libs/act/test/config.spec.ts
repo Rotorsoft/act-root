@@ -120,6 +120,47 @@ describe("config", () => {
       vi.doUnmock("node:fs");
     });
 
+    const load_with = async (content: string) => {
+      vi.resetModules();
+      vi.doMock("node:fs", () => ({
+        readFileSync: vi.fn().mockReturnValue(content),
+      }));
+      const { config: loadConfig } = await import("../src/config.js");
+      const c = loadConfig();
+      vi.doUnmock("node:fs");
+      return c;
+    };
+
+    it("uses the synthetic name/version when package.json has none", async () => {
+      const c = await load_with(JSON.stringify({ type: "module" }));
+      expect(c.name).toBe("act-fallback");
+      expect(c.version).toBe("0.0.0-fallback");
+    });
+
+    it("drops the empty fields npm init -y writes and keeps the rest", async () => {
+      const c = await load_with(
+        JSON.stringify({
+          name: "app",
+          version: "1.0.0",
+          description: "",
+          author: "",
+          license: "ISC",
+        })
+      );
+      expect(c).toMatchObject({
+        name: "app",
+        version: "1.0.0",
+        license: "ISC",
+      });
+      expect(c.description).toBeUndefined();
+      expect(c.author).toBeUndefined();
+    });
+
+    it("treats a package.json of null as one with no fields", async () => {
+      const c = await load_with("null");
+      expect(c.name).toBe("act-fallback");
+    });
+
     it("should surface a string thrown during package.json read", async () => {
       vi.resetModules();
       vi.doMock("node:fs", () => ({

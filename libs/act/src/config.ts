@@ -45,7 +45,8 @@ export type Package = z.infer<typeof PackageSchema>;
  * Fallback package metadata when `package.json` can't be read at module
  * load — happens when the framework is consumed from a CWD that doesn't
  * have one (bundled CLIs, Lambda layers, embedded scripts) or when the
- * file exists but is malformed.
+ * file exists but is malformed. `name` and `version` also fall back one by
+ * one when the file has no valid value for them.
  *
  * The values are deliberately synthetic so callers spot them immediately:
  * `config().name === "act-fallback"` is a runtime signal that the framework
@@ -60,9 +61,12 @@ const FALLBACK_PACKAGE: Package = {
 };
 
 /**
- * Loads and parses the local package.json file as a Package object. On
- * any read or parse failure, falls back to {@link FALLBACK_PACKAGE} and
- * stashes the error so {@link config} can surface it on first access —
+ * Loads the local package.json as a Package object, keeping each field only
+ * when it is valid: `npm init -y` writes an empty `description` and
+ * `author`, and a bare `{"type":"module"}` has no name or version. A
+ * missing or invalid `name` / `version` falls back to
+ * {@link FALLBACK_PACKAGE}. On a read or parse failure, falls back entirely
+ * and stashes the error so {@link config} can surface it on first access —
  * we can't call `log()` here because the logger port memoizes on first
  * call and locking it at module load defeats user injection.
  *
@@ -70,8 +74,16 @@ const FALLBACK_PACKAGE: Package = {
  */
 const get_package = (): Package => {
   try {
-    const raw = fs.readFileSync("package.json");
-    return JSON.parse(raw.toString()) as Package;
+    const raw = JSON.parse(fs.readFileSync("package.json").toString());
+    const pkg: Record<string, unknown> = {
+      name: FALLBACK_PACKAGE.name,
+      version: FALLBACK_PACKAGE.version,
+    };
+    for (const [key, schema] of Object.entries(PackageSchema.shape)) {
+      const field = schema.safeParse(raw?.[key]);
+      if (field.success && field.data !== undefined) pkg[key] = field.data;
+    }
+    return pkg as Package;
   } catch (err) {
     pkg_load_error = err;
     return FALLBACK_PACKAGE;
