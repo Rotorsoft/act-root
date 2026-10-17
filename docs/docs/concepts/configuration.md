@@ -145,7 +145,7 @@ const app = act()
 
 ### Circuit breaker
 
-Every `Act` owns one circuit breaker, shared by the drain, settle, and autoclose loops. After `failureThreshold` consecutive store failures it **opens** — those loops skip the store while it's open instead of hammering a down backend — and `cooldownMs` later it **schedules its own retry** (a drain attempt): a pass closes it, a failure re-opens it and reschedules. So recovery is automatic regardless of lane configuration. While the store stays down it keeps probing once per `cooldownMs` (each failed probe re-emits the [`error` event](./error-handling#store-failures-and-the-circuit-breaker)); the timer is `unref()`'d and cleared on recovery or `dispose()`. See [Store failures and the circuit breaker](./error-handling#store-failures-and-the-circuit-breaker).
+Every `Act` owns one circuit breaker, shared by the drain, settle, and autoclose loops. After every store failure it **schedules its own retry** (a settle) `cooldownMs` later, and after `failureThreshold` consecutive failures it **opens**: those loops skip the store while it's open instead of hammering a down backend. A pass closes it, a failure re-opens it and reschedules. So recovery is automatic regardless of lane configuration. While the store stays down it keeps probing once per `cooldownMs` (each failed probe re-emits the [`error` event](./error-handling#store-failures-and-the-circuit-breaker)); the timer is `unref()`'d and cleared on recovery or `dispose()`. See [Store failures and the circuit breaker](./error-handling#store-failures-and-the-circuit-breaker).
 
 ```typescript
 import { act, state } from "@rotorsoft/act";

@@ -414,13 +414,13 @@ export class DrainController<
    * Local wake at the earliest parked (backoff or defer) visit, or at the
    * lease expiry after a failed pass (the {@link RETRY} key); the schedule
    * itself is persisted. On an idle app nothing else would drain it. It
-   * drains until a pass leases nothing, and an entry stays until handled or
-   * until a later pass claims nothing.
+   * drains until a pass leases nothing or the controller stops, and an entry
+   * stays until handled or until a later pass claims nothing.
    */
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
     void this._deps.run_scoped(async () => {
-      while ((await this.drain()).leased.length > 0);
+      while (!this._stopped && (await this.drain()).leased.length > 0);
     });
   });
   private _worker: ReturnType<typeof setTimeout> | undefined;
