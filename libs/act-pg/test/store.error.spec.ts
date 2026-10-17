@@ -136,6 +136,14 @@ describe("PostgresStore", () => {
   });
 
   describe("query", () => {
+    it("counts 0 rows when pg reports no rowCount", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg types rowCount as number | null
+        { rows: [], rowCount: undefined }
+      );
+      expect(await store.query(() => {})).toBe(0);
+    });
+
     it("covers no conditions branch", async () => {
       const store = new PostgresStore({
         port: 5431,

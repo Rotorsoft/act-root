@@ -88,3 +88,35 @@ describe("pool defaults", () => {
     expect((err.cause as Error).message).toBe("pool exhausted");
   });
 });
+
+describe("PostgresStore config", () => {
+  it("merges custom config with defaults", () => {
+    const store = new PostgresStore({
+      host: "custom",
+      port: 1234,
+      schema: "myschema",
+      table: "mytable",
+    });
+    expect(store.config).toMatchObject({
+      host: "custom",
+      port: 1234,
+      schema: "myschema",
+      table: "mytable",
+      user: "postgres",
+      password: "postgres",
+      database: "postgres",
+    });
+  });
+
+  it("uses defaults when no config is provided", () => {
+    expect(new PostgresStore().config).toMatchObject({
+      host: "localhost",
+      port: 5432,
+      user: "postgres",
+      password: "postgres",
+      database: "postgres",
+      schema: "public",
+      table: "events",
+    });
+  });
+});

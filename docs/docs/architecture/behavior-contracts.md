@@ -42,7 +42,7 @@ they run on InMemory, Postgres and SQLite at once.
 | Invariant and validation failures leave the warm cache untouched | [Cache and snapshots](cache-and-snapshots.md#cache-invalidation--narrow-contract) | `cache.spec.ts` → "invariant failure leaves the warm cache untouched (no commit)", "validation failure leaves the warm cache untouched (no commit)" |
 | A `cache.set` rejection warns and does not fail the action | [Cache and snapshots](cache-and-snapshots.md#cache-invalidation--narrow-contract) | `cache.spec.ts` → "cache.set rejection warns but does not fail the action" |
 | A time-travel (`asOf`) load skips the cache and ignores snapshots outside its cutoff, for every bound | [Cache and snapshots](cache-and-snapshots.md#time-travel-reads) | `time-travel.spec.ts` → "should not read from cache for time-travel loads", "should not write to cache for time-travel loads", "should not use snapshots for time-travel loads", "time-travel ignores snapshots outside the cutoff (RFC 1274)" |
-| `query_stats` head and tail never carry `pii` | `Store.query_stats` doc | `store-tck.ts` → "query_stats head/tail never carry pii — introspection surface is pii-safe"; act-sqlite `pii-encryption.spec.ts` → "never carries pii on query_stats head/tail — the operator-introspection surface is pii-safe" |
+| `query_stats` head and tail never carry `pii` | `Store.query_stats` doc | `store-tck.ts` → "query_stats head/tail never carry pii — introspection surface is pii-safe" |
 
 ## Reactions, drain, and errors
 

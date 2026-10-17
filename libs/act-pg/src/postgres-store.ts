@@ -39,27 +39,7 @@ import pg from "pg";
 
 const logger: Logger = log();
 
-const { Pool, types } = pg;
-
-/**
- * Per-Pool type parser. Overrides ONLY the JSONB parser to revive
- * ISO-date strings in event payloads to `Date`, delegating every other
- * OID to pg's global default. Passed as the Pool's `types` option so the
- * Date coercion is scoped to this store's connections — it never mutates
- * the process-global `pg.types` registry, so a host app's other pg usage
- * (Drizzle projections, ad-hoc queries) reads jsonb with the stock
- * parser. This is the shape pg threads down to each pooled client.
- */
-const JSONB_OID = types.builtins.JSONB;
-const scopedTypes: { getTypeParser: typeof types.getTypeParser } = {
-  getTypeParser: ((oid: number, format?: unknown) =>
-    oid === JSONB_OID
-      ? (val: string) => JSON.parse(val)
-      : (types.getTypeParser as (oid: number, format?: unknown) => unknown)(
-          oid,
-          format
-        )) as typeof types.getTypeParser,
-};
+const { Pool } = pg;
 
 type Config = Readonly<{
   schema: string;
@@ -364,8 +344,7 @@ export class PostgresStore implements Store {
       pii_encryption: ___,
       ...poolConfig
     } = this.config;
-    // Per-Pool JSONB reviver: scoped here, never global.
-    this._pool = new Pool({ ...poolConfig, types: scopedTypes });
+    this._pool = new Pool(poolConfig);
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._fqc = `"${this.config.schema}"."${this.config.table}_correlated"`;
