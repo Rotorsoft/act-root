@@ -1,7 +1,11 @@
+import { afterEach, beforeEach } from "vitest";
 import { ZodError, z } from "zod";
 import {
   act,
   cache,
+  dispose,
+  InMemoryCache,
+  InMemoryStore,
   projection,
   sensitive,
   slice,
@@ -11,7 +15,7 @@ import {
 import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 import { SNAP_EVENT } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
-import type { CacheEntry } from "../src/types/index.js";
+import type { CacheEntry, Schema } from "../src/types/index.js";
 
 const actor = { id: "a", name: "a" };
 
@@ -659,5 +663,319 @@ describe("state projection (.of)", () => {
 
     await a.dispose();
     await b.dispose();
+  });
+});
+
+// The fold frontier is contiguous, and a rebuild does not trust the cache.
+// The fold cache is per-Act while the subscription watermark is shared, so a
+// worker can be handed an event whose predecessors a sibling drained; folding
+// it onto the cached state would corrupt the row. A rebuild replays from the
+// beginning, so it must re-fold rather than re-flush what the cache holds.
+describe("fold across workers", () => {
+  /** The read table every worker upserts into, as a database would be. */
+  const table = new Map<string, { count: number }>();
+
+  /** One "worker": its own Act, and so its own fold cache. */
+  const worker = () => {
+    const counters = projection("counters")
+      .of(Counter)
+      .flush(async (rows) => {
+        for (const r of rows)
+          table.set(r.stream, r.state as unknown as { count: number });
+      })
+      .build();
+    return act().withState(Counter).withProjection(counters).build();
+  };
+
+  const bump = (app: ReturnType<typeof worker>, by: number, stream = "c1") =>
+    app.do("increment", { stream, actor }, { by });
+
+  const drain = async (app: ReturnType<typeof worker>) => {
+    await app.correlate();
+    await app.drain();
+  };
+
+  beforeEach(async () => {
+    await dispose()("EXIT").catch(() => {});
+  });
+
+  afterEach(async () => {
+    table.clear();
+    await dispose()("EXIT").catch(() => {});
+  });
+
+  describe("fold frontier contiguity", () => {
+    it("does not fold onto stale state when a sibling worker drained the gap", async () => {
+      store(new InMemoryStore());
+      await store().seed();
+      const w1 = worker();
+      const w2 = worker();
+
+      await bump(w1, 1);
+      await bump(w1, 2);
+      await drain(w1); // w1's cache: count 3
+      expect(table.get("c1")?.count).toBe(3);
+
+      await bump(w1, 4);
+      await bump(w1, 8);
+      await drain(w2); // w2 takes this window; w1 never sees it
+      expect(table.get("c1")?.count).toBe(15);
+
+      // Back to w1, whose cache still says 3. Before the fix this folded
+      // 16 onto 3 and wrote 19.
+      await bump(w1, 16);
+      await drain(w1);
+
+      const truth = (await w1.load(Counter, "c1")).state.count;
+      expect(truth).toBe(31);
+      expect(table.get("c1")?.count).toBe(31);
+    });
+
+    it("still folds incrementally for a single worker — no reload per event", async () => {
+      store(new InMemoryStore());
+      await store().seed();
+      const only = worker();
+      for (const by of [1, 2, 4, 8, 16]) {
+        await bump(only, by);
+        await drain(only);
+      }
+      expect(table.get("c1")?.count).toBe(31);
+      expect((await only.load(Counter, "c1")).state.count).toBe(31);
+    });
+
+    it("keeps each stream's frontier independent", async () => {
+      store(new InMemoryStore());
+      await store().seed();
+      const w1 = worker();
+      const w2 = worker();
+
+      await bump(w1, 1, "c1");
+      await bump(w1, 5, "c2");
+      await drain(w1);
+
+      // A gap on c1 only; c2 keeps folding from its own cached frontier.
+      await bump(w1, 2, "c1");
+      await drain(w2);
+      await bump(w1, 4, "c1");
+      await bump(w1, 7, "c2");
+      await drain(w1);
+
+      expect(table.get("c1")?.count).toBe(7);
+      expect(table.get("c2")?.count).toBe(12);
+    });
+  });
+
+  describe("rebuild does not trust the fold cache", () => {
+    it("re-derives the row from the store instead of re-flushing the cache", async () => {
+      // Asserting the row value alone would pass whether or not the cache was
+      // cleared, because a warm cache usually holds the right answer. What
+      // makes a rebuild a rebuild is that it goes back to the store, so this
+      // watches for the head load.
+      const raw = new InMemoryStore();
+      let head_loads = 0;
+      let counting = false;
+      const counted = new Proxy(raw, {
+        get(t, p, r) {
+          const v = Reflect.get(t, p, r);
+          if (typeof v !== "function") return v;
+          return (...args: unknown[]) => {
+            const q = args[1] as { stream?: string } | undefined;
+            if (counting && p === "query" && q?.stream === "c1") head_loads++;
+            return (v as (...a: unknown[]) => unknown).apply(t, args);
+          };
+        },
+      });
+      store(counted as never);
+      await store().seed();
+      const w1 = worker();
+
+      await bump(w1, 1);
+      await bump(w1, 2);
+      await drain(w1);
+      expect(table.get("c1")?.count).toBe(3);
+
+      counting = true;
+      await w1.reset(["counters"]);
+      await w1.drain();
+
+      expect(head_loads).toBeGreaterThan(0);
+      expect(table.get("c1")?.count).toBe(3);
+    });
+
+    it("reset clears the cache for every fold projection, not just one", async () => {
+      store(new InMemoryStore());
+      await store().seed();
+      const rows_a = new Map<string, { count: number }>();
+      const rows_b = new Map<string, { count: number }>();
+      const a = projection("counters-a")
+        .of(Counter)
+        .flush(async (rows) => {
+          for (const r of rows) rows_a.set(r.stream, r.state as never);
+        })
+        .build();
+      const b = projection("counters-b")
+        .of(Counter)
+        .flush(async (rows) => {
+          for (const r of rows) rows_b.set(r.stream, r.state as never);
+        })
+        .build();
+      const app = act()
+        .withState(Counter)
+        .withProjection(a)
+        .withProjection(b)
+        .build();
+
+      await bump(app as never, 3);
+      await drain(app as never);
+      expect(rows_a.get("c1")?.count).toBe(3);
+      expect(rows_b.get("c1")?.count).toBe(3);
+
+      rows_a.set("c1", { count: 111 });
+      rows_b.set("c1", { count: 222 });
+      await app.reset(["counters-a", "counters-b"]);
+      await app.drain();
+
+      expect(rows_a.get("c1")?.count).toBe(3);
+      expect(rows_b.get("c1")?.count).toBe(3);
+    });
+  });
+});
+
+// A fold's first sight of a stream takes its state and frontier from one
+// load(), so a commit racing that load can't pair an older state with a
+// newer frontier and leave the row lagging head forever.
+describe("fold first-sight frontier TOCTOU", () => {
+  it("does not skip events when the cache frontier moves during first-sight load", async () => {
+    const table = new Map<string, CacheEntry<{ count: number }>>();
+    const counters = projection("counters")
+      .of(Counter)
+      .flush(async (rows) => {
+        for (const row of rows) table.set(row.stream, { ...row });
+      })
+      .build();
+
+    const store = new InMemoryStore();
+
+    // The cache fires a one-shot hook on the SECOND `get("c1")` — the
+    // fold's separate head-id read on the OLD code (the first `get` is
+    // `load()`'s own internal probe). The hook overshoots the cached
+    // event_id to 2 while leaving the state at count=1: exactly the entry
+    // a racing writer that computed from a stale base leaves behind. On
+    // the fixed code the fold issues no second read, so the hook never
+    // fires and the snapshot's head id (event_id 1) stands.
+    let armed = false;
+    let gets = 0;
+    class RacingCache extends InMemoryCache {
+      override async get<TState extends Schema>(stream: string) {
+        if (armed && stream === "c1") {
+          gets++;
+          if (gets === 2) {
+            armed = false;
+            // Return an event_id that overshoots the count=1 state without
+            // persisting it — only the fold's separate read sees the race;
+            // the shared cache stays truthful for `app.load`/`action`.
+            return {
+              stream: "c1",
+              state: { count: 1 },
+              version: 0,
+              // event_id overshoots the count=1 state to event #2's id
+              // (ids are 0-based: event #1 is id 0, event #2 is id 1).
+              event_id: 1,
+              patches: 1,
+              snaps: 0,
+            } as unknown as CacheEntry<TState>;
+          }
+        }
+        return super.get<TState>(stream);
+      }
+    }
+    const cache = new RacingCache();
+
+    const ctx = await sandbox(
+      act().withState(Counter).withProjection(counters),
+      { store: () => store, cache: () => cache }
+    );
+    try {
+      const app = ctx.app;
+
+      // Phase 1: only event #1 (count=1) is committed. Warm the cache to
+      // its frontier so the fold's first-sight load hits warm.
+      await app.do("increment", { stream: "c1", actor }, { by: 1 });
+      await cache.set("c1", {
+        stream: "c1",
+        state: { count: 1 },
+        version: 0,
+        event_id: 0, // event #1 (0-based ids)
+        patches: 1,
+        snaps: 0,
+      });
+      armed = true;
+      await settle_all(app);
+      armed = false; // the race window closes with phase 1
+
+      // Phase 2: the missed event #2 (by 10) arrives in a later batch.
+      // The old code, having stamped the row's frontier at event_id 2,
+      // skips it (2 is not > 2). The fixed code stamped event_id 1 and
+      // folds it through to head.
+      await app.do("increment", { stream: "c1", actor }, { by: 10 });
+      await settle_all(app);
+
+      const truth = await app.load(Counter, "c1");
+      expect(truth.state).toEqual({ count: 11 });
+      expect(table.get("c1")?.state).toEqual({ count: 11 });
+    } finally {
+      await ctx.dispose();
+    }
+  });
+});
+
+// The fold applies the same PII treatment on its cold first-sight load as
+// on its warm incremental path: both drop the sensitive key.
+describe("fold PII treatment is path-independent", () => {
+  const Secret = state({ Secret: z.object({ seen: z.string().optional() }) })
+    .init(() => ({}))
+    .emits({ Leaked: z.object({ token: sensitive(z.string()) }) })
+    // The reducer copies the sensitive field into projected state — a mistake
+    // the framework guards by handing sinks stripped events, never PII.
+    .patch({ Leaked: ({ data }) => ({ seen: data.token }) })
+    .on({ leak: z.object({ token: z.string() }) })
+    .emit((p) => ["Leaked", p])
+    .build();
+
+  it("cold-loaded and warm-folded rows of an identical history match", async () => {
+    const table = new Map<string, CacheEntry<{ seen?: string }>>();
+    const secrets = projection("secrets")
+      .of(Secret)
+      .flush(async (rows) => {
+        for (const r of rows) table.set(r.stream, { ...r });
+      })
+      .build();
+
+    const ctx = await sandbox(act().withState(Secret).withProjection(secrets));
+    try {
+      const app = ctx.app;
+
+      // "warm": e1 first-sights cold, e2 folds warm (drain between commits).
+      await app.do("leak", { stream: "warm", actor }, { token: "t1" });
+      await settle_all(app);
+      await app.do("leak", { stream: "warm", actor }, { token: "t2" });
+      await settle_all(app);
+
+      // "cold": both events fold via the first-sight load (single drain).
+      await app.do("leak", { stream: "cold", actor }, { token: "t1" });
+      await app.do("leak", { stream: "cold", actor }, { token: "t2" });
+      await settle_all(app);
+
+      const warm = table.get("warm")?.state;
+      const cold = table.get("cold")?.state;
+
+      // Identical histories must project identically regardless of warmth.
+      expect(warm).toEqual(cold);
+      // And the sensitive key is structurally stripped, never `[REDACTED]`.
+      expect(warm).toEqual({});
+      expect(cold).toEqual({});
+    } finally {
+      await ctx.dispose();
+    }
   });
 });
