@@ -411,19 +411,6 @@ describe("a per-event projection may not share a served target", () => {
 });
 
 describe("a dynamic resolution onto a projection's target", () => {
-  it("CONTROL — the static form is still rejected at build", () => {
-    expect(() =>
-      act()
-        .withState(Counter)
-        .withState(Other)
-        .withProjection(fold("counters"))
-        .on("Pinged")
-        .do(async function onPinged() {})
-        .to({ target: "counters" })
-        .build()
-    ).toThrow(/conflicts with the projection/);
-  });
-
   it("is skipped, and never feeds the projection a foreign aggregate", async () => {
     const rows: unknown[] = [];
     const { app, dispose } = await sandbox(

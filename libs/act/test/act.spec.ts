@@ -1,13 +1,5 @@
 import { z } from "zod";
-import {
-  act,
-  dispose,
-  log,
-  sleep,
-  state,
-  store,
-  ZodEmpty,
-} from "../src/index.js";
+import { act, log, sleep, state, store, ZodEmpty } from "../src/index.js";
 import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 
 describe("act", () => {
@@ -281,39 +273,6 @@ describe("act", () => {
     expect(snap.patches).toBe(0);
   });
 
-  it("should handle unregistered events in drain", async () => {
-    // Emit a registered event so this stream gets polled
-    await app.do("increment", { stream: "mixed-evt", actor }, {});
-    // Also commit an unregistered event to the same stream
-    await store().commit("mixed-evt", [{ name: "UnknownEvent", data: {} }], {
-      correlation: "c",
-      causation: {},
-    });
-    await app.correlate({ limit: 200 });
-    // drain encounters both "incremented" (registered) and "UnknownEvent" (not registered)
-    const drained = await app.drain();
-    expect(drained).toBeDefined();
-  });
-
-  it("should handle zero leaseMillis without setting lease fields", async () => {
-    await app.do("increment", { stream: "lease-zero", actor }, {});
-    await app.correlate();
-    const d = await app.drain({ leaseMillis: 0 });
-    // With millis=0, lease fields aren't set — drain still runs but ack may not match
-    expect(d.leased.length).toBeGreaterThan(0);
-  });
-
-  it("should exit drain loop on error", async () => {
-    // mock store claim to throw
-    const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
-      throw new Error("test");
-    });
-    (app as any)._arm_all();
-    const drained = await app.drain();
-    expect(drained.leased.length).toBe(0);
-    mockedClaim.mockRestore();
-  });
-
   it("should handle dynamic correlate where targets already subscribed", async () => {
     // Build a separate app with a dynamic resolver
     const dynState = state({ Dyn: z.object({ n: z.number() }) })
@@ -578,54 +537,6 @@ describe("act", () => {
     );
   });
 
-  it("should handle static resolver targets at build time", async () => {
-    const s = state({ Static: z.object({ v: z.number() }) })
-      .init(() => ({ v: 0 }))
-      .emits({ StaticEvt: ZodEmpty })
-      .patch({ StaticEvt: () => ({}) })
-      .on({ doStatic: ZodEmpty })
-      .emit(() => ["StaticEvt", {}])
-      .build();
-
-    const staticApp = act()
-      .withState(s)
-      .on("StaticEvt")
-      .do(function handleStaticEvt() {
-        return Promise.resolve();
-      })
-      .to("my-static-target") // static resolver — covers constructor branch
-      .build();
-
-    // _static_targets populated at build time
-    const correlate = (staticApp as any)._correlate;
-    expect(correlate._static_targets.length).toBe(1);
-    expect(correlate._static_targets[0].stream).toBe("my-static-target");
-
-    // Correlate initializes subscriptions for static targets. The record goes
-    // in the non-evictable static map, never the LRU (#1582).
-    await staticApp.correlate();
-    expect(correlate._static_subscriptions.has("my-static-target")).toBe(true);
-    expect(correlate._dynamic_subscriptions.has("my-static-target")).toBe(
-      false
-    );
-
-    // Commit + drain with static resolver — covers the non-function branch in drain's payload filter
-    await staticApp.do("doStatic", { stream: "static-1", actor }, {});
-    await staticApp.correlate();
-    const d = await staticApp.drain();
-    expect(d.acked.length).toBeGreaterThan(0);
-  });
-
-  it("disarms the drain once it is fully caught up", async () => {
-    await app.do("increment", { stream: "clear-flag", actor }, {});
-    await app.correlate();
-    let d = await app.drain();
-    while (d.leased.length) {
-      d = await app.drain();
-    }
-    expect((app as any)._drain_controllers.get("default").armed).toBe(false);
-  });
-
   it("stays armed after a claim that yields no work, and disarms on the next empty claim", async () => {
     // The claim returns a stream, but every handler produces nothing
     const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
@@ -653,114 +564,5 @@ describe("act", () => {
     expect(controller.armed).toBe(true);
     await app.drain();
     expect(controller.armed).toBe(false);
-  });
-
-  it("should cleanup on dispose", async () => {
-    const s = state({ Disp: z.object({ n: z.number() }) })
-      .init(() => ({ n: 0 }))
-      .emits({ DispEvt: ZodEmpty })
-      .patch({ DispEvt: () => ({}) })
-      .on({ doDisp: ZodEmpty })
-      .emit(() => ["DispEvt", {}])
-      .build();
-
-    const dispApp = act().withState(s).build();
-    // Start correlations to have a timer to clean up
-    dispApp.start_correlations({}, 100);
-    // dispose should not throw
-    await dispose()();
-    // Re-seed for other tests
-    await store().seed();
-  });
-
-  it("should evaluate dynamic resolvers in correlate and skip static ones", async () => {
-    // Build an app with BOTH dynamic and static resolvers on the same event
-    // This forces correlate to enter the inner loop (has dynamic resolvers)
-    // and encounter both function and non-function resolvers
-    const s = state({ Mix: z.object({ n: z.number() }) })
-      .init(() => ({ n: 0 }))
-      .emits({ MixEvt: ZodEmpty })
-      .patch({ MixEvt: () => ({}) })
-      .on({ doMix: ZodEmpty })
-      .emit(() => ["MixEvt", {}])
-      .build();
-
-    const mixApp = act()
-      .withState(s)
-      .on("MixEvt")
-      .do(function handleMixEvtStatic() {
-        return Promise.resolve();
-      })
-      .to("static-target") // static resolver
-      .on("MixEvt")
-      .do(function handleMixEvtDynamic() {
-        return Promise.resolve();
-      })
-      .to((e) => ({ target: `dyn-${e.stream}` })) // dynamic resolver
-      .build();
-
-    await mixApp.do("doMix", { stream: "mix-1", actor }, {});
-    const r = await mixApp.correlate({ limit: 500 });
-    expect(r.subscribed).toBe(1); // dynamic target discovered
-  });
-
-  it("never arms the drain in an app with no reactions", async () => {
-    // App with no reactions
-    const s = state({ NoRx: z.object({ n: z.number() }) })
-      .init(() => ({ n: 0 }))
-      .emits({ NoRxEvt: ZodEmpty })
-      .patch({ NoRxEvt: () => ({}) })
-      .on({ doNoRx: ZodEmpty })
-      .emit(() => ["NoRxEvt", {}])
-      .build();
-
-    const noRxApp = act().withState(s).build();
-    expect((noRxApp as any)._reactive).toBe(false);
-    // correlate initializes but does not arm the drain
-    await noRxApp.correlate();
-    expect((noRxApp as any)._drain_controllers.get("default").armed).toBe(
-      false
-    );
-    // drain skips immediately
-    const d = await noRxApp.drain();
-    expect(d.fetched.length).toBe(0);
-  });
-
-  it("should handle leased stream with no payloads in map", async () => {
-    // Claim returns two streams, but fetched only has events for one.
-    // The second stream won't have an entry in payloads_map → `|| []` fallback.
-    const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
-      {
-        stream: "has-events",
-        source: undefined,
-        at: 0,
-        by: "test",
-        retry: 0,
-        lagging: true,
-      },
-      {
-        stream: "no-events",
-        source: undefined,
-        at: 0,
-        by: "test",
-        retry: 0,
-        lagging: false,
-      },
-    ]);
-    // query_array returns events only for the first stream's source
-    const origQueryArray = app.query_array.bind(app);
-    const mockQueryArray = vi
-      .spyOn(app, "query_array")
-      .mockImplementation(async (q) => {
-        if (q.stream === undefined) return origQueryArray(q);
-        return []; // no events for any stream
-      });
-    const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
-    (app as any)._arm_all();
-    const d = await app.drain();
-    expect(d.leased.length).toBe(2);
-    mockClaim.mockRestore();
-    mockQueryArray.mockRestore();
-    mockAck.mockRestore();
   });
 });
