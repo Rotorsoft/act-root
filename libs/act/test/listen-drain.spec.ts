@@ -58,7 +58,7 @@ describe("ActOptions.listen and .drain", () => {
       .on("Tick")
       .do(handler)
       .to("tick-log")
-      .build();
+      .build({ autoSettle: false });
     // Give the async _wire_notify a microtask to complete.
     await Promise.resolve();
     await Promise.resolve();
@@ -70,9 +70,12 @@ describe("ActOptions.listen and .drain", () => {
   });
 
   it("listen: false skips the Store.notify subscription", async () => {
-    act().withState(Counter).on("Tick").do(vi.fn()).to("x").build({
-      listen: false,
-    });
+    act()
+      .withState(Counter)
+      .on("Tick")
+      .do(vi.fn())
+      .to("x")
+      .build({ autoSettle: false, listen: false });
     await Promise.resolve();
     await Promise.resolve();
     expect(notifyStore.subscribed).toBe(0);
@@ -85,7 +88,7 @@ describe("ActOptions.listen and .drain", () => {
       .on("Tick")
       .do(handler)
       .to("local-log")
-      .build({ listen: false });
+      .build({ autoSettle: false, listen: false });
     await app.do("tick", { stream: "c2", actor: { id: "u", name: "U" } }, {});
     await app.correlate();
     await app.drain();
@@ -99,7 +102,7 @@ describe("ActOptions.listen and .drain", () => {
       .on("Tick")
       .do(handler)
       .to("noop-log")
-      .build({ drain: false });
+      .build({ autoSettle: false, drain: false });
     await app.do("tick", { stream: "c3", actor: { id: "u", name: "U" } }, {});
     const drainResult = await app.drain();
     expect(drainResult).toEqual({
@@ -123,7 +126,7 @@ describe("ActOptions.listen and .drain", () => {
       .on("Tick")
       .do(handler)
       .to("sidecar-log")
-      .build({ drain: false, listen: true });
+      .build({ autoSettle: false, drain: false, listen: true });
     app.on("notified", notified);
     await Promise.resolve();
     await Promise.resolve();
@@ -146,7 +149,7 @@ describe("ActOptions.listen and .drain", () => {
       .on("Tick")
       .do(handler)
       .to("writer-log")
-      .build({ listen: false, drain: false });
+      .build({ autoSettle: false, listen: false, drain: false });
     await Promise.resolve();
     await Promise.resolve();
     expect(notifyStore.subscribed).toBe(0);

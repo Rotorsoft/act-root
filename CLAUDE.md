@@ -181,7 +181,7 @@ Easy to get subtly wrong. Read the linked doc before editing related code.
 - **Cross-slice event schemas:** two partials declaring the same event must share one Zod schema instance; export it from a module. [state-management § Cross-slice event schemas](docs/docs/concepts/state-management.md#cross-slice-event-schemas--reference-identity)
 - **`_v<n>` event names are load-bearing:** adding `Foo_v2` deprecates `Foo`, and a static `.emit("Foo")` then throws at build. [event-schema-evolution](docs/docs/architecture/event-schema-evolution.md#the-versioning-convention-is-the-deprecation-signal-act-403)
 - **Run vitest from the repo root** (`pnpm test`, `pnpm -F <pkg> test`, `npx vitest run <path>`): from a package directory a spec can pass against stale `dist/`.
-- **Tests:** use `fixture(builder)` (`sandbox` for several Acts), and `await app.correlate(); await app.drain();` rather than `settle()`; a bare `drain()` after a commit finds nothing. [testing](docs/docs/concepts/testing.md)
+- **Tests:** use `fixture(builder)` (`sandbox` for several Acts). To walk the pipeline, build with `autoSettle: false` and call `await app.correlate(); await app.drain();` (a bare `drain()` after a commit finds nothing); otherwise keep the default and wait for the outcome. [testing](docs/docs/concepts/testing.md)
 - **Backoff is a persisted per-stream schedule:** every worker honors it, and a stream blocks after `maxRetries + 1` attempts. [error-handling § Backoff](docs/docs/concepts/error-handling.md#backoff)
 - **Lanes:** one drain controller per lane, run in parallel; every reaction to one target must agree on its lane; re-laning takes a restart. [configuration § Lanes](docs/docs/concepts/configuration.md#lanes)
 

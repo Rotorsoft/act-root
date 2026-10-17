@@ -51,7 +51,7 @@ describe("act", () => {
     .do(function handleAdded() {
       return Promise.resolve();
     })
-    .build();
+    .build({ autoSettle: false });
 
   const actor = { id: "a", name: "a" };
 
@@ -197,7 +197,7 @@ describe("act", () => {
         return Promise.resolve();
       })
       .to((event) => ({ target: `poll-${event.stream}` }))
-      .build();
+      .build({ autoSettle: false });
 
     await errApp.do("doPollErr", { stream: "p1", actor }, {});
 
@@ -291,7 +291,7 @@ describe("act", () => {
         return Promise.resolve();
       })
       .to((event) => ({ target: `dyn-${event.stream}` }))
-      .build();
+      .build({ autoSettle: false });
 
     await dynApp.do("doDyn", { stream: "x", actor }, {});
     // First correlate discovers "dyn-x"
@@ -321,7 +321,7 @@ describe("act", () => {
         return Promise.resolve();
       })
       .to((event) => ({ target: `dyn2-${event.stream}` }))
-      .build();
+      .build({ autoSettle: false });
 
     await dynApp.do("doDyn2", { stream: "y", actor }, {});
 
@@ -416,7 +416,9 @@ describe("act", () => {
     });
 
     it("uses ActOptions.settleDebounceMs as default when settle() is called with no options", async () => {
-      const customApp = act().withState(counter).build({ settleDebounceMs: 5 });
+      const customApp = act()
+        .withState(counter)
+        .build({ autoSettle: false, settleDebounceMs: 5 });
       const settledListener = vi.fn();
       customApp.on("settled", settledListener);
 
@@ -456,30 +458,28 @@ describe("act", () => {
         .mockResolvedValue({ subscribed: 0, last_id: 0 });
       // Drain leases and acks on the first 2 passes, then nothing → loop exits.
       let drainCount = 0;
-      const drainSpy = vi
-        .spyOn(app as any, "_drain_pass")
-        .mockImplementation(() => {
-          drainCount++;
-          const work =
-            drainCount <= 2
-              ? [
-                  {
-                    stream: "x",
-                    source: "x",
-                    at: drainCount,
-                    by: "t",
-                    retry: 0,
-                    lagging: false,
-                  },
-                ]
-              : [];
-          return Promise.resolve({
-            fetched: [],
-            leased: work,
-            acked: work,
-            blocked: [],
-          });
+      const drainSpy = vi.spyOn(app, "drain").mockImplementation(() => {
+        drainCount++;
+        const work =
+          drainCount <= 2
+            ? [
+                {
+                  stream: "x",
+                  source: "x",
+                  at: drainCount,
+                  by: "t",
+                  retry: 0,
+                  lagging: false,
+                },
+              ]
+            : [];
+        return Promise.resolve({
+          fetched: [],
+          leased: work,
+          acked: work,
+          blocked: [],
         });
+      });
 
       app.settle({ debounceMs: 1, maxPasses: 10 });
       await sleep(300);
@@ -541,8 +541,6 @@ describe("act", () => {
   });
 
   it("stays armed after a claim that yields no work, and disarms on the next empty claim", async () => {
-    // Start from a quiet pipeline: finish what earlier tests' commits left.
-    await app.drain();
     // The claim returns a stream, but every handler produces nothing
     const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
       {

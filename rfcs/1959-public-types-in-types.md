@@ -13,10 +13,13 @@ The framework now follows one pattern, by audience. `types/` declares every publ
 
 ## Public surface added
 
-No name is added to or removed from the package root, and no name is removed anywhere. Existing public names also appear on the `@rotorsoft/act/types` subpath:
+Existing public names also appear on the `@rotorsoft/act/types` subpath:
 
 - **Types on `./types`:** `ActOptions`, `ActLifecycleEvents`, `CircuitState`, `CircuitBreakerOptions`, `AutocloseConfig`, `AutoclosePolicy`, `ActBuilder`, `StateBuilder`, `ActionBuilder`, `SliceBuilder`, `Slice`, `ProjectionBuilder`, `Projection`, `Config`, `Package`, `CsvFileOptions`, `ExitCode`, `Scoped`.
-- **Values on `./types`:** `DeferSignal`, `ExitCodes`, `DEFAULT_SETTLE_DEBOUNCE_MS`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`, `DEFAULT_AUTOCLOSE_CYCLE_MINUTES`, `DEFAULT_CLOSE_BATCH_SIZE`, `DEFAULT_CLOSE_YIELD_MS`.
+- **Values on `./types`:** `DeferSignal`, `ExitCodes`, `DEFAULT_SETTLE_DEBOUNCE_MS`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`.
+- **`ActOptions.autoSettle`** (default `true`): a local change that frees reaction work (a commit, `reset()`, `unblock()`, `restore()`) settles it on its own. Tests and tools that walk the pipeline with `correlate()` / `drain()` set it `false`. It replaces the `app.on("committed", () => app.settle())` wiring every app needed; a long `settleDebounceMs` was rejected as the off switch because a timing value pretending to mean "off" is not an interface.
+
+The same release removes the deprecated autoclose knobs (`autocloseCycleMinutes`, `closeBatchSize`, `closeYieldMs`, `closeOnError`), their three `DEFAULT_*` constants and the `start_correlations` callback.
 
 The test-helper types `Sandbox` and `SandboxOptions` are declared in `types/sandbox.ts` but published only through `@rotorsoft/act/test`, as before: `types/index.ts` does not re-export them.
 
@@ -28,4 +31,4 @@ The test-helper types `Sandbox` and `SandboxOptions` are declared in `types/sand
 
 ## Stability / charter impact
 
-Additive only. Every name keeps its root import path, and the moved names also appear on `./types`. The Zod-inferred public types (`AutoclosePolicy`, `AutocloseConfig`, `CircuitBreakerOptions`, `Config`, `Package`) are now written out in `types/`, and each schema ends in `satisfies z.ZodType<…>`, so a schema whose output no longer matches its public type fails to compile. Declaration files move inside `dist/@types`. The package's `exports` map never exposed those paths.
+The layering is additive: every name keeps its root import path, and the moved names also appear on `./types`. The removed deprecations and the new default (`autoSettle: true`) change behavior; the user chose to ship them as a minor, with the release note telling writer-only processes to set `drain: false` and tests that walk the pipeline to set `autoSettle: false`. The Zod-inferred public types (`AutoclosePolicy`, `AutocloseConfig`, `CircuitBreakerOptions`, `Config`, `Package`) are now written out in `types/`, and each schema ends in `satisfies z.ZodType<…>`, so a schema whose output no longer matches its public type fails to compile. Declaration files move inside `dist/@types`. The package's `exports` map never exposed those paths.

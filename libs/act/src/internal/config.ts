@@ -213,6 +213,7 @@ const ActOptionsSchema = z
   .object({
     maxSubscribedStreams: z.number().int().min(1).optional(),
     settleDebounceMs: z.number().int().min(0).optional(),
+    autoSettle: z.boolean().optional(),
   })
   .loose();
 

@@ -118,10 +118,16 @@ export type ActLifecycleEvents<
  *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
  *   Act instance instead of threading the value through every call site.
  *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
+ * @property autoSettle - Settle on its own after a local change that
+ *   frees reaction work: a commit, `reset()`, `unblock()` or `restore()`.
+ *   Set `false` when you walk the pipeline yourself with `correlate()` /
+ *   `drain()` (tests that check its steps, tools); reactions then run only
+ *   when you call `settle()`, `correlate()` or `drain()`. Default: `true`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
   readonly settleDebounceMs?: number;
+  readonly autoSettle?: boolean;
   /**
    * Per-Act ports. When set, this Act runs against the
    * provided store + cache instead of the singletons — threaded via

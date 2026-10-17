@@ -94,7 +94,8 @@ describe("slice", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(ThingSlice).withState(PartB)
+      act().withSlice(ThingSlice).withState(PartB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 3 });
@@ -124,7 +125,8 @@ describe("slice", () => {
     const SliceB = slice().withState(PartB).on("Labeled").do(onLabeled).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(SliceA).withSlice(SliceB)
+      act().withSlice(SliceA).withSlice(SliceB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 1 });
@@ -165,7 +167,8 @@ describe("slice", () => {
     const SliceB = slice().withState(CountB).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(SliceA).withSlice(SliceB)
+      act().withSlice(SliceA).withSlice(SliceB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("add", { stream, actor }, { n: 5 });
@@ -346,7 +349,8 @@ describe("slice", () => {
         .withSlice(CounterSlice)
         .withSlice(LoggerSlice)
         .on("Counted")
-        .do(crossHandler)
+        .do(crossHandler),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("count", { stream, actor }, { n: 1 });
@@ -369,7 +373,9 @@ describe("slice", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const { app, dispose } = await sandbox(act().withState(counter));
+    const { app, dispose } = await sandbox(act().withState(counter), {
+      actOptions: { autoSettle: false },
+    });
     await app.do("increment", { stream, actor }, {});
     const snap = await app.load(counter, stream);
     expect(snap.state.count).toBe(1);
@@ -400,7 +406,8 @@ describe("slice", () => {
     const CounterSlice = slice().withState(Counter).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(CounterSlice).withState(Logger)
+      act().withSlice(CounterSlice).withState(Logger),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("count", { stream: counterStream, actor }, { n: 5 });
@@ -436,7 +443,8 @@ describe("slice", () => {
     const SliceB = slice().withState(PartB).on("Labeled").do(onLabeled).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(SliceA).withSlice(SliceB)
+      act().withSlice(SliceA).withSlice(SliceB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 7 });
@@ -462,7 +470,9 @@ describe("slice", () => {
     expect(s.events.Incremented).toBeDefined();
     expect(s.events.Labeled).toBeDefined();
 
-    const { app, dispose } = await sandbox(act().withSlice(s));
+    const { app, dispose } = await sandbox(act().withSlice(s), {
+      actOptions: { autoSettle: false },
+    });
     await app.do("increment", { stream, actor }, { by: 2 });
     await app.do("setLabel", { stream, actor }, { label: "merged" });
 
@@ -504,7 +514,8 @@ describe("slice", () => {
 
     const ThingSlice = slice().withState(PartA).withProjection(proj).build();
     const { app, dispose } = await sandbox(
-      act().withSlice(ThingSlice).withState(PartB)
+      act().withSlice(ThingSlice).withState(PartB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 7 });
@@ -534,7 +545,9 @@ describe("slice", () => {
       .do(sliceHandler)
       .build();
 
-    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice), {
+      actOptions: { autoSettle: false },
+    });
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
@@ -563,7 +576,9 @@ describe("slice", () => {
       .build();
 
     const ThingSlice = slice().withState(PartA).withProjection(proj).build();
-    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice), {
+      actOptions: { autoSettle: false },
+    });
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
@@ -595,7 +610,9 @@ describe("slice", () => {
       .do(sliceHandler)
       .build();
 
-    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice), {
+      actOptions: { autoSettle: false },
+    });
     const events = app.registry.events as Record<string, any>;
 
     const names = [...events.Incremented.reactions.keys()];
@@ -620,7 +637,8 @@ describe("slice", () => {
     const SliceB = slice().withState(PartB).withProjection(ProjB).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(SliceA).withSlice(SliceB)
+      act().withSlice(SliceA).withSlice(SliceB),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 1 });
@@ -645,7 +663,8 @@ describe("slice", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(PartA).withProjection(StandaloneProj)
+      act().withState(PartA).withProjection(StandaloneProj),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 5 });

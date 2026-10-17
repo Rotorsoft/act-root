@@ -52,7 +52,8 @@ describe("optimization guards", () => {
 
     it("writes one snapshot per 5 commits, none before", async () => {
       const { app, store, dispose } = await sandbox(
-        act().withState(SnappingCounter)
+        act().withState(SnappingCounter),
+        { actOptions: { autoSettle: false } }
       );
       try {
         const stream = "snap-cadence";
@@ -122,7 +123,8 @@ describe("optimization guards", () => {
         .build();
 
       const { app, dispose } = await sandbox(
-        act().withState(Counter).withProjection(BatchProjection)
+        act().withState(Counter).withProjection(BatchProjection),
+        { actOptions: { autoSettle: false } }
       );
       try {
         const stream = "batch-src";
@@ -151,7 +153,8 @@ describe("optimization guards", () => {
   describe("(c) cache 'after: cached.event_id' skips pre-cache rows on load", () => {
     it("a cache-warm load queries with `after` and replays zero rows", async () => {
       const { app, store, cache, dispose } = await sandbox(
-        act().withState(Counter)
+        act().withState(Counter),
+        { actOptions: { autoSettle: false } }
       );
       try {
         const stream = "cache-after";

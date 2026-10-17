@@ -32,7 +32,7 @@ describe("close", () => {
       await Promise.resolve();
     })
     .to("reaction-target")
-    .build();
+    .build({ autoSettle: false });
 
   const actor = { id: "test", name: "Test" };
 
@@ -189,7 +189,10 @@ describe("close", () => {
       .emit("StockSet")
       .build();
 
-    const multiApp = act().withState(Order).withState(Inventory).build();
+    const multiApp = act()
+      .withState(Order)
+      .withState(Inventory)
+      .build({ autoSettle: false });
 
     await multiApp.do(
       "addItem",
@@ -223,7 +226,7 @@ describe("close", () => {
   it("should log error and tombstone restart streams whose events have no owning state", async () => {
     // Use an isolated app with no reactions to bypass the safety-check
     // wildcard issue (covered by task #10) — focus this test on seed loading.
-    const isolatedApp = act().withState(counter).build();
+    const isolatedApp = act().withState(counter).build({ autoSettle: false });
 
     // Commit an event under a name that no registered state owns
     await store().commit(
@@ -409,7 +412,7 @@ describe("close", () => {
         await Promise.resolve();
       })
       .to((e) => ({ target: `proj-${e.stream}`, source: e.stream }))
-      .build();
+      .build({ autoSettle: false });
 
     await srcApp.do("increment", { stream: "src-a", actor }, { by: 1 });
     await srcApp.correlate();
@@ -432,7 +435,7 @@ describe("close", () => {
         await Promise.resolve();
       })
       .to((e) => ({ target: `proj-${e.data.by}`, source: "shared-src" }))
-      .build();
+      .build({ autoSettle: false });
 
     await sharedApp.do("increment", { stream: "shared-src", actor }, { by: 1 });
     await sharedApp.do("increment", { stream: "shared-src", actor }, { by: 2 });
@@ -462,7 +465,7 @@ describe("close", () => {
           ? { target: "a-unrelated", source: "other-src" }
           : { target: "z-lagging", source: "paged-src" }
       )
-      .build();
+      .build({ autoSettle: false });
 
     await pagedApp.do("increment", { stream: "paged-src", actor }, { by: 1 });
     await pagedApp.do("increment", { stream: "paged-src", actor }, { by: 2 });
@@ -497,7 +500,7 @@ describe("close", () => {
         await Promise.resolve();
       })
       .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-      .build();
+      .build({ autoSettle: false });
 
     await stalledApp.do(
       "increment",
@@ -535,7 +538,7 @@ describe("close", () => {
         await Promise.resolve();
       })
       .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-      .build({ drain: false });
+      .build({ autoSettle: false, drain: false });
 
     await writerOnly.do(
       "increment",
@@ -563,7 +566,7 @@ describe("close", () => {
 
   it("should close streams on an app with no registered states", async () => {
     await store().drop();
-    const noStateApp = act().build();
+    const noStateApp = act().build({ autoSettle: false });
 
     await store().commit(
       "raw-stream",
@@ -630,7 +633,7 @@ describe("close restart on a sensitive-bearing state", () => {
   // forget_pii cannot reach — the very thing the build guard on .snap()
   // prevents. A pii-aware state cannot be restarted at all.
   it("refuses the close entirely rather than tombstoning", async () => {
-    const pii_app = act().withState(Person).build();
+    const pii_app = act().withState(Person).build({ autoSettle: false });
     await pii_app.do(
       "register",
       { stream: "p1", actor },
@@ -669,7 +672,7 @@ describe("close restart on a sensitive-bearing state", () => {
   });
 
   it("closes without restart normally", async () => {
-    const pii_app = act().withState(Person).build();
+    const pii_app = act().withState(Person).build({ autoSettle: false });
     await pii_app.do(
       "register",
       { stream: "p2", actor },
@@ -687,7 +690,7 @@ describe("close restart on a sensitive-bearing state", () => {
   });
 
   it("ignores a restart target for a stream with no events", async () => {
-    const pii_app = act().withState(Person).build();
+    const pii_app = act().withState(Person).build({ autoSettle: false });
     // No stream_info entry exists for an empty stream, so the pii check
     // has nothing to inspect — it must not throw.
     const result = await pii_app.close([{ stream: "ghost", restart: true }]);
@@ -720,7 +723,7 @@ describe("close and reaction subscriptions", () => {
         seen.push(`${event.stream}#${event.id}`);
       })
       .to((event) => ({ target: event.stream }))
-      .build();
+      .build({ autoSettle: false });
 
   afterEach(async () => {
     await dispose()();
@@ -787,7 +790,7 @@ describe("close and reaction subscriptions", () => {
       })
       // Target IS the source stream, so it carries events and is closable.
       .to("SS")
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("bump", { stream: "SS", actor: sub_actor }, {});
     await app.correlate();
@@ -823,7 +826,7 @@ describe("overlapping full closes", () => {
     .emit((a) => ["added", { by: a.by }])
     .build();
   const actor = { id: "t", name: "t" };
-  const build = () => act().withState(tally).build();
+  const build = () => act().withState(tally).build({ autoSettle: false });
 
   afterEach(async () => {
     await dispose()();

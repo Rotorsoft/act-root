@@ -32,7 +32,7 @@ describe("tickets", () => {
 
   beforeAll(async () => {
     const ctx = await sandbox(builder, {
-      actOptions: { correlator: tenantCorrelator },
+      actOptions: { correlator: tenantCorrelator, autoSettle: false },
     });
     app = ctx.app;
     cache = ctx.cache;

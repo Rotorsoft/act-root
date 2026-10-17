@@ -10,7 +10,7 @@ How reactions actually fire. Two cooperating subsystems with a shared goal: deli
 - **Correlation** — discovery. Given an event, *which streams* should react to it?
 - **Drain** — delivery. Given streams that need processing, *fetch and run* their reactions.
 
-Both run lazily: nothing happens until a caller invokes `correlate()`, `drain()`, `settle()`, or one of the polling timers. The framework never spins up background workers without being told to.
+Both run on demand. A local change that frees reaction work (a commit, `reset()`, `unblock()`, `restore()`) schedules `settle()` unless the app sets `autoSettle: false`, and so does a notification from another process; otherwise nothing runs until a caller invokes `correlate()`, `drain()`, `settle()`, or a polling timer.
 
 ## The shape of a reaction
 
@@ -176,7 +176,7 @@ When `_armed` is false, `drain()` returns immediately without issuing `claim`. T
 
 The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drain_all` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
 
-The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the cold-start path arm every controller via `Act._armAll`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain on the controller that drains at the lane's cadence independent of the Act-level settle loop — useful for "always-on" lanes that need low commit-to-ack latency without callers explicitly driving `settle()`. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
+The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the cold-start path arm every controller via `Act._armAll`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain on the controller that drains at the lane's cadence independent of the Act-level settle loop — useful for lanes that should drain on their own cadence. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
 
 ## Settle — the catch-up loop
 

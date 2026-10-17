@@ -62,7 +62,7 @@ describe("NonRetryableError (drain integration)", () => {
         maxRetries: 5,
         backoff: { strategy: "fixed", baseMs: 100 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
@@ -89,7 +89,7 @@ describe("NonRetryableError (drain integration)", () => {
         blockOnError: false,
         backoff: { strategy: "fixed" as const, baseMs: 1 },
       })
-      .build();
+      .build({ autoSettle: false });
     const acked: string[] = [];
     const blocked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
@@ -123,7 +123,7 @@ describe("NonRetryableError (drain integration)", () => {
         maxRetries: 2,
         backoff: { strategy: "fixed" as const, baseMs: 1 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s3", actor }, {});
     await app.correlate();
@@ -156,7 +156,7 @@ describe("NonRetryableError (drain integration)", () => {
         maxRetries: 10,
         backoff: { strategy: "exponential", baseMs: 1_000, maxMs: 30_000 },
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s4", actor }, {});
     await app.correlate();
@@ -184,7 +184,7 @@ describe("NonRetryableError (drain integration)", () => {
       .withState(counter)
       .on("ticked")
       .do(handler, { maxRetries: 5 })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s5", actor }, {});
     await app.correlate();
@@ -207,7 +207,7 @@ describe("NonRetryableError (drain integration)", () => {
       .withState(counter)
       .on("ticked")
       .do(handler, { maxRetries: 5 })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s6", actor }, {});
     await app.correlate();
@@ -237,7 +237,7 @@ describe("NonRetryableError (drain integration)", () => {
       .withState(counter)
       .on("ticked")
       .do(async function noop() {}, { maxRetries: 5 })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "s7", actor }, {});
     await app.correlate();
@@ -258,7 +258,7 @@ describe("NonRetryableError (drain integration)", () => {
       .withState(counter)
       .on("ticked")
       .do(handler, { maxRetries: 5 })
-      .build();
+      .build({ autoSettle: false });
 
     // Three streams in the same family all block on a shared bug.
     for (const stream of ["fam-a", "fam-b", "fam-c"]) {
@@ -291,7 +291,7 @@ describe("NonRetryableError (drain integration)", () => {
       .withState(counter)
       .on("ticked")
       .do(handler, { maxRetries: 5 })
-      .build();
+      .build({ autoSettle: false });
 
     // Nothing blocked yet.
     expect((await app.blocked_streams()).length).toBe(0);
@@ -337,7 +337,7 @@ describe("NonRetryableError (drain integration)", () => {
       .withState(counter)
       .on("ticked")
       .do(handler, { maxRetries: 5 })
-      .build();
+      .build({ autoSettle: false });
 
     // Two events on ONE stream, fetched together in one drain cycle.
     await app.do("tick", { stream: "partial-1", actor }, {});
@@ -382,7 +382,7 @@ describe("lifecycle listener containment (drain finalize)", () => {
         if (event.stream.startsWith("poison"))
           throw new NonRetryableError("nope");
       })
-      .build();
+      .build({ autoSettle: false });
 
     const blocked: unknown[] = [];
     const errors: unknown[] = [];
@@ -419,7 +419,7 @@ describe("lifecycle listener containment (drain finalize)", () => {
         if (event.stream.startsWith("poison"))
           throw new NonRetryableError("nope");
       })
-      .build();
+      .build({ autoSettle: false });
 
     const acked: unknown[] = [];
     const errors: unknown[] = [];
@@ -454,7 +454,7 @@ describe("lifecycle listener containment (drain finalize)", () => {
       .do(async function react() {
         throw new NonRetryableError("poison");
       })
-      .build();
+      .build({ autoSettle: false });
 
     const blocked: unknown[] = [];
     app.on("blocked", (b) => blocked.push(b));
@@ -522,7 +522,7 @@ describe("a handler that only ever loses its lease", () => {
         { maxRetries, blockOnError }
       )
       .to(target)
-      .build();
+      .build({ autoSettle: false });
 
     const fast = act()
       .withState(counter)
@@ -534,7 +534,7 @@ describe("a handler that only ever loses its lease", () => {
         { maxRetries, blockOnError }
       )
       .to(target)
-      .build();
+      .build({ autoSettle: false });
 
     return { slow, fast, entered, release, fast_attempts: () => fast_attempts };
   };

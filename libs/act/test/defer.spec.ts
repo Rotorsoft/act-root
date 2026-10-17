@@ -56,7 +56,7 @@ describe("declarative .defer(when)", () => {
       .do(async function cooldown() {
         ran++;
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "d1", actor }, {});
     await app.correlate();
@@ -77,7 +77,7 @@ describe("declarative .defer(when)", () => {
       .do(async function longCooldown() {
         ran++;
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "dh1", actor }, {});
     await app.correlate();
@@ -97,7 +97,7 @@ describe("declarative .defer(when)", () => {
       .do(async function start() {
         ran++;
       })
-      .build();
+      .build({ autoSettle: false });
     const acked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
@@ -123,7 +123,7 @@ describe("declarative .defer(when)", () => {
       .do(async function immediate() {
         ran++;
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "now1", actor }, {});
     await app.correlate();
@@ -142,7 +142,7 @@ describe("declarative .defer(when)", () => {
         ran++;
       })
       .to("counter-deadlines")
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "r1", actor }, {});
     await app.correlate();
@@ -180,7 +180,7 @@ describe("declarative .defer(when)", () => {
       .on("ticked")
       .defer(() => ({}) as never)
       .do(async function fnBad() {})
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "fb1", actor }, {});
     await app.correlate();
@@ -201,7 +201,7 @@ describe("declarative .defer(when)", () => {
       })
       .build();
 
-    const app = act().withSlice(s).build();
+    const app = act().withSlice(s).build({ autoSettle: false });
     await app.do("tick", { stream: "s1", actor }, {});
     await app.correlate();
     const first = await app.drain();
@@ -211,6 +211,34 @@ describe("declarative .defer(when)", () => {
 });
 
 describe("imperative DeferSignal(when)", () => {
+  it("treats a DeferSignal from another copy of the class as a defer", async () => {
+    // The CommonJS build carries one copy of the class per entry point, so a
+    // signal built from "@rotorsoft/act/types" fails `instanceof` here.
+    const foreign = (when: { at: Date }) =>
+      Object.assign(new Error("reaction deferred"), {
+        name: "DeferSignal",
+        when,
+      });
+    let attempts = 0;
+    const until = Date.now() + 80;
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function deadline() {
+        attempts++;
+        if (Date.now() < until) throw foreign({ at: new Date(until) });
+      })
+      .build({ autoSettle: false });
+    const blocked = vi.fn();
+    app.on("blocked", blocked);
+    await app.do("tick", { stream: "cjs1", actor }, {});
+    await app.correlate();
+    const first = await app.drain();
+    expect(first.acked.length).toBe(0); // deferred, not failed
+    await vi.waitFor(() => expect(attempts).toBe(2));
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
   it("{ at: Date } holds until the due-time, then acts", async () => {
     let attempts = 0;
     const until = Date.now() + 120;
@@ -221,7 +249,7 @@ describe("imperative DeferSignal(when)", () => {
         attempts++;
         if (Date.now() < until) throw new DeferSignal({ at: new Date(until) });
       })
-      .build();
+      .build({ autoSettle: false });
     const acked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
@@ -247,7 +275,7 @@ describe("imperative DeferSignal(when)", () => {
         const due = event.created.getTime() + 100;
         if (Date.now() < due) throw new DeferSignal({ at: new Date(due) });
       })
-      .build();
+      .build({ autoSettle: false });
     const acked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
@@ -271,7 +299,7 @@ describe("imperative DeferSignal(when)", () => {
         attempts++;
         throw new DeferSignal({ after: { minutes: 30 } });
       })
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "after1", actor }, {});
     await app.correlate();
@@ -359,7 +387,7 @@ describe("defer outcome (integration)", () => {
             throw new DeferSignal({ at: new Date(Date.now() + 300) });
         })
         .to("reminders")
-        .build({ circuitBreaker: { cooldownMs: 100 } });
+        .build({ autoSettle: false, circuitBreaker: { cooldownMs: 100 } });
       app.on("error", () => {});
       await app.do("tick", { stream: "flaky", actor }, {});
       const s = store();
@@ -386,7 +414,11 @@ describe("defer outcome (integration)", () => {
       if (Date.now() < until) throw new DeferSignal({ at: new Date(until) });
     };
 
-    const app = act().withState(counter).on("ticked").do(deferring).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(deferring)
+      .build({ autoSettle: false });
     const acked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
@@ -427,7 +459,7 @@ describe("defer outcome (integration)", () => {
         ran.push(e.stream);
       })
       .to((e) => ({ target: `remind-${e.stream}` }))
-      .build();
+      .build({ autoSettle: false });
 
     await w1.do("tick", { stream: "w1", actor }, {});
     await w1.do("tick", { stream: "w2", actor }, {});
@@ -461,7 +493,10 @@ describe("defer outcome (integration)", () => {
         ran.push(e.stream);
       })
       .to((e) => ({ target: `remind-${e.stream}` }))
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 120 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 120 },
+      });
     app.on("error", () => {});
     await app.do("tick", { stream: "w1", actor }, {});
     await app.do("tick", { stream: "w2", actor }, {});
@@ -497,7 +532,7 @@ describe("defer outcome (integration)", () => {
           ran.push(e.stream);
         })
         .to((e) => ({ target: `t-${e.stream}` }))
-        .build();
+        .build({ autoSettle: false });
       await app.do("tick", { stream: "b", actor }, {});
       await app.correlate();
       await app.drain(); // b parked until +100
@@ -553,7 +588,11 @@ describe("defer outcome (integration)", () => {
       if (Date.now() < until) throw new DeferSignal({ at: new Date(until) });
     };
 
-    const app = act().withState(counter).on("ticked").do(deferring).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(deferring)
+      .build({ autoSettle: false });
     const acked = new Set<string>();
     app.on("acked", (leases) => {
       for (const l of leases) acked.add(l.stream);
@@ -591,7 +630,11 @@ describe("defer durability", () => {
       throw new CloseSignal();
     };
 
-    const app = act().withState(counter).on("ticked").do(handler).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler)
+      .build({ autoSettle: false });
     const closed: CloseResult[] = [];
     const errors: string[] = [];
     app.on("closed", (r) => closed.push(r));
@@ -631,7 +674,11 @@ describe("defer durability", () => {
     const deferring = async () => {
       throw new DeferSignal({ at: due });
     };
-    const app = act().withState(counter).on("ticked").do(deferring).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(deferring)
+      .build({ autoSettle: false });
 
     const ack_spy = vi.spyOn(store(), "ack");
     const defer_spy = vi.spyOn(store(), "defer");
@@ -666,7 +713,11 @@ describe("defer durability", () => {
     // Cold start: a fresh Act over the same store, new controllers + a new
     // (empty) DeferTimer. init() must re-seed the timer from deferred_at.
     const noop = async () => {};
-    const app = act().withState(counter).on("ticked").do(noop).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(noop)
+      .build({ autoSettle: false });
     await app.correlate();
 
     const controllers = (
@@ -705,7 +756,11 @@ describe("defer durability", () => {
     await store().defer(["zzz-idle"], due);
 
     const noop = async () => {};
-    const app = act().withState(counter).on("ticked").do(noop).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(noop)
+      .build({ autoSettle: false });
     await app.correlate();
 
     const controller = (
@@ -729,7 +784,11 @@ describe("defer durability", () => {
     await store().defer(["idle-agg"], due);
 
     const noop = async () => {};
-    const app = act().withState(counter).on("ticked").do(noop).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(noop)
+      .build({ autoSettle: false });
     await app.correlate();
     // Drive the cold-start drain to the disarmed state: the deferred stream
     // isn't claimable yet, so the controller disarms on the empty claim.
@@ -766,7 +825,7 @@ describe("defer durability", () => {
       .withLane({ name: "slow" })
       .on("ticked")
       .do(noop)
-      .build();
+      .build({ autoSettle: false });
     await app.correlate();
 
     const controllers = (
@@ -801,7 +860,7 @@ describe("defer durability", () => {
       .withLane({ name: "fast" })
       .on("ticked")
       .do(noop)
-      .build({ onlyLanes: ["fast"] });
+      .build({ autoSettle: false, onlyLanes: ["fast"] });
     await app.correlate();
 
     const controllers = (
@@ -835,7 +894,11 @@ describe("defer durability", () => {
     );
 
     const noop = async () => {};
-    const app = act().withState(counter).on("ticked").do(noop).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(noop)
+      .build({ autoSettle: false });
     await app.correlate();
 
     const controllers = (
@@ -859,7 +922,11 @@ describe("defer durability", () => {
     await store().defer(["past-agg"], Date.now() - 1_000);
 
     const noop = async () => {};
-    const app = act().withState(counter).on("ticked").do(noop).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(noop)
+      .build({ autoSettle: false });
     await app.correlate();
 
     const controllers = (
@@ -876,7 +943,11 @@ describe("defer durability", () => {
       attempts++;
       throw new DeferSignal({ at: new Date(Date.now() + 60_000) });
     };
-    const app = act().withState(counter).on("ticked").do(deferring).build();
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(deferring)
+      .build({ autoSettle: false });
     app.on("error", () => {});
 
     vi.spyOn(store(), "ack").mockRejectedValue(new Error("still down"));

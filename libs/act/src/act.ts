@@ -157,6 +157,7 @@ export class Act<
   private readonly _breaker: CircuitBreaker;
   private readonly _listen: boolean;
   private readonly _drain: boolean;
+  private readonly _auto_settle: boolean;
   /** Whether any event has a reaction; nothing arms without one. */
   private readonly _reactive: boolean;
   private readonly _drain_controllers: Map<
@@ -334,6 +335,7 @@ export class Act<
     this._event_to_lanes = classification.event_to_lanes;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
+    this._auto_settle = options.autoSettle !== false;
 
     // Order matters: controllers read the breaker, the audit bag reads the
     // controller set, settle reads the correlate cycle.
@@ -503,7 +505,7 @@ export class Act<
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
         correlate: (q) => this._correlate_scanned(q, true),
-        drain: (o) => this._drain_pass(o),
+        drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
       },
@@ -542,7 +544,7 @@ export class Act<
         // notification would schedule a cycle nothing cancels. Never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
-        this._settle.stop();
+        this._settle.stop(true);
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         await this._await_inflight(options?.graceMs);
@@ -938,20 +940,9 @@ export class Act<
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
     // streamLimit / eventLimit throws ZodError here, not on the first cycle).
     resolveDrainConfig(options);
-    await this._settle.yield_to_caller();
-    return this._drain_pass(options);
-  }
-
-  /** One drain pass, as settle runs it; the caller has validated `options`. */
-  private _drain_pass(options: DrainOptions): Promise<Drain<TEvents>> {
     // Writer-only instances run no reactions.
     if (!this._drain)
-      return Promise.resolve({
-        fetched: [],
-        leased: [],
-        acked: [],
-        blocked: [],
-      });
+      return { fetched: [], leased: [], acked: [], blocked: [] };
     return this._scoped(() => this._drain_all(options));
   }
 
@@ -963,12 +954,13 @@ export class Act<
   }
 
   /**
-   * Settles what a local change armed (a commit, a reset, an unblock), the
-   * way a commit from another process does. A caller that drives the
-   * pipeline with `correlate()` / `drain()` right after cancels the pass.
+   * Settles what a local change armed (a commit, a reset, an unblock, a
+   * restore), the way a commit from another process does, unless the app
+   * walks the pipeline itself (`autoSettle: false`).
    */
   private _settle_armed(armed: boolean): void {
-    if (armed && this._drain) this._settle.schedule({}, true);
+    if (armed && this._drain && this._auto_settle)
+      this._settle.schedule({}, true);
   }
 
   /** Arms only the lanes these events react on; true when any was armed. */
@@ -1047,7 +1039,6 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    await this._settle.yield_to_caller();
     const { subscribed, last_id } = await this._correlate_scanned(query);
     return { subscribed, last_id };
   }
@@ -1280,6 +1271,7 @@ export class Act<
       if (!sink) {
         this._correlate.restart();
         this._arm_all();
+        this._settle_armed(this._reactive);
       }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
     });
@@ -1420,7 +1412,7 @@ export class Act<
       catch_up_correlation: (until) =>
         catch_up_correlation(
           this._correlate,
-          (limit) => this._correlate_scanned({ limit }),
+          (limit) => this.correlate({ limit }),
           until
         ),
       event_to_state: this._event_to_state,
@@ -1482,14 +1474,15 @@ export class Act<
   /**
    * Debounced, non-blocking correlate→drain cycle.
    *
-   * Call this after `app.do()` (or `app.reset()`) to schedule a background
-   * drain. Multiple rapid calls within the debounce window are coalesced
-   * into a single cycle. Runs correlate→drain in a loop until a pass makes
-   * no progress — no new subscriptions, no events read, no streams leased —
-   * then emits
-   * the `"settled"` lifecycle event. This means a single `settle()` call
-   * fully catches up paginated streams (e.g. after `reset()` on a long
-   * projection) without forcing callers to loop.
+   * A local change that frees reaction work (a commit, `reset()`,
+   * `unblock()`, `restore()`) schedules this on its own unless the app
+   * sets `autoSettle: false`. Call it at startup, to run what was pending
+   * before a restart, or with options to replace the scheduled pass.
+   * Multiple rapid calls within the debounce window are coalesced into a
+   * single cycle. Runs correlate→drain in a loop until a pass makes no
+   * progress — no new subscriptions, no events read, no streams leased —
+   * then emits the `"settled"` lifecycle event, so one call fully catches
+   * up paginated streams without forcing callers to loop.
    *
    * @param options - Settle configuration — see {@link SettleOptions} for fields:
    *   `debounceMs` (default 10), `correlate` (default `{ after: -1, limit: 100 }`),
@@ -1497,10 +1490,9 @@ export class Act<
    *   `streamLimit` (default 10), `eventLimit` (default 10),
    *   `leaseMillis` (default 10000).
    *
-   * @example API mutations
+   * @example Startup
    * ```typescript
-   * await app.do("CreateItem", target, input);
-   * app.settle(); // non-blocking, returns immediately
+   * app.settle(); // run what was pending before the restart
    *
    * app.on("settled", (drain) => {
    *   // notify SSE clients, invalidate caches, etc.

@@ -161,7 +161,9 @@ describe("schema-driven date revival", () => {
   });
 
   it("types a folded state by its declaration, warm and cold", async () => {
-    const { app, cache, dispose } = await sandbox(act().withState(Doc));
+    const { app, cache, dispose } = await sandbox(act().withState(Doc), {
+      actOptions: { autoSettle: false },
+    });
     await app.do("stamp", { stream: "d1", actor }, payload);
 
     const warm = await app.load(Doc, "d1");
@@ -191,7 +193,9 @@ describe("schema-driven date revival", () => {
       .snap(() => true)
       .build();
 
-    const { app, cache, dispose } = await sandbox(act().withState(Snapped));
+    const { app, cache, dispose } = await sandbox(act().withState(Snapped), {
+      actOptions: { autoSettle: false },
+    });
     const at = new Date("2026-03-03T00:00:00.000Z");
     await app.do("tick", { stream: "s1", actor }, { at });
     await cache.clear();
@@ -203,7 +207,9 @@ describe("schema-driven date revival", () => {
   });
 
   it("types query and query_array by declaration", async () => {
-    const { app, dispose } = await sandbox(act().withState(Doc));
+    const { app, dispose } = await sandbox(act().withState(Doc), {
+      actOptions: { autoSettle: false },
+    });
     await app.do("stamp", { stream: "d2", actor }, payload);
 
     const [viaArray] = await app.query_array({
@@ -235,7 +241,8 @@ describe("schema-driven date revival", () => {
           seen.born = kind(d.meta.born);
           seen.label = kind(d.label);
         })
-        .to({ target: "reader" })
+        .to({ target: "reader" }),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("stamp", { stream: "d3", actor }, payload);
     await app.correlate();
@@ -264,7 +271,8 @@ describe("schema-driven date revival", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Doc).withProjection(Proj)
+      act().withState(Doc).withProjection(Proj),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("stamp", { stream: "d4", actor }, payload);
     await app.correlate();

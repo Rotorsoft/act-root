@@ -41,7 +41,8 @@ describe("auto-inject reactingTo", () => {
             { val: event.data.val }
           );
         })
-        .to((event) => ({ target: `sink-${event.stream}` }))
+        .to((event) => ({ target: `sink-${event.stream}` })),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("trigger", { stream: "src-1", actor }, { val: 42 });
@@ -108,7 +109,8 @@ describe("auto-inject reactingTo", () => {
             { reactingTo: fakeEvent }
           );
         })
-        .to((event) => ({ target: `sink2-${event.stream}` }))
+        .to((event) => ({ target: `sink2-${event.stream}` })),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("trigger2", { stream: "src2-1", actor }, { val: 99 });
@@ -174,7 +176,8 @@ describe("auto-inject reactingTo", () => {
             { val: event.data.val }
           );
         })
-        .to(() => ({ target: "step3-1" }))
+        .to(() => ({ target: "step3-1" })),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("start", { stream: "step1-1", actor }, { val: 7 });
@@ -234,7 +237,8 @@ describe("auto-inject reactingTo", () => {
             { val: event.data.val }
           );
         })
-        .to(() => ({ target: "sink3-1" }))
+        .to(() => ({ target: "sink3-1" })),
+      { actOptions: { autoSettle: false } }
     );
     captured = app as unknown as typeof captured;
 
@@ -276,7 +280,9 @@ describe("auto-inject reactingTo", () => {
       .emit("AmbientCounted")
       .build();
 
-    const { app, dispose } = await sandbox(act().withState(Counter));
+    const { app, dispose } = await sandbox(act().withState(Counter), {
+      actOptions: { autoSettle: false },
+    });
 
     await app.do("count", { stream: "amb-1", actor }, { n: 1 });
     await app.do("count", { stream: "amb-2", actor }, { n: 1 });
@@ -338,7 +344,8 @@ describe("auto-inject reactingTo", () => {
             )
           );
         })
-        .to(() => ({ target: "sink5" }))
+        .to(() => ({ target: "sink5" })),
+      { actOptions: { autoSettle: false } }
     );
     captured = app as unknown as typeof captured;
 
@@ -402,7 +409,8 @@ describe("auto-inject reactingTo", () => {
             { val: event.data.val }
           );
         })
-        .to(() => ({ target: "sink4" }))
+        .to(() => ({ target: "sink4" })),
+      { actOptions: { autoSettle: false } }
     );
     captured = app as unknown as typeof captured;
 
@@ -484,7 +492,8 @@ describe("auto-inject reactingTo", () => {
           );
           unguarded_ok = true;
         })
-        .to(() => ({ target: "sink6-1" }))
+        .to(() => ({ target: "sink6-1" })),
+      { actOptions: { autoSettle: false } }
     );
     captured = app as unknown as typeof captured;
 
@@ -529,7 +538,8 @@ describe("auto-inject reactingTo", () => {
             captured.do("spend6", { stream: "L6", actor: sys }, {})
           );
         })
-        .to({ target: "t6" })
+        .to({ target: "t6" }),
+      { actOptions: { autoSettle: false } }
     );
     captured = app as unknown as typeof captured;
 
@@ -587,7 +597,8 @@ describe("auto-inject reactingTo", () => {
             stream_exact: true,
           });
         })
-        .to(() => ({ target: "reaction-ctr" }))
+        .to(() => ({ target: "reaction-ctr" })),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("count", { stream: "ctr-1", actor }, { n: 5 });

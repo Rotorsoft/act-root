@@ -125,7 +125,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Counter).withProjection(CounterProjection)
+      act().withState(Counter).withProjection(CounterProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 5 });
@@ -154,7 +155,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(CounterSlice).withProjection(CounterProjection)
+      act().withSlice(CounterSlice).withProjection(CounterProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 3 });
@@ -197,7 +199,8 @@ describe("projection", () => {
       act()
         .withState(Counter)
         // @ts-expect-error - ExternalEvent is not in Counter's events
-        .withProjection(ExternalProjection)
+        .withProjection(ExternalProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     // Runtime still works (constraint is compile-time only)
@@ -275,7 +278,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Counter).withProjection(BatchProjection)
+      act().withState(Counter).withProjection(BatchProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 1 });
@@ -309,7 +313,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Counter).withProjection(TwoHandlers)
+      act().withState(Counter).withProjection(TwoHandlers),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.do("increment", { stream, actor }, { by: 2 });
@@ -336,7 +341,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Counter).withProjection(BatchProjection)
+      act().withState(Counter).withProjection(BatchProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 7 });
@@ -394,7 +400,10 @@ describe("projection", () => {
       .build();
 
     expect(() =>
-      act().withSlice(SliceWithProjB).withProjection(ProjA).build()
+      act()
+        .withSlice(SliceWithProjB)
+        .withProjection(ProjA)
+        .build({ autoSettle: false })
     ).toThrow(/dup-target-2/);
   });
 
@@ -409,7 +418,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Counter).withProjection(BatchProjection)
+      act().withState(Counter).withProjection(BatchProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 1 });
@@ -434,7 +444,8 @@ describe("projection", () => {
 
     const blocked: Array<{ stream: string; error: string }> = [];
     const { app, dispose } = await sandbox(
-      act().withState(Counter).withProjection(BatchProjection)
+      act().withState(Counter).withProjection(BatchProjection),
+      { actOptions: { autoSettle: false } }
     );
     app.on("blocked", (b) => blocked.push(...b));
 
@@ -471,7 +482,9 @@ describe("projection", () => {
       .withProjection(BatchProjection)
       .build();
 
-    const { app, dispose } = await sandbox(act().withSlice(CounterSlice));
+    const { app, dispose } = await sandbox(act().withSlice(CounterSlice), {
+      actOptions: { autoSettle: false },
+    });
 
     await app.do("increment", { stream, actor }, { by: 4 });
     await app.correlate();
@@ -513,7 +526,8 @@ describe("projection", () => {
       .build();
 
     const { app, dispose } = await sandbox(
-      act().withState(Widget).withProjection(MixedProjection)
+      act().withState(Widget).withProjection(MixedProjection),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("increment", { stream, actor }, { by: 1 });

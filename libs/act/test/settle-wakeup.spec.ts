@@ -460,34 +460,54 @@ describe("a local change settles its own reactions", () => {
     await vi.waitFor(() => expect(ran).toEqual(["p1"]));
   });
 
-  it("leaves the work to a caller that correlates and drains right after", async () => {
-    const ran: string[] = [];
-    const app = reacting(ran);
-    await app.do("ping", { stream: "p2", actor }, {});
-    await app.correlate();
-    const drained = await app.drain();
-    expect(drained.acked.map((l) => l.stream)).toEqual(["tracker"]);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(ran).toEqual(["p2"]);
-  });
-
-  it("finishes a running pass before a caller's drain returns", async () => {
+  it("runs nothing on its own with autoSettle: false, until the caller walks the pipeline", async () => {
     const ran: string[] = [];
     const app = act()
       .withState(Ping)
       .on("Pinged")
-      .do(async function slow(event) {
-        await new Promise((r) => setTimeout(r, 100));
+      .do(async function track(event) {
         ran.push(event.stream);
       })
-      .to((event) => ({ target: `slow-${event.stream}` }))
-      .build();
-    await app.do("ping", { stream: "s1", actor }, {});
-    await new Promise((r) => setTimeout(r, 30)); // s1's pass is running
-    await app.do("ping", { stream: "s2", actor }, {});
+      .to("tracker")
+      .build({ autoSettle: false });
+    await app.do("ping", { stream: "p2", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual([]);
     await app.correlate();
-    await app.drain();
-    expect(ran.sort()).toEqual(["s1", "s2"]);
+    const drained = await app.drain();
+    expect(drained.acked.map((l) => l.stream)).toEqual(["tracker"]);
+    expect(ran).toEqual(["p2"]);
+  });
+
+  it("runs no reaction for a commit after shutdown", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.shutdown();
+    await app.do("ping", { stream: "late", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual([]);
+  });
+
+  it("keeps a caller's settle when a commit lands before it runs", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    app.settle({ debounceMs: 80 });
+    await app.do("ping", { stream: "k1", actor }, {});
+    await new Promise((r) => setTimeout(r, 40));
+    expect(ran).toEqual([]); // the commit didn't swap in a 10ms pass
+    await vi.waitFor(() => expect(ran).toEqual(["k1"]));
+  });
+
+  it("doesn't put off a scheduled pass while commits keep landing", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    const until = Date.now() + 150;
+    let i = 0;
+    while (Date.now() < until) {
+      await app.do("ping", { stream: `w${i++}`, actor }, {});
+      await new Promise((r) => setTimeout(r, 3));
+    }
+    expect(ran.length).toBeGreaterThan(0); // some ran while commits kept coming
   });
 
   it("replays a reset target with no settle call", async () => {

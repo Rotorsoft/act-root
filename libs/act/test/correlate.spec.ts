@@ -56,7 +56,7 @@ describe("correlate: the armed flag", () => {
       .on("Ticked")
       .do(async function noop() {})
       .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-      .build();
+      .build({ autoSettle: false });
 
   /** Correlate + drain until a pass makes no progress — what settle loops. */
   const quiesce = async (app: ReturnType<typeof build>) => {
@@ -142,7 +142,7 @@ describe("correlate: the armed flag", () => {
         .on("Ticked")
         .do(async function noop() {})
         .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-        .build();
+        .build({ autoSettle: false });
 
       // One window's worth of inert events, then the reactive one.
       for (let i = 0; i < 5; i++)
@@ -170,7 +170,7 @@ describe("correlate: the armed flag", () => {
           handled.push(e.stream);
         })
         .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-        .build();
+        .build({ autoSettle: false });
 
       // The default settle window is 100, so 100 inert commits fill it.
       for (let i = 0; i < 100; i++)
@@ -196,7 +196,7 @@ describe("correlate: the armed flag", () => {
         .on("Ticked")
         .do(async function noop() {})
         .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-        .build();
+        .build({ autoSettle: false });
 
       for (let i = 0; i < 3; i++)
         await app.do("hush", { stream: `q${i}`, actor }, {});
@@ -219,7 +219,7 @@ describe("correlate: the armed flag", () => {
         .on("Ticked")
         .do(async function noop() {})
         .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-        .build();
+        .build({ autoSettle: false });
 
       for (let i = 0; i < 4; i++)
         await app.do("hush", { stream: `q${i}`, actor }, {});
@@ -248,7 +248,7 @@ describe("correlate: the armed flag", () => {
           seen.push(e.stream);
         })
         .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
-        .build();
+        .build({ autoSettle: false });
 
       await app.do("tick", { stream: "s1", actor }, {});
       await quiesce(app);
@@ -306,8 +306,7 @@ describe("correlate: arming lanes", () => {
           source: e.stream,
           lane: "payments",
         }))
-        // The starvation window is the point, so nothing settles on its own.
-        .build({ settleDebounceMs: 60_000 });
+        .build({ autoSettle: false });
 
       // Consume the correlate cycle's one-time cold-start arm first, so
       // the assertions below exercise the steady state, not init.
@@ -382,7 +381,7 @@ describe("correlate: the checkpoint", () => {
       .on("Ticked")
       .do(async function noop() {})
       .to((e) => ({ target: `dyn-${e.stream}` }))
-      .build();
+      .build({ autoSettle: false });
 
   /** The checkpoint rides subscribe's return (#1484). */
   const peek = async (s: InMemoryStore) =>
@@ -490,7 +489,7 @@ describe("correlate: the checkpoint", () => {
         .on("Ticked")
         .do(async function noop() {})
         .to({ target: "out" })
-        .build();
+        .build({ autoSettle: false });
 
       await app.do("tick", { stream: "src", actor }, {});
       const scan = await app.correlate();
@@ -542,7 +541,7 @@ describe("correlate: cold start", () => {
             fulfilled.push(event.stream);
           })
           .to((e) => ({ target: `fulfill:${e.stream}`, source: e.stream }))
-          .build();
+          .build({ autoSettle: false });
 
       // First process: commit the cold trigger, then advance the static
       // "audit" watermark above it by draining WITHOUT ever correlating.
@@ -659,7 +658,7 @@ describe("correlate: cold start", () => {
           handled++;
         })
         .to("out")
-        .build({ scoped: { store, cache } });
+        .build({ autoSettle: false, scoped: { store, cache } });
 
       await app.do("fire", { stream: "s1", actor }, {});
       let threw = false;
@@ -721,7 +720,7 @@ describe("correlate: cold start", () => {
         .on("Fired")
         .do(async function react() {})
         .to("out")
-        .build({ scoped: { store, cache } });
+        .build({ autoSettle: false, scoped: { store, cache } });
 
       await Promise.all([app.correlate(), app.correlate(), app.correlate()]);
       expect(calls).toBe(1);
@@ -767,7 +766,7 @@ describe("correlate: dynamic lanes", () => {
         .on("ticked")
         .do(async function reactHigh() {})
         .to(() => ({ target: "shared", priority: 7, lane: "slow" }))
-        .build();
+        .build({ autoSettle: false });
 
       await app.do("tick", { stream: "s1", actor }, {});
       await app.correlate();
@@ -811,7 +810,7 @@ describe("correlate: dynamic lanes", () => {
             priority: (e.data as { premium: boolean }).premium ? 5 : 0,
             lane: (e.data as { premium: boolean }).premium ? "slow" : "fast",
           }))
-          .build();
+          .build({ autoSettle: false });
       }
 
       async function sharedState(): Promise<{
@@ -863,7 +862,7 @@ describe("correlate: dynamic lanes", () => {
           .on("ticked")
           .do(async function react() {})
           .to((e) => ({ target: "shared", source: e.stream }))
-          .build();
+          .build({ autoSettle: false });
 
         await app.do("tick", { stream: "a", actor }, { premium: false });
         await app.correlate();
@@ -918,7 +917,7 @@ describe("correlate: dynamic lanes", () => {
             ran?.push("bump");
           })
           .to((e) => ({ target: (e.data as { to: string }).to }))
-          .build({ maxSubscribedStreams, onlyLanes });
+          .build({ autoSettle: false, maxSubscribedStreams, onlyLanes });
       }
 
       async function sharedLane(): Promise<string | undefined> {
@@ -1076,7 +1075,7 @@ describe("correlate: dynamic lanes", () => {
             lane: "fast",
             priority: 10,
           }))
-          .build({ maxSubscribedStreams, onlyLanes });
+          .build({ autoSettle: false, maxSubscribedStreams, onlyLanes });
       }
 
       async function targetLane(): Promise<string | undefined> {
@@ -1179,7 +1178,7 @@ describe("correlate: dynamic lanes", () => {
             .on("churned")
             .do(async function churn() {})
             .to((e) => ({ target: (e.data as { to: string }).to, lane: "a" }))
-            .build({ maxSubscribedStreams });
+            .build({ autoSettle: false, maxSubscribedStreams });
         }
 
         async function conflicts(fn: () => Promise<void>): Promise<number> {
@@ -1246,7 +1245,7 @@ describe("correlate: dynamic lanes", () => {
             .on("loed")
             .do(async function toB() {})
             .to(() => ({ target: "T", lane: "b" }))
-            .build();
+            .build({ autoSettle: false });
           await app.do("hi", { stream: "s1", actor }, {});
           await app.correlate();
 
@@ -1266,7 +1265,7 @@ describe("correlate: dynamic lanes", () => {
             .on("loed")
             .do(async function toB() {})
             .to(() => ({ target: "T", lane: "b" }))
-            .build();
+            .build({ autoSettle: false });
           const logged = await conflicts(async () => {
             await restarted.do("hi", { stream: "s1", actor }, {});
             await restarted.do("lo", { stream: "s1", actor }, {});
@@ -1292,7 +1291,7 @@ describe("correlate: dynamic lanes", () => {
             .on("churned")
             .do(async function churn() {})
             .to((e) => ({ target: (e.data as { to: string }).to, lane: "a" }))
-            .build({ maxSubscribedStreams: 1 });
+            .build({ autoSettle: false, maxSubscribedStreams: 1 });
           await app.do("hi", { stream: "s1", actor }, {});
           await app.correlate();
           await app.do("churn", { stream: "s1", actor }, { to: "d1" });
@@ -1330,7 +1329,10 @@ describe("correlate: the lease", () => {
           await Promise.resolve();
         })
         .to((e) => ({ target: `handled-${e.stream}`, source: e.stream }))
-        .build({ scoped: { store, cache: new InMemoryCache() } });
+        .build({
+          autoSettle: false,
+          scoped: { store, cache: new InMemoryCache() },
+        });
 
     it("stops a second worker with the same registry from scanning", async () => {
       const store = new InMemoryStore();
@@ -1394,7 +1396,10 @@ describe("correlate: the lease", () => {
           await Promise.resolve();
         })
         .to((e) => ({ target: `poked-${e.stream}`, source: e.stream }))
-        .build({ scoped: { store, cache: new InMemoryCache() } });
+        .build({
+          autoSettle: false,
+          scoped: { store, cache: new InMemoryCache() },
+        });
 
       const spy = vi.spyOn(store, "subscribe");
       await one.do("bump", { stream: "s3", actor }, {});
@@ -1478,7 +1483,7 @@ describe("correlate: the work mark", () => {
 
   const disposers: Array<() => Promise<void>> = [];
   const open = async <T>(builder: { build: (o?: any) => T }) => {
-    const ctx = await sandbox(builder);
+    const ctx = await sandbox(builder, { actOptions: { autoSettle: false } });
     disposers.push(ctx.dispose);
     return ctx;
   };

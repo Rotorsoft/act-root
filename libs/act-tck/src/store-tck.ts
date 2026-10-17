@@ -4542,7 +4542,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const cache = new InMemoryCache();
         const app = act()
           .withState(Ticket)
-          .build({ scoped: { store: fresh, cache } });
+          .build({ autoSettle: false, scoped: { store: fresh, cache } });
         const truncated: string[] = [];
         app.on("closed", (r) => truncated.push(...r.truncated.keys()));
         const stream = `ac-${uid()}`;
@@ -4810,7 +4810,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         opts: ScanOptions = {}
       ): Promise<ScanResult> => {
         const cache = new InMemoryCache();
-        const app = act().build({ scoped: { store, cache } });
+        const app = act().build({
+          autoSettle: false,
+          scoped: { store, cache },
+        });
         try {
           return await app.restore(source, opts);
         } finally {
