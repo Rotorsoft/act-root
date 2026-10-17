@@ -169,6 +169,46 @@ describe("settle loop store-error handling", () => {
   });
 });
 
+describe("a failed settle retries on an idle app", () => {
+  // One failed read during settle's correlate leaves the breaker closed
+  // (threshold 5). Nothing else would settle an idle app, so the breaker's
+  // retry has to follow every failure, not only the one that opens it.
+  const run = async (fail: boolean) => {
+    const s = new InMemoryStore();
+    store(s);
+    let ran = 0;
+    const app = act()
+      .withState(Counter)
+      .on("Bumped")
+      .do(async function react() {
+        ran++;
+      })
+      .build({ circuitBreaker: { cooldownMs: 100 } });
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    const real_query = s.query.bind(s);
+    let failing = fail;
+    s.query = ((...args: unknown[]) => {
+      if (failing) {
+        failing = false;
+        return Promise.reject(new StoreError("query"));
+      }
+      return (real_query as (...a: unknown[]) => unknown)(...args);
+    }) as never;
+    try {
+      app.settle({ debounceMs: 0 });
+      await vi.waitFor(() => expect(ran).toBe(1), { timeout: 1000 });
+    } finally {
+      await dispose()();
+    }
+  };
+
+  it("re-drives settle cooldownMs after a store failure, before the breaker opens", () =>
+    run(true));
+
+  it("control — runs the reaction when settle's read doesn't fail", () =>
+    run(false));
+});
+
 describe("breaker scope: a whole-store outage detector", () => {
   // Correlate's scan is the only store read with `with_pii: false`; failing
   // it alone leaves `claim`, `ack` and commits healthy.

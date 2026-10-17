@@ -4949,9 +4949,9 @@ export type CircuitBreakerHooks = {
   /** Invoked on every {@link CircuitBreaker.failed} with the error and state. */
   readonly on_error?: (error: unknown, circuit: CircuitState) => void;
   /**
-   * Invoked once, \`cooldownMs\` after the breaker opens (and again on each
-   * re-open). The orchestrator wires it to re-attempt a drain — so recovery
-   * is automatic even on the default lane, which has no periodic poller.
+   * Invoked once, \`cooldownMs\` after the latest failure, open or not. The
+   * orchestrator wires it to a settle, so recovery is automatic even on the
+   * default lane, which has no periodic poller.
    */
   readonly on_retry?: () => void;
 };
@@ -5004,12 +5004,13 @@ export class CircuitBreaker {
    * if a half-open trial just failed. Returns the resulting state.
    *
    * Callers gate on the state directly — \`state(now) === "open"\` means skip.
-   * On opening, schedules the \`on_retry\` wake so recovery is automatic;
-   * always surfaces the failure via \`on_error\`.
+   * Every failure (re)schedules the \`on_retry\` wake, so one failed pass on
+   * an idle app retries without waiting for the breaker to open; always
+   * surfaces the failure via \`on_error\`.
    */
   failed(now: number, error?: unknown): CircuitState {
     const circuit = this._advance(now);
-    if (circuit === "open") this._schedule_wake();
+    this._schedule_wake();
     this._hooks.on_error?.(error, circuit);
     return circuit;
   }
@@ -8263,13 +8264,13 @@ export class DrainController<
    * Local wake at the earliest parked (backoff or defer) visit, or at the
    * lease expiry after a failed pass (the {@link RETRY} key); the schedule
    * itself is persisted. On an idle app nothing else would drain it. It
-   * drains until a pass leases nothing, and an entry stays until handled or
-   * until a later pass claims nothing.
+   * drains until a pass leases nothing or the controller stops, and an entry
+   * stays until handled or until a later pass claims nothing.
    */
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
     void this._deps.run_scoped(async () => {
-      while ((await this.drain()).leased.length > 0);
+      while (!this._stopped && (await this.drain()).leased.length > 0);
     });
   });
   private _worker: ReturnType<typeof setTimeout> | undefined;

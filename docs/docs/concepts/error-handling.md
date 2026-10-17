@@ -155,10 +155,10 @@ Adapters throw `StoreError` from `claim` / `ack` / `block` / `subscribe` (and th
 The drain, settle, and autoclose loops all hit the store. When it goes down, every attempt throws a `StoreError`. Rather than hammer a dead database, each `Act` owns a **circuit breaker** shared by those loops:
 
 - **closed** → normal; consecutive failures are counted.
-- **open** → after `failureThreshold` consecutive failures, any drain/settle/autoclose attempt *skips* the store while open, and the breaker schedules a **retry** `cooldownMs` out.
-- **half-open** → the scheduled retry re-attempts a drain; a pass closes the breaker, a failure re-opens it and reschedules the retry.
+- **open** → after `failureThreshold` consecutive failures, any drain/settle/autoclose attempt *skips* the store while open.
+- **half-open** → once `cooldownMs` has passed, the next attempt is a trial; a pass closes the breaker, a failure re-opens it.
 
-Because the breaker schedules its own retry, recovery is **automatic** — you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; once the cooldown elapses the breaker re-trials it and closes as soon as the store is healthy again. (A thrown `StoreError` also keeps the drain controller armed, so the retry isn't mistaken for "caught up", and the drain retries after `cooldownMs` on its own even before the breaker opens.)
+After **every** store failure, open or not, the breaker schedules one **retry** (a settle) `cooldownMs` later, so recovery is **automatic**: you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; the retry re-trials it and the breaker closes as soon as the store is healthy again. A failed drain pass also keeps its controller armed and retries on its own, never before the leases it took expire, since only then can another pass claim those streams.
 
 If the store stays down, the breaker keeps probing — **one attempt per `cooldownMs`, indefinitely** (always exactly one pending timer, `unref()`'d so it never blocks process exit). It never gives up, so it recovers whenever the store returns; the trade-off is that each failed probe re-emits the `error` event (an outage heartbeat — raise `cooldownMs` or dedupe in your handler if that's too chatty). The timer is cleared on the first successful probe and on `dispose()`. Tune it via [`ActOptions.circuitBreaker`](./configuration#circuit-breaker) (defaults: threshold 5, cooldown 30s).
 

@@ -85,6 +85,18 @@ describe("CircuitBreaker", () => {
     expect(retries).toBe(1);
   });
 
+  it("fires the on_retry hook cooldownMs after a failure that leaves it closed", () => {
+    vi.useFakeTimers();
+    let retries = 0;
+    const cb = new CircuitBreaker(
+      { failureThreshold: 5, cooldownMs: 1000 },
+      { on_retry: () => retries++ }
+    );
+    expect(cb.failed(0)).toBe("closed");
+    vi.advanceTimersByTime(1000);
+    expect(retries).toBe(1);
+  });
+
   it("cancels the pending retry when it closes or stops", () => {
     vi.useFakeTimers();
     let retries = 0;

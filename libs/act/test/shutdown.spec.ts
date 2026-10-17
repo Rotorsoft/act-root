@@ -5,7 +5,14 @@
  * teardown keeps its stream leased and lands its store calls on a disposed
  * store.
  */
-import { act, dispose, InMemoryStore, state, store } from "@rotorsoft/act";
+import {
+  act,
+  DeferSignal,
+  dispose,
+  InMemoryStore,
+  state,
+  store,
+} from "@rotorsoft/act";
 import type {
   Store,
   StoreNotification,
@@ -471,4 +478,44 @@ describe("a notification during shutdown cannot arm a new cycle", () => {
     expect(await scenario(false)).toEqual([]);
     expect(await scenario(true)).toEqual([]);
   }, 20_000);
+});
+
+describe("the defer wake stops draining at shutdown", () => {
+  // Three streams come due together on a lane that claims one per pass, so
+  // the wake needs three passes. Shutdown waits for the pass in flight; the
+  // wake must not start another after it.
+  const scenario = async (streamLimit: number) => {
+    store(new InMemoryStore());
+    const due = new Date(Date.now() + 100);
+    const after_shutdown: string[] = [];
+    let down = false;
+    const app = act()
+      .withState(Ticker)
+      .withLane({ name: "one", streamLimit })
+      .on("Ticked")
+      .do(async function remind(event) {
+        if (Date.now() < due.getTime()) throw new DeferSignal({ at: due });
+        await pause(60);
+        if (down) after_shutdown.push(event.stream);
+      })
+      .to((event) => ({ target: `r-${event.stream}`, lane: "one" }))
+      .build();
+    for (const s of ["x1", "x2", "x3"])
+      await app.do("tick", { stream: s, actor }, {});
+    await app.correlate();
+    await app.drain({ streamLimit: 10 });
+    await pause(130); // the wake fired and its first pass is running
+    await app.shutdown();
+    down = true;
+    await pause(250);
+    return after_shutdown;
+  };
+
+  it("runs no handler after shutdown resolves", async () => {
+    expect(await scenario(1)).toEqual([]);
+  });
+
+  it("control — a wake that needs one pass also runs none", async () => {
+    expect(await scenario(10)).toEqual([]);
+  });
 });

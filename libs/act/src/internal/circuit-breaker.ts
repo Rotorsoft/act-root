@@ -35,9 +35,9 @@ export type CircuitBreakerHooks = {
   /** Invoked on every {@link CircuitBreaker.failed} with the error and state. */
   readonly on_error?: (error: unknown, circuit: CircuitState) => void;
   /**
-   * Invoked once, `cooldownMs` after the breaker opens (and again on each
-   * re-open). The orchestrator wires it to re-attempt a drain — so recovery
-   * is automatic even on the default lane, which has no periodic poller.
+   * Invoked once, `cooldownMs` after the latest failure, open or not. The
+   * orchestrator wires it to a settle, so recovery is automatic even on the
+   * default lane, which has no periodic poller.
    */
   readonly on_retry?: () => void;
 };
@@ -90,12 +90,13 @@ export class CircuitBreaker {
    * if a half-open trial just failed. Returns the resulting state.
    *
    * Callers gate on the state directly — `state(now) === "open"` means skip.
-   * On opening, schedules the `on_retry` wake so recovery is automatic;
-   * always surfaces the failure via `on_error`.
+   * Every failure (re)schedules the `on_retry` wake, so one failed pass on
+   * an idle app retries without waiting for the breaker to open; always
+   * surfaces the failure via `on_error`.
    */
   failed(now: number, error?: unknown): CircuitState {
     const circuit = this._advance(now);
-    if (circuit === "open") this._schedule_wake();
+    this._schedule_wake();
     this._hooks.on_error?.(error, circuit);
     return circuit;
   }
