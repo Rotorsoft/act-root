@@ -146,7 +146,7 @@ Separate leases do not make two applications over one store supported. They stil
                               emit "acked" / "blocked" lifecycle events
                                              │
                                              ▼
-                              disarm if no acks / blocks / errors this cycle
+                              disarm only if claim returned nothing
 ```
 
 ### The dual-frontier split
@@ -168,7 +168,7 @@ A naive drain would query the store on every call. For apps where most actions d
 - `do()` sets `_armed = true` if any committed event is in `reactiveEvents`
 - `reset()` sets `_armed = true` if there are any reactive events
 - `correlate.init()` sets `_armed = true` on cold start (might have historical reactive events to process)
-- `drain()` clears `_armed` in two cases: `claim()` returned no leases (fully caught up), or the cycle finished with no acks, no blocks, no errors
+- `drain()` clears `_armed` only when `claim()` returned no leases. A pass that leased streams is never idle, even if every one of them deferred, backed off or failed: more marked streams may be waiting behind the claim's budget. A pass whose store call fails stays armed and retries after the breaker's `cooldownMs` (never before its leases expire), so an idle app recovers without waiting for the breaker to open
 
 When `_armed` is false, `drain()` returns immediately without issuing `claim`. Three round trips saved per call (`claim`, `query`, `ack`). Cold start: armed by `correlate.init()` so historical events are picked up on first drain.
 

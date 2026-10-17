@@ -494,26 +494,27 @@ describe("act", () => {
       const correlateSpy = vi
         .spyOn(app, "correlate")
         .mockResolvedValue({ subscribed: 0, last_id: 0 });
-      // Drain reports work on first 2 passes, then nothing → loop exits.
+      // Drain leases and acks on the first 2 passes, then nothing → loop exits.
       let drainCount = 0;
       const drainSpy = vi.spyOn(app, "drain").mockImplementation(() => {
         drainCount++;
+        const work =
+          drainCount <= 2
+            ? [
+                {
+                  stream: "x",
+                  source: "x",
+                  at: drainCount,
+                  by: "t",
+                  retry: 0,
+                  lagging: false,
+                },
+              ]
+            : [];
         return Promise.resolve({
           fetched: [],
-          leased: [],
-          acked:
-            drainCount <= 2
-              ? [
-                  {
-                    stream: "x",
-                    source: "x",
-                    at: drainCount,
-                    by: "t",
-                    retry: 0,
-                    lagging: false,
-                  },
-                ]
-              : [],
+          leased: work,
+          acked: work,
           blocked: [],
         });
       });
@@ -619,13 +620,13 @@ describe("act", () => {
     await app.do("increment", { stream: "clear-flag", actor }, {});
     await app.correlate();
     let d = await app.drain();
-    while (d.acked.length || d.blocked.length) {
+    while (d.leased.length) {
       d = await app.drain();
     }
     expect((app as any)._drain_controllers.get("default").armed).toBe(false);
   });
 
-  it("disarms the drain when a claimed stream yields no work", async () => {
+  it("stays armed after a claim that yields no work, and disarms on the next empty claim", async () => {
     // The claim returns a stream, but every handler produces nothing
     const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
       {
@@ -642,12 +643,16 @@ describe("act", () => {
     // Arm it manually
     (app as any)._arm_all();
     const d = await app.drain();
-    expect(d.acked.length).toBe(0);
-    expect(d.blocked.length).toBe(0);
-    expect((app as any)._drain_controllers.get("default").armed).toBe(false);
     mockClaim.mockRestore();
     mockQuery.mockRestore();
     mockAck.mockRestore();
+    expect(d.acked.length).toBe(0);
+    expect(d.blocked.length).toBe(0);
+    // A pass that leased something isn't idle, however little it did.
+    const controller = (app as any)._drain_controllers.get("default");
+    expect(controller.armed).toBe(true);
+    await app.drain();
+    expect(controller.armed).toBe(false);
   });
 
   it("should cleanup on dispose", async () => {

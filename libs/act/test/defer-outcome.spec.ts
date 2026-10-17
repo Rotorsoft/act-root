@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  dispose,
+  StoreError,
+  sleep,
+  state,
+  store,
+  ZodEmpty,
+} from "../src/index.js";
 import { DeferSignal } from "../src/internal/defer-signal.js";
 
 /**
  * End-to-end coverage of the `defer` outcome (#1090): a reaction handler
  * throws {@link DeferSignal}, the drain holds the triggering event pending
- * (no ack, no retry bump), persists the due-time via `Store.defer` so
+ * (no ack, no retry bump), persists the due-time with the cycle's `ack` so
  * `claim` skips the stream, and re-delivers once the due-time passes.
  */
 describe("defer outcome (integration)", () => {
@@ -56,6 +64,74 @@ describe("defer outcome (integration)", () => {
       await sleep(400);
       expect(ran.n).toBe(1);
     });
+
+    // A pass whose claimed streams all deferred still has work: more streams
+    // were marked than one claim takes (streamLimit 10).
+    const burst = async (defer_first: boolean) => {
+      const tried = new Set<string>();
+      const ran = new Set<string>();
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(async function remindLater(event) {
+          if (defer_first && !tried.has(event.stream)) {
+            tried.add(event.stream);
+            throw new DeferSignal({ at: new Date(Date.now() + 200) });
+          }
+          ran.add(event.stream);
+        })
+        .to((e) => ({ target: `r-${e.stream}`, source: e.stream }))
+        .build();
+      app.on("committed", () => app.settle());
+      await Promise.all(
+        Array.from({ length: 12 }, (_, i) =>
+          app.do("tick", { stream: `b${i}`, actor }, {})
+        )
+      );
+      await vi.waitFor(() => expect(ran.size).toBe(12), { timeout: 3000 });
+    };
+
+    it("runs every stream of a burst whose first pass only deferred", () =>
+      burst(true));
+
+    it("control — runs every stream of a burst that never defers", () =>
+      burst(false));
+
+    // A failed finalize persisted nothing, so the reaction redelivers; the
+    // drain retries after the breaker's cooldown without waiting for it to
+    // open (threshold 5).
+    const failed_finalize = async (fail: boolean) => {
+      let runs = 0;
+      const app = act()
+        .withState(counter)
+        .on("ticked")
+        .do(async function remindLater() {
+          runs++;
+          if (runs === 1)
+            throw new DeferSignal({ at: new Date(Date.now() + 300) });
+        })
+        .to("reminders")
+        .build({ circuitBreaker: { cooldownMs: 100 } });
+      app.on("error", () => {});
+      await app.do("tick", { stream: "flaky", actor }, {});
+      const s = store();
+      const ack = s.ack.bind(s);
+      let once = fail;
+      vi.spyOn(s, "ack").mockImplementation((leases) => {
+        if (!once) return ack(leases);
+        once = false;
+        return Promise.reject(new StoreError("ack"));
+      });
+      await app.correlate();
+      await app.drain({ leaseMillis: 200 });
+      await vi.waitFor(() => expect(runs).toBe(2), { timeout: 1500 });
+    };
+
+    it("re-fires after the finalize that would persist its schedule fails", () =>
+      failed_finalize(true));
+
+    it("control — re-fires when the finalize succeeds", () =>
+      failed_finalize(false));
   });
 
   it("holds pending until the due-time, then redelivers and acks", async () => {

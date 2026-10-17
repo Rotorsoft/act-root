@@ -399,6 +399,9 @@ export type DrainControllerDeps<
   };
 };
 
+/** Wake key for the controller's own retry; no stream is named "". */
+const RETRY = "";
+
 export class DrainController<
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -408,13 +411,17 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Local wake at the earliest parked (backoff or defer) visit; the schedule
-   * itself is persisted. On an idle app nothing else would drain it. A due
-   * entry stays until handled or until a later pass claims nothing.
+   * Local wake at the earliest parked (backoff or defer) visit, or at the
+   * lease expiry after a failed pass (the {@link RETRY} key); the schedule
+   * itself is persisted. On an idle app nothing else would drain it. It
+   * drains until a pass leases nothing, and an entry stays until handled or
+   * until a later pass claims nothing.
    */
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
-    void this._deps.run_scoped(() => this.drain());
+    void this._deps.run_scoped(async () => {
+      while ((await this.drain()).leased.length > 0);
+    });
   });
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private readonly _misrouted = new Set<string>();
@@ -545,13 +552,15 @@ export class DrainController<
       // After `on_close`, so a failed close never counts as a store success.
       this._deps.breaker.passed();
 
-      // Errors keep the flag set so retries flow through the next drain.
-      const has_errors = handled.some(({ error }) => error);
-      if (!acked.length && !blocked.length && !has_errors) this._armed = false;
-
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      // A store op threw: stay armed, retry after the cooldown.
+      // A store op threw: stay armed and retry after the breaker's cooldown,
+      // never before this pass's leases expire, so an idle app retries
+      // without waiting for the breaker to open.
+      this._defer.set(
+        RETRY,
+        Date.now() + Math.max(leaseMillis, this._deps.breaker.cooldown_ms)
+      );
       this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
