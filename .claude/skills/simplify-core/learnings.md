@@ -52,6 +52,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Distrust a guard that duplicates a condition already expressed downstream; it is usually narrower than the real rule. (#1445)
 - Idle means nothing left to claim, not nothing succeeded. A pass whose claims all deferred or failed disarmed the drain and ended settle, so streams marked but never claimed waited for the next commit. (2026-10-15 probe: 5 of 12 reactions ran)
 - A window that one-based ids happened to paper over should be removed, not propagated. (#1446)
+- A loop added to a background path checks the stop flag on every turn: shutdown waits for the pass in flight, not the loop around it. (#1928's wake loop ran two handlers after `shutdown()` resolved, 2026-10-17)
+- Several loops that feed one failure counter need the same recovery: #1928 made a failed drain pass retry and left a failed settle pass waiting for the breaker to open. Fix the class, then probe each loop.
 
 ## Contracts and tests
 
@@ -72,6 +74,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Type quality is judged at the weakest boundary; prefer generics with defaults, and the widest true type over a cast. (#1185)
 - Making the test seam the API can be the right call. (#402: `act -q`)
 - Benchmark on real adapters; InMemory understates every win. (#102)
+- A performance mechanism serves a bench, not a contract row; "no row needs it" is no reason to remove it. Measure on a real adapter first. (#1923, closed)
 
 ## Hunting and fixing
 

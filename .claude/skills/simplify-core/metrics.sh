@@ -31,9 +31,7 @@ echo "| ticket refs in source / in test names | $tickets / $ticket_tests |"
 echo "| core files touching 5+ features | $coupled |"
 echo "| files over 300 lines / over 300 code lines | $over300 / $over300code |"
 echo "| runtime exports (@rotorsoft/act) | $exports |"
-echo "| IAct methods / Act class public methods | $iact / $act_public |"
-echo "| Store port methods | $store |"
-echo "| ActOptions fields | $act_options |"
+echo "| surface guard: IAct / Act methods / Store methods / ActOptions | $iact / $act_public / $store / $act_options |"
 
 # Beyond the core: tests, packages, infra, docs.
 specs=$(git ls-files '*.spec.ts' | wc -l | tr -d ' ')
