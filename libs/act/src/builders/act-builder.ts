@@ -5,21 +5,23 @@
  * Fluent builder for composing event-sourced applications.
  */
 import { Act, type ActOptions } from "../act.js";
+import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
+import { resolveActConfig, resolveLaneConfig } from "../internal/config.js";
 import {
   bare_patch,
+  type PatchFn,
+  validating_patch,
+} from "../internal/event-sourcing.js";
+import {
   current_version_of,
   deprecated_event_names,
-  type EventGate,
+} from "../internal/event-versions.js";
+import {
   FOLD_RESET,
-  IDENTITY_GATE,
   make_fold_handler,
-  type PatchFn,
   type ResettableBatchHandler,
-  resolveActConfig,
-  resolveLaneConfig,
-  synthesize_autoclose_reactions,
-  validating_patch,
-} from "../internal/index.js";
+} from "../internal/projection-fold.js";
+import { type EventGate, IDENTITY_GATE } from "../internal/sensitive.js";
 import { type DEFAULT_LANE, log } from "../ports.js";
 import { current_autoclose_window } from "../scoped.js";
 import type {

@@ -9,50 +9,61 @@ import {
   build_handle_batch,
 } from "./builders/reaction-builder.js";
 import { register_weak_disposer } from "./disposers.js";
+import { type AuditDeps, audit } from "./internal/audit.js";
 import {
-  type AuditDeps,
-  audit,
-  bare_patch,
-  build_drain,
-  build_es,
   CircuitBreaker,
-  type CircuitBreakerOptions,
   type CircuitState,
+} from "./internal/circuit-breaker.js";
+import {
   CloseLock,
-  CorrelateCycle,
   catch_up_correlation,
-  close_correlation,
+  run_close_cycle,
+} from "./internal/close-cycle.js";
+import {
+  type CircuitBreakerOptions,
   DEFAULT_LEASE_MILLIS,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
-  DrainController,
-  type DrainOps,
-  default_correlator,
-  type EsOps,
-  FOLD_RESET,
-  type Handle,
-  type HandleBatch,
   MAX_SHUTDOWN_GRACE_MS,
-  type PatchFn,
-  type ResettableBatchHandler,
   resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   resolveDrainConfig,
   resolveSettleConfig,
   resolveShutdownConfig,
-  run_close_cycle,
-  SettleLoop,
+} from "./internal/config.js";
+import { CorrelateCycle } from "./internal/correlate-cycle.js";
+import {
+  close_correlation,
+  default_correlator,
+} from "./internal/correlator.js";
+import type { DrainOps } from "./internal/drain.js";
+import {
+  DrainController,
+  type Handle,
+  type HandleBatch,
+} from "./internal/drain-cycle.js";
+import {
+  bare_patch,
+  type EsOps,
+  type PatchFn,
   scan,
-  walk_streams,
-} from "./internal/index.js";
+} from "./internal/event-sourcing.js";
+import {
+  FOLD_RESET,
+  type ResettableBatchHandler,
+} from "./internal/projection-fold.js";
+import { SettleLoop } from "./internal/settle.js";
+import { build_drain, build_es } from "./internal/tracing.js";
+import { walk_streams } from "./internal/walk-streams.js";
 import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
 } from "./scoped.js";
 
+export type { CircuitState } from "./internal/circuit-breaker.js";
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
-export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
+export type { CircuitBreakerOptions } from "./internal/config.js";
 
 import { cache, default_scope, log, type Scoped, store } from "./ports.js";
 import { StoreError } from "./types/errors.js";
@@ -96,6 +107,7 @@ import type {
   Target,
 } from "./types/index.js";
 
+export type { AutoclosePolicy } from "./internal/autoclose-policy.js";
 // Re-export the autoclose config surface so operators can
 // `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"`. The implementation lives in
@@ -103,14 +115,13 @@ import type {
 // to keep this orchestrator file focused on the `Act` class.
 export {
   type AutocloseConfig,
-  type AutoclosePolicy,
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   DEFAULT_MAX_SUBSCRIBED_STREAMS,
   DEFAULT_SETTLE_DEBOUNCE_MS,
   resolveAutocloseConfig,
-} from "./internal/index.js";
+} from "./internal/config.js";
 
 /**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.

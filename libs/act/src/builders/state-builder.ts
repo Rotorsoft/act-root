@@ -10,8 +10,8 @@ import {
   compile_autoclose_policy,
   policy_keep_days,
   policy_min_after_days,
-  resolveActionConfig,
-} from "../internal/index.js";
+} from "../internal/autoclose-policy.js";
+import { resolveActionConfig } from "../internal/config.js";
 import type {
   ActionHandler,
   ActionOptions,

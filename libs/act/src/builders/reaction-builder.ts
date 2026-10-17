@@ -16,14 +16,14 @@
  * @internal
  */
 
+import { CloseSignal } from "../internal/close-signal.js";
+import { resolve_defer_at } from "../internal/defer-config.js";
+import { DeferSignal } from "../internal/defer-signal.js";
 import {
-  CloseSignal,
-  DeferSignal,
   finalize,
   type Handle,
   type HandleBatch,
-  resolve_defer_at,
-} from "../internal/index.js";
+} from "../internal/drain-cycle.js";
 
 import type { ReactionScope } from "../scoped.js";
 import type {

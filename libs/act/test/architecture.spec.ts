@@ -18,8 +18,7 @@ import { join } from "node:path";
  *   reach for ambient state.
  * - PII is one module's business. `internal/sensitive.ts` owns the marker and
  *   the transforms; `builders/event-builder.ts` is the only place that
- *   composes them. Nothing else imports a `pii_*` helper, and the internal
- *   barrel does not re-export one.
+ *   composes them. Nothing else imports a `pii_*` helper.
  * - `scoped.ts` owns every `AsyncLocalStorage` and every operation on one.
  * - Ambient mechanisms are not public API.
  */
@@ -82,16 +81,6 @@ describe("architecture: internal/ is stateless", () => {
       )
       .map(({ name }) => name);
     expect(offenders).toEqual([]);
-  });
-
-  it("re-exports nothing from outside internal/", () => {
-    // The barrel reaching out to a root module is the same evasion wearing
-    // a different hat — it made `internal/index.ts` a door into root state.
-    const barrel = code_of(readFileSync(join(INTERNAL, "index.ts"), "utf8"));
-    const escapes = [...barrel.matchAll(/from "(\.\.\/[^"]+)"/g)].map(
-      (m) => m[1]
-    );
-    expect(escapes).toEqual([]);
   });
 });
 
@@ -159,13 +148,6 @@ describe("architecture: PII stays inside the modules that own it", () => {
       )
       .map(({ name }) => name);
     expect(offenders).toEqual([]);
-  });
-
-  it("is not re-exported through the internal barrel", () => {
-    // Deep-importing `internal/sensitive.js` is the documented exception, so
-    // the barrel carrying `pii_*` only widens the surface that can reach it.
-    const barrel = code_of(readFileSync(join(INTERNAL, "index.ts"), "utf8"));
-    expect(barrel).not.toMatch(/\bpii_(split|gate|strip|fields)\b/);
   });
 
   it("publishes only what another package genuinely needs", () => {

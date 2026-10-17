@@ -32,7 +32,7 @@
  */
 
 import { z } from "zod";
-import { date_reviver_schema } from "../internal/index.js";
+import { date_reviver_schema } from "../internal/date-reviver.js";
 import {
   type EventGate,
   IDENTITY_GATE,

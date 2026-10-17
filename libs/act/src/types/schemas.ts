@@ -1,8 +1,4 @@
 import { type ZodObject, type ZodRawShape, z } from "zod";
-// Deep-path import (vs `../internal/index.js`) is deliberate — `_registry` is
-// a side-effect-free leaf, and going through the internal barrel would pull
-// tracing.ts → config.ts in at type-schema load time and crash on TDZ when a
-// test imports a public schema before config is initialized.
 import { _mark_sensitive, _registry } from "../internal/sensitive.js";
 
 /**

@@ -6,7 +6,7 @@
  * self-contained functional slices (vertical slice architecture).
  */
 
-import { resolveLaneConfig } from "../internal/index.js";
+import { resolveLaneConfig } from "../internal/config.js";
 import type { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,

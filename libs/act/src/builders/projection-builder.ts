@@ -14,7 +14,7 @@ import {
   DEFAULT_MAX_RETRIES,
   type FoldConfig,
   resolveFoldConfig,
-} from "../internal/index.js";
+} from "../internal/config.js";
 import type {
   BatchHandler,
   CacheEntry,

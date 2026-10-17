@@ -19,7 +19,7 @@
  * @internal
  */
 
-import type { StaticTarget } from "../internal/index.js";
+import type { StaticTarget } from "../internal/correlate-cycle.js";
 import type {
   Registry,
   Schema,
