@@ -162,21 +162,22 @@ describe("act", () => {
   });
 
   it("should start and stop correlation worker, awaiting for interval to trigger correlations", async () => {
-    const started = app.start_correlations({}, 10, vi.fn());
+    const started = app.start_correlations({}, 10);
     expect(started).toBe(true);
     await sleep(100);
-    const retry = app.start_correlations({}, 10, vi.fn());
+    const retry = app.start_correlations({}, 10);
     expect(retry).toBe(false);
     app.stop_correlations();
 
-    // Should be able to start again after stopping, and callback should be called
-    const callback = vi.fn();
+    // Starts again after stopping, and each tick settles what it finds
+    const settled = vi.fn();
+    app.on("settled", settled);
     await app.do("increment", { stream: "new stream", actor }, {});
-    const restarted = app.start_correlations({}, 10, callback);
+    const restarted = app.start_correlations({}, 10);
     expect(restarted).toBe(true);
-    await sleep(100);
+    await vi.waitFor(() => expect(settled).toHaveBeenCalled());
     app.stop_correlations();
-    expect(callback).toHaveBeenCalled();
+    app.off("settled", settled);
   });
 
   it("should log errors thrown by correlate inside the polling worker", async () => {

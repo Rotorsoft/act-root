@@ -117,8 +117,7 @@ The `.autocloses({...})` form covers ~90% of real policies in a line. See
 [docs/docs/guides/close-policies.md](../../docs/docs/guides/close-policies.md)
 for the full API: terminal-event matching, time windows, cardinality thresholds,
 `or:` backstops, the rolling-window `keep` variant, and the off-hours
-`autocloseWindow`. (The sweep-era cost knobs — `autocloseCycleMinutes`,
-`closeBatchSize`, `closeYieldMs` — are deprecated and ignored since #1175.)
+`autocloseWindow`.
 
 ### The rolling-window variant: streams that never close
 

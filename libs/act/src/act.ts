@@ -166,8 +166,6 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   private readonly _settle: SettleLoop<TEvents>;
   private _poll: ReturnType<typeof setInterval> | undefined;
-  /** The deprecated `start_correlations` callback, while the poll runs. */
-  private _on_discovered: ((subscribed: number) => void) | undefined;
   /**
    * Wired at construction against the store current then, so a store
    * injected after `build()` is never notified.
@@ -1044,7 +1042,6 @@ export class Act<
         await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
       if (subscribed > 0 || marked > 0) this._arm_all();
-      if (subscribed > 0) this._on_discovered?.(subscribed);
       return { subscribed, last_id, scanned };
     });
   }
@@ -1065,9 +1062,6 @@ export class Act<
    *   reads (default 100). The scan always starts at the correlation
    *   checkpoint, so `after` is ignored.
    * @param frequency - Milliseconds between ticks (default: 10000)
-   * @param callback - Called with the number of newly subscribed streams
-   *   after each correlate pass that found some.
-   *   @deprecated Listen to the `"settled"` lifecycle event instead.
    * @returns `true` if the poll started, `false` if one is already running
    *
    * @example
@@ -1080,13 +1074,8 @@ export class Act<
    * @see {@link settle} for what each tick runs
    * @see {@link stop_correlations} to stop the poll
    */
-  start_correlations(
-    query: Query = {},
-    frequency = 10_000,
-    callback?: (subscribed: number) => void
-  ): boolean {
+  start_correlations(query: Query = {}, frequency = 10_000): boolean {
     if (this._poll) return false;
-    this._on_discovered = callback;
     const correlate = { limit: query.limit || 100 };
     this._poll = setInterval(() => {
       // No local signal says there is work, so look anyway.
@@ -1107,7 +1096,6 @@ export class Act<
       clearInterval(this._poll);
       this._poll = undefined;
     }
-    this._on_discovered = undefined;
     // Hand the correlation lease back, best-effort and not awaited (this
     // method is synchronous; the lease would expire anyway).
     void this._scoped(() => this._correlate.release_correlation());

@@ -27,15 +27,6 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
  * `ActOptions.maxSubscribedStreams`.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
-/**
- * @deprecated The cadence knob is derived from `autocloseWindow` now;
- * nothing consumes it. Kept for compat; removed in the next major.
- */
-export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_YIELD_MS = 0;
 
 /** Per-Act ports bag. Both required together — a shared cache across stores would collide on stream keys. */
 export type Scoped = {
@@ -54,10 +45,6 @@ export type CircuitBreakerOptions = {
 
 /** Resolved autoclose configuration after validation + default expansion. */
 export type AutocloseConfig = {
-  autocloseCycleMinutes: number;
-  closeBatchSize: number;
-  closeYieldMs: number;
-  closeOnError: boolean;
   autocloseWindow?: { start: number; end: number; timeZone: string };
 };
 
@@ -183,39 +170,6 @@ export type ActOptions<TLanes extends string = string> = {
    * a `ZodError` at `act().build()`. Defaults: threshold 5, cooldown 30s.
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
-  /**
-   * @deprecated Accepted, validated, and ignored. It paced the off-hours
-   * re-check of the old autoclose sweep; the synthesized autoclose reaction now derives its re-check
-   * directly from `autocloseWindow` — a tick landing outside the window
-   * parks until the exact instant the window opens, so there is no
-   * polling cadence to configure (and nothing minute-denominated on the
-   * close surface). Still validated as an integer `[1, 1440]` so typos
-   * keep failing loudly at `act().build()`. Will be removed in the next
-   * major.
-   */
-  readonly autocloseCycleMinutes?: number;
-  /**
-   * @deprecated Unused since the autoclose sweep was replaced by a
-   * synthesized per-aggregate reaction — nothing pages the store in
-   * batches anymore, so nothing reads this. Accepted and validated
-   * (`[1, 1024]`) for compatibility; will be removed in the next major.
-   */
-  readonly closeBatchSize?: number;
-  /**
-   * @deprecated Unused: the sweep that yielded between
-   * successive `Store.truncate` calls no longer exists; closes are
-   * staged per stream by the autoclose reaction. Accepted and validated
-   * (`[0, 1000]`) for compatibility; will be removed in the next major.
-   */
-  readonly closeYieldMs?: number;
-  /**
-   * @deprecated Unused: the sweep-side predicate try/catch
-   * this flag steered no longer exists; a throwing policy predicate now
-   * follows the reaction retry path (`blockOnError: false`, three
-   * retries). Accepted for compatibility; will be removed in the next
-   * major.
-   */
-  readonly closeOnError?: boolean;
   /**
    * Optional off-hours window restricting when autoclose evaluates. A
    * synthesized autoclose reaction that triggers outside the window

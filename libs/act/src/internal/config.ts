@@ -9,13 +9,10 @@
  */
 
 import { z } from "zod";
-import {
-  type ActOptions,
-  type AutocloseConfig,
-  type CircuitBreakerOptions,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
+import type {
+  ActOptions,
+  AutocloseConfig,
+  CircuitBreakerOptions,
 } from "../types/act.js";
 import type {
   ActionOptions,
@@ -228,7 +225,7 @@ export function resolveActConfig(
   return options;
 }
 
-// Autoclose — the autoclose knobs on `ActOptions` (+ the off-hours window).
+// Autoclose — the off-hours window on `ActOptions`.
 // The window *logic* (DST, hour math) stays in `autoclose-window.ts`; only
 // the schema, defaults, and resolver live here.
 
@@ -270,20 +267,6 @@ const AutocloseWindowSchema = z
   });
 
 const AutocloseOptionsSchema = z.object({
-  autocloseCycleMinutes: z
-    .number()
-    .int()
-    .min(1)
-    .max(1440)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
-  closeBatchSize: z
-    .number()
-    .int()
-    .min(1)
-    .max(1024)
-    .default(DEFAULT_CLOSE_BATCH_SIZE),
-  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
-  closeOnError: z.boolean().default(false),
   autocloseWindow: AutocloseWindowSchema.optional(),
 }) satisfies z.ZodType<AutocloseConfig>;
 
@@ -292,10 +275,6 @@ export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
   return AutocloseOptionsSchema.parse({
-    autocloseCycleMinutes: options?.autocloseCycleMinutes,
-    closeBatchSize: options?.closeBatchSize,
-    closeYieldMs: options?.closeYieldMs,
-    closeOnError: options?.closeOnError,
     autocloseWindow: options?.autocloseWindow,
   });
 }
