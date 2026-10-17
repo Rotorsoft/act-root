@@ -191,12 +191,12 @@ Source-of-truth for what lives where:
 
 - `libs/act/src/builders/` (`state-builder.ts`, `slice-builder.ts`, `projection-builder.ts`, `act-builder.ts`) — public builder APIs
 - `libs/act/src/internal/event-sourcing.ts` — `load()`, `action()`, `snap()`
-- `libs/act/src/internal/correlate-cycle.ts`, `drain-cycle.ts`, `handle.ts`, `settle.ts` — reaction pipeline
+- `libs/act/src/internal/correlate-cycle.ts`, `drain-cycle.ts`, `reaction-dispatch.ts`, `settle.ts` — reaction pipeline
 - `libs/act/src/internal/close-cycle.ts` — close-the-books orchestration
 - `libs/act/src/ports.ts` + `libs/act/src/adapters/` — port singletons and in-memory defaults
 - `libs/act-pg/src/postgres-store.ts`, `libs/act-sqlite/src/sqlite-store.ts` — production adapters
 - `libs/act/src/types/` — public type contracts (`Store`, `Cache`, `Logger`, `Snapshot`, errors)
-- `libs/act/src/internal/` holds nothing public except the config bags in `internal/config.ts`; `types/` never imports from it (`architecture.spec.ts` enforces both)
+- **Three layers, by audience:** `types/` declares every public type (and the public contract values: errors and signals, schemas, sentinels, defaults); the public runtime modules (`act.ts`, `builders/`, `adapters/`, `ports.ts`, `config.ts`, `csv.ts`, `utils.ts`, `sensitive.ts`, `test/`) implement them and declare no public types; `internal/` is private, never re-exported and never imported by `types/`. `architecture.spec.ts` enforces all three.
 
 ## Development Workflow
 
@@ -208,8 +208,8 @@ Source-of-truth for what lives where:
 - Adding a feature to core: update `libs/act/src/types/`, implement, test, demo in an example, ensure all three stores (InMemory/Postgres/Sqlite) support it
 - Adding a new `/libs` package: see [contributing-new-package.md](docs/docs/guides/contributing-new-package.md) — **seed a baseline tag before the first merge** or semantic-release defaults to `1.0.0`
 - **Respecting the stability charter.** The public API is covered by [STABILITY.md](STABILITY.md). Before changing any of the surfaces below, decide whether the change is **additive** (new optional method, new optional field, new event name) or **breaking** (rename, removal, narrowed type, changed semantics). Additive changes are fine in any release; breaking changes require a `BREAKING CHANGE:` commit footer that drives a major version bump and a written migration note in `RELEASE_NOTES_*.md` or the changelog. If you're not sure which category your change falls into, stop and ask. Files holding charter-covered surface:
-  - `libs/act/src/builders/{act,state,slice,projection,…}-builder.ts` — fluent builder DSL
-  - `libs/act/src/act.ts` — the `IAct` interface (`do`, `load`, `query`, `query_array`, `drain`, `settle`, `correlate`, `reset`, `close`) and lifecycle event names/shapes
+  - `libs/act/src/builders/{act,state,slice,projection}-builder.ts` and their contracts in `libs/act/src/types/builders.ts` — fluent builder DSL
+  - `libs/act/src/act.ts` and `libs/act/src/types/act.ts` — the `Act` orchestrator, `ActOptions`, and lifecycle event names/shapes (`IAct` lives in `types/action.ts`)
   - `libs/act/src/types/ports.ts` — `Store`, `Cache`, `Logger` interfaces
   - `libs/act/src/types/index.ts` (and what it re-exports) — public type surface
   - `libs/act/src/ports.ts` — the public port singletons (`store()`, `cache()`, `log()`, `dispose()`, etc.) and `SNAP_EVENT`/`TOMBSTONE_EVENT` constants
@@ -306,13 +306,13 @@ Any options bag that ships to `act().build()` / `openapi(app, ...)` / similar en
 | Element | Convention |
 |---|---|
 | Schema name | `<Type>OptionsSchema` — `AutocloseOptionsSchema`, `SseOptionsSchema`, `OpenAPIOptionsSchema` |
-| Schema visibility | Internal `const`, never re-exported. The public surface is the inferred type + resolver, not the schema itself. |
-| Inferred type | `type <Type>Config = z.infer<typeof <Type>OptionsSchema>` |
+| Schema visibility | Internal `const`, never re-exported. The public surface is the type + resolver, not the schema itself. |
+| Config type | Internal: `type <Type>Config = z.infer<typeof <Type>OptionsSchema>`. Public: written out in `types/`, and the schema ends in `satisfies z.ZodType<…>` so the two can't drift. |
 | Resolver | `resolve<Type>Config(options: <Type>Options): <Type>Config` — camelCase, parses + applies defaults in one call |
-| Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth |
+| Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth; a public default lives in `types/act.ts` |
 | Custom error messages | `{ message: "..." }` on the individual constraint when callers depend on the wording (test assertions, structured logs). Don't override Zod's default for shape errors callers don't read. |
 
-**Single home:** every builder-facing act-core config bag (schema + resolver + `DEFAULT_*`) lives in **`libs/act/src/internal/config.ts`** — one discoverable module, one section per bag (`Backoff`, `Reaction`, `Action`, `Lane`, `Drain`/`Settle`, `Act`, `Autoclose`, `CircuitBreaker`, `Fold`). Feature logic (the `CircuitBreaker` state machine, the fold engine, the autoclose window math in `autoclose-window.ts`) imports its resolved-config type from there. A new config bag adds a section to `config.ts` and wires its `resolve<Type>Config` at the declaration/runtime site (`.on(...)` / `.do(...)` / `.withLane(...)` / `act().build(...)` / `drain(...)` / `settle(...)`) — never a hand-rolled range check. Validation is fail-closed but non-tightening: reject `NaN`/`±Infinity`/nonsensical-negatives, never newly reject a value that works today. The sibling env/package config (`config()`) stays in the public `libs/act/src/config.ts`; `@rotorsoft/act-http` transport bags (`sse-wiring.ts`, `openapi/index.ts`) stay in that package. Never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
+**Single home:** every builder-facing act-core config bag (schema + resolver + private `DEFAULT_*`) lives in **`libs/act/src/internal/config.ts`**; a resolver that is public (`resolveAutocloseConfig`) is a one-line wrapper in the public `config.ts` — one discoverable module, one section per bag (`Backoff`, `Reaction`, `Action`, `Lane`, `Drain`/`Settle`, `Act`, `Autoclose`, `CircuitBreaker`, `Fold`). Feature logic (the `CircuitBreaker` state machine, the fold engine, the autoclose window math in `autoclose-window.ts`) imports its resolved-config type from there. A new config bag adds a section to `config.ts` and wires its `resolve<Type>Config` at the declaration/runtime site (`.on(...)` / `.do(...)` / `.withLane(...)` / `act().build(...)` / `drain(...)` / `settle(...)`) — never a hand-rolled range check. Validation is fail-closed but non-tightening: reject `NaN`/`±Infinity`/nonsensical-negatives, never newly reject a value that works today. The sibling env/package config (`config()`) stays in the public `libs/act/src/config.ts`; `@rotorsoft/act-http` transport bags (`sse-wiring.ts`, `openapi/index.ts`) stay in that package. Never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
 
 ## Troubleshooting
 

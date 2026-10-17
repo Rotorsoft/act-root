@@ -13,10 +13,7 @@ import {
   run_close_cycle,
 } from "./internal/close-cycle.js";
 import {
-  type CircuitBreakerOptions,
   DEFAULT_LEASE_MILLIS,
-  DEFAULT_MAX_SUBSCRIBED_STREAMS,
-  DEFAULT_SETTLE_DEBOUNCE_MS,
   MAX_SHUTDOWN_GRACE_MS,
   resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
@@ -41,26 +38,31 @@ import {
   type PatchFn,
   scan,
 } from "./internal/event-sourcing.js";
-import { build_handle, build_handle_batch } from "./internal/handle.js";
 import {
   FOLD_RESET,
   type ResettableBatchHandler,
 } from "./internal/projection-fold.js";
+import {
+  build_handle,
+  build_handle_batch,
+} from "./internal/reaction-dispatch.js";
 import { SettleLoop } from "./internal/settle.js";
 import { build_drain, build_es } from "./internal/tracing.js";
 import { walk_streams } from "./internal/walk-streams.js";
+import { cache, default_scope, log, store } from "./ports.js";
 import {
   current_reacting,
   make_reaction_scope,
   make_run_scoped,
 } from "./scoped.js";
-
-/** Circuit breaker state, reported with every `error` lifecycle event. */
-export type CircuitState = "closed" | "open" | "half-open";
-// A public config type; config bags live in internal/config.ts.
-export type { CircuitBreakerOptions } from "./internal/config.js";
-
-import { cache, default_scope, log, type Scoped, store } from "./ports.js";
+import {
+  type ActLifecycleEvents,
+  type ActOptions,
+  type CircuitState,
+  DEFAULT_MAX_SUBSCRIBED_STREAMS,
+  DEFAULT_SETTLE_DEBOUNCE_MS,
+  type Scoped,
+} from "./types/act.js";
 import { StoreError } from "./types/errors.js";
 import type {
   Actor,
@@ -96,263 +98,10 @@ import type {
   Snapshot,
   State,
   Store,
-  StoreNotification,
   StreamFilter,
   StreamPosition,
   Target,
 } from "./types/index.js";
-
-/**
- * Declarative close-policy options consumed by `.autocloses({...})`.
- * Top-level fields are AND-combined; the optional `or` block opens an
- * alternative OR-path. Omitted fields contribute nothing — they do
- * not mean "match everything."
- *
- * @property after - Close when `head.created` is at least the resolved
- *   window in the past. Days are the close surface's only unit;
- *   fractional `days` cover sub-day cooldowns (`{ days: 1/24 }` is one
- *   hour) without introducing another denomination.
- * @property is - Close when `head.name` matches. String for the
- *   single-terminal-event case (the most common); `readonly string[]`
- *   for multi-terminal states (`Order: Shipped | Delivered |
- *   Cancelled`).
- * @property reaches - Close when the stream's event count is `>= N`
- *   (inclusive — fires the moment the threshold is reached).
- * @property or - Alternative OR-path. When present, the policy fires
- *   if EITHER the top-level AND group matches OR any field inside
- *   `or` matches. Used for safety-net backstops layered onto a
- *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
- *   10k"*). Nested `or` inside `or` rejects at build time.
- * @property keep - Rolling-window retention, **independent** of
- *   the terminate fields: while the stream stays open, prune events
- *   older than `now − keep` behind the closest safe snapshot via a
- *   windowed close. Does not participate in the AND group or the `or`
- *   block — a policy may terminate, prune, or both. Requires
- *   `.snap(...)` earlier in the builder chain (type-gated) and a
- *   window of at least one day — the close cycle is low-cadence
- *   housekeeping, never sub-day realtime.
- */
-export type AutoclosePolicy = {
-  after?: { days: number };
-  is?: string | readonly string[];
-  reaches?: number;
-  or?: {
-    after?: { days: number };
-    is?: string | readonly string[];
-    reaches?: number;
-  };
-  keep?: { days: number };
-};
-// Re-export the autoclose config surface so operators can
-// `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
-// from "@rotorsoft/act"`. The implementation lives in
-// `internal/config.ts` (the single home for builder-facing config bags)
-// to keep this orchestrator file focused on the `Act` class.
-export {
-  type AutocloseConfig,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  DEFAULT_MAX_SUBSCRIBED_STREAMS,
-  DEFAULT_SETTLE_DEBOUNCE_MS,
-  resolveAutocloseConfig,
-} from "./internal/config.js";
-
-/**
- * Lifecycle events emitted by {@link Act}, mapped to their payload type.
- * Drives the typing of `emit` / `on` / `off` — the event-name argument
- * narrows its payload at the call site.
- *
- * The first parameter is kept (unused) for arity compatibility: `committed`
- * carries snapshots of whichever state each action targeted, so its honest
- * element type is `Snapshot<Schema, TEvents>` — the register map itself was
- * never the shape of any snapshot's state.
- */
-export type ActLifecycleEvents<
-  _TSchemaReg extends SchemaRegister<TActions>,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-> = {
-  committed: Snapshot<Schema, TEvents>[];
-  acked: Lease[];
-  blocked: BlockedLease[];
-  settled: Drain<TEvents>;
-  closed: CloseResult;
-  /**
-   * A **different process** committed an event to the same backing store.
-   *
-   * Fires only when the configured store implements
-   * {@link Store.notify} and there is at least one registered reaction.
-   * The orchestrator uses the same signal internally to wake `settle()`
-   * — listeners get the raw payload for SSE fan-out, dashboards, and
-   * audit logs.
-   *
-   * Local commits do *not* fire `notified` (use `committed` for those):
-   * stores self-filter their own writes so this channel has a clean
-   * cross-process semantic.
-   */
-  notified: StoreNotification;
-  /**
-   * A stream's sensitive-data payload was wiped via {@link Act.forget}.
-   * Fires exactly once per successful `forget(stream)` call — idempotent
-   * second calls (no PII left on the stream) return `eventCount: 0` and
-   * do NOT re-emit. Apps that never call `forget()` never see this event.
-   *
-   * Listeners use it for the compliance side of GDPR / CCPA: audit log,
-   * downstream cache busts, projection-side wipes that the framework
-   * doesn't reach (e.g., search indexes, ETL caches). The framework's own
-   * cache is invalidated by `forget()` itself before the event fires.
-   */
-  forgotten: { stream: string; at: Date; eventCount: number };
-  /**
-   * A store operation failed during the drain loop. Fires on
-   * every failed drain cycle — typically a {@link StoreError} from a
-   * degraded backend — carrying the orchestrator circuit breaker's state
-   * after the failure (`open` means the drain loop has backed off and will
-   * retry after the cooldown). Listen to alert on a degraded store; the
-   * framework logs the same error regardless. Emitted only when a listener
-   * is registered (Node's `EventEmitter` throws on an unhandled `"error"`).
-   */
-  error: { error: unknown; circuit: CircuitState };
-};
-
-/**
- * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
- *
- * @property maxSubscribedStreams - Cap for the LRU tracking what each
- *   dynamically resolved reaction target was last subscribed at. Statically
- *   declared targets are held outside it and never evicted, so their lane
- *   and priority stay owned by the build-time subscribe.
- *   Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
- * @property settleDebounceMs - Debounce window (ms) used by `settle()` when
- *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
- *   Act instance instead of threading the value through every call site.
- *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
- */
-export type ActOptions<TLanes extends string = string> = {
-  readonly maxSubscribedStreams?: number;
-  readonly settleDebounceMs?: number;
-  /**
-   * Per-Act ports. When set, this Act runs against the
-   * provided store + cache instead of the singletons — threaded via
-   * AsyncLocalStorage so internals are unchanged. Both are required
-   * together (a shared cache across distinct stores would collide on
-   * stream keys). Omit for the singleton path.
-   */
-  readonly scoped?: Scoped;
-  /**
-   * Correlation-id generator for originating actions. When
-   * omitted, Act uses {@link default_correlator}, which produces a
-   * readable, time-monotonic-within-window, lowercase id of the form
-   * `{state[:4]}-{action[:4]}-{ts}{rnd}` (18 chars).
-   *
-   * Reactions inherit `reactingTo.meta.correlation` so the chain stays
-   * intact — the delegate is only consulted on originating commits and
-   * for the close-the-books transaction.
-   */
-  readonly correlator?: Correlator;
-  /** Restrict this process to a subset of declared lanes. */
-  readonly onlyLanes?: ReadonlyArray<TLanes>;
-  /**
-   * Subscribe to {@link Store.notify} on this instance. Defaults
-   * to `true`. Set `false` on instances that only commit and never
-   * react — the subscriber-connection budget is the practical scaling
-   * ceiling for the notify/listen pattern, and writer-only fleets
-   * spend it for nothing when they subscribe to a channel they never
-   * read. Commits still emit notifications (that's part of the
-   * store's commit protocol); only the subscriber side is gated.
-   */
-  readonly listen?: boolean;
-  /**
-   * Run the local reaction pipeline on this instance. Defaults
-   * to `true`. Set `false` on writer-only or sidecar instances: drain
-   * controllers' auto-cycle workers don't start, `correlate()` /
-   * `drain()` / `settle()` become no-ops, and the notify handler
-   * skips its drain-wakeup arm (but still emits the `notified`
-   * lifecycle event so observability sidecars work).
-   */
-  readonly drain?: boolean;
-  /**
-   * Orchestrator circuit breaker for the drain loop. After
-   * `failureThreshold` consecutive store failures the breaker opens and
-   * the drain loop skips `claim()` for `cooldownMs` instead of hammering a
-   * down backend, then allows a half-open trial. Out-of-range values throw
-   * a `ZodError` at `act().build()`. Defaults: threshold 5, cooldown 30s.
-   */
-  readonly circuitBreaker?: CircuitBreakerOptions;
-  /**
-   * @deprecated Accepted, validated, and ignored. It paced the off-hours
-   * re-check of the old autoclose sweep; the synthesized autoclose reaction now derives its re-check
-   * directly from `autocloseWindow` — a tick landing outside the window
-   * parks until the exact instant the window opens, so there is no
-   * polling cadence to configure (and nothing minute-denominated on the
-   * close surface). Still validated as an integer `[1, 1440]` so typos
-   * keep failing loudly at `act().build()`. Will be removed in the next
-   * major.
-   */
-  readonly autocloseCycleMinutes?: number;
-  /**
-   * @deprecated Unused since the autoclose sweep was replaced by a
-   * synthesized per-aggregate reaction — nothing pages the store in
-   * batches anymore, so nothing reads this. Accepted and validated
-   * (`[1, 1024]`) for compatibility; will be removed in the next major.
-   */
-  readonly closeBatchSize?: number;
-  /**
-   * @deprecated Unused: the sweep that yielded between
-   * successive `Store.truncate` calls no longer exists; closes are
-   * staged per stream by the autoclose reaction. Accepted and validated
-   * (`[0, 1000]`) for compatibility; will be removed in the next major.
-   */
-  readonly closeYieldMs?: number;
-  /**
-   * @deprecated Unused: the sweep-side predicate try/catch
-   * this flag steered no longer exists; a throwing policy predicate now
-   * follows the reaction retry path (`blockOnError: false`, three
-   * retries). Accepted for compatibility; will be removed in the next
-   * major.
-   */
-  readonly closeOnError?: boolean;
-  /**
-   * Optional off-hours window restricting when autoclose evaluates. A
-   * synthesized autoclose reaction that triggers outside the window
-   * defers to the next instant the window opens — derived from the
-   * window itself, no polling cadence. Hours are `[0, 23]` integers in
-   * `timeZone` (IANA, default `"UTC"`, DST-correct); `start > end` is
-   * an overnight window (e.g. `{ start: 22, end: 6 }`). Omit to
-   * evaluate regardless of clock time.
-   */
-  readonly autocloseWindow?: {
-    readonly start: number;
-    readonly end: number;
-    readonly timeZone?: string;
-  };
-  /**
-   * Validate folded state against its declared Zod schema after every
-   * reduction. Off by default.
-   *
-   * When `true`, each time an event is folded into state — on the
-   * command path (`do`), on `load`/replay, and inside projection-fold
-   * projections — the merged full state is parsed against the owning
-   * state's `state({ Name: schema })` schema. A reducer that produces
-   * schema-violating state (the calculator divide-by-zero NaN
-   * class) throws a {@link ValidationError} at the triggering event,
-   * whose `target` names the state and the event (`<state>.<event>#<id>`)
-   * — instead of the bad value propagating and surfacing hops later as a
-   * confusing downstream error.
-   *
-   * This is a **debugging / CI aid, not a production guard**. Turn it on
-   * in development and CI to catch total-reducer bugs at the source; the
-   * framework already validates action inputs and emitted events, so the
-   * reduced state is the one shape it otherwise trusts. The per-event
-   * patch step is selected **once at `build()`** (the same way the
-   * orchestrator picks bare vs trace-decorated store ops from the log
-   * level): when `false` (the default) the fold loop is byte-identical to
-   * a bare reduction — the validating patch step is never selected, so
-   * there is no per-event cost, not even a branch.
-   */
-  readonly validateFoldedState?: boolean;
-};
 
 /** Reject `onlyLanes` entries that reference undeclared lanes. */
 function validate_only_lanes(

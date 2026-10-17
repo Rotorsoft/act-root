@@ -224,4 +224,4 @@ Mixing them is fine — `settle()` doesn't acquire any global lock, just a per-c
 - `libs/act/src/internal/drain-ratio.ts` — adaptive lag/lead ratio
 - `libs/act/src/internal/settle.ts` — `SettleLoop` debounce + progress loop
 - `libs/act/src/internal/classify.ts` — registry classification at construction
-- `libs/act/src/internal/handle.ts` — `build_handle` / `build_handle_batch` — what runs inside a drain cycle for each leased stream
+- `libs/act/src/internal/reaction-dispatch.ts` — `build_handle` / `build_handle_batch` — what runs inside a drain cycle for each leased stream

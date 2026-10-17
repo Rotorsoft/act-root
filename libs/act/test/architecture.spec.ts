@@ -84,10 +84,9 @@ describe("architecture: internal/ is stateless", () => {
   });
 });
 
-describe("architecture: internal/ holds nothing public", () => {
-  // Public names live outside internal/, so the stability snapshot (which
-  // follows re-exports) never copies an internal module. The config bags
-  // are the one exception: CLAUDE.md gives them a single home there.
+describe("architecture: public types live in types/", () => {
+  // Three layers, by audience: types/ declares every public type,
+  // the public runtime modules implement them, and internal/ is private.
   const outside = ts_files(SRC)
     .filter((p) => !p.startsWith(INTERNAL))
     .map((path) => ({
@@ -95,22 +94,47 @@ describe("architecture: internal/ holds nothing public", () => {
       text: code_of(readFileSync(path, "utf8")),
     }));
 
-  it("is re-exported only through internal/config.ts", () => {
+  /** Every module a public entry point reaches through its re-exports. */
+  const reached = (() => {
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = code_of(readFileSync(join(SRC, file), "utf8"));
+      for (const m of text.matchAll(
+        /^export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s+"(\.[^"]+)\.js"/gm
+      ))
+        walk(join(file, "..", `${m[1]}.ts`));
+    };
+    for (const entry of ["index.ts", "types/index.ts", "test/index.ts"])
+      walk(entry);
+    return [...seen];
+  })();
+
+  it("never re-exports internal/", () => {
     const offenders = outside
-      .filter(({ text }) =>
-        [
-          ...text.matchAll(/^export [^;]*from "[./]*internal\/([\w-]+)\.js"/gm),
-        ].some((m) => m[1] !== "config")
-      )
+      .filter(({ text }) => /^export [^;]*from "[./]*internal\//m.test(text))
       .map(({ name }) => name);
     expect(offenders).toEqual([]);
   });
 
-  it("is never imported by types/", () => {
+  it("never imports internal/ from types/", () => {
     const offenders = outside
       .filter(({ name }) => name.startsWith("types/"))
       .filter(({ text }) => /from "\.\.\/internal\//.test(text))
       .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("declares no public type outside types/", () => {
+    const offenders = reached
+      .filter((file) => !file.startsWith("types/"))
+      .filter((file) =>
+        /^export (?:type|interface) \w/m.test(
+          code_of(readFileSync(join(SRC, file), "utf8"))
+        )
+      );
+    expect(reached.length).toBeGreaterThan(10);
     expect(offenders).toEqual([]);
   });
 });
@@ -150,11 +174,12 @@ describe("architecture: ambient context is owned by scoped.ts", () => {
 describe("architecture: ambient mechanisms are not public API", () => {
   it("does not publish the ports AsyncLocalStorage", () => {
     // `index.ts` star-exports `ports.ts`, so anything ports.ts exports is
-    // published. The `Scoped` TYPE is public on purpose — it types
-    // `ActOptions.scoped`. The instance is not.
+    // published. The `Scoped` TYPE is public on purpose (it types
+    // `ActOptions.scoped`) and lives in types/. The instance is not.
     const ports = code_of(readFileSync(join(SRC, "ports.ts"), "utf8"));
     expect(ports).not.toMatch(/export \{[^}]*\bscoped\b[^}]*\}/);
-    expect(ports).toMatch(/export type \{ Scoped \}/);
+    const types = code_of(readFileSync(join(SRC, "types", "act.ts"), "utf8"));
+    expect(types).toMatch(/export type Scoped = /);
   });
 });
 

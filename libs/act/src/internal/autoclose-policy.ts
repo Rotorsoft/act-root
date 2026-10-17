@@ -8,8 +8,11 @@
  */
 
 import { z } from "zod";
-import type { AutoclosePolicy } from "../act.js";
-import type { AutoclosePredicate, Schemas } from "../types/action.js";
+import type {
+  AutoclosePolicy,
+  AutoclosePredicate,
+  Schemas,
+} from "../types/action.js";
 
 /**
  * One day in epoch milliseconds. The close surface is day-denominated
@@ -115,7 +118,7 @@ const OrBlockSchema = z
  * never this schema. `.strict()` rejects unknown keys so typos surface
  * at build instead of being silently ignored.
  */
-const AutoclosePolicySchema: z.ZodType<AutoclosePolicy> = z
+const AutoclosePolicySchema = z
   .object({
     after: AfterSchema.optional(),
     is: IsSchema.optional(),
@@ -135,7 +138,7 @@ const AutoclosePolicySchema: z.ZodType<AutoclosePolicy> = z
       message:
         "autocloses: at least one of after / is / reaches / or / keep must be specified — empty `{}` is a misconfiguration",
     }
-  );
+  ) satisfies z.ZodType<AutoclosePolicy>;
 
 /** Compile a single `after` field into its predicate slice. */
 function compile_after(

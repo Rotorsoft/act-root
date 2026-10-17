@@ -18,7 +18,7 @@
  */
 
 import { z } from "zod";
-import { DeferSignal } from "../defer-signal.js";
+import { DeferSignal } from "../types/errors.js";
 import type { Committed, DeferWhen, Schemas } from "../types/index.js";
 
 /**

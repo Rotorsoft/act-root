@@ -3,20 +3,16 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports, type Scoped } from "./scoped.js";
+import { current_ports } from "./scoped.js";
 import type {
   Cache,
   Disposable,
   Disposer,
   Logger,
+  Scoped,
   Store,
 } from "./types/index.js";
-
-// `Scoped` is the type of the public `ActOptions.scoped` bag, so it stays
-// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
-// it was only ever reachable because `index.ts` star-exports this module,
-// and its own doc-comment already declared it internal.
-export type { Scoped } from "./scoped.js";
+import { type ExitCode, ExitCodes } from "./types/index.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -32,24 +28,6 @@ export type { Scoped } from "./scoped.js";
  *
  * @module ports
  */
-
-/**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
- */
-export const ExitCodes = ["ERROR", "EXIT"] as const;
-
-/**
- * Type for allowed exit codes.
- *
- * - `"ERROR"` — abnormal termination (uncaught exception, unhandled rejection)
- * - `"EXIT"` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
- */
-export type ExitCode = (typeof ExitCodes)[number];
 
 // ---------------------------------------------------------------------------
 // Port factory

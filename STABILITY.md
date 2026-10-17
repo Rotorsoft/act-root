@@ -49,7 +49,7 @@ We will be explicit in release notes when this surface changes.
 
 ### Lifecycle events
 
-The events emitted by the orchestrator on the public event bus (`ActLifecycleEvents` in `libs/act/src/act.ts`):
+The events emitted by the orchestrator on the public event bus (`ActLifecycleEvents` in `libs/act/src/types/act.ts`):
 
 - `committed` — events committed by an action in this process (`Snapshot[]`)
 - `acked` — reactions that processed successfully (`Lease[]`)

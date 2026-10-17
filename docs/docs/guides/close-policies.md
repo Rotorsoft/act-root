@@ -327,6 +327,6 @@ async function retireOldTickets(app, store) {
 
 - `.autocloses` / `.archives` declarators: `libs/act/src/builders/state-builder.ts`
 - Declarative policy schema + compiler: `libs/act/src/internal/autoclose-policy.ts`
-- Reaction synthesis + signals: `libs/act/src/act.ts`, `libs/act/src/defer-signal.ts`, `libs/act/src/internal/{handle,defer-timer}.ts`
+- Reaction synthesis + signals: `libs/act/src/act.ts`, `libs/act/src/types/errors.ts` (`DeferSignal`), `libs/act/src/internal/{reaction-dispatch,defer-timer}.ts`
 - [Close-cycle architecture](../architecture/close-cycle.md) — explicit close + the synthesized autoclose reaction in one page
 - [Error handling](../concepts/error-handling.md) — what `StreamClosedError` means for actions on a closed stream

@@ -12,7 +12,7 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
-import { CloseSignal } from "../src/internal/handle.js";
+import { CloseSignal } from "../src/internal/reaction-dispatch.js";
 
 /**
  * Deferred reactions. A reaction holds until its schedule is due, then runs:

@@ -16,7 +16,7 @@
  * machine is deterministic under test.
  */
 
-import type { CircuitState } from "../act.js";
+import type { CircuitState } from "../types/index.js";
 import type { CircuitBreakerConfig } from "./config.js";
 
 /**

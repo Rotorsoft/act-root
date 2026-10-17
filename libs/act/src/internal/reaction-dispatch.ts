@@ -13,8 +13,8 @@
  * stream); dispatch turns either into a `HandleResult`.
  */
 
-import { DeferSignal } from "../defer-signal.js";
 import type { ReactionScope } from "../scoped.js";
+import { DeferSignal } from "../types/errors.js";
 import type {
   Actor,
   BatchHandler,

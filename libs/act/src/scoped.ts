@@ -25,20 +25,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type {
-  Actor,
-  Cache,
-  Committed,
-  IAct,
-  Schemas,
-  Store,
-} from "./types/index.js";
-
-/** Per-Act ports bag. Both required together — a shared cache across stores would collide on stream keys. */
-export type Scoped = {
-  readonly store: Store;
-  readonly cache: Cache;
-};
+import type { Actor, Committed, IAct, Schemas, Scoped } from "./types/index.js";
 
 /**
  * What an Act actually installs in its frame: the ports a caller passed,

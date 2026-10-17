@@ -3,7 +3,7 @@
  * "next time the window opens".
  */
 
-import type { AutocloseConfig } from "./config.js";
+import type { AutocloseConfig } from "../types/index.js";
 
 /**
  * The current hour `[0, 23]` in the given IANA time zone, DST-correct

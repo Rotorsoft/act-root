@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, log, state, store } from "../src/index.js";
-import { CloseSignal } from "../src/internal/handle.js";
+import { CloseSignal } from "../src/internal/reaction-dispatch.js";
 
 /**
  * App code failing inside a framework loop (a resolver, a close's archive
