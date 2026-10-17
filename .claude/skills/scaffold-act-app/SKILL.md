@@ -215,7 +215,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] `broadcastState()` called after every `app.do()` — sets `_v` from `snap.event.version`
 - [ ] SSE `onStateChange` subscription uses `broadcast.subscribe()` for incremental state push
 - [ ] SSE `onEvent` subscription wired with `app.on("settled")` for event replay
-- [ ] `app.settle()` called after mutations (non-blocking, debounced, emits "settled" after reactions)
+- [ ] No `app.settle()` in mutations (each commit settles on its own and emits "settled" after reactions)
 - [ ] Client `useStateStream` hook uses `applyPatchMessage()` from `@rotorsoft/act-http/sse`
 - [ ] Client uses `splitLink` for SSE subscriptions + HTTP for mutations/queries
 - [ ] Types compile with `npx tsc --noEmit`

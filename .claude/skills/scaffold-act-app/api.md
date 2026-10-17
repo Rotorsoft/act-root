@@ -6,7 +6,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 
 **Why decompose into many small files instead of one router?** Each file has a single responsibility and a clear dependency graph. `trpc.ts` knows nothing about auth; `context.ts` knows nothing about routes; route files know nothing about each other. This prevents circular dependencies and makes it easy to find where a specific endpoint lives. When the spec adds a new domain aggregate, you add handlers to `domain.routes.ts` without touching auth or SSE logic.
 
-**The mutation sequence is always: `app.do()` → `broadcastState()` → `settle()` → return.** Every mutation follows this exact order. If you skip `broadcastState()`, SSE clients won't see the change. If you skip `settle()`, reactions and projections won't process. If you read from a projection instead of the snapshot in the response, you'll return stale data because projections are async. Always return data from the snapshot, never from a projection query in the same request.
+**The mutation sequence is always: `app.do()` → `broadcastState()` → return.** Every mutation follows this exact order. If you skip `broadcastState()`, SSE clients won't see the change. Reactions and projections run on their own after the commit. If you read from a projection instead of the snapshot in the response, you'll return stale data because projections are async. Always return data from the snapshot, never from a projection query in the same request.
 
 **Choosing the right procedure type:** Use `publicProcedure` for unauthenticated reads (list views, SSE subscriptions). Use `authedProcedure` for any mutation that modifies state — the middleware guarantees `ctx.actor` is non-null and typed. Use `adminProcedure` for administrative operations (role assignment, user management). Never use `publicProcedure` for mutations unless the spec explicitly allows anonymous writes.
 
@@ -27,7 +27,7 @@ tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 | `index.ts` | Router composition | `t.mergeRouters()` + export `AppRouter` type |
 
 **Key rules:**
-- Call `app.settle()` after every `app.do()` in mutations — non-blocking, returns immediately
+- Don't call `app.settle()` in mutations — each commit settles its reactions on its own
 - Call `broadcastState(streamId, snap)` after every `app.do()` — pushes incremental patches via `@rotorsoft/act-http/sse`
 - Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
 - `onStateChange` SSE uses `broadcast.subscribe()` from `@rotorsoft/act-http/sse` for real-time state push
@@ -222,7 +222,6 @@ export const domainRouter = t.router({
       const stream = crypto.randomUUID();
       const snaps = await app.do("CreateItem", { stream, actor: ctx.actor }, input);
       broadcastState(stream, snaps); // incremental patches to SSE subscribers
-      app.settle();                  // non-blocking — projections + reactions
       return { success: true, id: stream };
     }),
 
@@ -360,7 +359,6 @@ export const authRouter = t.router({
       await app.do("RegisterUser", { stream: input.username, actor: { ...systemActor, name: "AuthSystem" } }, {
         email: input.username, name: input.name, provider: "local", providerId: input.username, passwordHash,
       });
-      app.settle();
       const user = getUserByEmail(input.username);
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to register" });
       const token = signToken({ email: user.email });
@@ -374,7 +372,6 @@ export const authRouter = t.router({
     .mutation(async ({ input, ctx }) => {
       if (!getUserByEmail(input.email)) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
       await app.do("AssignRole", { stream: input.email, actor: ctx.actor }, { role: input.role });
-      app.settle();
       return { success: true };
     }),
 
