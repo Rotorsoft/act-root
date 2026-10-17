@@ -692,10 +692,12 @@ export class Act<
         do_options
       );
       // Arm only the lanes whose reactions match the committed events
-      // (`action()` snapshots always carry their event).
-      this._arm_for_event_names(
+      // (`action()` snapshots always carry their event), and settle them:
+      // a local commit runs its reactions the way a remote one does.
+      const armed = this._arm_for_event_names(
         snapshots.map((s) => (s.event as { name: string }).name)
       );
+      if (armed && this._drain) this._settle.schedule({}, true);
       this.emit("committed", snapshots);
       return snapshots;
     });
@@ -936,6 +938,7 @@ export class Act<
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
     // streamLimit / eventLimit throws ZodError here, not on the first cycle).
     resolveDrainConfig(options);
+    this._settle.cancel_auto();
     // Writer-only instances run no reactions.
     if (!this._drain)
       return { fetched: [], leased: [], acked: [], blocked: [] };
@@ -1025,6 +1028,7 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
+    this._settle.cancel_auto();
     const { subscribed, last_id } = await this._correlate_scanned(query);
     return { subscribed, last_id };
   }

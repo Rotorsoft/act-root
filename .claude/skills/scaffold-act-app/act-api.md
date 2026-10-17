@@ -330,7 +330,7 @@ Set `source` only when you want to genuinely scope drain to a *stable* stream pa
 
 ## 7. Correlate Before Drain — settle() Pattern
 
-**Rule:** a commit doesn't make work drainable; `correlate` does. In tests call `await app.correlate(); await app.drain();` (a bare `drain()` finds nothing). In the app, wire `app.on("committed", () => app.settle())` at bootstrap so API mutations need no explicit `settle()`, and use `app.start_correlations()` when other processes commit to the same store. See [testing](https://rotorsoft.github.io/act-root/docs/concepts/testing) and [correlation and drain](https://rotorsoft.github.io/act-root/docs/architecture/correlation-and-drain).
+**Rule:** a commit doesn't make work drainable; `correlate` does. In tests call `await app.correlate(); await app.drain();` (a bare `drain()` finds nothing). In the app, commits settle their own reactions, so API mutations need no `settle()`; use `app.start_correlations()` only when other processes commit to a store without `notify`. See [testing](https://rotorsoft.github.io/act-root/docs/concepts/testing) and [correlation and drain](https://rotorsoft.github.io/act-root/docs/architecture/correlation-and-drain).
 
 ## 8. Invariant Type
 

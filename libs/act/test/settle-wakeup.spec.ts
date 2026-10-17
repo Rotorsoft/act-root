@@ -419,3 +419,57 @@ describe("a throwing settled listener is contained", () => {
     await app.shutdown();
   });
 });
+
+describe("a local commit settles its own reactions", () => {
+  const Ping = state({ Ping: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Pinged: ZodEmpty, Noted: ZodEmpty })
+    .patch({ Pinged: (_, s) => ({ n: s.n + 1 }), Noted: (_, s) => s })
+    .on({ ping: ZodEmpty })
+    .emit(() => ["Pinged", {}])
+    .on({ note: ZodEmpty })
+    .emit(() => ["Noted", {}])
+    .build();
+  const actor = { id: "a", name: "a" };
+
+  const reacting = (ran: string[]) =>
+    act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track(event) {
+        ran.push(event.stream);
+      })
+      .to("tracker")
+      .build();
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("runs the reaction with no settle wiring", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.do("ping", { stream: "p1", actor }, {});
+    await vi.waitFor(() => expect(ran).toEqual(["p1"]));
+  });
+
+  it("leaves the work to a caller that correlates and drains right after", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.do("ping", { stream: "p2", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.map((l) => l.stream)).toEqual(["tracker"]);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual(["p2"]);
+  });
+
+  it("control — schedules nothing for an event no reaction handles", async () => {
+    const settled = vi.fn();
+    const app = reacting([]);
+    app.on("settled", settled);
+    await app.do("note", { stream: "p3", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).not.toHaveBeenCalled();
+  });
+});

@@ -36,9 +36,9 @@ const app = act()
   )
   .to((event) => ({ target: `fulfillment:${event.stream}` }))
   .build();
-// Production wires app.on("committed", () => app.settle()) and lets the
-// debounced loop drive processing; this demo drains explicitly instead
-// so the poison stream's retry budget exhausts deterministically.
+// A commit settles its reactions on its own; this demo drives correlate
+// and drain explicitly instead, so the poison stream's retry budget
+// exhausts deterministically.
 
 // The bridge: one call, canonical metric set, on a registry we own.
 const registry = new Registry();

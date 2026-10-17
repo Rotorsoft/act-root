@@ -99,7 +99,6 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 store(new PostgresStore({ /* … */ }));
 await store().seed();
 
-app.on("committed", () => app.settle());          // drain reactions on every commit
 app.on("blocked", (xs) => log().error({ xs }));   // page on blocked streams
 dispose(async () => { /* your cleanup */ });      // wired into SIGINT/SIGTERM
 ```

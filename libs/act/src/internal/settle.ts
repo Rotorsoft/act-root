@@ -57,6 +57,8 @@ export class SettleLoop<TEvents extends Schemas> {
    * `finally` schedules one more pass with these options, so it isn't lost.
    */
   private _pending: SettleOptions | undefined = undefined;
+  /** True while the pending timer came from a commit, not a caller. */
+  private _auto = false;
   private readonly _deps: SettleDeps<TEvents>;
   /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
   private readonly _default_debounce_ms: number;
@@ -67,14 +69,30 @@ export class SettleLoop<TEvents extends Schemas> {
   }
 
   /**
+   * Drops a pending pass that a local commit scheduled, because the caller
+   * is driving the pipeline with `correlate()` / `drain()`. A pass already
+   * running, or one a caller asked for with `settle()`, is left alone.
+   */
+  cancel_auto(): void {
+    if (this._running) return;
+    if (this._auto && this._timer) {
+      clearTimeout(this._timer);
+      this._timer = undefined;
+    }
+    this._auto = false;
+  }
+
+  /**
    * Schedule a settle pass. Multiple calls inside the debounce window
    * coalesce into one cycle. The cycle runs correlate→drain in a loop
    * until no progress is made (no new subscriptions, no events read, no
    * streams leased)
    * or `maxPasses` is reached, then emits the `"settled"` lifecycle event
-   * via {@link SettleDeps.on_settled}.
+   * via {@link SettleDeps.on_settled}. `auto` marks a pass a local commit
+   * scheduled, which a caller driving the pipeline may cancel.
    */
-  schedule(options: SettleOptions = {}): void {
+  schedule(options: SettleOptions = {}, auto = false): void {
+    this._auto = auto;
     const {
       debounceMs = this._default_debounce_ms,
       correlate: correlate_query = { after: -1, limit: 100 },

@@ -248,8 +248,7 @@ const app = act().build();
 await app.correlate();
 await app.drain();
 
-// In production — wire settle() to the "committed" lifecycle event
-app.on("committed", () => app.settle());
+// In production — each commit settles its reactions on its own
 ```
 
 ### Dual-Frontier Strategy
@@ -263,7 +262,9 @@ The ratio adapts dynamically based on event pressure (clamped between 20-80%).
 
 ### settle()
 
-The recommended production pattern. `settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event. The canonical wiring is to subscribe to `"committed"` once at bootstrap and let it trigger automatically — actions never call `settle()` directly:
+`settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event.
+
+**It runs on its own.** A commit whose events have a reaction in this app schedules `settle()` with the default debounce (`ActOptions.settleDebounceMs`, 10ms); a commit from another process does the same through `Store.notify`. A writer-only app (`drain: false`) and a commit no reaction handles schedule nothing. Calling `correlate()` or `drain()` yourself right after `do()` cancels the scheduled pass, so tests that drive the pipeline stay deterministic. Calling `settle(options)` replaces it, which is how you pass custom drain options from a `"committed"` listener. Call `settle()` directly after `reset()` or to force a pass:
 
 ```typescript
 import { act, state } from "@rotorsoft/act";
@@ -279,9 +280,6 @@ const Item = state({ Item: z.object({ name: z.string() }) })
 const app = act().withState(Item).build();
 const target = { stream: "item-1", actor: { id: "1", name: "User" } };
 const input = { name: "Test" };
-
-// At app bootstrap — wire once
-app.on("committed", () => app.settle());
 
 // Optional: react to the completion signal
 app.on("settled", (drain) => {

@@ -684,7 +684,11 @@ describe("fold across workers", () => {
           table.set(r.stream, r.state as unknown as { count: number });
       })
       .build();
-    return act().withState(Counter).withProjection(counters).build();
+    // Each test picks which worker drains, so nothing settles on its own.
+    return act()
+      .withState(Counter)
+      .withProjection(counters)
+      .build({ settleDebounceMs: 60_000 });
   };
 
   const bump = (app: ReturnType<typeof worker>, by: number, stream = "c1") =>

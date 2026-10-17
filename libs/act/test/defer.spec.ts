@@ -337,7 +337,6 @@ describe("defer outcome (integration)", () => {
         })
         .to((e) => ({ target: `r-${e.stream}`, source: e.stream }))
         .build();
-      app.on("committed", () => app.settle());
       await Promise.all(
         Array.from({ length: 12 }, (_, i) =>
           app.do("tick", { stream: `b${i}`, actor }, {})

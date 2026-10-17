@@ -623,8 +623,6 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   private readonly _settle: SettleLoop<TEvents>;
   private _poll: ReturnType<typeof setInterval> | undefined;
-  /** The deprecated \`start_correlations\` callback, while the poll runs. */
-  private _on_discovered: ((subscribed: number) => void) | undefined;
   /**
    * Wired at construction against the store current then, so a store
    * injected after \`build()\` is never notified.
@@ -1151,10 +1149,12 @@ export class Act<
         do_options
       );
       // Arm only the lanes whose reactions match the committed events
-      // (\`action()\` snapshots always carry their event).
-      this._arm_for_event_names(
+      // (\`action()\` snapshots always carry their event), and settle them:
+      // a local commit runs its reactions the way a remote one does.
+      const armed = this._arm_for_event_names(
         snapshots.map((s) => (s.event as { name: string }).name)
       );
+      if (armed && this._drain) this._settle.schedule({}, true);
       this.emit("committed", snapshots);
       return snapshots;
     });
@@ -1395,6 +1395,7 @@ export class Act<
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
     // streamLimit / eventLimit throws ZodError here, not on the first cycle).
     resolveDrainConfig(options);
+    this._settle.cancel_auto();
     // Writer-only instances run no reactions.
     if (!this._drain)
       return { fetched: [], leased: [], acked: [], blocked: [] };
@@ -1484,6 +1485,7 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
+    this._settle.cancel_auto();
     const { subscribed, last_id } = await this._correlate_scanned(query);
     return { subscribed, last_id };
   }
@@ -1501,7 +1503,6 @@ export class Act<
         await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
       if (subscribed > 0 || marked > 0) this._arm_all();
-      if (subscribed > 0) this._on_discovered?.(subscribed);
       return { subscribed, last_id, scanned };
     });
   }
@@ -1522,9 +1523,6 @@ export class Act<
    *   reads (default 100). The scan always starts at the correlation
    *   checkpoint, so \`after\` is ignored.
    * @param frequency - Milliseconds between ticks (default: 10000)
-   * @param callback - Called with the number of newly subscribed streams
-   *   after each correlate pass that found some.
-   *   @deprecated Listen to the \`"settled"\` lifecycle event instead.
    * @returns \`true\` if the poll started, \`false\` if one is already running
    *
    * @example
@@ -1537,13 +1535,8 @@ export class Act<
    * @see {@link settle} for what each tick runs
    * @see {@link stop_correlations} to stop the poll
    */
-  start_correlations(
-    query: Query = {},
-    frequency = 10_000,
-    callback?: (subscribed: number) => void
-  ): boolean {
+  start_correlations(query: Query = {}, frequency = 10_000): boolean {
     if (this._poll) return false;
-    this._on_discovered = callback;
     const correlate = { limit: query.limit || 100 };
     this._poll = setInterval(() => {
       // No local signal says there is work, so look anyway.
@@ -1564,7 +1557,6 @@ export class Act<
       clearInterval(this._poll);
       this._poll = undefined;
     }
-    this._on_discovered = undefined;
     // Hand the correlation lease back, best-effort and not awaited (this
     // method is synchronous; the lease would expire anyway).
     void this._scoped(() => this._correlate.release_correlation());
@@ -1992,15 +1984,6 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
  * \`ActOptions.maxSubscribedStreams\`.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
-/**
- * @deprecated The cadence knob is derived from \`autocloseWindow\` now;
- * nothing consumes it. Kept for compat; removed in the next major.
- */
-export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_YIELD_MS = 0;
 
 /** Per-Act ports bag. Both required together — a shared cache across stores would collide on stream keys. */
 export type Scoped = {
@@ -2019,10 +2002,6 @@ export type CircuitBreakerOptions = {
 
 /** Resolved autoclose configuration after validation + default expansion. */
 export type AutocloseConfig = {
-  autocloseCycleMinutes: number;
-  closeBatchSize: number;
-  closeYieldMs: number;
-  closeOnError: boolean;
   autocloseWindow?: { start: number; end: number; timeZone: string };
 };
 
@@ -2148,39 +2127,6 @@ export type ActOptions<TLanes extends string = string> = {
    * a \`ZodError\` at \`act().build()\`. Defaults: threshold 5, cooldown 30s.
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
-  /**
-   * @deprecated Accepted, validated, and ignored. It paced the off-hours
-   * re-check of the old autoclose sweep; the synthesized autoclose reaction now derives its re-check
-   * directly from \`autocloseWindow\` — a tick landing outside the window
-   * parks until the exact instant the window opens, so there is no
-   * polling cadence to configure (and nothing minute-denominated on the
-   * close surface). Still validated as an integer \`[1, 1440]\` so typos
-   * keep failing loudly at \`act().build()\`. Will be removed in the next
-   * major.
-   */
-  readonly autocloseCycleMinutes?: number;
-  /**
-   * @deprecated Unused since the autoclose sweep was replaced by a
-   * synthesized per-aggregate reaction — nothing pages the store in
-   * batches anymore, so nothing reads this. Accepted and validated
-   * (\`[1, 1024]\`) for compatibility; will be removed in the next major.
-   */
-  readonly closeBatchSize?: number;
-  /**
-   * @deprecated Unused: the sweep that yielded between
-   * successive \`Store.truncate\` calls no longer exists; closes are
-   * staged per stream by the autoclose reaction. Accepted and validated
-   * (\`[0, 1000]\`) for compatibility; will be removed in the next major.
-   */
-  readonly closeYieldMs?: number;
-  /**
-   * @deprecated Unused: the sweep-side predicate try/catch
-   * this flag steered no longer exists; a throwing policy predicate now
-   * follows the reaction retry path (\`blockOnError: false\`, three
-   * retries). Accepted for compatibility; will be removed in the next
-   * major.
-   */
-  readonly closeOnError?: boolean;
   /**
    * Optional off-hours window restricting when autoclose evaluates. A
    * synthesized autoclose reaction that triggers outside the window
@@ -10404,15 +10350,6 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
  * \`ActOptions.maxSubscribedStreams\`.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
-/**
- * @deprecated The cadence knob is derived from \`autocloseWindow\` now;
- * nothing consumes it. Kept for compat; removed in the next major.
- */
-export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_BATCH_SIZE = 64;
-/** @deprecated Unused since the autoclose sweep was removed. */
-export const DEFAULT_CLOSE_YIELD_MS = 0;
 
 /** Per-Act ports bag. Both required together — a shared cache across stores would collide on stream keys. */
 export type Scoped = {
@@ -10431,10 +10368,6 @@ export type CircuitBreakerOptions = {
 
 /** Resolved autoclose configuration after validation + default expansion. */
 export type AutocloseConfig = {
-  autocloseCycleMinutes: number;
-  closeBatchSize: number;
-  closeYieldMs: number;
-  closeOnError: boolean;
   autocloseWindow?: { start: number; end: number; timeZone: string };
 };
 
@@ -10560,39 +10493,6 @@ export type ActOptions<TLanes extends string = string> = {
    * a \`ZodError\` at \`act().build()\`. Defaults: threshold 5, cooldown 30s.
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
-  /**
-   * @deprecated Accepted, validated, and ignored. It paced the off-hours
-   * re-check of the old autoclose sweep; the synthesized autoclose reaction now derives its re-check
-   * directly from \`autocloseWindow\` — a tick landing outside the window
-   * parks until the exact instant the window opens, so there is no
-   * polling cadence to configure (and nothing minute-denominated on the
-   * close surface). Still validated as an integer \`[1, 1440]\` so typos
-   * keep failing loudly at \`act().build()\`. Will be removed in the next
-   * major.
-   */
-  readonly autocloseCycleMinutes?: number;
-  /**
-   * @deprecated Unused since the autoclose sweep was replaced by a
-   * synthesized per-aggregate reaction — nothing pages the store in
-   * batches anymore, so nothing reads this. Accepted and validated
-   * (\`[1, 1024]\`) for compatibility; will be removed in the next major.
-   */
-  readonly closeBatchSize?: number;
-  /**
-   * @deprecated Unused: the sweep that yielded between
-   * successive \`Store.truncate\` calls no longer exists; closes are
-   * staged per stream by the autoclose reaction. Accepted and validated
-   * (\`[0, 1000]\`) for compatibility; will be removed in the next major.
-   */
-  readonly closeYieldMs?: number;
-  /**
-   * @deprecated Unused: the sweep-side predicate try/catch
-   * this flag steered no longer exists; a throwing policy predicate now
-   * follows the reaction retry path (\`blockOnError: false\`, three
-   * retries). Accepted for compatibility; will be removed in the next
-   * major.
-   */
-  readonly closeOnError?: boolean;
   /**
    * Optional off-hours window restricting when autoclose evaluates. A
    * synthesized autoclose reaction that triggers outside the window

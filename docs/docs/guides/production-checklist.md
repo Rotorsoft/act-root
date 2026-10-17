@@ -35,15 +35,11 @@ A few production-relevant defaults to override depending on workload:
 
 `SqliteStore` from `@rotorsoft/act-sqlite` is the right choice for embedded / single-node deployments. Same interface; no pool tuning.
 
-## 2. Wire `settle()` to `"committed"`
+## 2. Reactions settle on their own
 
-Without this, projections and reactions never run. The canonical pattern, set once at bootstrap:
+There is nothing to wire. A commit whose events have a reaction in this app schedules `settle()`, and so does a commit from another process (through `Store.notify`). See [Event sourcing § settle()](../concepts/event-sourcing.md#settle) for the rule.
 
-```typescript no-check
-app.on("committed", () => app.settle());
-```
-
-`settle()` is debounced (default 10ms) and non-blocking. Multiple commits inside the debounce window collapse into a single `correlate → drain` pass. The function returns void; await the `"settled"` event when you need to know the framework is idle.
+`settle()` is debounced (default 10ms) and non-blocking. Multiple commits inside the debounce window collapse into a single `correlate → drain` pass. Listen for the `"settled"` event when you need to know the framework is idle.
 
 Tune the debounce via `act().build({ settleDebounceMs: 25 })` if your workload bursts in tight loops (you'll see the `"settled"` event fire more often, with smaller batches).
 
@@ -382,7 +378,6 @@ Before pushing to production, walk this list mentally:
 
 - [ ] `store(new PostgresStore({…}))` (or SqliteStore) configured before any state is loaded
 - [ ] `await store().seed()` runs at bootstrap (idempotent)
-- [ ] `app.on("committed", () => app.settle())` wired
 - [ ] `app.on("blocked", …)` wired to monitoring
 - [ ] Snap policies set on long-lived states
 - [ ] Idempotency middleware on mutation endpoints

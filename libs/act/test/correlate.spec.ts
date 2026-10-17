@@ -306,7 +306,8 @@ describe("correlate: arming lanes", () => {
           source: e.stream,
           lane: "payments",
         }))
-        .build();
+        // The starvation window is the point, so nothing settles on its own.
+        .build({ settleDebounceMs: 60_000 });
 
       // Consume the correlate cycle's one-time cold-start arm first, so
       // the assertions below exercise the steady state, not init.
@@ -350,7 +351,6 @@ describe("correlate: arming lanes", () => {
           lane: "payments",
         }))
         .build({ settleDebounceMs: 150 });
-      app.on("committed", () => app.settle());
 
       await app.do("place", { stream: "o1", actor }, { sku: "x" });
       await vi.waitFor(() => expect(seen).toEqual(["o1"]), { timeout: 2_000 });

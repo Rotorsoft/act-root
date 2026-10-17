@@ -251,7 +251,6 @@ So for a read model over states that close or prune: write it as an `.of()` fold
 
 1. **Reading the projection from inside an action handler.** The projection lags behind the event log by however long it takes the drain pipeline to catch up. If your action's logic depends on the projection being current, you have a race. Read state via `app.load(...)` (which always sees the current state through the snapshot/cache layer) — never via the projection.
 2. **Projections that aren't idempotent.** Replays can and will happen. Every write must be expressible as `INSERT … ON CONFLICT DO UPDATE` or `UPDATE … WHERE`, never as a counter you increment by reading the previous value. The in-SQL `x + 1` pattern looks ugly until your first replay corrupts a counter and you understand why it's necessary.
-3. **Forgetting the `"committed"` wiring.** In production, projections only update because something runs `correlate → drain` after each commit. The canonical wiring is `app.on("committed", () => app.settle())` at bootstrap — see [Production checklist](./production-checklist.md). Without it, you'll commit events all day and notice the projection is hours behind.
 
 ## Where to look in source
 
