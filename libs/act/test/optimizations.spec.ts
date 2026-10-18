@@ -11,7 +11,7 @@
  *       trips (event-sourcing.ts `action()` → `void snap(last)`).
  *   (b) batched projection replay — a static-target projection with
  *       `.batch(fn)` receives every claimed event in ONE call, not one
- *       call per event (reaction-builder.ts `build_handle_batch`).
+ *       call per event (internal/reaction-dispatch.ts `build_handle_batch`).
  *   (c) cache `after: cached.event_id` — a cache-warm load queries the
  *       store with `after` set and replays zero pre-cache rows
  *       (event-sourcing.ts `load()` query options).
@@ -52,7 +52,8 @@ describe("optimization guards", () => {
 
     it("writes one snapshot per 5 commits, none before", async () => {
       const { app, store, dispose } = await sandbox(
-        act().withState(SnappingCounter)
+        act().withState(SnappingCounter),
+        { actOptions: { autoSettle: false } }
       );
       try {
         const stream = "snap-cadence";
@@ -122,7 +123,8 @@ describe("optimization guards", () => {
         .build();
 
       const { app, dispose } = await sandbox(
-        act().withState(Counter).withProjection(BatchProjection)
+        act().withState(Counter).withProjection(BatchProjection),
+        { actOptions: { autoSettle: false } }
       );
       try {
         const stream = "batch-src";
@@ -151,7 +153,8 @@ describe("optimization guards", () => {
   describe("(c) cache 'after: cached.event_id' skips pre-cache rows on load", () => {
     it("a cache-warm load queries with `after` and replays zero rows", async () => {
       const { app, store, cache, dispose } = await sandbox(
-        act().withState(Counter)
+        act().withState(Counter),
+        { actOptions: { autoSettle: false } }
       );
       try {
         const stream = "cache-after";

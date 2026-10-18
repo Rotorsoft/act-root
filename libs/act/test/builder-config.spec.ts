@@ -180,7 +180,9 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
   });
 
   it("settle({ maxPasses: Infinity }) does not throw at the call site", async () => {
-    const ctx = await sandbox(act().withState(S_cfg));
+    const ctx = await sandbox(act().withState(S_cfg), {
+      actOptions: { autoSettle: false },
+    });
     try {
       // Throws a ZodError at `resolveSettleConfig` before this fix.
       await ctx.app.settle({ maxPasses: Number.POSITIVE_INFINITY });
@@ -219,7 +221,7 @@ describe("config is validated at the declaration/runtime site", () => {
         .withState(counter)
         .on("ticked")
         .do(react, { maxRetries: Number.NaN })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow();
   });
 
@@ -240,18 +242,20 @@ describe("config is validated at the declaration/runtime site", () => {
       act()
         .withState(counter)
         .withLane({ name: "slow", leaseMillis: Number.NaN })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow();
   });
 
-  it("act().build() with a bad maxSubscribedStreams throws", () => {
+  it("act().build({ autoSettle: false }) with a bad maxSubscribedStreams throws", () => {
     expect(() =>
-      act().withState(counter).build({ maxSubscribedStreams: 0 })
+      act()
+        .withState(counter)
+        .build({ autoSettle: false, maxSubscribedStreams: 0 })
     ).toThrow();
   });
 
   it("drain() / settle() with a NaN knob throw at the call", async () => {
-    const app = act().withState(counter).build();
+    const app = act().withState(counter).build({ autoSettle: false });
     await expect(app.drain({ leaseMillis: Number.NaN })).rejects.toThrow();
     expect(() => app.settle({ debounceMs: Number.NaN })).toThrow();
   });

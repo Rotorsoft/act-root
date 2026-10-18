@@ -623,6 +623,48 @@ export type AutocloseArchiver<TEvents extends Schemas> = (
 ) => Promise<void>;
 
 /**
+ * Declarative close-policy options consumed by `.autocloses({...})`.
+ * Top-level fields are AND-combined; the optional `or` block opens an
+ * alternative OR-path. Omitted fields contribute nothing — they do
+ * not mean "match everything."
+ *
+ * @property after - Close when `head.created` is at least the resolved
+ *   window in the past. Days are the close surface's only unit;
+ *   fractional `days` cover sub-day cooldowns (`{ days: 1/24 }` is one
+ *   hour) without introducing another denomination.
+ * @property is - Close when `head.name` matches. String for the
+ *   single-terminal-event case (the most common); `readonly string[]`
+ *   for multi-terminal states (`Order: Shipped | Delivered |
+ *   Cancelled`).
+ * @property reaches - Close when the stream's event count is `>= N`
+ *   (inclusive — fires the moment the threshold is reached).
+ * @property or - Alternative OR-path. When present, the policy fires
+ *   if EITHER the top-level AND group matches OR any field inside
+ *   `or` matches. Used for safety-net backstops layered onto a
+ *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
+ *   10k"*). Nested `or` inside `or` rejects at build time.
+ * @property keep - Rolling-window retention, **independent** of
+ *   the terminate fields: while the stream stays open, prune events
+ *   older than `now − keep` behind the closest safe snapshot via a
+ *   windowed close. Does not participate in the AND group or the `or`
+ *   block — a policy may terminate, prune, or both. Requires
+ *   `.snap(...)` earlier in the builder chain (type-gated) and a
+ *   window of at least one day — the close cycle is low-cadence
+ *   housekeeping, never sub-day realtime.
+ */
+export type AutoclosePolicy = {
+  after?: { days: number };
+  is?: string | readonly string[];
+  reaches?: number;
+  or?: {
+    after?: { days: number };
+    is?: string | readonly string[];
+    reaches?: number;
+  };
+  keep?: { days: number };
+};
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -1012,6 +1054,17 @@ export type ScanResult = {
 };
 
 /**
+ * Construct a {@link CsvFile} from either a filesystem path (for
+ * reading and/or writing through the OS) or an in-memory blob (a
+ * pre-loaded CSV string, used by the inspector when a CSV arrives
+ * over the wire via tRPC).
+ *
+ * Both modes share the same on-disk format, so the same blob shape
+ * can be round-tripped through the transfer pipeline.
+ */
+export type CsvFileOptions = { path: string } | { blob: string };
+
+/**
  * Read end of the transfer pipeline. Anything
  * that exposes a `Store.query`-shaped reader plus `dispose` can be
  * used as a source for {@link IAct.restore}.
@@ -1185,3 +1238,19 @@ export interface IAct<
    */
   forget(stream: string): Promise<{ eventCount: number }>;
 }
+
+/**
+ * The patch step: merges a reducer's partial into state. The builder picks
+ * one per app, never per event. `me` and `event` let a validating patch
+ * name the reduction that produced an invalid state.
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;

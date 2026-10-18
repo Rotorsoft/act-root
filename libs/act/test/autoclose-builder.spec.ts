@@ -10,15 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import {
-  act,
-  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
-  DEFAULT_CLOSE_BATCH_SIZE,
-  DEFAULT_CLOSE_YIELD_MS,
-  resolveAutocloseConfig,
-  state,
-  ZodEmpty,
-} from "../src/index.js";
+import { act, resolveAutocloseConfig, state, ZodEmpty } from "../src/index.js";
 import {
   hour_in_zone,
   in_autoclose_window,
@@ -266,96 +258,6 @@ describe("registry.autoclose_archiver(state_name) — lookup", () => {
 });
 
 describe("resolveAutocloseConfig — defaults + validation", () => {
-  it("applies all defaults when no knobs are set", () => {
-    const cfg = resolveAutocloseConfig(undefined);
-    expect(cfg.autocloseCycleMinutes).toBe(DEFAULT_AUTOCLOSE_CYCLE_MINUTES);
-    expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
-    expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
-    expect(cfg.closeOnError).toBe(false);
-  });
-
-  it("applies defaults when ActOptions has none of the autoclose keys", () => {
-    const cfg = resolveAutocloseConfig({});
-    expect(cfg.autocloseCycleMinutes).toBe(DEFAULT_AUTOCLOSE_CYCLE_MINUTES);
-    expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
-    expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
-    expect(cfg.closeOnError).toBe(false);
-  });
-
-  it("preserves caller-supplied knobs", () => {
-    const cfg = resolveAutocloseConfig({
-      autocloseCycleMinutes: 600,
-      closeBatchSize: 128,
-      closeYieldMs: 5,
-      closeOnError: true,
-    });
-    expect(cfg.autocloseCycleMinutes).toBe(600);
-    expect(cfg.closeBatchSize).toBe(128);
-    expect(cfg.closeYieldMs).toBe(5);
-    expect(cfg.closeOnError).toBe(true);
-  });
-
-  it("rejects autocloseCycleMinutes below the 1 minute floor", () => {
-    expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMinutes: 0 })
-    ).toThrow();
-  });
-
-  it("rejects autocloseCycleMinutes above the 24 h ceiling", () => {
-    expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMinutes: 1441 })
-    ).toThrow();
-  });
-
-  it("rejects a non-integer autocloseCycleMinutes", () => {
-    expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMinutes: 12.5 })
-    ).toThrow();
-  });
-
-  it("rejects non-finite autocloseCycleMinutes", () => {
-    expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMinutes: Number.NaN })
-    ).toThrow();
-    expect(() =>
-      resolveAutocloseConfig({
-        autocloseCycleMinutes: Number.POSITIVE_INFINITY,
-      })
-    ).toThrow();
-  });
-
-  it("rejects closeBatchSize below 1", () => {
-    expect(() => resolveAutocloseConfig({ closeBatchSize: 0 })).toThrow();
-  });
-
-  it("rejects closeBatchSize above 1024", () => {
-    expect(() => resolveAutocloseConfig({ closeBatchSize: 1025 })).toThrow();
-  });
-
-  it("rejects non-integer closeBatchSize", () => {
-    expect(() => resolveAutocloseConfig({ closeBatchSize: 12.5 })).toThrow();
-  });
-
-  it("rejects non-finite closeBatchSize", () => {
-    expect(() =>
-      resolveAutocloseConfig({ closeBatchSize: Number.NaN })
-    ).toThrow();
-  });
-
-  it("rejects closeYieldMs below 0", () => {
-    expect(() => resolveAutocloseConfig({ closeYieldMs: -1 })).toThrow();
-  });
-
-  it("rejects closeYieldMs above 1000", () => {
-    expect(() => resolveAutocloseConfig({ closeYieldMs: 1001 })).toThrow();
-  });
-
-  it("rejects non-finite closeYieldMs", () => {
-    expect(() =>
-      resolveAutocloseConfig({ closeYieldMs: Number.NaN })
-    ).toThrow();
-  });
-
   it("defaults autocloseWindow to undefined", () => {
     expect(resolveAutocloseConfig({}).autocloseWindow).toBeUndefined();
   });
@@ -527,25 +429,19 @@ describe("next_window_open — the derived off-window re-check", () => {
 });
 
 describe("act().build() — autoclose validation runs at build time", () => {
-  it("out-of-range autocloseCycleMinutes throws on build", () => {
+  it("an out-of-range autocloseWindow throws on build", () => {
     expect(() =>
-      act().withState(make_ticket().build()).build({ autocloseCycleMinutes: 0 })
+      act()
+        .withState(make_ticket().build())
+        .build({ autocloseWindow: { start: 24, end: 2 } })
     ).toThrow();
   });
 
-  it("out-of-range closeBatchSize throws on build", () => {
-    expect(() =>
-      act().withState(make_ticket().build()).build({ closeBatchSize: 99_999 })
-    ).toThrow();
-  });
-
-  it("valid knobs construct an Act successfully", () => {
+  it("a valid autocloseWindow constructs an Act", () => {
     const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
-    const app = act().withState(Ticket).build({
-      autocloseCycleMinutes: 600,
-      closeBatchSize: 32,
-      closeYieldMs: 0,
-    });
+    const app = act()
+      .withState(Ticket)
+      .build({ autocloseWindow: { start: 22, end: 6 } });
     expect(app.registry.autoclose_policy("Ticket")).toBeInstanceOf(Function);
   });
 });

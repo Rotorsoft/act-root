@@ -7,7 +7,7 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
-import { default_correlator } from "../src/internal/correlator.js";
+import { default_correlator } from "../src/internal/correlation-id.js";
 
 describe("default_correlator (pure)", () => {
   const baseCtx = {
@@ -77,7 +77,7 @@ describe("Act integration", () => {
   });
 
   it("uses default correlator when none provided", async () => {
-    const app = act().withState(counter).build();
+    const app = act().withState(counter).build({ autoSettle: false });
     await app.do("increment", { stream: "s1", actor }, {});
     const events = await app.query_array({ stream: "s1" });
     expect(events[0]?.meta.correlation).toMatch(/^coun-incr-[0-9a-z]{8}$/);
@@ -86,7 +86,9 @@ describe("Act integration", () => {
   it("honors a custom correlator from ActOptions", async () => {
     const correlator: Correlator = ({ state, action, stream }) =>
       `custom:${state}:${action}:${stream}`;
-    const app = act().withState(counter).build({ correlator });
+    const app = act()
+      .withState(counter)
+      .build({ autoSettle: false, correlator });
     await app.do("increment", { stream: "s2", actor }, {});
     const events = await app.query_array({ stream: "s2" });
     expect(events[0]?.meta.correlation).toBe("custom:Counter:increment:s2");
@@ -103,9 +105,7 @@ describe("Act integration", () => {
       .withState(counter)
       .on("incremented")
       .do(captured)
-      .build({
-        correlator: () => "WORKFLOW-42",
-      });
+      .build({ autoSettle: false, correlator: () => "WORKFLOW-42" });
 
     await app.do("increment", { stream: "s3", actor }, {});
     await app.correlate();
@@ -120,7 +120,9 @@ describe("Act integration", () => {
       return "x";
     };
 
-    const app = act().withState(counter).build({ correlator });
+    const app = act()
+      .withState(counter)
+      .build({ autoSettle: false, correlator });
     await app.do(
       "increment",
       { stream: "s4", actor: { id: "alice", name: "Alice" } },
@@ -159,7 +161,9 @@ describe("close-cycle integration", () => {
       return `id-${seen.length}`;
     };
 
-    const app = act().withState(counter).build({ correlator });
+    const app = act()
+      .withState(counter)
+      .build({ autoSettle: false, correlator });
     await app.do("increment", { stream: "to-close", actor }, {});
     await app.close([{ stream: "to-close" }]);
 

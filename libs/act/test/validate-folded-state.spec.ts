@@ -49,7 +49,9 @@ describe("validateFoldedState", () => {
   });
 
   it("throws at the triggering event when a reducer produces schema-violating state", async () => {
-    const app = act().withState(calc()).build({ validateFoldedState: true });
+    const app = act()
+      .withState(calc())
+      .build({ autoSettle: false, validateFoldedState: true });
     await app.do("add", { stream: "c1", actor }, { by: 5 });
     await expect(
       app.do("divide", { stream: "c1", actor }, {})
@@ -57,7 +59,9 @@ describe("validateFoldedState", () => {
   });
 
   it("names the state and the triggering event in the error", async () => {
-    const app = act().withState(calc()).build({ validateFoldedState: true });
+    const app = act()
+      .withState(calc())
+      .build({ autoSettle: false, validateFoldedState: true });
     let caught: unknown;
     try {
       await app.do("divide", { stream: "c2", actor }, {});
@@ -71,13 +75,15 @@ describe("validateFoldedState", () => {
   });
 
   it("does NOT throw and produces the bad state when the flag is off (default)", async () => {
-    const app = act().withState(calc()).build();
+    const app = act().withState(calc()).build({ autoSettle: false });
     const [snap] = await app.do("divide", { stream: "c3", actor }, {});
     expect(Number.isNaN((snap.state as { result: number }).result)).toBe(true);
   });
 
   it("leaves a well-behaved app unchanged with the flag on (no spurious throws)", async () => {
-    const app = act().withState(calc()).build({ validateFoldedState: true });
+    const app = act()
+      .withState(calc())
+      .build({ autoSettle: false, validateFoldedState: true });
     for (let i = 0; i < 25; i++)
       await app.do("add", { stream: "ok", actor }, { by: 1 });
     const snap = await app.load("Calc", "ok");
@@ -91,10 +97,12 @@ describe("validateFoldedState", () => {
     // the cache and replays every event from the store, so the reducer
     // actually runs — a warm cache hit would fold nothing, so there would
     // be nothing to validate (the flag guards reductions, not reads).
-    const writer = act().withState(calc()).build();
+    const writer = act().withState(calc()).build({ autoSettle: false });
     await writer.do("divide", { stream: "replay", actor }, {});
 
-    const reader = act().withState(calc()).build({ validateFoldedState: true });
+    const reader = act()
+      .withState(calc())
+      .build({ autoSettle: false, validateFoldedState: true });
     await expect(
       reader.load("Calc", "replay", undefined, { before: 1_000_000 })
     ).rejects.toBeInstanceOf(ValidationError);
@@ -109,7 +117,7 @@ describe("validateFoldedState", () => {
     const table = new Map<string, Row>();
     const errors: string[] = [];
 
-    const writer = act().withState(calc()).build();
+    const writer = act().withState(calc()).build({ autoSettle: false });
     await writer.do("divide", { stream: "p1", actor }, {});
     // Cold the shared cache so the fold handler's first-sight load
     // actually replays the bad event through the reducer (a warm hit
@@ -125,7 +133,7 @@ describe("validateFoldedState", () => {
     const app = act()
       .withState(calc())
       .withProjection(proj)
-      .build({ validateFoldedState: true });
+      .build({ autoSettle: false, validateFoldedState: true });
     app.on("blocked", (leases) => {
       for (const l of leases) if (l.error) errors.push(l.error);
     });

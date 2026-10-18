@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, log, state, store } from "../src/index.js";
-import { CloseSignal } from "../src/internal/close-signal.js";
+import { CloseSignal } from "../src/internal/reaction-dispatch.js";
 
 /**
  * App code failing inside a framework loop (a resolver, a close's archive
@@ -47,7 +47,10 @@ describe("a resolver that throws during correlate", () => {
         if (broken && event.stream === "s1") throw new Error("resolver bug");
         return { target: `t-${event.stream}` };
       })
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 },
+      });
     const errors: unknown[] = [];
     app.on("error", (e) => errors.push(e));
     const logged = vi.spyOn(log(), "error").mockImplementation(() => {});
@@ -95,7 +98,10 @@ describe("a resolver that throws during drain", () => {
         // With a source, each target reads only its own stream's events.
         return { target: `t-${event.stream}`, source: event.stream };
       })
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 },
+      });
     const errors: unknown[] = [];
     app.on("error", (e) => errors.push(e));
     const blocked: { stream: string; error: string }[] = [];
@@ -131,7 +137,7 @@ describe("a resolver that throws during drain", () => {
         if (fail) throw "drain-time bug";
         return { target: `t-${event.stream}`, source: event.stream };
       })
-      .build();
+      .build({ autoSettle: false });
     const blocked: unknown[] = [];
     app.on("blocked", (leases) => blocked.push(...leases));
     vi.spyOn(log(), "error").mockImplementation(() => {});
@@ -166,7 +172,10 @@ describe("a reaction-requested close whose archive callback throws", () => {
           },
         });
       })
-      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 },
+      });
     const errors: unknown[] = [];
     app.on("error", (e) => errors.push(e));
     const logged = vi.spyOn(log(), "error").mockImplementation(() => {});

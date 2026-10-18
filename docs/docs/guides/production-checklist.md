@@ -35,17 +35,15 @@ A few production-relevant defaults to override depending on workload:
 
 `SqliteStore` from `@rotorsoft/act-sqlite` is the right choice for embedded / single-node deployments. Same interface; no pool tuning.
 
-## 2. Wire `settle()` to `"committed"`
+## 2. Reactions settle on their own
 
-Without this, projections and reactions never run. The canonical pattern, set once at bootstrap:
+There is nothing to wire. A commit whose events have a reaction in this app schedules `settle()`, and so does a commit from another process (through `Store.notify`). Call `app.settle()` once at startup, after `seed()`: it runs the work left pending by the last shutdown, including deferred and backed-off streams, which otherwise wait until something drains their lane. See [Event sourcing § settle()](../concepts/event-sourcing.md#settle) for the rule.
 
-```typescript no-check
-app.on("committed", () => app.settle());
-```
+`settle()` is debounced (default 10ms) and non-blocking. Multiple commits inside the debounce window collapse into a single `correlate → drain` pass. Listen for the `"settled"` event when you need to know the framework is idle.
 
-`settle()` is debounced (default 10ms) and non-blocking. Multiple commits inside the debounce window collapse into a single `correlate → drain` pass. The function returns void; await the `"settled"` event when you need to know the framework is idle.
+Raise the debounce via `act().build({ settleDebounceMs: 25 })` if commits come in tight bursts: fewer, larger batches. A pass a commit schedules is never put off by later commits, so steady writes can't starve it.
 
-Tune the debounce via `act().build({ settleDebounceMs: 25 })` if your workload bursts in tight loops (you'll see the `"settled"` event fire more often, with smaller batches).
+A process that only writes (an API pod in a writer/worker split, a seed or migration script, an admin CLI) should build with `drain: false`, or it runs reactions too.
 
 ## 3. Listen for `"blocked"`
 
@@ -226,8 +224,8 @@ await cache().clear();
 // 3. Rebuild projections. Restore replaces events; it does not replay them
 //    through reactions. If any projection lives in a database/cache outside
 //    the event log, you need an explicit reset for it.
-await app.reset({ stream: "^proj-" });
-app.settle({ eventLimit: 1000 });
+await app.reset({ stream: "^proj-" }); // settles the replay on its own
+app.settle({ eventLimit: 1000 });      // optional: bigger batches
 ```
 
 Operator-side guardrails:
@@ -289,7 +287,7 @@ const app = act()
 
 - **`leaseMillis`** — set to the longest expected handler invocation in the lane plus headroom (50–100%). A lease shorter than the handler causes premature re-claim and double dispatch; a lease far longer than the handler delays crash recovery (a dead worker's leases stay parked until expiry). For webhook lanes, match your HTTP client timeout. For best-effort lanes, sub-second is usually right.
 - **`streamLimit`** — bounds the per-cycle parallel handler budget. With slow handlers (100 ms+), keep this low so an erroring batch doesn't tie up a wide pool of leases. With fast handlers, raise it to amortize the claim round-trip.
-- **`cycleMs`** — when set, the lane's controller drains at this cadence (independent of the Act's settle loop). It drains work that correlation has already marked; it does not correlate, so a new commit still reaches the lane through `notify`, `settle()` or `start_correlations()`. Best for "always-on" lanes that should keep draining while handlers fail or a backlog clears. Omit for lanes that are fine running on the settle debounce. Deferred and backed-off streams do not need it: each worker wakes its own drain at their due-time.
+- **`cycleMs`** — when set, the lane's controller drains at least this often. It is a floor, not a rate limit: with `autoSettle` on (the default), a commit's settle drains every armed lane, so a slow lane may run sooner when nothing else is waiting. The chain is the extra precaution for when `autoSettle` is off, and for lanes that should keep draining while handlers fail or a backlog clears. It drains work that correlation has already marked; it does not correlate. Deferred and backed-off streams do not need it: each worker wakes its own drain at their due-time.
 
 **Process-per-lane and the coverage invariant.** When you deploy one process per lane with `onlyLanes`, no single instance drains every lane — that's the point. What each instance can't see is whether some *other* instance is covering the lanes it skipped. The cluster invariant is that the union of every worker's `onlyLanes` must cover every declared lane: `∪ onlyLanes ⊇ declared lanes`. A lane left out of every worker's set has no `DrainController` anywhere, so its streams are subscribed but never claimed, and its reactions silently stall.
 
@@ -382,7 +380,7 @@ Before pushing to production, walk this list mentally:
 
 - [ ] `store(new PostgresStore({…}))` (or SqliteStore) configured before any state is loaded
 - [ ] `await store().seed()` runs at bootstrap (idempotent)
-- [ ] `app.on("committed", () => app.settle())` wired
+- [ ] `app.settle()` runs once at startup, after `seed()`
 - [ ] `app.on("blocked", …)` wired to monitoring
 - [ ] Snap policies set on long-lived states
 - [ ] Idempotency middleware on mutation endpoints

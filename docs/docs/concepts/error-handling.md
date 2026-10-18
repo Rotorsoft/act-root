@@ -158,7 +158,7 @@ The drain, settle, and autoclose loops all hit the store. When it goes down, eve
 - **open** → after `failureThreshold` consecutive failures, any drain/settle/autoclose attempt *skips* the store while open.
 - **half-open** → once `cooldownMs` has passed, the next attempt is a trial; a pass closes the breaker, a failure re-opens it.
 
-After **every** store failure, open or not, the breaker schedules one **retry** (a settle) `cooldownMs` later, so recovery is **automatic**: you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; the retry re-trials it and the breaker closes as soon as the store is healthy again. A failed drain pass also keeps its controller armed and retries on its own, never before the leases it took expire, since only then can another pass claim those streams.
+After **every** store failure, open or not, the breaker schedules one **retry** (a settle) `cooldownMs` later (plus the settle debounce, `settleDebounceMs`), so recovery is **automatic**: you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; the retry re-trials it and the breaker closes as soon as the store is healthy again. A failed drain pass also keeps its controller armed and retries on its own, never before the leases it took expire, since only then can another pass claim those streams.
 
 If the store stays down, the breaker keeps probing — **one attempt per `cooldownMs`, indefinitely** (always exactly one pending timer, `unref()`'d so it never blocks process exit). It never gives up, so it recovers whenever the store returns; the trade-off is that each failed probe re-emits the `error` event (an outage heartbeat — raise `cooldownMs` or dedupe in your handler if that's too chatty). The timer is cleared on the first successful probe and on `dispose()`. Tune it via [`ActOptions.circuitBreaker`](./configuration#circuit-breaker) (defaults: threshold 5, cooldown 30s).
 
@@ -216,8 +216,7 @@ CreateItem: authedProcedure
   .mutation(async ({ input, ctx }) => {
     try {
       const snaps = await app.do("CreateItem", { stream: id, actor: ctx.actor }, input);
-      // settle runs automatically — wired at bootstrap via
-      // app.on("committed", () => app.settle())
+      // the commit settles its reactions on its own
       return { success: true, id };
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -442,7 +441,7 @@ await app.unblock({ stream: "^webhooks-out-" });
 await app.unblock({});
 ```
 
-`unblock` clears the blocked flag, resets retry count, drops any stale lease, and arms the orchestrator's drain flag so a settled app picks up the now-free stream on the next cycle. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
+`unblock` clears the blocked flag, resets retry count, drops any stale lease, and settles the now-free stream on its own. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
 
 The filter form always restricts to `blocked = true` regardless of what the caller passes — there's no use case for "unblock unblocked streams." Already-unblocked streams and unknown names are silently skipped; the return count reflects only streams that were actually flipped.
 

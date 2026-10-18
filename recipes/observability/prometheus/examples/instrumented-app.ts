@@ -35,10 +35,9 @@ const app = act()
     { backoff: { strategy: "fixed", baseMs: 10 } }
   )
   .to((event) => ({ target: `fulfillment:${event.stream}` }))
-  .build();
-// Production wires app.on("committed", () => app.settle()) and lets the
-// debounced loop drive processing; this demo drains explicitly instead
-// so the poison stream's retry budget exhausts deterministically.
+  // This demo walks the pipeline itself, so the poison stream's retry
+  // budget exhausts deterministically; an app leaves autoSettle on.
+  .build({ autoSettle: false });
 
 // The bridge: one call, canonical metric set, on a registry we own.
 const registry = new Registry();

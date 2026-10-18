@@ -61,7 +61,7 @@ app.on("notified", (n) => sse.broadcast(n));
 
 Every store instance carries a per-instance UUID (`_by`) embedded in the NOTIFY payload. The LISTEN handler skips payloads where `by === this._by`. Result:
 
-- Local commits never echo back through `notified` (the local fast path inside `do()` already arms drain — no double signal).
+- Local commits never echo back through `notified` (`do()` already settles a local commit's reactions, so there is no double signal).
 - The `notified` lifecycle event surfaces only **another process** writing to the same store. That gives consumers a clean signal for cross-process visibility.
 
 The alternative (broadcast everything, let the consumer filter) was rejected as messier — it pollutes the local fast path with self-echoes and forces every listener to know about the filter.

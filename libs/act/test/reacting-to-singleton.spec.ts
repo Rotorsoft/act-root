@@ -47,7 +47,7 @@ const app = act()
     );
   })
   .to({ target: "book-income" })
-  .build();
+  .build({ autoSettle: false });
 
 describe("ambient reactingTo on the singleton-port path", () => {
   beforeEach(async () => {

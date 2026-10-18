@@ -95,11 +95,9 @@ function buildApp(rec: LatencyRecorder) {
     .on("Tick")
     .do(handler)
     .to((e) => ({ source: e.stream, target: `proj-${e.stream}` }))
-    .build();
-
-  // Production pattern: settle on every commit so reactions wake on
-  // the local fast path (do → arm drain → settle debounced).
-  app.on("committed", () => app.settle({ debounceMs: 0 }));
+    // A commit settles its reactions on its own; no debounce, to measure
+    // the reaction latency itself.
+    .build({ settleDebounceMs: 0 });
 
   return app;
 }

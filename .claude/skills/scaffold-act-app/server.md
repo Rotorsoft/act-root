@@ -156,12 +156,12 @@ Without snapshots, a cold-start `load()` replays the entire event stream. With s
 
 ## Background Correlation (Large-Scale)
 
-For high-throughput deployments, use periodic background correlation instead of (or in addition to) `app.settle()`:
+When other processes commit to the same store and it has no `notify` (SQLite, or Postgres with `listen: false`), poll for their commits:
 
 ```typescript
 import { dispose } from "@rotorsoft/act";
 
-// Periodic settle — picks up work committed by other processes every 3s
+// Periodic settle — picks up commits from other processes every 3s
 app.start_correlations({ limit: 10 }, 3000);
 
 // Graceful shutdown — dispose() shuts the app down (stopping the poll) and
@@ -770,9 +770,9 @@ execSync(`DATABASE_URL=${TEST_DB_URL} pnpm drizzle-kit migrate`, { cwd: "path/to
 
 ### Bootstrap Order
 
-Initialize in this order: DB → event store (+ optional cache adapter) → wire `committed` listener → initial settle (replays events and runs projections) → warm caches → enable background processes.
+Initialize in this order: DB → event store (+ optional cache adapter) → initial settle (replays events and runs projections) → warm caches → enable background processes.
 
-**Critical pattern: settle on committed events.** Reactions produce new events during drain. Those new events fire `committed`, which must trigger another `settle()` to process the reaction's output through projections and further reactions. Without this, projection streams lag behind after reaction chains. Wire `app.on("committed", () => app.settle())` **before** the initial settle so that events produced during startup settle are also processed.
+**Commits settle on their own.** A commit whose events have a reaction schedules `settle()`, and reactions' own commits do the same, so reaction chains propagate through projections without wiring. Automatic passes use each lane's settings (`.withLane({ streamLimit, leaseMillis })`). `app.settle(options)` applies its options to the next pass only, which is what the startup settle below wants; don't call it from a `committed` listener, since commits already schedule passes.
 
 ```typescript
 async function bootstrap() {
@@ -780,9 +780,6 @@ async function bootstrap() {
   await store().seed();
 
   const settleOpts = { streamLimit: 100, eventLimit: 1000 };
-
-  // Settle after every commit — ensures reaction chains fully propagate
-  app.on("committed", () => app.settle(settleOpts));
 
   // Settle on startup — replays pending events and runs projections
   await new Promise<void>((resolve) => {

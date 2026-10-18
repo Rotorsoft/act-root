@@ -5,7 +5,7 @@
  * the public `Store`, never orchestration internals.
  */
 
-import { SNAP_EVENT } from "../ports.js";
+import { pii_fields } from "../sensitive.js";
 import type {
   AuditCategory,
   AuditFinding,
@@ -18,11 +18,11 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
+import { SNAP_EVENT } from "../types/index.js";
 import {
   current_version_of,
   deprecated_event_names,
 } from "./event-versions.js";
-import { pii_fields } from "./sensitive.js";
 import { walk_streams } from "./walk-streams.js";
 
 /** The orchestrator state the audit reads, built once at `build()`. */

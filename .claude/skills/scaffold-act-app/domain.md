@@ -338,7 +338,7 @@ export const app = appBuilder.build();
 
 **What to test and what not to:** Test domain behavior — actions produce correct events, invariants reject invalid state transitions, reactions trigger expected downstream actions, projections build correct read models. Do NOT test framework internals (event storage, cache behavior, version numbering). Trust the framework for infrastructure; verify your business logic.
 
-**Testing reactions requires two steps:** First `correlate()` — which discovers target streams *and* marks the work waiting on them — then `drain()` to claim and process it. A common AI mistake is calling only `drain()`; it returns empty, because `claim` follows the mark and nothing has raised one. That applies to already-registered and static targets too, not just newly discovered ones. In tests, always call both explicitly. In production, `settle()` handles this automatically.
+**Testing reactions requires two steps** (on an app built with `autoSettle: false`, so nothing settles in the background; timers still run: backoff and defer wake-ups, `cycleMs` lanes, `start_correlations` and the breaker's recovery pass): First `correlate()` — which discovers target streams *and* marks the work waiting on them — then `drain()` to claim and process it. A common AI mistake is calling only `drain()`; it returns empty, because `claim` follows the mark and nothing has raised one. That applies to already-registered and static targets too, not just newly discovered ones. In tests, always call both explicitly. In production, `settle()` handles this automatically.
 
 ```typescript
 import { expect } from "vitest";
@@ -350,7 +350,8 @@ const actor: AppActor = { id: "user-1", name: "Test", role: "user" };
 const target = (stream = crypto.randomUUID()): Target => ({ stream, actor });
 
 // Each test gets its own isolated Act (fresh, auto-seeded store + cache).
-const test = fixture(appBuilder);
+// autoSettle: false, because these tests walk correlate() / drain() by hand.
+const test = fixture(appBuilder, { actOptions: { autoSettle: false } });
 
 test("creates an item", async ({ app }) => {
   const t = target();

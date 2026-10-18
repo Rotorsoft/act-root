@@ -248,8 +248,7 @@ const app = act().build();
 await app.correlate();
 await app.drain();
 
-// In production — wire settle() to the "committed" lifecycle event
-app.on("committed", () => app.settle());
+// In production — each commit settles its reactions on its own
 ```
 
 ### Dual-Frontier Strategy
@@ -263,7 +262,9 @@ The ratio adapts dynamically based on event pressure (clamped between 20-80%).
 
 ### settle()
 
-The recommended production pattern. `settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event. The canonical wiring is to subscribe to `"committed"` once at bootstrap and let it trigger automatically — actions never call `settle()` directly:
+`settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event.
+
+**It runs on its own.** A commit whose events have a reaction in this app schedules `settle()`, and so do `app.reset()`, `app.unblock()` and `app.restore()` when they free work with the default debounce (`ActOptions.settleDebounceMs`, 10ms); a commit from another process does the same through `Store.notify`. A writer-only app (`drain: false`) and a commit no reaction handles schedule nothing. Calling `settle(options)` gives its options to the pass already scheduled; a pass is never put off, and a shorter `debounceMs` brings it forward. Set `autoSettle: false` when you walk the pipeline yourself with `correlate()` / `drain()` (tests that check its steps); nothing then settles on its own, though timers still run: lanes with `cycleMs`, `start_correlations()`, the breaker's recovery pass, and each stream's backoff or defer wake-up. Call `settle()` directly at startup, to replay what was pending before a restart, or to force a pass:
 
 ```typescript
 import { act, state } from "@rotorsoft/act";
@@ -279,9 +280,6 @@ const Item = state({ Item: z.object({ name: z.string() }) })
 const app = act().withState(Item).build();
 const target = { stream: "item-1", actor: { id: "1", name: "User" } };
 const input = { name: "Test" };
-
-// At app bootstrap — wire once
-app.on("committed", () => app.settle());
 
 // Optional: react to the completion signal
 app.on("settled", (drain) => {
@@ -311,16 +309,16 @@ import { act } from "@rotorsoft/act";
 
 const app = act().build();
 
-// 1. Reset the projection's reaction watermarks AND arm the drain flag
+// Reset the projection's watermarks; the reset settles the replay on its own
 await app.reset(["my-projection"]);
 
-// 2. settle loops correlate→drain until caught up, then emits "settled"
+// Optional: replay in bigger batches (the scheduled pass uses these)
 app.settle({ eventLimit: 1000 });
 ```
 
 `reset` accepts either an explicit `string[]` of target stream names (above) or a `StreamFilter` for bulk operations — e.g., `app.reset({ stream: "^proj-" })` rebuilds every projection target matching the pattern in a single call, or `app.reset({ blocked: true })` rebuilds everything currently blocked. The filter shape (`stream`, `stream_exact`, `source`, `source_exact`, `blocked`) is shared with `app.unblock` and `app.prioritize`.
 
-Always go through `app.reset(...)` rather than `store().reset(...)` directly — the orchestrator's internal `_armed` flag has to be raised, otherwise a settled app short-circuits and skips the replay.
+Always go through `app.reset(...)` rather than `store().reset(...)` directly: `store().reset(...)` alone neither arms nor settles the drain, so a settled app skips the replay.
 
 Use `app.reset` for **rebuilds** (watermark → -1, every event replayed). Use [`app.unblock`](./error-handling.md#recovering-a-blocked-stream--appunblock) for **recovery** (watermark preserved, stream resumes from where it stopped). Don't conflate them — using `reset` to clear a blocked webhook stream would re-fire every historical webhook.
 

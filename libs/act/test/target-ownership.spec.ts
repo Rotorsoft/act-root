@@ -205,14 +205,22 @@ describe("re-registering one projection is idempotent", () => {
   it("accepts the same fold projection registered twice", () => {
     const p = fold("counters");
     expect(() =>
-      act().withState(Counter).withProjection(p).withProjection(p).build()
+      act()
+        .withState(Counter)
+        .withProjection(p)
+        .withProjection(p)
+        .build({ autoSettle: false })
     ).not.toThrow();
   });
 
   it("accepts the same batch projection registered twice", () => {
     const p = batch("sink");
     expect(() =>
-      act().withState(Counter).withProjection(p).withProjection(p).build()
+      act()
+        .withState(Counter)
+        .withProjection(p)
+        .withProjection(p)
+        .build({ autoSettle: false })
     ).not.toThrow();
   });
 });
@@ -229,7 +237,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(batch("tally"))
         .withProjection(other)
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(DUP);
   });
 
@@ -239,7 +247,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(batch("tally"))
         .withProjection(fold("tally"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(DUP);
   });
 
@@ -249,7 +257,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(fold("tally"))
         .withProjection(batch("tally"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(DUP);
   });
 
@@ -259,7 +267,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(fold("tally"))
         .withProjection(fold("tally"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(DUP);
   });
 
@@ -277,7 +285,7 @@ describe("one target, one owner", () => {
         .withState(Other)
         .withProjection(ping_batch)
         .withProjection(fold("mixed"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(DUP);
   });
 
@@ -287,7 +295,7 @@ describe("one target, one owner", () => {
       .withState(Counter)
       .withProjection(batch("batch-target", seen))
       .withProjection(fold("fold-target"))
-      .build();
+      .build({ autoSettle: false });
     await app.do("increment", { stream: "d3", actor }, { by: 1 });
     await app.correlate();
     await app.drain({ eventLimit: 100 });
@@ -305,7 +313,7 @@ describe("a reaction may not target a projection's target", () => {
         .on("Pinged")
         .do(async function onPinged() {})
         .to({ target: "counters" })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(SERVED);
   });
 
@@ -318,7 +326,7 @@ describe("a reaction may not target a projection's target", () => {
         .on("Pinged")
         .do(async function onPinged() {})
         .to({ target: "sink" })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(SERVED);
   });
 
@@ -331,7 +339,7 @@ describe("a reaction may not target a projection's target", () => {
         .do(async function onPinged() {})
         .to({ target: "counters" })
         .withProjection(fold("counters"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(SERVED);
   });
 
@@ -339,7 +347,10 @@ describe("a reaction may not target a projection's target", () => {
     // Per-event handlers plus a batch handler is the documented pattern the
     // batch handler exists for.
     expect(() =>
-      act().withState(Counter).withProjection(batch("mixed")).build()
+      act()
+        .withState(Counter)
+        .withProjection(batch("mixed"))
+        .build({ autoSettle: false })
     ).not.toThrow();
   });
 
@@ -352,7 +363,7 @@ describe("a reaction may not target a projection's target", () => {
         .on("Pinged")
         .do(async function onPinged() {})
         .to({ target: "elsewhere" })
-        .build()
+        .build({ autoSettle: false })
     ).not.toThrow();
   });
 });
@@ -365,7 +376,7 @@ describe("a per-event projection may not share a served target", () => {
         .withState(Other)
         .withProjection(fold("counters"))
         .withProjection(per_event("counters"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(SERVED);
   });
 
@@ -376,7 +387,7 @@ describe("a per-event projection may not share a served target", () => {
         .withState(Other)
         .withProjection(batch("sink"))
         .withProjection(per_event("sink"))
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(SERVED);
   });
 
@@ -389,9 +400,9 @@ describe("a per-event projection may not share a served target", () => {
       .withState(Other)
       .withProjection(per_event("counters"))
       .build();
-    expect(() => act().withSlice(folds).withSlice(pings).build()).toThrow(
-      SERVED
-    );
+    expect(() =>
+      act().withSlice(folds).withSlice(pings).build({ autoSettle: false })
+    ).toThrow(SERVED);
   });
 
   it("still allows per-event projections to share a target nobody serves", () => {
@@ -405,7 +416,7 @@ describe("a per-event projection may not share a served target", () => {
         .withState(Other)
         .withProjection(counted)
         .withProjection(per_event("feed"))
-        .build()
+        .build({ autoSettle: false })
     ).not.toThrow();
   });
 });
@@ -420,7 +431,8 @@ describe("a dynamic resolution onto a projection's target", () => {
         .withProjection(fold("counters", rows))
         .on("Pinged")
         .do(async function onPinged() {})
-        .to(() => ({ target: "counters" }))
+        .to(() => ({ target: "counters" })),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("increment", { stream: "c1", actor }, { by: 1 });
     await app.do("ping", { stream: "o1", actor }, { label: "ping" });
@@ -448,7 +460,8 @@ describe("a dynamic resolution onto a projection's target", () => {
         .withProjection(fold("counters-solo"))
         .on("Pinged")
         .do(async function onPinged() {})
-        .to(() => ({ target: "counters-solo" }))
+        .to(() => ({ target: "counters-solo" })),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("ping", { stream: "o1", actor }, { label: "ping" });
     for (let i = 0; i < 2; i++) {
@@ -478,7 +491,8 @@ describe("a dynamic resolution onto a projection's target", () => {
         .do(async function good() {
           healthy++;
         })
-        .to(() => ({ target: "healthy-out" }))
+        .to(() => ({ target: "healthy-out" })),
+      { actOptions: { autoSettle: false } }
     );
     await app.do("ping", { stream: "o1", actor }, { label: "poison" });
     await app.do("increment", { stream: "c1", actor }, { by: 1 });

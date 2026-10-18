@@ -9,6 +9,10 @@ export default defineConfig({
   // "Vitest failed to find the current suite".
   external: ["vitest"],
   format: ["esm", "cjs"],
+  // Share one copy of each class across entry points in both formats:
+  // without it every CommonJS entry carries its own, and `instanceof`
+  // fails for an error thrown by one entry and checked against another.
+  splitting: true,
   dts: false,
   outDir: "dist",
   clean: true,

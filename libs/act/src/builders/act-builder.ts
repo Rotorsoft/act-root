@@ -4,35 +4,35 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
-import { Act, type ActOptions } from "../act.js";
+import { Act } from "../act.js";
+import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
+import { resolveActConfig, resolveLaneConfig } from "../internal/config.js";
+import { bare_patch, validating_patch } from "../internal/event-sourcing.js";
 import {
-  bare_patch,
   current_version_of,
   deprecated_event_names,
-  type EventGate,
+} from "../internal/event-versions.js";
+import { type EventGate, IDENTITY_GATE } from "../internal/pii.js";
+import {
   FOLD_RESET,
-  IDENTITY_GATE,
   make_fold_handler,
-  type PatchFn,
   type ResettableBatchHandler,
-  resolveActConfig,
-  resolveLaneConfig,
-  synthesize_autoclose_reactions,
-  validating_patch,
-} from "../internal/index.js";
-import { type DEFAULT_LANE, log } from "../ports.js";
+} from "../internal/projection-fold.js";
+import { log } from "../ports.js";
 import { current_autoclose_window } from "../scoped.js";
+import type { ActBuilder, Projection } from "../types/builders.js";
 import type {
+  ActOptions,
   Actor,
   BatchHandler,
   LaneConfig,
+  PatchFn,
   Registry,
   Schema,
   SchemaRegister,
   Schemas,
   State,
 } from "../types/index.js";
-import type { BuilderBase } from "./builder-base.js";
 import { reaction_on, register_lane } from "./builder-utils.js";
 import { build_events } from "./event-builder.js";
 import {
@@ -40,8 +40,6 @@ import {
   merge_projection,
   register_state,
 } from "./merge.js";
-import type { Projection } from "./projection-builder.js";
-import type { Slice } from "./slice-builder.js";
 
 /**
  * Registers a projection's batch handler against its target stream, throwing
@@ -60,175 +58,6 @@ function register_batch_handler(
     );
   }
   batch_handlers.set(proj.target, proj.batchHandler);
-}
-
-/**
- * Fluent builder interface for composing event-sourced applications.
- *
- * Provides a chainable API for:
- * - Registering states via `.withState()`
- * - Registering slices via `.withSlice()`
- * - Registering projections via `.withProjection()`
- * - Locking a custom actor type via `.withActor<TActor>()`
- * - Declaring drain lanes via `.withLane({name, ...})`
- * - Defining event reactions via `.on()` → `.do()` → `.to()`
- * - Building the orchestrator via `.build()`
- *
- * @template TSchemaReg - Schema register for states (maps action names to state schemas)
- * @template TEvents - Event schemas (maps event names to event data schemas)
- * @template TActions - Action schemas (maps action names to action payload schemas)
- * @template TStateMap - Map of state names to state schemas
- * @template TActor - Actor type extending base Actor
- * @template TLanes - Union of declared lane names. Narrowed by
- *   `.withLane({name})` calls so `.to({lane})` and `ActOptions.onlyLanes`
- *   reject typos at compile time. Starts at `"default"`.
- *
- * @see {@link act} for usage examples
- * @see {@link Act} for the built orchestrator API
- */
-export interface ActBuilder<
-  TSchemaReg extends SchemaRegister<TActions>,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  TStateMap extends Record<string, Schema> = {},
-  TActor extends Actor = Actor,
-  TLanes extends string = typeof DEFAULT_LANE,
-> extends BuilderBase<
-    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
-    TEvents,
-    TActions,
-    TActor,
-    TLanes
-  > {
-  /**
-   * Registers a state definition with the builder.
-   *
-   * State names, action names, and event names must be unique across the
-   * application (partial states with the same name are merged automatically).
-   *
-   * @throws {Error} If duplicate action or event names are detected
-   */
-  withState: <
-    TNewState extends Schema,
-    TNewEvents extends Schemas,
-    TNewActions extends Schemas,
-    TNewName extends string = string,
-  >(
-    state: State<TNewState, TNewEvents, TNewActions, TNewName>
-  ) => ActBuilder<
-    TSchemaReg & { [K in keyof TNewActions]: TNewState },
-    TEvents & TNewEvents,
-    TActions & TNewActions,
-    TStateMap & { [K in TNewName]: TNewState },
-    TActor,
-    TLanes
-  >;
-  /**
-   * Registers a slice with the builder.
-   *
-   * Merges all the slice's states and reactions into the application.
-   * State names, action names, and event names must be unique across the
-   * application (partial states with the same name are merged automatically).
-   *
-   * @throws {Error} If duplicate action or event names are detected
-   */
-  withSlice: <
-    TNewSchemaReg extends SchemaRegister<TNewActions>,
-    TNewEvents extends Schemas,
-    TNewActions extends Schemas,
-    TNewMap extends Record<string, Schema>,
-    TNewLanes extends string,
-  >(
-    slice: Slice<
-      TNewSchemaReg,
-      TNewEvents,
-      TNewActions,
-      TNewMap,
-      Actor,
-      TNewLanes
-    >
-  ) => ActBuilder<
-    TSchemaReg & TNewSchemaReg,
-    TEvents & TNewEvents,
-    TActions & TNewActions,
-    TStateMap & TNewMap,
-    TActor,
-    TLanes | TNewLanes
-  >;
-  /**
-   * Locks a custom actor type for this application.
-   *
-   * This is a pure type-level method — it returns the same builder at
-   * runtime but narrows the `TActor` generic so that `app.do()` and
-   * reaction dispatchers require the richer actor shape.
-   *
-   * @template TNewActor - Custom actor type extending base Actor
-   * @returns The same builder with `TActor` locked to `TNewActor`
-   *
-   * @example
-   * ```typescript
-   * type MyActor = { id: string; name: string; role: string; tenantId: string };
-   *
-   * const app = act()
-   *   .withActor<MyActor>()
-   *   .withState(Counter)
-   *   .build();
-   *
-   * // Now app.do() requires MyActor in the target
-   * await app.do("increment", {
-   *   stream: "counter-1",
-   *   actor: { id: "1", name: "Alice", role: "admin", tenantId: "t1" }
-   * }, { by: 5 });
-   * ```
-   */
-  withActor: <TNewActor extends Actor>() => ActBuilder<
-    TSchemaReg,
-    TEvents,
-    TActions,
-    TStateMap,
-    TNewActor,
-    TLanes
-  >;
-  /**
-   * Declares a drain lane. Lane name narrows `TLanes` so
-   * `.to({lane})` and `ActOptions.onlyLanes` type-check against it.
-   *
-   * @example
-   * ```typescript
-   * const app = act()
-   *   .withState(Counter)
-   *   .withLane({ name: "slow", leaseMillis: 60_000, streamLimit: 5 })
-   *   .on("OrderConfirmed")
-   *     .do(deliverWebhook)
-   *     .to({ target: "webhooks-out", lane: "slow" })
-   *   .build();
-   * ```
-   */
-  withLane: <const TConfig extends LaneConfig>(
-    config: TConfig
-  ) => ActBuilder<
-    TSchemaReg,
-    TEvents,
-    TActions,
-    TStateMap,
-    TActor,
-    TLanes | TConfig["name"]
-  >;
-  /**
-   * Builds and returns the Act orchestrator instance.
-   *
-   * @param options - Optional runtime overrides (see {@link ActOptions}).
-   *   `options.onlyLanes` is narrowed to the declared `TLanes` union, so
-   *   `onlyLanes: ["typo"]` is a compile error when the lane wasn't
-   *   declared via `.withLane(...)`.
-   * @returns The Act orchestrator instance
-   *
-   * @see {@link Act} for available orchestrator methods
-   */
-  build: (
-    options?: ActOptions<TLanes>
-  ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
 }
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */

@@ -6,7 +6,6 @@
  * @category Adapters
  */
 
-import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -26,6 +25,7 @@ import type {
   StreamStats,
   SubscribeInput,
 } from "../types/index.js";
+import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import { sleep } from "../utils.js";
 
 /** One subscription row: watermark, lease, retry and schedule. */

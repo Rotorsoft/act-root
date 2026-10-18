@@ -13,9 +13,9 @@ import {
   store,
 } from "../src/index.js";
 import { DEFAULT_BACKOFF } from "../src/internal/config.js";
-import { SNAP_EVENT } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
 import type { CacheEntry, Schema } from "../src/types/index.js";
+import { SNAP_EVENT } from "../src/types/index.js";
 
 const actor = { id: "a", name: "a" };
 
@@ -94,7 +94,8 @@ describe("state projection (.of)", () => {
   it("folds every event into one row per stream, converging to head state", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -116,7 +117,8 @@ describe("state projection (.of)", () => {
   it("keeps folding warm streams across drain cycles without losing state", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -133,7 +135,8 @@ describe("state projection (.of)", () => {
   it("flushes in rounds of flushEvery within a single batch", async () => {
     const h = harness({ flushEvery: 2 });
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -150,7 +153,8 @@ describe("state projection (.of)", () => {
   it("flushes the evictee before dropping it under maxCachedStates pressure", async () => {
     const h = harness({ maxCachedStates: 1, flushEvery: 1_000 });
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -172,7 +176,8 @@ describe("state projection (.of)", () => {
   it("holds the watermark when flush fails and converges on retry", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -195,7 +200,8 @@ describe("state projection (.of)", () => {
   it("rebuilds in O(streams) upserts, not O(events)", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -226,7 +232,8 @@ describe("state projection (.of)", () => {
   it("scopes the fold to the projected state's streams in a multi-state app", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withState(Tag).withProjection(h.counters)
+      act().withState(Counter).withState(Tag).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -243,7 +250,8 @@ describe("state projection (.of)", () => {
   it("skips the flush for a clean evictee and for empty rounds", async () => {
     const h = harness({ maxCachedStates: 1, flushEvery: 1 });
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -283,7 +291,9 @@ describe("state projection (.of)", () => {
         for (const row of rows) rows_seen.push(row.stream);
       })
       .build();
-    const ctx = await sandbox(act().withState(Person).withProjection(people));
+    const ctx = await sandbox(act().withState(Person).withProjection(people), {
+      actOptions: { autoSettle: false },
+    });
     try {
       const app = ctx.app;
       await app.do("register", { stream: "p1", actor }, { email: "a@b.c" });
@@ -297,7 +307,8 @@ describe("state projection (.of)", () => {
   it("resumes the first-sight load from the latest snapshot", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -326,7 +337,8 @@ describe("state projection (.of)", () => {
     // never leaves a stale row behind.
     const h = harness({ flushEvery: 1 });
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -352,7 +364,8 @@ describe("state projection (.of)", () => {
     // the other stream mid-batch, and re-admission re-loads head state.
     const h = harness({ maxCachedStates: 1 });
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -381,7 +394,8 @@ describe("state projection (.of)", () => {
     // row back to exact ground truth: table.state === load().state.
     const h = harness({ maxCachedStates: 2, flushEvery: 3 });
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -422,7 +436,8 @@ describe("state projection (.of)", () => {
   it("freezes a tombstoned stream's row at its final state", async () => {
     const h = harness();
     const ctx = await sandbox(
-      act().withState(Counter).withProjection(h.counters)
+      act().withState(Counter).withProjection(h.counters),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -478,7 +493,8 @@ describe("state projection (.of)", () => {
       })
       .build();
     const ctx = await sandbox(
-      act().withState(PartA).withState(PartB).withProjection(pairs)
+      act().withState(PartA).withState(PartB).withProjection(pairs),
+      { actOptions: { autoSettle: false } }
     );
     try {
       const app = ctx.app;
@@ -534,7 +550,9 @@ describe("state projection (.of)", () => {
       .withState(PartB)
       .withProjection(duos as never)
       .build();
-    const ctx = await sandbox(act().withState(PartA).withSlice(DuoSlice));
+    const ctx = await sandbox(act().withState(PartA).withSlice(DuoSlice), {
+      actOptions: { autoSettle: false },
+    });
     try {
       const app = ctx.app;
       await app.do("doA", { stream: "d1", actor }, {});
@@ -568,7 +586,8 @@ describe("state projection (.of)", () => {
       .build();
     await expect(
       sandbox(
-        act().withState(PartA).withState(PartB).withProjection(partial_fold)
+        act().withState(PartA).withState(PartB).withProjection(partial_fold),
+        { actOptions: { autoSettle: false } }
       )
     ).rejects.toThrow(/missing events BHappened/);
   });
@@ -581,7 +600,9 @@ describe("state projection (.of)", () => {
     // no state registered at all — the cast bypasses the event-scoped
     // generic to reach the runtime guard
     await expect(
-      sandbox(act().withProjection(orphans as never))
+      sandbox(act().withProjection(orphans as never), {
+        actOptions: { autoSettle: false },
+      })
     ).rejects.toThrow(/not registered/);
   });
 
@@ -684,7 +705,11 @@ describe("fold across workers", () => {
           table.set(r.stream, r.state as unknown as { count: number });
       })
       .build();
-    return act().withState(Counter).withProjection(counters).build();
+    // Each test picks which worker drains.
+    return act()
+      .withState(Counter)
+      .withProjection(counters)
+      .build({ autoSettle: false });
   };
 
   const bump = (app: ReturnType<typeof worker>, by: number, stream = "c1") =>
@@ -823,7 +848,7 @@ describe("fold across workers", () => {
         .withState(Counter)
         .withProjection(a)
         .withProjection(b)
-        .build();
+        .build({ autoSettle: false });
 
       await bump(app as never, 3);
       await drain(app as never);
@@ -893,7 +918,11 @@ describe("fold first-sight frontier TOCTOU", () => {
 
     const ctx = await sandbox(
       act().withState(Counter).withProjection(counters),
-      { store: () => store, cache: () => cache }
+      {
+        actOptions: { autoSettle: false },
+        store: () => store,
+        cache: () => cache,
+      }
     );
     try {
       const app = ctx.app;
@@ -951,7 +980,9 @@ describe("fold PII treatment is path-independent", () => {
       })
       .build();
 
-    const ctx = await sandbox(act().withState(Secret).withProjection(secrets));
+    const ctx = await sandbox(act().withState(Secret).withProjection(secrets), {
+      actOptions: { autoSettle: false },
+    });
     try {
       const app = ctx.app;
 

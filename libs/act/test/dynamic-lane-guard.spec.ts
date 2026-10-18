@@ -59,7 +59,8 @@ describe("a dynamic resolution onto an undeclared lane", () => {
         .do(async function onPinged() {
           ran++;
         })
-        .to(() => ({ target: "t", lane: "typo" as "fast" }))
+        .to(() => ({ target: "t", lane: "typo" as "fast" })),
+      { actOptions: { autoSettle: false } }
     );
 
     await app.do("ping", { stream: "c1", actor }, {});
@@ -82,7 +83,8 @@ describe("a dynamic resolution onto an undeclared lane", () => {
           .withLane({ name: "fast" })
           .on("Pinged")
           .do(async function onPinged() {})
-          .to(() => ({ target: "solo-1564", lane: "typo" as "fast" }))
+          .to(() => ({ target: "solo-1564", lane: "typo" as "fast" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("ping", { stream: "c1", actor }, {});
       for (let i = 0; i < 2; i++) {
@@ -106,7 +108,8 @@ describe("a dynamic resolution onto an undeclared lane", () => {
           .withLane({ name: "fast" })
           .on("Pinged")
           .do(async function onPinged() {})
-          .to(() => ({ target: "repeat-1564", lane: "typo" as "fast" }))
+          .to(() => ({ target: "repeat-1564", lane: "typo" as "fast" })),
+        { actOptions: { autoSettle: false } }
       );
       // A resolver fires for every matching event; an operator with a busy
       // stream must not get one line per event.
@@ -137,7 +140,8 @@ describe("two dynamic resolutions disagreeing on a target's lane", () => {
           .to(() => ({ target: "T-1567", lane: "fast" }))
           .on("Pinged")
           .do(async function onPinged() {})
-          .to(() => ({ target: "T-1567", lane: "slow" }))
+          .to(() => ({ target: "T-1567", lane: "slow" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("bump", { stream: "c1", actor }, {});
       await app.do("ping", { stream: "c1", actor }, {});
@@ -196,7 +200,11 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .withLane({ name: "fast" })
             .on("Pinged")
             .do(async function onPingedSolo() {})
-            .to((e) => ({ target: `${e.stream}-view`, lane: "typo" as "fast" }))
+            .to((e) => ({
+              target: `${e.stream}-view`,
+              lane: "typo" as "fast",
+            })),
+          { actOptions: { autoSettle: false } }
         );
         await app.do("ping", { stream: "c0", actor }, {});
         await cycle(app);
@@ -214,7 +222,11 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .withLane({ name: "fast" })
             .on("Pinged")
             .do(async function onPingedMany() {})
-            .to((e) => ({ target: `${e.stream}-view`, lane: "typo" as "fast" }))
+            .to((e) => ({
+              target: `${e.stream}-view`,
+              lane: "typo" as "fast",
+            })),
+          { actOptions: { autoSettle: false } }
         );
         for (let i = 0; i < AGGREGATES; i++)
           await app.do("ping", { stream: `c${i}`, actor }, {});
@@ -240,7 +252,8 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-a`, lane: "typo" as "fast" }))
             .on("Bumped")
             .do(async function onBumpedB() {})
-            .to((e) => ({ target: `${e.stream}-b`, lane: "typo" as "fast" }))
+            .to((e) => ({ target: `${e.stream}-b`, lane: "typo" as "fast" })),
+          { actOptions: { autoSettle: false } }
         );
         for (let i = 0; i < 3; i++) {
           await app.do("ping", { stream: `c${i}`, actor }, {});
@@ -269,7 +282,8 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-view`, lane: "fast" }))
             .on("Pinged")
             .do(async function onPingedSolo() {})
-            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" }))
+            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" })),
+          { actOptions: { autoSettle: false } }
         );
         await app.do("bump", { stream: "c0", actor }, {});
         await app.do("ping", { stream: "c0", actor }, {});
@@ -292,7 +306,8 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-view`, lane: "fast" }))
             .on("Pinged")
             .do(async function onPingedMany() {})
-            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" }))
+            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" })),
+          { actOptions: { autoSettle: false } }
         );
         for (let i = 0; i < AGGREGATES; i++) {
           await app.do("bump", { stream: `c${i}`, actor }, {});
@@ -325,7 +340,8 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-b`, lane: "fast" }))
             .on("Pinged")
             .do(async function onPingedB() {})
-            .to((e) => ({ target: `${e.stream}-b`, lane: "slow" }))
+            .to((e) => ({ target: `${e.stream}-b`, lane: "slow" })),
+          { actOptions: { autoSettle: false } }
         );
         for (let i = 0; i < 3; i++) {
           await app.do("bump", { stream: `c${i}`, actor }, {});
@@ -366,7 +382,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .to(() => ({ target: "T-1598" }))
           .on("Pinged")
           .do(async function onPingedSlow() {})
-          .to(() => ({ target: "T-1598", lane: "slow" }))
+          .to(() => ({ target: "T-1598", lane: "slow" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("bump", { stream: "c1", actor }, {});
       await app.do("ping", { stream: "c1", actor }, {});
@@ -394,7 +411,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .to(() => ({ target: "T-1598-rev", lane: "slow" }))
           .on("Pinged")
           .do(async function onPingedDefault() {})
-          .to(() => ({ target: "T-1598-rev" }))
+          .to(() => ({ target: "T-1598-rev" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("bump", { stream: "c1", actor }, {});
       await app.do("ping", { stream: "c1", actor }, {});
@@ -422,7 +440,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .to(() => ({ target: "T-1598-across" }))
           .on("Pinged")
           .do(async function onPingedAcross() {})
-          .to(() => ({ target: "T-1598-across", lane: "slow" }))
+          .to(() => ({ target: "T-1598-across", lane: "slow" })),
+        { actOptions: { autoSettle: false } }
       );
       // Two scans: the first records the target's lane on its subscription
       // row, the second reads it back from there rather than from the
@@ -452,7 +471,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .to(() => ({ target: "T-1598-reroute", lane: "slow" }))
           .on("Pinged")
           .do(async function onPingedTypo() {})
-          .to(() => ({ target: "T-1598-reroute", lane: "typo" as "slow" }))
+          .to(() => ({ target: "T-1598-reroute", lane: "typo" as "slow" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("bump", { stream: "c1", actor }, {});
       await app.do("ping", { stream: "c1", actor }, {});
@@ -483,7 +503,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .to(() => ({ target: "T-1598-agree" }))
           .on("Pinged")
           .do(async function onPingedExplicit() {})
-          .to(() => ({ target: "T-1598-agree", lane: "default" as "slow" }))
+          .to(() => ({ target: "T-1598-agree", lane: "default" as "slow" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("bump", { stream: "c1", actor }, {});
       await app.do("ping", { stream: "c1", actor }, {});
@@ -505,7 +526,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .withLane({ name: "slow" })
           .on("Pinged")
           .do(async function onPingedFirst() {})
-          .to(() => ({ target: "T-1598-first", lane: "slow" }))
+          .to(() => ({ target: "T-1598-first", lane: "slow" })),
+        { actOptions: { autoSettle: false } }
       );
       await app.do("ping", { stream: "c1", actor }, {});
       for (let i = 0; i < 2; i++) {
@@ -531,7 +553,8 @@ describe("an omitted lane disagreeing with a declared one", () => {
           .to(() => ({ target: "T-1598-rank" }))
           .on("Pinged")
           .do(async function onPingedHigh() {})
-          .to(() => ({ target: "T-1598-rank", lane: "slow", priority: 5 }))
+          .to(() => ({ target: "T-1598-rank", lane: "slow", priority: 5 })),
+        { actOptions: { autoSettle: false } }
       );
       // Separate scans, so the second resolution meets the first through
       // the recorded row and beats its floor.

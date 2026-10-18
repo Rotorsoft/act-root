@@ -52,7 +52,7 @@ describe("an Act's ports are its own", () => {
   it("a shared Act called from inside a tenant's handler writes to the shared store", async () => {
     const global_store = new InMemoryStore();
     store(global_store);
-    const shared = act().withState(Logged).build();
+    const shared = act().withState(Logged).build({ autoSettle: false });
 
     const tenant_store = new InMemoryStore();
     const tenant = act()
@@ -63,7 +63,10 @@ describe("an Act's ports are its own", () => {
         await shared.do("log", { stream: "audit", actor }, {});
       })
       .to(() => ({ target: "t" }))
-      .build({ scoped: { store: tenant_store, cache: new InMemoryCache() } });
+      .build({
+        autoSettle: false,
+        scoped: { store: tenant_store, cache: new InMemoryCache() },
+      });
 
     await tenant.do("bump", { stream: "c1", actor }, {});
     await tenant.correlate();
@@ -79,7 +82,10 @@ describe("an Act's ports are its own", () => {
     const tenant_store = new InMemoryStore();
     const tenant = act()
       .withState(Logged)
-      .build({ scoped: { store: tenant_store, cache: new InMemoryCache() } });
+      .build({
+        autoSettle: false,
+        scoped: { store: tenant_store, cache: new InMemoryCache() },
+      });
 
     const shared = act()
       .withState(Counter)
@@ -88,7 +94,7 @@ describe("an Act's ports are its own", () => {
         await tenant.do("log", { stream: "audit", actor }, {});
       })
       .to(() => ({ target: "t" }))
-      .build();
+      .build({ autoSettle: false });
 
     await shared.do("bump", { stream: "c1", actor }, {});
     await shared.correlate();
@@ -113,7 +119,7 @@ describe("an Act's ports are its own", () => {
     // standing contract, not something the ports frame changes.
     const early = new InMemoryStore();
     store(early);
-    const app = act().withState(Counter).build();
+    const app = act().withState(Counter).build({ autoSettle: false });
     await app.do("bump", { stream: "c1", actor }, {});
     expect(await names(early)).toEqual(["Bumped"]);
   });

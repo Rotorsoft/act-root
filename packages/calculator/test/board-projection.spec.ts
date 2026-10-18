@@ -53,7 +53,8 @@ describe("calculator board projection (regex claim source)", () => {
             { reactingTo: event }
           );
         })
-        .to({ source: `^(${streams.join("|")})$`, target: "Board" })
+        .to({ source: `^(${streams.join("|")})$`, target: "Board" }),
+      { actOptions: { autoSettle: false } }
     );
 
     // Press "1" on A and "2" on B — two distinct source streams, both

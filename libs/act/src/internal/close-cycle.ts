@@ -9,7 +9,7 @@
  * orchestrator only wires its ports in and emits `"closed"`.
  */
 
-import { cache, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { cache, store } from "../ports.js";
 import type {
   CloseResult,
   CloseTarget,
@@ -17,6 +17,7 @@ import type {
   Schema,
   State,
 } from "../types/index.js";
+import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import type { EsOps } from "./event-sourcing.js";
 import { walk_streams } from "./walk-streams.js";
 

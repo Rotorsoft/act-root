@@ -3,20 +3,16 @@ import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import { register_disposer, run_disposers } from "./disposers.js";
-import { current_ports, type Scoped } from "./scoped.js";
+import { current_ports } from "./scoped.js";
 import type {
   Cache,
   Disposable,
   Disposer,
   Logger,
+  Scoped,
   Store,
 } from "./types/index.js";
-
-// `Scoped` is the type of the public `ActOptions.scoped` bag, so it stays
-// exported. The AsyncLocalStorage carrying it does not: it is a mechanism,
-// it was only ever reachable because `index.ts` star-exports this module,
-// and its own doc-comment already declared it internal.
-export type { Scoped } from "./scoped.js";
+import { type ExitCode, ExitCodes } from "./types/index.js";
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -32,24 +28,6 @@ export type { Scoped } from "./scoped.js";
  *
  * @module ports
  */
-
-/**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
- */
-export const ExitCodes = ["ERROR", "EXIT"] as const;
-
-/**
- * Type for allowed exit codes.
- *
- * - `"ERROR"` — abnormal termination (uncaught exception, unhandled rejection)
- * - `"EXIT"` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
- */
-export type ExitCode = (typeof ExitCodes)[number];
 
 // ---------------------------------------------------------------------------
 // Port factory
@@ -294,34 +272,3 @@ export function dispose(
   disposer && register_disposer(disposer);
   return disposeAndExit;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Event name used internally for snapshot events in the event store.
- * Snapshot events store a full state checkpoint, enabling efficient cold-start
- * recovery without replaying the entire event stream.
- */
-export const SNAP_EVENT = "__snapshot__";
-
-/**
- * Event name used internally for tombstone events in the event store.
- * A tombstone marks a stream as permanently closed — no further writes
- * are permitted until the stream is explicitly restarted via `close()`.
- *
- * @see {@link Act.close} for the close-the-books API
- */
-export const TOMBSTONE_EVENT = "__tombstone__";
-
-/**
- * Name of the implicit lane every reaction lands in unless its `.to({lane})`
- * declaration says otherwise. Acts that don't call
- * `.withLane(...)` see only this lane, and behavior is identical to
- * pre-1103 single-controller drain.
- *
- * Persisted on `streams.lane` and threaded as the strict-typed default in
- * builder generics — `lane?: TLanes` always includes `"default"`.
- */
-export const DEFAULT_LANE = "default";

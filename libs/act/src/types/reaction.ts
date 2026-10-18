@@ -386,7 +386,8 @@ export type Drain<TEvents extends Schemas> = {
  * window, the correlation query, and the maximum number of correlate→drain
  * passes.
  *
- * @property debounceMs - Debounce window in milliseconds (default: 10)
+ * @property debounceMs - Debounce window in milliseconds (default: 10). A
+ *   pass already scheduled keeps its time unless this is shorter.
  * @property correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
  * @property maxPasses - Cap on correlate→drain loops (default: `Infinity`).
  *   Settle exits early as soon as a pass makes no progress (no new
@@ -422,3 +423,13 @@ export type SettleOptions = DrainOptions & {
 export type ShutdownOptions = {
   readonly graceMs?: number;
 };
+
+/**
+ * Name of the implicit lane every reaction lands in unless its `.to({lane})`
+ * declaration says otherwise. Acts that don't call
+ * `.withLane(...)` see only this lane,.
+ *
+ * Persisted on `streams.lane` and threaded as the strict-typed default in
+ * builder generics — `lane?: TLanes` always includes `"default"`.
+ */
+export const DEFAULT_LANE = "default";

@@ -16,10 +16,9 @@ import { join } from "node:path";
  * - `internal/` holds stateless implementations. They RECEIVE what they need
  *   (see `ReactionDeps.reaction_scope`, `DrainDeps.run_scoped`); they never
  *   reach for ambient state.
- * - PII is one module's business. `internal/sensitive.ts` owns the marker and
- *   the transforms; `builders/event-builder.ts` is the only place that
- *   composes them. Nothing else imports a `pii_*` helper, and the internal
- *   barrel does not re-export one.
+ * - PII is one module's business. `sensitive.ts` owns the marker,
+ *   `internal/pii.ts` the transforms, and `builders/event-builder.ts` is the
+ *   only place that composes them. Nothing else imports a `pii_*` helper.
  * - `scoped.ts` owns every `AsyncLocalStorage` and every operation on one.
  * - Ambient mechanisms are not public API.
  */
@@ -83,15 +82,60 @@ describe("architecture: internal/ is stateless", () => {
       .map(({ name }) => name);
     expect(offenders).toEqual([]);
   });
+});
 
-  it("re-exports nothing from outside internal/", () => {
-    // The barrel reaching out to a root module is the same evasion wearing
-    // a different hat — it made `internal/index.ts` a door into root state.
-    const barrel = code_of(readFileSync(join(INTERNAL, "index.ts"), "utf8"));
-    const escapes = [...barrel.matchAll(/from "(\.\.\/[^"]+)"/g)].map(
-      (m) => m[1]
-    );
-    expect(escapes).toEqual([]);
+describe("architecture: public types live in types/", () => {
+  // Three layers, by audience: types/ declares every public type,
+  // the public runtime modules implement them, and internal/ is private.
+  const outside = ts_files(SRC)
+    .filter((p) => !p.startsWith(INTERNAL))
+    .map((path) => ({
+      name: path.slice(SRC.length),
+      text: code_of(readFileSync(path, "utf8")),
+    }));
+
+  /** Every module a public entry point reaches through its re-exports. */
+  const reached = (() => {
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = code_of(readFileSync(join(SRC, file), "utf8"));
+      for (const m of text.matchAll(
+        /^export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s+"(\.[^"]+)\.js"/gm
+      ))
+        walk(join(file, "..", `${m[1]}.ts`));
+    };
+    for (const entry of ["index.ts", "types/index.ts", "test/index.ts"])
+      walk(entry);
+    return [...seen];
+  })();
+
+  it("never re-exports internal/", () => {
+    const offenders = outside
+      .filter(({ text }) => /^export [^;]*from "[./]*internal\//m.test(text))
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("never imports internal/ from types/", () => {
+    const offenders = outside
+      .filter(({ name }) => name.startsWith("types/"))
+      .filter(({ text }) => /from "\.\.\/internal\//.test(text))
+      .map(({ name }) => name);
+    expect(offenders).toEqual([]);
+  });
+
+  it("declares no public type outside types/", () => {
+    const offenders = reached
+      .filter((file) => !file.startsWith("types/"))
+      .filter((file) =>
+        /^export (?:type|interface) \w/m.test(
+          code_of(readFileSync(join(SRC, file), "utf8"))
+        )
+      );
+    expect(reached.length).toBeGreaterThan(10);
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -130,20 +174,21 @@ describe("architecture: ambient context is owned by scoped.ts", () => {
 describe("architecture: ambient mechanisms are not public API", () => {
   it("does not publish the ports AsyncLocalStorage", () => {
     // `index.ts` star-exports `ports.ts`, so anything ports.ts exports is
-    // published. The `Scoped` TYPE is public on purpose — it types
-    // `ActOptions.scoped`. The instance is not.
+    // published. The `Scoped` TYPE is public on purpose (it types
+    // `ActOptions.scoped`) and lives in types/. The instance is not.
     const ports = code_of(readFileSync(join(SRC, "ports.ts"), "utf8"));
     expect(ports).not.toMatch(/export \{[^}]*\bscoped\b[^}]*\}/);
-    expect(ports).toMatch(/export type \{ Scoped \}/);
+    const types = code_of(readFileSync(join(SRC, "types", "act.ts"), "utf8"));
+    expect(types).toMatch(/export type Scoped = /);
   });
 });
 
 describe("architecture: PII stays inside the modules that own it", () => {
-  const SENSITIVE = join(SRC, "internal", "sensitive.ts");
+  const SENSITIVE = join(SRC, "internal", "pii.ts");
   const OWNER = join(SRC, "builders", "event-builder.ts");
 
   it("is composed in exactly one place", () => {
-    // `sensitive.ts` declares the marker and the transforms;
+    // `internal/pii.ts` declares the transforms;
     // `event-builder.ts` composes them into readers at build. A third module
     // reaching for `pii_split` / `pii_strip` / `pii_gate` / `make_gate` means
     // the composition has leaked back out to a caller — which is how it was
@@ -161,13 +206,6 @@ describe("architecture: PII stays inside the modules that own it", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("is not re-exported through the internal barrel", () => {
-    // Deep-importing `internal/sensitive.js` is the documented exception, so
-    // the barrel carrying `pii_*` only widens the surface that can reach it.
-    const barrel = code_of(readFileSync(join(INTERNAL, "index.ts"), "utf8"));
-    expect(barrel).not.toMatch(/\bpii_(split|gate|strip|fields)\b/);
-  });
-
   it("publishes only what another package genuinely needs", () => {
     // `pii_fields` IS public: act-http's OpenAPI emitter marks request-body
     // properties `writeOnly` with it (auto-generated-api.md). The transforms
@@ -175,7 +213,7 @@ describe("architecture: PII stays inside the modules that own it", () => {
     const schemas = code_of(
       readFileSync(join(SRC, "types", "schemas.ts"), "utf8")
     );
-    expect(schemas).toMatch(/export \{ pii_fields,/);
+    expect(schemas).toMatch(/export \{ pii_fields \}/);
     expect(schemas).not.toMatch(/\bpii_(split|gate|strip)\b/);
   });
 });

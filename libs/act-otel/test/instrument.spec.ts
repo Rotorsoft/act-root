@@ -24,7 +24,8 @@ const test = fixture(
     .withState(counter)
     .on("ticked")
     .do(async function noop() {})
-    .to("sink")
+    .to("sink"),
+  { actOptions: { autoSettle: false } }
 );
 
 const value = async (registry: Registry, name: string, labels = {}) => {

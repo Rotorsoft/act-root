@@ -4,7 +4,7 @@
  */
 
 import { type Patch, patch } from "@rotorsoft/act-patch";
-import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { cache, log, store } from "../ports.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -18,6 +18,7 @@ import type {
   EventMeta,
   EventSource,
   LoadTarget,
+  PatchFn,
   ScanOptions,
   ScanResult,
   Schema,
@@ -26,25 +27,10 @@ import type {
   State,
   Target,
 } from "../types/index.js";
+import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import { sleep, validate } from "../utils.js";
 import { compute_backoff_delay } from "./backoff.js";
-import { default_correlator } from "./correlator.js";
-
-/**
- * The patch step: merges a reducer's partial into state. Chosen once at
- * construction (`build_es`), never per event. `me`/`event` only serve
- * {@link validating_patch}, to name the failing reduction.
- */
-export type PatchFn = <
-  TState extends Schema,
-  TEvents extends Schemas,
-  TActions extends Schemas,
->(
-  me: State<TState, TEvents, TActions>,
-  state: TState,
-  partial: Readonly<Patch<TState>>,
-  event: Committed<TEvents, keyof TEvents>
-) => TState;
+import { default_correlator } from "./correlation-id.js";
 
 /** The default patch step: a bare merge, so the hot path pays nothing. */
 export const bare_patch: PatchFn = (_me, state, partial) =>

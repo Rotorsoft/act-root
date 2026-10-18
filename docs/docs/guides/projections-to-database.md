@@ -177,7 +177,7 @@ When you change the projection's logic — add a column, fix an aggregation, cha
 
 1. Truncate the projection's tables.
 2. Reset the projection's reaction watermark with `app.reset(["tickets"])`. For multiple related projections, you can also pass a `StreamFilter` — `app.reset({ stream: "^proj-" })` rebuilds every projection whose target stream starts with `proj-` in a single call.
-3. Call `app.settle()` once. The framework loops `correlate → drain` until every historical event has been replayed through the projection's handlers.
+3. The reset settles on its own: the framework loops `correlate → drain` until every historical event has been replayed through the projection's handlers. Call `app.settle({ eventLimit })` right after to replay in bigger batches.
 
 For long event streams, replaying one event per transaction is slow. Define a `.batch(handler)` and Act will call it with every event for a stream in a single pass:
 
@@ -227,7 +227,8 @@ async function rebuildTicketsProjection() {
   //    the flag, so a settled app won't pick the work up.
   await app.reset(["tickets"]);
 
-  // 3. settle() loops correlate→drain until no progress; emits "settled".
+  // 3. Replay in bigger batches; settle() replaces the reset's own pass
+  //    and emits "settled" when caught up.
   await new Promise<void>((resolve) => {
     app.once("settled", () => resolve());
     app.settle({ eventLimit: 1000 });
@@ -251,7 +252,6 @@ So for a read model over states that close or prune: write it as an `.of()` fold
 
 1. **Reading the projection from inside an action handler.** The projection lags behind the event log by however long it takes the drain pipeline to catch up. If your action's logic depends on the projection being current, you have a race. Read state via `app.load(...)` (which always sees the current state through the snapshot/cache layer) — never via the projection.
 2. **Projections that aren't idempotent.** Replays can and will happen. Every write must be expressible as `INSERT … ON CONFLICT DO UPDATE` or `UPDATE … WHERE`, never as a counter you increment by reading the previous value. The in-SQL `x + 1` pattern looks ugly until your first replay corrupts a counter and you understand why it's necessary.
-3. **Forgetting the `"committed"` wiring.** In production, projections only update because something runs `correlate → drain` after each commit. The canonical wiring is `app.on("committed", () => app.settle())` at bootstrap — see [Production checklist](./production-checklist.md). Without it, you'll commit events all day and notice the projection is hours behind.
 
 ## Where to look in source
 

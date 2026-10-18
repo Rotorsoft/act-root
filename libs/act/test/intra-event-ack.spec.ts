@@ -70,7 +70,7 @@ describe("intra-event ack across co-targeted reactions", () => {
         }
       )
       .to("co-target-1")
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "i1", actor }, { by: 1 });
     await app.correlate();
@@ -123,7 +123,7 @@ describe("intra-event ack across co-targeted reactions", () => {
         }
       )
       .to("co-target-2")
-      .build();
+      .build({ autoSettle: false });
     const acked: string[] = [];
     app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
 
@@ -159,7 +159,7 @@ describe("intra-event ack across co-targeted reactions", () => {
         { maxRetries: 99, blockOnError: false }
       )
       .to("co-target-3")
-      .build();
+      .build({ autoSettle: false });
 
     await app.do("tick", { stream: "i3", actor }, { by: 1 });
     await app.do("tick", { stream: "i3", actor }, { by: 1 });

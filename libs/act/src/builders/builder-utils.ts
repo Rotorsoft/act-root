@@ -13,14 +13,15 @@
  */
 
 import {
-  assert_defer_when,
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_MAX_RETRIES,
+  resolveReactionConfig,
+} from "../internal/config.js";
+import {
+  assert_defer_when,
   type DeferSchedule,
   make_deferred,
-  resolveReactionConfig,
-} from "../internal/index.js";
-import { DEFAULT_LANE } from "../ports.js";
+} from "../internal/defer-config.js";
 import type {
   Committed,
   EventRegister,
@@ -31,6 +32,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
+import { DEFAULT_LANE } from "../types/index.js";
 import { _this_ } from "./merge.js";
 
 /**

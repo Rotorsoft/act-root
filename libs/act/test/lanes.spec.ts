@@ -30,7 +30,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow", leaseMillis: 30_000, streamLimit: 5 })
       .withLane({ name: "fast", cycleMs: 50 })
-      .build();
+      .build({ autoSettle: false });
 
     expect(app.lanes).toHaveLength(2);
     expect(app.lanes.map((l) => l.name)).toEqual(["slow", "fast"]);
@@ -43,7 +43,7 @@ describe("lanes", () => {
   });
 
   it("preserves today's single-lane behavior when no lane is declared", () => {
-    const app = act().withState(Counter).build();
+    const app = act().withState(Counter).build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
 
@@ -73,7 +73,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "slow-target", lane: "slow" })
-      .build();
+      .build({ autoSettle: false });
 
     const reaction = app.registry.events.Incremented.reactions.get("react");
     expect(reaction?.resolver).toEqual({
@@ -104,7 +104,7 @@ describe("lanes", () => {
           return Promise.resolve();
         })
         .to({ target: "shared", source: "sB", priority: 1, lane: "slow" })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(/conflicting lane assignments/);
   });
 
@@ -122,7 +122,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB", priority: 7, lane: "fast" })
-      .build();
+      .build({ autoSettle: false });
     // Same lane target-wide is fine; the build succeeds.
     expect(app.lanes.map((l) => l.name)).toContain("fast");
   });
@@ -145,7 +145,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB" })
-      .build();
+      .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
 
@@ -162,7 +162,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB", lane: "default" })
-      .build();
+      .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
 
@@ -179,7 +179,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB" })
-      .build();
+      .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
 
@@ -196,7 +196,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB", lane: "default" })
-      .build();
+      .build({ autoSettle: false });
     expect(app.lanes).toEqual([]);
   });
 
@@ -215,7 +215,7 @@ describe("lanes", () => {
           return Promise.resolve();
         })
         .to({ target: "shared", source: "sB" })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(
       'Stream "shared" has conflicting lane assignments ("slow" vs "default")'
     );
@@ -238,7 +238,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared" })
-      .build();
+      .build({ autoSettle: false });
     expect(app.lanes.map((l) => l.name)).toEqual(["slow"]);
   });
 
@@ -273,7 +273,10 @@ describe("lanes", () => {
       .build();
 
     expect(WebhookSlice.lanes).toEqual([{ name: "slow", leaseMillis: 30_000 }]);
-    const app = act().withState(Counter).withSlice(WebhookSlice).build();
+    const app = act()
+      .withState(Counter)
+      .withSlice(WebhookSlice)
+      .build({ autoSettle: false });
     expect(app.lanes).toEqual([{ name: "slow", leaseMillis: 30_000 }]);
   });
 
@@ -287,7 +290,9 @@ describe("lanes", () => {
       .to({ target: "default-target", lane: "default" })
       .build();
 
-    expect(() => act().withSlice(ok).build()).not.toThrow();
+    expect(() =>
+      act().withSlice(ok).build({ autoSettle: false })
+    ).not.toThrow();
   });
 
   it("rejects re-declaring 'default' on a slice", () => {
@@ -318,7 +323,7 @@ describe("lanes", () => {
         .withState(Counter)
         .withLane({ name: "slow", leaseMillis: 60_000 })
         .withSlice(sliceA)
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(/different config/);
   });
 
@@ -332,7 +337,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow", leaseMillis: 30_000 })
       .withSlice(sliceA)
-      .build();
+      .build({ autoSettle: false });
 
     expect(app.lanes).toHaveLength(1);
     expect(app.lanes[0]).toMatchObject({ name: "slow", leaseMillis: 30_000 });
@@ -343,7 +348,7 @@ describe("lanes", () => {
       act()
         .withState(Counter)
         .withLane({ name: "slow" })
-        .build({ onlyLanes: ["slow", "ghost" as never] })
+        .build({ autoSettle: false, onlyLanes: ["slow", "ghost" as never] })
     ).toThrow(/undeclared lane.*ghost/);
   });
 
@@ -351,13 +356,13 @@ describe("lanes", () => {
     expect(() =>
       act()
         .withState(Counter)
-        .build({ onlyLanes: ["default"] })
+        .build({ autoSettle: false, onlyLanes: ["default"] })
     ).not.toThrow();
   });
 
   it("accepts an empty onlyLanes array as a no-op (no validation tripped)", () => {
     expect(() =>
-      act().withState(Counter).build({ onlyLanes: [] })
+      act().withState(Counter).build({ autoSettle: false, onlyLanes: [] })
     ).not.toThrow();
   });
 
@@ -377,7 +382,7 @@ describe("lanes", () => {
       .to({ target: "anywhere", lane: "ghost" as never })
       .build();
 
-    expect(() => act().withSlice(stale).build()).toThrow(
+    expect(() => act().withSlice(stale).build({ autoSettle: false })).toThrow(
       /undeclared lane "ghost"/
     );
   });
@@ -408,7 +413,9 @@ describe("lanes", () => {
       .to((event) => ({ target: `slow-${event.stream}`, lane: "slow" }))
       .build();
 
-    expect(() => act().withSlice(ok).build()).not.toThrow();
+    expect(() =>
+      act().withSlice(ok).build({ autoSettle: false })
+    ).not.toThrow();
   });
 
   it("rejects two static reactions targeting the same stream with different lanes", () => {
@@ -429,7 +436,7 @@ describe("lanes", () => {
         .on("Incremented")
         .do(handlerB)
         .to({ target: "shared", lane: "fast" })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(/conflicting lane assignments/);
   });
 
@@ -451,7 +458,7 @@ describe("lanes", () => {
         .on("Incremented")
         .do(handlerB)
         .to("shared")
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(/conflicting lane assignments/);
     // Direction B: no-lane-first, then lane (existing.lane undefined, incoming defined)
     function handlerC() {
@@ -470,7 +477,7 @@ describe("lanes", () => {
         .on("Incremented")
         .do(handlerD)
         .to({ target: "shared2", lane: "slow" })
-        .build()
+        .build({ autoSettle: false })
     ).toThrow(/conflicting lane assignments/);
   });
 
@@ -478,7 +485,7 @@ describe("lanes", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "slow", leaseMillis: 30_000, streamLimit: 7 })
-      .build();
+      .build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<
@@ -495,7 +502,7 @@ describe("lanes", () => {
   });
 
   it("keeps a single controller with lane=undefined when no lanes are declared", () => {
-    const app = act().withState(Counter).build();
+    const app = act().withState(Counter).build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { lane: string | undefined }>;
@@ -510,7 +517,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ onlyLanes: ["slow"] });
+      .build({ autoSettle: false, onlyLanes: ["slow"] });
     const controllers = (
       app as unknown as { _drain_controllers: Map<string, unknown> }
     )._drain_controllers;
@@ -523,7 +530,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ onlyLanes: ["fast"] });
+      .build({ autoSettle: false, onlyLanes: ["fast"] });
 
     const advisory = infoSpy.mock.calls.find((c) =>
       String(c[0] ?? "").includes("orphaned lane")
@@ -541,7 +548,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ onlyLanes: ["default", "slow", "fast"] });
+      .build({ autoSettle: false, onlyLanes: ["default", "slow", "fast"] });
 
     const advisory = infoSpy.mock.calls.find((c) =>
       String(c[0] ?? "").includes("orphaned lane")
@@ -556,7 +563,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build();
+      .build({ autoSettle: false });
 
     const advisory = infoSpy.mock.calls.find((c) =>
       String(c[0] ?? "").includes("orphaned lane")
@@ -569,7 +576,7 @@ describe("lanes", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5 })
-      .build();
+      .build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<
@@ -591,7 +598,7 @@ describe("lanes", () => {
       .on("Incremented")
       .do(async function noop() {})
       .to({ target: "out", lane: "fast" })
-      .build();
+      .build({ autoSettle: false });
     await app.do(
       "increment",
       { stream: "x", actor: { id: "a", name: "a" } },
@@ -613,7 +620,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5 })
       .withLane({ name: "slow", cycleMs: 1_000 })
-      .build();
+      .build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<
@@ -631,7 +638,7 @@ describe("lanes", () => {
   });
 
   it("start() is a no-op after stop() — once stopped, the controller stays stopped", () => {
-    const app = act().withState(Counter).build();
+    const app = act().withState(Counter).build({ autoSettle: false });
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -655,7 +662,7 @@ describe("lanes", () => {
     // A timer already queued when `stop()` runs will still fire, so the tick
     // re-checks after draining. Without that check the chain would schedule
     // itself again and keep draining past shutdown.
-    const app = act().withState(Counter).build();
+    const app = act().withState(Counter).build({ autoSettle: false });
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -698,7 +705,7 @@ describe("lanes", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5 })
-      .build();
+      .build({ autoSettle: false });
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -740,7 +747,7 @@ describe("lanes", () => {
       .on("SlowTick")
       .do(async function slowHandler() {})
       .to({ target: "slow-out", lane: "slow" })
-      .build();
+      .build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { armed: boolean }>;
@@ -766,7 +773,7 @@ describe("lanes", () => {
       .on("Incremented")
       .do(async function noop() {})
       .to({ target: "all-out", lane: "all" })
-      .build();
+      .build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { armed: boolean }>;
@@ -793,7 +800,7 @@ describe("lanes", () => {
       .on("Incremented")
       .do(async function dyn() {})
       .to((event) => ({ target: `dyn-${event.stream}`, lane: "fast" }))
-      .build();
+      .build({ autoSettle: false });
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { armed: boolean }>;
@@ -820,7 +827,7 @@ describe("lanes", () => {
       .on("Incremented")
       .do(async function noop() {})
       .to({ target: "stop-mid-tick", lane: "fast" })
-      .build();
+      .build({ autoSettle: false });
     app.on("acked", () => {
       void app.shutdown();
     });
@@ -884,7 +891,7 @@ describe("lanes", () => {
         await slowGate;
       })
       .to({ target: "slow-out", lane: "slow" })
-      .build();
+      .build({ autoSettle: false });
 
     const actor = { id: "a", name: "a" };
     await app.do("slowTick", { stream: "src", actor }, {});
@@ -1035,6 +1042,7 @@ describe("lanes", () => {
         })
         .to({ target: "t-b", lane: "b" })
         .build({
+          autoSettle: false,
           scoped: { store, cache: new InMemoryCache() },
           onlyLanes: only_lanes as ["default"],
         });

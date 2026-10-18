@@ -4,8 +4,8 @@ import { buildReminderTimer, startReminders } from "./recurring-reminder.js";
 
 /**
  * Unit test for the recurring-timer recipe. Uses a sub-second cadence (the
- * `(event) => { at }` form) so the loop is driven with plain waits, the way the
- * framework's `defer.spec` drives a single defer.
+ * `(event) => { at }` form) so each tick comes due quickly; ticks settle on
+ * their own, so most tests just wait for the outcome.
  */
 describe("recurring reminder timer recipe", () => {
   const STEP = 40; // ms between ticks
@@ -24,12 +24,16 @@ describe("recurring reminder timer recipe", () => {
       },
     });
 
+    const closed: CloseResult[] = [];
+    app.on("closed", (r) => closed.push(r));
+
+    // Each tick settles on its own; wait for the loop to end and be reaped.
     await startReminders(app, "t1");
-    for (let i = 0; i < 8; i++) {
-      await app.correlate();
-      await app.drain();
-      await sleep(STEP + 20);
-    }
+    await vi.waitFor(
+      () =>
+        expect(closed.some((r) => r.truncated.has("reminders:t1"))).toBe(true),
+      { timeout: 2000 }
+    );
 
     // The nudge side effect is the autoclose-independent evidence of the loop:
     // ticks 1 and 2 fired a nudge and re-armed; tick 3 hit the bound and ended
@@ -64,6 +68,8 @@ describe("recurring reminder timer recipe", () => {
 
     // The failed finalize leaves tick 1 leased until the lease expires; jump
     // the clock past it once (only `Date` is faked, and it keeps moving).
+    // The loop drives a drain after the jump, since the real-time wake for
+    // the expired lease would not fire inside the test.
     vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     let jumped = false;
     await startReminders(app, "t3");
@@ -99,14 +105,13 @@ describe("recurring reminder timer recipe", () => {
     app.on("closed", (r) => closed.push(r));
 
     await startReminders(app, "t2");
-    for (let i = 0; i < 8; i++) {
-      await app.correlate();
-      await app.drain();
-      await sleep(STEP + 20);
-    }
 
     // The `.autocloses({ is: "RemindersEnded" })` policy reaps the per-entity
     // stream the moment its head is the terminal event.
-    expect(closed.some((r) => r.truncated.has("reminders:t2"))).toBe(true);
+    await vi.waitFor(
+      () =>
+        expect(closed.some((r) => r.truncated.has("reminders:t2"))).toBe(true),
+      { timeout: 2000 }
+    );
   });
 });

@@ -46,7 +46,7 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
         ran.push(e.stream);
       })
       .to((e) => ({ target: `r-${e.stream}`, lane: "l" }))
-      .build();
+      .build({ autoSettle: false });
     await app.do("ping", { stream: "p", actor }, {});
     await app.correlate();
     // Wait for delivery rather than a fixed delay: the defer is 2 s out and a
@@ -70,7 +70,7 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
         { maxRetries: 3, backoff: { strategy: "fixed", baseMs: 300 } }
       )
       .to((e) => ({ target: `r-${e.stream}`, lane: "l" }))
-      .build();
+      .build({ autoSettle: false });
     await app.do("ping", { stream: "b", actor }, {});
     await app.correlate();
     await sleep(3_000);

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
-import * as drain from "../src/internal/drain.js";
+import * as drain from "../src/internal/drain-ops.js";
 import * as es from "../src/internal/event-sourcing.js";
 import { build_drain, build_es, trace_cycle } from "../src/internal/tracing.js";
 import { cache, log, store } from "../src/ports.js";

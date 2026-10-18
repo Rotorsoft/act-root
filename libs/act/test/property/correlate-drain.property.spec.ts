@@ -57,7 +57,7 @@ describe("property: correlate→drain delivery invariants", () => {
           return Promise.resolve();
         })
         .to((event) => ({ target: `proj-${event.stream}` }))
-        .build();
+        .build({ autoSettle: false });
 
       for (const s of commits) {
         await app.do("inc", target(s), {});
@@ -92,7 +92,7 @@ describe("property: correlate→drain delivery invariants", () => {
           return Promise.resolve();
         })
         .to((event) => ({ target: `proj-${event.stream}` }))
-        .build();
+        .build({ autoSettle: false });
 
       for (const s of commits) {
         await app.do("inc", target(s), {});

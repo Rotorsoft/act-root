@@ -52,7 +52,7 @@ describe("a failing store does not quarantine a healthy stream", () => {
       .do(handler, { maxRetries: 3 })
       // Threshold raised so the breaker stays closed through five failures:
       // this test is about the retry budget, not about the breaker tripping.
-      .build({ circuitBreaker: { failureThreshold: 10 } });
+      .build({ autoSettle: false, circuitBreaker: { failureThreshold: 10 } });
     app.on("error", () => {});
 
     await app.do("tick", { stream: "busy-db", actor }, {});
@@ -91,7 +91,7 @@ describe("a failing store does not quarantine a healthy stream", () => {
       .withState(counter)
       .on("ticked")
       .do(handler, { maxRetries: 3 })
-      .build();
+      .build({ autoSettle: false });
     app.on("error", () => {});
 
     const tick = async () => {
@@ -190,7 +190,10 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
       .do(async function sink(e) {
         seen.push(e.stream);
       })
-      .build({ scoped: { store: thrower, cache: new InMemoryCache() } });
+      .build({
+        autoSettle: false,
+        scoped: { store: thrower, cache: new InMemoryCache() },
+      });
 
     await app.do("tick", { stream: "victim", actor }, {});
     await app.do("tick", { stream: "healthy", actor }, {});
@@ -229,6 +232,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
           { maxRetries: 2, blockOnError: options.blockOnError }
         )
         .build({
+          autoSettle: false,
           circuitBreaker: { failureThreshold: 20 },
           scoped: {
             store: poison_stream(base, "victim"),
@@ -308,6 +312,7 @@ describe("a stream whose fetch fails does not stall the streams beside it", () =
         seen.push(e.stream);
       })
       .build({
+        autoSettle: false,
         scoped: {
           store: poison_stream(base, "victim"),
           cache: new InMemoryCache(),

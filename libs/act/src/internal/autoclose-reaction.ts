@@ -13,19 +13,21 @@
  * mutates it.
  */
 
-import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { store } from "../ports.js";
+import { DeferSignal } from "../types/errors.js";
 import type {
+  AutocloseConfig,
   Reaction,
   Registry,
   SchemaRegister,
   Schemas,
   State,
 } from "../types/index.js";
+import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
-import { CloseSignal } from "./close-signal.js";
-import { type AutocloseConfig, DEFAULT_MAX_RETRIES } from "./config.js";
-import { DeferSignal } from "./defer-signal.js";
+import { DEFAULT_MAX_RETRIES } from "./config.js";
+import { CloseSignal } from "./reaction-dispatch.js";
 
 /**
  * Prefix for the synthetic per-aggregate stream the autoclose reaction

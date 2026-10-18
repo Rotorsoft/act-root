@@ -30,11 +30,8 @@ async function main() {
   const predicate = app.registry.autoclose_policy("Ticket");
   console.log("Ticket.autoclose registered:", typeof predicate === "function");
 
-  // `start_correlations()` settles on a timer, which drains the autoclose
-  // reaction. A policy keyed on `after: { days: 90 }` won't fire on a
-  // ticket that resolved seconds ago — this proves the wiring, not the
-  // eviction.
-  app.start_correlations();
+  // A policy keyed on `after: { days: 90 }` won't fire on a ticket that
+  // resolved seconds ago — this proves the wiring, not the eviction.
   await app.shutdown();
 }
 

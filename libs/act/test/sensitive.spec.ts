@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { _mark_sensitive, pii_fields } from "../src/internal/sensitive.js";
+import { _mark_sensitive, pii_fields } from "../src/sensitive.js";
 import { sensitive } from "../src/types/schemas.js";
 
 describe("sensitive()", () => {

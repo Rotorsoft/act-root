@@ -1,8 +1,9 @@
 import { test } from "vitest";
-import type { Act, ActOptions } from "../act.js";
+import type { Act } from "../act.js";
 import { InMemoryCache } from "../adapters/in-memory-cache.js";
 import { InMemoryStore } from "../adapters/in-memory-store.js";
-import type { Cache, Store } from "../types/index.js";
+import type { ActOptions, Cache, Store } from "../types/index.js";
+import type { Sandbox, SandboxOptions } from "../types/sandbox.js";
 
 /**
  * Minimal structural shape — anything with a `.build()` that returns an
@@ -18,32 +19,6 @@ type AnyActBuilder<TApp> = {
   // (`scoped`, `correlator`, `settleDebounceMs`, etc.) still type-checks
   // at the runtime call site below.
   build: (options?: ActOptions<any>) => TApp;
-};
-
-/**
- * Options for {@link sandbox} / {@link fixture}.
- *
- * Defaults to `new InMemoryStore() + new InMemoryCache()` per call.
- * Override `store` / `cache` to point at PG, SQLite, or any other
- * adapter — factories run once per call so each test gets a fresh
- * instance.
- */
-export type SandboxOptions = {
-  /** Factory for the per-test store. Defaults to `new InMemoryStore()`. */
-  readonly store?: () => Store | Promise<Store>;
-  /** Factory for the per-test cache. Defaults to `new InMemoryCache()`. */
-  readonly cache?: () => Cache | Promise<Cache>;
-  /** Pass-through ActOptions. `scoped` is filled in by the helper. */
-  readonly actOptions?: Omit<ActOptions, "scoped">;
-};
-
-/** Return shape of {@link sandbox}. */
-export type Sandbox<TApp> = {
-  readonly app: TApp;
-  readonly store: Store;
-  readonly cache: Cache;
-  /** Tears down the Act, store, and cache. Idempotent. */
-  readonly dispose: () => Promise<void>;
 };
 
 /**

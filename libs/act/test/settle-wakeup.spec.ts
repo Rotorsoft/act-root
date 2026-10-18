@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { act, dispose, state, store, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  dispose,
+  NonRetryableError,
+  state,
+  store,
+  ZodEmpty,
+} from "../src/index.js";
 import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 import { SettleLoop } from "../src/internal/settle.js";
 import type { Drain, Schemas } from "../src/types/index.js";
@@ -83,6 +90,152 @@ describe("settle loop wake-up during a running cycle", () => {
 
     expect(drains).toBeGreaterThanOrEqual(2);
     loop.stop();
+  });
+});
+
+describe("a scheduled settle pass is never reset or replaced", () => {
+  const breaker = () =>
+    new CircuitBreaker({ failureThreshold: 5, cooldownMs: 1000 });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps a caller's options when an internal wake-up lands mid-cycle", async () => {
+    const seen: Array<number | undefined> = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain: async (options) => {
+          seen.push(options.eventLimit);
+          if (seen.length === 1) {
+            started();
+            await gate;
+          }
+          return empty_drain();
+        },
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      0
+    );
+    loop.schedule();
+    await running;
+    loop.schedule(); // a commit while the cycle runs
+    loop.schedule({ eventLimit: 77 }); // the caller
+    loop.schedule(); // another commit
+    release();
+    await vi.waitFor(() => expect(seen).toEqual([undefined, 77]));
+    loop.stop(true);
+  });
+
+  it("doesn't put off a scheduled pass when more calls arrive", async () => {
+    vi.useFakeTimers();
+    const drain = vi.fn(async () => empty_drain());
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain,
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      10
+    );
+    loop.schedule({ debounceMs: 50 });
+    await vi.advanceTimersByTimeAsync(40);
+    loop.schedule({ debounceMs: 50 }); // a caller
+    loop.schedule(); // a commit
+    await vi.advanceTimersByTimeAsync(10);
+    expect(drain).toHaveBeenCalledTimes(1);
+    loop.stop(true);
+  });
+
+  it("a pass queued mid-cycle keeps the caller's delay", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const drain = vi.fn(async () => {
+      if (drain.mock.calls.length === 1) await gate;
+      return empty_drain();
+    });
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain,
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      1000
+    );
+    loop.schedule({ debounceMs: 0 });
+    await vi.advanceTimersByTimeAsync(0); // the first cycle holds in drain
+    loop.schedule({ debounceMs: 0 }); // the caller, mid-cycle
+    release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(drain).toHaveBeenCalledTimes(2); // not 1000ms later
+    loop.stop(true);
+  });
+
+  it("brings a scheduled pass forward for a shorter delay", async () => {
+    vi.useFakeTimers();
+    const drain = vi.fn(async () => empty_drain());
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain,
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      10
+    );
+    loop.schedule({ debounceMs: 5000 }); // a caller's long delay
+    loop.schedule(); // a commit
+    await vi.advanceTimersByTimeAsync(10);
+    expect(drain).toHaveBeenCalledTimes(1);
+    loop.stop(true);
+  });
+
+  it("control — stop() drops the caller's options with the pending pass", async () => {
+    vi.useFakeTimers();
+    const seen: Array<number | undefined> = [];
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain: async (options) => {
+          seen.push(options.eventLimit);
+          return empty_drain();
+        },
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      10
+    );
+    loop.schedule({ eventLimit: 5 });
+    loop.stop();
+    loop.schedule();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(seen).toEqual([undefined]);
+    loop.stop(true);
   });
 });
 
@@ -322,7 +475,7 @@ describe("a throwing settled listener is contained", () => {
       .on("Ticked")
       .do(async function react() {})
       .to((e) => ({ target: `t-${e.stream}` }))
-      .build(opts as never);
+      .build({ autoSettle: false, ...opts } as never);
 
   /**
    * Settle, waiting on a resolver registered BEFORE the throwing listener so
@@ -417,5 +570,152 @@ describe("a throwing settled listener is contained", () => {
     );
     boom.mockRestore();
     await app.shutdown();
+  });
+});
+
+describe("a local change settles its own reactions", () => {
+  const Ping = state({ Ping: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Pinged: ZodEmpty, Noted: ZodEmpty })
+    .patch({ Pinged: (_, s) => ({ n: s.n + 1 }), Noted: (_, s) => s })
+    .on({ ping: ZodEmpty })
+    .emit(() => ["Pinged", {}])
+    .on({ note: ZodEmpty })
+    .emit(() => ["Noted", {}])
+    .build();
+  const actor = { id: "a", name: "a" };
+
+  const reacting = (ran: string[]) =>
+    act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track(event) {
+        ran.push(event.stream);
+      })
+      .to("tracker")
+      .build();
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  it("runs the reaction with no settle wiring", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.do("ping", { stream: "p1", actor }, {});
+    await vi.waitFor(() => expect(ran).toEqual(["p1"]));
+  });
+
+  it("runs nothing on its own with autoSettle: false, until the caller walks the pipeline", async () => {
+    const ran: string[] = [];
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track(event) {
+        ran.push(event.stream);
+      })
+      .to("tracker")
+      .build({ autoSettle: false });
+    await app.do("ping", { stream: "p2", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual([]);
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.map((l) => l.stream)).toEqual(["tracker"]);
+    expect(ran).toEqual(["p2"]);
+  });
+
+  it("runs no reaction for a commit after shutdown", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.shutdown();
+    await app.do("ping", { stream: "late", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ran).toEqual([]);
+  });
+
+  it("keeps a caller's settle options while start_correlations polls", async () => {
+    const app = reacting([]);
+    const limits: Array<number | undefined> = [];
+    const drain = app.drain.bind(app);
+    vi.spyOn(app, "drain").mockImplementation((options) => {
+      limits.push(options?.eventLimit);
+      return drain(options);
+    });
+    vi.useFakeTimers();
+    try {
+      app.start_correlations({ limit: 5 }, 5);
+      app.settle({ eventLimit: 77, debounceMs: 60 });
+      // The 5ms tick brings the pass forward; it must keep the caller's options.
+      await vi.advanceTimersByTimeAsync(20);
+      expect(limits[0]).toBe(77);
+    } finally {
+      app.stop_correlations();
+      vi.useRealTimers();
+    }
+  });
+
+  it("scans with the poll's limit only while the poll runs", async () => {
+    const app = reacting([]);
+    const scanned = vi.spyOn(app as never, "_correlate_scanned") as unknown as {
+      mock: { calls: Array<[{ limit?: number }]> };
+    };
+    const limit = () => scanned.mock.calls.at(-1)?.[0].limit;
+    app.start_correlations({ limit: 5 }, 5);
+    await vi.waitFor(() => expect(limit()).toBe(5));
+    app.stop_correlations();
+    app.settle({ correlate: { limit: 7 } });
+    await vi.waitFor(() => expect(limit()).toBe(7));
+    app.settle();
+    await vi.waitFor(() => expect(limit()).toBe(100));
+  });
+
+  it("replays a reset target with no settle call", async () => {
+    const ran: string[] = [];
+    const app = reacting(ran);
+    await app.do("ping", { stream: "r1", actor }, {});
+    await vi.waitFor(() => expect(ran).toEqual(["r1"]));
+    expect(await app.reset(["tracker"])).toBe(1);
+    await vi.waitFor(() => expect(ran).toEqual(["r1", "r1"]));
+  });
+
+  it("resumes an unblocked stream with no settle call", async () => {
+    let fail = true;
+    const ran: string[] = [];
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function flaky(event) {
+        if (fail) throw new NonRetryableError("down");
+        ran.push(event.stream);
+      })
+      .to("flaky")
+      .build();
+    // Wait for the commit's own settle to finish, so nothing is running.
+    const idle = new Promise((r) => app.on("settled", r));
+    await app.do("ping", { stream: "u1", actor }, {});
+    await idle;
+    expect(await app.blocked_streams()).toHaveLength(1);
+    fail = false;
+    expect(await app.unblock(["flaky"])).toBe(1);
+    await vi.waitFor(() => expect(ran).toEqual(["u1"]));
+  });
+
+  it("control — a reset that resets nothing schedules nothing", async () => {
+    const settled = vi.fn();
+    const app = reacting([]);
+    app.on("settled", settled);
+    expect(await app.reset(["nobody"])).toBe(0);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).not.toHaveBeenCalled();
+  });
+
+  it("control — schedules nothing for an event no reaction handles", async () => {
+    const settled = vi.fn();
+    const app = reacting([]);
+    app.on("settled", settled);
+    await app.do("note", { stream: "p3", actor }, {});
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).not.toHaveBeenCalled();
   });
 });
