@@ -12,18 +12,11 @@ import { SettleLoop } from "../src/internal/settle.js";
 import type { Drain, Schemas } from "../src/types/index.js";
 
 /**
- * ACT-1205 — SettleLoop.schedule must not drop a wake-up requested while
- * a cycle is running.
- *
- * `schedule()`'s timer used to bail with `if (this._running) return;` and
- * no pending flag. A commit landing during the final no-progress drain
- * pass — whose `schedule({debounceMs:0})` fires before `_running` clears
- * — was consumed: the armed controllers stayed armed but nothing
- * re-drained on an instance with no lane `cycleMs` and no polling.
- *
- * The fix records a `_pending` flag when the timer fires mid-cycle and
- * re-schedules it in `finally`. RED on the old code (the second wake-up
- * yields no second cycle); GREEN once the pending pass runs.
+ * SettleLoop.schedule must not drop a wake-up requested while a cycle is
+ * running. A commit landing during the final no-progress pass would
+ * otherwise be lost: its lanes stay armed, but nothing drains them on an
+ * instance with no lane `cycleMs` and no polling. A wake-up mid-cycle sets
+ * `_pending`, and the cycle's `finally` schedules one more pass.
  */
 
 const empty_drain = (): Drain<Schemas> => ({
@@ -59,7 +52,7 @@ describe("settle loop wake-up during a running cycle", () => {
           drains++;
           if (drains === 1) {
             // First cycle's drain is in flight — signal, then hold so the
-            // second schedule() lands while _running is still true.
+            // second schedule() lands while the cycle is still in flight.
             started_signal();
             await gate;
           }
@@ -75,11 +68,10 @@ describe("settle loop wake-up during a running cycle", () => {
     loop.schedule({ debounceMs: 0 });
     await started; // cycle 1's drain is running
 
-    // Fire a wake-up while the cycle is running. The old code drops it.
+    // Fire a wake-up while the cycle is running.
     loop.schedule({ debounceMs: 0 });
-    // Let the wake-up's zero-delay timer actually fire while _running is
-    // still true — that's the exact window the bug lives in. Only then
-    // release the in-flight cycle.
+    // Let the wake-up's zero-delay timer fire while the cycle is still in
+    // flight, the window a lost wake-up would fall in, before releasing it.
     await new Promise((r) => setTimeout(r, 10));
 
     // Let cycle 1 finish; its finally must re-arm the pending pass.
@@ -637,8 +629,10 @@ describe("a local change settles its own reactions", () => {
   it("keeps a caller's settle options while start_correlations polls", async () => {
     const app = reacting([]);
     const limits: Array<number | undefined> = [];
-    const drain = app.drain.bind(app);
-    vi.spyOn(app, "drain").mockImplementation((options) => {
+    // The settle loop drains through the internal path, not `app.drain`.
+    const internal = app as unknown as { _drain_all: typeof app.drain };
+    const drain = internal._drain_all.bind(app);
+    vi.spyOn(internal, "_drain_all").mockImplementation((options) => {
       limits.push(options?.eventLimit);
       return drain(options);
     });

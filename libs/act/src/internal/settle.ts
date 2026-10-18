@@ -46,10 +46,9 @@ export type SettleDeps<TEvents extends Schemas> = {
  */
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
-  private _running = false;
   /**
-   * Resolves when the cycle in flight finishes, so shutdown can wait for
-   * it (`stop()` cancels scheduling only). Never rejects.
+   * The cycle in flight, set while one runs. Shutdown waits for it
+   * (`stop()` cancels scheduling only). Never rejects.
    */
   private _inflight: Promise<void> | undefined;
   /** A wake-up arrived while a cycle ran: run one more pass after it. */
@@ -83,7 +82,7 @@ export class SettleLoop<TEvents extends Schemas> {
   schedule(options?: SettleOptions): void {
     if (this._stopped) return;
     if (options) this._next = options;
-    if (this._running) {
+    if (this._inflight) {
       this._pending = true;
       return;
     }
@@ -103,14 +102,8 @@ export class SettleLoop<TEvents extends Schemas> {
         ...drain_options
       } = this._next ?? {};
       this._next = undefined;
-      this._running = true;
 
-      let settle_done!: () => void;
-      this._inflight = new Promise<void>((done) => {
-        settle_done = done;
-      });
-
-      (async () => {
+      this._inflight = (async () => {
         await this._deps.init();
         // Accumulated across every pass, so `settled` reports what the whole
         // settle did; its last pass made no progress and is always empty.
@@ -161,9 +154,7 @@ export class SettleLoop<TEvents extends Schemas> {
           this._deps.breaker.failed(Date.now(), err);
         })
         .finally(() => {
-          this._running = false;
           this._inflight = undefined;
-          settle_done();
           // A wake-up arrived mid-cycle: run one more pass so it isn't lost.
           if (this._pending) {
             this._pending = false;

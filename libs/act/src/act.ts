@@ -505,7 +505,9 @@ export class Act<
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
             true
           ),
-        drain: (o) => this.drain(o),
+        // `settle()` validated the options, and `_schedule` skips writer-only
+        // instances, so the loop drains through the internal path.
+        drain: (o) => this._scoped(() => this._drain_all(o)),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
       },
@@ -612,14 +614,7 @@ export class Act<
         // Errors are logged and swallowed so the store's listener survives.
         try {
           this.emit("notified", notification);
-          // Arm only the lanes whose reactions match the notified events.
-          // A sidecar (`drain: false`) still gets the `notified` event.
-          if (this._drain) {
-            const armed = this._arm_for_event_names(
-              notification.events.map((e) => e.name)
-            );
-            this._settle_armed(armed);
-          }
+          this._wake(notification.events.map((e) => e.name));
         } catch (err) {
           this._logger.error(err, "notified handler threw");
         }
@@ -693,13 +688,9 @@ export class Act<
         payload,
         do_options
       );
-      // Arm only the lanes whose reactions match the committed events
-      // (`action()` snapshots always carry their event), and settle them:
-      // a local commit runs its reactions the way a remote one does.
-      const armed = this._arm_for_event_names(
-        snapshots.map((s) => (s.event as { name: string }).name)
-      );
-      this._settle_armed(armed);
+      // A local commit runs its reactions the way a remote one does
+      // (`action()` snapshots always carry their event).
+      this._wake(snapshots.map((s) => (s.event as { name: string }).name));
       this.emit("committed", snapshots);
       return snapshots;
     });
@@ -946,19 +937,23 @@ export class Act<
     return this._scoped(() => this._drain_all(options));
   }
 
-  private _arm_all(): void {
-    if (!this._reactive) return;
+  /** Arms correlate and every lane; false on an app with no reactions. */
+  private _arm_all(): boolean {
+    if (!this._reactive) return false;
     // A commit may also give the next correlate scan something to find.
     this._correlate.arm();
     for (const c of this._drain_controllers.values()) c.arm();
+    return true;
   }
 
   /**
-   * Settles what a change armed (a commit, a reset, an unblock, a restore,
-   * a notification from another process), unless the app walks the
-   * pipeline itself (`autoSettle: false`).
+   * Wakes what a change freed (a commit, a reset, an unblock, a restore,
+   * a notification from another process): arms the lanes these events
+   * react on, or every lane without names, and settles them unless the app
+   * walks the pipeline itself (`autoSettle: false`).
    */
-  private _settle_armed(armed: boolean): void {
+  private _wake(names?: Iterable<string>): void {
+    const armed = names ? this._arm_for_event_names(names) : this._arm_all();
     if (armed && this._auto_settle) this._schedule();
   }
 
@@ -1168,8 +1163,7 @@ export class Act<
       for (const handler of this._batch_handlers.values())
         (handler as ResettableBatchHandler<TEvents>)[FOLD_RESET]?.();
       if (count > 0) {
-        this._arm_all();
-        this._settle_armed(this._reactive);
+        this._wake();
       }
       return count;
     });
@@ -1204,8 +1198,7 @@ export class Act<
     return this._scoped(async () => {
       const count = await store().unblock(input);
       if (count > 0) {
-        this._arm_all();
-        this._settle_armed(this._reactive);
+        this._wake();
       }
       return count;
     });
@@ -1278,8 +1271,7 @@ export class Act<
       // subscription rows): restart correlation from cold and arm the drain.
       if (!sink) {
         this._correlate.restart();
-        this._arm_all();
-        this._settle_armed(this._reactive);
+        this._wake();
       }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
     });
