@@ -76,7 +76,7 @@ describe("read-path PII gate", () => {
   // --- do() return is gated by target.actor ---
 
   it("owner registering themselves sees plaintext in the returned snapshot", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     const [snap] = await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -90,7 +90,7 @@ describe("read-path PII gate", () => {
   });
 
   it("admin registering someone else sees plaintext — predicate matches the roles branch", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     const [snap] = await app.do(
       "register",
       { stream: "user-1", actor: admin },
@@ -109,7 +109,7 @@ describe("read-path PII gate", () => {
     // plaintext they submitted. .discloses governs reads (load/query),
     // not writes; redacting a freshly-emitted event back to its
     // originator would be theater.
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     const [snap] = await app.do(
       "register",
       { stream: "user-1", actor: stranger },
@@ -123,7 +123,7 @@ describe("read-path PII gate", () => {
   });
 
   it("do() on a state without .discloses also returns plaintext — same rationale", async () => {
-    const app = act().withState(UserNoPolicy).build({ autoSettle: false });
+    const app = act().withState(UserNoPolicy).build();
     const [snap] = await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -139,7 +139,7 @@ describe("read-path PII gate", () => {
   // --- load() is gated by actor parameter ---
 
   it("load with the owner actor sees plaintext (cache invalidated to force a fresh query)", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -155,7 +155,7 @@ describe("read-path PII gate", () => {
   });
 
   it("load with a stranger actor sees REDACTED", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -171,7 +171,7 @@ describe("read-path PII gate", () => {
   });
 
   it("load with no actor default-denies", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -187,7 +187,7 @@ describe("read-path PII gate", () => {
   });
 
   it("the gated load event drops the pii sidecar — plaintext never rides in event.pii", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -207,7 +207,7 @@ describe("read-path PII gate", () => {
   // --- SHREDDED — irrecoverable post-forget ---
 
   it("after Store.forget_pii, reads return SHREDDED regardless of authorization", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -239,7 +239,7 @@ describe("read-path PII gate", () => {
   //     authorized. Best-effort name-match — see `pii_mask_state`.
 
   it("reducer sees plaintext; load-path mask redacts state for unauthorized actors", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -291,7 +291,7 @@ describe("read-path PII gate", () => {
       .emit((action) => ["UserPromoted", action])
       .discloses(() => true)
       .build();
-    const app = act().withState(MixedUser).build({ autoSettle: false });
+    const app = act().withState(MixedUser).build();
     await app.do(
       "register",
       { stream: "u-mix", actor: owner },
@@ -319,7 +319,7 @@ describe("read-path PII gate", () => {
       .on({ increment: z.object({ by: z.number() }) })
       .emit((p) => ["Incremented", p])
       .build();
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     const [doSnap] = await app.do(
       "increment",
       { stream: "c-1", actor: owner },
@@ -344,7 +344,7 @@ describe("query / query_array default-deny PII gate", () => {
   });
 
   it("query_array redacts sensitive fields and drops the pii sidecar — even with a permissive .discloses", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -361,7 +361,7 @@ describe("query / query_array default-deny PII gate", () => {
   });
 
   it("query (streaming callback) redacts + drops the sidecar too", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -387,7 +387,7 @@ describe("query / query_array default-deny PII gate", () => {
   });
 
   it("a default-deny state (no .discloses) is redacted on query too", async () => {
-    const app = act().withState(UserNoPolicy).build({ autoSettle: false });
+    const app = act().withState(UserNoPolicy).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -402,7 +402,7 @@ describe("query / query_array default-deny PII gate", () => {
   });
 
   it("after forget_pii, query returns SHREDDED", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
@@ -429,7 +429,7 @@ describe("query / query_array default-deny PII gate", () => {
       .on({ increment: z.object({ by: z.number() }) })
       .emit((p) => ["Incremented", p])
       .build();
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     await app.do("increment", { stream: "c-1", actor: owner }, { by: 5 });
     const [e] = await app.query_array({ stream: "c-1", stream_exact: true });
     expect(e.data).toEqual({ by: 5 });
@@ -462,7 +462,7 @@ describe("query / query_array default-deny PII gate", () => {
       .emit((p) => ["UserPromoted3", p])
       .discloses(() => true)
       .build();
-    const app = act().withState(MixedUser).build({ autoSettle: false });
+    const app = act().withState(MixedUser).build();
     await app.do(
       "register",
       { stream: "u-mix", actor: owner },

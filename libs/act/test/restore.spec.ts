@@ -564,9 +564,7 @@ describe("Act.restore (orchestrator)", () => {
   const calc = (events: E[]): EventSource => fromArray(events);
 
   it("delegates to store.restore via the driver and returns the result", async () => {
-    const ctx = await sandbox(act().withState(Calculator), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Calculator));
     const stream = `restore-orchestrator-${Date.now()}`;
     const t = new Date("2024-04-01T00:00:00.000Z");
     const result = await ctx.app.restore(
@@ -591,9 +589,7 @@ describe("Act.restore (orchestrator)", () => {
   });
 
   it("throws when the adapter has no restore capability", async () => {
-    const ctx = await sandbox(act().withState(Calculator), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Calculator));
     // Remove the optional method on the scoped store to simulate a
     // restore-incapable adapter without writing a new one.
     const savedRestore = ctx.store.restore;
@@ -613,9 +609,7 @@ describe("Act.restore (orchestrator)", () => {
   });
 
   it("dry_run validates the source without touching the store", async () => {
-    const ctx = await sandbox(act().withState(Calculator), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Calculator));
     const stream = `restore-dry-${Date.now()}`;
     const t = new Date("2024-04-01T00:00:00.000Z");
     // Spy on the store's restore so we can prove it was never invoked.
@@ -643,9 +637,7 @@ describe("Act.restore (orchestrator)", () => {
   });
 
   it("dry_run works on an adapter with no restore capability", async () => {
-    const ctx = await sandbox(act().withState(Calculator), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Calculator));
     const savedRestore = ctx.store.restore;
     (ctx.store as { restore?: unknown }).restore = undefined;
     try {
@@ -660,9 +652,7 @@ describe("Act.restore (orchestrator)", () => {
   });
 
   it("dry_run surfaces validation errors without touching the store", async () => {
-    const ctx = await sandbox(act().withState(Calculator), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Calculator));
     try {
       await expect(
         ctx.app.restore(calc([baseEvent({ version: -1 })]), { dry_run: true })
@@ -695,9 +685,7 @@ describe("restore from a real Store source", () => {
   };
 
   it("carries a __snapshot__ through a store-to-store restore", async () => {
-    const ctx = await sandbox(act().withState(Counter), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Counter));
     try {
       for (let i = 0; i < 4; i++)
         await ctx.app.do("Tick", { stream: "r1", actor }, {});
@@ -714,9 +702,7 @@ describe("restore from a real Store source", () => {
   });
 
   it("does not lose a stream whose history was pruned by a windowed close", async () => {
-    const ctx = await sandbox(act().withState(Counter), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Counter));
     try {
       for (let i = 0; i < 6; i++)
         await ctx.app.do("Tick", { stream: "r2", actor }, {});
@@ -740,9 +726,7 @@ describe("restore from a real Store source", () => {
   });
 
   it("drop_snapshots actually drops them from a Store source", async () => {
-    const ctx = await sandbox(act().withState(Counter), {
-      actOptions: { autoSettle: false },
-    });
+    const ctx = await sandbox(act().withState(Counter));
     try {
       for (let i = 0; i < 6; i++)
         await ctx.app.do("Tick", { stream: "r3", actor }, {});

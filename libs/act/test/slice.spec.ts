@@ -167,8 +167,7 @@ describe("slice", () => {
     const SliceB = slice().withState(CountB).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(SliceA).withSlice(SliceB),
-      { actOptions: { autoSettle: false } }
+      act().withSlice(SliceA).withSlice(SliceB)
     );
 
     await app.do("add", { stream, actor }, { n: 5 });
@@ -373,9 +372,7 @@ describe("slice", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const { app, dispose } = await sandbox(act().withState(counter), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, dispose } = await sandbox(act().withState(counter));
     await app.do("increment", { stream, actor }, {});
     const snap = await app.load(counter, stream);
     expect(snap.state.count).toBe(1);
@@ -406,8 +403,7 @@ describe("slice", () => {
     const CounterSlice = slice().withState(Counter).build();
 
     const { app, dispose } = await sandbox(
-      act().withSlice(CounterSlice).withState(Logger),
-      { actOptions: { autoSettle: false } }
+      act().withSlice(CounterSlice).withState(Logger)
     );
 
     await app.do("count", { stream: counterStream, actor }, { n: 5 });
@@ -470,9 +466,7 @@ describe("slice", () => {
     expect(s.events.Incremented).toBeDefined();
     expect(s.events.Labeled).toBeDefined();
 
-    const { app, dispose } = await sandbox(act().withSlice(s), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, dispose } = await sandbox(act().withSlice(s));
     await app.do("increment", { stream, actor }, { by: 2 });
     await app.do("setLabel", { stream, actor }, { label: "merged" });
 
@@ -610,9 +604,7 @@ describe("slice", () => {
       .do(sliceHandler)
       .build();
 
-    const { app, dispose } = await sandbox(act().withSlice(ThingSlice), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
     const events = app.registry.events as Record<string, any>;
 
     const names = [...events.Incremented.reactions.keys()];

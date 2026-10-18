@@ -203,8 +203,7 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({
               target: `${e.stream}-view`,
               lane: "typo" as "fast",
-            })),
-          { actOptions: { autoSettle: false } }
+            }))
         );
         await app.do("ping", { stream: "c0", actor }, {});
         await cycle(app);
@@ -225,8 +224,7 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({
               target: `${e.stream}-view`,
               lane: "typo" as "fast",
-            })),
-          { actOptions: { autoSettle: false } }
+            }))
         );
         for (let i = 0; i < AGGREGATES; i++)
           await app.do("ping", { stream: `c${i}`, actor }, {});
@@ -252,8 +250,7 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-a`, lane: "typo" as "fast" }))
             .on("Bumped")
             .do(async function onBumpedB() {})
-            .to((e) => ({ target: `${e.stream}-b`, lane: "typo" as "fast" })),
-          { actOptions: { autoSettle: false } }
+            .to((e) => ({ target: `${e.stream}-b`, lane: "typo" as "fast" }))
         );
         for (let i = 0; i < 3; i++) {
           await app.do("ping", { stream: `c${i}`, actor }, {});
@@ -282,8 +279,7 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-view`, lane: "fast" }))
             .on("Pinged")
             .do(async function onPingedSolo() {})
-            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" })),
-          { actOptions: { autoSettle: false } }
+            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" }))
         );
         await app.do("bump", { stream: "c0", actor }, {});
         await app.do("ping", { stream: "c0", actor }, {});
@@ -306,8 +302,7 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-view`, lane: "fast" }))
             .on("Pinged")
             .do(async function onPingedMany() {})
-            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" })),
-          { actOptions: { autoSettle: false } }
+            .to((e) => ({ target: `${e.stream}-view`, lane: "slow" }))
         );
         for (let i = 0; i < AGGREGATES; i++) {
           await app.do("bump", { stream: `c${i}`, actor }, {});
@@ -340,8 +335,7 @@ describe("reporting once per declaration, not once per aggregate", () => {
             .to((e) => ({ target: `${e.stream}-b`, lane: "fast" }))
             .on("Pinged")
             .do(async function onPingedB() {})
-            .to((e) => ({ target: `${e.stream}-b`, lane: "slow" })),
-          { actOptions: { autoSettle: false } }
+            .to((e) => ({ target: `${e.stream}-b`, lane: "slow" }))
         );
         for (let i = 0; i < 3; i++) {
           await app.do("bump", { stream: `c${i}`, actor }, {});
