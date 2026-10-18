@@ -151,8 +151,8 @@ await app.drain({ streamLimit: 100, eventLimit: 1000 });`,
 
 const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
   {
-    title: "Functional Event Sourcing",
-    body: "Every state change is a pure function of previous state and events. Immutability and replayability by design.",
+    title: "Event Sourcing",
+    body: "State is folded from events with pure patch functions, so any stream can be replayed to rebuild it.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -160,8 +160,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Composable State Machines",
-    body: "Model your domain as composable, strongly-typed state machines. No classes, just functions and data.",
+    title: "Composable Builders",
+    body: "States, slices and projections are built with typed builders and composed into one app. No classes.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="12 2 2 7 12 12 22 7 12 2" />
@@ -171,8 +171,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "TypeScript Native",
-    body: "Type safety and inference everywhere. Catch errors at compile time, not at runtime.",
+    title: "Typed End to End",
+    body: "Action, event and state types are inferred from Zod schemas, and the same schemas validate at runtime.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -180,8 +180,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Reactive by Default",
-    body: "Reactions let you build event-driven flows and side effects with ease — with built-in correlation, drain, and dual-frontier processing.",
+    title: "Reactions",
+    body: "Reactions run after events are committed, with retries, backoff and timers handled by the framework.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="23 4 23 10 17 10" />
@@ -192,8 +192,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Production Adapters Included",
-    body: "Postgres for scale, SQLite for embedded, in-memory for tests. Switch between them with a single line of code.",
+    title: "Store Adapters",
+    body: "Postgres and SQLite stores, plus an in-memory store for tests. The store is set in one call.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -203,8 +203,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Minimal Footprint",
-    body: "Minimal and dependency-light. No codegen, no runtime bloat, and a tiny bundle size.",
+    title: "Small Footprint",
+    body: "The core package depends only on its own patch utility, with Zod as a peer. No code generation.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73z" />
@@ -371,22 +371,35 @@ function Hero() {
   const colorMode = useSiteTheme();
   return (
     <header className={styles.hero}>
-      <h1 className={styles.formula} aria-label="Act: Actions, State, Reactions">
-        <span className={styles.fAction}>Actions</span>
-        <span className={styles.fArrow}> → </span>
-        <span className={styles.fState}>
-          <b>{"{"}</b>State<b>{"}"}</b>
-        </span>
-        <span className={styles.fArrow}> ← </span>
-        <span className={styles.fReaction}>Reactions</span>
-      </h1>
-      <div className={styles.heroBand}>
-        <p className={styles.heroLede}>
-          Act is event sourcing for TypeScript. Declare actions, state and reactions with typed
-          builders, and Act keeps the event log, runs the reactions and builds the projections, on
-          Postgres, SQLite or in memory.
-        </p>
-        <div className={styles.heroActions}>
+      <div className={styles.heroTop}>
+        <div className={styles.heroBrand}>
+          <img
+            className={styles.heroIcon}
+            src={useBaseUrl("/img/logo-dark.png")}
+            alt=""
+            aria-hidden="true"
+          />
+          <h1 className={styles.heroWordmark} aria-label="Act">
+            <span className={styles.wA}>A</span>
+            <span className={styles.wC}>c</span>
+            <span className={`${styles.heroT} ${styles.wT}`}>t</span>
+          </h1>
+        </div>
+        <div className={styles.heroIntro}>
+          <p className={styles.formula} aria-label="Actions, State, Reactions">
+            <span className={styles.fAction}>Actions</span>
+            <span className={styles.fArrow}> → </span>
+            <span className={styles.fState}>
+              <b>{"{"}</b>State<b>{"}"}</b>
+            </span>
+            <span className={styles.fArrow}> ← </span>
+            <span className={styles.fReaction}>Reactions</span>
+          </p>
+          <p className={styles.heroLede}>
+            Fluent event sourcing for TypeScript. You declare actions, state and reactions with
+            typed builders; Act stores the events, runs the reactions and keeps the projections up
+            to date, on Postgres, SQLite or in memory.
+          </p>
           <div className={styles.heroCtas}>
             <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
               Get started
@@ -396,6 +409,9 @@ function Hero() {
               href="https://github.com/rotorsoft/act-root"
             >
               GitHub
+            </Link>
+            <Link className={styles.textLink} href="https://payhip.com/b/7ezLy">
+              Read the book
             </Link>
           </div>
           <CopyInstall />
@@ -411,11 +427,10 @@ function Hero() {
         />
         <figcaption className={styles.stageCaption}>
           <p>
-            <b>This is a real Act app running.</b> WolfDesk, the help desk from{" "}
-            <i>Learning Domain-Driven Design</i>, drawn from its own builders: every action passes
-            through the state, lands in the event stream and wakes the reactions and timers that
-            follow. Ask Claude Code to <code>animate the flows</code> of your app and get the same
-            page, published with your docs or exported as video.
+            <b>WolfDesk, the ticketing example, drawn from its builders.</b> Each tab is a
+            scripted walk through its flows: an action passes the state's checks, its event is
+            stored, and the reactions and timers it triggers run next. The repo includes a Claude
+            Code skill that makes the same page for your own app.
           </p>
           <div className={styles.linkRow}>
             <a className={styles.textLink} href={frameUrl}>
@@ -425,7 +440,7 @@ function Hero() {
               All animations
             </a>
             <Link className={styles.textLink} to={guideUrl}>
-              Animate your app
+              How it's made
             </Link>
           </div>
         </figcaption>
@@ -453,9 +468,9 @@ function Quickstart() {
     <section className={styles.section}>
       <div className={styles.split}>
         <div className={styles.splitText}>
-          <SectionHead title="Your first event in a minute">
-            One file, nothing hidden: a calculator with one state, one action and three events, on an
-            in-memory store you swap for Postgres when you're ready.
+          <SectionHead title="Quickstart">
+            A calculator with one state, one action and three events, on the in-memory store. Swap
+            in the Postgres or SQLite store when you need persistence.
           </SectionHead>
           <ol className={styles.steps}>
             <li>
@@ -490,8 +505,8 @@ function CompositionPatterns() {
   const current = PATTERNS[active];
   return (
     <section className={styles.section}>
-      <SectionHead title="Grows with the domain">
-        Five primitives build every Act app. Shown here on WolfDesk; the full, runnable model is in{" "}
+      <SectionHead title="Composition patterns">
+        How larger models are put together, shown on WolfDesk. The full source is in{" "}
         <Link to="https://github.com/rotorsoft/act-root/tree/master/packages/wolfdesk/src">
           packages/wolfdesk
         </Link>
@@ -529,10 +544,10 @@ function GeneratedTransports() {
     <section className={styles.section}>
       <div className={styles.split}>
         <div className={styles.splitText}>
-          <SectionHead title="An API without writing routes">
-            A built Act is a typed registry of actions. <code>@rotorsoft/act-http</code> walks it
-            once and serves every action over tRPC, REST and an OpenAPI 3.1 document, with the same
-            actor and stream rules and the same error shape on each.
+          <SectionHead title="Generated APIs">
+            <code>@rotorsoft/act-http</code> reads the actions of a built app and creates a tRPC
+            router, Hono REST routes and an OpenAPI 3.1 document from them, with the same actor and
+            stream handling and the same error shape on each.
           </SectionHead>
           <dl className={styles.transports}>
             <div>
@@ -598,9 +613,9 @@ function Sandboxes() {
         if (!isChrome || !isDesktop) return null;
         return (
           <section className={styles.section}>
-            <SectionHead title="Run it in your browser">
-              Two real projects boot in StackBlitz when you scroll here. Edit the code and the
-              terminal reruns.
+            <SectionHead title="Console output">
+              Two example projects running in StackBlitz, so you can watch what Act logs as it
+              works. They start when you scroll here, in desktop Chrome only.
             </SectionHead>
             <div className={styles.sandboxTabs} role="tablist">
               {SANDBOXES.map((s, i) => (
@@ -627,8 +642,8 @@ function Sandboxes() {
 function Features() {
   return (
     <section className={styles.section}>
-      <SectionHead title="Built for systems that have to be right">
-        Small surface, strong types, and the adapters you need in production.
+      <SectionHead title="Features">
+        What the framework gives you, in short.
       </SectionHead>
       <div className={styles.features}>
         {FEATURES.map((f) => (
@@ -651,22 +666,53 @@ function FinalCta() {
   return (
     <section className={`${styles.section} ${styles.final}`}>
       <div>
-        <h2 className={styles.headTitle}>Start with one state</h2>
+        <h2 className={styles.headTitle}>Get started</h2>
         <p className={styles.headSub}>
-          A minute on the quickstart, an afternoon on the calculator, a weekend on WolfDesk. Every
-          step runs.
+          Begin with the quickstart, then read the calculator and WolfDesk examples.
         </p>
       </div>
       <div className={styles.heroCtas}>
         <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
-          Get started
+          Read the docs
         </Link>
         <Link className={`button button--secondary button--lg ${styles.cta}`} to={archUrl}>
-          Read the architecture
+          Architecture
         </Link>
       </div>
     </section>
   );
+}
+
+function AnimatedT() {
+  // Swing the wordmark's "t" every 12 seconds while the hero is visible.
+  useEffect(() => {
+    const t = document.querySelector(`.${styles.heroT}`);
+    if (!t || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let timer: number | undefined;
+    const trigger = () => {
+      t.classList.remove(styles.heroTAnimate);
+      void (t as HTMLElement).offsetWidth;
+      t.classList.add(styles.heroTAnimate);
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          trigger();
+          timer = window.setInterval(trigger, 12000);
+        } else if (timer) {
+          window.clearInterval(timer);
+          timer = undefined;
+        }
+      },
+      { threshold: 0.5 },
+    );
+    observer.observe(t);
+    return () => {
+      observer.disconnect();
+      if (timer) window.clearInterval(timer);
+    };
+  }, []);
+  return null;
 }
 
 export default function Home() {
@@ -676,6 +722,7 @@ export default function Home() {
       title={`${siteConfig.title} — ${siteConfig.tagline}`}
       description="Act is a TypeScript-first event sourcing framework with composable state machines, reactions, projections, and adapters for Postgres and SQLite."
     >
+      <BrowserOnly>{() => <AnimatedT />}</BrowserOnly>
       <main className={styles.main}>
         <Hero />
         <Quickstart />

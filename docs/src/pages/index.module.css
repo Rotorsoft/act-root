@@ -28,21 +28,70 @@
   gap: 1.75rem;
 }
 
-.heroBand {
-  display: flex;
-  flex-wrap: wrap;
+/* Hero: the logo and wordmark lead; the formula sits beside them, smaller. */
+.heroTop {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.5rem 3.5rem;
   align-items: center;
-  justify-content: space-between;
-  gap: 1.25rem 3rem;
 }
 
-/* One line at every width: 29 monospace characters, sized to the viewport. */
+.heroBrand {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.6rem, 1.4vw, 1.1rem);
+}
+
+.heroIcon {
+  height: clamp(4rem, 8vw, 7rem);
+  width: auto;
+  display: block;
+}
+
+.heroWordmark {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 900;
+  font-size: clamp(4.5rem, 10vw, 8.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.07em;
+  margin: 0;
+}
+
+.wA { color: var(--c-action); }
+.wC { color: var(--c-state); }
+.wT { color: var(--c-reaction); }
+
+.heroT {
+  display: inline-block;
+  transform-origin: 50% 85%;
+  will-change: transform;
+}
+
+.heroTAnimate {
+  animation: heroDropT 1.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes heroDropT {
+  0% { transform: rotate(-30deg); }
+  60% { transform: rotate(18deg); }
+  80% { transform: rotate(-8deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.heroIntro {
+  min-width: 0;
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+  max-width: 44rem;
+}
+
 .formula {
   font-family: var(--ifm-font-family-monospace);
   font-weight: 700;
-  font-size: min(4.25rem, 5.1vw);
-  line-height: 1.1;
-  letter-spacing: -0.03em;
+  font-size: min(2rem, 4.9vw);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
   white-space: nowrap;
   margin: 0;
 }
@@ -59,17 +108,9 @@
   color: var(--act-text-muted);
 }
 
-.heroActions {
-  display: grid;
-  gap: 0.75rem;
-  justify-items: start;
-}
-
 .heroLede {
   margin: 0;
-  flex: 1 1 28rem;
-  max-width: 40rem;
-  font-size: 1.15rem;
+  font-size: 1.12rem;
   line-height: 1.6;
   letter-spacing: -0.005em;
   color: var(--act-text-muted);
@@ -563,6 +604,7 @@
 
 /* ---------- Responsive ---------- */
 @media (max-width: 996px) {
+  .heroTop,
   .split,
   .patterns {
     grid-template-columns: minmax(0, 1fr);
