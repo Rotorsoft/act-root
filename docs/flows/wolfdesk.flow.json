@@ -981,10 +981,10 @@
           "to": "evt:TicketClosed",
           "say": "**TicketClosed** commits.",
           "data": {
-            "closedById": "ticket-timers"
+            "closedById": "4f2a9c1e-7b3d-4e8a-9c21-0d5e6f7a8b90"
           },
           "patch": {
-            "closedById": "ticket-timers"
+            "closedById": "4f2a9c1e-7b3d-4e8a-9c21-0d5e6f7a8b90"
           }
         },
         {
@@ -1187,10 +1187,10 @@
           "to": "evt:TicketClosed",
           "say": "**TicketClosed** commits.",
           "data": {
-            "closedById": "ticket-timers"
+            "closedById": "4f2a9c1e-7b3d-4e8a-9c21-0d5e6f7a8b90"
           },
           "patch": {
-            "closedById": "ticket-timers"
+            "closedById": "4f2a9c1e-7b3d-4e8a-9c21-0d5e6f7a8b90"
           }
         },
         {

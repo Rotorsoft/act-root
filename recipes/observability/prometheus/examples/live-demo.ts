@@ -79,9 +79,9 @@ let provider_broken = false;
 const app = act()
   .withState(Order)
   .withProjection(OrderStats)
-  .withLane({ name: "payments", cycleMs: 250, leaseMillis: 3_000 })
-  .withLane({ name: "fulfillment", cycleMs: 250 })
-  .withLane({ name: "delivery", cycleMs: 250, leaseMillis: 2_000 })
+  .withLane({ name: "payments", leaseMillis: 3_000 })
+  .withLane({ name: "fulfillment" })
+  .withLane({ name: "delivery", leaseMillis: 2_000 })
   // Payments: charge every placed order — the poison SKU is the one the
   // provider rejects forever, so its stream retries and then blocks.
   .on("OrderPlaced")

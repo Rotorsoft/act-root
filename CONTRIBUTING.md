@@ -44,9 +44,9 @@ Each issue should include:
 
 - **`libs/act/PERFORMANCE.md`** — detailed benchmark tables, pattern explanation, before/after comparison
 - **`libs/act/README.md`** — current patterns only, link to PERFORMANCE.md for history
-- **`CLAUDE.md`** — Store Interface Contract, optimization notes
+- **`docs/docs/architecture/extension-points.md`** — the Store contract, when the change touches it
 - **Docusaurus** — concept pages with optimization notes
-- **Scaffold skills** — update production.md, act-api.md as needed
+- **Scaffold skill** — update `act-api.md` as needed
 - Verify Docusaurus build passes before PR
 
 ### Key Principles
@@ -63,5 +63,5 @@ This repo uses **Renovate** for version updates and **Dependabot for security al
 
 - **Direct deps** — Renovate opens PRs grouped by `Types packages` and `Dev dependencies`. Patch updates auto-merge; minor/major need review.
 - **Lockfile maintenance** — runs weekly (Mon < 03:00 UTC) to refresh transitive resolutions.
-- **Stuck transitive vulnerabilities** — when a transitive dep can't be lifted by Renovate (the parent hasn't released, or the resolution graph won't bump), pin it via `pnpm.overrides` in the root `package.json`. Use a version-range key so the override is scoped to the vulnerable range only.
-- **Vulnerability alerts** — Dependabot security alerts are enabled. Triage promptly; fix via Renovate PR, manual `pnpm update`, or a `pnpm.overrides` entry depending on where the vuln sits in the tree.
+- **Stuck transitive vulnerabilities** — when a transitive dep can't be lifted by Renovate (the parent hasn't released, or the resolution graph won't bump), pin it in the `overrides` block of `pnpm-workspace.yaml`. Use a version-range key so the override is scoped to the vulnerable range only.
+- **Vulnerability alerts** — Dependabot security alerts are enabled. Triage promptly; fix via Renovate PR, manual `pnpm update`, or an `overrides` entry in `pnpm-workspace.yaml` depending on where the vuln sits in the tree.

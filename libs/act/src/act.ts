@@ -119,21 +119,14 @@ function validate_only_lanes(
  * @category Orchestrator
  * @see Store
  *
- * Main orchestrator for event-sourced state machines and workflows.
- *
- * It manages the lifecycle of actions, reactions, and event streams, providing APIs for loading state, executing actions, querying events, and draining reactions.
- *
- * ## Usage
+ * The orchestrator: executes actions, loads state, queries events, and runs
+ * the reactions each commit frees (on its own, unless `autoSettle: false`).
  *
  * ```typescript
  * const app = act().withState(Counter).build();
  * await app.do("increment", { stream: "counter1", actor }, { by: 1 });
  * const snapshot = await app.load(Counter, "counter1");
- * await app.drain();
  * ```
- *
- * - Register event listeners with `.on("committed", ...)` and `.on("acked", ...)` to react to lifecycle events.
- * - Use `.query()` to analyze event streams for analytics or debugging.
  *
  * @template TSchemaReg SchemaRegister for state
  * @template TEvents Schemas for events
@@ -516,21 +509,14 @@ export class Act<
   private _shutdown_promise: Promise<void> | undefined;
 
   /**
-   * Per-instance teardown: stop scheduling new work, give drain cycles
-   * already in flight a bounded chance to finish, then remove lifecycle
-   * listeners and tear down the cross-process notify subscription.
+   * Per-instance teardown: stops scheduling, gives the cycles in flight up
+   * to `graceMs` to reach their `ack` (an abandoned handler holds its lease
+   * until it expires), then removes listeners and the notify subscription.
+   * The budget is a ceiling, not a delay.
    *
-   * Scheduling stops first, then in-flight cycles get up to `graceMs` to
-   * reach their `ack` (an abandoned handler holds its lease until it
-   * expires). Listeners come off after the wait, so they still see work that
-   * finished during it. The budget is a ceiling, not a delay; when it runs
-   * out, teardown proceeds anyway.
-   *
-   * Idempotent — repeated calls return the same promise, and the first
-   * call's `graceMs` is the one that applies. Registered automatically with
-   * the global `dispose()` registry at construction, so process-wide
-   * `dispose()()` covers it; test helpers (or operators that mint
-   * short-lived Acts) call it explicitly for prompt cleanup.
+   * Idempotent: repeated calls return the same promise, with the first
+   * call's `graceMs`. Registered with the global `dispose()` registry, so
+   * `dispose()()` covers it; call it directly for prompt cleanup.
    *
    * @param options - See {@link ShutdownOptions}. Defaults the grace budget
    *   to the largest lane `leaseMillis` (capped at 30s).
@@ -631,15 +617,10 @@ export class Act<
   }
 
   /**
-   * Executes an action on a state instance, committing resulting events.
-   *
-   * This is the primary method for modifying state. It:
-   * 1. Validates the action payload against the schema
-   * 2. Loads the current state snapshot
-   * 3. Checks invariants (business rules)
-   * 4. Executes the action handler to generate events
-   * 5. Applies events to create new state
-   * 6. Commits events to the store with optimistic concurrency control
+   * Executes an action: validates the payload, loads the state, checks its
+   * invariants, and commits the events its handler emits, with optimistic
+   * concurrency on the stream. The reactions to those events settle on
+   * their own (unless `autoSettle: false`).
    *
    * @template TKey - Action name from registered actions
    * @param action - The name of the action to execute
@@ -803,9 +784,7 @@ export class Act<
    *
    * For small result sets, consider using {@link query_array} instead.
    *
-   * @param query - Filter criteria — see {@link Query} for available fields
-   *   (`stream`, `name`, `after`, `before`, `created_after`, `created_before`,
-   *   `limit`, `with_snaps`, `stream_exact`)
+   * @param query - Filter criteria; see {@link Query} for the fields
    * @param callback - Optional callback invoked for each matching event
    * @returns Object with first event, last event, and total count
    *
@@ -902,31 +881,23 @@ export class Act<
   }
 
   /**
-   * Processes pending reactions by draining uncommitted events from the event store.
+   * Runs one drain cycle: claims streams with marked work (leasing them),
+   * fetches their events, runs the matching reactions, and acks or blocks
+   * each stream.
    *
-   * Runs a single drain cycle:
-   * 1. Polls the store for streams with uncommitted events
-   * 2. Leases streams to prevent concurrent processing
-   * 3. Fetches events for each leased stream
-   * 4. Executes matching reaction handlers
-   * 5. Acknowledges successful reactions or blocks failing ones
-   *
-   * Drain uses a dual-frontier strategy to balance processing of new streams (lagging)
-   * vs active streams (leading). The ratio adapts based on event pressure.
-   *
-   * Call `correlate()` before `drain()`. It is not only how dynamic targets
-   * are discovered: a stream is claimable while `at < correlated_at`, and
-   * `correlate` is the only component that raises that mark, so a
-   * commit no correlate has seen is not drainable, static targets included. For a
-   * higher-level API that handles debouncing, correlation, and signaling
-   * automatically, use {@link settle}.
+   * A stream is claimable only once `correlate()` has marked it, static
+   * targets included, so a commit no correlate has seen is not drainable.
+   * Apps rarely call this: each commit settles its reactions on its own.
+   * With `autoSettle: false`, tests walk the pipeline with `correlate()`
+   * then `drain()` (see the testing guide).
    *
    * @param options - Drain configuration — see {@link DrainOptions} for fields
    *   (`streamLimit`, `eventLimit`, `leaseMillis`).
    * @returns Drain statistics with fetched, leased, acked, and blocked counts
    *
-   * @example In tests and scripts
+   * @example Walking the pipeline in a test
    * ```typescript
+   * const app = act().withState(User).withProjection(Users).build({ autoSettle: false });
    * await app.do("createUser", target, payload);
    * await app.correlate();
    * await app.drain();
@@ -934,7 +905,6 @@ export class Act<
    *
    * @see {@link settle} for debounced correlate→drain with lifecycle events
    * @see {@link correlate} for dynamic stream discovery
-   * @see {@link start_correlations} for automatic correlation
    */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     // Validate the runtime knobs before anything runs (a bad leaseMillis /
@@ -1013,32 +983,20 @@ export class Act<
   }
 
   /**
-   * Discovers and registers new streams dynamically based on reaction resolvers.
-   *
-   * Correlation enables "dynamic reactions" where target streams are determined at runtime
-   * based on event content. For example, you might create a stats stream for each user
-   * when they perform certain actions.
-   *
-   * This method scans events matching the query and identifies new target streams based
-   * on reaction resolvers. It then registers these streams so they'll be picked up by
-   * the next drain cycle.
+   * Scans committed events from the correlation checkpoint, subscribes the
+   * target streams their reactions resolve to (static or computed from
+   * the event), and marks their work so the next drain can claim it.
    *
    * @param query - Scan filter — see {@link Query} for fields (typically
-   *   `{ after: <event-id>, limit: <count> }`)
+   *   `{ limit: <count> }`; the scan starts at the checkpoint)
    * @returns The number of newly subscribed streams and the last scanned event id
    *
    * @example Manual correlation
    * ```typescript
-   * // Scan for new streams
-   * const { subscribed, last_id } = await app.correlate({ after: 0, limit: 100 });
-   * console.log(`Subscribed ${subscribed} new streams`);
-   *
-   * // Save last_id for next scan
-   * await saveCheckpoint(last_id);
+   * const { subscribed } = await app.correlate({ limit: 100 });
    * ```
    *
    * @see {@link start_correlations} for automatic periodic correlation
-   * @see {@link stop_correlations} to stop automatic correlation
    */
   async correlate(
     query: Query = { after: -1, limit: 10 }
@@ -1135,15 +1093,13 @@ export class Act<
    * events through their reactions.
    *
    * Use this to replay events through projections (or other reaction targets)
-   * after changing handler logic. Equivalent to calling `store().reset(streams)`
-   * directly, but also raises the orchestrator's internal "needs drain" flag —
-   * `store().reset(...)` alone leaves the flag untouched, so a settled app
-   * would short-circuit and skip the replay.
-   *
-   * The reset schedules a settle on its own, which loops correlate→drain
-   * until the replay catches up. Call `app.settle(options)` right after to
-   * give that pass batch options, or
-   * `correlate()` / `drain()` to drive the replay by hand.
+   * after changing handler logic. It rewinds the same watermarks as
+   * `store().reset(streams)`, and also wakes the drain and schedules a
+   * settle, which loops correlate→drain until the replay catches up;
+   * `store().reset(...)` alone leaves a settled app idle. Call
+   * `app.settle(options)` right after to give that pass batch options, or,
+   * with `autoSettle: false`, `correlate()` / `drain()` to drive the replay
+   * by hand.
    *
    * @param input - Reaction target streams (e.g., projection names) to reset, or a {@link StreamFilter} for bulk operations
    * @returns Count of streams that were actually reset
@@ -1322,45 +1278,20 @@ export class Act<
   }
 
   /**
-   * Operator-driven store audit.
-   *
-   * Walks the connected store and yields per-category findings —
-   * each tagged with the remediation it suggests. Same operator-
-   * driven category as `app.close()` / `app.reset()` /
-   * `app.unblock()` / `app.blocked_streams()`: never auto-invoked by
-   * the framework; the operator decides when to run it (CI gate,
-   * scheduled job, ad-hoc forensics) and what to do with the
-   * findings.
-   *
-   * Categories are independent — pass a subset to scope the work,
-   * or omit to run everything:
-   *
-   * ```typescript
-   * // Targeted: schema drift + deprecated-event load only
-   * for await (const f of app.audit(["schema", "deprecated-load"], {
-   *   query: { created_after: lastScan },
-   *   thresholds: { deprecatedLoadShareMin: 0.10 },
-   * })) {
-   *   await escalate(f);
-   * }
-   *
-   * // Full audit, default thresholds
-   * for await (const f of app.audit()) console.log(f);
-   * ```
-   *
-   * Returns an `AsyncIterable` so callers can `break` early — the
-   * underlying store paginations respect the iterator protocol and
-   * stop cleanly. Each finding is emitted independently, so
-   * pipelining into Slack / persistence / further analysis works
-   * without buffering the full report in memory.
-   *
-   * Findings shape — see {@link AuditFinding}. The discriminated
-   * union carries enough context for the operator to act on each
-   * finding directly: stream id, event id, recommendation hints.
+   * Operator-driven store audit: walks the store and yields findings per
+   * category, each with the remediation it suggests. Never run by the
+   * framework. Pass a subset of categories to scope the work; the iterable
+   * can be broken early, and findings stream without buffering the report.
    *
    * @param categories - Subset of categories to run (default: all).
    * @param options - Query window + per-category thresholds.
    * @returns Async iterable of {@link AuditFinding}.
+   *
+   * @example Schema drift since the last scan
+   * ```typescript
+   * for await (const f of app.audit(["schema"], { query: { created_after: lastScan } }))
+   *   await escalate(f);
+   * ```
    */
   async *audit(
     categories?: AuditCategory[],
@@ -1379,22 +1310,13 @@ export class Act<
   }
 
   /**
-   * Bulk-update scheduling priority for streams matching `filter`.
+   * Sets the scheduling priority of every stream matching `filter`, as-is:
+   * unlike build-time priorities (the highest across reactions wins), this
+   * overrides them. Useful to let a long replay jump ahead of other lagging
+   * streams, or to yield slots back. **An empty filter (`{}`) updates every
+   * registered stream.**
    *
-   * Operator-grade override of the `claim()` lagging-frontier
-   * ordering. Useful when a long-running replay needs to
-   * jump ahead of other lagging streams, or when a no-longer-urgent
-   * job should yield slots back to the rest. Build-time priorities
-   * (set via the resolver's `priority` field) are subject to a
-   * `max()` invariant across reactions; this API ignores that and
-   * sets the priority outright on every matching row.
-   *
-   * Filter shape mirrors {@link query} / {@link Store.query_streams}:
-   * `stream` / `source` are regex by default, exact with the
-   * `*_exact` flags; `blocked` restricts to blocked or unblocked
-   * rows. **An empty filter (`{}`) updates every registered stream.**
-   *
-   * @param filter - Selection criteria (regex by default).
+   * @param filter - Selection criteria (regex by default, like {@link query}).
    * @param priority - New priority value. Set as-is — no clamp.
    * @returns Count of streams whose priority changed.
    *
@@ -1404,7 +1326,6 @@ export class Act<
    * ```
    *
    * @see {@link Store.prioritize} for the underlying primitive
-   * @see {@link claim} for how priority biases scheduling
    */
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
     return this._scoped(() => store().prioritize(filter, priority));
@@ -1435,30 +1356,12 @@ export class Act<
   }
 
   /**
-   * Close the books — guard, archive, truncate, and optionally restart streams.
-   *
-   * Safely removes historical events from the operational store:
-   *
-   * 1. **Correlate** — discover pending reaction targets
-   * 2. **Safety check** — skip streams with pending reactions (skipped when no reactive events)
-   * 3. **Guard** — commit `__tombstone__` with `expectedVersion` to block concurrent writes
-   * 4. **Load state** — for streams in `snapshots`, load final state while guarded (no races)
-   * 5. **Archive** — user callback per stream (abort-all on failure, streams are guarded)
-   * 6. **Truncate + seed** — atomic: delete all events, insert `__snapshot__` or `__tombstone__`
-   * 7. **Cache** — invalidate (tombstoned) or warm (restarted)
-   * 8. **Emit "closed"** — lifecycle event with results
-   *
-   * Targets carrying `before` take the **windowed** branch instead —
-   * close the books on a rolling window: probe the min consumer
-   * watermark (so the boundary never rises past a lagging reaction),
-   * run the archive callback against the cutoff, then prune the prefix
-   * below the closest safe `__snapshot__`. No tombstone guard (the
-   * pre-cutoff prefix is immutable), no seed, cache untouched — the
-   * stream stays live and keeps accepting actions. Requires the state
-   * to snapshot via `.snap(...)`; no qualifying snapshot ⇒ the stream
-   * lands in `skipped` (retry after the next snapshot). Windowed
-   * entries in the result echo `before` and carry the surviving
-   * boundary snapshot as `committed`.
+   * Close the books: guard, archive, truncate, and optionally restart
+   * streams. A stream with pending reactions is skipped; an archive
+   * failure aborts the whole close while the streams are still guarded.
+   * Targets carrying `before` prune a rolling window instead and leave the
+   * stream live (needs `.snap(...)`). The phases and their failure
+   * semantics are in the close-cycle architecture page.
    *
    * @param targets - Per-stream close options (stream, restart?, archive?, before?)
    * @returns `{ truncated: TruncateResult, skipped: string[] }`

@@ -3,10 +3,9 @@
  *
  * Demonstrates how app.close() enables safe stream archival and truncation:
  * 1. Build a counter app and emit events across multiple streams
- * 2. Drain all reactions so streams are fully settled
- * 3. Close streams — guard, archive, truncate + seed atomically
- * 4. Verify tombstoned streams reject writes
- * 5. Restart a stream with a snapshot of its final state
+ * 2. Close streams — guard, archive, truncate + seed atomically
+ * 3. Verify tombstoned streams reject writes
+ * 4. Restart a stream with a snapshot of its final state
  *
  * Run: pnpm -F calculator dev:close
  */

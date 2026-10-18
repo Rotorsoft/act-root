@@ -106,9 +106,8 @@ export type SubscribeResult = {
    * **Keyed per correlator** when a `correlator` is supplied, and
    * shared otherwise. Correlators that look for different things read the
    * log for different reasons, so one inheriting another's position at cold
-   * start could skip events it needed — previously survivable only because
-   * of the back-scan window. A key with no row yet falls back to the shared
-   * value, so an upgrade does not re-read history.
+   * start could skip events it needed. A key with no row yet falls back to
+   * the shared value, so an upgrade does not re-read history.
    */
   correlated_at: number;
 };
@@ -616,9 +615,7 @@ export interface Store extends Disposable, EventSource {
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
-   * @param query - Optional filter criteria — see {@link Query} for fields
-   *   (`stream`, `name`, `after`, `before`, `created_after`, `created_before`,
-   *   `limit`, `with_snaps`, `stream_exact`).
+   * @param query - Optional filter criteria; see {@link Query} for the fields.
    * @returns Total number of events processed
    *
    * @example Query all events for a stream
@@ -780,8 +777,7 @@ export interface Store extends Disposable, EventSource {
      * - `millis` is how long the lease is held from now.
      *
      * Omitted entirely, no lease is taken and the caller reads and advances
-     * the shared legacy checkpoint — which is what callers that predate
-     * the lease do, and why this is additive.
+     * the shared checkpoint.
      */
     correlator?: { key: string; by: string; millis: number }
   ) => Promise<SubscribeResult>;
@@ -942,7 +938,7 @@ export interface Store extends Disposable, EventSource {
    * ```
    *
    * @see {@link Act.reset} for the high-level rebuild API that wraps
-   *   this primitive and arms the orchestrator's drain flag
+   *   this primitive and schedules the replay
    */
   reset: (input: string[] | StreamFilter) => Promise<number>;
 

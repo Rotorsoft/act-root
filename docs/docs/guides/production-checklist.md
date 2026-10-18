@@ -276,8 +276,8 @@ If reactions in this app have heterogeneous timing profiles — webhook delivery
 ```typescript no-check
 const app = act()
   .withState(Ticket)
-  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5, cycleMs: 500 })
-  .withLane({ name: "metrics",  leaseMillis: 1_000,  streamLimit: 50, cycleMs: 50  })
+  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5 })
+  .withLane({ name: "metrics",  leaseMillis: 1_000,  streamLimit: 50 })
   .on("OrderConfirmed").do(deliverWebhook).to({ target: "webhooks-out", lane: "webhooks" })
   .on("OrderConfirmed").do(emitMetric).to({ target: "metrics-out",  lane: "metrics" })
   .build();
@@ -287,7 +287,7 @@ const app = act()
 
 - **`leaseMillis`** — set to the longest expected handler invocation in the lane plus headroom (50–100%). A lease shorter than the handler causes premature re-claim and double dispatch; a lease far longer than the handler delays crash recovery (a dead worker's leases stay parked until expiry). For webhook lanes, match your HTTP client timeout. For best-effort lanes, sub-second is usually right.
 - **`streamLimit`** — bounds the per-cycle parallel handler budget. With slow handlers (100 ms+), keep this low so an erroring batch doesn't tie up a wide pool of leases. With fast handlers, raise it to amortize the claim round-trip.
-- **`cycleMs`** — when set, the lane's controller drains at least this often. It is a floor, not a rate limit: with `autoSettle` on (the default), a commit's settle drains every armed lane, so a slow lane may run sooner when nothing else is waiting. The chain is the extra precaution for when `autoSettle` is off, and for lanes that should keep draining while handlers fail or a backlog clears. It drains work that correlation has already marked; it does not correlate. Deferred and backed-off streams do not need it: each worker wakes its own drain at their due-time.
+- **`cycleMs`** — leave it unset with the default `autoSettle`; see [configuration § `LaneConfig` fields](../concepts/configuration.md#laneconfig-fields). Deferred and backed-off streams don't need it either: each worker wakes its own drain at their due time.
 
 **Process-per-lane and the coverage invariant.** When you deploy one process per lane with `onlyLanes`, no single instance drains every lane — that's the point. What each instance can't see is whether some *other* instance is covering the lanes it skipped. The cluster invariant is that the union of every worker's `onlyLanes` must cover every declared lane: `∪ onlyLanes ⊇ declared lanes`. A lane left out of every worker's set has no `DrainController` anywhere, so its streams are subscribed but never claimed, and its reactions silently stall.
 
@@ -296,7 +296,6 @@ To catch a half-configured rollout early, each instance logs a one-line startup 
 **Sanity checks for the sizing:**
 
 - [ ] Slow lane's `leaseMillis` ≥ the longest expected handler runtime in that lane
-- [ ] Fast lane's `cycleMs` matches the responsiveness target (e.g., 10 ms for sub-100 ms acks)
 - [ ] No reaction targets the same stream via two reactions with different lanes (the build-time scan throws on this)
 - [ ] If running process-per-lane, `ActOptions.onlyLanes` is wired from an environment variable of your choosing so the same image deploys to every lane
 - [ ] Across the whole cluster, the union of every worker's `onlyLanes` covers every declared lane (`∪ onlyLanes ⊇ declared lanes`) — reconcile the per-instance orphaned-lane advisories to confirm

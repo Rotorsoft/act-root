@@ -64,11 +64,13 @@ async function main() {
     })
     .build();
 
+  // This demo walks each step of the rebuild by hand, so nothing settles
+  // in the background between them.
   const app = act()
     .withState(Counter)
     .withProjection(SumProjection)
     .withProjection(CounterList)
-    .build();
+    .build({ autoSettle: false });
 
   const actor = { id: "demo", name: "Demo User" };
   const stream = "counter-1";

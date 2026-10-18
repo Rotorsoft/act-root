@@ -635,9 +635,8 @@ export type ActionBuilder<
    * policy's min after` while the cooldown holds and closes the stream once
    * the policy matches. There is no background sweep.
    *
-   * **The function-predicate form was removed.** `.autocloses` no
-   * longer accepts `(stream, head, count) => boolean`; an opaque predicate has
-   * no derivable due-time or terminal event to react to. For conditions the
+   * There is no function-predicate form: an opaque predicate has no
+   * derivable due-time or terminal event to react to. For conditions the
    * declarative form can't express, call `app.close(...)` from your own logic.
    *
    * @param policy The declarative {@link AutoclosePolicy} bag.
