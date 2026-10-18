@@ -29,7 +29,7 @@
 [hidden] { display: none !important; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); overflow: hidden; }
-.app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .brand { min-width: 0; flex: 1 1 260px; }
@@ -38,7 +38,7 @@ h1 { font: 600 19px/1.2 var(--f-display); margin: 0; white-space: nowrap; overfl
 .tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
 .tabs button { border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--f-body); padding: 5px 10px; border-radius: 7px; cursor: pointer; }
 .tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
-.ctl { display: flex; gap: 4px; align-items: center; }
+.ctl { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ctl button, .ctl select { height: 30px; min-width: 32px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; font: 500 12.5px var(--f-body); cursor: pointer; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .ctl button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); min-width: 74px; }
 .ctl button[aria-pressed="true"] { background: color-mix(in srgb, var(--action) 14%, var(--surface)); }
@@ -51,7 +51,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
 .main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 400px); min-height: 0; }
 .stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-.stage > svg { position: absolute; inset: 0 0 76px 0; width: 100%; height: calc(100% - 76px); display: block; }
+/* a map wider than the stage scrolls sideways at a readable scale; the caption stays put */
+.scroller { position: absolute; inset: 0 0 76px 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+.scroller > svg { display: block; width: 100%; height: 100%; }
 .caption { position: absolute; left: 16px; right: 16px; bottom: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 14px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: var(--shadow); }
 .caption .count { font: 500 12px var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .caption .say { font-size: 15px; min-width: 0; }
@@ -173,12 +175,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   body { overflow: auto; padding-bottom: 96px; }
   .app { height: auto; }
   .main { grid-template-columns: minmax(0, 1fr); }
-  .stage { height: 64vh; overflow: auto; }
-  .stage > svg { position: relative; inset: auto; width: 1100px; height: 100%; }
+  .top { padding: 10px 12px; }
+  .tabs { flex: 1 1 100%; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .tabs button { flex: none; white-space: nowrap; }
+  #rec-btn, .ctl .sep { display: none; }
+  .stage { height: calc(100svh - 120px); min-height: 420px; }
+  .scroller { bottom: 88px; }
   .caption { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 6; grid-template-columns: auto minmax(0, 1fr); }
   .caption .chip { display: none; }
   .caption .say { font-size: 14px; }
   .side { border-left: 0; border-top: 1px solid var(--line); }
+  .panel.grow { flex: none; }
   .panel .pb { max-height: 50vh; }
   .win { position: fixed; }
 }
@@ -207,7 +214,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
   <div class="main">
     <section class="stage" id="stage">
-      <svg id="svg" role="img" aria-label="Flow map" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="scroller" id="scroller"><svg id="svg" role="img" aria-label="Flow map" preserveAspectRatio="xMidYMid meet"></svg></div>
       <div class="caption" aria-live="polite">
         <span class="count" id="count"></span>
         <span class="say" id="say"></span>
@@ -279,6 +286,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   const BASE_H = { actor: 84, action: 96, state: 62, event: 96, projection: 66, reaction: 110, external: 80 };
   const BARS = new Set(["state", "projection"]);
   const kindOf = n => n.lane;
+  // the state bar under a column: with several states, each bar spans the actions that load it
+  const barAt = x => stateBars.find(b => x >= b.x0 && x <= b.x1) || stateBar;
   const isBar = n => BARS.has(kindOf(n));
   const color = n => `var(${(KINDS[kindOf(n)] || KINDS.action).color})`;
   const svg = $("svg");
@@ -288,7 +297,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (parent) parent.appendChild(x);
     return x;
   };
-  let nodes, edges, lanes, stateBar, gFx, stretch = 0;
+  let nodes, edges, lanes, stateBar, stateBars = [], gFx, stretch = 0, wide = false;
+  // the embedded overview (landing page) fits the whole map on a wide screen
+  const minScale = () => (EMBED && !matchMedia("(max-width: 900px)").matches ? 0 : 0.75);
 
   function rounded(pts, r = 9) {
     let d = `M${pts[0][0]},${pts[0][1]}`;
@@ -304,12 +315,14 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const last = pts[pts.length - 1];
     return d + ` L${last[0]},${last[1]}`;
   }
+  // "PlayerReplacedByBot" reads as "Player Replaced / By Bot"; the detail panel keeps the code name
   function words(label) {
     const parts = label.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
-    if (label.length <= 14 || parts.length === 1) return [label];
-    let best = [label], score = Infinity;
+    const spaced = parts.join(" ");
+    if (spaced.length <= 12 || parts.length === 1) return [spaced];
+    let best = [spaced], score = Infinity;
     for (let i = 1; i < parts.length; i++) {
-      const a = parts.slice(0, i).join(""), b = parts.slice(i).join("");
+      const a = parts.slice(0, i).join(" "), b = parts.slice(i).join(" ");
       const s = Math.max(a.length, b.length);
       if (s < score) { score = s; best = [a, b]; }
     }
@@ -342,6 +355,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     const busSpace = busRows * 6 + 6;
     const present = spec.lanes.filter(l => [...nodes.values()].some(n => n.lane === l.id));
     const H0 = TOP * 2 + present.reduce((s, l) => s + (l.height || BASE_H[l.id] || 90) + (l.id === "reaction" ? busSpace : 0), 0);
+    // never shrink the map below a readable scale: past that it scrolls sideways
+    wide = W * minScale() > $("scroller").clientWidth;
+    svg.style.width = wide ? `${Math.ceil(W * minScale())}px` : "";
     stretch = fitStretch(W, H0);
     lanes = [];
     let y = TOP;
@@ -366,7 +382,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       } else { n.cx = X(n.col); n.w = w; }
       n.top = n.cy - h / 2; n.bot = n.cy + h / 2; n.left = n.cx - n.w / 2; n.right = n.cx + n.w / 2;
     }
-    stateBar = [...nodes.values()].find(n => kindOf(n) === "state");
+    stateBars = [...nodes.values()].filter(n => kindOf(n) === "state");
+    stateBar = stateBars[0];
 
     const inCount = {};
     function route(e, busIndex) {
@@ -435,8 +452,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       el("rect", { x: n.left - 3, y: n.top - 3, width: n.w + 6, height: n.h + 6, rx: r + 3, class: "pulse" }, g);
       el("rect", { x: n.left, y: n.top, width: n.w, height: n.h, rx: r, class: "box" }, g);
       if (isBar(n)) {
-        const t = el("text", { x: n.left + 12, y: n.cy + 4.5 }, g); t.textContent = n.label;
-        if (n.note) { const s = el("text", { x: n.left + 20 + n.label.length * 7.6, y: n.cy + 4, class: "badge" }, g); s.textContent = n.note; }
+        const t = el("text", { x: n.left + 12, y: n.cy + 4.5 }, g); t.textContent = words(n.label).join(" ");
+        if (n.note) {
+          const s = el("text", { x: n.left + 20 + t.getComputedTextLength(), y: n.cy + 4, class: "badge" }, g); s.textContent = n.note;
+          // a narrow bar keeps its name and drops the note (still shown when the bar is selected)
+          if (s.getComputedTextLength() + 8 > n.right - +s.getAttribute("x")) s.remove();
+        }
         continue;
       }
       if (kind === "actor") {
@@ -456,8 +477,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         const t = el("text", { x: n.cx - tw / 2 + 12, y: ty, class: "as" }, g); t.textContent = n.as;
       }
       const inv = (n.invariants || []).length;
-      const badge = [n.badge, inv ? `◆${inv}` : ""].filter(Boolean).join(" ");
-      if (badge) { const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g); b.textContent = badge; }
+      // ◆ n checks: how many invariants the state tests before this action commits
+      const badge = [n.badge, inv ? `◆ ${inv} ${inv > 1 ? "checks" : "check"}` : ""].filter(Boolean).join(" ");
+      if (badge) {
+        const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g); b.textContent = badge;
+        if (inv) el("title", {}, b).textContent = "Checked by the state before it commits:\n" + n.invariants.join("\n");
+      }
     }
     if (selected) { selected = nodes.get(selected.id); selected?.g.classList.add("sel"); }
   }
@@ -473,10 +498,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
-    `<div><span class="mono">◆</span>Invariants</div><div><span class="mono">⏱</span>Timer (deferred)</div>`;
+    `<div><span class="mono">◆</span>Checks (invariants)</div><div><span class="mono">⏱</span>Timer (deferred)</div>`;
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants and either refuses the action or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants (the ◆ count on an action) and either refuses the action or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     <p>Select a box for its contract and source. Keys: space plays or pauses, arrows step.</p>
     <p>Coming from event storming? Actions are its commands, reactions its policies, and projections build its read models.</p>`;
@@ -507,7 +532,9 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   makeWin(legendWin, () => $("legend-btn").setAttribute("aria-pressed", "false"));
   makeWin(nodeWin, () => select(null));
   try {
-    if (localStorage.getItem("flow-legend") === "0") { legendWin.hidden = true; $("legend-btn").setAttribute("aria-pressed", "false"); }
+    // the legend opens by default on wide screens only; on a phone it would cover the map
+    const pref = localStorage.getItem("flow-legend");
+    if (pref === "0" || (pref === null && matchMedia("(max-width: 900px)").matches)) { legendWin.hidden = true; $("legend-btn").setAttribute("aria-pressed", "false"); }
     if (localStorage.getItem("flow-read") === "0") $("read-box").open = false;
   } catch {}
   $("read-box").addEventListener("toggle", () => { try { localStorage.setItem("flow-read", $("read-box").open ? "1" : "0"); } catch {} });
@@ -534,6 +561,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       <div class="kind" style="color:var(${k.color})">${k.name}${who}</div>
       <h3>${esc(n.label)}</h3>
       ${n.file ? `<div class="file">${esc(n.file)}${n.line ? ":" + n.line : ""}</div>` : ""}
+      ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
       ${(n.invariants || []).length ? `<p class="rel">Invariants</p><ul>${n.invariants.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
       ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
@@ -590,11 +618,11 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ver[stream] = (ver[stream] ?? -1) + 1;
       log.push({ type: "evt", id: id++, name: n.label, stream, v: ver[stream], data: st.data, who: issuer(sc, i) });
       const patch = st.patch ?? st.data;
-      if (isObj(patch)) { state = merge(state, patch); changed = Object.keys(patch); }
+      if (stream === (sc.stream || "stream") && isObj(patch)) { state = merge(state, patch); changed = Object.keys(patch); }
     }
     return { log, state, changed, version: ver[sc.stream || "stream"], blocked };
   }
-  const fmt = v => v === undefined ? "–" : typeof v === "string" ? v : JSON.stringify(v);
+  const fmt = v => v == null ? "–" : typeof v === "string" ? v : JSON.stringify(v);
   function renderPanels(k, fresh) {
     const r = replay(k), sc = scenarios[cur];
     const ol = $("log");
@@ -630,8 +658,25 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 
   const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
   function setChip(text, k) { const c = $("chip"); c.hidden = !text; c.textContent = text || ""; c.style.setProperty("--k", k || "var(--muted)"); }
+  // keeps the step in view when the map scrolls sideways
+  function follow(st) {
+    const sc = $("scroller");
+    if (!wide || !st) return;
+    const box = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    const s = Math.min(box.width / vb.width, box.height / vb.height), off = (box.width - vb.width * s) / 2;
+    const px = x => off + x * s;
+    let x;
+    if (st.at) x = px(nodes.get(st.at).cx);
+    else {
+      const a = px(nodes.get(st.from).cx), b = px(nodes.get(st.to).cx);
+      x = Math.abs(a - b) < sc.clientWidth * 0.6 ? (a + b) / 2 : b;
+    }
+    if (x < sc.scrollLeft + sc.clientWidth * 0.2 || x > sc.scrollLeft + sc.clientWidth * 0.8)
+      sc.scrollTo({ left: x - sc.clientWidth / 2, behavior: reduce ? "auto" : "smooth" });
+  }
   function setNarr(k) {
     const sc = scenarios[cur], st = sc.steps[k - 1];
+    follow(st);
     $("count").textContent = `${String(k).padStart(2, "0")} / ${String(sc.steps.length).padStart(2, "0")}`;
     $("say").innerHTML = k === 0 ? `<b>${esc(sc.title)}.</b> ${md(sc.summary || "Press Play to walk the flow.")}` : md(st.say || "");
     $("prog").style.width = `${(k / sc.steps.length) * 100}%`;
@@ -655,7 +700,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       if (st.reject || st.blocked) continue;
       nodes.get(st.to).g.classList.add("on");
       if (kindOf(nodes.get(st.to)) === "event") {
-        stateBar?.g.classList.add("on");
+        barAt(nodes.get(st.to).cx)?.g.classList.add("on");
         edges.filter(x => x.a.id === st.to && kindOf(x.b) === "projection").forEach(x => x.g.classList.add("trail"));
       }
     }
@@ -731,15 +776,16 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     e.g.classList.add("live");
     from.g.classList.add("on");
 
-    if (kindOf(from) === "action" && kindOf(to) === "event" && stateBar) {
+    const bar = barAt(from.cx);
+    if (kindOf(from) === "action" && kindOf(to) === "event" && bar) {
       // the action passes through the state: invariants pass or refuse
-      const f = fractionAtY(e, stateBar.cy);
+      const f = fractionAtY(e, bar.cy);
       if (!(await travel(e, token, 0, f))) return false;
-      ping(stateBar);
+      ping(bar);
       const inv = (from.invariants || []).length;
       const v = st.reject
-        ? verdict(from.cx, stateBar.cy, "✕ " + st.reject, "var(--bad)")
-        : verdict(from.cx, stateBar.cy, inv ? `◆${inv} ✓` : "✓", "var(--good)");
+        ? verdict(from.cx, bar.cy, "✕ " + st.reject, "var(--bad)")
+        : verdict(from.cx, bar.cy, inv ? `◆ ${inv} ${inv > 1 ? "checks" : "check"} ✓` : "✓", "var(--good)");
       const ok = await wait(st.reject ? 1700 : 650, token);
       v.remove();
       if (!ok) return false;
@@ -782,7 +828,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     step++;
     if (kindOf(to) === "event") {
       renderPanels(step, true);
-      stateBar?.g.classList.add("on");
+      barAt(to.cx)?.g.classList.add("on");
       for (const x of edges.filter(x => x.a === to && kindOf(x.b) === "projection")) {
         x.g.classList.add("live");
         travel(x, token).then(() => { x.g.classList.remove("live"); x.g.classList.add("trail"); x.tick.classList.remove("on"); void x.tick.getBBox(); x.tick.classList.add("on"); });
@@ -856,7 +902,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const vb = svg.viewBox.baseVal;
       if (!box.width || !vb.width) return;
       const want = Math.max(1, Math.min(1.9, stretch * (box.height / box.width) / (vb.height / vb.width)));
-      if (Math.abs(want - stretch) < 0.04) return;
+      const was_wide = wide !== (vb.width * minScale() > $("scroller").clientWidth);
+      if (Math.abs(want - stretch) < 0.04 && !was_wide) return;
       const resume = playing;
       stop(); drawMap();
       if (scenarios.length) { paint(step); if (resume) play(); }
