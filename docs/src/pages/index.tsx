@@ -385,35 +385,29 @@ function Hero() {
             <span className={`${styles.heroT} ${styles.wT}`}>t</span>
           </h1>
         </div>
-        <div className={styles.heroIntro}>
-          <p className={styles.formula} aria-label="Actions, State, Reactions">
-            <span className={styles.fAction}>Actions</span>
-            <span className={styles.fArrow}> → </span>
-            <span className={styles.fState}>
-              <b>{"{"}</b>State<b>{"}"}</b>
-            </span>
-            <span className={styles.fArrow}> ← </span>
-            <span className={styles.fReaction}>Reactions</span>
-          </p>
-          <p className={styles.heroLede}>
-            Fluent event sourcing for TypeScript. You declare actions, state and reactions with
-            typed builders; Act stores the events, runs the reactions and keeps the projections up
-            to date, on Postgres, SQLite or in memory.
-          </p>
-          <div className={styles.heroCtas}>
-            <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
-              Get started
-            </Link>
-            <Link
-              className={`button button--secondary button--lg ${styles.cta}`}
-              href="https://github.com/rotorsoft/act-root"
-            >
-              GitHub
-            </Link>
-            <Link className={styles.textLink} href="https://payhip.com/b/7ezLy">
-              Read the book
-            </Link>
-          </div>
+        <p className={styles.formula} aria-label="Actions, State, Reactions">
+          <span className={styles.fAction}>Actions</span>
+          <span className={styles.fArrow}> → </span>
+          <span className={styles.fState}>
+            <b>{"{"}</b>State<b>{"}"}</b>
+          </span>
+          <span className={styles.fArrow}> ← </span>
+          <span className={styles.fReaction}>Reactions</span>
+        </p>
+        <p className={styles.heroLede}>
+          Fluent event sourcing for TypeScript. Declare actions, state and reactions with typed
+          builders; Act stores the events, runs the reactions and keeps the projections up to date.
+        </p>
+        <div className={styles.heroCtas}>
+          <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
+            Get started
+          </Link>
+          <Link
+            className={`button button--secondary button--lg ${styles.cta}`}
+            href="https://github.com/rotorsoft/act-root"
+          >
+            GitHub
+          </Link>
           <CopyInstall />
         </div>
       </div>
