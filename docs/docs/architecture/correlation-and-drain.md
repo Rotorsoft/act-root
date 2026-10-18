@@ -215,7 +215,7 @@ The cost of that rule: a reaction that commits while the cycle runs queues one m
 
 `drain()` is one round-trip: claim, fetch, dispatch, ack/block, return. Predictable. Useful for tests and synchronous catch-up scripts where the caller wants control over each cycle.
 
-`settle()` wraps drain in a debounced async loop with progress detection. Useful for production: fire and forget; the framework figures out when "done" means done. Listeners on `"settled"` get notified after each cycle that did work.
+`settle()` wraps drain in a debounced async loop with progress detection. Useful for production: fire and forget; the framework figures out when "done" means done. Listeners on `"settled"` get notified after each cycle, even one that found nothing to do.
 
 Mixing them is fine — `settle()` doesn't acquire any global lock, just a per-controller reentrancy guard. Multiple settle calls on different Act instances proceed independently.
 
