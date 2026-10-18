@@ -162,6 +162,36 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     loop.stop(true);
   });
 
+  it("a pass queued mid-cycle keeps the caller's delay", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const drain = vi.fn(async () => {
+      if (drain.mock.calls.length === 1) await gate;
+      return empty_drain();
+    });
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain,
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      1000
+    );
+    loop.schedule({ debounceMs: 0 });
+    await vi.advanceTimersByTimeAsync(0); // the first cycle holds in drain
+    loop.schedule({ debounceMs: 0 }); // the caller, mid-cycle
+    release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(drain).toHaveBeenCalledTimes(2); // not 1000ms later
+    loop.stop(true);
+  });
+
   it("brings a scheduled pass forward for a shorter delay", async () => {
     vi.useFakeTimers();
     const drain = vi.fn(async () => empty_drain());
@@ -612,10 +642,17 @@ describe("a local change settles its own reactions", () => {
       limits.push(options?.eventLimit);
       return drain(options);
     });
-    app.start_correlations({ limit: 5 }, 5);
-    app.settle({ eventLimit: 77, debounceMs: 60 });
-    await vi.waitFor(() => expect(limits).toContain(77));
-    app.stop_correlations();
+    vi.useFakeTimers();
+    try {
+      app.start_correlations({ limit: 5 }, 5);
+      app.settle({ eventLimit: 77, debounceMs: 60 });
+      // The 5ms tick brings the pass forward; it must keep the caller's options.
+      await vi.advanceTimersByTimeAsync(20);
+      expect(limits[0]).toBe(77);
+    } finally {
+      app.stop_correlations();
+      vi.useRealTimers();
+    }
   });
 
   it("scans with the poll's limit only while the poll runs", async () => {

@@ -1496,7 +1496,9 @@ export class Act<
    * up paginated streams without forcing callers to loop.
    *
    * @param options - Settle configuration — see {@link SettleOptions} for fields:
-   *   `debounceMs` (default 10), `correlate` (default `{ after: -1, limit: 100 }`),
+   *   `debounceMs` (default 10), `correlate.limit` (default 100, or the
+   *   poll's limit while `start_correlations` runs; `after` is always the
+   *   checkpoint),
    *   `maxPasses` (default `Infinity` — kill-switch for runaway loops),
    *   `streamLimit` (default 10), `eventLimit` (default 10),
    *   `leaseMillis` (default 10000).

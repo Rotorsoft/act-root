@@ -1953,7 +1953,9 @@ export class Act<
    * up paginated streams without forcing callers to loop.
    *
    * @param options - Settle configuration — see {@link SettleOptions} for fields:
-   *   \`debounceMs\` (default 10), \`correlate\` (default \`{ after: -1, limit: 100 }\`),
+   *   \`debounceMs\` (default 10), \`correlate.limit\` (default 100, or the
+   *   poll's limit while \`start_correlations\` runs; \`after\` is always the
+   *   checkpoint),
    *   \`maxPasses\` (default \`Infinity\` — kill-switch for runaway loops),
    *   \`streamLimit\` (default 10), \`eventLimit\` (default 10),
    *   \`leaseMillis\` (default 10000).
@@ -2103,9 +2105,10 @@ export type ActLifecycleEvents<
  *   reaction work: a commit, \`reset()\`, \`unblock()\`, \`restore()\` or a
  *   notification from another process. Set \`false\` when you walk the
  *   pipeline yourself with \`correlate()\` / \`drain()\` (tests that check its
- *   steps, tools). Timers you start still run (lanes with \`cycleMs\`,
- *   \`start_correlations()\`), and so does the circuit breaker's recovery
- *   pass after a store failure. Default: \`true\`.
+ *   steps, tools). Timers still run: lanes with \`cycleMs\`,
+ *   \`start_correlations()\`, the circuit breaker's recovery pass after a
+ *   store failure, and each stream's backoff or defer wake-up.
+ *   Default: \`true\`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
@@ -10478,9 +10481,10 @@ export type ActLifecycleEvents<
  *   reaction work: a commit, \`reset()\`, \`unblock()\`, \`restore()\` or a
  *   notification from another process. Set \`false\` when you walk the
  *   pipeline yourself with \`correlate()\` / \`drain()\` (tests that check its
- *   steps, tools). Timers you start still run (lanes with \`cycleMs\`,
- *   \`start_correlations()\`), and so does the circuit breaker's recovery
- *   pass after a store failure. Default: \`true\`.
+ *   steps, tools). Timers still run: lanes with \`cycleMs\`,
+ *   \`start_correlations()\`, the circuit breaker's recovery pass after a
+ *   store failure, and each stream's backoff or defer wake-up.
+ *   Default: \`true\`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;

@@ -171,7 +171,7 @@ it("should enforce business rules", async () => {
 
 A commit settles its reactions in the background (`ActOptions.autoSettle`, on by default). A test checks them one of two ways:
 
-- **Walk the pipeline yourself.** Build the app with `autoSettle: false` (`fixture(builder, { actOptions: { autoSettle: false } })`), then call `correlate()` and `drain()`. Nothing runs until you do, so the steps and their counts are deterministic. The pair is required, not a style choice: `drain()` claims only streams that `correlate()` has marked, so a bare `drain()` after a commit finds nothing.
+- **Walk the pipeline yourself.** Build the app with `autoSettle: false` (`fixture(builder, { actOptions: { autoSettle: false } })`), then call `correlate()` and `drain()`. Nothing settles until you do, so the steps and their counts are deterministic. One exception: a stream waiting out a retry backoff or a defer wakes its own drain when it comes due, so a test that counts retries should drive them with fake timers or wait for the outcome. The pair is required, not a style choice: `drain()` claims only streams that `correlate()` has marked, so a bare `drain()` after a commit finds nothing.
 - **Keep the default and wait for the outcome** with `vi.waitFor(...)`, the way the app itself would see it.
 
 ```typescript no-check

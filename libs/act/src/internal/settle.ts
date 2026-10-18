@@ -166,7 +166,7 @@ export class SettleLoop<TEvents extends Schemas> {
           // A wake-up arrived mid-cycle: run one more pass so it isn't lost.
           if (this._pending) {
             this._pending = false;
-            this.schedule();
+            this.schedule(this._next);
           }
         });
     }, delay);
