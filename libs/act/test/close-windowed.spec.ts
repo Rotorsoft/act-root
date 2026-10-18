@@ -392,7 +392,7 @@ describe("windowed close", () => {
   });
 
   it("prunes purely by date when the app has no reactions", async () => {
-    const solo = act().withState(counter).build({ autoSettle: false });
+    const solo = act().withState(counter).build();
     for (let i = 0; i < 5; i++)
       await solo.do("tick", { stream: "w11", actor }, { by: 1 });
     const { truncated, skipped } = await solo.close([

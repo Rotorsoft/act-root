@@ -133,7 +133,7 @@ describe("backoff config is validated at build", () => {
         .do(react, {
           backoff: { strategy: "expontential" as never, baseMs: 1 },
         })
-        .build({ autoSettle: false })
+        .build()
     ).toThrow();
   });
 

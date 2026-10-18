@@ -245,7 +245,7 @@ describe("priority lanes — framework", () => {
         .on("Inc")
         .do(async function r2() {})
         .to({ target: "shared", priority: 7 })
-        .build({ autoSettle: false }) as unknown as {
+        .build() as unknown as {
         registry: any;
         _states: any;
       };
@@ -269,7 +269,7 @@ describe("priority lanes — framework", () => {
         .on("Inc")
         .do(async function r() {})
         .to((e) => ({ target: `tgt-${e.stream}`, priority: 5 }))
-        .build({ autoSettle: false }) as unknown as {
+        .build() as unknown as {
         registry: any;
         _states: any;
       };

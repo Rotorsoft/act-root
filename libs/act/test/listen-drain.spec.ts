@@ -75,7 +75,7 @@ describe("ActOptions.listen and .drain", () => {
       .on("Tick")
       .do(vi.fn())
       .to("x")
-      .build({ autoSettle: false, listen: false });
+      .build({ listen: false });
     await Promise.resolve();
     await Promise.resolve();
     expect(notifyStore.subscribed).toBe(0);

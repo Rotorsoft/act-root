@@ -161,9 +161,7 @@ describe("schema-driven date revival", () => {
   });
 
   it("types a folded state by its declaration, warm and cold", async () => {
-    const { app, cache, dispose } = await sandbox(act().withState(Doc), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, cache, dispose } = await sandbox(act().withState(Doc));
     await app.do("stamp", { stream: "d1", actor }, payload);
 
     const warm = await app.load(Doc, "d1");
@@ -193,9 +191,7 @@ describe("schema-driven date revival", () => {
       .snap(() => true)
       .build();
 
-    const { app, cache, dispose } = await sandbox(act().withState(Snapped), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, cache, dispose } = await sandbox(act().withState(Snapped));
     const at = new Date("2026-03-03T00:00:00.000Z");
     await app.do("tick", { stream: "s1", actor }, { at });
     await cache.clear();
@@ -207,9 +203,7 @@ describe("schema-driven date revival", () => {
   });
 
   it("types query and query_array by declaration", async () => {
-    const { app, dispose } = await sandbox(act().withState(Doc), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, dispose } = await sandbox(act().withState(Doc));
     await app.do("stamp", { stream: "d2", actor }, payload);
 
     const [viaArray] = await app.query_array({

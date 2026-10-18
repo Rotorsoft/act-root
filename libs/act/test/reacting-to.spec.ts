@@ -280,9 +280,7 @@ describe("auto-inject reactingTo", () => {
       .emit("AmbientCounted")
       .build();
 
-    const { app, dispose } = await sandbox(act().withState(Counter), {
-      actOptions: { autoSettle: false },
-    });
+    const { app, dispose } = await sandbox(act().withState(Counter));
 
     await app.do("count", { stream: "amb-1", actor }, { n: 1 });
     await app.do("count", { stream: "amb-2", actor }, { n: 1 });

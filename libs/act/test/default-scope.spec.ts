@@ -119,7 +119,7 @@ describe("an Act's ports are its own", () => {
     // standing contract, not something the ports frame changes.
     const early = new InMemoryStore();
     store(early);
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     await app.do("bump", { stream: "c1", actor }, {});
     expect(await names(early)).toEqual(["Bumped"]);
   });

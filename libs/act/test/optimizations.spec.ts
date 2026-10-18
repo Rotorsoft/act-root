@@ -52,8 +52,7 @@ describe("optimization guards", () => {
 
     it("writes one snapshot per 5 commits, none before", async () => {
       const { app, store, dispose } = await sandbox(
-        act().withState(SnappingCounter),
-        { actOptions: { autoSettle: false } }
+        act().withState(SnappingCounter)
       );
       try {
         const stream = "snap-cadence";
