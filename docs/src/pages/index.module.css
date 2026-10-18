@@ -6,6 +6,8 @@
  */
 
 .main {
+  --page: 1280px;
+  --gutter: clamp(1rem, 3vw, 2rem);
   --c-action: #0a7fd1;
   --c-state: #a86f00;
   --c-reaction: #2e7d32;
@@ -20,19 +22,26 @@
 }
 
 /* ---------- Hero ---------- */
-.hero {
-  max-width: 1520px;
+/* Every block shares one width and one left edge. */
+.hero,
+.section {
+  box-sizing: content-box;
+  max-width: var(--page);
   margin: 0 auto;
-  padding: 3.25rem 1.5rem 1rem;
+  padding-inline: var(--gutter);
+}
+
+.hero {
+  padding-block: 3.5rem 1.5rem;
   display: grid;
-  gap: 1.75rem;
+  gap: 2.5rem;
 }
 
 /* Hero: the logo and wordmark lead; the formula sits beside them, smaller. */
 .heroTop {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 1.5rem 3.5rem;
+  gap: 1.5rem clamp(2rem, 5vw, 4.5rem);
   align-items: center;
 }
 
@@ -180,7 +189,7 @@
 .stageFrame {
   display: block;
   width: 100%;
-  height: clamp(540px, 58vw, 860px);
+  height: clamp(540px, 50vw, 760px);
   border: 0;
 }
 
@@ -224,12 +233,12 @@
 
 /* ---------- Sections ---------- */
 .section {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 4.5rem 1.5rem;
+  padding-block: 4rem;
 }
+/* divider drawn inside the gutters so it spans exactly the content width */
 .section + .section {
-  border-top: 1px solid var(--act-border);
+  background: linear-gradient(var(--act-border), var(--act-border)) top center / calc(100% - 2 * var(--gutter)) 1px no-repeat;
+  background-origin: padding-box;
 }
 
 .head {
@@ -482,7 +491,7 @@
   border: 1px solid var(--act-border);
   border-radius: 18px;
   padding: 1.75rem;
-  margin-bottom: 2rem;
+  margin-bottom: 0;
   box-shadow: 0 12px 32px -20px rgba(15, 23, 42, 0.25);
 }
 
@@ -631,10 +640,11 @@
 
 @media (max-width: 640px) {
   .hero {
-    padding: 2.25rem 1rem 0.5rem;
+    padding-block: 2rem 0.5rem;
+    gap: 1.75rem;
   }
   .section {
-    padding: 3rem 1rem;
+    padding-block: 3rem;
   }
   .features {
     grid-template-columns: minmax(0, 1fr);
@@ -643,4 +653,42 @@
   .sandboxPoster {
     height: 420px;
   }
+}
+
+/* ---------- Code blocks on this page ----------
+ * The site-wide inline-code chip (background, border, padding, a second size step)
+ * also lands on block code; undo that here and give the samples room to read. */
+.main :global(.prism-code) {
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+.main pre code,
+.main pre code * {
+  font-feature-settings: "calt" 0, "liga" 0;
+}
+.main pre code {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 1.1rem 1.35rem;
+  font-size: inherit;
+}
+[data-theme="dark"] .main :global(.prism-code) {
+  background: #0d1117 !important;
+}
+.main :global([class*="codeBlockTitle"]) {
+  font: 500 0.8rem var(--ifm-font-family-monospace);
+  color: var(--act-text-muted);
+  background: var(--act-surface-2);
+  border: 1px solid var(--act-border);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  padding: 0.55rem 1.35rem;
+}
+[data-theme="dark"] .main :global([class*="codeBlockTitle"]) {
+  background: #121821;
+}
+.main :global([class*="codeBlockTitle"] + [class*="codeBlockContent"]) pre {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
