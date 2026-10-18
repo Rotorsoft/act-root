@@ -53,6 +53,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - Idle means nothing left to claim, not nothing succeeded. A pass whose claims all deferred or failed disarmed the drain and ended settle, so streams marked but never claimed waited for the next commit. (2026-10-15 probe: 5 of 12 reactions ran)
 - A window that one-based ids happened to paper over should be removed, not propagated. (#1446)
 - A loop added to a background path checks the stop flag on every turn: shutdown waits for the pass in flight, not the loop around it. (#1928's wake loop ran two handlers after `shutdown()` resolved, 2026-10-17)
+- When a fix adds a stop check to one loop, grep for every loop in the same lifecycle: #1950 stopped the defer wake loop at shutdown, and settle's own pass loop, one file over, still ran 57 handlers after `shutdown()` resolved. (2026-10-18 probe)
+- A safety-net timer must restart every stage that can go idle, not only the first: the `start_correlations` tick re-armed correlation, but lanes disarmed on an empty claim never claimed a dead worker's expired lease. (2026-10-18 probe)
 - Several loops that feed one failure counter need the same recovery: #1928 made a failed drain pass retry and left a failed settle pass waiting for the breaker to open. Fix the class, then probe each loop.
 
 ## Contracts and tests
@@ -68,6 +70,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A convenience is a promise; an unexercised default decays into silent loss. Refuse a default you can't honor. (#1443)
 - A test that skips by default is no contract. (#1441)
 - A gate whose self-test checks only that something failed can pass for the wrong reason. The snippet check type-checked zero files for 2.5 months while its self-test passed on a missing-module error. (2026-10-08 review)
+- A field list hand-copied into a doc comment drifts from its schema (`Act.query` listed `name`; the field is `names`); link the type instead. A hand-kept file list in a gate drifts when files move (`/release-check` missed the types #1959 moved); diff the artifact that already covers them. (2026-10-18)
 - A type check can't see a rule enforced at build: 31 doc and skill examples passed `check:snippets` while passing arrow functions to `.do(...)`, which throws "must be a named function" when the app is built. (2026-10-15 review)
 - A test whose verdict depends on the machine it runs on teaches people to ignore red. (#1443)
 - Trust boundaries pool around user code; enforce the contract the user already declared (opt-in when it costs). (#1238)
