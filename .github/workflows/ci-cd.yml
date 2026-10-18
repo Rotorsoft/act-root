@@ -22,7 +22,7 @@ jobs:
   #   - `src-changed`: anything that can change typecheck/build/test results
   #     → run `ci`. Pure docs/CHANGELOG/PERFORMANCE updates
   #     inside a lib don't trip this; dependency, lockfile, test and
-  #     toolchain changes do (#1778).
+  #     toolchain changes do.
   #   - `perf-changed`: a perf-critical hot path or a benchmark file changed
   #     → run the real-adapter perf gates on top of unit tests. Most PRs and most master pushes
   #     skip this. A perf-affecting change that doesn't touch the filter's
@@ -130,7 +130,7 @@ jobs:
 
       - run: pnpm install
       # Fail fast if a package added/removed/renamed a subpath `export`
-      # without regenerating the workspace `paths` map (ticket #1059).
+      # without regenerating the workspace `paths` map.
       # `pnpm paths:sync` rewrites tsconfig.workspace.json from the
       # `exports` fields; this check enforces they stay in lockstep.
       - run: pnpm paths:check
@@ -150,15 +150,13 @@ jobs:
       - run: pnpm test
 
       # Browser-safety gate. A published subpath that client code imports
-      # (`@rotorsoft/act-http/sse`) must not statically reach a Node API:
-      # #1423 added `import { log } from "@rotorsoft/act"` to the server half
-      # of that barrel, which put the framework — and the AsyncLocalStorage it
-      # builds at module scope — into every browser bundle touching it. Nothing
-      # here builds a browser bundle, so it sat for ten days. Walks `dist/`, so
+      # (`@rotorsoft/act-http/sse`) must not statically reach a Node API: one
+      # framework import puts its module-scope AsyncLocalStorage into every
+      # browser bundle, and nothing else here builds one. Walks `dist/`, so
       # it runs after build.
       - run: pnpm check:browser-safe
 
-      # Section-presence check for libs/*/README.md — ticket #751.
+      # Section-presence check for libs/*/README.md.
       # Fails the build if any lib README is missing one of the required
       # canonical sections (Title + tagline, Why, Installation, Quick start,
       # Related, Documentation, License). Deprecated packages opt out via
@@ -189,8 +187,7 @@ jobs:
           grep -q "status:" act-cli-wolfdesk.log
       # The steps above run the CLI from source through tsx. Consumers get the
       # BUILT bin, so run that too, executed directly through its shebang the
-      # way `npx act` does. A doubled shebang in dist shipped for four releases
-      # because nothing ran the artifact (#1775).
+      # way `npx act` does: only the artifact shows a broken shebang.
       - name: act-cli smoke (built bin)
         env:
           NO_COLOR: "1"
@@ -236,11 +233,10 @@ jobs:
       # ratio check when the baseline p50 is below a 1.0 ms absolute floor
       # (sub-ms ops are noise-dominated). See each package's perf-check.ts.
       #
-      # BLOCKING (#1094): a budget breach fails the PR. Baselines were
-      # generated on this CI runner via the perf-baseline.yml workflow, so they
-      # match the hardware the gate runs on — the laptop-vs-runner mismatch that
-      # report-only guarded against is gone, and the 2.0×/1.5× tolerances + the
-      # 1.0 ms floor absorb run-to-run variance. If a scenario proves noisy,
+      # BLOCKING: a budget breach fails the PR. Baselines come from this CI
+      # runner (perf-baseline.yml), so they match the hardware the gate runs
+      # on, and the 2.0×/1.5× tolerances + the 1.0 ms floor absorb
+      # run-to-run variance. If a scenario proves noisy,
       # refresh the baseline (re-run perf-baseline.yml) or widen its budget —
       # don't silence the gate. The pg connection needs no extra env:
       # PostgresStore defaults (host/db/user/password = postgres) match the
@@ -278,10 +274,8 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Coveralls upload is best-effort. Outages have blocked merges on
-      # master before — we'd rather lose a coverage badge than lose a
-      # release. `continue-on-error: true` lets the rest of the pipeline
-      # advance regardless of coveralls availability.
+      # Coveralls upload is best-effort: a coveralls outage must not block a
+      # release.
       - uses: coverallsapp/github-action@v2
         continue-on-error: true
         with:
@@ -303,7 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     # Job-level permissions REPLACE the workflow-level block, so the existing
     # grants are restated here alongside the new one. `id-token: write` lets
-    # npm mint a Sigstore provenance attestation on publish (issue #1142) —
+    # npm mint a Sigstore provenance attestation on publish —
     # the OIDC token proves the package was built by this workflow run.
     permissions:
       contents: write
@@ -331,14 +325,10 @@ jobs:
 
       - run: pnpm install
 
-      # Build everything from source. We used to ship a `libs/*/dist`
-      # artifact from CI and download it here, but `actions/upload-artifact`
-      # strips the longest common ancestor (`libs/`), so the dist files
-      # landed at `<root>/<lib>/dist` instead of `<root>/libs/<lib>/dist`
-      # — and `pnpm publish` shipped 11 versions across 7 libs with no
-      # `dist/` at all (LICENSE + README + package.json only). Rebuilding
-      # here costs ~30s per matrix job and removes the whole class of
-      # bug. `pnpm -r build` respects topological order.
+      # Build from source rather than downloading CI's `dist` artifact:
+      # `actions/upload-artifact` strips the common `libs/` prefix, which
+      # publishes a package with no `dist/`. ~30s per matrix job; `pnpm -r
+      # build` respects topological order.
       - run: pnpm build
 
       - name: configure git
@@ -356,16 +346,15 @@ jobs:
       # registered as that package's Trusted Publisher on npmjs.com. A
       # publish from anywhere else has no identity to trade.
       #
-      # `NPM_TOKEN` / `NODE_AUTH_TOKEN` were removed with the migration
-      # (setup for a new package: contributing-new-package.md). Note pnpm attempts the OIDC exchange whether or
-      # not a static token is present, so their absence is not what enables
-      # this — the Trusted Publisher registration is. Adding a token back
-      # would only reinstate a credential that can leak.
+      # There is no `NPM_TOKEN`: pnpm attempts the OIDC exchange whether or
+      # not a static token is present, so the Trusted Publisher registration
+      # is what enables it, and a token would only add a credential that can
+      # leak (setup for a new package: contributing-new-package.md).
       - name: release ${{ matrix.lib }}
         working-directory: libs/${{ matrix.lib }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Provenance attestation (issue #1142). Trusted publishing turns
+          # Provenance attestation. Trusted publishing turns
           # this on by default; kept explicit so the intent survives a change
           # of publish path, and because `pnpm publish` delegates to the npm
           # CLI, which reads NPM_CONFIG_* from the environment.

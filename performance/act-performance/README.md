@@ -21,3 +21,5 @@ An express server exposing a todo app over HTTP, with k6 load scripts and an inf
 pnpm -F act-performance compose         # build + start the stack
 pnpm -F act-performance throughput:parallel
 ```
+
+The k6 scripts live in `performance/k6`. Set the load with `VUS`, `DURATION` and `WRITE_RATIO`, for example `docker compose run --rm -e VUS=200 -e DURATION=60s -e WRITE_RATIO=0.5 k6 run /scripts/throughput.js`. Results stream to InfluxDB: open Grafana on :3000, add the InfluxDB data source (`http://influxdb:8086`, database `k6`) and import dashboard 2587.

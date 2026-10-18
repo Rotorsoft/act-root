@@ -90,8 +90,7 @@
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
-    "pre-commit": "npx lint-staged",
-    "pre-push": "branch=$(git rev-parse --abbrev-ref HEAD); if [ \"$branch\" = \"master\" ]; then pnpm test; fi"
+    "pre-commit": "npx lint-staged"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,json}": [
