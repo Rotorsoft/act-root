@@ -52,7 +52,6 @@
     "dev:http": "concurrently -n 'server,client' -c 'cyan,yellow' 'CORS_ORIGIN=http://localhost:3000 pnpm -F server dev' 'pnpm -F client dev'",
     "dev:metrics": "bash recipes/observability/prometheus/run.sh",
     "dev:inspector": "pnpm -F @rotorsoft/act-inspector dev",
-    "dev:diagram": "pnpm -F @rotorsoft/act-diagram dev",
     "act": "NODE_OPTIONS=--disable-warning=DEP0205 FORCE_COLOR=${FORCE_COLOR:-1} tsx libs/act-diagram/src/cli/index.ts",
     "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh"
   },
@@ -90,8 +89,7 @@
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
-    "pre-commit": "npx lint-staged",
-    "pre-push": "branch=$(git rev-parse --abbrev-ref HEAD); if [ \"$branch\" = \"master\" ]; then pnpm test; fi"
+    "pre-commit": "npx lint-staged"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,json}": [

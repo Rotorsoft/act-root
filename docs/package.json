@@ -9,11 +9,8 @@
     "snippets:extract": "node scripts/check-snippets.mjs",
     "check:snippets": "node scripts/check-snippets.mjs --check",
     "check:snippets:selftest": "node scripts/check-snippets.mjs --self-test",
-    "swizzle": "docusaurus swizzle",
     "clear": "docusaurus clear",
-    "serve": "docusaurus serve",
-    "write-translations": "docusaurus write-translations",
-    "write-heading-ids": "docusaurus write-heading-ids"
+    "serve": "docusaurus serve"
   },
   "dependencies": {
     "@mdx-js/react": "^3.1.1",
