@@ -9,7 +9,7 @@ sidebar_position: 3.6
 
 An Act app already knows its own flows. Every action, the state that checks it, the events it commits, the projections that fold them and the reactions that pick them up are declared in the builders. A flow animation draws all of that as one map and plays it: a token leaves a person or an automation, passes through the state where the invariants are checked, lands as an event, feeds the projections, wakes a reaction, and goes on to the next action or out to another system.
 
-**See one:** [WolfDesk ticket flows](pathname:///flows/wolfdesk.html) · [all animations](pathname:///flows/index.html)
+**See one:** [WolfDesk ticket flows](pathname:///flows/wolfdesk.html) · [Calculator flows](pathname:///flows/calculator.html) · [Risk game flows](pathname:///flows/risk.html), from the [Risk board game](https://github.com/Rotorsoft/risk) built on Act · [all animations](pathname:///flows/index.html)
 
 ## What you get
 
@@ -71,7 +71,11 @@ pnpm -F docs flows:video wolfdesk --scenario 2 --out escalation.mp4
 
 It drives Chrome through `playwright-core`, captures every frame the page paints and encodes H.264 with `ffmpeg`. You need Chrome and `ffmpeg` installed.
 
-The hosted page also has a **Record** button. In Chrome it captures the tab while the current scenario plays and saves the file.
+The hosted page also has a **Record** button. In desktop Chrome it captures the tab while the current scenario plays and saves the file. Phones don't show it.
+
+## On a phone
+
+The map never shrinks below a readable size. A map wider than the screen scrolls sideways, and playback scrolls to each step as it plays. The scenario tabs scroll in one row, the caption stays at the bottom, and the event stream and state panels follow the map. The landing page's embedded overview is the exception: on a wide screen it fits the whole map.
 
 ## Link or embed
 
@@ -90,4 +94,4 @@ The page reads a few words from the URL fragment, joined with `-`:
 
 ## The spec
 
-The player is generic. All app knowledge lives in the spec: lanes, nodes with a column, edges, and scenarios made of steps. A step either walks an edge (`from`, `to`) or stands at a node (`at`). Steps can carry the event `data`, the state `patch`, a `wait` for timers, a `reject` reason, `retries` with `backoff`, and `blocked`. The skill's `SKILL.md` documents every field, and [`docs/flows/wolfdesk.flow.json`](https://github.com/rotorsoft/act-root/blob/master/docs/flows/wolfdesk.flow.json) uses all of them.
+The player is generic. All app knowledge lives in the spec: lanes, nodes with a column, edges, and scenarios made of steps. A step either walks an edge (`from`, `to`) or stands at a node (`at`). Steps can carry the event `data`, the state `patch`, a `wait` for timers, a `reject` reason, `retries` with `backoff`, and `blocked`. An app with several states gets one bar per state, each with a `span` over the actions that load it; the state panel shows the scenario's own stream. The skill's `SKILL.md` documents every field, and [`docs/flows/wolfdesk.flow.json`](https://github.com/rotorsoft/act-root/blob/master/docs/flows/wolfdesk.flow.json) uses all of them.

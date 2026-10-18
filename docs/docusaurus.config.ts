@@ -54,6 +54,18 @@ const config: Config = {
     locales: ["en"],
   },
 
+  // Tinybird web analytics (page views). The token is a public, append-only
+  // tracker token meant to ship in the page.
+  scripts: [
+    {
+      src: "https://unpkg.com/@tinybirdco/flock.js",
+      defer: true,
+      "data-host": "https://api.us-east.tinybird.co",
+      "data-token":
+        "p.eyJ1IjogIjU4MDAxMmY5LTMyOGItNGRhZS1hNmUxLWVlMzkyYzc5MDVkZCIsICJpZCI6ICJhYmI4ODRlMC01NzQxLTQ0NTAtYWM5Mi0wMTU5ZTBmZDViMWEiLCAiaG9zdCI6ICJ1c19lYXN0In0.YHha7mn6nkX4N0G-ljwRSI8gS3Uh3LhhHuw-AGGx8Gc",
+    },
+  ],
+
   headTags: [
     {
       tagName: "link",

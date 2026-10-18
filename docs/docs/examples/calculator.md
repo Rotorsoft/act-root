@@ -9,6 +9,8 @@ A simple calculator demonstrating core Act patterns: state machines, multiple ev
 
 **Source:** [packages/calculator/src/](https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src)
 
+**See it animated:** [Calculator flows](pathname:///flows/calculator.html) plays key presses through the calculator state and the two reactions in `main.ts` that count digits and record results, in three scenarios: a sum, decimals and clear, and refusals with a division by zero. [How these are made](../guides/flow-animations.md).
+
 ## Patterns Demonstrated
 
 ### Single State Machine

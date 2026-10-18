@@ -32,7 +32,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 - **`.emits()`** declares events with passthrough reducers by default (`({ data }) => data`)
 - **`.patch()`** overrides only events that need custom reducers
-- **`.on(entry, options?)`** registers an action; the optional second argument is an [`ActionOptions`](./error-handling#retry-pattern--per-action-policy) for per-action retry policy (`maxRetries`, optional `backoff`). Omit for the current single-attempt behavior.
+- **`.on(entry, options?)`** registers an action; the optional second argument is an [`ActionOptions`](./error-handling.md#retry-pattern--per-action-policy) for per-action retry policy (`maxRetries`, optional `backoff`). Omit for the current single-attempt behavior.
 - **`.emit("EventName")`** passes the action payload through directly as event data
 - **`.emit((action, snapshot, target) => [name, data])`** for computed event data. The handler receives:
   - `action` — the validated action payload

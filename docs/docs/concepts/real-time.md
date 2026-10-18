@@ -7,13 +7,13 @@ title: Real-Time with SSE
 
 `@rotorsoft/act-http/sse` broadcasts incremental state updates over Server-Sent Events. Each event-sourced commit emits a *domain patch* (a partial state update); the broadcast layer forwards those patches keyed by event version, so subscribers can apply them to their cached state without ever refetching.
 
-> SSE is one of two HTTP-shaped integration paths. For the outbound side — webhooks, downstream services, message buses — see [External integration patterns](../guides/external-integration). The two are independent; an app can run both.
+> SSE is one of two HTTP-shaped integration paths. For the outbound side — webhooks, downstream services, message buses — see [External integration patterns](../guides/external-integration.md). The two are independent; an app can run both.
 
 ```bash
 npm install @rotorsoft/act-http
 ```
 
-> **Migrating from `@rotorsoft/act-sse`?** That standalone package is deprecated on npm and no longer published from this repo — `@rotorsoft/act-http/sse` is the only home. The surface is identical; swap the import specifier and you're done. Versions already installed keep working. See the [1.x migration guide](../guides/migrating-to-1.x).
+> **Migrating from `@rotorsoft/act-sse`?** That standalone package is deprecated on npm and no longer published from this repo — `@rotorsoft/act-http/sse` is the only home. The surface is identical; swap the import specifier and you're done. Versions already installed keep working. See the [1.x migration guide](../guides/migrating-to-1.x.md).
 
 
 ### Clearing a field
@@ -170,7 +170,7 @@ presence.isOnline(streamId, identityId); // boolean
 
 ### If you use the generated transports
 
-You may not need to write a subscription handler at all. Both `trpc(app, { sse })` and `hono(app, { sse })` from `@rotorsoft/act-http` accept an `sse: { channel: broadcast }` option that walks the registry and emits one subscription — or one streaming `GET /api/sse/<stateName>?stream=<id>` endpoint — per registered state, all reading from your `BroadcastChannel`. You keep owning publication (`broadcast.publish(...)` after commits); the generator owns subscription, accounting, cleanup, and the wire format. See [Auto-generated API surfaces § Real-time subscriptions](../guides/auto-generated-api#real-time-subscriptions), and the runnable demo in `packages/server` + `packages/client` (`pnpm dev:http` from the repo root).
+You may not need to write a subscription handler at all. Both `trpc(app, { sse })` and `hono(app, { sse })` from `@rotorsoft/act-http` accept an `sse: { channel: broadcast }` option that walks the registry and emits one subscription — or one streaming `GET /api/sse/<stateName>?stream=<id>` endpoint — per registered state, all reading from your `BroadcastChannel`. You keep owning publication (`broadcast.publish(...)` after commits); the generator owns subscription, accounting, cleanup, and the wire format. See [Auto-generated API surfaces § Real-time subscriptions](../guides/auto-generated-api.md#real-time-subscriptions), and the runnable demo in `packages/server` + `packages/client` (`pnpm dev:http` from the repo root).
 
 The section below is the custom-server path — the same loop the generator writes for you, hand-rolled for hosts the generators don't cover.
 

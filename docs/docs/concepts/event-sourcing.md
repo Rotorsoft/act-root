@@ -348,7 +348,7 @@ const result = await app.close([
 //                                windowed closes with no qualifying snapshot
 ```
 
-After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent `app.do()`. Restarted streams are reseeded and continue normally. See [Close cycle](../architecture/close-cycle) for the full phase-by-phase semantics.
+After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent `app.do()`. Restarted streams are reseeded and continue normally. See [Close cycle](../architecture/close-cycle.md) for the full phase-by-phase semantics.
 
 There is a third variant for streams whose lifecycle never ends: a target carrying `before: Date` closes the books on a **rolling window**, pruning the events older than the cutoff behind the stream's closest safe snapshot while the stream stays live and keeps accepting actions — no tombstone, no seed. It requires the state to snapshot via `.snap(...)`, and the declarative form is `.autocloses({ keep: { days: 180 } })`. See [Windowed close](../architecture/close-cycle.md#windowed-close--prune-behind-a-snapshot) and the [close-policies guide](../guides/close-policies.md#keep--days---the-rolling-window).
 

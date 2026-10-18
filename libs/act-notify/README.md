@@ -63,7 +63,7 @@ The decorator passes the full Store TCK — including the lease-semantics cases 
 
 - [Cross-process reactions](https://rotorsoft.github.io/act-root/docs/architecture/cross-process-reactions) — the notify contract this package implements
 - [Lift the LISTEN/NOTIFY fanout ceiling](https://github.com/Rotorsoft/act-root/tree/master/recipes/scaling/notify-broker) — the operator recipe
-- [API reference](https://rotorsoft.github.io/act-root/docs/api/act-notify/src)
+- [API reference](https://rotorsoft.github.io/act-root/docs/api/act-notify)
 
 ## License
 

@@ -1,0 +1,583 @@
+{
+  "title": "Calculator Flows",
+  "subtitle": "The calculator example: key presses become events on a calculator stream, and two reactions keep a digit board and a result stream up to date.",
+  "source": "packages/calculator/src",
+  "lanes": [
+    {
+      "id": "actor",
+      "label": "Actors"
+    },
+    {
+      "id": "action",
+      "label": "Actions"
+    },
+    {
+      "id": "state",
+      "label": "State",
+      "sub": "load · check · patch"
+    },
+    {
+      "id": "event",
+      "label": "Events",
+      "sub": "A · Board · CalculatorA"
+    },
+    {
+      "id": "reaction",
+      "label": "Reactions"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "actor:user",
+      "lane": "actor",
+      "actor": "person",
+      "label": "User",
+      "col": 1.5,
+      "description": "Presses keys and clears the calculator. In main.ts a loop presses random keys on streams A and B."
+    },
+    {
+      "id": "action:PressKey",
+      "lane": "action",
+      "label": "PressKey",
+      "col": 1.5,
+      "schema": "{ key: 0-9 | + - * / | . | = }",
+      "file": "packages/calculator/src/calculator.ts",
+      "line": 117,
+      "description": "One action for every key. The emit decides which event the key becomes, and refuses = when no operator is pending (it throws \"no operator\")."
+    },
+    {
+      "id": "action:Clear",
+      "lane": "action",
+      "label": "Clear",
+      "col": 4,
+      "invariants": ["Must be dirty"],
+      "file": "packages/calculator/src/calculator.ts",
+      "line": 128,
+      "description": "Resets the calculator. The invariant refuses it when there is nothing to clear."
+    },
+    {
+      "id": "action:CountDigit",
+      "lane": "action",
+      "label": "CountDigit",
+      "col": 5.5,
+      "schema": "{ digit: 0-9 }",
+      "file": "packages/calculator/src/main.ts",
+      "line": 34,
+      "description": "Adds one to a digit's count on the shared Board stream."
+    },
+    {
+      "id": "action:ProjectResult",
+      "lane": "action",
+      "label": "ProjectResult",
+      "col": 7,
+      "schema": "{ result: number }",
+      "file": "packages/calculator/src/main.ts",
+      "line": 48,
+      "description": "Records a calculator's current result on its own Calculator<stream> stream."
+    },
+    {
+      "id": "state:Calculator",
+      "lane": "state",
+      "label": "Calculator",
+      "note": "left · operator · right · result",
+      "span": [0, 4],
+      "file": "packages/calculator/src/calculator.ts",
+      "description": "One calculator per stream (A, B). Each key loads it, and its event patches it: digits and dots append to the left or right operand, an operator or = computes the pending result. A division by zero resets to 0 instead of storing Infinity. Snapshots every 12 patches."
+    },
+    {
+      "id": "state:DigitBoard",
+      "lane": "state",
+      "label": "DigitBoard",
+      "note": "count per digit",
+      "span": [5.25, 5.75],
+      "file": "packages/calculator/src/main.ts",
+      "description": "A count for each digit 0-9, on one shared Board stream."
+    },
+    {
+      "id": "state:CalculatorResult",
+      "lane": "state",
+      "label": "CalculatorResult",
+      "note": "result",
+      "span": [6.75, 7.25],
+      "file": "packages/calculator/src/main.ts",
+      "description": "The last projected result of one calculator, on a CalculatorA or CalculatorB stream."
+    },
+    {
+      "id": "evt:DigitPressed",
+      "lane": "event",
+      "label": "DigitPressed",
+      "col": 0,
+      "schema": "{ digit: 0-9 }"
+    },
+    {
+      "id": "evt:OperatorPressed",
+      "lane": "event",
+      "label": "OperatorPressed",
+      "col": 1,
+      "schema": "{ operator: + - * / }"
+    },
+    {
+      "id": "evt:DotPressed",
+      "lane": "event",
+      "label": "DotPressed",
+      "col": 2,
+      "schema": "{}"
+    },
+    {
+      "id": "evt:EqualsPressed",
+      "lane": "event",
+      "label": "EqualsPressed",
+      "col": 3,
+      "schema": "{}"
+    },
+    {
+      "id": "evt:Cleared",
+      "lane": "event",
+      "label": "Cleared",
+      "col": 4,
+      "schema": "{}"
+    },
+    {
+      "id": "evt:DigitCounted",
+      "lane": "event",
+      "label": "DigitCounted",
+      "col": 5.5,
+      "schema": "{ digit: 0-9 }"
+    },
+    {
+      "id": "evt:ResultProjected",
+      "lane": "event",
+      "label": "ResultProjected",
+      "col": 7,
+      "schema": "{ result: number }"
+    },
+    {
+      "id": "reaction:CountDigits",
+      "lane": "reaction",
+      "label": "CountDigits",
+      "col": 0,
+      "as": "Calculator",
+      "file": "packages/calculator/src/main.ts",
+      "line": 77,
+      "description": "Every DigitPressed on stream A or B counts the digit on the Board stream. Target: Board, lane \"board\" (lease 5 s, 10 streams per drain)."
+    },
+    {
+      "id": "reaction:ProjectResult",
+      "lane": "reaction",
+      "label": "ProjectResult",
+      "col": 1,
+      "as": "Calculator",
+      "file": "packages/calculator/src/main.ts",
+      "line": 91,
+      "description": "Every OperatorPressed loads the calculator and records its result. Target: Calculator<stream>, lane \"result\" (lease 5 s, 10 streams per drain)."
+    }
+  ],
+  "edges": [
+    {
+      "from": "actor:user",
+      "to": "action:PressKey"
+    },
+    {
+      "from": "actor:user",
+      "to": "action:Clear"
+    },
+    {
+      "from": "action:PressKey",
+      "to": "evt:DigitPressed"
+    },
+    {
+      "from": "action:PressKey",
+      "to": "evt:OperatorPressed"
+    },
+    {
+      "from": "action:PressKey",
+      "to": "evt:DotPressed"
+    },
+    {
+      "from": "action:PressKey",
+      "to": "evt:EqualsPressed"
+    },
+    {
+      "from": "action:Clear",
+      "to": "evt:Cleared"
+    },
+    {
+      "from": "evt:DigitPressed",
+      "to": "reaction:CountDigits"
+    },
+    {
+      "from": "reaction:CountDigits",
+      "to": "action:CountDigit"
+    },
+    {
+      "from": "action:CountDigit",
+      "to": "evt:DigitCounted"
+    },
+    {
+      "from": "evt:OperatorPressed",
+      "to": "reaction:ProjectResult"
+    },
+    {
+      "from": "reaction:ProjectResult",
+      "to": "action:ProjectResult"
+    },
+    {
+      "from": "action:ProjectResult",
+      "to": "evt:ResultProjected"
+    }
+  ],
+  "scenarios": [
+    {
+      "title": "12 + 3 =",
+      "stream": "A",
+      "summary": "Four keys on calculator A. Each digit is counted on the Board, and the operator records A's result so far on CalculatorA.",
+      "initial": {
+        "result": 0
+      },
+      "steps": [
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **1** on calculator A."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DigitPressed",
+          "say": "A digit becomes **DigitPressed** and appends to the left operand.",
+          "data": {
+            "digit": "1"
+          },
+          "patch": {
+            "left": "1"
+          }
+        },
+        {
+          "from": "evt:DigitPressed",
+          "to": "reaction:CountDigits",
+          "say": "**CountDigits** reacts to every digit, on the **board** lane."
+        },
+        {
+          "from": "reaction:CountDigits",
+          "to": "action:CountDigit",
+          "say": "It invokes **CountDigit** on the shared Board stream."
+        },
+        {
+          "from": "action:CountDigit",
+          "to": "evt:DigitCounted",
+          "say": "The Board counts one more **1**.",
+          "stream": "Board",
+          "data": {
+            "digit": "1"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **2**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DigitPressed",
+          "say": "The left operand is now **12**.",
+          "data": {
+            "digit": "2"
+          },
+          "patch": {
+            "left": "12"
+          }
+        },
+        {
+          "from": "evt:DigitPressed",
+          "to": "reaction:CountDigits",
+          "say": "Counted again."
+        },
+        {
+          "from": "reaction:CountDigits",
+          "to": "action:CountDigit",
+          "say": "Same reaction, same Board stream."
+        },
+        {
+          "from": "action:CountDigit",
+          "to": "evt:DigitCounted",
+          "say": "The Board now has one **1** and one **2**.",
+          "stream": "Board",
+          "data": {
+            "digit": "2"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **+**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:OperatorPressed",
+          "say": "**OperatorPressed** sets the pending operator. Nothing to compute yet.",
+          "data": {
+            "operator": "+"
+          },
+          "patch": {
+            "operator": "+"
+          }
+        },
+        {
+          "from": "evt:OperatorPressed",
+          "to": "reaction:ProjectResult",
+          "say": "**ProjectResult** reacts to every operator, on the **result** lane."
+        },
+        {
+          "from": "reaction:ProjectResult",
+          "to": "action:ProjectResult",
+          "say": "It loads calculator A and records its result."
+        },
+        {
+          "from": "action:ProjectResult",
+          "to": "evt:ResultProjected",
+          "say": "CalculatorA holds **0**: the sum is computed on the next operator or =.",
+          "stream": "CalculatorA",
+          "data": {
+            "result": 0
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **3**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DigitPressed",
+          "say": "With an operator pending, digits go to the right operand.",
+          "data": {
+            "digit": "3"
+          },
+          "patch": {
+            "right": "3"
+          }
+        },
+        {
+          "from": "evt:DigitPressed",
+          "to": "reaction:CountDigits",
+          "say": "Counted."
+        },
+        {
+          "from": "reaction:CountDigits",
+          "to": "action:CountDigit",
+          "say": "One more Board update."
+        },
+        {
+          "from": "action:CountDigit",
+          "to": "evt:DigitCounted",
+          "say": "The Board has counted three digits.",
+          "stream": "Board",
+          "data": {
+            "digit": "3"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **=**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:EqualsPressed",
+          "say": "**EqualsPressed** computes 12 + 3. The result becomes the next left operand.",
+          "data": {},
+          "patch": {
+            "result": 15,
+            "left": "15",
+            "operator": null,
+            "right": null
+          }
+        }
+      ]
+    },
+    {
+      "title": "Decimals and clear",
+      "stream": "B",
+      "summary": "A decimal on calculator B, a second dot that changes nothing, then a clear.",
+      "initial": {
+        "result": 0
+      },
+      "steps": [
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **.** on calculator B."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DotPressed",
+          "say": "**DotPressed** appends a dot to the left operand.",
+          "data": {},
+          "patch": {
+            "left": "."
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "Then **5**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DigitPressed",
+          "say": "The left operand reads **.5**.",
+          "data": {
+            "digit": "5"
+          },
+          "patch": {
+            "left": ".5"
+          }
+        },
+        {
+          "from": "evt:DigitPressed",
+          "to": "reaction:CountDigits",
+          "say": "Digits from B are counted on the same Board."
+        },
+        {
+          "from": "reaction:CountDigits",
+          "to": "action:CountDigit",
+          "say": "Both calculators share one Board stream."
+        },
+        {
+          "from": "action:CountDigit",
+          "to": "evt:DigitCounted",
+          "say": "The Board counts a **5**.",
+          "stream": "Board",
+          "data": {
+            "digit": "5"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **.** again."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DotPressed",
+          "say": "The event is recorded, but the patch sees a dot already there and changes nothing.",
+          "data": {},
+          "patch": {}
+        },
+        {
+          "from": "actor:user",
+          "to": "action:Clear",
+          "say": "The user clears the calculator."
+        },
+        {
+          "from": "action:Clear",
+          "to": "evt:Cleared",
+          "say": "It is dirty, so **Cleared** commits and resets every field.",
+          "data": {},
+          "patch": {
+            "result": 0,
+            "left": null,
+            "right": null,
+            "operator": null
+          }
+        }
+      ]
+    },
+    {
+      "title": "Refusals and division by zero",
+      "stream": "A",
+      "summary": "What the calculator refuses, and how it keeps Infinity out of its state.",
+      "initial": {
+        "result": 0
+      },
+      "steps": [
+        {
+          "from": "actor:user",
+          "to": "action:Clear",
+          "say": "The user presses clear on a fresh calculator."
+        },
+        {
+          "from": "action:Clear",
+          "to": "evt:Cleared",
+          "say": "Nothing to clear: the invariant refuses it.",
+          "reject": "Must be dirty"
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **=** with no operator."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:EqualsPressed",
+          "say": "The emit throws, so nothing commits.",
+          "reject": "no operator"
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "The user presses **8**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DigitPressed",
+          "say": "Left operand **8**.",
+          "data": {
+            "digit": "8"
+          },
+          "patch": {
+            "left": "8"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "Then **/**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:OperatorPressed",
+          "say": "Division is pending.",
+          "data": {
+            "operator": "/"
+          },
+          "patch": {
+            "operator": "/"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "Then **0**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:DigitPressed",
+          "say": "Right operand **0**.",
+          "data": {
+            "digit": "0"
+          },
+          "patch": {
+            "right": "0"
+          }
+        },
+        {
+          "from": "actor:user",
+          "to": "action:PressKey",
+          "say": "And **=**."
+        },
+        {
+          "from": "action:PressKey",
+          "to": "evt:EqualsPressed",
+          "say": "8 / 0 is Infinity, which the state schema rejects. The patch resets to **0** instead.",
+          "data": {},
+          "patch": {
+            "result": 0,
+            "left": null,
+            "right": null,
+            "operator": null
+          }
+        }
+      ]
+    }
+  ]
+}
