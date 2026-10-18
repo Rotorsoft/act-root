@@ -10,6 +10,7 @@
     "check:snippets": "node scripts/check-snippets.mjs --check",
     "check:snippets:selftest": "node scripts/check-snippets.mjs --self-test",
     "clear": "docusaurus clear",
+    "swizzle": "docusaurus swizzle",
     "serve": "docusaurus serve"
   },
   "dependencies": {
