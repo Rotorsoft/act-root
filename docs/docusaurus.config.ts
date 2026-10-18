@@ -219,6 +219,7 @@ const config: Config = {
           items: [
             { label: "Calculator", to: "/docs/examples/calculator" },
             { label: "WolfDesk", to: "/docs/examples/wolfdesk" },
+            { label: "Flow animations", href: "pathname:///flows/index.html" },
           ],
         },
         {

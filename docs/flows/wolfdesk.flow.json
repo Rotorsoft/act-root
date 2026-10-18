@@ -1,0 +1,1210 @@
+{
+  "title": "WolfDesk Ticket Flows",
+  "subtitle": "Every action, event and reaction in the WolfDesk help desk, from the Learning Domain-Driven Design example, built on Act.",
+  "source": "packages/wolfdesk/src",
+  "lanes": [
+    {
+      "id": "actor",
+      "label": "Actors"
+    },
+    {
+      "id": "action",
+      "label": "Actions"
+    },
+    {
+      "id": "state",
+      "label": "State",
+      "sub": "load · check · patch"
+    },
+    {
+      "id": "event",
+      "label": "Events",
+      "sub": "ticket stream"
+    },
+    {
+      "id": "projection",
+      "label": "Projections"
+    },
+    {
+      "id": "reaction",
+      "label": "Reactions"
+    },
+    {
+      "id": "external",
+      "label": "Outside world"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "actor:customer",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Customer",
+      "col": 1.5,
+      "description": "Opens tickets, writes messages, reads replies, asks for escalation. Owns the ticket (the mustBeUser invariant)."
+    },
+    {
+      "id": "actor:agent",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Support agent",
+      "col": 7.5,
+      "description": "The assigned agent. Answers and reads messages, resolves the ticket."
+    },
+    {
+      "id": "action:OpenTicket",
+      "lane": "action",
+      "label": "OpenTicket",
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "col": 0.5
+    },
+    {
+      "id": "evt:TicketOpened",
+      "lane": "event",
+      "label": "TicketOpened",
+      "schema": "OpenTicketFields.and(\n  z.object({ userId: z.uuid(), messageId: z.uuid() })\n).describe(\"A new ticket was opened\")",
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "col": 0.5
+    },
+    {
+      "id": "action:AssignTicket",
+      "lane": "action",
+      "label": "AssignTicket",
+      "invariants": ["Ticket must be open"],
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 2
+    },
+    {
+      "id": "evt:TicketAssigned",
+      "lane": "event",
+      "label": "TicketAssigned",
+      "schema": "AssignmentFields.describe(\n  \"An agent was assigned to the ticket\"\n)",
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 2
+    },
+    {
+      "id": "action:AddMessage",
+      "lane": "action",
+      "label": "AddMessage",
+      "invariants": ["Ticket must be open", "Must be owner or assigned agent"],
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "col": 3
+    },
+    {
+      "id": "evt:MessageAdded",
+      "lane": "event",
+      "label": "MessageAdded",
+      "schema": "MessageFields.and(\n  z.object({ from: z.uuid(), messageId: z.uuid() })\n).describe(\"A user added a message to the ticket\")",
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "col": 3
+    },
+    {
+      "id": "action:MarkMessageDelivered",
+      "lane": "action",
+      "label": "MarkMessageDelivered",
+      "invariants": ["Ticket must be open"],
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "col": 4
+    },
+    {
+      "id": "evt:MessageDelivered",
+      "lane": "event",
+      "label": "MessageDelivered",
+      "schema": "MessageIdField.describe(\n  \"The message was delivered to the recepient\"\n)",
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "col": 4
+    },
+    {
+      "id": "action:AcknowledgeMessage",
+      "lane": "action",
+      "label": "AcknowledgeMessage",
+      "invariants": ["Ticket must be open"],
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "col": 5
+    },
+    {
+      "id": "evt:MessageRead",
+      "lane": "event",
+      "label": "MessageRead",
+      "schema": "MessageIdField.describe(\n  \"The message was acknoledged by the recipient\"\n)",
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "col": 5
+    },
+    {
+      "id": "action:RequestTicketEscalation",
+      "lane": "action",
+      "label": "RequestTicketEscalation",
+      "invariants": ["Ticket must be open", "Must be the owner"],
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 6
+    },
+    {
+      "id": "evt:TicketEscalationRequested",
+      "lane": "event",
+      "label": "TicketEscalationRequested",
+      "schema": "EscalationFields.describe(\n  \"A ticket escalation was requested\"\n)",
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 6
+    },
+    {
+      "id": "action:EscalateTicket",
+      "lane": "action",
+      "label": "EscalateTicket",
+      "invariants": ["Ticket must be open"],
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 7.5
+    },
+    {
+      "id": "evt:TicketEscalated",
+      "lane": "event",
+      "label": "TicketEscalated",
+      "schema": "EscalationFields.and(\n  z.object({ escalationId: z.uuid() })\n).describe(\"The ticket was escalated\")",
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 7.5
+    },
+    {
+      "id": "action:ReassignTicket",
+      "lane": "action",
+      "label": "ReassignTicket",
+      "invariants": ["Ticket must be open"],
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 9
+    },
+    {
+      "id": "evt:TicketReassigned",
+      "lane": "event",
+      "label": "TicketReassigned",
+      "schema": "AssignmentFields.describe(\n  \"The ticket was reassigned\"\n)",
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "col": 9
+    },
+    {
+      "id": "action:MarkTicketResolved",
+      "lane": "action",
+      "label": "MarkTicketResolved",
+      "invariants": ["Ticket must be open", "Must be owner or assigned agent"],
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "col": 10
+    },
+    {
+      "id": "evt:TicketResolved",
+      "lane": "event",
+      "label": "TicketResolved",
+      "schema": "z\n  .object({ resolvedById: z.uuid() })\n  .describe(\"The ticket was marked as resolved\")",
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "col": 10
+    },
+    {
+      "id": "action:CloseTicket",
+      "lane": "action",
+      "label": "CloseTicket",
+      "invariants": ["Ticket must be open"],
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "col": 11
+    },
+    {
+      "id": "evt:TicketClosed",
+      "lane": "event",
+      "label": "TicketClosed",
+      "schema": "z\n  .object({ closedById: z.uuid() })\n  .describe(\"The ticket was closed\")",
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "col": 11
+    },
+    {
+      "id": "state:Ticket",
+      "lane": "state",
+      "label": "Ticket",
+      "note": "TicketCreation + TicketOperations + TicketMessaging, merged at build",
+      "file": "packages/wolfdesk/src/ticket.ts",
+      "description": "One Ticket state assembled from three partial states. Each action loads it from the stream (cache or snapshot plus events), checks its invariants against it, and commits events that patch it. Optimistic concurrency on the stream version."
+    },
+    {
+      "id": "proj:tickets",
+      "lane": "projection",
+      "label": "tickets",
+      "file": "packages/wolfdesk/src/ticket-projections.ts",
+      "note": "Drizzle table, one row per ticket",
+      "span": [0, 11],
+      "description": "Projection folded from the full Ticket state and flushed in batches as upserts keyed on the stream."
+    },
+    {
+      "id": "reaction:assign",
+      "lane": "reaction",
+      "label": "assign",
+      "col": 0,
+      "file": "packages/wolfdesk/src/ticket-creation.ts",
+      "description": "Picks an agent for the ticket's category and priority, then invokes AssignTicket.",
+      "as": "assign reaction"
+    },
+    {
+      "id": "reaction:autoClose",
+      "lane": "reaction",
+      "label": "autoClose",
+      "col": 1,
+      "file": "packages/wolfdesk/src/ticket-timers.ts",
+      "description": "Throws a DeferSignal until the ticket's closeAfter, then closes the ticket if nobody closed it first. Runs on its own target close:<ticket>.",
+      "badge": "⏱",
+      "as": "ticket-timers"
+    },
+    {
+      "id": "reaction:autoEscalate",
+      "lane": "reaction",
+      "label": "autoEscalate",
+      "col": 2,
+      "file": "packages/wolfdesk/src/ticket-timers.ts",
+      "description": "`.defer`red to escalateAfter on TicketAssigned. Escalates if the ticket is still open and not escalated. Target escalate:<ticket>.",
+      "badge": "⏱",
+      "as": "ticket-timers"
+    },
+    {
+      "id": "reaction:deliver",
+      "lane": "reaction",
+      "label": "deliver",
+      "col": 3,
+      "file": "packages/wolfdesk/src/ticket-messaging.ts",
+      "description": "Sends the message through the notification service, then marks it delivered. Up to 5 retries with exponential backoff and jitter.",
+      "as": "deliver reaction"
+    },
+    {
+      "id": "reaction:escalate",
+      "lane": "reaction",
+      "label": "escalate",
+      "col": 6,
+      "file": "packages/wolfdesk/src/ticket-operations.ts",
+      "description": "Turns an escalation request into EscalateTicket.",
+      "as": "escalate reaction"
+    },
+    {
+      "id": "reaction:autoReassign",
+      "lane": "reaction",
+      "label": "autoReassign",
+      "col": 7,
+      "file": "packages/wolfdesk/src/ticket-timers.ts",
+      "description": "Defers to reassignAfter, then reassigns the ticket unless an agent has read one of the customer's messages or the ticket is closed. Target reassign:<ticket>.",
+      "badge": "⏱",
+      "as": "ticket-timers"
+    },
+    {
+      "id": "reaction:webhook",
+      "lane": "reaction",
+      "label": "escalation webhook",
+      "col": 8,
+      "file": "packages/wolfdesk/src/ticket-webhooks.ts",
+      "description": "webhook() from @rotorsoft/act-http on its own webhooks lane: 30 s lease, 2 s timeout, 3 retries with exponential backoff, Idempotency-Key, optional HMAC signing. All tickets share one target, ticket-escalation-webhooks.",
+      "as": "webhooks lane"
+    },
+    {
+      "id": "reaction:autoReassignAgain",
+      "lane": "reaction",
+      "label": "autoReassignAgain",
+      "col": 9,
+      "file": "packages/wolfdesk/src/ticket-timers.ts",
+      "description": "Each TicketReassigned pushes reassignAfter forward and re-arms the same check. The chain stops once an agent reads a customer message.",
+      "badge": "⏱",
+      "as": "ticket-timers"
+    },
+    {
+      "id": "ext:notify",
+      "lane": "external",
+      "label": "Notification service",
+      "col": 3,
+      "file": "packages/wolfdesk/src/services/notification.ts",
+      "description": "deliverMessage(): the outbound channel. In development it fails the first WOLFDESK_DELIVERY_FAILS attempts per message so the backoff shows."
+    },
+    {
+      "id": "ext:hook",
+      "lane": "external",
+      "label": "Incident endpoint",
+      "col": 8,
+      "file": "packages/server/src/webhook-receiver.ts",
+      "description": "WOLFDESK_ESCALATION_WEBHOOK. The demo receiver verifies the signature and dedupes on the Idempotency-Key, so retries are safe."
+    }
+  ],
+  "edges": [
+    {
+      "from": "actor:customer",
+      "to": "action:OpenTicket"
+    },
+    {
+      "from": "actor:customer",
+      "to": "action:AddMessage"
+    },
+    {
+      "from": "actor:customer",
+      "to": "action:AcknowledgeMessage"
+    },
+    {
+      "from": "actor:customer",
+      "to": "action:RequestTicketEscalation"
+    },
+    {
+      "from": "actor:agent",
+      "to": "action:AddMessage"
+    },
+    {
+      "from": "actor:agent",
+      "to": "action:AcknowledgeMessage"
+    },
+    {
+      "from": "actor:agent",
+      "to": "action:MarkTicketResolved"
+    },
+    {
+      "from": "action:OpenTicket",
+      "to": "evt:TicketOpened"
+    },
+    {
+      "from": "action:AssignTicket",
+      "to": "evt:TicketAssigned"
+    },
+    {
+      "from": "action:AddMessage",
+      "to": "evt:MessageAdded"
+    },
+    {
+      "from": "action:MarkMessageDelivered",
+      "to": "evt:MessageDelivered"
+    },
+    {
+      "from": "action:AcknowledgeMessage",
+      "to": "evt:MessageRead"
+    },
+    {
+      "from": "action:RequestTicketEscalation",
+      "to": "evt:TicketEscalationRequested"
+    },
+    {
+      "from": "action:EscalateTicket",
+      "to": "evt:TicketEscalated"
+    },
+    {
+      "from": "action:ReassignTicket",
+      "to": "evt:TicketReassigned"
+    },
+    {
+      "from": "action:MarkTicketResolved",
+      "to": "evt:TicketResolved"
+    },
+    {
+      "from": "action:CloseTicket",
+      "to": "evt:TicketClosed"
+    },
+    {
+      "from": "evt:TicketOpened",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketAssigned",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:MessageAdded",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:MessageDelivered",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:MessageRead",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketEscalationRequested",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketEscalated",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketReassigned",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketResolved",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketClosed",
+      "to": "proj:tickets"
+    },
+    {
+      "from": "evt:TicketOpened",
+      "to": "reaction:assign"
+    },
+    {
+      "from": "reaction:assign",
+      "to": "action:AssignTicket"
+    },
+    {
+      "from": "evt:TicketOpened",
+      "to": "reaction:autoClose",
+      "timer": true
+    },
+    {
+      "from": "reaction:autoClose",
+      "to": "action:CloseTicket"
+    },
+    {
+      "from": "evt:TicketAssigned",
+      "to": "reaction:autoEscalate",
+      "timer": true
+    },
+    {
+      "from": "reaction:autoEscalate",
+      "to": "action:EscalateTicket"
+    },
+    {
+      "from": "evt:MessageAdded",
+      "to": "reaction:deliver"
+    },
+    {
+      "from": "reaction:deliver",
+      "to": "ext:notify"
+    },
+    {
+      "from": "reaction:deliver",
+      "to": "action:MarkMessageDelivered"
+    },
+    {
+      "from": "evt:TicketEscalationRequested",
+      "to": "reaction:escalate"
+    },
+    {
+      "from": "reaction:escalate",
+      "to": "action:EscalateTicket"
+    },
+    {
+      "from": "evt:TicketEscalated",
+      "to": "reaction:autoReassign",
+      "timer": true
+    },
+    {
+      "from": "reaction:autoReassign",
+      "to": "action:ReassignTicket"
+    },
+    {
+      "from": "evt:TicketEscalated",
+      "to": "reaction:webhook"
+    },
+    {
+      "from": "reaction:webhook",
+      "to": "ext:hook"
+    },
+    {
+      "from": "evt:TicketReassigned",
+      "to": "reaction:autoReassignAgain",
+      "timer": true
+    },
+    {
+      "from": "reaction:autoReassignAgain",
+      "to": "action:ReassignTicket"
+    }
+  ],
+  "scenarios": [
+    {
+      "title": "Open to resolved",
+      "stream": "ticket-4821",
+      "summary": "A customer opens a ticket, the system assigns an agent, they trade messages both ways and the agent resolves it.",
+      "steps": [
+        {
+          "from": "actor:customer",
+          "to": "action:OpenTicket",
+          "say": "**Carla**, a customer, opens a ticket: Printer on fire, priority High."
+        },
+        {
+          "from": "action:OpenTicket",
+          "to": "evt:TicketOpened",
+          "say": "The Ticket state is empty, so OpenTicket passes. **TicketOpened** commits at version 0 and carries her first message.",
+          "data": {
+            "title": "Printer on fire",
+            "priority": "High"
+          },
+          "patch": {
+            "title": "Printer on fire",
+            "priority": "High",
+            "userId": "carla",
+            "messages": {
+              "m1": {
+                "from": "carla",
+                "body": "…"
+              }
+            }
+          }
+        },
+        {
+          "from": "evt:TicketOpened",
+          "to": "reaction:assign",
+          "say": "After the commit, the **assign** reaction picks the event up from the stream."
+        },
+        {
+          "from": "reaction:assign",
+          "to": "action:AssignTicket",
+          "say": "It picks an agent and invokes **AssignTicket** as the automation actor, with the event as `reactingTo`."
+        },
+        {
+          "from": "action:AssignTicket",
+          "to": "evt:TicketAssigned",
+          "say": "**TicketAssigned** sets the agent and the deadlines `escalateAfter` and `reassignAfter`.",
+          "data": {
+            "agentId": "ada",
+            "escalateAfter": "Tue 09:00",
+            "reassignAfter": "Tue 13:00"
+          },
+          "patch": {
+            "agentId": "ada",
+            "escalateAfter": "Tue 09:00",
+            "reassignAfter": "Tue 13:00"
+          }
+        },
+        {
+          "from": "actor:agent",
+          "to": "action:AddMessage",
+          "say": "**Ada**, the agent, writes to Carla."
+        },
+        {
+          "from": "action:AddMessage",
+          "to": "evt:MessageAdded",
+          "say": "Two invariants pass: the ticket is open and Ada is the assigned agent. **MessageAdded** commits.",
+          "data": {
+            "to": "carla",
+            "body": "Unplug it and step away."
+          },
+          "patch": {
+            "messages": {
+              "m2": {
+                "from": "ada",
+                "to": "carla",
+                "body": "Unplug it…"
+              }
+            }
+          }
+        },
+        {
+          "from": "evt:MessageAdded",
+          "to": "reaction:deliver",
+          "say": "The **deliver** reaction claims the stream."
+        },
+        {
+          "from": "reaction:deliver",
+          "to": "ext:notify",
+          "say": "It hands the message to the **notification service**."
+        },
+        {
+          "from": "reaction:deliver",
+          "to": "action:MarkMessageDelivered",
+          "say": "Delivery worked, so it invokes **MarkMessageDelivered**."
+        },
+        {
+          "from": "action:MarkMessageDelivered",
+          "to": "evt:MessageDelivered",
+          "say": "**MessageDelivered** commits.",
+          "data": {
+            "messageId": "m2"
+          },
+          "patch": {
+            "messages": {
+              "m2": {
+                "wasDelivered": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:customer",
+          "to": "action:AcknowledgeMessage",
+          "say": "**Carla** reads Ada's reply. Only the receiver may acknowledge a message."
+        },
+        {
+          "from": "action:AcknowledgeMessage",
+          "to": "evt:MessageRead",
+          "say": "**MessageRead** commits.",
+          "data": {
+            "messageId": "m2"
+          },
+          "patch": {
+            "messages": {
+              "m2": {
+                "wasRead": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:customer",
+          "to": "action:AddMessage",
+          "say": "**Carla** answers: it worked."
+        },
+        {
+          "from": "action:AddMessage",
+          "to": "evt:MessageAdded",
+          "say": "**MessageAdded** commits, addressed to Ada.",
+          "data": {
+            "to": "ada",
+            "body": "Fire is out, thanks."
+          },
+          "patch": {
+            "messages": {
+              "m3": {
+                "from": "carla",
+                "to": "ada",
+                "body": "Fire is out…"
+              }
+            }
+          }
+        },
+        {
+          "from": "evt:MessageAdded",
+          "to": "reaction:deliver",
+          "say": "**deliver** reacts again, for the new message."
+        },
+        {
+          "from": "reaction:deliver",
+          "to": "ext:notify",
+          "say": "The notification service sends it to Ada."
+        },
+        {
+          "from": "reaction:deliver",
+          "to": "action:MarkMessageDelivered",
+          "say": "It invokes **MarkMessageDelivered**."
+        },
+        {
+          "from": "action:MarkMessageDelivered",
+          "to": "evt:MessageDelivered",
+          "say": "**MessageDelivered** commits.",
+          "data": {
+            "messageId": "m3"
+          },
+          "patch": {
+            "messages": {
+              "m3": {
+                "wasDelivered": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:agent",
+          "to": "action:AcknowledgeMessage",
+          "say": "**Ada** reads Carla's message."
+        },
+        {
+          "from": "action:AcknowledgeMessage",
+          "to": "evt:MessageRead",
+          "say": "**MessageRead** commits. An agent has now read a customer message, which is the condition that stops any reassignment.",
+          "data": {
+            "messageId": "m3"
+          },
+          "patch": {
+            "messages": {
+              "m3": {
+                "wasRead": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:agent",
+          "to": "action:MarkTicketResolved",
+          "say": "**Ada** marks the ticket resolved."
+        },
+        {
+          "from": "action:MarkTicketResolved",
+          "to": "evt:TicketResolved",
+          "say": "**TicketResolved** commits and the tickets projection row shows the ticket resolved.",
+          "data": {
+            "resolvedById": "ada"
+          },
+          "patch": {
+            "resolvedById": "ada"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Escalation chain",
+      "stream": "ticket-4822",
+      "initial": {
+        "title": "Refund not received",
+        "priority": "Medium",
+        "userId": "carla",
+        "messages": {
+          "m1": {
+            "from": "carla",
+            "body": "…"
+          },
+          "m4": {
+            "from": "carla",
+            "to": "ada",
+            "body": "Any news?",
+            "wasDelivered": true
+          }
+        },
+        "agentId": "ada",
+        "escalateAfter": "Mon 09:00 (passed)",
+        "reassignAfter": "Tue 13:00"
+      },
+      "summary": "The ticket is assigned and past its escalation deadline. The customer asks for escalation, the system pages the outside world and keeps reassigning until an agent reads her message.",
+      "steps": [
+        {
+          "from": "actor:customer",
+          "to": "action:RequestTicketEscalation",
+          "say": "**Carla** asks for escalation. Only the owner may, the ticket must be open and `escalateAfter` must have passed."
+        },
+        {
+          "from": "action:RequestTicketEscalation",
+          "to": "evt:TicketEscalationRequested",
+          "say": "All checks pass. **TicketEscalationRequested** commits.",
+          "data": {
+            "requestId": "req-31"
+          }
+        },
+        {
+          "from": "evt:TicketEscalationRequested",
+          "to": "reaction:escalate",
+          "say": "The **escalate** reaction picks it up."
+        },
+        {
+          "from": "reaction:escalate",
+          "to": "action:EscalateTicket",
+          "say": "It invokes **EscalateTicket** with the request data."
+        },
+        {
+          "from": "action:EscalateTicket",
+          "to": "evt:TicketEscalated",
+          "say": "Not escalated before, so **TicketEscalated** commits. Two reactions listen to it.",
+          "data": {
+            "escalationId": "esc-77"
+          },
+          "patch": {
+            "escalationId": "esc-77"
+          }
+        },
+        {
+          "from": "evt:TicketEscalated",
+          "to": "reaction:webhook",
+          "say": "The **escalation webhook** runs on its own `webhooks` lane, so a slow receiver never holds up the other reactions."
+        },
+        {
+          "from": "reaction:webhook",
+          "to": "ext:hook",
+          "say": "POST `{ ticket, escalationId }` to the **incident endpoint**, signed, with an Idempotency-Key."
+        },
+        {
+          "from": "evt:TicketEscalated",
+          "to": "reaction:autoReassign",
+          "say": "**autoReassign** checks the ticket: nobody has read Carla's message, but `reassignAfter` is still ahead."
+        },
+        {
+          "from": "reaction:autoReassign",
+          "to": "action:ReassignTicket",
+          "say": "It throws a DeferSignal, sleeps until `reassignAfter`, wakes and invokes **ReassignTicket**.",
+          "wait": "deferred until reassignAfter"
+        },
+        {
+          "from": "action:ReassignTicket",
+          "to": "evt:TicketReassigned",
+          "say": "**TicketReassigned** commits: a new agent and a later `reassignAfter`.",
+          "data": {
+            "agentId": "grace",
+            "reassignAfter": "Tue 17:00"
+          },
+          "patch": {
+            "agentId": "grace",
+            "reassignAfter": "Tue 17:00"
+          }
+        },
+        {
+          "from": "evt:TicketReassigned",
+          "to": "reaction:autoReassignAgain",
+          "say": "**autoReassignAgain** arms the same check for the new deadline."
+        },
+        {
+          "from": "reaction:autoReassignAgain",
+          "to": "action:ReassignTicket",
+          "say": "Grace does not answer either. At the deadline it reassigns again.",
+          "wait": "deferred until reassignAfter"
+        },
+        {
+          "from": "action:ReassignTicket",
+          "to": "evt:TicketReassigned",
+          "say": "**TicketReassigned** commits with Hugo.",
+          "data": {
+            "agentId": "hugo",
+            "reassignAfter": "Tue 21:00"
+          },
+          "patch": {
+            "agentId": "hugo",
+            "reassignAfter": "Tue 21:00"
+          }
+        },
+        {
+          "from": "evt:TicketReassigned",
+          "to": "reaction:autoReassignAgain",
+          "say": "The chain re-arms once more."
+        },
+        {
+          "from": "actor:agent",
+          "to": "action:AcknowledgeMessage",
+          "say": "**Hugo** reads Carla's message."
+        },
+        {
+          "from": "action:AcknowledgeMessage",
+          "to": "evt:MessageRead",
+          "say": "**MessageRead** commits on her message.",
+          "data": {
+            "messageId": "m4"
+          },
+          "patch": {
+            "messages": {
+              "m4": {
+                "wasRead": true
+              }
+            }
+          }
+        },
+        {
+          "at": "reaction:autoReassignAgain",
+          "say": "At the deadline the timer wakes, finds a customer message read by an agent and does nothing. The chain ends.",
+          "wait": "deferred until reassignAfter",
+          "noop": true
+        }
+      ]
+    },
+    {
+      "title": "Timers only",
+      "stream": "ticket-4823",
+      "summary": "Nobody touches the ticket after it opens. Deferred reactions escalate it and later close it, with no polling jobs.",
+      "steps": [
+        {
+          "from": "actor:customer",
+          "to": "action:OpenTicket",
+          "say": "**Carla** opens a ticket with a `closeAfter` deadline, then goes quiet."
+        },
+        {
+          "from": "action:OpenTicket",
+          "to": "evt:TicketOpened",
+          "say": "**TicketOpened** commits with `closeAfter`.",
+          "data": {
+            "title": "VPN drops hourly",
+            "closeAfter": "+7d"
+          },
+          "patch": {
+            "title": "VPN drops hourly",
+            "priority": "High",
+            "userId": "carla",
+            "messages": {
+              "m1": {
+                "from": "carla",
+                "body": "…"
+              }
+            },
+            "closeAfter": "Mon +7d"
+          }
+        },
+        {
+          "from": "evt:TicketOpened",
+          "to": "reaction:assign",
+          "say": "**assign** reacts right away."
+        },
+        {
+          "from": "reaction:assign",
+          "to": "action:AssignTicket",
+          "say": "It invokes **AssignTicket**."
+        },
+        {
+          "from": "action:AssignTicket",
+          "to": "evt:TicketAssigned",
+          "say": "**TicketAssigned** commits with `escalateAfter` a day out.",
+          "data": {
+            "agentId": "ada",
+            "escalateAfter": "Tue 09:00",
+            "reassignAfter": "Tue 13:00"
+          },
+          "patch": {
+            "agentId": "ada",
+            "escalateAfter": "Tue 09:00",
+            "reassignAfter": "Tue 13:00"
+          }
+        },
+        {
+          "from": "evt:TicketAssigned",
+          "to": "reaction:autoEscalate",
+          "say": "**autoEscalate** is `.defer`red to `escalateAfter` on its own target `escalate:ticket-4823`, so a pending timer never holds the ticket's other reactions."
+        },
+        {
+          "from": "reaction:autoEscalate",
+          "to": "action:EscalateTicket",
+          "say": "A day passes with no escalation. It wakes and invokes **EscalateTicket**.",
+          "wait": "deferred until escalateAfter"
+        },
+        {
+          "from": "action:EscalateTicket",
+          "to": "evt:TicketEscalated",
+          "say": "**TicketEscalated** commits.",
+          "data": {
+            "escalationId": "esc-78"
+          },
+          "patch": {
+            "escalationId": "esc-78"
+          }
+        },
+        {
+          "from": "evt:TicketEscalated",
+          "to": "reaction:webhook",
+          "say": "The escalation webhook fires."
+        },
+        {
+          "from": "reaction:webhook",
+          "to": "ext:hook",
+          "say": "The **incident endpoint** gets paged."
+        },
+        {
+          "from": "evt:TicketEscalated",
+          "to": "reaction:autoReassign",
+          "say": "**autoReassign** arms its timer for `reassignAfter`."
+        },
+        {
+          "from": "evt:TicketOpened",
+          "to": "reaction:autoClose",
+          "say": "Meanwhile **autoClose** has been waiting on `closeAfter` since the ticket opened."
+        },
+        {
+          "from": "reaction:autoClose",
+          "to": "action:CloseTicket",
+          "say": "Seven days later it wakes, finds the ticket still open and invokes **CloseTicket**.",
+          "wait": "deferred until closeAfter"
+        },
+        {
+          "from": "action:CloseTicket",
+          "to": "evt:TicketClosed",
+          "say": "**TicketClosed** commits.",
+          "data": {
+            "closedById": "ticket-timers"
+          },
+          "patch": {
+            "closedById": "ticket-timers"
+          }
+        },
+        {
+          "at": "reaction:autoReassign",
+          "say": "When the reassignment timer wakes, it sees `closedById` and does nothing.",
+          "wait": "deferred until reassignAfter",
+          "noop": true
+        }
+      ]
+    },
+    {
+      "title": "Retries and blocking",
+      "stream": "ticket-4824",
+      "initial": {
+        "title": "Invoice PDF is blank",
+        "priority": "Low",
+        "userId": "carla",
+        "messages": {
+          "m1": {
+            "from": "carla",
+            "body": "…"
+          }
+        },
+        "agentId": "ada",
+        "escalateAfter": "Mon 09:00 (passed)",
+        "reassignAfter": "Tue 13:00"
+      },
+      "summary": "The outside world fails. Delivery recovers after two retries. The escalation webhook runs out of retries and blocks its target.",
+      "steps": [
+        {
+          "from": "actor:customer",
+          "to": "action:AddMessage",
+          "say": "**Carla** adds a message."
+        },
+        {
+          "from": "action:AddMessage",
+          "to": "evt:MessageAdded",
+          "say": "**MessageAdded** commits.",
+          "data": {
+            "to": "ada",
+            "body": "Still blank."
+          },
+          "patch": {
+            "messages": {
+              "m5": {
+                "from": "carla",
+                "to": "ada",
+                "body": "Still blank."
+              }
+            }
+          }
+        },
+        {
+          "from": "evt:MessageAdded",
+          "to": "reaction:deliver",
+          "say": "**deliver** claims the stream."
+        },
+        {
+          "from": "reaction:deliver",
+          "to": "ext:notify",
+          "say": "The channel fails twice. Each failure schedules the next attempt with exponential backoff and jitter, persisted on the stream so any worker honors it. The third attempt lands.",
+          "retries": 2,
+          "backoff": ["~200 ms", "~400 ms"]
+        },
+        {
+          "from": "reaction:deliver",
+          "to": "action:MarkMessageDelivered",
+          "say": "Now it invokes **MarkMessageDelivered**."
+        },
+        {
+          "from": "action:MarkMessageDelivered",
+          "to": "evt:MessageDelivered",
+          "say": "**MessageDelivered** commits.",
+          "data": {
+            "messageId": "m5"
+          },
+          "patch": {
+            "messages": {
+              "m5": {
+                "wasDelivered": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:customer",
+          "to": "action:RequestTicketEscalation",
+          "say": "**Carla** asks for escalation."
+        },
+        {
+          "from": "action:RequestTicketEscalation",
+          "to": "evt:TicketEscalationRequested",
+          "say": "**TicketEscalationRequested** commits.",
+          "data": {
+            "requestId": "req-40"
+          }
+        },
+        {
+          "from": "evt:TicketEscalationRequested",
+          "to": "reaction:escalate",
+          "say": "**escalate** reacts."
+        },
+        {
+          "from": "reaction:escalate",
+          "to": "action:EscalateTicket",
+          "say": "It invokes **EscalateTicket**."
+        },
+        {
+          "from": "action:EscalateTicket",
+          "to": "evt:TicketEscalated",
+          "say": "**TicketEscalated** commits.",
+          "data": {
+            "escalationId": "esc-79"
+          },
+          "patch": {
+            "escalationId": "esc-79"
+          }
+        },
+        {
+          "from": "evt:TicketEscalated",
+          "to": "reaction:webhook",
+          "say": "The **escalation webhook** claims its target."
+        },
+        {
+          "from": "reaction:webhook",
+          "to": "ext:hook",
+          "say": "The incident endpoint is down. After 4 attempts (`maxRetries` 3 + 1) the target `ticket-escalation-webhooks` blocks. All tickets share it, so later escalation webhooks wait until an operator calls `app.unblock`, which resumes from the watermark.",
+          "retries": 3,
+          "backoff": ["~200 ms", "~400 ms", "~800 ms"],
+          "blocked": true,
+          "target": "ticket-escalation-webhooks"
+        }
+      ]
+    },
+    {
+      "title": "Refused actions",
+      "stream": "ticket-4825",
+      "initial": {
+        "title": "Badge does not open door 3",
+        "priority": "High",
+        "userId": "carla",
+        "messages": {
+          "m1": {
+            "from": "carla",
+            "body": "…"
+          },
+          "m6": {
+            "from": "ada",
+            "to": "carla",
+            "body": "Try it now?"
+          }
+        },
+        "agentId": "ada",
+        "escalateAfter": "Thu 09:00 (ahead)",
+        "reassignAfter": "Tue 13:00"
+      },
+      "summary": "The state refuses actions that break its rules. Nothing is committed, and the caller gets the error.",
+      "steps": [
+        {
+          "from": "actor:customer",
+          "to": "action:OpenTicket",
+          "say": "**Carla** retries the OpenTicket action on the same stream."
+        },
+        {
+          "from": "action:OpenTicket",
+          "to": "evt:TicketOpened",
+          "say": "The state already has a product, so the emit throws **TicketCannotOpenTwiceError**.",
+          "reject": "TicketCannotOpenTwice"
+        },
+        {
+          "from": "actor:customer",
+          "to": "action:RequestTicketEscalation",
+          "say": "**Carla** asks for escalation too early."
+        },
+        {
+          "from": "action:RequestTicketEscalation",
+          "to": "evt:TicketEscalationRequested",
+          "say": "`escalateAfter` is still ahead, so the state refuses.",
+          "reject": "Cannot escalate before due date"
+        },
+        {
+          "from": "actor:agent",
+          "to": "action:AcknowledgeMessage",
+          "say": "**Ada** tries to mark her own message as read."
+        },
+        {
+          "from": "action:AcknowledgeMessage",
+          "to": "evt:MessageRead",
+          "say": "Only the receiver may acknowledge, so an InvariantError comes back.",
+          "reject": "Must be receiver to ack"
+        },
+        {
+          "from": "reaction:autoClose",
+          "to": "action:CloseTicket",
+          "say": "Later, the inactivity timer closes the ticket.",
+          "wait": "deferred until closeAfter"
+        },
+        {
+          "from": "action:CloseTicket",
+          "to": "evt:TicketClosed",
+          "say": "**TicketClosed** commits.",
+          "data": {
+            "closedById": "ticket-timers"
+          },
+          "patch": {
+            "closedById": "ticket-timers"
+          }
+        },
+        {
+          "from": "actor:customer",
+          "to": "action:AddMessage",
+          "say": "**Carla** writes one more message."
+        },
+        {
+          "from": "action:AddMessage",
+          "to": "evt:MessageAdded",
+          "say": "The **Ticket must be open** invariant fails. A closed ticket accepts no more actions.",
+          "reject": "Ticket must be open"
+        }
+      ]
+    }
+  ]
+}

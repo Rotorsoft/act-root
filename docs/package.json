@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build:all": "typedoc --options typedoc.json && docusaurus build",
+    "build:all": "node scripts/flows.mjs build && typedoc --options typedoc.json && docusaurus build",
+    "flows": "node scripts/flows.mjs build",
+    "flows:video": "node scripts/flows.mjs video",
     "snippets:extract": "node scripts/check-snippets.mjs",
     "check:snippets": "node scripts/check-snippets.mjs --check",
     "check:snippets:selftest": "node scripts/check-snippets.mjs --self-test",
@@ -23,18 +25,19 @@
   "devDependencies": {
     "@docusaurus/core": "^3.10.2",
     "@docusaurus/faster": "^3.10.2",
-    "@rotorsoft/act": "workspace:^",
-    "zod": "^4.6.5",
     "@docusaurus/module-type-aliases": "3.10.2",
     "@docusaurus/preset-classic": "^3.10.2",
     "@docusaurus/tsconfig": "3.10.2",
     "@docusaurus/types": "3.10.2",
+    "@rotorsoft/act": "workspace:^",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "docusaurus-plugin-typedoc": "^1.4.3",
+    "playwright-core": "^1.64.1",
     "typedoc": "~0.28.20",
     "typedoc-plugin-markdown": "~4.13.1",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "zod": "^4.6.5"
   },
   "browserslist": {
     "production": [
