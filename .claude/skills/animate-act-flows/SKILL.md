@@ -37,7 +37,7 @@ The parser is best-effort. Always read the slice and state files and check each 
 - **Timers.** `.defer(...)`, or a `DeferSignal` thrown in the handler, means the reaction waits. Put `"timer": true` on the `event → reaction` edge and `"badge": "⏱"` on the reaction.
 - **Outside world.** Webhooks, notification services, payment providers and other calls out of the process become `external` nodes with a `reaction → external` edge.
 - **Actors.** The parser has no actors. Read invariants ("Must be the owner") and the app's API to decide who invokes which action. Add `actor` nodes with `"actor": "person"` or `"actor": "automation"` (a cron job, an importer, another system calling the API) and `actor → action` edges. Actions invoked only by reactions get no actor node. Instead, set `"as"` on the reaction to the actor name its `app.do` uses (`"ticket-timers"`, `"assign reaction"`), so the map shows it as an automation.
-- **State.** Give the state bar a `note` naming the partial states merged into it and a `description`. Actions pass through it on the way to events: that is where invariants are checked and where events patch the state.
+- **State.** Give the state bar a `note` naming the partial states merged into it and a `description`. Actions pass through it on the way to events: that is where invariants are checked and where events patch the state. With several states (the calculator's `Calculator`, `DigitBoard`, `CalculatorResult`), add one bar per state with a `span` over the columns of the actions that load it; each action passes through the bar above its column. A bar too narrow for its `note` drops it from the map (the detail panel still shows it).
 - **Lanes, retries, targets.** Put `.withLane`, backoff and `.to(...)` targets in the node `description` (shown when a box is selected).
 - One node per reaction. When two handlers share a name, keep separate ids.
 
@@ -65,7 +65,7 @@ Use one scenario per mechanism (happy path, reaction chain, timers, failures, re
 Each step walks one existing edge (`from`, `to`) or stands at one node (`at`):
 
 - `say`: one or two plain sentences for the caption. `**bold**` and `` `code` `` render.
-- Steps that reach an event: `data` (the fields that matter) and `patch` (the change to the state, mirroring the real `.patch(...)`; defaults to `data`).
+- Steps that reach an event: `data` (the fields that matter) and `patch` (the change to the state, mirroring the real `.patch(...)`; defaults to `data`). Set `patch` (`{}` when nothing shows) whenever the data fields aren't state fields, or they land in the state panel. The panel folds only events on the scenario's `stream`; a step on another stream sets `"stream"` and shows up in the event stream only. `null` in a patch shows a cleared field.
 - `wait` on a step leaving a deferred reaction ("deferred until escalateAfter").
 - `action → event` with `"reject": "<reason>"`: the state refuses, nothing commits. Use the real invariant description or error message.
 - `reaction → external` with `"retries": n` and `"backoff": ["~200 ms", ...]`: fails n times, then succeeds. Add `"blocked": true` and `"target"` when it runs out instead.
@@ -146,4 +146,4 @@ Lane ids are fixed: `actor`, `action`, `state`, `event`, `projection`, `reaction
 
 ## Changing the player
 
-`docs/flows/player.html` is generic. Fix layout or animation bugs there, never with app-specific code. After a change, run `pnpm -F docs flows` and look at `docs/static/flows/wolfdesk.html` at a desktop size and at phone width before publishing anything else.
+`docs/flows/player.html` is generic. Fix layout or animation bugs there, never with app-specific code. After a change, run `pnpm -F docs flows` and look at `docs/static/flows/wolfdesk.html` at a desktop size and at phone width before publishing anything else. A browser window can't usually shrink to 390px: load the page in a 390px-wide iframe instead, and check that `document.documentElement.scrollWidth` equals the frame width (no sideways page scroll). Full pages keep a 0.75 minimum scale and scroll wide maps sideways; the `#embed` overview fits the whole map on wide screens.

@@ -1,0 +1,1467 @@
+{
+  "title": "Risk Game Flows",
+  "subtitle": "The Risk board game on Act: one Game state per stream, every move an action, every outcome an event, with a bot engine and a turn timer playing for absent players.",
+  "source": "github.com/Rotorsoft/risk · packages/domain/src",
+  "lanes": [
+    {
+      "id": "actor",
+      "label": "Actors"
+    },
+    {
+      "id": "action",
+      "label": "Actions"
+    },
+    {
+      "id": "state",
+      "label": "State",
+      "sub": "load · check · patch"
+    },
+    {
+      "id": "event",
+      "label": "Events",
+      "sub": "game stream"
+    },
+    {
+      "id": "projection",
+      "label": "Projections"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "actor:creator",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Game creator",
+      "col": 1,
+      "description": "The player who created the game. Only the creator can start or delete it (the mustBeCreator invariant). The creator joins and plays like anyone else."
+    },
+    {
+      "id": "actor:player",
+      "lane": "actor",
+      "actor": "person",
+      "label": "Player",
+      "col": 7,
+      "description": "A person at the table, through the tRPC API. Every move after the lobby checks that it is this player's turn (mustBeCurrentPlayer)."
+    },
+    {
+      "id": "actor:bot",
+      "lane": "actor",
+      "actor": "automation",
+      "label": "Bot engine",
+      "col": 11.5,
+      "description": "app/src/api/sync/bot-engine.ts plays a bot's turn after every state change: reinforce, attack (blitz when the odds are good), conquest moves, fortify. It acts as the bot player, so the same turn invariants apply."
+    },
+    {
+      "id": "actor:timer",
+      "lane": "actor",
+      "actor": "automation",
+      "label": "Turn timer",
+      "col": 15.5,
+      "description": "app/src/api/sync/turn-timer.ts schedules a deadline after every change (turnTimeoutSec, 90 s by default). On timeout it plays the rest of the absent player's turn; after repeated timeouts it replaces the player with a bot, as the system actor."
+    },
+    {
+      "id": "action:CreateGame",
+      "lane": "action",
+      "label": "CreateGame",
+      "col": 0,
+      "schema": "{ name, turnTimeoutSec? }",
+      "file": "packages/domain/src/game.ts",
+      "line": 142,
+      "description": "Opens a lobby. The actor becomes the creator."
+    },
+    {
+      "id": "action:JoinGame",
+      "lane": "action",
+      "label": "JoinGame",
+      "col": 1,
+      "invariants": [
+        "Game must be in lobby phase",
+        "Game must not be full (max 6 players)"
+      ],
+      "schema": "{ playerName, color, bot?, avatar? }",
+      "file": "packages/domain/src/game.ts",
+      "line": 146,
+      "description": "Takes a seat. Also refuses a player who already joined."
+    },
+    {
+      "id": "action:StartGame",
+      "lane": "action",
+      "label": "StartGame",
+      "col": 2,
+      "invariants": [
+        "Game must be in lobby phase",
+        "Game must have at least 2 players",
+        "Only the game creator can start the game"
+      ],
+      "file": "packages/domain/src/game.ts",
+      "line": 159,
+      "description": "Shuffles the turn order, deals the 42 territories one army each, and computes each player's setup armies (40 for two players, down to 20 for six)."
+    },
+    {
+      "id": "action:PlaceArmy",
+      "lane": "action",
+      "label": "PlaceArmy",
+      "col": 3,
+      "invariants": [
+        "Game must be in setup phase",
+        "Must be the current player's turn"
+      ],
+      "schema": "{ territory }",
+      "file": "packages/domain/src/game.ts",
+      "line": 194,
+      "description": "Places one setup army on an owned territory. The last army on the table also emits SetupCompleted."
+    },
+    {
+      "id": "action:AutoDeploy",
+      "lane": "action",
+      "label": "AutoDeploy",
+      "col": 5,
+      "invariants": [
+        "Game must be in setup phase",
+        "Must be the current player's turn"
+      ],
+      "file": "packages/domain/src/game.ts",
+      "line": 557,
+      "description": "Places all of a player's remaining setup armies at once, weakest border territories first. Emits SetupCompleted too when nobody else has armies left."
+    },
+    {
+      "id": "action:TradeCards",
+      "lane": "action",
+      "label": "TradeCards",
+      "col": 6,
+      "invariants": ["Must be the current player's turn"],
+      "schema": "{ cardIndices: [i, j, k] }",
+      "file": "packages/domain/src/game.ts",
+      "line": 469,
+      "description": "Trades a valid set of three cards for bonus armies (4, 6, 8, 10, 12, 15, then +5 each). Only in reinforce, or in attack with 5+ cards."
+    },
+    {
+      "id": "action:Reinforce",
+      "lane": "action",
+      "label": "Reinforce",
+      "col": 7,
+      "invariants": [
+        "Game must be in reinforce phase",
+        "Must be the current player's turn"
+      ],
+      "schema": "{ territory, armies }",
+      "file": "packages/domain/src/game.ts",
+      "line": 220,
+      "description": "Deploys reinforcements. A hand of 5+ cards with a valid set must be traded first. When none remain, the phase moves to attack."
+    },
+    {
+      "id": "action:Attack",
+      "lane": "action",
+      "label": "Attack",
+      "col": 8,
+      "invariants": [
+        "Game must be in attack phase",
+        "Must be the current player's turn"
+      ],
+      "schema": "{ from, to, attackDice }",
+      "file": "packages/domain/src/game.ts",
+      "line": 242,
+      "description": "Rolls one round of dice inside the action, so the event records the outcome. Taking a player's last territory also emits PlayerEliminated, and GameWon when one player remains."
+    },
+    {
+      "id": "action:BlitzAttack",
+      "lane": "action",
+      "label": "BlitzAttack",
+      "col": 9,
+      "invariants": [
+        "Game must be in attack phase",
+        "Must be the current player's turn"
+      ],
+      "schema": "{ from, to, minArmies? }",
+      "file": "packages/domain/src/game.ts",
+      "line": 335,
+      "description": "Rolls rounds until the territory falls or the attacker is down to minArmies, and records every round in one event. Same elimination and win rules as Attack."
+    },
+    {
+      "id": "action:ConquestMove",
+      "lane": "action",
+      "label": "ConquestMove",
+      "col": 12,
+      "invariants": [
+        "Game must be in attack phase",
+        "Must be the current player's turn"
+      ],
+      "schema": "{ from, to, armies }",
+      "file": "packages/domain/src/game.ts",
+      "line": 456,
+      "description": "Moves extra armies into a conquered territory. Attacks, ending the attack and fortifying wait until it is done."
+    },
+    {
+      "id": "action:EndAttack",
+      "lane": "action",
+      "label": "EndAttack",
+      "col": 13,
+      "invariants": [
+        "Game must be in attack phase",
+        "Must be the current player's turn"
+      ],
+      "file": "packages/domain/src/game.ts",
+      "line": 445,
+      "description": "Ends the attack phase and moves to fortify."
+    },
+    {
+      "id": "action:Fortify",
+      "lane": "action",
+      "label": "Fortify",
+      "col": 14,
+      "invariants": [
+        "Game must be in fortify phase",
+        "Must be the current player's turn"
+      ],
+      "schema": "{ from, to, armies }",
+      "file": "packages/domain/src/game.ts",
+      "line": 495,
+      "description": "Moves armies between two owned territories connected through owned territories, then ends the turn: a card if the player conquered this turn, then TurnStarted for the next player."
+    },
+    {
+      "id": "action:SkipFortify",
+      "lane": "action",
+      "label": "SkipFortify",
+      "col": 16,
+      "invariants": [
+        "Game must be in fortify phase",
+        "Must be the current player's turn"
+      ],
+      "file": "packages/domain/src/game.ts",
+      "line": 532,
+      "description": "Ends the turn without moving armies, with the same card and next-turn events as Fortify."
+    },
+    {
+      "id": "action:ReplaceWithBot",
+      "lane": "action",
+      "label": "ReplaceWithBot",
+      "col": 17,
+      "schema": "{ playerId }",
+      "file": "packages/domain/src/game.ts",
+      "line": 615,
+      "description": "Hands a seat to the bot engine. The emit refuses any actor but the system."
+    },
+    {
+      "id": "action:DeleteGame",
+      "lane": "action",
+      "label": "DeleteGame",
+      "col": 18,
+      "invariants": ["Only the game creator can start the game"],
+      "file": "packages/domain/src/game.ts",
+      "line": 607,
+      "description": "Marks the game deleted (it stays in the log). The invariant reuses the creator check, so its message says start."
+    },
+    {
+      "id": "state:Game",
+      "lane": "state",
+      "label": "Game",
+      "note": "phase · players · turn · territories · cards",
+      "file": "packages/domain/src/game.ts",
+      "description": "One Game state per stream. Every action loads it, checks the phase and turn invariants, and its events patch it (game-patches.ts). Dice are rolled inside the action, so replaying the events always rebuilds the same board. Snapshots every 20 patches. The panel leaves out the 42 territories and the card deck."
+    },
+    {
+      "id": "evt:GameCreated",
+      "lane": "event",
+      "label": "GameCreated",
+      "col": 0,
+      "schema": "{ name, createdBy, turnTimeoutSec }"
+    },
+    {
+      "id": "evt:PlayerJoined",
+      "lane": "event",
+      "label": "PlayerJoined",
+      "col": 1,
+      "schema": "{ playerId, playerName, color, bot, avatar? }"
+    },
+    {
+      "id": "evt:GameStarted",
+      "lane": "event",
+      "label": "GameStarted",
+      "col": 2,
+      "schema": "{ playerOrder, territories, setupArmiesRemaining }"
+    },
+    {
+      "id": "evt:ArmyPlaced",
+      "lane": "event",
+      "label": "ArmyPlaced",
+      "col": 3,
+      "schema": "{ playerId, territory }"
+    },
+    {
+      "id": "evt:SetupCompleted",
+      "lane": "event",
+      "label": "SetupCompleted",
+      "col": 4,
+      "schema": "{}"
+    },
+    {
+      "id": "evt:AutoDeployed",
+      "lane": "event",
+      "label": "AutoDeployed",
+      "col": 5,
+      "schema": "{ playerId, placements }"
+    },
+    {
+      "id": "evt:CardsTraded",
+      "lane": "event",
+      "label": "CardsTraded",
+      "col": 6,
+      "schema": "{ playerId, cardIndices, bonusArmies, tradeCount, tradedCards, territoryBonuses }"
+    },
+    {
+      "id": "evt:Reinforced",
+      "lane": "event",
+      "label": "Reinforced",
+      "col": 7,
+      "schema": "{ territory, armies, remaining }"
+    },
+    {
+      "id": "evt:Attacked",
+      "lane": "event",
+      "label": "Attacked",
+      "col": 8,
+      "schema": "{ from, to, attackDice, defendDice, attackerLosses, defenderLosses, conquered, fromArmies, toArmies, toOwner }"
+    },
+    {
+      "id": "evt:BlitzAttacked",
+      "lane": "event",
+      "label": "BlitzAttacked",
+      "col": 9,
+      "schema": "{ from, to, rounds, conquered, fromArmies, toArmies, toOwner }"
+    },
+    {
+      "id": "evt:PlayerEliminated",
+      "lane": "event",
+      "label": "PlayerEliminated",
+      "col": 10,
+      "schema": "{ playerId, conquerorId, transferredCards }"
+    },
+    {
+      "id": "evt:GameWon",
+      "lane": "event",
+      "label": "GameWon",
+      "col": 11,
+      "schema": "{ winnerId }"
+    },
+    {
+      "id": "evt:ConquestMoved",
+      "lane": "event",
+      "label": "ConquestMoved",
+      "col": 12,
+      "schema": "{ from, to, armies }"
+    },
+    {
+      "id": "evt:AttackPhaseEnded",
+      "lane": "event",
+      "label": "AttackPhaseEnded",
+      "col": 13,
+      "schema": "{}"
+    },
+    {
+      "id": "evt:Fortified",
+      "lane": "event",
+      "label": "Fortified",
+      "col": 14,
+      "schema": "{ from, to, armies }"
+    },
+    {
+      "id": "evt:CardEarned",
+      "lane": "event",
+      "label": "CardEarned",
+      "col": 15,
+      "schema": "{ playerId, card }"
+    },
+    {
+      "id": "evt:TurnStarted",
+      "lane": "event",
+      "label": "TurnStarted",
+      "col": 16,
+      "schema": "{ playerId, playerIndex, turnNumber, reinforcements }"
+    },
+    {
+      "id": "evt:PlayerReplacedByBot",
+      "lane": "event",
+      "label": "PlayerReplacedByBot",
+      "col": 17,
+      "schema": "{ playerId }"
+    },
+    {
+      "id": "evt:GameDeleted",
+      "lane": "event",
+      "label": "GameDeleted",
+      "col": 18,
+      "schema": "{}"
+    },
+    {
+      "id": "proj:games",
+      "lane": "projection",
+      "label": "games",
+      "note": "lobby list: one row per game",
+      "file": "packages/app/src/api/projection/game-projection.ts",
+      "description": "Upserts a game summary row (name, players, phase, winner, deleted) on the events that change what the lobby shows. Moves inside a turn reach the browsers through the SSE broadcast after each action, not through this projection."
+    }
+  ],
+  "edges": [
+    {
+      "from": "actor:creator",
+      "to": "action:CreateGame"
+    },
+    {
+      "from": "actor:creator",
+      "to": "action:StartGame"
+    },
+    {
+      "from": "actor:creator",
+      "to": "action:DeleteGame"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:JoinGame"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:PlaceArmy"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:AutoDeploy"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:TradeCards"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:Reinforce"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:Attack"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:ConquestMove"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:EndAttack"
+    },
+    {
+      "from": "actor:player",
+      "to": "action:Fortify"
+    },
+    {
+      "from": "actor:bot",
+      "to": "action:BlitzAttack"
+    },
+    {
+      "from": "actor:bot",
+      "to": "action:Fortify"
+    },
+    {
+      "from": "actor:timer",
+      "to": "action:PlaceArmy"
+    },
+    {
+      "from": "actor:timer",
+      "to": "action:EndAttack"
+    },
+    {
+      "from": "actor:timer",
+      "to": "action:SkipFortify"
+    },
+    {
+      "from": "actor:timer",
+      "to": "action:ReplaceWithBot"
+    },
+    {
+      "from": "action:CreateGame",
+      "to": "evt:GameCreated"
+    },
+    {
+      "from": "action:JoinGame",
+      "to": "evt:PlayerJoined"
+    },
+    {
+      "from": "action:StartGame",
+      "to": "evt:GameStarted"
+    },
+    {
+      "from": "action:PlaceArmy",
+      "to": "evt:ArmyPlaced"
+    },
+    {
+      "from": "action:PlaceArmy",
+      "to": "evt:SetupCompleted"
+    },
+    {
+      "from": "action:AutoDeploy",
+      "to": "evt:AutoDeployed"
+    },
+    {
+      "from": "action:AutoDeploy",
+      "to": "evt:SetupCompleted"
+    },
+    {
+      "from": "action:TradeCards",
+      "to": "evt:CardsTraded"
+    },
+    {
+      "from": "action:Reinforce",
+      "to": "evt:Reinforced"
+    },
+    {
+      "from": "action:Attack",
+      "to": "evt:Attacked"
+    },
+    {
+      "from": "action:Attack",
+      "to": "evt:PlayerEliminated"
+    },
+    {
+      "from": "action:Attack",
+      "to": "evt:GameWon"
+    },
+    {
+      "from": "action:BlitzAttack",
+      "to": "evt:BlitzAttacked"
+    },
+    {
+      "from": "action:BlitzAttack",
+      "to": "evt:PlayerEliminated"
+    },
+    {
+      "from": "action:BlitzAttack",
+      "to": "evt:GameWon"
+    },
+    {
+      "from": "action:ConquestMove",
+      "to": "evt:ConquestMoved"
+    },
+    {
+      "from": "action:EndAttack",
+      "to": "evt:AttackPhaseEnded"
+    },
+    {
+      "from": "action:Fortify",
+      "to": "evt:Fortified"
+    },
+    {
+      "from": "action:Fortify",
+      "to": "evt:CardEarned"
+    },
+    {
+      "from": "action:Fortify",
+      "to": "evt:TurnStarted"
+    },
+    {
+      "from": "action:SkipFortify",
+      "to": "evt:CardEarned"
+    },
+    {
+      "from": "action:SkipFortify",
+      "to": "evt:TurnStarted"
+    },
+    {
+      "from": "action:ReplaceWithBot",
+      "to": "evt:PlayerReplacedByBot"
+    },
+    {
+      "from": "action:DeleteGame",
+      "to": "evt:GameDeleted"
+    },
+    {
+      "from": "evt:GameCreated",
+      "to": "proj:games"
+    },
+    {
+      "from": "evt:PlayerJoined",
+      "to": "proj:games"
+    },
+    {
+      "from": "evt:GameStarted",
+      "to": "proj:games"
+    },
+    {
+      "from": "evt:PlayerEliminated",
+      "to": "proj:games"
+    },
+    {
+      "from": "evt:GameWon",
+      "to": "proj:games"
+    },
+    {
+      "from": "evt:PlayerReplacedByBot",
+      "to": "proj:games"
+    },
+    {
+      "from": "evt:GameDeleted",
+      "to": "proj:games"
+    }
+  ],
+  "scenarios": [
+    {
+      "title": "Lobby to first turn",
+      "stream": "game-7f3a",
+      "summary": "Ana opens a game, Ben joins, the board is dealt and both place their setup armies.",
+      "steps": [
+        {
+          "from": "actor:creator",
+          "to": "action:CreateGame",
+          "say": "**Ana** creates a game called Weekend Campaign."
+        },
+        {
+          "from": "action:CreateGame",
+          "to": "evt:GameCreated",
+          "say": "**GameCreated** opens the lobby with a 90 second turn clock. The games projection lists it.",
+          "data": {
+            "name": "Weekend Campaign",
+            "createdBy": "ana",
+            "turnTimeoutSec": 90
+          },
+          "patch": {
+            "name": "Weekend Campaign",
+            "createdBy": "ana",
+            "phase": "lobby",
+            "turnTimeoutSec": 90
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:JoinGame",
+          "say": "Ana takes the first seat."
+        },
+        {
+          "from": "action:JoinGame",
+          "to": "evt:PlayerJoined",
+          "say": "**PlayerJoined**: one player at the table.",
+          "data": {
+            "playerId": "ana",
+            "playerName": "Ana",
+            "color": "red",
+            "bot": false
+          },
+          "patch": {
+            "players": {
+              "ana": {
+                "name": "Ana",
+                "color": "red"
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:creator",
+          "to": "action:StartGame",
+          "say": "Ana tries to start right away."
+        },
+        {
+          "from": "action:StartGame",
+          "to": "evt:GameStarted",
+          "say": "The game state refuses it: one player is not a game.",
+          "reject": "Game must have at least 2 players"
+        },
+        {
+          "from": "actor:player",
+          "to": "action:JoinGame",
+          "say": "**Ben** joins."
+        },
+        {
+          "from": "action:JoinGame",
+          "to": "evt:PlayerJoined",
+          "say": "Two players: now the game can start.",
+          "data": {
+            "playerId": "ben",
+            "playerName": "Ben",
+            "color": "blue",
+            "bot": false
+          },
+          "patch": {
+            "players": {
+              "ben": {
+                "name": "Ben",
+                "color": "blue"
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:creator",
+          "to": "action:StartGame",
+          "say": "Ana starts the game."
+        },
+        {
+          "from": "action:StartGame",
+          "to": "evt:GameStarted",
+          "say": "**GameStarted** carries the shuffled order and the dealt board, so a replay rebuilds the same game. Each player has 19 armies left to place.",
+          "data": {
+            "playerOrder": ["ana", "ben"],
+            "territories": "42 dealt, 21 each",
+            "setupArmiesRemaining": {
+              "ana": 19,
+              "ben": 19
+            }
+          },
+          "patch": {
+            "phase": "setup",
+            "playerOrder": ["ana", "ben"],
+            "currentPlayerIndex": 0,
+            "setupArmiesRemaining": {
+              "ana": 19,
+              "ben": 19
+            }
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:PlaceArmy",
+          "say": "Ana places an army on Brazil."
+        },
+        {
+          "from": "action:PlaceArmy",
+          "to": "evt:ArmyPlaced",
+          "say": "**ArmyPlaced**, and the turn passes to Ben.",
+          "data": {
+            "playerId": "ana",
+            "territory": "Brazil"
+          },
+          "patch": {
+            "setupArmiesRemaining": {
+              "ana": 18
+            },
+            "currentPlayerIndex": 1
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:AutoDeploy",
+          "say": "Ben lets the game place all his armies."
+        },
+        {
+          "from": "action:AutoDeploy",
+          "to": "evt:AutoDeployed",
+          "say": "**AutoDeployed** spreads 19 armies over his weakest borders in one event.",
+          "data": {
+            "playerId": "ben",
+            "placements": {
+              "Ukraine": 5,
+              "Siam": 4,
+              "Peru": 4,
+              "…": 6
+            }
+          },
+          "patch": {
+            "setupArmiesRemaining": {
+              "ben": 0
+            },
+            "currentPlayerIndex": 0
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:AutoDeploy",
+          "say": "Ana auto-deploys her last 18."
+        },
+        {
+          "from": "action:AutoDeploy",
+          "to": "evt:AutoDeployed",
+          "say": "Her armies are placed…",
+          "data": {
+            "playerId": "ana",
+            "placements": {
+              "Brazil": 6,
+              "Egypt": 5,
+              "…": 7
+            }
+          },
+          "patch": {
+            "setupArmiesRemaining": {
+              "ana": 0
+            }
+          }
+        },
+        {
+          "from": "action:AutoDeploy",
+          "to": "evt:SetupCompleted",
+          "say": "…and nobody has any left, so the same action also emits **SetupCompleted**. Ana's first turn starts with 3 reinforcements.",
+          "data": {},
+          "patch": {
+            "phase": "reinforce",
+            "currentPlayerIndex": 0,
+            "turnNumber": 1,
+            "reinforcementsRemaining": 3
+          }
+        }
+      ]
+    },
+    {
+      "title": "A full turn",
+      "stream": "game-7f3a",
+      "summary": "Ana reinforces, conquers a territory, moves in, ends the attack, fortifies and earns a card.",
+      "initial": {
+        "name": "Weekend Campaign",
+        "phase": "reinforce",
+        "playerOrder": ["ana", "ben"],
+        "currentPlayerIndex": 0,
+        "turnNumber": 1,
+        "reinforcementsRemaining": 3,
+        "conqueredThisTurn": false,
+        "pendingConquest": {
+          "from": "",
+          "to": "",
+          "maxExtra": 0
+        }
+      },
+      "startId": 46,
+      "steps": [
+        {
+          "from": "actor:player",
+          "to": "action:Reinforce",
+          "say": "Ana puts all 3 reinforcements on North Africa."
+        },
+        {
+          "from": "action:Reinforce",
+          "to": "evt:Reinforced",
+          "say": "**Reinforced** with none left moves the game to the attack phase.",
+          "data": {
+            "territory": "North Africa",
+            "armies": 3,
+            "remaining": 0
+          },
+          "patch": {
+            "reinforcementsRemaining": 0,
+            "phase": "attack"
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Attack",
+          "say": "She attacks Egypt from North Africa with 3 dice."
+        },
+        {
+          "from": "action:Attack",
+          "to": "evt:Attacked",
+          "say": "The dice are rolled inside the action, and **Attacked** records them: 6-5-2 against 4-1. Egypt falls, and 2 extra armies may follow.",
+          "data": {
+            "from": "North Africa",
+            "to": "Egypt",
+            "attackDice": [6, 5, 2],
+            "defendDice": [4, 1],
+            "defenderLosses": 2,
+            "conquered": true,
+            "toOwner": "ana"
+          },
+          "patch": {
+            "conqueredThisTurn": true,
+            "pendingConquest": {
+              "from": "North Africa",
+              "to": "Egypt",
+              "maxExtra": 2
+            }
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:ConquestMove",
+          "say": "Ana moves both extra armies in."
+        },
+        {
+          "from": "action:ConquestMove",
+          "to": "evt:ConquestMoved",
+          "say": "**ConquestMoved** clears the pending move, which unlocks attacking again or ending the phase.",
+          "data": {
+            "from": "North Africa",
+            "to": "Egypt",
+            "armies": 2
+          },
+          "patch": {
+            "pendingConquest": {
+              "from": "",
+              "to": "",
+              "maxExtra": 0
+            }
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:EndAttack",
+          "say": "She stops attacking."
+        },
+        {
+          "from": "action:EndAttack",
+          "to": "evt:AttackPhaseEnded",
+          "say": "**AttackPhaseEnded**: on to fortify.",
+          "data": {},
+          "patch": {
+            "phase": "fortify"
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Fortify",
+          "say": "Ana moves 2 armies from Brazil to North Africa, through her own territories."
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:Fortified",
+          "say": "**Fortified** is the first of three events from this one action.",
+          "data": {
+            "from": "Brazil",
+            "to": "North Africa",
+            "armies": 2
+          },
+          "patch": {}
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:CardEarned",
+          "say": "She conquered this turn, so she draws a card: **CardEarned**.",
+          "data": {
+            "playerId": "ana",
+            "card": {
+              "territory": "Siam",
+              "type": "cavalry"
+            }
+          },
+          "patch": {
+            "cards": {
+              "ana": "1 card"
+            }
+          }
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:TurnStarted",
+          "say": "**TurnStarted** hands the board to Ben with 3 reinforcements.",
+          "data": {
+            "playerId": "ben",
+            "playerIndex": 1,
+            "turnNumber": 2,
+            "reinforcements": 3
+          },
+          "patch": {
+            "currentPlayerIndex": 1,
+            "turnNumber": 2,
+            "reinforcementsRemaining": 3,
+            "phase": "reinforce",
+            "conqueredThisTurn": false
+          }
+        }
+      ]
+    },
+    {
+      "title": "Away from the keyboard",
+      "stream": "game-c21d",
+      "summary": "Ben stops answering. The turn timer plays for him, then hands his seat to the bot engine, and a bot's blitz knocks out another bot.",
+      "initial": {
+        "name": "Friday Night",
+        "phase": "setup",
+        "playerOrder": ["ana", "ben", "cy"],
+        "currentPlayerIndex": 1,
+        "players": {
+          "ana": {
+            "name": "Ana"
+          },
+          "ben": {
+            "name": "Ben"
+          },
+          "cy": {
+            "name": "General Zhukov",
+            "bot": true
+          }
+        },
+        "setupArmiesRemaining": {
+          "ana": 0,
+          "ben": 1,
+          "cy": 0
+        }
+      },
+      "startId": 120,
+      "steps": [
+        {
+          "from": "actor:timer",
+          "to": "action:PlaceArmy",
+          "say": "Ben has one setup army left and his 90 seconds run out. The **turn timer** places it for him, as Ben."
+        },
+        {
+          "from": "action:PlaceArmy",
+          "to": "evt:ArmyPlaced",
+          "say": "**ArmyPlaced** on one of his territories…",
+          "data": {
+            "playerId": "ben",
+            "territory": "Ural"
+          },
+          "patch": {
+            "setupArmiesRemaining": {
+              "ben": 0
+            }
+          }
+        },
+        {
+          "from": "action:PlaceArmy",
+          "to": "evt:SetupCompleted",
+          "say": "…and it was the last army on the table, so **SetupCompleted** follows from the same action.",
+          "data": {},
+          "patch": {
+            "phase": "reinforce",
+            "currentPlayerIndex": 0,
+            "turnNumber": 1
+          }
+        },
+        {
+          "at": "actor:timer",
+          "say": "Turns later, Ben conquered a territory and walked away mid-attack.",
+          "wait": "turn deadline: 90 s"
+        },
+        {
+          "from": "actor:timer",
+          "to": "action:EndAttack",
+          "say": "The timer plays out the rest of his turn: it ends the attack…"
+        },
+        {
+          "from": "action:EndAttack",
+          "to": "evt:AttackPhaseEnded",
+          "say": "**AttackPhaseEnded**.",
+          "data": {},
+          "patch": {
+            "phase": "fortify",
+            "currentPlayerIndex": 1,
+            "turnNumber": 7,
+            "conqueredThisTurn": true
+          }
+        },
+        {
+          "from": "actor:timer",
+          "to": "action:SkipFortify",
+          "say": "…and skips fortify."
+        },
+        {
+          "from": "action:SkipFortify",
+          "to": "evt:CardEarned",
+          "say": "He conquered this turn, so he still earns his card.",
+          "data": {
+            "playerId": "ben",
+            "card": {
+              "territory": "Kamchatka",
+              "type": "artillery"
+            }
+          },
+          "patch": {
+            "cards": {
+              "ben": "+1 card"
+            }
+          }
+        },
+        {
+          "from": "action:SkipFortify",
+          "to": "evt:TurnStarted",
+          "say": "**TurnStarted** passes the turn to General Zhukov, a bot.",
+          "data": {
+            "playerId": "cy",
+            "playerIndex": 2,
+            "turnNumber": 8,
+            "reinforcements": 4
+          },
+          "patch": {
+            "currentPlayerIndex": 2,
+            "turnNumber": 8,
+            "phase": "reinforce",
+            "conqueredThisTurn": false
+          }
+        },
+        {
+          "from": "actor:timer",
+          "to": "action:ReplaceWithBot",
+          "say": "That was Ben's third timeout in a row. The timer, as the **system** actor, replaces him."
+        },
+        {
+          "from": "action:ReplaceWithBot",
+          "to": "evt:PlayerReplacedByBot",
+          "say": "**PlayerReplacedByBot**: the bot engine plays Ben's seat from now on. The games projection updates the lobby row.",
+          "data": {
+            "playerId": "ben"
+          },
+          "patch": {
+            "players": {
+              "ben": {
+                "bot": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:bot",
+          "to": "action:BlitzAttack",
+          "say": "Zhukov's turn: after reinforcing, the **bot engine** blitzes Ben's last territory, Ural, where the odds favor it."
+        },
+        {
+          "from": "action:BlitzAttack",
+          "to": "evt:BlitzAttacked",
+          "say": "**BlitzAttacked** records all four rounds in one event. Ural falls.",
+          "data": {
+            "from": "Siberia",
+            "to": "Ural",
+            "rounds": "4 rounds",
+            "conquered": true,
+            "toOwner": "cy"
+          },
+          "patch": {
+            "phase": "attack",
+            "conqueredThisTurn": true
+          }
+        },
+        {
+          "from": "action:BlitzAttack",
+          "to": "evt:PlayerEliminated",
+          "say": "It was Ben's last territory: **PlayerEliminated**, and his cards go to Zhukov.",
+          "data": {
+            "playerId": "ben",
+            "conquerorId": "cy",
+            "transferredCards": ["Kamchatka", "Peru"]
+          },
+          "patch": {
+            "players": {
+              "ben": {
+                "eliminated": true
+              }
+            }
+          }
+        },
+        {
+          "from": "actor:bot",
+          "to": "action:Fortify",
+          "say": "The bot ends the attack and fortifies its new border."
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:Fortified",
+          "say": "**Fortified**, followed by its card and the next turn (not shown).",
+          "data": {
+            "from": "Siberia",
+            "to": "Ural",
+            "armies": 3
+          },
+          "patch": {
+            "phase": "fortify"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Card trade and endgame",
+      "stream": "game-c21d",
+      "summary": "Ana against one bot. She trades cards, reinforces, attacks and fails, and the bot's blitz takes her last territory.",
+      "initial": {
+        "name": "Friday Night",
+        "phase": "reinforce",
+        "playerOrder": ["ana", "ben", "cy"],
+        "currentPlayerIndex": 0,
+        "turnNumber": 15,
+        "reinforcementsRemaining": 3,
+        "cardTradeCount": 2,
+        "cards": {
+          "ana": "3 cards"
+        }
+      },
+      "startId": 310,
+      "steps": [
+        {
+          "from": "actor:player",
+          "to": "action:TradeCards",
+          "say": "Ana trades three cards, one of each type."
+        },
+        {
+          "from": "action:TradeCards",
+          "to": "evt:CardsTraded",
+          "say": "**CardsTraded**: the third trade in this game is worth 8 armies.",
+          "data": {
+            "playerId": "ana",
+            "cardIndices": [0, 1, 2],
+            "bonusArmies": 8,
+            "tradeCount": 3
+          },
+          "patch": {
+            "reinforcementsRemaining": 11,
+            "cardTradeCount": 3,
+            "cards": {
+              "ana": "0 cards"
+            }
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Reinforce",
+          "say": "She puts all 11 on Egypt."
+        },
+        {
+          "from": "action:Reinforce",
+          "to": "evt:Reinforced",
+          "say": "On to the attack phase.",
+          "data": {
+            "territory": "Egypt",
+            "armies": 11,
+            "remaining": 0
+          },
+          "patch": {
+            "reinforcementsRemaining": 0,
+            "phase": "attack"
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Attack",
+          "say": "She attacks the Middle East."
+        },
+        {
+          "from": "action:Attack",
+          "to": "evt:Attacked",
+          "say": "Bad dice: she loses two armies and takes nothing. Losses are events too.",
+          "data": {
+            "from": "Egypt",
+            "to": "Middle East",
+            "attackDice": [3, 2, 1],
+            "defendDice": [5, 4],
+            "attackerLosses": 2,
+            "conquered": false
+          },
+          "patch": {}
+        },
+        {
+          "from": "actor:player",
+          "to": "action:EndAttack",
+          "say": "She stops."
+        },
+        {
+          "from": "action:EndAttack",
+          "to": "evt:AttackPhaseEnded",
+          "say": "**AttackPhaseEnded**.",
+          "data": {},
+          "patch": {
+            "phase": "fortify"
+          }
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Fortify",
+          "say": "She pulls armies back toward Egypt."
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:Fortified",
+          "say": "**Fortified**…",
+          "data": {
+            "from": "Congo",
+            "to": "Egypt",
+            "armies": 1
+          },
+          "patch": {}
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:TurnStarted",
+          "say": "…and **TurnStarted** for Zhukov.",
+          "data": {
+            "playerId": "cy",
+            "playerIndex": 2,
+            "turnNumber": 16,
+            "reinforcements": 9
+          },
+          "patch": {
+            "currentPlayerIndex": 2,
+            "turnNumber": 16,
+            "phase": "reinforce"
+          }
+        },
+        {
+          "from": "actor:bot",
+          "to": "action:BlitzAttack",
+          "say": "Zhukov has the board. The bot engine blitzes Egypt, Ana's last stronghold."
+        },
+        {
+          "from": "action:BlitzAttack",
+          "to": "evt:BlitzAttacked",
+          "say": "Nine rounds, and Egypt falls.",
+          "data": {
+            "from": "Middle East",
+            "to": "Egypt",
+            "rounds": "9 rounds",
+            "conquered": true,
+            "toOwner": "cy"
+          },
+          "patch": {
+            "phase": "attack"
+          }
+        },
+        {
+          "from": "action:BlitzAttack",
+          "to": "evt:PlayerEliminated",
+          "say": "**PlayerEliminated**: Ana is out.",
+          "data": {
+            "playerId": "ana",
+            "conquerorId": "cy",
+            "transferredCards": []
+          },
+          "patch": {
+            "players": {
+              "ana": {
+                "eliminated": true
+              }
+            }
+          }
+        },
+        {
+          "from": "action:BlitzAttack",
+          "to": "evt:GameWon",
+          "say": "Only Zhukov is left: **GameWon** ends the game. The games projection records the winner.",
+          "data": {
+            "winnerId": "cy"
+          },
+          "patch": {
+            "phase": "ended",
+            "winner": "cy"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Refused moves and a win",
+      "stream": "game-7f3a",
+      "summary": "Moves the Game state refuses, then Ana takes Ben's last territory, wins, and deletes the game.",
+      "initial": {
+        "name": "Weekend Campaign",
+        "createdBy": "ana",
+        "phase": "attack",
+        "playerOrder": ["ana", "ben"],
+        "currentPlayerIndex": 0,
+        "turnNumber": 23,
+        "pendingConquest": {
+          "from": "",
+          "to": "",
+          "maxExtra": 0
+        },
+        "deleted": false
+      },
+      "startId": 512,
+      "steps": [
+        {
+          "from": "actor:player",
+          "to": "action:JoinGame",
+          "say": "A latecomer tries to join the running game."
+        },
+        {
+          "from": "action:JoinGame",
+          "to": "evt:PlayerJoined",
+          "say": "Seats are only taken in the lobby.",
+          "reject": "Game must be in lobby phase"
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Attack",
+          "say": "Ben attacks out of turn."
+        },
+        {
+          "from": "action:Attack",
+          "to": "evt:Attacked",
+          "say": "It is Ana's turn, so the state refuses it.",
+          "reject": "Must be the current player's turn"
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Fortify",
+          "say": "Ana tries to fortify while still in the attack phase."
+        },
+        {
+          "from": "action:Fortify",
+          "to": "evt:Fortified",
+          "say": "Wrong phase.",
+          "reject": "Game must be in fortify phase"
+        },
+        {
+          "from": "actor:player",
+          "to": "action:ConquestMove",
+          "say": "She tries a conquest move with nothing conquered."
+        },
+        {
+          "from": "action:ConquestMove",
+          "to": "evt:ConquestMoved",
+          "say": "The emit throws: there is no pending move.",
+          "reject": "No pending conquest movement"
+        },
+        {
+          "from": "actor:player",
+          "to": "action:Attack",
+          "say": "Ana attacks Kamchatka, Ben's last territory."
+        },
+        {
+          "from": "action:Attack",
+          "to": "evt:Attacked",
+          "say": "Two defenders, two losses. Kamchatka falls.",
+          "data": {
+            "from": "Yakutsk",
+            "to": "Kamchatka",
+            "attackDice": [6, 6, 3],
+            "defendDice": [5, 2],
+            "defenderLosses": 2,
+            "conquered": true,
+            "toOwner": "ana"
+          },
+          "patch": {}
+        },
+        {
+          "from": "action:Attack",
+          "to": "evt:PlayerEliminated",
+          "say": "**PlayerEliminated**: Ben is out.",
+          "data": {
+            "playerId": "ben",
+            "conquerorId": "ana",
+            "transferredCards": []
+          },
+          "patch": {
+            "players": {
+              "ben": {
+                "eliminated": true
+              }
+            }
+          }
+        },
+        {
+          "from": "action:Attack",
+          "to": "evt:GameWon",
+          "say": "One player left: **GameWon**. Three events from one attack, committed together.",
+          "data": {
+            "winnerId": "ana"
+          },
+          "patch": {
+            "phase": "ended",
+            "winner": "ana"
+          }
+        },
+        {
+          "from": "actor:creator",
+          "to": "action:DeleteGame",
+          "say": "Ana, the creator, deletes the finished game."
+        },
+        {
+          "from": "action:DeleteGame",
+          "to": "evt:GameDeleted",
+          "say": "**GameDeleted** hides it from the lobby. The events stay in the log.",
+          "data": {},
+          "patch": {
+            "deleted": true
+          }
+        },
+        {
+          "from": "actor:creator",
+          "to": "action:DeleteGame",
+          "say": "She clicks delete again."
+        },
+        {
+          "from": "action:DeleteGame",
+          "to": "evt:GameDeleted",
+          "say": "The emit throws: it is already deleted.",
+          "reject": "Game already deleted"
+        }
+      ]
+    }
+  ]
+}
