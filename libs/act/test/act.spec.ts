@@ -215,6 +215,9 @@ describe("act", () => {
     const arg = errorSpy.mock.calls[0]?.[0] as unknown as Error;
     expect(arg.message).toBe("query exploded");
 
+    // Shut it down: a pass the poll already queued would otherwise run in
+    // the next test, against the shared store.
+    await errApp.shutdown();
     querySpy.mockRestore();
     errorSpy.mockRestore();
   });

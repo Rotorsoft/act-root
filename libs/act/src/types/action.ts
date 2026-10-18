@@ -1241,8 +1241,8 @@ export interface IAct<
 
 /**
  * The patch step: merges a reducer's partial into state. The builder picks
- * one per app, never per event. `me`/`event` only serve
- * {@link validating_patch}, to name the failing reduction.
+ * one per app, never per event. `me` and `event` let a validating patch
+ * name the reduction that produced an invalid state.
  */
 export type PatchFn = <
   TState extends Schema,

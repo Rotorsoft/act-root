@@ -3440,8 +3440,8 @@ export interface IAct<
 
 /**
  * The patch step: merges a reducer's partial into state. The builder picks
- * one per app, never per event. \`me\`/\`event\` only serve
- * {@link validating_patch}, to name the failing reduction.
+ * one per app, never per event. \`me\` and \`event\` let a validating patch
+ * name the reduction that produced an invalid state.
  */
 export type PatchFn = <
   TState extends Schema,
@@ -6735,10 +6735,9 @@ export const LogLevels = [
 export type LogLevel = (typeof LogLevels)[number];
 
 /**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
+ * List of exit codes for process termination, as passed to
+ * {@link disposeAndExit} by the signal handlers and by callers that shut
+ * down on their own.
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -6747,15 +6746,11 @@ export const ExitCodes = ["ERROR", "EXIT"] as const;
  *
  * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
  * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
  */
 export type ExitCode = (typeof ExitCodes)[number];
 
 /**
  * The validated \`package.json\` metadata \`config()\` reads.
- *
- * @internal
  */
 export type Package = {
   name: string;
@@ -11798,8 +11793,8 @@ export interface IAct<
 
 /**
  * The patch step: merges a reducer's partial into state. The builder picks
- * one per app, never per event. \`me\`/\`event\` only serve
- * {@link validating_patch}, to name the failing reduction.
+ * one per app, never per event. \`me\` and \`event\` let a validating patch
+ * name the reduction that produced an invalid state.
  */
 export type PatchFn = <
   TState extends Schema,
@@ -13467,10 +13462,9 @@ export const LogLevels = [
 export type LogLevel = (typeof LogLevels)[number];
 
 /**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
+ * List of exit codes for process termination, as passed to
+ * {@link disposeAndExit} by the signal handlers and by callers that shut
+ * down on their own.
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -13479,15 +13473,11 @@ export const ExitCodes = ["ERROR", "EXIT"] as const;
  *
  * - \`"ERROR"\` — abnormal termination (uncaught exception, unhandled rejection)
  * - \`"EXIT"\` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
  */
 export type ExitCode = (typeof ExitCodes)[number];
 
 /**
  * The validated \`package.json\` metadata \`config()\` reads.
- *
- * @internal
  */
 export type Package = {
   name: string;

@@ -37,7 +37,7 @@ A few production-relevant defaults to override depending on workload:
 
 ## 2. Reactions settle on their own
 
-There is nothing to wire. A commit whose events have a reaction in this app schedules `settle()`, and so does a commit from another process (through `Store.notify`). Call `app.settle()` once at startup, after `seed()`: it runs the work left pending by the last shutdown, including deferred and backed-off streams, which otherwise wait for the next commit. See [Event sourcing § settle()](../concepts/event-sourcing.md#settle) for the rule.
+There is nothing to wire. A commit whose events have a reaction in this app schedules `settle()`, and so does a commit from another process (through `Store.notify`). Call `app.settle()` once at startup, after `seed()`: it runs the work left pending by the last shutdown, including deferred and backed-off streams, which otherwise wait until something drains their lane. See [Event sourcing § settle()](../concepts/event-sourcing.md#settle) for the rule.
 
 `settle()` is debounced (default 10ms) and non-blocking. Multiple commits inside the debounce window collapse into a single `correlate → drain` pass. Listen for the `"settled"` event when you need to know the framework is idle.
 

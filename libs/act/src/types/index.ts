@@ -67,10 +67,9 @@ export const LogLevels = [
 export type LogLevel = (typeof LogLevels)[number];
 
 /**
- * List of exit codes for process termination. Consumed by signal handlers
- * and {@link disposeAndExit}; not part of the user-facing surface.
- *
- * @internal
+ * List of exit codes for process termination, as passed to
+ * {@link disposeAndExit} by the signal handlers and by callers that shut
+ * down on their own.
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -79,15 +78,11 @@ export const ExitCodes = ["ERROR", "EXIT"] as const;
  *
  * - `"ERROR"` — abnormal termination (uncaught exception, unhandled rejection)
  * - `"EXIT"` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
- *
- * @internal
  */
 export type ExitCode = (typeof ExitCodes)[number];
 
 /**
  * The validated `package.json` metadata `config()` reads.
- *
- * @internal
  */
 export type Package = {
   name: string;
