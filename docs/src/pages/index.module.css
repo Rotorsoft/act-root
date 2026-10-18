@@ -37,8 +37,8 @@
   gap: 2.5rem;
 }
 
-/* Hero: one centered column. The logo and wordmark lead, the formula and pitch follow
-   at stepped-down sizes, and the live model sits directly below. */
+/* Hero: one centered column. The formula leads (the brand lives in the navbar),
+   then the pitch and the actions, and the live model sits directly below. */
 .heroTop {
   display: grid;
   justify-items: center;
@@ -46,53 +46,10 @@
   gap: 1.1rem;
 }
 
-.heroBrand {
-  display: flex;
-  align-items: center;
-  gap: clamp(0.6rem, 1.2vw, 1rem);
-  margin-bottom: 0.35rem;
-}
-
-.heroIcon {
-  height: clamp(3.5rem, 6vw, 5.5rem);
-  width: auto;
-  display: block;
-}
-
-.heroWordmark {
-  font-family: var(--ifm-font-family-monospace);
-  font-weight: 900;
-  font-size: clamp(4rem, 8vw, 6.75rem);
-  line-height: 0.9;
-  letter-spacing: -0.07em;
-  margin: 0;
-}
-
-.wA { color: var(--c-action); }
-.wC { color: var(--c-state); }
-.wT { color: var(--c-reaction); }
-
-.heroT {
-  display: inline-block;
-  transform-origin: 50% 85%;
-  will-change: transform;
-}
-
-.heroTAnimate {
-  animation: heroDropT 1.1s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes heroDropT {
-  0% { transform: rotate(-30deg); }
-  60% { transform: rotate(18deg); }
-  80% { transform: rotate(-8deg); }
-  100% { transform: rotate(0deg); }
-}
-
 .formula {
   font-family: var(--ifm-font-family-monospace);
   font-weight: 700;
-  font-size: min(1.75rem, 4.9vw);
+  font-size: min(3.5rem, 4.9vw);
   line-height: 1.2;
   letter-spacing: -0.02em;
   white-space: nowrap;

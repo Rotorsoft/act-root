@@ -372,20 +372,7 @@ function Hero() {
   return (
     <header className={styles.hero}>
       <div className={styles.heroTop}>
-        <div className={styles.heroBrand}>
-          <img
-            className={styles.heroIcon}
-            src={useBaseUrl("/img/logo-dark.png")}
-            alt=""
-            aria-hidden="true"
-          />
-          <h1 className={styles.heroWordmark} aria-label="Act">
-            <span className={styles.wA}>A</span>
-            <span className={styles.wC}>c</span>
-            <span className={`${styles.heroT} ${styles.wT}`}>t</span>
-          </h1>
-        </div>
-        <p className={styles.formula} aria-label="Actions, State, Reactions">
+        <h1 className={styles.formula} aria-label="Act: Actions, State, Reactions">
           <span className={styles.fAction}>Actions</span>
           <span className={styles.fArrow}> → </span>
           <span className={styles.fState}>
@@ -393,7 +380,7 @@ function Hero() {
           </span>
           <span className={styles.fArrow}> ← </span>
           <span className={styles.fReaction}>Reactions</span>
-        </p>
+        </h1>
         <p className={styles.heroLede}>
           Fluent event sourcing for TypeScript. Declare actions, state and reactions with typed
           builders; Act stores the events, runs the reactions and keeps the projections up to date.
@@ -677,38 +664,6 @@ function FinalCta() {
   );
 }
 
-function AnimatedT() {
-  // Swing the wordmark's "t" every 12 seconds while the hero is visible.
-  useEffect(() => {
-    const t = document.querySelector(`.${styles.heroT}`);
-    if (!t || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let timer: number | undefined;
-    const trigger = () => {
-      t.classList.remove(styles.heroTAnimate);
-      void (t as HTMLElement).offsetWidth;
-      t.classList.add(styles.heroTAnimate);
-    };
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          trigger();
-          timer = window.setInterval(trigger, 12000);
-        } else if (timer) {
-          window.clearInterval(timer);
-          timer = undefined;
-        }
-      },
-      { threshold: 0.5 },
-    );
-    observer.observe(t);
-    return () => {
-      observer.disconnect();
-      if (timer) window.clearInterval(timer);
-    };
-  }, []);
-  return null;
-}
-
 export default function Home() {
   const { siteConfig } = useDocusaurusContext();
   return (
@@ -716,7 +671,6 @@ export default function Home() {
       title={`${siteConfig.title} — ${siteConfig.tagline}`}
       description="Act is a TypeScript-first event sourcing framework with composable state machines, reactions, projections, and adapters for Postgres and SQLite."
     >
-      <BrowserOnly>{() => <AnimatedT />}</BrowserOnly>
       <main className={styles.main}>
         <Hero />
         <Quickstart />
