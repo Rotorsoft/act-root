@@ -5,6 +5,7 @@ import BrowserOnly from "@docusaurus/BrowserOnly";
 import Layout from "@theme/Layout";
 import CodeBlock from "@theme/CodeBlock";
 import type { JSX } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import sdk from "@stackblitz/sdk";
 import styles from "./index.module.css";
@@ -150,8 +151,8 @@ await app.drain({ streamLimit: 100, eventLimit: 1000 });`,
 
 const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
   {
-    title: "Functional Event Sourcing",
-    body: "Every state change is a pure function of previous state and events. Immutability and replayability by design.",
+    title: "Event Sourcing",
+    body: "State is folded from events with pure patch functions, so any stream can be replayed to rebuild it.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -159,8 +160,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Composable State Machines",
-    body: "Model your domain as composable, strongly-typed state machines. No classes, just functions and data.",
+    title: "Composable Builders",
+    body: "States, slices and projections are built with typed builders and composed into one app. No classes.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="12 2 2 7 12 12 22 7 12 2" />
@@ -170,8 +171,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "TypeScript Native",
-    body: "Type safety and inference everywhere. Catch errors at compile time, not at runtime.",
+    title: "Typed End to End",
+    body: "Action, event and state types are inferred from Zod schemas, and the same schemas validate at runtime.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -179,8 +180,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Reactive by Default",
-    body: "Reactions let you build event-driven flows and side effects with ease — with built-in correlation, drain, and dual-frontier processing.",
+    title: "Reactions",
+    body: "Reactions run after events are committed, with retries, backoff and timers handled by the framework.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="23 4 23 10 17 10" />
@@ -191,8 +192,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Production Adapters Included",
-    body: "Postgres for scale, SQLite for embedded, in-memory for tests. Switch between them with a single line of code.",
+    title: "Store Adapters",
+    body: "Postgres and SQLite stores, plus an in-memory store for tests. The store is set in one call.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -202,8 +203,8 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
   {
-    title: "Minimal Footprint",
-    body: "Minimal and dependency-light. No codegen, no runtime bloat, and a tiny bundle size.",
+    title: "Small Footprint",
+    body: "The core package depends only on its own patch utility, with Zod as a peer. No code generation.",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73z" />
@@ -213,126 +214,6 @@ const FEATURES: { title: string; body: string; icon: JSX.Element }[] = [
     ),
   },
 ];
-
-function Hero() {
-  const docsUrl = useBaseUrl("/docs/intro");
-  return (
-    <header className={styles.hero}>
-      <div className={styles.heroGlow} aria-hidden />
-      <div className={styles.heroInner}>
-        <div className={styles.heroBadge}>
-          <span className={styles.heroBadgeDot} />
-          v1.x &middot; TypeScript-first event sourcing
-        </div>
-
-        <div className={styles.heroBrand}>
-          <img
-            className={styles.heroIcon}
-            src={useBaseUrl("/img/logo-dark.png")}
-            alt=""
-            aria-hidden="true"
-          />
-          <h1 className={styles.heroWordmark} aria-label="Act">
-            <span style={{ color: "var(--act-cyan)" }}>A</span>
-            <span style={{ color: "var(--act-amber)" }}>c</span>
-            <span className={styles.heroT} style={{ color: "var(--act-green)" }}>
-              t
-            </span>
-          </h1>
-        </div>
-
-        <p className={styles.heroTagline}>
-          <span className="act-gradient-text">Fluent event sourcing</span> for TypeScript
-        </p>
-
-        <p className={styles.heroLede}>
-          Build robust, auditable, and reactive systems with composable state machines, pure
-          functions, and zero runtime bloat.
-        </p>
-
-        <div className={styles.heroCtas}>
-          <Link className={`button button--primary button--lg ${styles.heroCta}`} to={docsUrl}>
-            Get started
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 12h14M13 6l6 6-6 6" />
-            </svg>
-          </Link>
-          <Link
-            className={`button button--secondary button--lg ${styles.heroCta}`}
-            href="https://github.com/rotorsoft/act-root"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.157-1.11-1.465-1.11-1.465-.908-.62.069-.608.069-.608 1.004.07 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.987 1.029-2.686-.103-.254-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.025A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.295 2.748-1.025 2.748-1.025.546 1.378.202 2.396.1 2.65.64.699 1.028 1.593 1.028 2.686 0 3.847-2.338 4.695-4.566 4.944.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.749 0 .268.18.579.688.481C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2Z" />
-            </svg>
-            GitHub
-          </Link>
-          <Link
-            className={`button button--lg ${styles.heroCta} ${styles.heroCtaBook}`}
-            href="https://payhip.com/b/7ezLy"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-            </svg>
-            Read the Book
-          </Link>
-        </div>
-
-        <div className={styles.heroPills}>
-          <span className={styles.heroPill}>Actions → State ← Reactions</span>
-          <span className={styles.heroPill}>Postgres · SQLite · In-Memory</span>
-          <span className={styles.heroPill}>tRPC · REST · OpenAPI</span>
-          <span className={styles.heroPill}>Zod-typed</span>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function Quickstart() {
-  const getStartedUrl = useBaseUrl("/docs/intro");
-  const { siteConfig } = useDocusaurusContext();
-  const quickstartApp = (siteConfig.customFields?.quickstartSource as string)
-    .replace(/^(?:\/\/.*\n)+\n?/, "")
-    .trimEnd();
-  return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>
-          <span className="act-gradient-text">Three steps</span> to your first event
-        </h2>
-        <p className={styles.sectionSub}>From install to your first persisted event in under a minute.</p>
-      </div>
-
-      <div className={styles.quickstartCard}>
-        <div className={styles.qsStep}>
-          <span className={styles.qsStepNum}>1</span>
-          <span className={styles.qsStepLabel}>Install</span>
-        </div>
-        <CodeBlock language="bash">{QUICKSTART_INSTALL}</CodeBlock>
-
-        <div className={styles.qsStep}>
-          <span className={styles.qsStepNum}>2</span>
-          <span className={styles.qsStepLabel}>Define a state and run an action</span>
-        </div>
-        <CodeBlock language="typescript">{quickstartApp}</CodeBlock>
-
-        <div className={styles.qsStep}>
-          <span className={styles.qsStepNum}>3</span>
-          <span className={styles.qsStepLabel}>Run &amp; explore</span>
-        </div>
-        <p className={styles.qsRunHint}>
-          Run your app and see the output in your terminal. Then dive into reactions, projections,
-          and slices.
-        </p>
-
-        <Link className={`button button--primary button--lg ${styles.qsCta}`} to={getStartedUrl}>
-          Read the full guide
-        </Link>
-      </div>
-    </section>
-  );
-}
 
 type SandboxProps = {
   title: string;
@@ -442,51 +323,160 @@ function Sandbox({ title, repoSlug, openFile, startScript, open, source, blurb }
   );
 }
 
-function Sandboxes() {
+function CopyInstall() {
+  const [copied, setCopied] = useState(false);
   return (
-    <BrowserOnly fallback={null}>
-      {() => {
-        const isChrome =
-          /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
-        const isDesktop =
-          window.innerWidth > 900 && !/Mobi|Android/i.test(navigator.userAgent);
-        if (!isChrome || !isDesktop) return null;
-
-        return (
-          <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>
-                <span className="act-gradient-text">Try it live</span>
-              </h2>
-              <p className={styles.sectionSub}>
-                Two interactive sandboxes — actions, events and replay in the first;
-                independent drain lanes drafting over the leading/lagging frontier in the second.
-              </p>
-            </div>
-
-            <Sandbox
-              title="Event Sourcing + Lanes"
-              blurb="Calculator demo — random keypresses commit events, a digit-board projection drains on the “board” lane, a per-stream result projection drains on the “result” lane. Watch lane names tag every drain cycle in the trace."
-              repoSlug="rotorsoft/act-root/tree/master/packages/calculator"
-              openFile="src/main.ts"
-              startScript="dev:stackblitz"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&startScript=dev%3Astackblitz"
-              source="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
-            />
-
-            <Sandbox
-              title="Lanes × Adaptive Dual-Frontier Drain"
-              blurb="Todo load test split across three lanes — “creates” (tight lease, hot path), “updates” (medium cadence), and “deletes” (long lease, can tolerate lag). Each drain cycle prints a lane × frontier table so you can see Act adapt the leading/lagging budget independently per lane until all three converge at their own pace."
-              repoSlug="rotorsoft/act-root/tree/master/performance/act-performance"
-              openFile="src/index.ts"
-              startScript="start:stackblitz"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&startScript=start%3Astackblitz"
-              source="https://github.com/rotorsoft/act-root/tree/master/performance/act-performance/src"
-            />
-          </section>
-        );
+    <button
+      type="button"
+      className={styles.install}
+      onClick={() => {
+        navigator.clipboard
+          ?.writeText(QUICKSTART_INSTALL)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1600);
+          })
+          .catch(() => {});
       }}
-    </BrowserOnly>
+      aria-label="Copy the install command"
+    >
+      <span className={styles.installPrompt} aria-hidden>
+        $
+      </span>
+      <code>{QUICKSTART_INSTALL}</code>
+      <span className={styles.installCopy}>{copied ? "Copied" : "Copy"}</span>
+    </button>
+  );
+}
+
+// The docs theme toggle sets data-theme on <html>; the embedded player follows it.
+function useSiteTheme(): string {
+  const [theme, setTheme] = useState("dark");
+  useEffect(() => {
+    const root = document.documentElement;
+    const read = () => setTheme(root.dataset.theme === "light" ? "light" : "dark");
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  }, []);
+  return theme;
+}
+
+function Hero() {
+  const docsUrl = useBaseUrl("/docs/intro");
+  const frameUrl = useBaseUrl("/flows/wolfdesk.html");
+  const galleryUrl = useBaseUrl("/flows/index.html");
+  const guideUrl = useBaseUrl("/docs/guides/flow-animations");
+  const colorMode = useSiteTheme();
+  return (
+    <header className={styles.hero}>
+      <div className={styles.heroTop}>
+        <h1 className={styles.formula} aria-label="Act: Actions, State, Reactions">
+          <span className={styles.fAction}>Actions</span>
+          <span className={styles.fArrow}> → </span>
+          <span className={styles.fState}>
+            <b>{"{"}</b>State<b>{"}"}</b>
+          </span>
+          <span className={styles.fArrow}> ← </span>
+          <span className={styles.fReaction}>Reactions</span>
+        </h1>
+        <p className={styles.heroLede}>
+          Fluent event sourcing for TypeScript. Declare actions, state and reactions with typed
+          builders; Act stores the events, runs the reactions and keeps the projections up to date.
+        </p>
+        <div className={styles.heroCtas}>
+          <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
+            Get started
+          </Link>
+          <Link
+            className={`button button--secondary button--lg ${styles.cta}`}
+            href="https://github.com/rotorsoft/act-root"
+          >
+            GitHub
+          </Link>
+          <CopyInstall />
+        </div>
+      </div>
+
+      <figure className={styles.stage}>
+        <iframe
+          key={colorMode}
+          className={styles.stageFrame}
+          src={`${frameUrl}#embed-${colorMode}`}
+          title="WolfDesk ticket flows, animated from the app's own builders"
+        />
+        <figcaption className={styles.stageCaption}>
+          <p>
+            <b>WolfDesk, the ticketing example, drawn from its builders.</b> Each tab is a
+            scripted walk through its flows: an action passes the state's checks, its event is
+            stored, and the reactions and timers it triggers run next. The repo includes a Claude
+            Code skill that makes the same page for your own app.
+          </p>
+          <div className={styles.linkRow}>
+            <a className={styles.textLink} href={frameUrl}>
+              Open full screen
+            </a>
+            <a className={styles.textLink} href={galleryUrl}>
+              All animations
+            </a>
+            <Link className={styles.textLink} to={guideUrl}>
+              How it's made
+            </Link>
+          </div>
+        </figcaption>
+      </figure>
+    </header>
+  );
+}
+
+function SectionHead({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className={styles.head}>
+      <h2 className={styles.headTitle}>{title}</h2>
+      <p className={styles.headSub}>{children}</p>
+    </div>
+  );
+}
+
+function Quickstart() {
+  const getStartedUrl = useBaseUrl("/docs/intro");
+  const { siteConfig } = useDocusaurusContext();
+  const quickstartApp = (siteConfig.customFields?.quickstartSource as string)
+    .replace(/^(?:\/\/.*\n)+\n?/, "")
+    .trimEnd();
+  return (
+    <section className={styles.section}>
+      <div className={styles.split}>
+        <div className={styles.splitText}>
+          <SectionHead title="Quickstart">
+            A calculator with one state, one action and three events, on the in-memory store. Swap
+            in the Postgres or SQLite store when you need persistence.
+          </SectionHead>
+          <ol className={styles.steps}>
+            <li>
+              <b>Install</b> <code>{QUICKSTART_INSTALL}</code>
+            </li>
+            <li>
+              <b>Declare the state.</b> A Zod schema, the events it emits, how each event patches it,
+              and the action that decides which event to emit.
+            </li>
+            <li>
+              <b>Run it.</b> Every <code>app.do</code> appends to the log; <code>app.load</code>{" "}
+              folds the stream back into state.
+            </li>
+          </ol>
+          <Link className={`button button--primary ${styles.cta}`} to={getStartedUrl}>
+            Read the guide
+          </Link>
+        </div>
+        <div className={styles.codePanel}>
+          <CodeBlock language="typescript" title="quickstart.ts">
+            {quickstartApp}
+          </CodeBlock>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -494,47 +484,35 @@ function CompositionPatterns() {
   const [active, setActive] = useState<PatternId>("slices");
   const ids = Object.keys(PATTERNS) as PatternId[];
   const current = PATTERNS[active];
-
   return (
     <section className={styles.section}>
-      <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>
-          <span className="act-gradient-text">Advanced composition</span> patterns
-        </h2>
-        <p className={styles.sectionSub}>
-          Five primitives compose every Act application — slices, projections, partial states,
-          invariants, and the orchestrator.
-        </p>
-      </div>
-
-      <div className={styles.patternsPanel}>
-        <div className={styles.patternsTabs} role="tablist">
+      <SectionHead title="Composition patterns">
+        How larger models are put together, shown on WolfDesk. The full source is in{" "}
+        <Link to="https://github.com/rotorsoft/act-root/tree/master/packages/wolfdesk/src">
+          packages/wolfdesk
+        </Link>
+        .
+      </SectionHead>
+      <div className={styles.patterns}>
+        <div className={styles.patternTabs} role="tablist" aria-orientation="vertical">
           {ids.map((id) => (
             <button
               key={id}
               role="tab"
-              aria-selected={active === id}
               type="button"
-              className={`${styles.patternsTab} ${active === id ? styles.patternsTabActive : ""}`}
+              aria-selected={active === id}
+              className={styles.patternTab}
               onClick={() => setActive(id)}
             >
-              {PATTERNS[id].tab}
+              <span>{PATTERNS[id].tab}</span>
+              <small>{PATTERNS[id].title}</small>
             </button>
           ))}
         </div>
-
-        <div className={styles.patternsBody}>
-          <h3 className={styles.patternsHeading}>{current.title}</h3>
-          <p className={styles.patternsBlurb}>{current.blurb}</p>
+        <div className={styles.patternBody} role="tabpanel">
+          <p className={styles.patternBlurb}>{current.blurb}</p>
           <CodeBlock language="typescript">{current.code}</CodeBlock>
-          <p className={styles.patternsNote}>{current.note}</p>
-          <p className={styles.patternsNote}>
-            Abridged for the overview — the full, runnable model lives in{" "}
-            <Link to="https://github.com/rotorsoft/act-root/tree/master/packages/wolfdesk/src">
-              @act/wolfdesk
-            </Link>
-            .
-          </p>
+          <p className={styles.patternNote}>{current.note}</p>
         </div>
       </div>
     </section>
@@ -545,71 +523,117 @@ function GeneratedTransports() {
   const guideUrl = useBaseUrl("/docs/guides/auto-generated-api");
   return (
     <section className={styles.section}>
-      <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>
-          <span className="act-gradient-text">From registry</span> to wire
-        </h2>
-        <p className={styles.sectionSub}>
-          A built Act is a typed registry of actions. <code>@rotorsoft/act-http</code> walks
-          it once and emits tRPC, Hono REST, and an OpenAPI 3.1 document — same actor and
-          stream seams across every transport, same error envelope, no codegen step.
-        </p>
-      </div>
-
-      <div className={styles.quickstartCard}>
-        <CodeBlock language="typescript">{GENERATED_TRANSPORTS_CODE}</CodeBlock>
-
-        <div className={styles.transportRow}>
-          <div className={styles.transportCard}>
-            <span className={styles.transportTag}>tRPC</span>
-            <p>
-              Typed React/Node client via <code>typeof router</code>. Mount with
-              <code> fetchRequestHandler</code> on any fetch-shaped runtime.
-            </p>
-          </div>
-          <div className={styles.transportCard}>
-            <span className={styles.transportTag}>Hono REST</span>
-            <p>
-              <code>POST /api/actions/&lt;name&gt;</code> per action. Runs unchanged on
-              Node, Bun, Cloudflare Workers, Vercel Edge, AWS Lambda.
-            </p>
-          </div>
-          <div className={styles.transportCard}>
-            <span className={styles.transportTag}>OpenAPI 3.1</span>
-            <p>
-              Pure-data emitter. Describes the live REST surface; pair with Scalar or
-              Redoc for an interactive explorer.
-            </p>
-          </div>
+      <div className={styles.split}>
+        <div className={styles.splitText}>
+          <SectionHead title="Generated APIs">
+            <code>@rotorsoft/act-http</code> reads the actions of a built app and creates a tRPC
+            router, Hono REST routes and an OpenAPI 3.1 document from them, with the same actor and
+            stream handling and the same error shape on each.
+          </SectionHead>
+          <dl className={styles.transports}>
+            <div>
+              <dt>tRPC</dt>
+              <dd>
+                A typed client from <code>typeof router</code>, on any fetch runtime.
+              </dd>
+            </div>
+            <div>
+              <dt>Hono REST</dt>
+              <dd>
+                <code>POST /api/actions/&lt;name&gt;</code> on Node, Bun, Workers, Vercel Edge or
+                Lambda.
+              </dd>
+            </div>
+            <div>
+              <dt>OpenAPI 3.1</dt>
+              <dd>A plain document of the live surface. Pair it with Scalar or Redoc.</dd>
+            </div>
+          </dl>
+          <Link className={styles.textLink} to={guideUrl}>
+            Read the API guide
+          </Link>
         </div>
-
-        <Link className={`button button--primary button--lg ${styles.qsCta}`} to={guideUrl}>
-          Read the API guide
-        </Link>
+        <div className={styles.codePanel}>
+          <CodeBlock language="typescript">{GENERATED_TRANSPORTS_CODE}</CodeBlock>
+        </div>
       </div>
     </section>
+  );
+}
+
+const SANDBOXES: SandboxProps[] = [
+  {
+    title: "Calculator with lanes",
+    blurb:
+      "Random keypresses commit events. A digit-board projection drains on the “board” lane and a per-stream result projection on the “result” lane; every drain cycle in the trace is tagged with its lane.",
+    repoSlug: "rotorsoft/act-root/tree/master/packages/calculator",
+    openFile: "src/main.ts",
+    startScript: "dev:stackblitz",
+    open: "https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&startScript=dev%3Astackblitz",
+    source: "https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src",
+  },
+  {
+    title: "Load test on three lanes",
+    blurb:
+      "A todo load test split across “creates”, “updates” and “deletes” lanes, each with its own lease and cadence. Each cycle prints a lane by frontier table, so you can watch every lane catch up at its own pace.",
+    repoSlug: "rotorsoft/act-root/tree/master/performance/act-performance",
+    openFile: "src/index.ts",
+    startScript: "start:stackblitz",
+    open: "https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&startScript=start%3Astackblitz",
+    source: "https://github.com/rotorsoft/act-root/tree/master/performance/act-performance/src",
+  },
+];
+
+function Sandboxes() {
+  const [active, setActive] = useState(0);
+  return (
+    <BrowserOnly fallback={null}>
+      {() => {
+        const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+        const isDesktop = window.innerWidth > 900 && !/Mobi|Android/i.test(navigator.userAgent);
+        if (!isChrome || !isDesktop) return null;
+        return (
+          <section className={styles.section}>
+            <SectionHead title="Console output">
+              Two example projects running in StackBlitz, so you can watch what Act logs as it
+              works. They start when you scroll here, in desktop Chrome only.
+            </SectionHead>
+            <div className={styles.sandboxTabs} role="tablist">
+              {SANDBOXES.map((s, i) => (
+                <button
+                  key={s.title}
+                  type="button"
+                  role="tab"
+                  aria-selected={active === i}
+                  className={styles.sandboxTab}
+                  onClick={() => setActive(i)}
+                >
+                  {s.title}
+                </button>
+              ))}
+            </div>
+            <Sandbox key={SANDBOXES[active].title} {...SANDBOXES[active]} />
+          </section>
+        );
+      }}
+    </BrowserOnly>
   );
 }
 
 function Features() {
   return (
     <section className={styles.section}>
-      <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>
-          <span className="act-gradient-text">Built for serious systems</span>
-        </h2>
-        <p className={styles.sectionSub}>
-          Type-safe primitives and production-ready adapters, with the smallest API surface that
-          gets the job done.
-        </p>
-      </div>
-
-      <div className={styles.featureGrid}>
+      <SectionHead title="Features">
+        What the framework gives you, in short.
+      </SectionHead>
+      <div className={styles.features}>
         {FEATURES.map((f) => (
-          <div key={f.title} className={styles.featureCard}>
-            <div className={styles.featureIcon}>{f.icon}</div>
-            <h3 className={styles.featureTitle}>{f.title}</h3>
-            <p className={styles.featureBody}>{f.body}</p>
+          <div key={f.title} className={styles.feature}>
+            <span className={styles.featureIcon} aria-hidden>
+              {f.icon}
+            </span>
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
           </div>
         ))}
       </div>
@@ -621,59 +645,23 @@ function FinalCta() {
   const docsUrl = useBaseUrl("/docs/intro");
   const archUrl = useBaseUrl("/docs/architecture");
   return (
-    <section className={`${styles.section} ${styles.finalCta}`}>
-      <div className={styles.finalCtaInner}>
-        <h2 className={styles.finalCtaTitle}>
-          Ready to <span className="act-gradient-text">act</span>?
-        </h2>
-        <p className={styles.finalCtaBody}>
-          Spend a minute on the quickstart, an afternoon on the Calculator example, or a weekend
-          on WolfDesk — every step has a working sandbox.
+    <section className={`${styles.section} ${styles.final}`}>
+      <div>
+        <h2 className={styles.headTitle}>Get started</h2>
+        <p className={styles.headSub}>
+          Begin with the quickstart, then read the calculator and WolfDesk examples.
         </p>
-        <div className={styles.heroCtas}>
-          <Link className="button button--primary button--lg" to={docsUrl}>
-            Get started
-          </Link>
-          <Link className="button button--secondary button--lg" to={archUrl}>
-            Architecture deep-dive
-          </Link>
-        </div>
+      </div>
+      <div className={styles.heroCtas}>
+        <Link className={`button button--primary button--lg ${styles.cta}`} to={docsUrl}>
+          Read the docs
+        </Link>
+        <Link className={`button button--secondary button--lg ${styles.cta}`} to={archUrl}>
+          Architecture
+        </Link>
       </div>
     </section>
   );
-}
-
-function AnimatedT() {
-  // Animate the wordmark "t" every 12 seconds when the hero is visible.
-  useEffect(() => {
-    const t = document.querySelector(`.${styles.heroT}`);
-    if (!t) return;
-    let timer: number | undefined;
-    const trigger = () => {
-      t.classList.remove(styles.heroTAnimate);
-      // Force reflow.
-      void (t as HTMLElement).offsetWidth;
-      t.classList.add(styles.heroTAnimate);
-    };
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          trigger();
-          timer = window.setInterval(trigger, 12000);
-        } else if (timer) {
-          window.clearInterval(timer);
-          timer = undefined;
-        }
-      },
-      { threshold: 0.5 },
-    );
-    observer.observe(t);
-    return () => {
-      observer.disconnect();
-      if (timer) window.clearInterval(timer);
-    };
-  }, []);
-  return null;
 }
 
 export default function Home() {
@@ -683,13 +671,12 @@ export default function Home() {
       title={`${siteConfig.title} — ${siteConfig.tagline}`}
       description="Act is a TypeScript-first event sourcing framework with composable state machines, reactions, projections, and adapters for Postgres and SQLite."
     >
-      <BrowserOnly>{() => <AnimatedT />}</BrowserOnly>
       <main className={styles.main}>
         <Hero />
         <Quickstart />
-        <Sandboxes />
         <CompositionPatterns />
         <GeneratedTransports />
+        <Sandboxes />
         <Features />
         <FinalCta />
       </main>

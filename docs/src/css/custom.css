@@ -471,3 +471,60 @@ hr {
   color: transparent;
   -webkit-text-fill-color: transparent;
 }
+
+/* ---------- Navbar wordmark ---------- */
+.act-brand {
+  gap: 0.55rem;
+}
+.act-wordmark {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 900;
+  font-size: 1.65rem;
+  line-height: 1;
+  letter-spacing: -0.07em;
+  display: inline-flex;
+}
+.act-a { color: #0a7fd1; }
+.act-c { color: #a86f00; }
+.act-t { color: #2e7d32; }
+[data-theme="dark"] .act-a { color: var(--act-cyan); }
+[data-theme="dark"] .act-c { color: var(--act-amber); }
+[data-theme="dark"] .act-t { color: #5fbf63; }
+
+/* The t swings once every 12 seconds. */
+.act-t {
+  display: inline-block;
+  transform-origin: 50% 85%;
+  animation: act-t-swing 12s cubic-bezier(0.4, 0, 0.2, 1) 1.5s infinite;
+}
+@keyframes act-t-swing {
+  0% { transform: rotate(0deg); }
+  2% { transform: rotate(-30deg); }
+  5.5% { transform: rotate(18deg); }
+  7% { transform: rotate(-8deg); }
+  9%, 100% { transform: rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .act-t { animation: none; }
+}
+
+/* ---------- Navbar book link with its cover ---------- */
+.navbar-book {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.book-thumb {
+  width: 24px;
+  height: 32px;
+  border-radius: 3px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--act-border-strong), 0 4px 10px -4px rgba(0, 0, 0, 0.5);
+  transition: transform 0.2s ease;
+}
+.navbar-book:hover .book-thumb {
+  transform: rotate(-4deg) translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .navbar-book:hover .book-thumb { transform: none; }
+}

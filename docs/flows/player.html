@@ -1,0 +1,884 @@
+<title>__TITLE__</title>
+<meta name="description" content="__DESCRIPTION__">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one screen. Top bar (title, scenarios, transport); the flow map fills the left and fits,
+   with captions over its foot; the right rail stacks event stream, live state and how-to-read panels,
+   each scrolling on its own. Legend and node details float above and close. */
+:root {
+  --bg: #f4f5f8; --surface: #ffffff; --raised: #ffffff; --ink: #151922; --muted: #5d6574; --line: #dde1e8; --edge: #b9c0cc;
+  --actor: #4f5d75; --action: #2b5fd0; --state: #a87d00; --event: #d96a14; --projection: #17875c; --reaction: #7f4cc7; --external: #c8336f;
+  --bad: #c62828; --good: #17875c; --focus: #2b5fd0; --shadow: 0 10px 30px rgba(20, 25, 40, .14);
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1015; --surface: #141920; --raised: #1a2029; --ink: #e8ebf1; --muted: #99a2b3; --line: #262d39; --edge: #465061;
+  --actor: #aab6cc; --action: #6e9cff; --state: #e9b931; --event: #ff9548; --projection: #3ccf92; --reaction: #b38bff; --external: #ff6ca8;
+  --bad: #ff6b6b; --good: #3ccf92; --focus: #6e9cff; --shadow: 0 12px 34px rgba(0, 0, 0, .5); color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #0d1015; --surface: #141920; --raised: #1a2029; --ink: #e8ebf1; --muted: #99a2b3; --line: #262d39; --edge: #465061;
+  --actor: #aab6cc; --action: #6e9cff; --state: #e9b931; --event: #ff9548; --projection: #3ccf92; --reaction: #b38bff; --external: #ff6ca8;
+  --bad: #ff6b6b; --good: #3ccf92; --focus: #6e9cff; --shadow: 0 12px 34px rgba(0, 0, 0, .5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); overflow: hidden; }
+.app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { min-width: 0; flex: 1 1 260px; }
+h1 { font: 600 19px/1.2 var(--f-display); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { color: var(--muted); font-size: 12.5px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.tabs button { border: 0; background: transparent; color: var(--muted); font: 500 12.5px var(--f-body); padding: 5px 10px; border-radius: 7px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.ctl { display: flex; gap: 4px; align-items: center; }
+.ctl button, .ctl select { height: 30px; min-width: 32px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; font: 500 12.5px var(--f-body); cursor: pointer; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ctl button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); min-width: 74px; }
+.ctl button[aria-pressed="true"] { background: color-mix(in srgb, var(--action) 14%, var(--surface)); }
+.ctl .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+.ctl svg { width: 14px; height: 14px; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+.recording .rec-dot { animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 400px); min-height: 0; }
+.stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.stage > svg { position: absolute; inset: 0 0 76px 0; width: 100%; height: calc(100% - 76px); display: block; }
+.caption { position: absolute; left: 16px; right: 16px; bottom: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 14px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: var(--shadow); }
+.caption .count { font: 500 12px var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.caption .say { font-size: 15px; min-width: 0; }
+.caption .say b { font-weight: 600; }
+.caption code, .side code { font-family: var(--f-mono); font-size: .92em; }
+.chip { font: 500 12px var(--f-mono); padding: 3px 9px; border-radius: 99px; white-space: nowrap; background: color-mix(in srgb, var(--k, var(--muted)) 14%, var(--surface)); color: var(--k, var(--muted)); }
+.progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; grid-column: 1 / -1; }
+.progress div { height: 100%; width: 0; background: var(--ink); transition: width .3s; }
+
+.side { border-left: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+.panel { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+.panel.grow { flex: 1 1 0; }
+.panel.grow.closed { flex: 0 0 auto; }
+.panel > button.ph { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 10px 16px; font: 600 11.5px var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.panel > button.ph:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.panel > button.ph .meta { margin-left: auto; text-transform: none; letter-spacing: 0; font: 500 11.5px var(--f-mono); }
+.panel > button.ph .caret { transition: transform .2s; font-size: 10px; }
+.panel.closed > button.ph .caret { transform: rotate(-90deg); }
+.panel .pb { overflow: auto; min-height: 0; padding: 0 16px 12px; }
+.panel.closed .pb { display: none; }
+.log { list-style: none; margin: 0; padding: 0; font: 12px/1.4 var(--f-mono); }
+.log li { display: grid; grid-template-columns: 2.6em minmax(0, 1fr); gap: 1px 10px; padding: 6px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.log li:first-child { border-top: 0; }
+.log li.new { animation: flash 1.2s ease-out; }
+.log .id { color: var(--muted); text-align: right; }
+.log .nm { color: var(--event); font-weight: 500; overflow-wrap: anywhere; }
+.log li.rej .nm, .log li.blk .nm { color: var(--bad); }
+.log .st, .log .dt { grid-column: 2; color: var(--muted); overflow-wrap: anywhere; }
+.log .dt { font-size: 11.5px; }
+.log .by { display: inline-flex; align-items: center; gap: 4px; }
+.log .by svg { width: 12px; height: 12px; flex: none; }
+.empty { display: block; color: var(--muted); font: 13px var(--f-body); }
+@keyframes flash { from { background: color-mix(in srgb, var(--event) 18%, transparent); } to { background: transparent; } }
+.state { margin: 0; display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 0 12px; font: 12px/1.45 var(--f-mono); }
+.state dt { color: var(--muted); padding: 3px 0; border-top: 1px solid var(--line); }
+.state dd { margin: 0; padding: 3px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.state dt:first-of-type, .state dd:first-of-type { border-top: 0; }
+.state .chg { animation: chg 1.6s ease-out; }
+.state dd.chg { color: var(--state); font-weight: 500; }
+@keyframes chg { from { background: color-mix(in srgb, var(--state) 22%, transparent); } to { background: transparent; } }
+.read { margin-top: 12px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); padding-top: 8px; }
+.read summary { cursor: pointer; font: 600 11.5px var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 2px 0 6px; }
+.read p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+
+/* floating windows */
+.win { position: absolute; z-index: 5; width: 320px; max-width: calc(100% - 24px); max-height: calc(100% - 110px); display: flex; flex-direction: column; background: color-mix(in srgb, var(--raised) 78%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.win header { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; cursor: grab; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); user-select: none; touch-action: none; }
+.win header h2 { margin: 0; font: 600 11.5px var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); flex: 1; }
+.win header button { border: 0; background: transparent; color: var(--muted); width: 26px; height: 26px; border-radius: 6px; cursor: pointer; font-size: 16px; line-height: 1; }
+.win header button:hover { background: var(--bg); color: var(--ink); }
+.win .wb { padding: 10px 14px 12px; overflow: auto; min-height: 0; }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 12px; }
+#legend-win { width: 380px; }
+.legend div { display: flex; align-items: center; gap: 9px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.legend svg { width: 14px; height: 14px; flex: none; }
+.legend .mono { font-family: var(--f-mono); width: 14px; text-align: center; flex: none; }
+.ico { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.detail h3 { font: 600 17px var(--f-display); margin: 0 0 2px; overflow-wrap: anywhere; }
+.detail .kind { font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; }
+.detail p { margin: 8px 0; color: var(--muted); font-size: 13px; }
+.detail ul { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.detail pre { font: 11.5px/1.45 var(--f-mono); background: var(--bg); border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 8px 0; white-space: pre-wrap; }
+.detail .rel { font-size: 13px; }
+.detail .rel button { border: 0; background: none; padding: 0; color: var(--ink); text-decoration: underline; text-decoration-color: var(--edge); cursor: pointer; font: inherit; }
+.detail .file { font: 11.5px var(--f-mono); color: var(--muted); overflow-wrap: anywhere; }
+.toast { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); z-index: 9; background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; max-width: min(560px, 90%); box-shadow: var(--shadow); }
+
+/* svg */
+.lane-bg { fill: var(--surface); opacity: .6; }
+.lane-sep { stroke: var(--line); }
+.lane-label { font: 600 11px var(--f-body); letter-spacing: .09em; text-transform: uppercase; fill: var(--muted); }
+.lane-sub { font: 11px var(--f-mono); fill: var(--muted); opacity: .8; }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.4; transition: stroke .3s, opacity .3s, stroke-width .3s; }
+.edge.dash { stroke-dasharray: 4 4; }
+.arrow { fill: var(--edge); transition: fill .3s, opacity .3s; }
+.eg.trail .edge { stroke: var(--k); stroke-width: 2; opacity: .55; }
+.eg.trail .arrow { fill: var(--k); opacity: .55; }
+.eg.live .edge { stroke: var(--k); stroke-width: 2.6; opacity: 1; }
+.eg.live .arrow { fill: var(--k); opacity: 1; }
+.dim .eg:not(.hl):not(.trail):not(.live) { opacity: .18; }
+.dim .node:not(.hl) { opacity: .35; }
+.eg.hl .edge { stroke: var(--k); stroke-width: 2.2; }
+.eg.hl .arrow { fill: var(--k); }
+.node { cursor: pointer; transition: opacity .3s; }
+.node rect.box { fill: color-mix(in srgb, var(--k) 11%, var(--surface)); stroke: var(--k); stroke-width: 1.3; transition: fill .3s, stroke-width .3s, stroke .3s; }
+.node.auto rect.box { stroke-dasharray: 5 3; }
+.node.on rect.box { fill: color-mix(in srgb, var(--k) 24%, var(--surface)); stroke-width: 2.2; }
+.node.sel rect.box { stroke-width: 2.6; }
+.node.blocked rect.box { stroke: var(--bad); stroke-width: 2.4; fill: color-mix(in srgb, var(--bad) 14%, var(--surface)); }
+.node.bad rect.box { stroke: var(--bad); }
+.node text { font: 600 12.5px var(--f-display); fill: var(--ink); pointer-events: none; }
+.node .tag { font: 600 8.5px var(--f-body); letter-spacing: .1em; fill: var(--k); text-transform: uppercase; }
+.node .badge { font: 500 10px var(--f-mono); fill: var(--k); }
+.node .as { font: 500 9.5px var(--f-mono); fill: var(--muted); }
+.node .glyph { fill: none; stroke: var(--k); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.node .pulse { fill: none; stroke: var(--k); opacity: 0; }
+.node.ping .pulse { animation: ping .9s ease-out; }
+@keyframes ping { 0% { opacity: .9; stroke-width: 6; } 100% { opacity: 0; stroke-width: 18; } }
+.token { fill: var(--k); stroke: var(--surface); stroke-width: 2; }
+.token-halo { fill: var(--k); opacity: .25; }
+.timer circle.face { fill: var(--surface); stroke: var(--k); stroke-width: 1.6; }
+.timer line { stroke: var(--k); stroke-width: 1.6; stroke-linecap: round; }
+.timer .hand { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.verdict rect { fill: var(--surface); stroke: var(--k); stroke-width: 1.4; }
+.verdict text { font: 600 11px var(--f-mono); fill: var(--k); }
+.verdict { animation: pop .25s ease-out; }
+@keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.tick { fill: var(--k); }
+.tick.on { animation: tickon .8s ease-out; }
+@keyframes tickon { 0% { r: 7; } 100% { r: 3.2; } }
+
+/* modes: #record hides interactive chrome, #embed trims for an iframe */
+.record .ctl, .record .win, .embed .brand, .embed .ctl .opt { display: none !important; }
+@media (min-width: 901px) { .embed .main { grid-template-columns: minmax(0, 1fr) clamp(260px, 26vw, 330px); } }
+
+@media (max-width: 900px) {
+  body { overflow: auto; padding-bottom: 96px; }
+  .app { height: auto; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .stage { height: 64vh; overflow: auto; }
+  .stage > svg { position: relative; inset: auto; width: 1100px; height: 100%; }
+  .caption { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 6; grid-template-columns: auto minmax(0, 1fr); }
+  .caption .chip { display: none; }
+  .caption .say { font-size: 14px; }
+  .side { border-left: 0; border-top: 1px solid var(--line); }
+  .panel .pb { max-height: 50vh; }
+  .win { position: fixed; }
+}
+@media (prefers-reduced-motion: reduce) { .node.ping .pulse, .timer .hand, .log li.new, .tick.on, .verdict, .state .chg, .recording .rec-dot { animation: none; } }
+</style>
+
+<div class="app" id="app">
+  <div class="top">
+    <div class="brand">
+      <h1 id="title"></h1>
+      <p class="sub" id="subtitle"></p>
+    </div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <div class="ctl">
+      <button id="restart" title="Restart scenario" aria-label="Restart scenario">⟲</button>
+      <button id="back" title="Previous step (←)" aria-label="Previous step">‹</button>
+      <button id="play" class="primary" title="Play or pause (space)">Play</button>
+      <button id="fwd" title="Next step (→)" aria-label="Next step">›</button>
+      <select id="speed" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.6">1.6×</option><option value="2.5">2.5×</option></select>
+      <span class="sep opt"></span>
+      <button id="legend-btn" class="opt" aria-pressed="true" title="Show or hide the legend and how to read">Legend</button>
+      <button id="theme-btn" class="opt" title="Switch light or dark" aria-label="Switch light or dark"><svg viewBox="0 0 16 16" class="ico"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11A5.5 5.5 0 0 0 8 2.5z" fill="currentColor"/></svg></button>
+      <button id="rec-btn" class="opt" title="Record this scenario as a video of the tab"><span class="rec-dot"></span>Record</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <section class="stage" id="stage">
+      <svg id="svg" role="img" aria-label="Flow map" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="caption" aria-live="polite">
+        <span class="count" id="count"></span>
+        <span class="say" id="say"></span>
+        <span class="chip" id="chip" hidden></span>
+        <div class="progress"><div id="prog"></div></div>
+      </div>
+      <div class="win" id="legend-win" style="right:16px;bottom:92px">
+        <header><h2>Legend</h2><button data-close aria-label="Close legend">×</button></header>
+        <div class="wb">
+          <div class="legend" id="legend"></div>
+          <details class="read" id="read-box" open>
+            <summary>How to read</summary>
+            <div id="read"></div>
+          </details>
+        </div>
+      </div>
+      <div class="win detail" id="node-win" hidden style="right:16px;top:16px">
+        <header><h2>Selected</h2><button data-close aria-label="Close details">×</button></header>
+        <div class="wb" id="detail"></div>
+      </div>
+      <div class="toast" id="toast" hidden role="status"></div>
+    </section>
+
+    <aside class="side">
+      <section class="panel grow" id="p-log">
+        <button class="ph" aria-expanded="true"><span class="caret">▼</span>Event stream<span class="meta" id="log-meta"></span></button>
+        <div class="pb"><ol class="log" id="log"></ol></div>
+      </section>
+      <section class="panel grow" id="p-state">
+        <button class="ph" aria-expanded="true"><span class="caret">▼</span><span id="state-h">State</span><span class="meta" id="state-meta"></span></button>
+        <div class="pb" id="state"></div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script type="application/json" id="flow">__FLOW_JSON__</script>
+<script>
+(() => {
+  const spec = JSON.parse(document.getElementById("flow").textContent);
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = id => document.getElementById(id);
+  const modes = new Set(location.hash.slice(1).split("-").filter(Boolean));
+  const RECORD = modes.has("record"), EMBED = modes.has("embed");
+  if (modes.has("dark")) document.documentElement.dataset.theme = "dark";
+  if (modes.has("light")) document.documentElement.dataset.theme = "light";
+  if (RECORD) document.body.classList.add("record");
+  if (EMBED) document.body.classList.add("embed");
+  const reduce = !RECORD && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const KINDS = {
+    actor: { color: "--actor", tag: "actor", name: "Actor" },
+    action: { color: "--action", tag: "action", name: "Action" },
+    state: { color: "--state", tag: "state", name: "State" },
+    event: { color: "--event", tag: "event", name: "Event" },
+    projection: { color: "--projection", tag: "projection", name: "Projection" },
+    reaction: { color: "--reaction", tag: "reaction", name: "Reaction" },
+    external: { color: "--external", tag: "external", name: "Outside world" },
+  };
+  const ICON = {
+    person: '<circle cx="8" cy="5" r="2.6"/><path d="M3 14c.6-3 2.6-4.6 5-4.6s4.4 1.6 5 4.6"/>',
+    automation: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4 5 11M11 5l1.4-1.4"/>',
+  };
+  const svgIcon = k => `<svg viewBox="0 0 16 16" width="14" height="14" class="ico" aria-hidden="true">${ICON[k]}</svg>`;
+
+  /* ---------- layout and drawing (redrawn when the stage changes shape) ---------- */
+  const LABEL_W = 118, PAD = 24, COL_W = spec.colWidth || 142, TOP = 14;
+  const NODE = { actor: [124, 40], action: [124, 52], state: [0, 30], event: [124, 52], projection: [0, 30], reaction: [128, 58], external: [124, 44] };
+  const BASE_H = { actor: 84, action: 96, state: 62, event: 96, projection: 66, reaction: 110, external: 80 };
+  const BARS = new Set(["state", "projection"]);
+  const kindOf = n => n.lane;
+  const isBar = n => BARS.has(kindOf(n));
+  const color = n => `var(${(KINDS[kindOf(n)] || KINDS.action).color})`;
+  const svg = $("svg");
+  const el = (tag, attrs = {}, parent) => {
+    const x = document.createElementNS(NS, tag);
+    for (const k in attrs) x.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(x);
+    return x;
+  };
+  let nodes, edges, lanes, stateBar, gFx, stretch = 0;
+
+  function rounded(pts, r = 9) {
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+      const l1 = Math.hypot(x1 - x0, y1 - y0), l2 = Math.hypot(x2 - x1, y2 - y1);
+      const k = Math.min(r, l1 / 2, l2 / 2);
+      if (k < 0.5) { d += ` L${x1},${y1}`; continue; }
+      const ax = x1 - (x1 - x0) / l1 * k, ay = y1 - (y1 - y0) / l1 * k;
+      const bx = x1 + (x2 - x1) / l2 * k, by = y1 + (y2 - y1) / l2 * k;
+      d += ` L${ax},${ay} Q${x1},${y1} ${bx},${by}`;
+    }
+    const last = pts[pts.length - 1];
+    return d + ` L${last[0]},${last[1]}`;
+  }
+  function words(label) {
+    const parts = label.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
+    if (label.length <= 14 || parts.length === 1) return [label];
+    let best = [label], score = Infinity;
+    for (let i = 1; i < parts.length; i++) {
+      const a = parts.slice(0, i).join(""), b = parts.slice(i).join("");
+      const s = Math.max(a.length, b.length);
+      if (s < score) { score = s; best = [a, b]; }
+    }
+    return best;
+  }
+  const glyph = (kind, x, y, parent, s = 1) => {
+    const g = el("g", { class: "glyph", transform: `translate(${x - 8 * s},${y - 8 * s}) scale(${s})` }, parent);
+    g.innerHTML = ICON[kind];
+    return g;
+  };
+
+  // stretch lane heights so the map fills the stage instead of floating in it
+  function fitStretch(W, H0) {
+    const box = svg.getBoundingClientRect();
+    if (!box.width || !box.height) return 1;
+    return Math.max(1, Math.min(1.9, (box.height / box.width) * W / H0));
+  }
+
+  function drawMap() {
+    svg.textContent = "";
+    nodes = new Map(spec.nodes.map(n => [n.id, { ...n }]));
+    const laneCount = {};
+    for (const n of nodes.values()) if (n.col === undefined && !isBar(n)) n.col = (laneCount[n.lane] = (laneCount[n.lane] ?? -1) + 1);
+    const cols = [...nodes.values()].filter(n => typeof n.col === "number").map(n => n.col);
+    const minCol = Math.min(0, ...cols), maxCol = Math.max(...cols);
+    const X = c => LABEL_W + PAD + (c - minCol) * COL_W + COL_W / 2;
+    const W = X(maxCol) + COL_W / 2 + PAD;
+    edges = spec.edges.map((e, i) => ({ ...e, i, a: nodes.get(e.from), b: nodes.get(e.to) })).filter(e => e.a && e.b);
+    const busRows = edges.filter(e => kindOf(e.a) === "reaction" && kindOf(e.b) === "action").length;
+    const busSpace = busRows * 6 + 6;
+    const present = spec.lanes.filter(l => [...nodes.values()].some(n => n.lane === l.id));
+    const H0 = TOP * 2 + present.reduce((s, l) => s + (l.height || BASE_H[l.id] || 90) + (l.id === "reaction" ? busSpace : 0), 0);
+    stretch = fitStretch(W, H0);
+    lanes = [];
+    let y = TOP;
+    for (const l of present) {
+      const h = (l.height || BASE_H[l.id] || 90) * stretch + (l.id === "reaction" ? busSpace : 0);
+      lanes.push({ ...l, y, h });
+      y += h;
+    }
+    const H = y + TOP;
+    const laneOf = id => lanes.find(l => l.id === id);
+    const actionCols = [...nodes.values()].filter(n => kindOf(n) === "action").map(n => n.col);
+    for (const n of nodes.values()) {
+      const l = laneOf(n.lane);
+      const [w, h] = NODE[kindOf(n)] || NODE.action;
+      n.h = h;
+      n.cy = l.id === "reaction" ? l.y + Math.max(18 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2;
+      if (isBar(n)) {
+        const fed = kindOf(n) === "projection" ? edges.filter(e => e.b === n).map(e => e.a.col) : actionCols;
+        const span = n.span || [Math.min(...fed), Math.max(...fed)];
+        n.x0 = X(span[0]) - COL_W / 2 + 10; n.x1 = X(span[1]) + COL_W / 2 - 10;
+        n.cx = (n.x0 + n.x1) / 2; n.w = n.x1 - n.x0;
+      } else { n.cx = X(n.col); n.w = w; }
+      n.top = n.cy - h / 2; n.bot = n.cy + h / 2; n.left = n.cx - n.w / 2; n.right = n.cx + n.w / 2;
+    }
+    stateBar = [...nodes.values()].find(n => kindOf(n) === "state");
+
+    const inCount = {};
+    function route(e, busIndex) {
+      const { a, b } = e, ka = kindOf(a), kb = kindOf(b);
+      if (kb === "projection") return [[a.cx, a.bot], [a.cx, b.top]];
+      if (ka === "reaction" && kb === "action") {
+        const pl = laneOf("reaction");
+        const busY = pl.y + pl.h - 8 - busIndex * 6;
+        const k = (inCount[b.id] = (inCount[b.id] ?? -1) + 1);
+        const gx = b.left - 10 - k * 5;
+        return [[a.cx, a.bot], [a.cx, busY], [gx, busY], [gx, b.cy], [b.left - 1, b.cy]];
+      }
+      if (b.cy > a.cy) {
+        if (Math.abs(a.cx - b.cx) < 1) return [[a.cx, a.bot], [b.cx, b.top]];
+        const mid = b.top - 14;
+        return [[a.cx, a.bot], [a.cx, mid], [b.cx, mid], [b.cx, b.top]];
+      }
+      const mid = a.top - 14;
+      return [[a.cx, a.top], [a.cx, mid], [b.cx, mid], [b.cx, b.bot]];
+    }
+
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const gLanes = el("g", {}, svg), gEdges = el("g", {}, svg), gNodes = el("g", {}, svg);
+    gFx = el("g", {}, svg);
+    lanes.forEach((l, i) => {
+      if (i % 2 === 0) el("rect", { x: 0, y: l.y, width: W, height: l.h, class: "lane-bg" }, gLanes);
+      if (i) el("line", { x1: 0, x2: W, y1: l.y, y2: l.y, class: "lane-sep" }, gLanes);
+      const t = el("text", { x: 16, y: l.y + 22, class: "lane-label" }, gLanes); t.textContent = l.label;
+      if (l.sub) { const s = el("text", { x: 16, y: l.y + 38, class: "lane-sub" }, gLanes); s.textContent = l.sub; }
+    });
+
+    let bus = 0;
+    for (const e of edges) {
+      const pts = route(e, kindOf(e.a) === "reaction" && kindOf(e.b) === "action" ? bus++ : 0);
+      const g = el("g", { class: "eg", style: `--k:${color(e.b)}` }, gEdges);
+      e.g = g;
+      e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed ? " dash" : "") }, g);
+      if (kindOf(e.b) !== "projection") {
+        const [p, q] = [pts[pts.length - 2], pts[pts.length - 1]];
+        const ang = Math.atan2(q[1] - p[1], q[0] - p[0]);
+        const s = 6, tip = q;
+        const p1 = [tip[0] - s * Math.cos(ang - 0.45), tip[1] - s * Math.sin(ang - 0.45)];
+        const p2 = [tip[0] - s * Math.cos(ang + 0.45), tip[1] - s * Math.sin(ang + 0.45)];
+        el("path", { d: `M${tip} L${p1} L${p2} Z`, class: "arrow" }, g);
+      } else {
+        e.tick = el("circle", { cx: e.a.cx, cy: e.b.top, r: 3.2, class: "tick", style: `--k:${color(e.b)}` }, gEdges);
+      }
+      if (e.timer) {
+        const [tx, ty] = [pts[0][0], (pts[0][1] + pts[1][1]) / 2];
+        const tg = el("g", { class: "timer", style: `--k:${color(e.b)}` }, g);
+        el("circle", { cx: tx, cy: ty, r: 6.5, class: "face" }, tg);
+        el("line", { x1: tx, y1: ty, x2: tx, y2: ty - 3.8 }, tg);
+        el("line", { x1: tx, y1: ty, x2: tx + 2.8, y2: ty }, tg);
+      }
+    }
+
+    for (const n of nodes.values()) {
+      const kind = kindOf(n);
+      const g = el("g", { class: "node" + (kind === "actor" && n.actor === "automation" ? " auto" : ""), tabindex: 0, role: "button", "aria-label": `${KINDS[kind]?.name || ""} ${n.label}`, style: `--k:${color(n)}` }, gNodes);
+      n.g = g;
+      g.addEventListener("click", () => select(selected?.id === n.id ? null : n));
+      g.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); select(n); } });
+      g.addEventListener("mouseenter", () => !playing && hover(n));
+      g.addEventListener("mouseleave", () => hover(null));
+      const r = kind === "actor" ? n.h / 2 : isBar(n) ? 8 : 9;
+      el("rect", { x: n.left - 3, y: n.top - 3, width: n.w + 6, height: n.h + 6, rx: r + 3, class: "pulse" }, g);
+      el("rect", { x: n.left, y: n.top, width: n.w, height: n.h, rx: r, class: "box" }, g);
+      if (isBar(n)) {
+        const t = el("text", { x: n.left + 12, y: n.cy + 4.5 }, g); t.textContent = n.label;
+        if (n.note) { const s = el("text", { x: n.left + 20 + n.label.length * 7.6, y: n.cy + 4, class: "badge" }, g); s.textContent = n.note; }
+        continue;
+      }
+      if (kind === "actor") {
+        glyph(n.actor === "automation" ? "automation" : "person", n.left + 20, n.cy, g, 1.05);
+        const t = el("text", { x: n.left + 34, y: n.cy + 4.5 }, g); t.textContent = n.label;
+        continue;
+      }
+      const tag = el("text", { x: n.left + 8, y: n.top + 12, class: "tag" }, g);
+      tag.textContent = KINDS[kind]?.tag || "";
+      const lines = words(n.label);
+      const lift = kind === "reaction" && n.as ? 6 : 0;
+      const base = n.cy + 8 - lift - (lines.length - 1) * 7.5;
+      lines.forEach((ln, i) => { const t = el("text", { x: n.cx, y: base + i * 15, "text-anchor": "middle" }, g); t.textContent = ln; });
+      if (kind === "reaction" && n.as) {
+        const ty = n.bot - 8, tw = n.as.length * 5.7 + 12;
+        glyph("automation", n.cx - tw / 2 + 5, ty - 3.4, g, 0.62);
+        const t = el("text", { x: n.cx - tw / 2 + 12, y: ty, class: "as" }, g); t.textContent = n.as;
+      }
+      const inv = (n.invariants || []).length;
+      const badge = [n.badge, inv ? `◆${inv}` : ""].filter(Boolean).join(" ");
+      if (badge) { const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g); b.textContent = badge; }
+    }
+    if (selected) { selected = nodes.get(selected.id); selected?.g.classList.add("sel"); }
+  }
+  let selected = null, playing = false;
+  drawMap();
+
+  /* ---------- static text ---------- */
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  $("title").textContent = spec.title;
+  $("subtitle").textContent = spec.subtitle || "";
+  $("subtitle").title = spec.subtitle || "";
+  const used = new Set([...nodes.values()].map(kindOf));
+  $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
+    .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
+    `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
+    `<div><span class="mono">◆</span>Invariants</div><div><span class="mono">⏱</span>Timer (deferred)</div>`;
+  $("read").innerHTML = `
+    <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants and either refuses the action or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
+    <p>Select a box for its contract and source. Keys: space plays or pauses, arrows step.</p>
+    <p>Coming from event storming? Actions are its commands, reactions its policies, and projections build its read models.</p>`;
+
+  /* ---------- panels and windows ---------- */
+  document.querySelectorAll(".panel > .ph").forEach(b => b.onclick = () => {
+    const p = b.parentElement; p.classList.toggle("closed");
+    b.setAttribute("aria-expanded", String(!p.classList.contains("closed")));
+  });
+  function makeWin(win, onClose) {
+    const head = win.querySelector("header"), stage = $("stage");
+    win.querySelector("[data-close]").onclick = () => { win.hidden = true; onClose?.(); };
+    head.addEventListener("pointerdown", ev => {
+      if (ev.target.closest("button")) return;
+      const r = win.getBoundingClientRect(), s = stage.getBoundingClientRect();
+      const dx = ev.clientX - r.left, dy = ev.clientY - r.top;
+      head.setPointerCapture(ev.pointerId);
+      const move = e => {
+        const x = Math.max(0, Math.min(s.width - r.width, e.clientX - s.left - dx));
+        const y = Math.max(0, Math.min(s.height - 40, e.clientY - s.top - dy));
+        Object.assign(win.style, { left: x + "px", top: y + "px", right: "auto" });
+      };
+      const up = () => { head.removeEventListener("pointermove", move); head.removeEventListener("pointerup", up); };
+      head.addEventListener("pointermove", move); head.addEventListener("pointerup", up);
+    });
+  }
+  const legendWin = $("legend-win"), nodeWin = $("node-win");
+  makeWin(legendWin, () => $("legend-btn").setAttribute("aria-pressed", "false"));
+  makeWin(nodeWin, () => select(null));
+  try {
+    if (localStorage.getItem("flow-legend") === "0") { legendWin.hidden = true; $("legend-btn").setAttribute("aria-pressed", "false"); }
+    if (localStorage.getItem("flow-read") === "0") $("read-box").open = false;
+  } catch {}
+  $("read-box").addEventListener("toggle", () => { try { localStorage.setItem("flow-read", $("read-box").open ? "1" : "0"); } catch {} });
+  $("legend-btn").onclick = () => {
+    legendWin.hidden = !legendWin.hidden;
+    $("legend-btn").setAttribute("aria-pressed", String(!legendWin.hidden));
+    try { localStorage.setItem("flow-legend", legendWin.hidden ? "0" : "1"); } catch {}
+  };
+  if (EMBED) legendWin.hidden = true;
+  $("theme-btn").onclick = () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+  };
+  let toastTimer;
+  function toast(msg, ms = 4500) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms); }
+
+  function showNode(n) {
+    const ins = edges.filter(e => e.b === n), outs = edges.filter(e => e.a === n);
+    const link = x => `<button data-id="${esc(x.id)}">${esc(x.label)}</button>`;
+    const k = KINDS[kindOf(n)] || KINDS.action;
+    const who = kindOf(n) === "actor" ? (n.actor === "automation" ? " · automation" : " · person") : kindOf(n) === "reaction" && n.as ? ` · runs as ${esc(n.as)}` : "";
+    $("detail").innerHTML = `
+      <div class="kind" style="color:var(${k.color})">${k.name}${who}</div>
+      <h3>${esc(n.label)}</h3>
+      ${n.file ? `<div class="file">${esc(n.file)}${n.line ? ":" + n.line : ""}</div>` : ""}
+      ${n.description ? `<p>${esc(n.description)}</p>` : ""}
+      ${(n.invariants || []).length ? `<p class="rel">Invariants</p><ul>${n.invariants.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+      ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
+      ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
+      ${outs.length ? `<p class="rel">To: ${outs.map(e => link(e.b)).join(", ")}</p>` : ""}`;
+    $("detail").querySelectorAll("button[data-id]").forEach(b => b.onclick = () => select(nodes.get(b.dataset.id)));
+  }
+  function select(n) {
+    if (selected) selected.g.classList.remove("sel");
+    selected = n;
+    if (n) { n.g.classList.add("sel"); showNode(n); nodeWin.hidden = false; } else nodeWin.hidden = true;
+  }
+  function hover(n) {
+    if (!n) { svg.classList.remove("dim"); document.querySelectorAll(".hl").forEach(x => x.classList.remove("hl")); return; }
+    svg.classList.add("dim");
+    n.g.classList.add("hl");
+    for (const e of edges) if (e.a === n || e.b === n) { e.g.classList.add("hl"); e.a.g.classList.add("hl"); e.b.g.classList.add("hl"); }
+  }
+
+  /* ---------- scenario model ---------- */
+  const scenarios = spec.scenarios || [];
+  const findEdge = (f, t) => edges.find(e => e.from === f && e.to === t);
+  const isObj = v => v && typeof v === "object" && !Array.isArray(v);
+  function merge(a, b) {
+    const out = { ...a };
+    for (const k in b) out[k] = isObj(b[k]) && isObj(a[k]) ? merge(a[k], b[k]) : b[k];
+    return out;
+  }
+  // who invoked the action behind step i's event: a person, an automation actor, or a reaction
+  function issuer(sc, i) {
+    const cmd = sc.steps[i].from;
+    for (let j = i - 1; j >= 0; j--) {
+      const st = sc.steps[j];
+      if (st.to !== cmd) continue;
+      const n = nodes.get(st.from);
+      if (kindOf(n) === "actor") return { kind: n.actor === "automation" ? "automation" : "person", name: n.label };
+      if (kindOf(n) === "reaction") return { kind: "automation", name: n.as || n.label };
+    }
+    return null;
+  }
+  // replays steps [0, k) into the event log, the folded state and blocked targets
+  function replay(k) {
+    const sc = scenarios[cur], log = [], ver = {}, blocked = new Set();
+    let id = sc.startId ?? 1, state = sc.initial ? structuredClone(sc.initial) : {}, changed = [];
+    for (let i = 0; i < k; i++) {
+      const st = sc.steps[i];
+      changed = [];
+      if (st.at) continue;
+      const n = nodes.get(st.to);
+      if (st.reject) { log.push({ type: "rej", name: nodes.get(st.from).label, reason: st.reject, who: issuer(sc, i) }); continue; }
+      if (st.blocked) { blocked.add(st.from); log.push({ type: "blk", name: st.target || nodes.get(st.from).label, reason: `blocked after ${(st.retries || 0) + 1} attempts` }); continue; }
+      if (kindOf(n) !== "event") continue;
+      const stream = st.stream || sc.stream || "stream";
+      ver[stream] = (ver[stream] ?? -1) + 1;
+      log.push({ type: "evt", id: id++, name: n.label, stream, v: ver[stream], data: st.data, who: issuer(sc, i) });
+      const patch = st.patch ?? st.data;
+      if (isObj(patch)) { state = merge(state, patch); changed = Object.keys(patch); }
+    }
+    return { log, state, changed, version: ver[sc.stream || "stream"], blocked };
+  }
+  const fmt = v => v === undefined ? "–" : typeof v === "string" ? v : JSON.stringify(v);
+  function renderPanels(k, fresh) {
+    const r = replay(k), sc = scenarios[cur];
+    const ol = $("log");
+    $("log-meta").textContent = r.log.filter(e => e.type === "evt").length + " committed";
+    if (!r.log.length) ol.innerHTML = `<li><span class="empty" style="grid-column:1/-1">No events yet. Each commit lands here with its global id, stream version and who caused it.</span></li>`;
+    else ol.innerHTML = r.log.map((e, i) => {
+      const cls = (fresh && i === r.log.length - 1 ? "new " : "") + (e.type === "evt" ? "" : e.type);
+      const who = e.who ? `<span class="by">${svgIcon(e.who.kind)}${esc(e.who.name)}</span>` : "";
+      if (e.type === "rej") return `<li class="${cls}"><span class="id">✕</span><span class="nm">${esc(e.name)} refused</span><span class="st">${who}</span><span class="dt">${esc(e.reason)} · nothing committed</span></li>`;
+      if (e.type === "blk") return `<li class="${cls}"><span class="id">⛔</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.reason)}</span></li>`;
+      return `<li class="${cls}"><span class="id">#${e.id}</span><span class="nm">${esc(e.name)}</span><span class="st">${esc(e.stream)} · v${e.v} · ${who}</span>${e.data ? `<span class="dt">${esc(fmt(e.data))}</span>` : ""}</li>`;
+    }).join("");
+    ol.parentElement.scrollTop = ol.parentElement.scrollHeight;
+    $("state-h").textContent = `${stateBar ? stateBar.label : ""} state`;
+    $("state-meta").textContent = `${sc.stream || ""}${r.version !== undefined ? " · v" + r.version : ""}`;
+    const keys = Object.keys(r.state);
+    $("state").innerHTML = keys.length
+      ? `<dl class="state">${keys.map(key => { const c = fresh && r.changed.includes(key) ? ' class="chg"' : ""; return `<dt${c}>${esc(key)}</dt><dd${c}>${esc(fmt(r.state[key]))}</dd>`; }).join("")}</dl>`
+      : `<span class="empty">Empty until the first event. Every committed event patches it, and the next action is checked against it.</span>`;
+    nodes.forEach(n => n.g.classList.toggle("blocked", r.blocked.has(n.id)));
+  }
+
+  /* ---------- playback ---------- */
+  const tabs = $("tabs");
+  scenarios.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.role = "tab"; b.textContent = s.title; b.id = "tab-" + i;
+    b.onclick = () => load(i, true);
+    tabs.appendChild(b);
+  });
+  let cur = 0, step = 0, run = 0, speed = 1;
+  $("speed").onchange = e => speed = +e.target.value;
+
+  const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
+  function setChip(text, k) { const c = $("chip"); c.hidden = !text; c.textContent = text || ""; c.style.setProperty("--k", k || "var(--muted)"); }
+  function setNarr(k) {
+    const sc = scenarios[cur], st = sc.steps[k - 1];
+    $("count").textContent = `${String(k).padStart(2, "0")} / ${String(sc.steps.length).padStart(2, "0")}`;
+    $("say").innerHTML = k === 0 ? `<b>${esc(sc.title)}.</b> ${md(sc.summary || "Press Play to walk the flow.")}` : md(st.say || "");
+    $("prog").style.width = `${(k / sc.steps.length) * 100}%`;
+    if (!k) return setChip("");
+    if (st.reject) return setChip("✕ " + st.reject, "var(--bad)");
+    if (st.blocked) return setChip("⛔ target blocked", "var(--bad)");
+    if (st.wait) return setChip("⏱ " + st.wait, "var(--reaction)");
+    if (st.at) return setChip(st.noop ? "wakes · no-op" : nodes.get(st.at).label, color(nodes.get(st.at)));
+    const n = nodes.get(st.to);
+    setChip((KINDS[kindOf(n)]?.tag || "") + " · " + n.label, color(n));
+  }
+  function paint(k) {
+    edges.forEach(e => e.g.classList.remove("trail", "live"));
+    nodes.forEach(n => n.g.classList.remove("on", "bad"));
+    const sc = scenarios[cur];
+    for (let i = 0; i < k; i++) {
+      const st = sc.steps[i];
+      if (st.at) { nodes.get(st.at).g.classList.add("on"); continue; }
+      findEdge(st.from, st.to)?.g.classList.add("trail");
+      nodes.get(st.from).g.classList.add("on");
+      if (st.reject || st.blocked) continue;
+      nodes.get(st.to).g.classList.add("on");
+      if (kindOf(nodes.get(st.to)) === "event") {
+        stateBar?.g.classList.add("on");
+        edges.filter(x => x.a.id === st.to && kindOf(x.b) === "projection").forEach(x => x.g.classList.add("trail"));
+      }
+    }
+    setNarr(k); renderPanels(k, false);
+  }
+  function load(i, autoplay) {
+    stop(); cur = i; step = 0;
+    [...tabs.children].forEach((b, j) => b.setAttribute("aria-selected", String(j === i)));
+    paint(0);
+    if (autoplay) return play();
+  }
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const wait = (ms, token) => sleep(ms / speed).then(() => token === run);
+  function travel(e, token, f0 = 0, f1 = 1) {
+    return new Promise(res => {
+      const len = e.path.getTotalLength();
+      const dist = Math.abs(f1 - f0) * len;
+      const dur = reduce ? 0 : Math.max(320, dist / 0.42) / speed;
+      const halo = el("circle", { r: 11, class: "token-halo", style: `--k:${color(e.b)}` }, gFx);
+      const dot = el("circle", { r: 5.5, class: "token", style: `--k:${color(e.b)}` }, gFx);
+      const t0 = performance.now();
+      const frame = now => {
+        if (token !== run) { halo.remove(); dot.remove(); return res(false); }
+        const t = dur ? Math.min(1, (now - t0) / dur) : 1;
+        const ease = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        const p = e.path.getPointAtLength(len * (f0 + (f1 - f0) * ease));
+        dot.setAttribute("cx", p.x); dot.setAttribute("cy", p.y);
+        halo.setAttribute("cx", p.x); halo.setAttribute("cy", p.y);
+        if (t < 1) requestAnimationFrame(frame); else { halo.remove(); dot.remove(); res(true); }
+      };
+      requestAnimationFrame(frame);
+    });
+  }
+  function fractionAtY(e, y) {
+    const len = e.path.getTotalLength();
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (e.path.getPointAtLength(len * m).y < y) lo = m; else hi = m; }
+    return lo;
+  }
+  function ping(n) { n.g.classList.remove("ping"); void n.g.getBBox(); n.g.classList.add("ping"); n.g.classList.add("on"); }
+  function verdict(x, y, text, k) {
+    const g = el("g", { class: "verdict", style: `--k:${k}` }, gFx);
+    el("rect", { x: x + 12, y: y - 11, width: text.length * 6.8 + 14, height: 22, rx: 11 }, g);
+    const t = el("text", { x: x + 19, y: y + 4 }, g); t.textContent = text;
+    return g;
+  }
+  function timer(n) {
+    const g = el("g", { class: "timer", style: `--k:var(--reaction)` }, gFx);
+    const x = n.right + 2, y = n.top - 2;
+    el("circle", { cx: x, cy: y, r: 10, class: "face" }, g);
+    el("line", { x1: x, y1: y, x2: x, y2: y - 6.5, class: "hand", style: `transform-origin:${x}px ${y}px` }, g);
+    el("line", { x1: x, y1: y, x2: x + 4, y2: y }, g);
+    return g;
+  }
+  const readTime = st => (reduce ? 1600 : 700 + Math.min(1600, (st.say || "").length * 16));
+
+  async function doStep(token) {
+    const sc = scenarios[cur], st = sc.steps[step];
+    setNarr(step + 1);
+    if (st.at) {
+      const n = nodes.get(st.at);
+      if (st.wait) { const t = timer(n); const ok = await wait(1500, token); t.remove(); if (!ok) return false; }
+      ping(n);
+      const v = st.noop ? verdict(n.right - 10, n.top - 14, "no-op", "var(--muted)") : null;
+      step++;
+      const ok = await wait(readTime(st), token);
+      v?.remove();
+      return ok;
+    }
+    const e = findEdge(st.from, st.to), from = nodes.get(st.from), to = nodes.get(st.to);
+    if (st.wait) { const t = timer(from); const ok = await wait(1500, token); t.remove(); if (!ok) return false; }
+    e.g.classList.add("live");
+    from.g.classList.add("on");
+
+    if (kindOf(from) === "action" && kindOf(to) === "event" && stateBar) {
+      // the action passes through the state: invariants pass or refuse
+      const f = fractionAtY(e, stateBar.cy);
+      if (!(await travel(e, token, 0, f))) return false;
+      ping(stateBar);
+      const inv = (from.invariants || []).length;
+      const v = st.reject
+        ? verdict(from.cx, stateBar.cy, "✕ " + st.reject, "var(--bad)")
+        : verdict(from.cx, stateBar.cy, inv ? `◆${inv} ✓` : "✓", "var(--good)");
+      const ok = await wait(st.reject ? 1700 : 650, token);
+      v.remove();
+      if (!ok) return false;
+      if (st.reject) {
+        from.g.classList.add("bad");
+        e.g.classList.remove("live"); e.g.classList.add("trail");
+        step++; renderPanels(step, true);
+        return wait(readTime(st), token);
+      }
+      if (!(await travel(e, token, f, 1))) return false;
+    } else if (st.retries || st.blocked) {
+      // an outbound call that fails, backs off and retries; blocked when it runs out
+      const n = st.retries || 0, labels = st.backoff || [];
+      const attempts = st.blocked ? n + 1 : n;
+      for (let i = 0; i < attempts; i++) {
+        if (!(await travel(e, token, 0, 1))) return false;
+        to.g.classList.add("bad");
+        const last = st.blocked && i === n;
+        setChip(last ? `attempt ${i + 1} failed · no retries left` : `attempt ${i + 1} failed · retry in ${labels[i] || "backoff"}`, "var(--bad)");
+        const v = verdict(to.cx - 10, to.top - 12, "✕", "var(--bad)");
+        if (!(await wait(700, token))) return false;
+        v.remove(); to.g.classList.remove("bad");
+        if (last) break;
+        const t = timer(from);
+        if (!(await wait(900, token))) return false;
+        t.remove();
+      }
+      if (st.blocked) {
+        e.g.classList.remove("live"); e.g.classList.add("trail");
+        from.g.classList.add("blocked");
+        step++; setNarr(step); renderPanels(step, true);
+        return wait(readTime(st), token);
+      }
+      if (!(await travel(e, token, 0, 1))) return false;
+      setChip(`attempt ${n + 1} succeeded`, "var(--good)");
+    } else if (!(await travel(e, token))) return false;
+
+    e.g.classList.remove("live"); e.g.classList.add("trail");
+    ping(to);
+    step++;
+    if (kindOf(to) === "event") {
+      renderPanels(step, true);
+      stateBar?.g.classList.add("on");
+      for (const x of edges.filter(x => x.a === to && kindOf(x.b) === "projection")) {
+        x.g.classList.add("live");
+        travel(x, token).then(() => { x.g.classList.remove("live"); x.g.classList.add("trail"); x.tick.classList.remove("on"); void x.tick.getBBox(); x.tick.classList.add("on"); });
+      }
+    }
+    return wait(readTime(st), token);
+  }
+  // resolves true when the scenario plays to the end
+  async function play() {
+    const sc = scenarios[cur];
+    if (!sc) return false;
+    if (step >= sc.steps.length) { step = 0; paint(0); }
+    playing = true; hover(null); $("play").textContent = "Pause";
+    const token = ++run;
+    while (playing && token === run && step < sc.steps.length) if (!(await doStep(token))) return false;
+    if (token !== run) return false;
+    playing = false; $("play").textContent = "Replay";
+    return true;
+  }
+  function stop() { run++; playing = false; gFx.innerHTML = ""; edges.forEach(e => e.g.classList.remove("live")); $("play").textContent = "Play"; }
+  const toggle = () => playing ? (stop(), paint(step)) : play();
+  const forward = async () => { const sc = scenarios[cur]; if (step >= sc.steps.length) return; stop(); paint(step); await doStep(++run); };
+  const backward = () => { stop(); step = Math.max(0, step - 1); paint(step); };
+  $("play").onclick = toggle;
+  $("fwd").onclick = forward;
+  $("back").onclick = backward;
+  $("restart").onclick = () => { stop(); step = 0; paint(0); };
+  document.addEventListener("keydown", ev => {
+    if (ev.target.closest?.("select, input, textarea") || RECORD) return;
+    if (ev.key === " ") { ev.preventDefault(); toggle(); }
+    else if (ev.key === "ArrowRight") forward();
+    else if (ev.key === "ArrowLeft") backward();
+    else if (ev.key === "Escape") { select(null); }
+  });
+
+  /* ---------- video: record the tab with the browser's screen capture ---------- */
+  $("rec-btn").onclick = async () => {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 60, displaySurface: "browser" }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" });
+    } catch {
+      return toast("This page can't capture itself here. Open the hosted page in Chrome, or run pnpm -F docs flows:video from the repo for an MP4.", 7000);
+    }
+    const type = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm"].find(t => MediaRecorder.isTypeSupported(t));
+    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 10e6 });
+    const chunks = [];
+    rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+    const done = new Promise(r => rec.onstop = r);
+    const wasLegend = legendWin.hidden;
+    document.body.classList.add("recording"); select(null);
+    await sleep(600);
+    rec.start();
+    await sleep(500);
+    await load(cur, true);
+    await sleep(1200);
+    rec.stop(); stream.getTracks().forEach(t => t.stop());
+    await done;
+    document.body.classList.remove("recording"); legendWin.hidden = wasLegend;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(chunks, { type }));
+    a.download = `${(spec.slug || "flow")}-${cur + 1}.${type.startsWith("video/mp4") ? "mp4" : "webm"}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast("Saved " + a.download);
+  };
+
+  let resizeTimer;
+  new ResizeObserver(() => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const box = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      if (!box.width || !vb.width) return;
+      const want = Math.max(1, Math.min(1.9, stretch * (box.height / box.width) / (vb.height / vb.width)));
+      if (Math.abs(want - stretch) < 0.04) return;
+      const resume = playing;
+      stop(); drawMap();
+      if (scenarios.length) { paint(step); if (resume) play(); }
+    }, 180);
+  }).observe($("stage"));
+
+  /* ---------- start ---------- */
+  const only = [...modes].map(m => /^s(\d+)$/.exec(m)).find(Boolean);
+  const first = only ? Math.min(scenarios.length - 1, Math.max(0, +only[1] - 1)) : 0;
+  async function playAll(loop) {
+    do {
+      for (let i = only ? first : 0; i < (only ? first + 1 : scenarios.length); i++) {
+        if (!(await load(i, true))) return;
+        await sleep(1400);
+      }
+    } while (loop);
+    document.documentElement.dataset.done = "1";
+  }
+  if (!scenarios.length) { document.querySelector(".caption").hidden = true; document.querySelector(".ctl").hidden = true; }
+  else if (RECORD) { speed = +(new URLSearchParams(location.search).get("speed") || 1); load(first, false); setTimeout(() => playAll(false), 1200); }
+  else if (EMBED) { load(first, false); setTimeout(() => playAll(true), 900); }
+  else { load(first, false); if (!reduce) setTimeout(() => step === 0 && !playing && play(), 900); }
+  window.flow = { load, play, stop, scenarios: scenarios.length };
+})();
+</script>

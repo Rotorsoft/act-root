@@ -129,6 +129,7 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | Database-backed projections (Drizzle, batched replay) | [docs/docs/guides/projections-to-database.md](docs/docs/guides/projections-to-database.md) |
 | External integration (inline `webhook` vs forwarded bus, idempotency contract, recovery) | [docs/docs/guides/external-integration.md](docs/docs/guides/external-integration.md) |
 | Auto-generated API surfaces (`trpc`, `hono`, `openapi` subpaths + deployment recipes) | [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md) |
+| Flow animations: animated maps of an app's flows, published with the docs or exported as MP4 (`docs/flows/*.flow.json`, `animate-act-flows` skill) | [docs/docs/guides/flow-animations.md](docs/docs/guides/flow-animations.md) |
 | Adding a new `@rotorsoft/act-*` package | [docs/docs/guides/contributing-new-package.md](docs/docs/guides/contributing-new-package.md) |
 | Third-party adapter onboarding (TCK from a fresh repo + conformance badge) | [docs/docs/guides/tck-conformance.md](docs/docs/guides/tck-conformance.md) |
 | Inspecting contracts with the `act` CLI | [docs/docs/guides/contracts-cli.md](docs/docs/guides/contracts-cli.md) |
@@ -329,6 +330,6 @@ Quick reference:
 - **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
 - **Slash commands**: `/pr`, `/release-check`, `/scaffold-package`.
 - **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
-- **Skills**: `scaffold-act-app` (build an app on Act), `simplify-core` (the simplicity review), `debug_wave` (adversarial bug hunting).
+- **Skills**: `scaffold-act-app` (build an app on Act), `simplify-core` (the simplicity review), `debug_wave` (adversarial bug hunting), `animate-act-flows` (animated flow map of an app).
 
 The typical "ticket → PR" flow: implement → `/release-check` → `act-code-reviewer` (pre-PR) → `/pr <issue#>`. The hooks fill the gap between "I think it's done" and "it is done."

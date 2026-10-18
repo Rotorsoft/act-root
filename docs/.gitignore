@@ -22,3 +22,6 @@ yarn-error.log*
 
 # Generated API reference (typedoc, built in CI)
 /docs/api
+
+# Rendered flow animations, built from docs/flows/*.flow.json by scripts/flows.mjs
+/static/flows

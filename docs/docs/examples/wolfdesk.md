@@ -11,6 +11,8 @@ Inspired by the ticketing system from "Learning Domain-Driven Design" by Vlad Kh
 
 **Source:** [packages/wolfdesk/src/](https://github.com/rotorsoft/act-root/tree/master/packages/wolfdesk/src)
 
+**See it animated:** [WolfDesk ticket flows](pathname:///flows/wolfdesk.html) plays every action, state check, event, reaction and timer in five scenarios: open to resolved, the escalation chain, timers only, retries and blocking, and refused actions. [How these are made](../guides/flow-animations.md).
+
 ## Architecture
 
 ```
