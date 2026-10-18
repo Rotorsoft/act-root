@@ -56,6 +56,8 @@ export class SettleLoop<TEvents extends Schemas> {
   private _pending = false;
   /** The last caller's options, used by the next pass. */
   private _next: SettleOptions | undefined = undefined;
+  /** When the scheduled pass fires (epoch ms). */
+  private _due = 0;
   /** Set at shutdown: nothing schedules again. */
   private _stopped = false;
   private readonly _deps: SettleDeps<TEvents>;
@@ -68,11 +70,12 @@ export class SettleLoop<TEvents extends Schemas> {
   }
 
   /**
-   * Schedule a settle pass. A pass already scheduled is never reset or
-   * replaced: calls that arrive before it runs coalesce into it, and a
-   * call during a running cycle queues one more pass after it. Callers
-   * pass options, which the next pass uses; internal wake-ups pass none,
-   * so they never discard a caller's. The cycle runs correlate→drain in a
+   * Schedule a settle pass. A pass already scheduled is never put off or
+   * replaced: calls that arrive before it runs join it (a shorter
+   * `debounceMs` brings it forward), and a call during a running cycle
+   * queues one more pass after it. Callers pass options, which the next
+   * pass uses; internal wake-ups pass none, so they never discard a
+   * caller's. The cycle runs correlate→drain in a
    * loop until no progress is made (no new subscriptions, no events read,
    * no streams leased) or `maxPasses` is reached, then emits the
    * `"settled"` lifecycle event via {@link SettleDeps.on_settled}.
@@ -84,12 +87,18 @@ export class SettleLoop<TEvents extends Schemas> {
       this._pending = true;
       return;
     }
-    if (this._timer) return;
+    const delay = options?.debounceMs ?? this._default_debounce_ms;
+    const due = Date.now() + delay;
+    if (this._timer) {
+      if (due >= this._due) return;
+      clearTimeout(this._timer);
+    }
+    this._due = due;
     this._timer = setTimeout(() => {
       this._timer = undefined;
       const {
         debounceMs: _,
-        correlate: correlate_query = { after: -1, limit: 100 },
+        correlate: correlate_query = {},
         maxPasses = Infinity,
         ...drain_options
       } = this._next ?? {};
@@ -160,7 +169,7 @@ export class SettleLoop<TEvents extends Schemas> {
             this.schedule();
           }
         });
-    }, this._next?.debounceMs ?? this._default_debounce_ms);
+    }, delay);
   }
 
   /**

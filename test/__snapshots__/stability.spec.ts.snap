@@ -624,6 +624,8 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   private readonly _settle: SettleLoop<TEvents>;
   private _poll: ReturnType<typeof setInterval> | undefined;
+  /** The poll's correlate \`limit\`, used by every settle pass while it runs. */
+  private _poll_limit: number | undefined;
   /**
    * Wired at construction against the store current then, so a store
    * injected after \`build()\` is never notified.
@@ -819,9 +821,7 @@ export class Act<
         on_error: (error, circuit) => this._emit_error(error, circuit),
         // When the cooldown elapses, settle once: its scan or claim is the
         // half-open probe that closes or re-opens the breaker.
-        on_retry: () => {
-          this.settle({ debounceMs: 0 });
-        },
+        on_retry: () => this._schedule(),
       }
     );
   }
@@ -961,7 +961,11 @@ export class Act<
       {
         init: () => this._scoped(() => this._correlate.init()),
         checkpoint: () => this._correlate.checkpoint,
-        correlate: (q) => this._correlate_scanned(q, true),
+        correlate: (q) =>
+          this._correlate_scanned(
+            { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
+            true
+          ),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
         breaker: this._breaker,
@@ -1416,7 +1420,12 @@ export class Act<
    * pipeline itself (\`autoSettle: false\`).
    */
   private _settle_armed(armed: boolean): void {
-    if (armed && this._drain && this._auto_settle) this._settle.schedule();
+    if (armed && this._auto_settle) this._schedule();
+  }
+
+  /** Schedules a settle pass; writer-only instances (\`drain: false\`) skip it. */
+  private _schedule(options?: SettleOptions): void {
+    if (this._drain) this._settle.schedule(options);
   }
 
   /** Arms only the lanes these events react on; true when any was armed. */
@@ -1546,11 +1555,11 @@ export class Act<
    */
   start_correlations(query: Query = {}, frequency = 10_000): boolean {
     if (this._poll) return false;
-    const correlate = { limit: query.limit || 100 };
+    this._poll_limit = query.limit || undefined;
     this._poll = setInterval(() => {
       // No local signal says there is work, so look anyway.
       this._correlate.arm();
-      this.settle({ debounceMs: 0, correlate });
+      this._schedule();
     }, frequency);
     return true;
   }
@@ -1565,6 +1574,7 @@ export class Act<
     if (this._poll) {
       clearInterval(this._poll);
       this._poll = undefined;
+      this._poll_limit = undefined;
     }
     // Hand the correlation lease back, best-effort and not awaited (this
     // method is synchronous; the lease would expire anyway).
@@ -1593,7 +1603,7 @@ export class Act<
    *
    * The reset schedules a settle on its own, which loops correlate→drain
    * until the replay catches up. Call \`app.settle(options)\` right after to
-   * pass batch options instead (it replaces the scheduled pass), or
+   * give that pass batch options, or
    * \`correlate()\` / \`drain()\` to drive the replay by hand.
    *
    * @param input - Reaction target streams (e.g., projection names) to reset, or a {@link StreamFilter} for bulk operations
@@ -1935,8 +1945,9 @@ export class Act<
    * \`unblock()\`, \`restore()\`) schedules this on its own unless the app
    * sets \`autoSettle: false\`. Call it at startup, to run what was pending
    * before a restart, or with options for the next pass. A pass already
-   * scheduled is never delayed: calls before it runs coalesce into it,
-   * and a call during a running cycle queues one more pass after it. Runs correlate→drain in a loop until a pass makes no
+   * scheduled is never put off: calls before it runs join it (a shorter
+   * \`debounceMs\` brings it forward), and a call during a running cycle
+   * queues one more pass after it. Runs correlate→drain in a loop until a pass makes no
    * progress — no new subscriptions, no events read, no streams leased —
    * then emits the \`"settled"\` lifecycle event, so one call fully catches
    * up paginated streams without forcing callers to loop.
@@ -1959,13 +1970,11 @@ export class Act<
    * @see {@link drain} for single synchronous drain cycles
    * @see {@link correlate} for manual correlation
    */
-  settle(options: SettleOptions = {}): void {
+  settle(options?: SettleOptions): void {
     // Validate the runtime knobs before anything runs (a bad debounceMs /
     // leaseMillis / maxPasses throws ZodError here, not on the first pass).
-    resolveSettleConfig(options);
-    // Writer-only instances skip settle.
-    if (!this._drain) return;
-    this._settle.schedule(options);
+    resolveSettleConfig(options ?? {});
+    this._schedule(options);
   }
 }
 
@@ -2094,8 +2103,9 @@ export type ActLifecycleEvents<
  *   reaction work: a commit, \`reset()\`, \`unblock()\`, \`restore()\` or a
  *   notification from another process. Set \`false\` when you walk the
  *   pipeline yourself with \`correlate()\` / \`drain()\` (tests that check its
- *   steps, tools). Timers you start still run: lanes with \`cycleMs\` and
- *   \`start_correlations()\`. Default: \`true\`.
+ *   steps, tools). Timers you start still run (lanes with \`cycleMs\`,
+ *   \`start_correlations()\`), and so does the circuit breaker's recovery
+ *   pass after a store failure. Default: \`true\`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
@@ -9098,7 +9108,8 @@ export type Drain<TEvents extends Schemas> = {
  * window, the correlation query, and the maximum number of correlate→drain
  * passes.
  *
- * @property debounceMs - Debounce window in milliseconds (default: 10)
+ * @property debounceMs - Debounce window in milliseconds (default: 10). A
+ *   pass already scheduled keeps its time unless this is shorter.
  * @property correlate - Query filter for correlation scans (default: \`{ after: -1, limit: 100 }\`)
  * @property maxPasses - Cap on correlate→drain loops (default: \`Infinity\`).
  *   Settle exits early as soon as a pass makes no progress (no new
@@ -10467,8 +10478,9 @@ export type ActLifecycleEvents<
  *   reaction work: a commit, \`reset()\`, \`unblock()\`, \`restore()\` or a
  *   notification from another process. Set \`false\` when you walk the
  *   pipeline yourself with \`correlate()\` / \`drain()\` (tests that check its
- *   steps, tools). Timers you start still run: lanes with \`cycleMs\` and
- *   \`start_correlations()\`. Default: \`true\`.
+ *   steps, tools). Timers you start still run (lanes with \`cycleMs\`,
+ *   \`start_correlations()\`), and so does the circuit breaker's recovery
+ *   pass after a store failure. Default: \`true\`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
@@ -15285,7 +15297,8 @@ export type Drain<TEvents extends Schemas> = {
  * window, the correlation query, and the maximum number of correlate→drain
  * passes.
  *
- * @property debounceMs - Debounce window in milliseconds (default: 10)
+ * @property debounceMs - Debounce window in milliseconds (default: 10). A
+ *   pass already scheduled keeps its time unless this is shorter.
  * @property correlate - Query filter for correlation scans (default: \`{ after: -1, limit: 100 }\`)
  * @property maxPasses - Cap on correlate→drain loops (default: \`Infinity\`).
  *   Settle exits early as soon as a pass makes no progress (no new

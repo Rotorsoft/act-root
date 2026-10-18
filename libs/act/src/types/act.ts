@@ -122,8 +122,9 @@ export type ActLifecycleEvents<
  *   reaction work: a commit, `reset()`, `unblock()`, `restore()` or a
  *   notification from another process. Set `false` when you walk the
  *   pipeline yourself with `correlate()` / `drain()` (tests that check its
- *   steps, tools). Timers you start still run: lanes with `cycleMs` and
- *   `start_correlations()`. Default: `true`.
+ *   steps, tools). Timers you start still run (lanes with `cycleMs`,
+ *   `start_correlations()`), and so does the circuit breaker's recovery
+ *   pass after a store failure. Default: `true`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;

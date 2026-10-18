@@ -162,6 +162,27 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     loop.stop(true);
   });
 
+  it("brings a scheduled pass forward for a shorter delay", async () => {
+    vi.useFakeTimers();
+    const drain = vi.fn(async () => empty_drain());
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain,
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      10
+    );
+    loop.schedule({ debounceMs: 5000 }); // a caller's long delay
+    loop.schedule(); // a commit
+    await vi.advanceTimersByTimeAsync(10);
+    expect(drain).toHaveBeenCalledTimes(1);
+    loop.stop(true);
+  });
+
   it("control — stop() drops the caller's options with the pending pass", async () => {
     vi.useFakeTimers();
     const seen: Array<number | undefined> = [];
@@ -581,6 +602,35 @@ describe("a local change settles its own reactions", () => {
     await app.do("ping", { stream: "late", actor }, {});
     await new Promise((r) => setTimeout(r, 50));
     expect(ran).toEqual([]);
+  });
+
+  it("keeps a caller's settle options while start_correlations polls", async () => {
+    const app = reacting([]);
+    const limits: Array<number | undefined> = [];
+    const drain = app.drain.bind(app);
+    vi.spyOn(app, "drain").mockImplementation((options) => {
+      limits.push(options?.eventLimit);
+      return drain(options);
+    });
+    app.start_correlations({ limit: 5 }, 5);
+    app.settle({ eventLimit: 77, debounceMs: 60 });
+    await vi.waitFor(() => expect(limits).toContain(77));
+    app.stop_correlations();
+  });
+
+  it("scans with the poll's limit only while the poll runs", async () => {
+    const app = reacting([]);
+    const scanned = vi.spyOn(app as never, "_correlate_scanned") as unknown as {
+      mock: { calls: Array<[{ limit?: number }]> };
+    };
+    const limit = () => scanned.mock.calls.at(-1)?.[0].limit;
+    app.start_correlations({ limit: 5 }, 5);
+    await vi.waitFor(() => expect(limit()).toBe(5));
+    app.stop_correlations();
+    app.settle({ correlate: { limit: 7 } });
+    await vi.waitFor(() => expect(limit()).toBe(7));
+    app.settle();
+    await vi.waitFor(() => expect(limit()).toBe(100));
   });
 
   it("replays a reset target with no settle call", async () => {
