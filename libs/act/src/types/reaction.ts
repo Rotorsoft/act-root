@@ -423,3 +423,13 @@ export type SettleOptions = DrainOptions & {
 export type ShutdownOptions = {
   readonly graceMs?: number;
 };
+
+/**
+ * Name of the implicit lane every reaction lands in unless its `.to({lane})`
+ * declaration says otherwise. Acts that don't call
+ * `.withLane(...)` see only this lane,.
+ *
+ * Persisted on `streams.lane` and threaded as the strict-typed default in
+ * builder generics — `lane?: TLanes` always includes `"default"`.
+ */
+export const DEFAULT_LANE = "default";

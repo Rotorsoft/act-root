@@ -88,13 +88,14 @@ const ordersApp = act()
   });
 
 async function main() {
+  // The commit settles its reaction on its own; wait until it has.
+  const settled = new Promise((resolve) => ordersApp.on("settled", resolve));
   await ordersApp.do(
     "placeOrder",
     { stream: "order-1", actor },
     { sku: "sku-42" }
   );
-  await ordersApp.correlate();
-  await ordersApp.drain();
+  await settled;
 
   // The audit context saw the fact...
   const audit = await auditApp.load("Audit", "audit-order-1");

@@ -350,7 +350,8 @@ const actor: AppActor = { id: "user-1", name: "Test", role: "user" };
 const target = (stream = crypto.randomUUID()): Target => ({ stream, actor });
 
 // Each test gets its own isolated Act (fresh, auto-seeded store + cache).
-const test = fixture(appBuilder);
+// autoSettle: false, because these tests walk correlate() / drain() by hand.
+const test = fixture(appBuilder, { actOptions: { autoSettle: false } });
 
 test("creates an item", async ({ app }) => {
   const t = target();

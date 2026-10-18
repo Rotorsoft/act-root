@@ -1,30 +1,11 @@
 /**
  * The sensitive-data marker: the registry `sensitive(zodType)` writes to,
- * the lookups that read it, and the two sentinels a gated read substitutes.
- * The public `sensitive()` lives in `types/schemas.ts`, which re-exports
- * `pii_fields`, `REDACTED` and `SHREDDED` from here. The transforms that
- * apply the marker at commit, load and dispatch live in `internal/pii.ts`.
+ * and the lookups that read it. The public `sensitive()` and the two
+ * sentinels live in `types/schemas.ts`, which re-exports `pii_fields` from
+ * here. The transforms that apply the marker at commit, load and dispatch
+ * live in `internal/pii.ts`.
  */
 import { z } from "zod";
-
-/**
- * Sentinel placed in `event.data[field]` when the caller isn't authorized to
- * see the sensitive field — either `.discloses(predicate)` returned `false`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
- *
- * Re-exported from `types/schemas.ts` as part of the public surface.
- */
-export const REDACTED = "[REDACTED]" as const;
-
-/**
- * Sentinel placed in `event.data[field]` when the underlying PII payload has
- * been wiped via `Store.forget_pii(stream)` — the row's pii column is `NULL`
- * and the original plaintext is gone forever. Irrecoverable.
- *
- * Re-exported from `types/schemas.ts` as part of the public surface.
- */
-export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Process-global registry holding every Zod schema marked sensitive. Backed
@@ -134,11 +115,10 @@ export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
 }
 
 /**
- * The names of an event's sensitive fields — {@link pii_schemas} keyed.
- *
- * @internal — consumed by the registry's `sensitive_fields(event_name)` lookup,
- * and public through `types/schemas.ts`, where act-http's OpenAPI emitter uses
- * it to mark request-body properties `writeOnly`.
+ * The top-level field names of a schema marked with `sensitive()`. Adapters
+ * and tooling use it to reflect sensitivity on their own wire surface (the
+ * act-http OpenAPI emitter marks these fields `writeOnly`). Returns `[]`
+ * for a schema with no sensitive fields.
  */
 export function pii_fields(schema: z.ZodType): readonly string[] {
   return Object.keys(pii_schemas(schema));

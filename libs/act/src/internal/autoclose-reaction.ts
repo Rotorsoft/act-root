@@ -13,7 +13,7 @@
  * mutates it.
  */
 
-import { SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { store } from "../ports.js";
 import { DeferSignal } from "../types/errors.js";
 import type {
   AutocloseConfig,
@@ -23,6 +23,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
+import { SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import { days_after, days_before_now } from "./autoclose-policy.js";
 import { in_autoclose_window, next_window_open } from "./autoclose-window.js";
 import { DEFAULT_MAX_RETRIES } from "./config.js";

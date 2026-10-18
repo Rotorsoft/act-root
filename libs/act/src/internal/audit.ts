@@ -5,7 +5,6 @@
  * the public `Store`, never orchestration internals.
  */
 
-import { SNAP_EVENT } from "../ports.js";
 import { pii_fields } from "../sensitive.js";
 import type {
   AuditCategory,
@@ -19,6 +18,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
+import { SNAP_EVENT } from "../types/index.js";
 import {
   current_version_of,
   deprecated_event_names,

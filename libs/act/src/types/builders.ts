@@ -5,7 +5,6 @@
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { DEFAULT_LANE } from "../ports.js";
 import type {
   ActionHandler,
   ActionOptions,
@@ -32,6 +31,7 @@ import type {
   State,
   ZodTypes,
 } from "./index.js";
+import type { DEFAULT_LANE } from "./reaction.js";
 
 /**
  * The `.do(handler)` step, parameterized by the builder it returns (`TReturn`).

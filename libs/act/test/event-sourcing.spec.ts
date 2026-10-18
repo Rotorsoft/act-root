@@ -7,9 +7,10 @@ import {
   snap,
   tombstone,
 } from "../src/internal/event-sourcing.js";
-import { cache, dispose, SNAP_EVENT, store } from "../src/ports.js";
+import { cache, dispose, store } from "../src/ports.js";
 import type { Snapshot } from "../src/types/action.js";
 import { InvariantError, StreamClosedError } from "../src/types/errors.js";
+import { SNAP_EVENT } from "../src/types/index.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 
 // Minimal state machine mock

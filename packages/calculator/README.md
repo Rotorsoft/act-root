@@ -40,7 +40,7 @@ The default demo (`pnpm dev:calculator` → `src/main.ts`) loops random `PressKe
 packages/calculator/
 ├── src/
 │   ├── calculator.ts      # Calculator state — events, patches, actions, invariants
-│   ├── hello.ts           # Smallest app: two counters, one reaction, settle
+│   ├── hello.ts           # Smallest app: two counters, one reaction
 │   ├── main.ts            # Demo loop with reactions to a Board + per-stream result projection
 │   ├── rebuild-demo.ts    # Demonstrates app.reset() + drain for projection rebuild
 │   ├── close-demo.ts      # Demonstrates app.close() — archive, tombstone, restart

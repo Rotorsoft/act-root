@@ -22,7 +22,6 @@ import {
   type DeferSchedule,
   make_deferred,
 } from "../internal/defer-config.js";
-import { DEFAULT_LANE } from "../ports.js";
 import type {
   Committed,
   EventRegister,
@@ -33,6 +32,7 @@ import type {
   ReactionResolver,
   Schemas,
 } from "../types/index.js";
+import { DEFAULT_LANE } from "../types/index.js";
 import { _this_ } from "./merge.js";
 
 /**

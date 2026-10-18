@@ -213,7 +213,7 @@ describe("architecture: PII stays inside the modules that own it", () => {
     const schemas = code_of(
       readFileSync(join(SRC, "types", "schemas.ts"), "utf8")
     );
-    expect(schemas).toMatch(/export \{ pii_fields,/);
+    expect(schemas).toMatch(/export \{ pii_fields \}/);
     expect(schemas).not.toMatch(/\bpii_(split|gate|strip)\b/);
   });
 });

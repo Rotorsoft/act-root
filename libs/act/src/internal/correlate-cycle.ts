@@ -5,7 +5,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { DEFAULT_LANE, log, store } from "../ports.js";
+import { log, store } from "../ports.js";
 import type {
   EventRegister,
   Query,
@@ -16,6 +16,7 @@ import type {
   StreamPosition,
   SubscribeInput,
 } from "../types/index.js";
+import { DEFAULT_LANE } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
 import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";

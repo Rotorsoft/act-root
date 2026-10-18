@@ -11,11 +11,7 @@ exports[`@rotorsoft/act — public API stability > stable public surface for (ro
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
 import { resolveActConfig, resolveLaneConfig } from "../internal/config.js";
-import {
-  bare_patch,
-  type PatchFn,
-  validating_patch,
-} from "../internal/event-sourcing.js";
+import { bare_patch, validating_patch } from "../internal/event-sourcing.js";
 import {
   current_version_of,
   deprecated_event_names,
@@ -34,6 +30,7 @@ import type {
   Actor,
   BatchHandler,
   LaneConfig,
+  PatchFn,
   Registry,
   Schema,
   SchemaRegister,
@@ -489,12 +486,7 @@ import {
   type HandleBatch,
 } from "./internal/drain-cycle.js";
 import type { DrainOps } from "./internal/drain-ops.js";
-import {
-  bare_patch,
-  type EsOps,
-  type PatchFn,
-  scan,
-} from "./internal/event-sourcing.js";
+import { bare_patch, type EsOps, scan } from "./internal/event-sourcing.js";
 import {
   FOLD_RESET,
   type ResettableBatchHandler,
@@ -543,6 +535,7 @@ import type {
   Lease,
   LoadTarget,
   Logger,
+  PatchFn,
   Query,
   Registry,
   ScanOptions,
@@ -3445,6 +3438,22 @@ export interface IAct<
   forget(stream: string): Promise<{ eventCount: number }>;
 }
 
+/**
+ * The patch step: merges a reducer's partial into state. The builder picks
+ * one per app, never per event. \`me\`/\`event\` only serve
+ * {@link validating_patch}, to name the failing reduction.
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
 // === audit.ts ===
 /**
  * @module act/types/audit
@@ -3621,7 +3630,6 @@ export type AuditFinding =
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { DEFAULT_LANE } from "../ports.js";
 import type {
   ActionHandler,
   ActionOptions,
@@ -3648,6 +3656,7 @@ import type {
   State,
   ZodTypes,
 } from "./index.js";
+import type { DEFAULT_LANE } from "./reaction.js";
 
 /**
  * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
@@ -5701,7 +5710,6 @@ export class InMemoryCache implements Cache {
  * @category Adapters
  */
 
-import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -5721,6 +5729,7 @@ import type {
   StreamStats,
   SubscribeInput,
 } from "../types/index.js";
+import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../types/index.js";
 import { sleep } from "../utils.js";
 
 /** One subscription row: watermark, lease, retry and schedule. */
@@ -6682,7 +6691,9 @@ export type {
 } from "./builders.js";
 export * from "./errors.js";
 export type * from "./ports.js";
+export { SNAP_EVENT, TOMBSTONE_EVENT } from "./ports.js";
 export type * from "./reaction.js";
+export { DEFAULT_LANE } from "./reaction.js";
 export type * from "./registry.js";
 export * from "./schemas.js";
 
@@ -7039,37 +7050,6 @@ export function dispose(
   return disposeAndExit;
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/**
- * Event name used internally for snapshot events in the event store.
- * Snapshot events store a full state checkpoint, enabling efficient cold-start
- * recovery without replaying the entire event stream.
- */
-export const SNAP_EVENT = "__snapshot__";
-
-/**
- * Event name used internally for tombstone events in the event store.
- * A tombstone marks a stream as permanently closed — no further writes
- * are permitted until the stream is explicitly restarted via \`close()\`.
- *
- * @see {@link Act.close} for the close-the-books API
- */
-export const TOMBSTONE_EVENT = "__tombstone__";
-
-/**
- * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
- * declaration says otherwise. Acts that don't call
- * \`.withLane(...)\` see only this lane, and behavior is identical to
- * pre-1103 single-controller drain.
- *
- * Persisted on \`streams.lane\` and threaded as the strict-typed default in
- * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
- */
-export const DEFAULT_LANE = "default";
-
 // === ports.ts ===
 /**
  * @packageDocumentation
@@ -7416,16 +7396,8 @@ export type PrioritizeFilter = StreamFilter;
 /**
  * Framework-internal event names — written by the runtime, not by user
  * code. Snapshots are seeded by \`truncate()\`; tombstones by \`close()\`.
- *
- * Kept as a literal-string union here (rather than re-exported from
- * \`../ports.js\` where the runtime constants live) so {@link QueryStatsOptions.exclude}
- * can be type-checked without inducing a \`types/\` → \`ports.ts\` cycle.
- * The runtime constants {@link "../ports.js".SNAP_EVENT | SNAP_EVENT} and
- * {@link "../ports.js".TOMBSTONE_EVENT | TOMBSTONE_EVENT} (exported from
- * \`@rotorsoft/act\`) are the typed source of truth; this union mirrors
- * them at the type level.
  */
-export type FrameworkEventName = "__snapshot__" | "__tombstone__";
+export type FrameworkEventName = typeof SNAP_EVENT | typeof TOMBSTONE_EVENT;
 
 /**
  * Union of all event names valid for a given schema set: user-declared
@@ -8469,6 +8441,22 @@ export interface Cache extends Disposable {
   clear(): Promise<void>;
 }
 
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via \`close()\`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
 // === projection-builder.ts ===
 import {
   DEFAULT_BLOCK_ON_ERROR,
@@ -9149,6 +9137,16 @@ export type ShutdownOptions = {
   readonly graceMs?: number;
 };
 
+/**
+ * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
+ * declaration says otherwise. Acts that don't call
+ * \`.withLane(...)\` see only this lane,.
+ *
+ * Persisted on \`streams.lane\` and threaded as the strict-typed default in
+ * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
+ */
+export const DEFAULT_LANE = "default";
+
 // === registry.ts ===
 import type { ZodType, z } from "zod";
 import type {
@@ -9342,25 +9340,22 @@ import { _mark_sensitive, _registry } from "../sensitive.js";
  */
 export const ZodEmpty = z.record(z.string(), z.never());
 
+export { pii_fields } from "../sensitive.js";
+
 /**
- * Sensitive-data foundation re-exports.
- *
- * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
- *   when the caller isn't authorized to see a sensitive field
- *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
- *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
- *   irrecoverable).
- *   top-level field names marked via {@link sensitive}. A pure,
- *   read-only helper that inspects the out-of-band sensitive registry (a
- *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
- *   unreachable from outside the package. Surfaced for adapters and
- *   tooling that must reflect input sensitivity on their own wire
- *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
- *   fields \`writeOnly\` + \`format: password\` so generated clients and
- *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
- *   schemas or objects with no sensitive fields; top-level shape only.
+ * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
+ * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
+ * or no predicate was declared (framework default-deny). Recoverable: a
+ * properly-authorized read returns the plaintext.
  */
-export { pii_fields, REDACTED, SHREDDED } from "../sensitive.js";
+export const REDACTED = "[REDACTED]" as const;
+
+/**
+ * Sentinel placed in \`event.data[field]\` when the underlying PII payload has
+ * been wiped via \`Store.forget_pii(stream)\` — the row's pii column is \`NULL\`
+ * and the original plaintext is gone forever. Irrecoverable.
+ */
+export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -9490,31 +9485,12 @@ export const QuerySchema = z
 // === sensitive.ts ===
 /**
  * The sensitive-data marker: the registry \`sensitive(zodType)\` writes to,
- * the lookups that read it, and the two sentinels a gated read substitutes.
- * The public \`sensitive()\` lives in \`types/schemas.ts\`, which re-exports
- * \`pii_fields\`, \`REDACTED\` and \`SHREDDED\` from here. The transforms that
- * apply the marker at commit, load and dispatch live in \`internal/pii.ts\`.
+ * and the lookups that read it. The public \`sensitive()\` and the two
+ * sentinels live in \`types/schemas.ts\`, which re-exports \`pii_fields\` from
+ * here. The transforms that apply the marker at commit, load and dispatch
+ * live in \`internal/pii.ts\`.
  */
 import { z } from "zod";
-
-/**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
- *
- * Re-exported from \`types/schemas.ts\` as part of the public surface.
- */
-export const REDACTED = "[REDACTED]" as const;
-
-/**
- * Sentinel placed in \`event.data[field]\` when the underlying PII payload has
- * been wiped via \`Store.forget_pii(stream)\` — the row's pii column is \`NULL\`
- * and the original plaintext is gone forever. Irrecoverable.
- *
- * Re-exported from \`types/schemas.ts\` as part of the public surface.
- */
-export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Process-global registry holding every Zod schema marked sensitive. Backed
@@ -9624,11 +9600,10 @@ export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
 }
 
 /**
- * The names of an event's sensitive fields — {@link pii_schemas} keyed.
- *
- * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup,
- * and public through \`types/schemas.ts\`, where act-http's OpenAPI emitter uses
- * it to mark request-body properties \`writeOnly\`.
+ * The top-level field names of a schema marked with \`sensitive()\`. Adapters
+ * and tooling use it to reflect sensitivity on their own wire surface (the
+ * act-http OpenAPI emitter marks these fields \`writeOnly\`). Returns \`[]\`
+ * for a schema with no sensitive fields.
  */
 export function pii_fields(schema: z.ZodType): readonly string[] {
   return Object.keys(pii_schemas(schema));
@@ -11821,6 +11796,22 @@ export interface IAct<
   forget(stream: string): Promise<{ eventCount: number }>;
 }
 
+/**
+ * The patch step: merges a reducer's partial into state. The builder picks
+ * one per app, never per event. \`me\`/\`event\` only serve
+ * {@link validating_patch}, to name the failing reduction.
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;
+
 // === audit.ts ===
 /**
  * @module act/types/audit
@@ -11997,7 +11988,6 @@ export type AuditFinding =
  */
 import type { ZodType } from "zod";
 import type { Act } from "../act.js";
-import type { DEFAULT_LANE } from "../ports.js";
 import type {
   ActionHandler,
   ActionOptions,
@@ -12024,6 +12014,7 @@ import type {
   State,
   ZodTypes,
 } from "./index.js";
+import type { DEFAULT_LANE } from "./reaction.js";
 
 /**
  * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
@@ -13432,7 +13423,9 @@ export type {
 } from "./builders.js";
 export * from "./errors.js";
 export type * from "./ports.js";
+export { SNAP_EVENT, TOMBSTONE_EVENT } from "./ports.js";
 export type * from "./reaction.js";
+export { DEFAULT_LANE } from "./reaction.js";
 export type * from "./registry.js";
 export * from "./schemas.js";
 
@@ -13859,16 +13852,8 @@ export type PrioritizeFilter = StreamFilter;
 /**
  * Framework-internal event names — written by the runtime, not by user
  * code. Snapshots are seeded by \`truncate()\`; tombstones by \`close()\`.
- *
- * Kept as a literal-string union here (rather than re-exported from
- * \`../ports.js\` where the runtime constants live) so {@link QueryStatsOptions.exclude}
- * can be type-checked without inducing a \`types/\` → \`ports.ts\` cycle.
- * The runtime constants {@link "../ports.js".SNAP_EVENT | SNAP_EVENT} and
- * {@link "../ports.js".TOMBSTONE_EVENT | TOMBSTONE_EVENT} (exported from
- * \`@rotorsoft/act\`) are the typed source of truth; this union mirrors
- * them at the type level.
  */
-export type FrameworkEventName = "__snapshot__" | "__tombstone__";
+export type FrameworkEventName = typeof SNAP_EVENT | typeof TOMBSTONE_EVENT;
 
 /**
  * Union of all event names valid for a given schema set: user-declared
@@ -14912,6 +14897,22 @@ export interface Cache extends Disposable {
   clear(): Promise<void>;
 }
 
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via \`close()\`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
 // === reaction.ts ===
 /**
  * @packageDocumentation
@@ -15339,6 +15340,16 @@ export type ShutdownOptions = {
   readonly graceMs?: number;
 };
 
+/**
+ * Name of the implicit lane every reaction lands in unless its \`.to({lane})\`
+ * declaration says otherwise. Acts that don't call
+ * \`.withLane(...)\` see only this lane,.
+ *
+ * Persisted on \`streams.lane\` and threaded as the strict-typed default in
+ * builder generics — \`lane?: TLanes\` always includes \`"default"\`.
+ */
+export const DEFAULT_LANE = "default";
+
 // === registry.ts ===
 import type { ZodType, z } from "zod";
 import type {
@@ -15532,25 +15543,22 @@ import { _mark_sensitive, _registry } from "../sensitive.js";
  */
 export const ZodEmpty = z.record(z.string(), z.never());
 
+export { pii_fields } from "../sensitive.js";
+
 /**
- * Sensitive-data foundation re-exports.
- *
- * - \`REDACTED\` / \`SHREDDED\` — sentinels placed in \`event.data[field]\`
- *   when the caller isn't authorized to see a sensitive field
- *   (\`.discloses(predicate)\` returned \`false\` or none was declared —
- *   recoverable) or the underlying PII was wiped (\`Store.forget_pii\` —
- *   irrecoverable).
- *   top-level field names marked via {@link sensitive}. A pure,
- *   read-only helper that inspects the out-of-band sensitive registry (a
- *   process-global \`WeakMap\`) \`sensitive()\` populates, otherwise
- *   unreachable from outside the package. Surfaced for adapters and
- *   tooling that must reflect input sensitivity on their own wire
- *   surface — e.g. the \`@rotorsoft/act-http/openapi\` emitter marks these
- *   fields \`writeOnly\` + \`format: password\` so generated clients and
- *   Swagger UI don't echo PII freely. Returns \`[]\` for non-object
- *   schemas or objects with no sensitive fields; top-level shape only.
+ * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
+ * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
+ * or no predicate was declared (framework default-deny). Recoverable: a
+ * properly-authorized read returns the plaintext.
  */
-export { pii_fields, REDACTED, SHREDDED } from "../sensitive.js";
+export const REDACTED = "[REDACTED]" as const;
+
+/**
+ * Sentinel placed in \`event.data[field]\` when the underlying PII payload has
+ * been wiped via \`Store.forget_pii(stream)\` — the row's pii column is \`NULL\`
+ * and the original plaintext is gone forever. Irrecoverable.
+ */
+export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -15680,31 +15688,12 @@ export const QuerySchema = z
 // === sensitive.ts ===
 /**
  * The sensitive-data marker: the registry \`sensitive(zodType)\` writes to,
- * the lookups that read it, and the two sentinels a gated read substitutes.
- * The public \`sensitive()\` lives in \`types/schemas.ts\`, which re-exports
- * \`pii_fields\`, \`REDACTED\` and \`SHREDDED\` from here. The transforms that
- * apply the marker at commit, load and dispatch live in \`internal/pii.ts\`.
+ * and the lookups that read it. The public \`sensitive()\` and the two
+ * sentinels live in \`types/schemas.ts\`, which re-exports \`pii_fields\` from
+ * here. The transforms that apply the marker at commit, load and dispatch
+ * live in \`internal/pii.ts\`.
  */
 import { z } from "zod";
-
-/**
- * Sentinel placed in \`event.data[field]\` when the caller isn't authorized to
- * see the sensitive field — either \`.discloses(predicate)\` returned \`false\`,
- * or no predicate was declared (framework default-deny). Recoverable: a
- * properly-authorized read returns the plaintext.
- *
- * Re-exported from \`types/schemas.ts\` as part of the public surface.
- */
-export const REDACTED = "[REDACTED]" as const;
-
-/**
- * Sentinel placed in \`event.data[field]\` when the underlying PII payload has
- * been wiped via \`Store.forget_pii(stream)\` — the row's pii column is \`NULL\`
- * and the original plaintext is gone forever. Irrecoverable.
- *
- * Re-exported from \`types/schemas.ts\` as part of the public surface.
- */
-export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Process-global registry holding every Zod schema marked sensitive. Backed
@@ -15814,11 +15803,10 @@ export function pii_schemas(schema: z.ZodType): Record<string, z.ZodType> {
 }
 
 /**
- * The names of an event's sensitive fields — {@link pii_schemas} keyed.
- *
- * @internal — consumed by the registry's \`sensitive_fields(event_name)\` lookup,
- * and public through \`types/schemas.ts\`, where act-http's OpenAPI emitter uses
- * it to mark request-body properties \`writeOnly\`.
+ * The top-level field names of a schema marked with \`sensitive()\`. Adapters
+ * and tooling use it to reflect sensitivity on their own wire surface (the
+ * act-http OpenAPI emitter marks these fields \`writeOnly\`). Returns \`[]\`
+ * for a schema with no sensitive fields.
  */
 export function pii_fields(schema: z.ZodType): readonly string[] {
   return Object.keys(pii_schemas(schema));

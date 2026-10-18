@@ -1238,3 +1238,19 @@ export interface IAct<
    */
   forget(stream: string): Promise<{ eventCount: number }>;
 }
+
+/**
+ * The patch step: merges a reducer's partial into state. The builder picks
+ * one per app, never per event. `me`/`event` only serve
+ * {@link validating_patch}, to name the failing reduction.
+ */
+export type PatchFn = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+>(
+  me: State<TState, TEvents, TActions>,
+  state: TState,
+  partial: Readonly<Patch<TState>>,
+  event: Committed<TEvents, keyof TEvents>
+) => TState;

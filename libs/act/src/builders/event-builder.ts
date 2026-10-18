@@ -40,9 +40,9 @@ import {
   pii_split,
   pii_strip,
 } from "../internal/pii.js";
-import { DEFAULT_LANE, SNAP_EVENT } from "../ports.js";
 import { pii_schemas } from "../sensitive.js";
 import type { Actor, LaneConfig, Registry } from "../types/index.js";
+import { DEFAULT_LANE, SNAP_EVENT } from "../types/index.js";
 
 /** What one pass over an event's schema resolves. @internal */
 export type EventTags = {

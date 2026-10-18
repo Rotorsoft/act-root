@@ -3,8 +3,9 @@
  * split sensitive fields out at commit, gate them on read, and strip them
  * before projection and reaction handlers.
  */
-import { REDACTED, SHREDDED } from "../sensitive.js";
+
 import type { Actor, Committed, Schemas } from "../types/index.js";
+import { REDACTED, SHREDDED } from "../types/schemas.js";
 
 /**
  * Split an emitted event's `data` into `data` (non-sensitive) + `pii`

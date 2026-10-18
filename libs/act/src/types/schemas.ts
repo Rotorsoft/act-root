@@ -13,25 +13,22 @@ import { _mark_sensitive, _registry } from "../sensitive.js";
  */
 export const ZodEmpty = z.record(z.string(), z.never());
 
+export { pii_fields } from "../sensitive.js";
+
 /**
- * Sensitive-data foundation re-exports.
- *
- * - `REDACTED` / `SHREDDED` — sentinels placed in `event.data[field]`
- *   when the caller isn't authorized to see a sensitive field
- *   (`.discloses(predicate)` returned `false` or none was declared —
- *   recoverable) or the underlying PII was wiped (`Store.forget_pii` —
- *   irrecoverable).
- *   top-level field names marked via {@link sensitive}. A pure,
- *   read-only helper that inspects the out-of-band sensitive registry (a
- *   process-global `WeakMap`) `sensitive()` populates, otherwise
- *   unreachable from outside the package. Surfaced for adapters and
- *   tooling that must reflect input sensitivity on their own wire
- *   surface — e.g. the `@rotorsoft/act-http/openapi` emitter marks these
- *   fields `writeOnly` + `format: password` so generated clients and
- *   Swagger UI don't echo PII freely. Returns `[]` for non-object
- *   schemas or objects with no sensitive fields; top-level shape only.
+ * Sentinel placed in `event.data[field]` when the caller isn't authorized to
+ * see the sensitive field — either `.discloses(predicate)` returned `false`,
+ * or no predicate was declared (framework default-deny). Recoverable: a
+ * properly-authorized read returns the plaintext.
  */
-export { pii_fields, REDACTED, SHREDDED } from "../sensitive.js";
+export const REDACTED = "[REDACTED]" as const;
+
+/**
+ * Sentinel placed in `event.data[field]` when the underlying PII payload has
+ * been wiped via `Store.forget_pii(stream)` — the row's pii column is `NULL`
+ * and the original plaintext is gone forever. Irrecoverable.
+ */
+export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the

@@ -212,7 +212,7 @@ Source-of-truth for what lives where:
   - `libs/act/src/act.ts` and `libs/act/src/types/act.ts` — the `Act` orchestrator, `ActOptions`, and lifecycle event names/shapes (`IAct` lives in `types/action.ts`)
   - `libs/act/src/types/ports.ts` — `Store`, `Cache`, `Logger` interfaces
   - `libs/act/src/types/index.ts` (and what it re-exports) — public type surface
-  - `libs/act/src/ports.ts` — the public port singletons (`store()`, `cache()`, `log()`, `dispose()`, etc.) and `SNAP_EVENT`/`TOMBSTONE_EVENT` constants
+  - `libs/act/src/ports.ts` — the public port singletons (`store()`, `cache()`, `log()`, `dispose()`, etc.); the `SNAP_EVENT`/`TOMBSTONE_EVENT` constants live in `types/ports.ts`
 
   Out of scope for the charter — change freely: anything in `libs/act/src/internal/`, performance characteristics, log formats, adapter implementation details outside the contract.
 
@@ -307,7 +307,7 @@ Any options bag that ships to `act().build()` / `openapi(app, ...)` / similar en
 |---|---|
 | Schema name | `<Type>OptionsSchema` — `AutocloseOptionsSchema`, `SseOptionsSchema`, `OpenAPIOptionsSchema` |
 | Schema visibility | Internal `const`, never re-exported. The public surface is the type + resolver, not the schema itself. |
-| Config type | Internal: `type <Type>Config = z.infer<typeof <Type>OptionsSchema>`. Public: written out in `types/`, and the schema ends in `satisfies z.ZodType<…>` so the two can't drift. |
+| Config type | Internal: `type <Type>Config = z.infer<typeof <Type>OptionsSchema>`. Public: written out in `types/`, and the schema ends in `satisfies z.ZodType<…>`, so a schema whose output stops fitting the type fails to compile (a field added to the type but not the schema still compiles, and parsing drops it: add both together). |
 | Resolver | `resolve<Type>Config(options: <Type>Options): <Type>Config` — camelCase, parses + applies defaults in one call |
 | Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth; a public default lives in `types/act.ts` |
 | Custom error messages | `{ message: "..." }` on the individual constraint when callers depend on the wording (test assertions, structured logs). Don't override Zod's default for shape errors callers don't read. |

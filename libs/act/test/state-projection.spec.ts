@@ -13,9 +13,9 @@ import {
   store,
 } from "../src/index.js";
 import { DEFAULT_BACKOFF } from "../src/internal/config.js";
-import { SNAP_EVENT } from "../src/ports.js";
 import { sandbox } from "../src/test/index.js";
 import type { CacheEntry, Schema } from "../src/types/index.js";
+import { SNAP_EVENT } from "../src/types/index.js";
 
 const actor = { id: "a", name: "a" };
 

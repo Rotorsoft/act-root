@@ -343,16 +343,8 @@ export type PrioritizeFilter = StreamFilter;
 /**
  * Framework-internal event names — written by the runtime, not by user
  * code. Snapshots are seeded by `truncate()`; tombstones by `close()`.
- *
- * Kept as a literal-string union here (rather than re-exported from
- * `../ports.js` where the runtime constants live) so {@link QueryStatsOptions.exclude}
- * can be type-checked without inducing a `types/` → `ports.ts` cycle.
- * The runtime constants {@link "../ports.js".SNAP_EVENT | SNAP_EVENT} and
- * {@link "../ports.js".TOMBSTONE_EVENT | TOMBSTONE_EVENT} (exported from
- * `@rotorsoft/act`) are the typed source of truth; this union mirrors
- * them at the type level.
  */
-export type FrameworkEventName = "__snapshot__" | "__tombstone__";
+export type FrameworkEventName = typeof SNAP_EVENT | typeof TOMBSTONE_EVENT;
 
 /**
  * Union of all event names valid for a given schema set: user-declared
@@ -1395,3 +1387,19 @@ export interface Cache extends Disposable {
   invalidate(stream: string): Promise<void>;
   clear(): Promise<void>;
 }
+
+/**
+ * Event name used internally for snapshot events in the event store.
+ * Snapshot events store a full state checkpoint, enabling efficient cold-start
+ * recovery without replaying the entire event stream.
+ */
+export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via `close()`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";

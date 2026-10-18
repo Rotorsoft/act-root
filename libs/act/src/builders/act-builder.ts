@@ -7,11 +7,7 @@
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
 import { resolveActConfig, resolveLaneConfig } from "../internal/config.js";
-import {
-  bare_patch,
-  type PatchFn,
-  validating_patch,
-} from "../internal/event-sourcing.js";
+import { bare_patch, validating_patch } from "../internal/event-sourcing.js";
 import {
   current_version_of,
   deprecated_event_names,
@@ -30,6 +26,7 @@ import type {
   Actor,
   BatchHandler,
   LaneConfig,
+  PatchFn,
   Registry,
   Schema,
   SchemaRegister,

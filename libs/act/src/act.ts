@@ -32,12 +32,7 @@ import {
   type HandleBatch,
 } from "./internal/drain-cycle.js";
 import type { DrainOps } from "./internal/drain-ops.js";
-import {
-  bare_patch,
-  type EsOps,
-  type PatchFn,
-  scan,
-} from "./internal/event-sourcing.js";
+import { bare_patch, type EsOps, scan } from "./internal/event-sourcing.js";
 import {
   FOLD_RESET,
   type ResettableBatchHandler,
@@ -86,6 +81,7 @@ import type {
   Lease,
   LoadTarget,
   Logger,
+  PatchFn,
   Query,
   Registry,
   ScanOptions,
