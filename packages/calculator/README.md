@@ -129,14 +129,14 @@ export type CalculatorRouter = typeof calculatorRouter;
 
 ### Projection rebuild — `dev:rebuild`
 
-`src/rebuild-demo.ts` builds a `Counter` state with a `SumProjection`, emits five `Incremented` events, drains them, then resets the projection watermark and re-drains:
+`src/rebuild-demo.ts` builds a `Counter` state with a `SumProjection`, emits five `Incremented` events, drains them, then resets the projection watermark and re-drains. It builds with `autoSettle: false` to show each step; in an app, `app.reset(...)` settles the replay on its own:
 
 ```ts
 const resetCount = await app.reset(["sum-proj"]);
 await app.drain({ eventLimit: 100 });
 ```
 
-`app.reset(["sum-proj"])` resets the watermark **and** arms the drain — calling `store().reset(...)` directly would not. The demo verifies the rebuilt sum matches the live state after each rebuild.
+`app.reset(["sum-proj"])` rewinds the watermark **and** wakes the drain; `store().reset(...)` alone leaves a settled app idle. The demo verifies the rebuilt sum matches the live state after each rebuild.
 
 ### Close-the-books — `dev:close`
 

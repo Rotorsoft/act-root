@@ -37,9 +37,10 @@ The dependency wiring is what differs from an in-tree adapter. You depend on `@r
   "exports": { ".": "./dist/index.js" },
   "peerDependencies": {
     "@rotorsoft/act": ">=1.0.0",
-    "zod": "^4.4.3"
+    "zod": "^4"
   },
   "devDependencies": {
+    "@fast-check/vitest": "latest",
     "@rotorsoft/act": "latest",
     "@rotorsoft/act-tck": "latest",
     "vitest": "latest"

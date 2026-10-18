@@ -176,7 +176,7 @@ When `_armed` is false, `drain()` returns immediately without issuing `claim`. T
 
 The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drain_all` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
 
-The `_armed` flag is per-controller. `do()` arms only the lanes its events react on; `reset()`, `unblock()`, `restore()` and the cold-start path arm every controller via `Act._arm_all`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain that drains the lane at least that often. It is a floor, not a rate limit: with `autoSettle` on, the settle a commit schedules drains every armed lane, so a slow lane may run sooner when nothing else is waiting. The chain is the extra precaution for when `autoSettle` is off. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
+The `_armed` flag is per-controller. `do()` arms only the lanes its events react on; `reset()`, `unblock()`, `restore()` and the cold-start path arm every controller via `Act._arm_all`. A lane's `cycleMs` adds a timer that drains it at least that often, which only matters with `autoSettle: false` (see [configuration § `LaneConfig` fields](../concepts/configuration.md#laneconfig-fields)). Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
 
 ## Settle — the catch-up loop
 
@@ -196,14 +196,14 @@ The `_armed` flag is per-controller. `do()` arms only the lanes its events react
                                                     correlate({ after: checkpoint })
                                                     drain(options)
                                                     progress = subscribed > 0 ||
-                                                               acked.length > 0 ||
-                                                               blocked.length > 0
+                                                               leased.length > 0 ||
+                                                               checkpoint moved
                                                               │
                                                               ▼
-                                                  emit "settled" with last drain
+                                                  emit "settled" with every pass's drain
 ```
 
-"Until no progress" handles paginated catch-up. After `app.reset(...)`, a settled stream might have thousands of events. One drain cycle's `streamLimit × eventLimit` won't catch up; subsequent cycles will. `settle()` doesn't return until the work is done — the caller gets the `"settled"` event when there's nothing left.
+"Until no progress" handles paginated catch-up. After `app.reset(...)`, a settled stream might have thousands of events. One drain cycle's `streamLimit × eventLimit` won't catch up; subsequent cycles will. A pass that leased streams counts as progress even if every one of them deferred or failed, since more marked streams may wait behind the claim's budget. `settle()` returns at once (it only schedules); the caller hears the `"settled"` event, carrying what every pass acked and blocked, when a pass finds nothing left.
 
 The debounce is `ActOptions.settleDebounceMs ?? 10` by default. Coalesces commits in the same tick (typical pattern: tRPC mutation chain calling `app.do` many times) into one settle pass.
 
@@ -217,7 +217,7 @@ The cost of that rule: a reaction that commits while the cycle runs queues one m
 
 `settle()` wraps drain in a debounced async loop with progress detection. Useful for production: fire and forget; the framework figures out when "done" means done. Listeners on `"settled"` get notified after each cycle, even one that found nothing to do.
 
-Mixing them is fine — `settle()` doesn't acquire any global lock, just a per-controller reentrancy guard. Multiple settle calls on different Act instances proceed independently.
+Mixing them works, with one catch: each lane's controller runs one drain at a time, so an explicit `drain()` while a settle holds the lane returns empty. Settle's correlate takes the correlation lease, so among workers running the same application over one store one scans on behalf of the others (see [The correlation lease](#the-correlation-lease)); their drains proceed independently.
 
 ## Pointers
 

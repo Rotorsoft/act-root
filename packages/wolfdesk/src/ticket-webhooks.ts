@@ -30,7 +30,7 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
  * premature re-claim, plus a small `streamLimit` so a stuck endpoint
  * can't tie up a wide pool of leases. Other reactions in the app stay
  * on the `"default"` lane with their own (much shorter) lease budget;
- * `Act._drainAll` runs both controllers in parallel so the webhook
+ * the orchestrator runs both controllers in parallel so the webhook
  * lane's in-flight POSTs don't block the rest of the pipeline.
  */
 // prettier-ignore
@@ -40,7 +40,6 @@ export const TicketWebhooksSlice = slice()
     name: "webhooks",
     leaseMillis: 30_000,
     streamLimit: 5,
-    cycleMs: 500,
   })
   .on("TicketEscalated")
   .do(

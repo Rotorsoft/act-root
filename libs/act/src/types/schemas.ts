@@ -59,8 +59,8 @@ export const SHREDDED = "[SHREDDED]" as const;
 export function sensitive<T extends z.ZodType>(schema: T): T {
   _registry.add(schema, { sensitive: true });
   // Also stamp the def, so the marker survives the clone Zod produces for
-  // any refinement chained AFTER this call — `sensitive(z.string()).min(1)`
-  // used to lose it silently and write plaintext into `events.data`.
+  // any refinement chained after this call (`sensitive(z.string()).min(1)`);
+  // without it the field would be written as plaintext into `events.data`.
   _mark_sensitive(schema);
   return schema;
 }

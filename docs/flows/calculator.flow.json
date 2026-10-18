@@ -82,7 +82,7 @@
       "note": "left · operator · right · result",
       "span": [0, 4],
       "file": "packages/calculator/src/calculator.ts",
-      "description": "One calculator per stream (A, B). Each key loads it, and its event patches it: digits and dots append to the left or right operand, an operator or = computes the pending result. A division by zero resets to 0 instead of storing Infinity. Snapshots every 12 patches."
+      "description": "One calculator per stream (A, B). Each key loads it, and its event patches it: digits and dots append to the left or right operand, an operator or = computes the pending result. A division by zero resets to 0 instead of storing Infinity. Takes a snapshot once more than 12 patches pile up since the last one."
     },
     {
       "id": "state:DigitBoard",

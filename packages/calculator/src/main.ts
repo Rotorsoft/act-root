@@ -179,19 +179,14 @@ async function main() {
         continue;
       }
     }
-    await sleep(1000); // slow down for demo
-    await app.drain({
-      streamLimit: 5,
-      eventLimit: 25,
-    });
+    // Slow down for the demo; the key's reactions settle on their own
+    // meanwhile (a commit with reactions schedules them).
+    await sleep(1000);
     if (await shouldStop()) {
       console.log("Stopping demo.\n");
       break;
     }
   }
-
-  // Final drain to process remaining reactions
-  await app.drain({ streamLimit: 5, eventLimit: 25 });
 
   // Show final calculator state
   await printStreamStates();
@@ -210,8 +205,7 @@ async function main() {
     }))
   );
 
-  // Clean up: stop the correlation pump so the process can exit
-  app.stop_correlations();
+  await app.shutdown();
 }
 
 main().catch((err) => {

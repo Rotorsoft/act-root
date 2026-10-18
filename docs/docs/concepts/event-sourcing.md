@@ -239,16 +239,14 @@ The delegate is only consulted on **originating actions** and on **close-the-boo
 4. **Handle** — execute reaction handlers
 5. **Ack/Block** — release successful claims or block failed streams
 
+Each commit settles its reactions on its own (see [settle()](#settle)). To walk the pipeline yourself, step by step, build with `autoSettle: false`:
+
 ```typescript
 import { act } from "@rotorsoft/act";
 
-const app = act().build();
-
-// In tests — explicit, deterministic
-await app.correlate();
-await app.drain();
-
-// In production — each commit settles its reactions on its own
+const app = act().build({ autoSettle: false });
+await app.correlate(); // mark the work
+await app.drain(); // run one cycle of it
 ```
 
 ### Dual-Frontier Strategy
@@ -290,7 +288,7 @@ app.on("settled", (drain) => {
 await app.do("CreateItem", target, input);
 ```
 
-`drain()` only processes one level per call. `settle()` is the loop that follows reaction chains to completion in production. In tests, prefer the explicit `correlate → drain` pair so cycle counts are deterministic.
+`drain()` only processes one level per call. `settle()` is the loop that follows reaction chains to completion. In tests, keep the default and wait for the outcome, or build with `autoSettle: false` to check each step; [Testing](./testing.md) shows both.
 
 ### Lifecycle Events
 
@@ -467,7 +465,7 @@ Then `stream_rename` runs (after the event migration, so it sees the migrated ev
 | Primitive | What it does | Atomicity |
 |---|---|---|
 | `app.restore(source, opts?, sink?)` | Wipe the sink (events + streams + subscriptions) and rebuild from the source in a single transaction. `created` preserved, `id` renumbered, causation refs rewritten. | Adapter transaction — all-or-nothing per call |
-| `app.reset(input)` | Set reaction watermarks to `-1` for matching streams, arm the orchestrator's drain flag so the next `settle()` replays every event through reactions. **Does not delete events.** | Per-stream watermark update |
+| `app.reset(input)` | Set reaction watermarks to `-1` for matching streams, and schedule a settle that replays every event through reactions. **Does not delete events.** | Per-stream watermark update |
 | `app.unblock(input)` | Lift the `blocked` flag from poison-message streams. Watermark preserved — the stream resumes from where it stopped, no replay. | Per-stream flag update |
 | `store().truncate(targets)` | Full targets: delete every event for the stream and insert a single seed event. Windowed targets (`before`): delete only the prefix below the closest safe snapshot, no seed. **Operator-facing, not orchestrator-aware.** Prefer `app.close(...)` for the orchestrator-coordinated variant. | Per-target transaction |
 | `app.close(targets)` | Archive + tombstone (or restart) a closed stream — or, with `before`, prune a rolling window while the stream stays live. Quiesces reactions, runs the archive callback, deletes events, commits the tombstone or a fresh `__snapshot__` (windowed targets seed nothing). | Per-target transaction with reaction quiesce |

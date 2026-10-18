@@ -202,7 +202,7 @@ Source-of-truth for what lives where:
 ## Development Workflow
 
 - Strict TypeScript everywhere — type-check before pushing
-- Pre-commit hooks run lint/format; pre-push runs the full test suite (don't bypass with `--no-verify` unless asked)
+- Pre-commit hooks run lint/format; pre-push runs the full test suite on master (don't bypass with `--no-verify` unless asked)
 - Use Zod schemas for all runtime validation
 - Never modify event data structures in place — evolve via versioned event names
 - Keep state machines focused; split concerns into separate slices

@@ -1,12 +1,8 @@
 name: Perf Baseline
 
-# Manually-dispatched: regenerates the adapter perf baselines on a CI runner
-# (issue #1062) so the gate in ci-cd.yml compares like-for-like hardware.
-# A laptop-generated baseline would false-fail the slower shared runner at
-# the 2.0x tolerance, so the authoritative baseline must be produced here.
-# Outputs the updated perf-baseline.json files as an artifact; a maintainer
-# downloads, commits them, and flips the ci-cd perf steps from report-only
-# to blocking.
+# Run by hand: regenerates the adapter perf baselines on a CI runner, so the
+# ci-cd perf gate compares like-for-like hardware. Commit the artifact's
+# perf-baseline.json files.
 on:
   workflow_dispatch:
 

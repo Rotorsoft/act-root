@@ -74,8 +74,8 @@ export type ActLifecycleEvents<
    * Fires only when the configured store implements
    * {@link Store.notify} and there is at least one registered reaction.
    * The orchestrator uses the same signal internally to wake `settle()`
-   * — listeners get the raw payload for SSE fan-out, dashboards, and
-   * audit logs.
+   * (unless `autoSettle: false`); listeners get the raw payload for SSE
+   * fan-out, dashboards, and audit logs.
    *
    * Local commits do *not* fire `notified` (use `committed` for those):
    * stores self-filter their own writes so this channel has a clean
@@ -122,10 +122,8 @@ export type ActLifecycleEvents<
  *   reaction work: a commit, `reset()`, `unblock()`, `restore()` or a
  *   notification from another process. Set `false` when you walk the
  *   pipeline yourself with `correlate()` / `drain()` (tests that check its
- *   steps, tools). Timers still run: lanes with `cycleMs`,
- *   `start_correlations()`, the circuit breaker's recovery pass after a
- *   store failure, and each stream's backoff or defer wake-up.
- *   Default: `true`.
+ *   steps, tools); the event-sourcing guide's settle section lists the
+ *   timers that still run. Default: `true`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
