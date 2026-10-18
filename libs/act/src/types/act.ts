@@ -118,11 +118,12 @@ export type ActLifecycleEvents<
  *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
  *   Act instance instead of threading the value through every call site.
  *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
- * @property autoSettle - Settle on its own after a local change that
- *   frees reaction work: a commit, `reset()`, `unblock()` or `restore()`.
- *   Set `false` when you walk the pipeline yourself with `correlate()` /
- *   `drain()` (tests that check its steps, tools); reactions then run only
- *   when you call `settle()`, `correlate()` or `drain()`. Default: `true`.
+ * @property autoSettle - Settle on its own after a change that frees
+ *   reaction work: a commit, `reset()`, `unblock()`, `restore()` or a
+ *   notification from another process. Set `false` when you walk the
+ *   pipeline yourself with `correlate()` / `drain()` (tests that check its
+ *   steps, tools). Timers you start still run: lanes with `cycleMs` and
+ *   `start_correlations()`. Default: `true`.
  */
 export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;

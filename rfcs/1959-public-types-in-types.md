@@ -17,11 +17,19 @@ Existing public names also appear on the `@rotorsoft/act/types` subpath:
 
 - **Types on `./types`:** `ActOptions`, `ActLifecycleEvents`, `CircuitState`, `CircuitBreakerOptions`, `AutocloseConfig`, `AutoclosePolicy`, `ActBuilder`, `StateBuilder`, `ActionBuilder`, `SliceBuilder`, `Slice`, `ProjectionBuilder`, `Projection`, `Config`, `Package`, `CsvFileOptions`, `ExitCode`, `Scoped`.
 - **Values on `./types`:** `DeferSignal`, `ExitCodes`, `DEFAULT_SETTLE_DEBOUNCE_MS`, `DEFAULT_MAX_SUBSCRIBED_STREAMS`.
-- **`ActOptions.autoSettle`** (default `true`): a local change that frees reaction work (a commit, `reset()`, `unblock()`, `restore()`) settles it on its own. Tests and tools that walk the pipeline with `correlate()` / `drain()` set it `false`. It replaces the `app.on("committed", () => app.settle())` wiring every app needed; a long `settleDebounceMs` was rejected as the off switch because a timing value pretending to mean "off" is not an interface.
+- **`ActOptions.autoSettle`** (default `true`): a change that frees reaction work (a commit, `reset()`, `unblock()`, `restore()`, a notification from another process) settles it on its own. Tests and tools that walk the pipeline with `correlate()` / `drain()` set it `false`. It replaces the `app.on("committed", () => app.settle())` wiring every app needed; a long `settleDebounceMs` was rejected as the off switch because a timing value pretending to mean "off" is not an interface.
 
-The same release removes the deprecated autoclose knobs (`autocloseCycleMinutes`, `closeBatchSize`, `closeYieldMs`, `closeOnError`), their three `DEFAULT_*` constants and the `start_correlations` callback.
+The same release removes the deprecated autoclose knobs (`autocloseCycleMinutes`, `closeBatchSize`, `closeYieldMs`, `closeOnError`), their three `DEFAULT_*` constants and the `start_correlations` callback. TypeScript callers that still pass the callback get a compile error; plain JavaScript callers get no error, and the callback is ignored.
 
 The test-helper types `Sandbox` and `SandboxOptions` are declared in `types/sandbox.ts` but published only through `@rotorsoft/act/test`, as before: `types/index.ts` does not re-export them.
+
+## Why settling became automatic
+
+Every app wired `app.on("committed", () => app.settle())`, and an app that forgot it ran no reactions until something else woke the drain. The framework already knows when a commit has a local reaction, so it now schedules the settle itself, and `reset()`, `unblock()` and `restore()` do the same. Startup stays explicit: one `app.settle()` runs what was pending before a restart.
+
+Scheduling follows one rule. A pass already scheduled is never reset or replaced: calls before it runs join it, and a call during a running cycle queues one more pass. Only `settle(options)` carries options; the framework's own wake-ups carry none, so they never discard a caller's. What this costs: a reaction that commits while a cycle runs queues one more short pass, so one chain can emit `"settled"` twice; and a lane with `cycleMs` may drain sooner than its cadence when a commit's settle finds work for it. `cycleMs` is a floor, the extra precaution for when `autoSettle` is off, not a rate limit.
+
+The CommonJS build now shares one copy of each class across entry points, so `instanceof` works for an error built from `@rotorsoft/act/types` and checked by the root.
 
 ## Alternatives considered
 

@@ -101,15 +101,14 @@ describe("sandbox", () => {
     const b = await sandbox(sharedBuilder);
 
     await a.app.do("increment", { stream: "c-1", actor }, { by: 1 });
-    await a.app.correlate();
-    await a.app.drain();
+    await vi.waitFor(() => expect(tallyCalls).toBe(1));
 
     await b.app.do("increment", { stream: "c-1", actor }, { by: 1 });
-    await b.app.correlate();
-    await b.app.drain();
+    await vi.waitFor(() => expect(tallyCalls).toBe(2));
 
     // Each tenant's projection ran once — no reaction-name accumulation
     // from the second build.
+    await new Promise((r) => setTimeout(r, 30));
     expect(tallyCalls).toBe(2);
 
     await a.dispose();

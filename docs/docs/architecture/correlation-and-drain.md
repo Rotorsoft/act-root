@@ -176,7 +176,7 @@ When `_armed` is false, `drain()` returns immediately without issuing `claim`. T
 
 The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drain_all` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
 
-The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the cold-start path arm every controller via `Act._armAll`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain on the controller that drains at the lane's cadence independent of the Act-level settle loop — useful for lanes that should drain on their own cadence. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
+The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the cold-start path arm every controller via `Act._arm_all`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain that drains the lane at least that often. It is a floor, not a rate limit: with `autoSettle` on, the settle a commit schedules drains every armed lane, so a slow lane may run sooner when nothing else is waiting. The chain is the extra precaution for when `autoSettle` is off. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
 
 ## Settle — the catch-up loop
 
@@ -207,13 +207,15 @@ The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the col
 
 The debounce is `ActOptions.settleDebounceMs ?? 10` by default. Coalesces commits in the same tick (typical pattern: tRPC mutation chain calling `app.do` many times) into one settle pass.
 
-**Mid-cycle wake-ups are never dropped (ACT-1205).** The reentrancy guard skips starting a second overlapping cycle, but a `schedule()` whose timer fires *while a cycle is running* is recorded as pending rather than discarded — the running cycle's `finally` re-arms it. Without this, a commit landing during the final no-progress drain pass (its wake-up firing just before `_running` clears) would be lost, and armed controllers could starve on an instance with no lane `cycleMs` and no polling.
+**One scheduling rule.** A pass already scheduled is never reset or replaced. Calls that arrive before it runs join it, so steady commits can't put it off. A call that arrives while a cycle runs queues one more pass after it, so a commit landing during the final no-progress pass is never lost. Only `settle(options)` carries options, and the next pass uses the last caller's; the wake-ups the framework schedules itself (a commit, a reset, an unblock, a restore, a notification) carry none, so they never discard a caller's `eventLimit` or `maxPasses`.
+
+The cost of that rule: a reaction that commits while the cycle runs queues one more pass, so one chain of reactions can emit `"settled"` twice, the second time for a short pass that finds little or nothing. Listeners on `"settled"` should treat it as "work was done", not "exactly once per burst".
 
 ## Why drain is one-cycle, settle is the loop
 
 `drain()` is one round-trip: claim, fetch, dispatch, ack/block, return. Predictable. Useful for tests and synchronous catch-up scripts where the caller wants control over each cycle.
 
-`settle()` wraps drain in a debounced async loop with progress detection. Useful for production: fire and forget; the framework figures out when "done" means done. Listeners on `"settled"` get notified once per coalesced burst.
+`settle()` wraps drain in a debounced async loop with progress detection. Useful for production: fire and forget; the framework figures out when "done" means done. Listeners on `"settled"` get notified after each cycle that did work.
 
 Mixing them is fine — `settle()` doesn't acquire any global lock, just a per-controller reentrancy guard. Multiple settle calls on different Act instances proceed independently.
 

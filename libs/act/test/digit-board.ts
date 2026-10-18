@@ -78,4 +78,4 @@ export const app = act()
     source: e.stream,
     target: "Calculator" + e.stream,
   }))
-  .build();
+  .build({ autoSettle: false });

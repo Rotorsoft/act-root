@@ -93,6 +93,101 @@ describe("settle loop wake-up during a running cycle", () => {
   });
 });
 
+describe("a scheduled settle pass is never reset or replaced", () => {
+  const breaker = () =>
+    new CircuitBreaker({ failureThreshold: 5, cooldownMs: 1000 });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps a caller's options when an internal wake-up lands mid-cycle", async () => {
+    const seen: Array<number | undefined> = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started!: () => void;
+    const running = new Promise<void>((r) => {
+      started = r;
+    });
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain: async (options) => {
+          seen.push(options.eventLimit);
+          if (seen.length === 1) {
+            started();
+            await gate;
+          }
+          return empty_drain();
+        },
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      0
+    );
+    loop.schedule();
+    await running;
+    loop.schedule(); // a commit while the cycle runs
+    loop.schedule({ eventLimit: 77 }); // the caller
+    loop.schedule(); // another commit
+    release();
+    await vi.waitFor(() => expect(seen).toEqual([undefined, 77]));
+    loop.stop(true);
+  });
+
+  it("doesn't put off a scheduled pass when more calls arrive", async () => {
+    vi.useFakeTimers();
+    const drain = vi.fn(async () => empty_drain());
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain,
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      10
+    );
+    loop.schedule({ debounceMs: 50 });
+    await vi.advanceTimersByTimeAsync(40);
+    loop.schedule({ debounceMs: 50 }); // a caller
+    loop.schedule(); // a commit
+    await vi.advanceTimersByTimeAsync(10);
+    expect(drain).toHaveBeenCalledTimes(1);
+    loop.stop(true);
+  });
+
+  it("control — stop() drops the caller's options with the pending pass", async () => {
+    vi.useFakeTimers();
+    const seen: Array<number | undefined> = [];
+    const loop = new SettleLoop<Schemas>(
+      {
+        init: async () => {},
+        checkpoint: () => -1,
+        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        drain: async (options) => {
+          seen.push(options.eventLimit);
+          return empty_drain();
+        },
+        on_settled: () => {},
+        breaker: breaker(),
+      },
+      10
+    );
+    loop.schedule({ eventLimit: 5 });
+    loop.stop();
+    loop.schedule();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(seen).toEqual([undefined]);
+    loop.stop(true);
+  });
+});
+
 /**
  * ACT-1309 — SettleLoop must keep paginating while correlate advances its
  * checkpoint, even when a window subscribes/drains nothing.
@@ -329,7 +424,7 @@ describe("a throwing settled listener is contained", () => {
       .on("Ticked")
       .do(async function react() {})
       .to((e) => ({ target: `t-${e.stream}` }))
-      .build(opts as never);
+      .build({ autoSettle: false, ...opts } as never);
 
   /**
    * Settle, waiting on a resolver registered BEFORE the throwing listener so
@@ -486,28 +581,6 @@ describe("a local change settles its own reactions", () => {
     await app.do("ping", { stream: "late", actor }, {});
     await new Promise((r) => setTimeout(r, 50));
     expect(ran).toEqual([]);
-  });
-
-  it("keeps a caller's settle when a commit lands before it runs", async () => {
-    const ran: string[] = [];
-    const app = reacting(ran);
-    app.settle({ debounceMs: 80 });
-    await app.do("ping", { stream: "k1", actor }, {});
-    await new Promise((r) => setTimeout(r, 40));
-    expect(ran).toEqual([]); // the commit didn't swap in a 10ms pass
-    await vi.waitFor(() => expect(ran).toEqual(["k1"]));
-  });
-
-  it("doesn't put off a scheduled pass while commits keep landing", async () => {
-    const ran: string[] = [];
-    const app = reacting(ran);
-    const until = Date.now() + 150;
-    let i = 0;
-    while (Date.now() < until) {
-      await app.do("ping", { stream: `w${i++}`, actor }, {});
-      await new Promise((r) => setTimeout(r, 3));
-    }
-    expect(ran.length).toBeGreaterThan(0); // some ran while commits kept coming
   });
 
   it("replays a reset target with no settle call", async () => {

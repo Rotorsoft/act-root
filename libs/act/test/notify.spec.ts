@@ -31,9 +31,15 @@ async function buildAppWithNotifyStore(
     hasNotify?: boolean;
     notifyThrows?: Error;
     registerReaction?: boolean;
+    autoSettle?: boolean;
   } = {}
 ) {
-  const { hasNotify = true, notifyThrows, registerReaction = true } = opts;
+  const {
+    hasNotify = true,
+    notifyThrows,
+    registerReaction = true,
+    autoSettle,
+  } = opts;
   vi.resetModules();
   const { InMemoryStore } = await import("../src/adapters/in-memory-store.js");
   const { store, dispose } = await import("../src/ports.js");
@@ -73,7 +79,7 @@ async function buildAppWithNotifyStore(
   // overhead at the store-config level (e.g., `PostgresStore({ notify:
   // true })` enables LISTEN/NOTIFY; `false` leaves the method
   // undefined).
-  const app = builder.build();
+  const app = builder.build({ autoSettle });
 
   // Wiring is kicked off in the constructor but the subscription
   // itself is async — yield once so the wire promise resolves before
@@ -131,8 +137,7 @@ describe("Act ↔ Store.notify auto-wiring", () => {
     const { app, capturedHandler } = await buildAppWithNotifyStore();
     const settled = vi.fn();
     // Resolve exactly when settle fires rather than guessing a fixed
-    // delay — settle() runs on a 0ms debounce, but a fixed sleep flakes
-    // under load. A real regression makes this await the test timeout.
+    // delay — a fixed sleep flakes under load. A real regression makes this await the test timeout.
     const settledOnce = new Promise<void>((resolve) =>
       app.on("settled", () => {
         settled();
@@ -145,6 +150,20 @@ describe("Act ↔ Store.notify auto-wiring", () => {
     });
     await settledOnce;
     expect(settled).toHaveBeenCalled();
+  });
+
+  it("does not wake settle with autoSettle: false", async () => {
+    const { app, capturedHandler } = await buildAppWithNotifyStore({
+      autoSettle: false,
+    });
+    const settled = vi.fn();
+    app.on("settled", settled);
+    capturedHandler()!({
+      stream: "remote-stream",
+      events: [{ id: 1, name: "Pressed" }],
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).not.toHaveBeenCalled();
   });
 
   it("contains errors thrown by user 'notified' listeners", async () => {

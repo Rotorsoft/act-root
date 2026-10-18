@@ -97,7 +97,7 @@ Pending work, not watermark lag — the two stopped being the same thing when co
 
 That question is only fair about events correlate has already resolved, so **the probe advances the read cursor to the head of the streams being closed before asking**. An uncorrelated tail raises no marks, so every reader would answer "caught up" about it — including the reader that does not exist yet, since the subscription a dynamic resolver would create is itself a product of correlating those events. Refusing to close instead would be worse than useless: the autoclose path fires *from* the event that reaches the terminal state, so its own trigger is routinely uncorrelated, and a retired stream gets no further commits to retry with. The catch-up is bounded (a fixed window, a capped number of passes), and whatever still sits above the cursor afterwards lands in `skipped` — the documented retryable outcome.
 
-- **Reader has unconsumed work below the head**: target goes to `skipped`. Callable code can retry close after the reader catches up (e.g., after `await app.settle()`).
+- **Reader has unconsumed work below the head**: target goes to `skipped`. Callable code can retry close after the reader catches up (e.g., on the next `"settled"` event).
 - **Reader has consumed everything marked for it**: target is `safe`.
 - **Probe fails**: close() throws. Nothing committed.
 

@@ -618,7 +618,7 @@ export class Act<
             const armed = this._arm_for_event_names(
               notification.events.map((e) => e.name)
             );
-            if (armed) this._settle.schedule({ debounceMs: 0 });
+            this._settle_armed(armed);
           }
         } catch (err) {
           this._logger.error(err, "notified handler threw");
@@ -954,13 +954,12 @@ export class Act<
   }
 
   /**
-   * Settles what a local change armed (a commit, a reset, an unblock, a
-   * restore), the way a commit from another process does, unless the app
-   * walks the pipeline itself (`autoSettle: false`).
+   * Settles what a change armed (a commit, a reset, an unblock, a restore,
+   * a notification from another process), unless the app walks the
+   * pipeline itself (`autoSettle: false`).
    */
   private _settle_armed(armed: boolean): void {
-    if (armed && this._drain && this._auto_settle)
-      this._settle.schedule({}, true);
+    if (armed && this._drain && this._auto_settle) this._settle.schedule();
   }
 
   /** Arms only the lanes these events react on; true when any was armed. */
@@ -1116,7 +1115,8 @@ export class Act<
   }
 
   /**
-   * Cancels any pending or active settle cycle.
+   * Drops the settle pass scheduled but not yet started. A cycle already
+   * running finishes; later changes schedule new passes.
    *
    * @see {@link settle}
    */
@@ -1477,9 +1477,9 @@ export class Act<
    * A local change that frees reaction work (a commit, `reset()`,
    * `unblock()`, `restore()`) schedules this on its own unless the app
    * sets `autoSettle: false`. Call it at startup, to run what was pending
-   * before a restart, or with options to replace the scheduled pass.
-   * Multiple rapid calls within the debounce window are coalesced into a
-   * single cycle. Runs correlate→drain in a loop until a pass makes no
+   * before a restart, or with options for the next pass. A pass already
+   * scheduled is never delayed: calls before it runs coalesce into it,
+   * and a call during a running cycle queues one more pass after it. Runs correlate→drain in a loop until a pass makes no
    * progress — no new subscriptions, no events read, no streams leased —
    * then emits the `"settled"` lifecycle event, so one call fully catches
    * up paginated streams without forcing callers to loop.

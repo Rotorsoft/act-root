@@ -211,34 +211,6 @@ describe("declarative .defer(when)", () => {
 });
 
 describe("imperative DeferSignal(when)", () => {
-  it("treats a DeferSignal from another copy of the class as a defer", async () => {
-    // The CommonJS build carries one copy of the class per entry point, so a
-    // signal built from "@rotorsoft/act/types" fails `instanceof` here.
-    const foreign = (when: { at: Date }) =>
-      Object.assign(new Error("reaction deferred"), {
-        name: "DeferSignal",
-        when,
-      });
-    let attempts = 0;
-    const until = Date.now() + 80;
-    const app = act()
-      .withState(counter)
-      .on("ticked")
-      .do(async function deadline() {
-        attempts++;
-        if (Date.now() < until) throw foreign({ at: new Date(until) });
-      })
-      .build({ autoSettle: false });
-    const blocked = vi.fn();
-    app.on("blocked", blocked);
-    await app.do("tick", { stream: "cjs1", actor }, {});
-    await app.correlate();
-    const first = await app.drain();
-    expect(first.acked.length).toBe(0); // deferred, not failed
-    await vi.waitFor(() => expect(attempts).toBe(2));
-    expect(blocked).not.toHaveBeenCalled();
-  });
-
   it("{ at: Date } holds until the due-time, then acts", async () => {
     let attempts = 0;
     const until = Date.now() + 120;

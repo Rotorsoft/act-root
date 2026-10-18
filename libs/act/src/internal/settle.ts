@@ -52,11 +52,10 @@ export class SettleLoop<TEvents extends Schemas> {
    * it (`stop()` cancels scheduling only). Never rejects.
    */
   private _inflight: Promise<void> | undefined;
-  /**
-   * A wake-up that fired while a cycle was running. The running cycle's
-   * `finally` schedules one more pass with these options, so it isn't lost.
-   */
-  private _pending: SettleOptions | undefined = undefined;
+  /** A wake-up arrived while a cycle ran: run one more pass after it. */
+  private _pending = false;
+  /** The last caller's options, used by the next pass. */
+  private _next: SettleOptions | undefined = undefined;
   /** Set at shutdown: nothing schedules again. */
   private _stopped = false;
   private readonly _deps: SettleDeps<TEvents>;
@@ -69,35 +68,32 @@ export class SettleLoop<TEvents extends Schemas> {
   }
 
   /**
-   * Schedule a settle pass. Multiple calls inside the debounce window
-   * coalesce into one cycle. The cycle runs correlate→drain in a loop
-   * until no progress is made (no new subscriptions, no events read, no
-   * streams leased)
-   * or `maxPasses` is reached, then emits the `"settled"` lifecycle event
-   * via {@link SettleDeps.on_settled}. `auto` marks a pass a local change
-   * asked for: it never displaces or delays a pass already scheduled, so a
-   * caller's options win and steady commits can't starve settling.
+   * Schedule a settle pass. A pass already scheduled is never reset or
+   * replaced: calls that arrive before it runs coalesce into it, and a
+   * call during a running cycle queues one more pass after it. Callers
+   * pass options, which the next pass uses; internal wake-ups pass none,
+   * so they never discard a caller's. The cycle runs correlate→drain in a
+   * loop until no progress is made (no new subscriptions, no events read,
+   * no streams leased) or `maxPasses` is reached, then emits the
+   * `"settled"` lifecycle event via {@link SettleDeps.on_settled}.
    */
-  schedule(options: SettleOptions = {}, auto = false): void {
+  schedule(options?: SettleOptions): void {
     if (this._stopped) return;
-    if (auto && (this._timer || this._pending)) return;
-    const {
-      debounceMs = this._default_debounce_ms,
-      correlate: correlate_query = { after: -1, limit: 100 },
-      maxPasses = Infinity,
-      ...drain_options
-    } = options;
-
-    if (this._timer) clearTimeout(this._timer);
+    if (options) this._next = options;
+    if (this._running) {
+      this._pending = true;
+      return;
+    }
+    if (this._timer) return;
     this._timer = setTimeout(() => {
       this._timer = undefined;
-      // A cycle is already running. Record this wake-up as pending rather
-      // than dropping it — the running cycle's `finally`
-      // re-schedules it so armed controllers always get one more drain.
-      if (this._running) {
-        this._pending = options;
-        return;
-      }
+      const {
+        debounceMs: _,
+        correlate: correlate_query = { after: -1, limit: 100 },
+        maxPasses = Infinity,
+        ...drain_options
+      } = this._next ?? {};
+      this._next = undefined;
       this._running = true;
 
       let settle_done!: () => void;
@@ -158,15 +154,13 @@ export class SettleLoop<TEvents extends Schemas> {
           this._running = false;
           this._inflight = undefined;
           settle_done();
-          // A wake-up arrived mid-cycle. Re-arm one more pass with its
-          // options so the requested drain actually happens.
-          const pending = this._pending;
-          if (pending !== undefined) {
-            this._pending = undefined;
-            this.schedule(pending);
+          // A wake-up arrived mid-cycle: run one more pass so it isn't lost.
+          if (this._pending) {
+            this._pending = false;
+            this.schedule();
           }
         });
-    }, debounceMs);
+    }, this._next?.debounceMs ?? this._default_debounce_ms);
   }
 
   /**
@@ -186,7 +180,8 @@ export class SettleLoop<TEvents extends Schemas> {
     if (final) this._stopped = true;
     // Drop a mid-cycle wake-up too — a stopped loop must not re-arm from
     // the running cycle's `finally`.
-    this._pending = undefined;
+    this._pending = false;
+    this._next = undefined;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = undefined;

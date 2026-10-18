@@ -312,7 +312,7 @@ const app = act().build();
 // Reset the projection's watermarks; the reset settles the replay on its own
 await app.reset(["my-projection"]);
 
-// Optional: replay in bigger batches (replaces the scheduled pass)
+// Optional: replay in bigger batches (the scheduled pass uses these)
 app.settle({ eventLimit: 1000 });
 ```
 

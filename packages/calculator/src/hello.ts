@@ -41,7 +41,8 @@ const app = act()
   .build();
 
 // Each commit runs its reactions on its own. Print the totals every time
-// they settle; the last line is { a: 4, b: 2, total: 6 }.
+// they settle; how many lines print varies, and once everything has run
+// they read { a: 4, b: 2, total: 6 }.
 app.on("settled", async () => {
   const a = await app.load(Counter, "a");
   const b = await app.load(Counter, "b");

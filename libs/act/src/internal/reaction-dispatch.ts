@@ -108,18 +108,6 @@ export type ReactionDeps<
 };
 
 /**
- * A thrown `DeferSignal`. Also matched by name: the CommonJS build carries
- * one copy of the class per entry point, so `instanceof` misses a signal
- * built from `@rotorsoft/act/types`.
- */
-function is_defer(error: unknown): error is DeferSignal {
-  return (
-    error instanceof DeferSignal ||
-    (error instanceof Error && error.name === "DeferSignal")
-  );
-}
-
-/**
  * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.
  *
  * The triggering event is installed as ambient context around each handler
@@ -177,7 +165,7 @@ export function build_handle<
         // (exclude from ack via `defer`), don't bump `retry`, and re-visit
         // the stream at the carried due-time. `acked_at` is unused on
         // the defer path — drain never acks a deferred result.
-        if (is_defer(error))
+        if (error instanceof DeferSignal)
           return {
             lease,
             handled,

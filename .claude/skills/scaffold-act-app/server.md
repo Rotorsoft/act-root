@@ -772,7 +772,7 @@ execSync(`DATABASE_URL=${TEST_DB_URL} pnpm drizzle-kit migrate`, { cwd: "path/to
 
 Initialize in this order: DB → event store (+ optional cache adapter) → initial settle (replays events and runs projections) → warm caches → enable background processes.
 
-**Commits settle on their own.** A commit whose events have a reaction schedules `settle()`, and reactions' own commits do the same, so reaction chains propagate through projections without wiring. To pass drain options to those passes, call `app.settle(options)` from an `app.on("committed", …)` listener; it replaces the automatic pass.
+**Commits settle on their own.** A commit whose events have a reaction schedules `settle()`, and reactions' own commits do the same, so reaction chains propagate through projections without wiring. Automatic passes use each lane's settings (`.withLane({ streamLimit, leaseMillis })`). `app.settle(options)` applies its options to the next pass only, which is what the startup settle below wants; don't call it from a `committed` listener, since commits already schedule passes.
 
 ```typescript
 async function bootstrap() {
