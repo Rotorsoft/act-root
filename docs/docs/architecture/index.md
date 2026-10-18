@@ -13,12 +13,12 @@ Each page targets one subsystem, focuses on the *why* behind the shape (not just
 
 | Page | Topic |
 |---|---|
-| [Concurrency model](./concurrency-model) | Optimistic concurrency (`commit` + `expectedVersion`) vs stream leasing (`claim` + `FOR UPDATE SKIP LOCKED`); how they don't interact |
-| [Cache and snapshots](./cache-and-snapshots) | Two checkpoint layers (in-memory cache + persisted snapshots), how `load()` reads both, time-travel bypass |
-| [Correlation and drain](./correlation-and-drain) | Static vs dynamic resolvers; `_armed` skip-flag; dual-frontier drain; settle's debounced catch-up loop |
-| [Close cycle](./close-cycle) | Phases of close-the-books (correlate → scan → safety → guard → load → archive → truncate); failure semantics; idempotency guarantees |
-| [Event schema evolution](./event-schema-evolution) | Versioned event names; non-breaking-via-defaults vs breaking-via-new-name; why upcasting was rejected |
-| [Extension points](./extension-points) | `Store`, `Cache`, `Logger` contracts; invariants adapters must hold; concrete implementations in this repo |
+| [Concurrency model](./concurrency-model.md) | Optimistic concurrency (`commit` + `expectedVersion`) vs stream leasing (`claim` + `FOR UPDATE SKIP LOCKED`); how they don't interact |
+| [Cache and snapshots](./cache-and-snapshots.md) | Two checkpoint layers (in-memory cache + persisted snapshots), how `load()` reads both, time-travel bypass |
+| [Correlation and drain](./correlation-and-drain.md) | Static vs dynamic resolvers; `_armed` skip-flag; dual-frontier drain; settle's debounced catch-up loop |
+| [Close cycle](./close-cycle.md) | Phases of close-the-books (correlate → scan → safety → guard → load → archive → truncate); failure semantics; idempotency guarantees |
+| [Event schema evolution](./event-schema-evolution.md) | Versioned event names; non-breaking-via-defaults vs breaking-via-new-name; why upcasting was rejected |
+| [Extension points](./extension-points.md) | `Store`, `Cache`, `Logger` contracts; invariants adapters must hold; concrete implementations in this repo |
 
 ## Audience
 

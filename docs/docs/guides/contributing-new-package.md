@@ -54,4 +54,4 @@ Never edit `version` in `package.json` by hand. Semantic-release owns the versio
 
 ## Adapter packages — implement the contract
 
-If the new package is a `Store`, `Cache`, or `Logger` adapter, make sure it implements every invariant in [Extension points](../architecture/extension-points). Reuse the multi-process stress harness in `libs/act-pg/test/stress/` as a template — it exercises the contract under contention and catches most bugs an adapter author would otherwise hit in production.
+If the new package is a `Store`, `Cache`, or `Logger` adapter, make sure it implements every invariant in [Extension points](../architecture/extension-points.md). Reuse the multi-process stress harness in `libs/act-pg/test/stress/` as a template — it exercises the contract under contention and catches most bugs an adapter author would otherwise hit in production.

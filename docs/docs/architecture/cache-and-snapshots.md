@@ -181,7 +181,7 @@ The supported pattern:
 3. New snapshots reflect the new shape
 4. Old snapshots produce old-shape state on cold start; the next reducer call adds the new field
 
-This works because reducers are pure functions of state + event. As long as reducers handle missing fields gracefully (or `cache_hit` semantics align), schema evolution is safe. See [Event schema evolution](./event-schema-evolution) for the full story on schema versioning.
+This works because reducers are pure functions of state + event. As long as reducers handle missing fields gracefully (or `cache_hit` semantics align), schema evolution is safe. See [Event schema evolution](./event-schema-evolution.md) for the full story on schema versioning.
 
 For a destructive reducer change (renamed field that you can't add as a new optional), the right move is to retire the stream via `app.close({ restart: true })` — that loads current state, commits a fresh `__snapshot__` reflecting the new shape, and tombstones older history.
 

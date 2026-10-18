@@ -61,7 +61,7 @@ Options: `registry` (defaults to prom-client's global registry), `prefix` (defau
 
 - [Observability guide](https://rotorsoft.github.io/act-root/docs/guides/observability) — the seam, the two hand-wired signals, and the page-vs-dashboard alerting split
 - [Production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist)
-- [API reference](https://rotorsoft.github.io/act-root/docs/api/act-otel/src)
+- [API reference](https://rotorsoft.github.io/act-root/docs/api/act-otel)
 
 ## License
 

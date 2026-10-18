@@ -150,7 +150,7 @@ A common confusion: "If I commit while another worker holds a lease, does my com
 
 **No.** Stream leasing locks the row in the `streams` table (which tracks reaction watermarks). Commits write to the `events` table and check the `(stream, version)` index. Different rows, different locks. A commit and a reaction lease can be active on the same stream concurrently.
 
-Real interaction surfaces in the close-the-books flow ([Close cycle](./close-cycle)), where the close operation must coordinate both: tombstone the stream (write a guard event via `commit`), then verify no leases are held (lease lifecycle).
+Real interaction surfaces in the close-the-books flow ([Close cycle](./close-cycle.md)), where the close operation must coordinate both: tombstone the stream (write a guard event via `commit`), then verify no leases are held (lease lifecycle).
 
 ## Commit visibility ordering — closing the id gap
 
@@ -191,7 +191,7 @@ One case still resolves the other way. If the store eats a few claims and then a
 
 ## Why no framework-level request deduplication
 
-Optimistic concurrency catches *stream-version* conflicts. It does **not** catch the case where a client retries a network-failed `POST` and the same intent commits twice. That's request-level idempotency, and the framework deliberately leaves it to the API edge (see [Idempotency at the API edge](../guides/production-checklist#5-idempotency-at-the-api-edge)).
+Optimistic concurrency catches *stream-version* conflicts. It does **not** catch the case where a client retries a network-failed `POST` and the same intent commits twice. That's request-level idempotency, and the framework deliberately leaves it to the API edge (see [Idempotency at the API edge](../guides/production-checklist.md#5-idempotency-at-the-api-edge)).
 
 A "use the action's correlation id as a dedup key" hook was evaluated and rejected. Five reasons:
 
