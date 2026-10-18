@@ -1,3 +1,10 @@
+# [@rotorsoft/act-otel-v0.2.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.10...@rotorsoft/act-otel-v0.2.0) (2026-10-18)
+
+
+### Features
+
+* **act:** reactions settle on their own, and one layering pattern for the package ([#1959](https://github.com/Rotorsoft/act-root/issues/1959)) ([9ed7599](https://github.com/Rotorsoft/act-root/commit/9ed75991ad892d26eae62c802374f296cae186f0)), closes [#1942](https://github.com/Rotorsoft/act-root/issues/1942) [#1949](https://github.com/Rotorsoft/act-root/issues/1949)
+
 # [@rotorsoft/act-otel-v0.1.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-otel-v0.1.9...@rotorsoft/act-otel-v0.1.10) (2026-10-15)
 
 
