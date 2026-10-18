@@ -268,6 +268,35 @@ describe("correlate: the armed flag", () => {
       await vi.waitFor(() => expect(seen).toContain("remote-1"));
       app.stop_correlations();
     });
+
+    it("polling reclaims a lease a dead worker let expire", async () => {
+      // A worker that claimed a stream and died leaves a lease nothing will
+      // announce expiring: no commit, no notification. The poll is the only
+      // signal, so it has to wake the lanes, not just correlate.
+      const raw = new InMemoryStore();
+      store(raw);
+      await store().seed();
+      const seen: string[] = [];
+      const app = act()
+        .withState(Ticker)
+        .on("Ticked")
+        .do(async function record(e) {
+          seen.push(e.stream);
+        })
+        .to((e) => ({ target: `out-${e.stream}`, source: e.stream }))
+        .build({ autoSettle: false });
+
+      await app.do("tick", { stream: "s1", actor }, {});
+      await app.correlate();
+      const dead = await raw.claim(10, 10, "dead-worker", 100);
+      expect(dead.map((l) => l.stream)).toEqual(["out-s1"]);
+      await app.drain(); // finds the lease held, and the lane goes idle
+      expect(seen).toEqual([]);
+
+      app.start_correlations({ limit: 100 }, 10);
+      await vi.waitFor(() => expect(seen).toEqual(["s1"]), { timeout: 1000 });
+      app.stop_correlations();
+    });
   });
 });
 

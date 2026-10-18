@@ -519,3 +519,40 @@ describe("the defer wake stops draining at shutdown", () => {
     expect(await scenario(10)).toEqual([]);
   });
 });
+
+describe("the settle loop stops at shutdown", () => {
+  // Three streams on a settle that claims one per pass, so it needs three
+  // passes. Shutdown waits for the pass in flight, up to its budget; when
+  // the budget runs out the loop must not start another pass.
+  const scenario = async (streamLimit: number) => {
+    store(new InMemoryStore());
+    const after_shutdown: string[] = [];
+    let down = false;
+    const app = act()
+      .withState(Ticker)
+      .on("Ticked")
+      .do(async function slow(event) {
+        await pause(60);
+        if (down) after_shutdown.push(event.stream);
+      })
+      .to((event) => ({ target: `r-${event.stream}` }))
+      .build({ autoSettle: false });
+    for (const s of ["x1", "x2", "x3"])
+      await app.do("tick", { stream: s, actor }, {});
+    app.settle({ streamLimit, debounceMs: 0 });
+    await pause(30); // the first pass is running
+    // A budget the first pass fits in but the whole loop doesn't.
+    await app.shutdown({ graceMs: 100 });
+    down = true;
+    await pause(250);
+    return after_shutdown;
+  };
+
+  it("starts no settle pass after shutdown resolves", async () => {
+    expect(await scenario(1)).toEqual([]);
+  });
+
+  it("control — a settle that needs one pass also runs none", async () => {
+    expect(await scenario(10)).toEqual([]);
+  });
+});
