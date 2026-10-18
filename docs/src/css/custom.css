@@ -507,3 +507,24 @@ hr {
 @media (prefers-reduced-motion: reduce) {
   .act-t { animation: none; }
 }
+
+/* ---------- Navbar book link with its cover ---------- */
+.navbar-book {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.book-thumb {
+  width: 24px;
+  height: 32px;
+  border-radius: 3px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--act-border-strong), 0 4px 10px -4px rgba(0, 0, 0, 0.5);
+  transition: transform 0.2s ease;
+}
+.navbar-book:hover .book-thumb {
+  transform: rotate(-4deg) translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .navbar-book:hover .book-thumb { transform: none; }
+}

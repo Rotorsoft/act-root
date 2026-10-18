@@ -186,7 +186,9 @@ const config: Config = {
         },
         {
           href: "https://payhip.com/b/7ezLy",
-          label: "Book",
+          html: '<img class="book-thumb" src="/act-root/img/book-cover-thumb.jpg" alt="" width="24" height="32" />Book',
+          "aria-label": "Read the book: Practical Event Sourcing in TypeScript",
+          className: "navbar-book",
           position: "right",
         },
         {
