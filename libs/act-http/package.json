@@ -100,7 +100,7 @@
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.19.0",
     "express": "^5.2.1",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.7",
     "hono": "^4.13.13"
   },
   "peerDependenciesMeta": {
@@ -133,7 +133,7 @@
     "@trpc/server": "^11.19.0",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.7",
     "hono": "^4.13.13",
     "zod": "^4.6.5"
   }
