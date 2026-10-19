@@ -95,7 +95,7 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.1.4",
+    "@hono/node-server": "^2.1.5",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.19.0",
@@ -127,7 +127,7 @@
     "@rotorsoft/act-patch": "workspace:^"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.1.4",
+    "@hono/node-server": "^2.1.5",
     "@hono/zod-validator": "^0.9.1",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": "^11.19.0",
