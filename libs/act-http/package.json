@@ -99,7 +99,7 @@
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.19.0",
-    "express": "^5.2.1",
+    "express": "^5.3.0",
     "fastify": "^5.12.7",
     "hono": "^4.13.13"
   },
@@ -132,7 +132,7 @@
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": "^11.19.0",
     "@types/express": "^5.0.6",
-    "express": "^5.2.1",
+    "express": "^5.3.0",
     "fastify": "^5.12.7",
     "hono": "^4.13.13",
     "zod": "^4.6.7"
