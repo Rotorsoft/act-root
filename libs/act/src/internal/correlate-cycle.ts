@@ -433,16 +433,18 @@ export class CorrelateCycle<
     }
 
     if (streams.length) {
-      // Leasing renews for free on the same call.
+      // Leasing renews for free on the same call, but only while the lease
+      // is held: one released mid-scan (shutdown) stays released.
+      const held = lease && this._lease_until > 0;
       const renewed_at = Date.now();
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
         last_id,
-        lease
+        held
           ? { key: this._key, by: this._by, millis: CORRELATION_LEASE_MS }
           : undefined
       );
-      if (lease && correlating !== false)
+      if (held && correlating !== false)
         this._lease_until = renewed_at + CORRELATION_LEASE_MS;
       // The orchestrator arms on re-marks too, not just new subscriptions.
       const marked = streams.filter(

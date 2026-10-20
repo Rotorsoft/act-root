@@ -981,14 +981,15 @@ export class Act<
     if (!this._shutdown_promise) {
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
+        // Stop every scheduler before awaiting anything slow, so nothing
+        // starts while the notify subscription comes down.
         this.stop_correlations();
-        // Unsubscribe from notify before stopping settle, or a late
-        // notification would schedule a cycle nothing cancels. Never rejects.
-        const disposer = await this._notify_disposer;
-        if (disposer) await disposer();
         this._settle.stop(true);
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
+        // Never rejects.
+        const disposer = await this._notify_disposer;
+        if (disposer) await disposer();
         await this._await_inflight(options?.graceMs);
         // Hand the correlation lease back last, after the wait (a settle
         // cycle still running would re-take it), and await it so a
