@@ -147,6 +147,24 @@ const resolve_url = (url: unknown): string => {
 const parse_json = (raw: string): unknown => JSON.parse(raw);
 
 /**
+ * Maps an events row to a `Committed` event. `prefix` reads aliased
+ * columns, such as the `t_` tail columns joined into a `query_stats` row.
+ */
+const to_committed = <E extends Schemas>(
+  row: Record<string, unknown>,
+  prefix = ""
+): Committed<E, keyof E> =>
+  ({
+    id: Number(row[`${prefix}id`]),
+    stream: row[`${prefix}stream`] as string,
+    version: Number(row[`${prefix}version`]),
+    created: new Date(row[`${prefix}created`] as string),
+    name: row[`${prefix}name`] as string,
+    data: parse_json(row[`${prefix}data`] as string) as any,
+    meta: parse_json(row[`${prefix}meta`] as string) as any,
+  }) as Committed<E, keyof E>;
+
+/**
  * SQLite extended result code for a UNIQUE constraint violation
  * (`SQLITE_CONSTRAINT_UNIQUE`). libsql surfaces it on the error's
  * `rawCode`.
@@ -651,9 +669,9 @@ export class SqliteStore implements Store {
       sql += ` AND name IN (${query.names.map(() => "?").join(",")})`;
       args.push(...query.names);
     }
-    if ((query as any)?.correlation) {
+    if (query?.correlation) {
       sql += " AND json_extract(meta, '$.correlation') = ?";
-      args.push((query as any).correlation);
+      args.push(query.correlation);
     }
     if (query?.after !== undefined) {
       sql += " AND id > ?";
@@ -706,13 +724,7 @@ export class SqliteStore implements Store {
           : await this._parse_pii_from_read(row.pii);
       await Promise.resolve(
         callback({
-          id: Number(row.id),
-          stream: row.stream as string,
-          version: Number(row.version),
-          created: new Date(row.created as string),
-          name: row.name as string,
-          data: parse_json(row.data as string) as any,
-          meta: parse_json(row.meta as string) as any,
+          ...to_committed<E>(row as unknown as Record<string, unknown>),
           pii: pii_value,
         })
       );
@@ -1424,23 +1436,10 @@ export class SqliteStore implements Store {
         : null,
     ]);
 
-    const to_committed = (
-      row: Record<string, unknown>
-    ): Committed<E, keyof E> =>
-      ({
-        id: Number(row.id),
-        stream: row.stream as string,
-        version: Number(row.version),
-        name: row.name as string,
-        data: parse_json(row.data as string) as any,
-        meta: parse_json(row.meta as string) as any,
-        created: new Date(row.created as string),
-      }) as Committed<E, keyof E>;
-
     const out = new Map<string, StreamStats<E>>();
     for (const row of headRes.rows) {
       out.set(row.stream as string, {
-        head: to_committed(row as Record<string, unknown>),
+        head: to_committed<E>(row as Record<string, unknown>),
       });
     }
     if (tailRes) {
@@ -1452,7 +1451,7 @@ export class SqliteStore implements Store {
             head: Committed<E, keyof E>;
             tail?: Committed<E, keyof E>;
           }
-        ).tail = to_committed(row as Record<string, unknown>);
+        ).tail = to_committed<E>(row as Record<string, unknown>);
       }
     }
     return out;
@@ -1531,25 +1530,6 @@ export class SqliteStore implements Store {
     const full_args = limit !== undefined ? [...args, limit] : args;
     const res = await this.client.execute({ sql, args: full_args as any[] });
 
-    const to_committed = (
-      id: unknown,
-      stream: unknown,
-      version: unknown,
-      name: unknown,
-      data: unknown,
-      meta: unknown,
-      created: unknown
-    ): Committed<E, keyof E> =>
-      ({
-        id: Number(id),
-        stream: stream as string,
-        version: Number(version),
-        name: name as string,
-        data: parse_json(data as string) as any,
-        meta: parse_json(meta as string) as any,
-        created: new Date(created as string),
-      }) as Committed<E, keyof E>;
-
     const out = new Map<string, StreamStats<E>>();
     for (const row of res.rows) {
       const r = row as unknown as Record<string, unknown>;
@@ -1559,26 +1539,10 @@ export class SqliteStore implements Store {
         count?: number;
         names?: Record<string, number>;
       } = {
-        head: to_committed(
-          r.id,
-          r.stream,
-          r.version,
-          r.name,
-          r.data,
-          r.meta,
-          r.created
-        ),
+        head: to_committed<E>(r),
       };
       if (want_tail && r.t_id !== null && r.t_id !== undefined) {
-        stats.tail = to_committed(
-          r.t_id,
-          r.t_stream,
-          r.t_version,
-          r.t_name,
-          r.t_data,
-          r.t_meta,
-          r.t_created
-        );
+        stats.tail = to_committed<E>(r, "t_");
       }
       if (want_count) stats.count = Number(r.agg_count);
       // `agg_names` is non-null when this row exists: heads and agg are
@@ -1648,15 +1612,9 @@ export class SqliteStore implements Store {
         });
         result.set(stream, {
           deleted: del.rowsAffected,
-          committed: {
-            id: boundary_id,
-            stream,
-            version: Number(row.version),
-            created: new Date(row.created as string),
-            name: row.name as string,
-            data: parse_json(row.data as string) as any,
-            meta: parse_json(row.meta as string) as any,
-          },
+          committed: to_committed<Schemas>(
+            row as unknown as Record<string, unknown>
+          ),
           before,
         });
       }
