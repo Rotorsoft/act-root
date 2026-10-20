@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.6...@rotorsoft/act-v1.33.7) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act:** a deferral with an invalid schedule fails its own reaction, not the drain pass ([#2024](https://github.com/Rotorsoft/act-root/issues/2024)) ([78b0aee](https://github.com/Rotorsoft/act-root/commit/78b0aee7aac960d835a99ba178974eb81c171e31)), closes [#2015](https://github.com/Rotorsoft/act-root/issues/2015)
+
 # [@rotorsoft/act-v1.33.6](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.5...@rotorsoft/act-v1.33.6) (2026-10-20)
 
 # [@rotorsoft/act-v1.33.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.4...@rotorsoft/act-v1.33.5) (2026-10-20)
