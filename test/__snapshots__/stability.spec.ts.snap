@@ -10,7 +10,7 @@ exports[`@rotorsoft/act — public API stability > stable public surface for (ro
  */
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
-import { resolveActConfig, resolveLaneConfig } from "../internal/config.js";
+import { resolveActConfig } from "../internal/config.js";
 import { bare_patch, validating_patch } from "../internal/event-sourcing.js";
 import {
   current_version_of,
@@ -298,22 +298,7 @@ export function act<
         }
         merge_event_register(registry.events, input.events);
         pending_projections.push(...input.projections);
-        for (const slice_lane of input.lanes) {
-          const existing = lanes.find((l) => l.name === slice_lane.name);
-          if (!existing) {
-            lanes.push(slice_lane);
-            continue;
-          }
-          if (
-            existing.leaseMillis !== slice_lane.leaseMillis ||
-            existing.streamLimit !== slice_lane.streamLimit ||
-            existing.cycleMs !== slice_lane.cycleMs
-          ) {
-            throw new Error(
-              \`Lane "\${slice_lane.name}" was already declared with a different config\`
-            );
-          }
-        }
+        for (const lane of input.lanes) register_lane(lane, lanes);
         return builder as never;
       },
       withProjection: (proj) => {
@@ -331,9 +316,7 @@ export function act<
         >,
       withLane: (config) => {
         if (_built) closed("withLane");
-        // Validate the lane bag at declaration (a bad leaseMillis/streamLimit
-        // throws ZodError at build, not on the first cycle).
-        register_lane(resolveLaneConfig(config), lanes);
+        register_lane(config, lanes);
         return builder as never;
       },
       on: <TKey extends keyof TEvents>(event: TKey) => {
@@ -9506,7 +9489,6 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  * self-contained functional slices (vertical slice architecture).
  */
 
-import { resolveLaneConfig } from "../internal/config.js";
 import type { Projection, Slice, SliceBuilder } from "../types/builders.js";
 import type {
   Actor,
@@ -9578,12 +9560,7 @@ export function slice<
       return builder;
     },
     withLane: (config) => {
-      // Validate at declaration, exactly as the \`act()\` path does. Without
-      // this the slice path accepted a bag the act() path rejects — and a
-      // lane carrying a bad streamLimit/leaseMillis/cycleMs drains nothing
-      // for the life of the process, silently: no error, no log, and nothing
-      // in \`blocked_streams()\` to find it by.
-      register_lane(resolveLaneConfig(config), lanes);
+      register_lane(config, lanes);
       return builder as never;
     },
     on: <TKey extends keyof TEvents>(event: TKey) =>

@@ -271,7 +271,7 @@ const app = act()
   });
 ```
 
-Slices declare their own lanes via the same `.withLane(...)` method; `act().withSlice(slice)` merges the slice's lanes into the Act's set. Conflicting timing configs (same lane name, different `leaseMillis`/`streamLimit`/`cycleMs` between the slice and the Act) throw at composition time — pick one declaration.
+Slices declare their own lanes via the same `.withLane(...)` method; `act().withSlice(slice)` merges the slice's lanes into the Act's set. A lane name declares one config: declaring it again with the same `leaseMillis`/`streamLimit`/`cycleMs` (on the Act, a slice, or both, in any order) is fine, and a different config throws at composition time — pick one declaration.
 
 ### Re-laning at restart
 
