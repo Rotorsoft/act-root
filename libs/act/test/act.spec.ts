@@ -461,28 +461,31 @@ describe("act", () => {
         .mockResolvedValue({ subscribed: 0, last_id: 0 });
       // Drain leases and acks on the first 2 passes, then nothing → loop exits.
       let drainCount = 0;
-      const drainSpy = vi.spyOn(app, "drain").mockImplementation(() => {
-        drainCount++;
-        const work =
-          drainCount <= 2
-            ? [
-                {
-                  stream: "x",
-                  source: "x",
-                  at: drainCount,
-                  by: "t",
-                  retry: 0,
-                  lagging: false,
-                },
-              ]
-            : [];
-        return Promise.resolve({
-          fetched: [],
-          leased: work,
-          acked: work,
-          blocked: [],
+      // The settle loop drains through the internal path, not `app.drain`.
+      const drainSpy = vi
+        .spyOn(app as unknown as { _drain_all: typeof app.drain }, "_drain_all")
+        .mockImplementation(() => {
+          drainCount++;
+          const work =
+            drainCount <= 2
+              ? [
+                  {
+                    stream: "x",
+                    source: "x",
+                    at: drainCount,
+                    by: "t",
+                    retry: 0,
+                    lagging: false,
+                  },
+                ]
+              : [];
+          return Promise.resolve({
+            fetched: [],
+            leased: work,
+            acked: work,
+            blocked: [],
+          });
         });
-      });
 
       app.settle({ debounceMs: 1, maxPasses: 10 });
       await sleep(300);
