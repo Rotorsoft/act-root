@@ -285,7 +285,7 @@ const app = act()
 
 **Sizing each field:**
 
-- **`leaseMillis`** — set to the longest expected handler invocation in the lane plus headroom (50–100%). A lease shorter than the handler causes premature re-claim and double dispatch; a lease far longer than the handler delays crash recovery (a dead worker's leases stay parked until expiry). For webhook lanes, match your HTTP client timeout. For best-effort lanes, sub-second is usually right.
+- **`leaseMillis`** — set to the longest expected handler invocation in the lane plus headroom (50–100%). A lease shorter than the handler causes premature re-claim and double dispatch; a lease far longer than the handler delays crash recovery (a dead worker's leases stay parked until expiry; then the next commit or notification on that lane, or a `start_correlations` tick, reclaims them). For webhook lanes, match your HTTP client timeout. For best-effort lanes, sub-second is usually right.
 - **`streamLimit`** — bounds the per-cycle parallel handler budget. With slow handlers (100 ms+), keep this low so an erroring batch doesn't tie up a wide pool of leases. With fast handlers, raise it to amortize the claim round-trip.
 - **`cycleMs`** — leave it unset with the default `autoSettle`; see [configuration § `LaneConfig` fields](../concepts/configuration.md#laneconfig-fields). Deferred and backed-off streams don't need it either: each worker wakes its own drain at their due time.
 

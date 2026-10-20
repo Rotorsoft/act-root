@@ -1025,7 +1025,7 @@ export class Act<
   /**
    * Starts a background poll that settles on a timer: each tick looks for
    * new events, subscribes the streams their reactions target, and drains
-   * them.
+   * them, along with any stream whose lease a dead worker let expire.
    *
    * Use it when this process can miss commits — another process writes to a
    * store without `notify`, or a notification is lost. It is the safety net
@@ -1054,8 +1054,10 @@ export class Act<
     if (this._poll) return false;
     this._poll_limit = query.limit || undefined;
     this._poll = setInterval(() => {
-      // No local signal says there is work, so look anyway.
-      this._correlate.arm();
+      // No local signal says there is work, so look anyway: correlate for
+      // new events, and every lane for leases that came free (a dead
+      // worker's expired lease is claimable, but no commit will say so).
+      this._arm_all();
       this._schedule();
     }, frequency);
     return true;
@@ -1398,7 +1400,8 @@ export class Act<
    *   `debounceMs` (default 10), `correlate.limit` (default 100, or the
    *   poll's limit while `start_correlations` runs; `after` is always the
    *   checkpoint),
-   *   `maxPasses` (default `Infinity` — kill-switch for runaway loops),
+   *   `maxPasses` (default `Infinity`; caps this settle's passes, not the
+   *   passes a reaction chain's own commits schedule),
    *   `streamLimit` (default 10), `eventLimit` (default 10),
    *   `leaseMillis` (default 10000).
    *

@@ -392,7 +392,9 @@ export type Drain<TEvents extends Schemas> = {
  * @property maxPasses - Cap on correlate→drain loops (default: `Infinity`).
  *   Settle exits early as soon as a pass makes no progress (no new
  *   subscriptions, no events read, no streams leased), so the cap only matters in
- *   pathological cases.
+ *   pathological cases. It caps one settle: a reaction chain that keeps
+ *   committing schedules new passes of its own, which `maxPasses` doesn't
+ *   cover. `shutdown()` stops any of them after the pass in flight.
  */
 export type SettleOptions = DrainOptions & {
   readonly debounceMs?: number;

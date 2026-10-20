@@ -119,7 +119,8 @@ export class SettleLoop<TEvents extends Schemas> {
         // catches up paginated streams (e.g. after `reset()` on a long
         // projection) without forcing callers to roll their own loop.
         // `maxPasses` caps runtime in pathological cases.
-        for (let i = 0; i < maxPasses; i++) {
+        // Shutdown waits for the pass in flight, not for the loop.
+        for (let i = 0; i < maxPasses && !this._stopped; i++) {
           const after_before = this._deps.checkpoint();
           const { subscribed, last_id, scanned } = await this._deps.correlate({
             ...correlate_query,
