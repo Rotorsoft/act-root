@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.8...@rotorsoft/act-v1.33.9) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act:** a reply that lands late never overwrites a wake or a lease handback ([#2025](https://github.com/Rotorsoft/act-root/issues/2025)) ([8d22a46](https://github.com/Rotorsoft/act-root/commit/8d22a46cf5e1ce0630e8d654368cc099244afadc)), closes [#2016](https://github.com/Rotorsoft/act-root/issues/2016) [#2017](https://github.com/Rotorsoft/act-root/issues/2017)
+
 # [@rotorsoft/act-v1.33.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.7...@rotorsoft/act-v1.33.8) (2026-10-20)
 
 
