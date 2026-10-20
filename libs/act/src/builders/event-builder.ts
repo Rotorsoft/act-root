@@ -238,7 +238,7 @@ export function build_events(
           `Reaction on target "${resolver.target}" conflicts with the projection that already serves it — a target is served by one batch handler or one state projection, and a reaction to it would never run`
         );
 
-      if (resolver.lane && !declared.has(resolver.lane))
+      if (resolver.lane !== undefined && !declared.has(resolver.lane))
         lane_errors.push(
           `Reaction "${handler_name}" on "${event_name}" targets undeclared lane "${resolver.lane}". ` +
             `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
