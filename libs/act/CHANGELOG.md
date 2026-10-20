@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.8](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.7...@rotorsoft/act-v1.33.8) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act:** a static empty lane is rejected at build like any undeclared lane ([#2026](https://github.com/Rotorsoft/act-root/issues/2026)) ([e044b45](https://github.com/Rotorsoft/act-root/commit/e044b4580cba117b85cd28edde68ab30a9546058)), closes [#2019](https://github.com/Rotorsoft/act-root/issues/2019)
+
 # [@rotorsoft/act-v1.33.7](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.6...@rotorsoft/act-v1.33.7) (2026-10-20)
 
 
