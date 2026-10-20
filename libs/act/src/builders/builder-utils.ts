@@ -63,6 +63,48 @@ export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
 }
 
 /**
+ * Register a reaction once, keyed by its handler's name, and hand back
+ * `builder` patched with `.to(...)`, which reroutes the same reaction in
+ * place (no second `Map.set()`). The one registration step for reactions and
+ * projection handlers: the named-function and duplicate guards run before
+ * `make` builds the reaction, and `kind` picks the wording of their errors.
+ *
+ * @internal
+ */
+export function add_reaction<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+  TBuilder extends object,
+>(
+  events: EventRegister<TEvents>,
+  event: TKey,
+  name: string,
+  kind: "Reaction" | "Projection",
+  make: () => Reaction<TEvents, TKey>,
+  builder: TBuilder
+) {
+  if (!name)
+    throw new Error(
+      `${kind} handler for "${String(event)}" must be a named function`
+    );
+  const label = kind === "Reaction" ? "reaction" : "projection handler";
+  if (events[event].reactions.has(name))
+    throw new Error(
+      `Duplicate ${label} "${name}" for event "${String(event)}". ` +
+        `${kind} handlers are keyed by function name; rename one of them.`
+    );
+  const reaction = make();
+  events[event].reactions.set(name, reaction);
+  return Object.assign(builder, {
+    to(resolver: ReactionResolver<TEvents, TKey> | string) {
+      reaction.resolver =
+        typeof resolver === "string" ? { target: resolver } : resolver;
+      return builder;
+    },
+  });
+}
+
+/**
  * Build the `.on(event)` step shared by both builders. Registers a reaction
  * (named-function + duplicate guards, fail-fast literal-schedule validation,
  * the default `_this_` resolver, and the `.defer` handler wrap) into
@@ -77,49 +119,38 @@ export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
 export function reaction_on<
   TEvents extends Schemas,
   TKey extends keyof TEvents,
-  TBuilder,
+  TBuilder extends object,
 >(event: TKey, events: EventRegister<TEvents>, builder: TBuilder) {
   const register = (
     handler: ReactionHandler<TEvents, TKey>,
     options?: Partial<ReactionOptions>,
     schedule?: DeferSchedule<Committed<TEvents, TKey>>
-  ) => {
-    if (!handler.name)
-      throw new Error(
-        `Reaction handler for "${String(event)}" must be a named function`
-      );
-    if (events[event].reactions.has(handler.name))
-      throw new Error(
-        `Duplicate reaction "${handler.name}" for event "${String(event)}". ` +
-          `Reaction handlers are keyed by function name; rename one of them.`
-      );
-    // Fail fast on a bad literal schedule; the function form is checked when it
-    // runs (no event to resolve against at build time).
-    if (schedule && typeof schedule !== "function") assert_defer_when(schedule);
-    const reaction: Reaction<TEvents, TKey> = {
-      handler: schedule ? make_deferred(handler, schedule) : handler,
-      resolver: _this_,
-      // Validate the whole bag at the declaration site so a bad
-      // `maxRetries`/`backoff`/`blockOnError` throws ZodError at build,
-      // not a NaN gate on the first retry.
-      options: resolveReactionConfig({
-        blockOnError: options?.blockOnError ?? DEFAULT_BLOCK_ON_ERROR,
-        maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
-        backoff: options?.backoff,
-      }),
-    };
-    // Register once with the default _this_ resolver. If `.to()` is chained
-    // next, it patches the same reaction's resolver in place — no second
-    // Map.set() round-trip.
-    events[event].reactions.set(handler.name, reaction);
-    return Object.assign(builder as object, {
-      to(resolver: ReactionResolver<TEvents, TKey> | string) {
-        reaction.resolver =
-          typeof resolver === "string" ? { target: resolver } : resolver;
-        return builder;
+  ) =>
+    add_reaction(
+      events,
+      event,
+      handler.name,
+      "Reaction",
+      () => {
+        // Fail fast on a bad literal schedule; the function form is checked
+        // when it runs (no event to resolve against at build time).
+        if (schedule && typeof schedule !== "function")
+          assert_defer_when(schedule);
+        return {
+          handler: schedule ? make_deferred(handler, schedule) : handler,
+          resolver: _this_,
+          // Validate the whole bag at the declaration site so a bad
+          // `maxRetries`/`backoff`/`blockOnError` throws ZodError at build,
+          // not a NaN gate on the first retry.
+          options: resolveReactionConfig({
+            blockOnError: options?.blockOnError ?? DEFAULT_BLOCK_ON_ERROR,
+            maxRetries: options?.maxRetries ?? DEFAULT_MAX_RETRIES,
+            backoff: options?.backoff,
+          }),
+        };
       },
-    });
-  };
+      builder
+    );
   return {
     do: (
       handler: ReactionHandler<TEvents, TKey>,

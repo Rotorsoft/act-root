@@ -14,12 +14,11 @@ import type {
   Committed,
   EventRegister,
   FoldOptions,
-  Reaction,
-  ReactionResolver,
   Schema,
   Schemas,
   State,
 } from "../types/index.js";
+import { add_reaction } from "./builder-utils.js";
 import { _this_ } from "./merge.js";
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
@@ -94,43 +93,28 @@ function _projection<
             stream: string
           ) => Promise<void>
         ) => {
-          const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
-            handler,
-            resolver: default_resolver ?? _this_,
-            options: {
-              blockOnError: DEFAULT_BLOCK_ON_ERROR,
-              maxRetries: DEFAULT_MAX_RETRIES,
-            },
-          };
-          const register = (events as Record<string, any>)[event];
-          if (!handler.name)
-            throw new Error(
-              `Projection handler for "${event}" must be a named function`
-            );
-          if (register.reactions.has(handler.name))
-            throw new Error(
-              `Duplicate projection handler "${handler.name}" for event "${event}". ` +
-                `Projection handlers are keyed by function name; rename one of them.`
-            );
-          register.reactions.set(handler.name, reaction);
-
           // Same builder, widened generic — no recursive call.
           const widened = base as unknown as ProjectionBuilder<
             TEvents & { [P in TKey]: TData },
             TTarget
           >;
-          return Object.assign(widened, {
-            to(
-              resolver:
-                | ReactionResolver<TEvents & { [P in TKey]: TData }, TKey>
-                | string
-            ) {
-              // Patch the same reaction in place — no second Map.set().
-              reaction.resolver =
-                typeof resolver === "string" ? { target: resolver } : resolver;
-              return widened;
-            },
-          });
+          return add_reaction(
+            events as unknown as EventRegister<
+              TEvents & { [P in TKey]: TData }
+            >,
+            event,
+            handler.name,
+            "Projection",
+            () => ({
+              handler,
+              resolver: default_resolver ?? _this_,
+              options: {
+                blockOnError: DEFAULT_BLOCK_ON_ERROR,
+                maxRetries: DEFAULT_MAX_RETRIES,
+              },
+            }),
+            widened
+          );
         },
       };
     },
