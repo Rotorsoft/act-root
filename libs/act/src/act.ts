@@ -144,7 +144,6 @@ export class Act<
 {
   private _emitter = new EventEmitter();
   private readonly _breaker: CircuitBreaker;
-  private readonly _listen: boolean;
   private readonly _drain: boolean;
   private readonly _auto_settle: boolean;
   /** Whether any event has a reaction; nothing arms without one. */
@@ -253,14 +252,6 @@ export class Act<
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
 
   private readonly _correlator: Correlator;
-  // Bound once, reused by every reaction payload.
-  private readonly _bound_do = this.do.bind(this);
-  private readonly _bound_load = this.load.bind(this);
-  private readonly _bound_query = this.query.bind(this);
-  private readonly _bound_query_array = this.query_array.bind(this);
-  private readonly _bound_forget = this.forget.bind(this);
-  private readonly _handle: Handle<TEvents>;
-  private readonly _handle_batch: HandleBatch<TEvents>;
   private readonly _lanes: ReadonlyArray<LaneConfig>;
 
   private readonly _close_lock = new CloseLock();
@@ -307,38 +298,45 @@ export class Act<
     this._es = build_es(this._logger, this._correlator, patch_fn);
     this._cd = build_drain<TEvents>(this._logger);
     // PII stripping is wrapped around handlers at build time, so the
-    // dispatcher is PII-unaware.
-    this._handle = build_handle<TEvents, TActions, TActor>({
+    // dispatcher is PII-unaware. Bound once, reused by every reaction payload.
+    const handle = build_handle<TEvents, TActions, TActor>({
       logger: this._logger,
       reaction_scope: make_reaction_scope({
-        do: this._bound_do,
-        load: this._bound_load,
-        query: this._bound_query,
-        query_array: this._bound_query_array,
-        forget: this._bound_forget,
+        do: this.do.bind(this),
+        load: this.load.bind(this),
+        query: this.query.bind(this),
+        query_array: this.query_array.bind(this),
+        forget: this.forget.bind(this),
       }),
     });
-    this._handle_batch = build_handle_batch<TEvents>(this._logger);
+    const handle_batch = build_handle_batch<TEvents>(this._logger);
 
     const classification = classify_registry(this.registry, this._states);
     this._reactive = classification.event_to_lanes.size > 0;
     this._event_to_state = classification.event_to_state;
     this._event_to_lanes = classification.event_to_lanes;
-    this._listen = options.listen !== false;
     this._drain = options.drain !== false;
     this._auto_settle = options.autoSettle !== false;
 
     // Order matters: controllers read the breaker, the audit bag reads the
     // controller set, settle reads the correlate cycle.
     this._breaker = this._build_breaker(options);
-    this._drain_controllers = this._build_drain_controllers(options, lanes);
+    this._drain_controllers = this._build_drain_controllers(
+      options,
+      lanes,
+      handle,
+      handle_batch
+    );
     this._advise_orphaned_lanes(options);
     this._audit_deps = this._build_audit_deps();
     this._correlate = this._build_correlate(options, classification);
     this._settle = this._build_settle(options);
 
     // Wire cross-process notify against the store current at construction.
-    this._notify_disposer = this._wire_notify(this._ports.store);
+    this._notify_disposer = this._wire_notify(
+      this._ports.store,
+      options.listen !== false
+    );
 
     // Registered weakly, so `dispose()()` reaches a live Act while an
     // unreachable one (per tenant, per test) can still be collected.
@@ -361,7 +359,9 @@ export class Act<
   /** Apps that declare no lanes pass no lane filter to `claim`. */
   private _build_drain_controllers(
     options: ActOptions,
-    lanes: ReadonlyArray<LaneConfig>
+    lanes: ReadonlyArray<LaneConfig>,
+    handle: Handle<TEvents>,
+    handle_batch: HandleBatch<TEvents>
   ): Map<string, DrainController<TEvents, TActions, TSchemaReg>> {
     const all_lanes = this._declared_lanes;
     const only_set =
@@ -385,8 +385,8 @@ export class Act<
         ops: this._cd,
         registry: this.registry,
         batch_handlers: this._batch_handlers,
-        handle: this._handle,
-        handle_batch: this._handle_batch,
+        handle,
+        handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
         // Reaction-requested close: the same machinery as `app.close`.
@@ -470,10 +470,10 @@ export class Act<
           ? [...this._drain_controllers.keys()]
           : undefined,
       // Only reached on a draining app: writer-only ones never correlate.
-      on_init: () => this._arm_all(),
-      on_init_async: this._drain
-        ? () => this._seed_persisted_defers()
-        : undefined,
+      on_init: async () => {
+        this._arm_all();
+        await this._seed_persisted_defers();
+      },
     });
   }
 
@@ -590,12 +590,13 @@ export class Act<
 
   /** Failures are logged, never thrown: `notify` is a hint. */
   private async _wire_notify(
-    s: Store
+    s: Store,
+    listen: boolean
   ): Promise<(() => void | Promise<void>) | undefined> {
     if (!this._reactive) return undefined;
     if (!s.notify) return undefined;
     // Only the subscriber side is gated; commits still notify.
-    if (!this._listen) return undefined;
+    if (!listen) return undefined;
     try {
       return await s.notify((notification) => {
         // Errors are logged and swallowed so the store's listener survives.
