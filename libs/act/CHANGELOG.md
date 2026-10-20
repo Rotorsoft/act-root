@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.1...@rotorsoft/act-v1.33.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act:** stop the settle loop at shutdown, and wake every lane on a poll tick ([#1973](https://github.com/Rotorsoft/act-root/issues/1973)) ([86df088](https://github.com/Rotorsoft/act-root/commit/86df088e1bc36be82df09e0ac5a16032e561f96e)), closes [#1963](https://github.com/Rotorsoft/act-root/issues/1963) [#1964](https://github.com/Rotorsoft/act-root/issues/1964)
+
 # [@rotorsoft/act-v1.33.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.0...@rotorsoft/act-v1.33.1) (2026-10-19)
 
 
