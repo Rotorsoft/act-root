@@ -145,7 +145,7 @@ describe("the same projection registered twice", () => {
     const { p, calls } = make();
     const once = act().withState(Counter).withProjection(p);
     const builder = twice ? once.withProjection(p) : once;
-    const app = builder.build();
+    const app = builder.build({ autoSettle: false });
     const keys = [...(builder.events.Incremented?.reactions.keys() ?? [])];
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
@@ -192,7 +192,7 @@ describe("the same projection registered twice", () => {
     const keys = [...(builder.events.Incremented?.reactions.keys() ?? [])];
     expect(keys).toEqual(["apply", "apply_p"]);
 
-    const app = builder.build();
+    const app = builder.build({ autoSettle: false });
     await app.do("increment", { stream: "d4", actor }, { by: 1 });
     await app.correlate();
     await app.drain();

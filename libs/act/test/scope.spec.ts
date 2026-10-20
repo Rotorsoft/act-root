@@ -173,7 +173,9 @@ describe("scoped ports", () => {
       })
       .to(() => ({ target: "mirror-1" }));
 
-    const { app, dispose } = await sandbox(reflectBuilder);
+    const { app, dispose } = await sandbox(reflectBuilder, {
+      actOptions: { autoSettle: false },
+    });
 
     await app.do("source", { stream: "source-1", actor }, { n: 7 });
     await app.correlate();
@@ -413,7 +415,10 @@ describe("scoped ports", () => {
       Awaited<ReturnType<typeof sandbox<TenantApp>>>
     >();
     for (const t of tenants) {
-      ctxs.set(t, await sandbox(tenantBuilder));
+      ctxs.set(
+        t,
+        await sandbox(tenantBuilder, { actOptions: { autoSettle: false } })
+      );
     }
 
     // No reaction accumulation after N builds.

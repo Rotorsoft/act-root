@@ -427,11 +427,11 @@ describe("autoclose as a synthesized reaction", () => {
       const builder = act().withState(ticket({ is: "Resolved" }));
       // First build declares a window that excludes now.
       const closed_a: CloseResult[] = [];
-      const a = builder.build({ autocloseWindow: shut() });
+      const a = builder.build({ autoSettle: false, autocloseWindow: shut() });
       a.on("closed", (r) => closed_a.push(r));
       // Second build declares none at all — "always open".
       const closed_b: CloseResult[] = [];
-      const b = builder.build();
+      const b = builder.build({ autoSettle: false });
       b.on("closed", (r) => closed_b.push(r));
 
       await resolve_on(a, "w-a");
@@ -444,10 +444,10 @@ describe("autoclose as a synthesized reaction", () => {
     it("a second Act built WITH a window still defers, whoever built first", async () => {
       const builder = act().withState(ticket({ is: "Resolved" }));
       const closed_b: CloseResult[] = [];
-      const b = builder.build();
+      const b = builder.build({ autoSettle: false });
       b.on("closed", (r) => closed_b.push(r));
       const closed_a: CloseResult[] = [];
-      const a = builder.build({ autocloseWindow: shut() });
+      const a = builder.build({ autoSettle: false, autocloseWindow: shut() });
       a.on("closed", (r) => closed_a.push(r));
 
       await resolve_on(b, "w-b2");

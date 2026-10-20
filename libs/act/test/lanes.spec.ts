@@ -958,7 +958,7 @@ describe("lanes", () => {
     it("a default-only worker never claims the slow lane's streams", async () => {
       const { builder, ran } = make_worker();
       const { app, dispose } = await sandbox(builder, {
-        actOptions: { onlyLanes: ["default"] },
+        actOptions: { autoSettle: false, onlyLanes: ["default"] },
       });
       const actor = { id: "a", name: "a" };
       await app.do("slowTick", { stream: "src", actor }, {});
@@ -974,7 +974,7 @@ describe("lanes", () => {
     it("a slow-only worker never claims the default lane's streams", async () => {
       const { builder, ran } = make_worker();
       const { app, dispose } = await sandbox(builder, {
-        actOptions: { onlyLanes: ["slow"] },
+        actOptions: { autoSettle: false, onlyLanes: ["slow"] },
       });
       const actor = { id: "a", name: "a" };
       await app.do("slowTick", { stream: "src", actor }, {});

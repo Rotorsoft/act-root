@@ -536,7 +536,7 @@ describe("defer outcome (integration)", () => {
         isolate
           ? deferred.to((e) => ({ target: `later-${e.stream}` }))
           : deferred
-      ).build();
+      ).build({ autoSettle: false });
       await app.do("tick", { stream: isolate ? "iso" : "shared", actor }, {});
       for (let i = 0; i < 4; i++) {
         await app.correlate();
