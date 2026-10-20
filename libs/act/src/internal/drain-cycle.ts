@@ -408,11 +408,12 @@ export class DrainController<
   TSchemaReg extends SchemaRegister<TActions>,
 > {
   /**
-   * Armed while `_arms` is ahead of `_settled` (the count the last empty
-   * claim saw), so a claim never disarms over an arm that landed during it.
+   * Armed while `_raised` is ahead of `_lowered` (the raise count the last
+   * empty claim saw), so a claim never lowers over a raise that landed
+   * during it.
    */
-  private _arms = 0;
-  private _settled = 0;
+  private _raised = 0;
+  private _lowered = 0;
   private _ratio = 0.5;
   /**
    * Local wake at the earliest parked (backoff or defer) visit, or at the
@@ -441,7 +442,7 @@ export class DrainController<
   }
 
   arm(): void {
-    this._arms++;
+    this._raised++;
   }
 
   /** Cold start: re-seed a persisted `deferred_at` into the local wake. */
@@ -451,7 +452,7 @@ export class DrainController<
   }
 
   get armed(): boolean {
-    return this._arms !== this._settled;
+    return this._raised !== this._lowered;
   }
 
   get inflight(): Promise<void> | undefined {
@@ -519,7 +520,7 @@ export class DrainController<
       const leading = streamLimit - lagging;
 
       const started = Date.now();
-      const arms = this._arms;
+      const raised = this._raised;
       const cycle = await run_drain_cycle(this._deps, {
         lagging,
         leading,
@@ -533,9 +534,9 @@ export class DrainController<
         // Caught up: whatever was due when this pass started has no work.
         this._defer.prune(started);
         this._deps.breaker.passed();
-        // Settles only the arms it saw: one that landed during the claim
+        // Lowers only the raises it saw: one that landed during the claim
         // (an unblock, a reset) brought work this claim couldn't see.
-        this._settled = arms;
+        this._lowered = raised;
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 

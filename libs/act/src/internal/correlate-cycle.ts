@@ -167,11 +167,11 @@ export class CorrelateCycle<
   /** Local expiry of the held lease (0 = none); stale only costs a duplicate scan. */
   private _lease_until = 0;
   /**
-   * Armed while `_arms` (raised by a commit or notification) is ahead of
-   * `_settled` (the count the last short page saw). Starts armed.
+   * Armed while `_raised` (bumped by a commit or notification) is ahead of
+   * `_lowered` (the raise count the last short page saw). Starts armed.
    */
-  private _arms = 1;
-  private _settled = 0;
+  private _raised = 1;
+  private _lowered = 0;
   /** Counts releases, so a lease reply that lands after one is dropped. */
   private _releases = 0;
   private _init_promise: Promise<void> | undefined;
@@ -214,7 +214,7 @@ export class CorrelateCycle<
 
   /** A commit (local or remote) may have produced uncorrelated events. */
   arm(): void {
-    this._arms++;
+    this._raised++;
   }
 
   async init(): Promise<void> {
@@ -256,7 +256,7 @@ export class CorrelateCycle<
     this._checkpoint = -1;
     this._dynamic_subscriptions.clear();
     this._static_subscriptions.clear();
-    this._arms++;
+    this._raised++;
   }
 
   /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
@@ -296,7 +296,7 @@ export class CorrelateCycle<
     await this.init();
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
-    if (this._arms === this._settled)
+    if (this._raised === this._lowered)
       return {
         subscribed: 0,
         last_id: this._checkpoint,
@@ -304,7 +304,7 @@ export class CorrelateCycle<
         scanned: false,
       };
 
-    const arms = this._arms;
+    const raised = this._raised;
 
     // The lease rides `subscribe` with no streams ("may I scan?"). Its shared
     // checkpoint is ignored: adopting it would skip events this worker never
@@ -471,10 +471,10 @@ export class CorrelateCycle<
       return { subscribed, last_id, marked, scanned: true };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
-    // not. It settles only the arms it saw, so one that landed mid-scan
+    // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
-    if (!stopped && found !== query.limit) this._settled = arms;
+    if (!stopped && found !== query.limit) this._lowered = raised;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
