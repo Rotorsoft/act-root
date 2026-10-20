@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-10-18 | 4 | 1 | active (#1959 added only `autoSettle`, which its RFC lists; no proposal) |
-| Dead code (tool) | 2026-10-17 | 4 | 2 | active (found #1935's leftovers and the internal barrel's cost) |
-| Hotspots (tool) | 2026-10-17 | 4 | 1 | active (no proposal this run: the top four are linear or already in the backlog; retire if the next run finds none) |
+| Dead code (tool) | 2026-10-20 | 5 | 2 | active (construction-only Act fields, a duplicate drain flag; knip's new false positives listed in lenses.md) |
+| Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-10-18 | 5 | 1 | active (the lanes/restore split is plainer, not smaller: backlog) |
 | Comment noise | 2026-10-18 | 4 | 3 | active (#1958 got internal/ to 29%, under the bar; act.ts doc comments next) |
 | Concepts and options | 2026-10-18 | 5 | 1 | active (found two settle bugs in #1959's area) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-17 | 4 | 1 | active (no new triple implementation; the backlog holds the best two) |
+| DRY across adapters and builders | 2026-10-20 | 5 | 1 | active (found the lane-merge asymmetry and SqliteStore's four row mappers) |
 | Reading path | 2026-10-18 | 4 | 3 | active (13 runtime files and ~28 names from a commit to a reaction) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-17 | 4 | 3 | active |
+| Tests by concept | 2026-10-20 | 5 | 3 | active (found the auto-settle test race #1976 widened and the act-pg seed race) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-10-18 | 5 | 1 | active |
 | One source of truth | 2026-10-18 | 5 | 5 | active |
 | Examples | 2026-10-18 | 4 | 2 | active (found `app.once`, which doesn't exist, in a `no-check` snippet) |
 | Process | 2026-10-18 | 4 | 7 | active |
-| Feature interactions | 2026-10-17 | 4 | 7 | active (found two bugs #1928 left) |
+| Feature interactions | 2026-10-20 | 5 | 7 | active (found two shutdown bugs #1973 left) |
 
 ## Interaction register
 
@@ -43,16 +43,18 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | breaker, drain / settle | five places feed one consecutive-failure count of **store** failures; a success in one loop resets failures in another | justified | #1877: app code never leaves the loop that ran it (correlate stops before a throwing resolver's event and logs once, drain fails the stream, a reaction close logs non-store failures), so only store and framework errors reach the breaker; a real outage fails every loop; a store failing one kind of call can keep it closed, still visible as `error` events |
 | defer wake, breaker | fixed by #1872: the breaker check sits inside the drain's `try`, so `finally` re-aims the wake | resolved | P2026-10-10o-1, #1874 |
 | defer wake, drain lock / streamLimit | resolved by #1928: only an empty claim is idle; the wake drains until a pass leases nothing | resolved | P2026-10-15o-1 |
-| drain failure, wake | resolved for the drain by #1928 (a `RETRY` wake at `max(leaseMillis, cooldownMs)`); settle's failure still waits for the breaker to open | accidental, and a bug (settle half) | P2026-10-17-1 (probed: 0 runs; control 1) |
+| drain failure, wake | a failed drain pass retries at `max(leaseMillis, cooldownMs)` (#1928) and a failed settle pass through the breaker's `on_retry` (#1950) | resolved | #1928, #1950 |
 | app errors, correlation | one throwing resolver stops the scan before its event, so discovery stops for every reaction until it stops throwing | justified | #1913, the user's choice: nothing is lost; isolating one reaction needs per-reaction checkpoints |
 | lease, lanes | background drains claim with the lane's `leaseMillis`; a per-call `leaseMillis` covers only that call | resolved | documented by #1898 (`error-handling.md`, `configuration.md`) |
 | drain `RETRY` wake, breaker cooldown | the drain reads `breaker.cooldown_ms` and retries at `max(leaseMillis, cooldownMs)` | justified | the breaker doesn't know the failed pass's leases (dropping the lease floor fails a defer-outcome case), and a lease-only retry spins with a 1 ms lease (two `store-failure-budget` cases) |
-| defer wake loop, shutdown | the wake drains in a loop that never checks `_stopped`; shutdown waits for one pass | accidental, and a bug | P2026-10-17-2 (probed: 2 handlers ran after `shutdown()` resolved; control 0) |
+| defer wake loop, shutdown | the wake drains in a loop that never checks `_stopped`; shutdown waits for one pass | resolved | #1950 |
 | `_reactive`, lane arming | `_reactive` is `event_to_lanes.size > 0` | shared primitive | #1937 |
-| settle loop, shutdown | settle's pass loop never checks `_stopped`; shutdown waits out its grace and handlers run after it resolves | accidental, and a bug | P2026-10-18-1 (probed: 57 handlers after `shutdown()`; control 0). The sibling of P2026-10-17-2 |
-| `start_correlations` tick, lane arming | the tick arms correlation only; lanes disarmed on their last empty claim never claim again, so a dead worker's expired lease is never reclaimed on an idle app | accidental, and a bug | P2026-10-18-2 (probed: 0 runs; control 1); since #1811 |
+| settle loop, shutdown | the loop now checks `_stopped` per pass (#1973), but a pass already in its scan when the grace runs out still drains and re-takes the correlation lease | accidental, and a bug (in-flight half) | P2026-10-20-1 (probed: the handler ran after `shutdown()`; control 0) |
+| notify disposal, shutdown order | shutdown awaits the notify disposer before stopping settle, so a pass scheduled just before shutdown runs when disposal is slow | accidental, and a bug | P2026-10-20-1 (probed: 60 ms disposer runs it; instant disposer doesn't) |
+| `start_correlations` tick, lane arming | the tick arms every lane (#1973): one empty claim per active lane per tick on an idle app (12 per 205 ms at 10 ms, 0 for `drain: false`, only owned lanes under `onlyLanes`) | justified | the cost of reclaiming a dead worker's expired lease |
 | `autoSettle`, `cycleMs` | with `autoSettle` on, a lane's `cycleMs` tick finds nothing settle hasn't drained (52 vs 53 ms, 0 extra claims) | justified only with `autoSettle: false` | P2026-10-18s-2 (docs); the option is published and stays |
-| `autoSettle`, `maxPasses` | each reaction commit schedules a new pass with no options, so `maxPasses` doesn't cap a chain that keeps committing | accidental (a doc overpromise) | P2026-10-18-1 (docs half) |
+| `autoSettle`, `maxPasses` | each reaction commit schedules a new pass with no options, so `maxPasses` doesn't cap a chain that keeps committing | resolved (documented) | #1973 |
+| writer-only app, notify | `_wake` arms lanes on a `drain: false` instance too; nothing there reads the armed flag | shared primitive | #1978; harmless (probed) |
 
 ## Mutation baselines
 
@@ -83,18 +85,19 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Tests: replace `sleep`-then-`expect` with `vi.waitFor` (recounted 2026-10-17: 61 sites, many negative waits `waitFor` can't replace; positive ones in act.spec 10, backoff 8, defer-outcome 6, public-defer 4, act-pg notify 4; thin margins in public-defer, backoff, intra-event-ack) and drop the two hand-written `until` helpers; `action-retry` asserts `elapsed < 50`. (P2026-10-11c-4)
 - act-pg / act-sqlite `pii-encryption.spec.ts` run the same 9 cases (~238 shared lines): delete the sqlite `query_stats` duplicate of a TCK case now; moving the rest into a TCK capability adds act-tck surface and needs an RFC (~−400 net, unprobed). (P2026-10-11c-5)
 - PostgresStore `commit`'s single-event SQL fork (4 statement variants → 2) if a CI bench shows it doesn't pay; `commit` is the most-changed function in the most-changed adapter. (P2026-10-11a-5)
-- Move lane wiring out of act.ts into `internal/lanes.ts` and restore's `scan` to `internal/restore.ts` (re-measured and simulated 2026-10-18: act.ts 811 → 647 code lines, event-sourcing.ts 467 → 338; +2 files, +36 code lines net, suite and coverage green). Plainer, not smaller. First close the test gap it found: removing the dry-run guard on restore's restart and arm keeps the suite green. The settle-drain half moved into P2026-10-18s-1. (P2026-10-15r-4, P2026-10-18b-2)
+- PostgresStore.commit returns the caller's pii instead of decrypting what it just wrote (one AES-GCM decrypt per pii event per commit, ~−7 lines). Apps see no change (the framework revives dates); direct `Store` callers would get the input value instead of an ISO string, as sqlite and InMemory already return. The user's call. (P2026-10-20b-5)
+- One shared pii-encryption suite for act-pg and act-sqlite in an unpublished root `test/` file (~−390, a new cross-package test pattern; sqlite gains the declined-payload case). (P2026-10-20b-3, was P2026-10-11c-5)
+- Store error wrapping differs: neither SQL adapter wraps query errors inside `truncate`/`restore`, so a reaction-requested close that fails on a database fault is logged and never retried, while the comment in act.ts says a store failure reaches the breaker. Probe before proposing. (P2026-10-20 design finding)- Move lane wiring out of act.ts into `internal/lanes.ts` and restore's `scan` to `internal/restore.ts` (re-measured and simulated 2026-10-18: act.ts 811 → 647 code lines, event-sourcing.ts 467 → 338; +2 files, +36 code lines net, suite and coverage green). Plainer, not smaller. First close the test gap it found: removing the dry-run guard on restore's restart and arm keeps the suite green. The settle-drain half moved into P2026-10-18s-1. (P2026-10-15r-4, P2026-10-18b-2)
 - Drop `Subscription.floor` in correlate: it equals `priority` for every dynamic record and differs only for statics, which have their own map (~−4 lines, one concept). (P2026-10-15o-4)
 - configuration.md § Circuit breaker restates error-handling.md and misses "Store failures only"; observability.md:29 says `error` fires only in the drain loop; act-tck README and tck-conformance.md hand-copy stale peer versions. Link instead. (P2026-10-15d-5)
 - Four published exports tagged `@internal` (re-checked 2026-10-15, unchanged), plus act.ts:99-104 pointing operators at a deprecated constant. (P2026-10-15r-5)
-- act-sqlite specs use the existing `tmp-db.ts` instead of 11 hand-rolled WAL/SHM cleanups (~−85 lines, −4 `.gitignore` lines; `test-autoclose.db` sidecars from a deleted spec still sit on disk). (P2026-10-17c-5)
-- `register_lane` resolves its own config; both builders drop their copy of the call and comment (~−7). (P2026-10-17b-5)
 - Spec comments carry 281 ticket references in 124 files (test names are clean); a comment sweep like #1909–#1911 for tests. 53 core specs define their own `Counter` (~−140 with a shared fixture, but shared fixtures couple tests).
 - Design finding: the defer wake's "drain until a pass leases nothing" loop repeats settle's loop without correlate (the background-copies-foreground smell); routing it through settle adds `settled` events and a correlate per wake, so it doesn't subtract today.
 - Resolved by #1959 (P2026-10-17d-2 → #1949): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
 ## Self-changes
 
+- 2026-10-20: retired Hotspots (two runs with no proposal). The Dead code lens lists knip's newer false positives (the evidence scripts, the k6 script, the webhook-receiver demo, the act-pg stress worker, skill scripts, docs and recipes dependencies). A smell added: a "does nothing" claim checked by reading the call site. #1976 judged tests by their body and dropped `autoSettle: false` from 17 tests whose helper walks the pipeline; making the public `drain()` throw under auto settle found all 28 such tests in one run.
 - 2026-10-18: `metrics.sh` reads `ActOptions` from `types/act.ts`; #1959 moved it there and the guard row read 0. The Examples lens now names doc snippets marked `no-check`: the production rebuild flow in projections-to-database.md calls `app.once`, which `Act` doesn't have, and nothing compiles it.
 - 2026-10-17: specialists simulate source edits only in their own `git clone --shared` under the scratchpad. One specialist edited `circuit-breaker.ts` in the shared tree while another was running the quickstart against it.
 - 2026-10-17: the bar's "every feature serves a contract row" now exempts performance mechanisms, which a real-adapter bench judges. P2026-10-15o-3 (drop the adaptive lag/lead ratio, "serves no row") was rejected because removing it could break a performance feature.
@@ -485,3 +488,38 @@ Simplifications:
 Design findings, not proposed: a reaction chain emits an extra empty `settled` (RFC 1959's known cost; removing the pending pass needs a condition); `settleDebounceMs`, `maxSubscribedStreams`, `listen` and `validateFoldedState` are set nowhere in packages/ or recipes/ (published, stay); `CorrelateCycle.correlate` is one 190-line method (plainer split, not smaller); polling opt-in vs the field's default, and the manual `autoSettle: false` mode vs the field's "wait until caught up" helpers; an act-pg `seed-upgrade` cold-boot test flaked once on master (23505 on `pg_namespace` under the advisory lock), unprobed.
 
 Tickets (user: "create the tickets for all the findings"): #1963 (P2026-10-18-1), #1964 (-2), #1965 (-3), #1966 (-4), #1967 (s-1), #1968 (s-2), #1969 (s-3), #1970 (s-4), #1971 (s-5), #1972 (s-6).
+
+### 2026-10-20 — full run (four specialists: dead code + hotspots, DRY across adapters and builders, tests by concept, feature interactions)
+
+| metric | 2026-10-18 | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17789 | 17674 | #1974 (doc comments), #1978 (settle internals); +#1973 (two fixes) |
+| comments | 43% (internal/ 29%, adapters/ 12%) | 42% (29% / 12%) | #1974 |
+| spec files / test lines | 216 / 59478 | 216 / 59429 | #1976 (−112), #1973 tests |
+| CI workflows / lines | 5 / 828 | 5 / 807 | #1977 |
+| docs lines / CLAUDE.md | 9380 / 38 KB | 9381 / 38 KB | #1974 trimmed copies, linked owners |
+| everything else | | unchanged | 51 exports, 8 / 20 / 18 / 11, 9 files touching 5+ features, 17 / 10 files over 300 |
+
+Audit: 16 PRs since the last run: its tickets (#1973–#1978), Renovate bumps (#1979–#1987) and a lockfile repair (#1988: three Renovate PRs merged within a minute left a lockfile missing `qs`). Only #1973 added mechanism (+94: a stop check per settle pass, the poll tick arming every lane). This run found what two of the assistant's PRs left: #1973 checks the stop flag at the top of each pass but not inside it (P2026-10-20-1), and #1976's "never walks the pipeline" rule read test bodies, not their helpers, which widened a CI race (P2026-10-20-3).
+
+Decisions on P2026-10-18*: all accepted and shipped. -1 + -2 → #1963, #1964 / #1973; -3, s-2, s-4, s-5 → #1965, #1968, #1970, #1971 / #1974; -4 → #1966 / #1975 (the contract rows already existed; only the gate changed); s-3 → #1969 / #1976; s-6 → #1972 / #1977 (`dev:diagram` and the docs `swizzle` script kept: the user runs them by hand); s-1 → #1967 / #1978.
+
+Promises kept: s-1 ~−20 → −28 (−17 source); s-3 ~−60 over 169 sites → −112 over 158, but 17 of the removed sites sat in tests that walk the pipeline through a helper, and one of them flaked in CI (a promise broken: "no change an app or test observes"); s-6 ~−300 → −210 (two headers already trimmed by #1974; two scripts kept); s-5 ~−100 act.ts comment lines → −86; #1974 −231 net.
+
+Verified in the main loop before ranking (red + control each, my own probe file or clone): a settle pass still in its correlate scan when `shutdown({ graceMs: 30 })` runs out runs its handler after shutdown resolves (control `graceMs: 400`: none); a pass scheduled by `do()` right before `shutdown()` runs when the notify disposer takes 60 ms (control: instant disposer, cancelled); making the public `drain()` throw under auto settle fails 28 core tests in 7 files (state-projection 12, dynamic-lane-guard 6, target-ownership 3, scope 2, lanes 2, autoclose-reaction 2, defer 1), which are the tests that walk the pipeline while a background settle can hold the lane; raw pg clients: a connection that looked a schema up while it was missing then waits on an advisory lock fails `CREATE SCHEMA IF NOT EXISTS` with 23505 10/10 (control: unprimed 10/10 ok; with a `pg_namespace` read after the lock 10/10 ok); `act().withSlice(S).withLane(slow)` throws "already declared" while `withLane(slow).withSlice(S)` with the same config builds, against configuration.md's "conflicting configs throw". Checked and harmless: the poll tick's extra claims are one per active lane per tick (0 for `drain: false`, only owned lanes under `onlyLanes`); a writer-only app armed by a notification runs nothing; settle draining through `_drain_all` skips no validation.
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-20-1. Shutdown stops what is in flight: a stopped `DrainController.drain` claims nothing (the defer wake loop's own stop check goes), correlate sends the lease options only while the lease is held (a released lease stays released), and shutdown stops settle, the breaker and the controllers before awaiting the notify disposer; correlation-and-drain.md:179 lists the poll tick among what arms every lane. Simulated: act, act-sqlite, act-tck, act-notify green (3,648). Probes become tests on rows 73, 240, 241.
+- P2026-10-20-2. act-pg `seed()` reads `pg_namespace` after taking its locks, so a connection with a stale catalog entry doesn't fail `CREATE SCHEMA` with 23505 (one catalog read per seed); a test that primes the connection first, and a row under seed-sync.
+- P2026-10-20-3. The 28 core tests that walk the pipeline under auto settle build with `autoSettle: false` (the ones that count batches or flushes) or wait for the outcome (the rest); 17 are #1976's. Re-run the instrumented check to reach 0.
+- P2026-10-20-4. One lane-registration rule: `register_lane` validates, rejects "default", treats an equal config as a no-op and a different one as a conflict, whatever the order; `withSlice` loops it. Fixes the order asymmetry (−14 source lines; two lanes.spec tests change config). (b-1)
+Simplifications:
+- P2026-10-20s-1 (a-1 + a-2). Construction-only state leaves `Act` (8 private fields become constructor locals; correlate's two init callbacks become one; a dead ternary) and `DrainController` drops `_locked`, which `_inflight` already says (the sibling of #1978's `_running`) (~−11 lines, 9 fields; simulated green).
+- P2026-10-20s-2 (b-2). One row mapper in SqliteStore: four copies of row → `Committed` become one `to_committed(row, prefix)` (−52; simulated, 100%).
+- P2026-10-20s-3 (c-4). act-sqlite specs use `tmp-db.ts`: 11 hand-rolled WAL/SHM cleanups, 14 stray sidecars and two `.gitignore` lines go (−99; simulated).
+- P2026-10-20s-4 (c-3). The two settle tests that spy on the private `_drain_all` (#1978) assert through the public API instead, under the same names (−22; both fail under the same mutations).
+- P2026-10-20s-5 (b-4). One reaction-registration step for reactions and projection handlers in builder-utils, error messages unchanged (−11; simulated).
+- P2026-10-20s-6 (c-5 + a-3). `vi.waitFor` for 15 positive sleep-then-assert sites and two hand-written `waitFor` helpers (~4.9 s of fixed sleep); delete the dead `defaultConnectInput` inspector test helper.
+- P2026-10-20s-7 (c-6). Sweep ticket numbers out of test comments and act-tck comments (332 references in 125 files), keeping the why.
+
+Design findings, not proposed: an explicit `drain()` returns empty when its lane is disarmed or locked, which is why 51 test sites reach into `_drain_controllers`; arming on an explicit call would change behavior. Store.commit returns the stored rows on pg and the input objects on sqlite/InMemory (the framework normalizes them). act-pg's retry-default and retry-overflow specs hard-code schemas, so two worktrees collide. `libs/act/test/calculator.ts` is a drifted copy of the example (core can't import it). backoff.spec "garbage-collects only entries whose window has elapsed" names a map that no longer exists.
