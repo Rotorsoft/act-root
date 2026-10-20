@@ -4,25 +4,23 @@
  * forget semantics, wrong-key / tampered-payload fault injection,
  * mixed-data rollout, restore-path symmetry.
  */
-import { randomBytes, randomUUID } from "node:crypto";
-import { unlinkSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { type Client, createClient } from "@libsql/client";
 import { DecryptionError } from "@rotorsoft/act-crypto";
 import { Chance } from "chance";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 const chance = new Chance();
 
 async function freshStore(
   key?: Buffer | (() => Buffer | Promise<Buffer>)
-): Promise<{ store: SqliteStore; raw: Client; url: string; path: string }> {
+): Promise<{ store: SqliteStore; raw: Client; url: string }> {
   // libSQL's `file::memory:` doesn't share state across client
   // instances, so we use a scratch file per test — that way the raw
-  // client below can
-  // read the same rows the SqliteStore committed.
-  const path = `/tmp/act-pii-enc-${randomUUID()}.db`;
-  const url = `file:${path}`;
+  // client below can read the same rows the SqliteStore committed.
+  const url = tmp_db_url();
   const store = new SqliteStore({
     url,
     pii_encryption: key
@@ -34,7 +32,7 @@ async function freshStore(
   });
   await store.seed();
   const raw = createClient({ url });
-  return { store, raw, url, path };
+  return { store, raw, url };
 }
 
 describe("SqliteStore pii_encryption", () => {
@@ -45,23 +43,19 @@ describe("SqliteStore pii_encryption", () => {
       await cleanup.pop()!();
     }
   });
+  afterAll(rm_tmp_dbs);
 
-  function track(s: SqliteStore, r: Client, path: string) {
+  function track(s: SqliteStore, r: Client) {
     cleanup.push(async () => {
       await s.dispose();
       r.close();
-      try {
-        unlinkSync(path);
-      } catch {
-        // best-effort
-      }
     });
   }
 
   it("round-trips an event's pii through commit and query (encrypted at rest)", async () => {
     const key = randomBytes(32);
-    const { store, raw, path } = await freshStore(key);
-    track(store, raw, path);
+    const { store, raw } = await freshStore(key);
+    track(store, raw);
     const stream = `roundtrip-${chance.guid()}`;
 
     const committed = await store.commit(
@@ -106,8 +100,8 @@ describe("SqliteStore pii_encryption", () => {
 
   it("forget_pii nulls the column regardless of ciphertext", async () => {
     const key = randomBytes(32);
-    const { store, raw, path } = await freshStore(key);
-    track(store, raw, path);
+    const { store, raw } = await freshStore(key);
+    track(store, raw);
     const stream = `forget-${chance.guid()}`;
 
     await store.commit(
@@ -143,8 +137,8 @@ describe("SqliteStore pii_encryption", () => {
 
   it("passes through events with no pii (encryption only wraps non-null payloads)", async () => {
     const key = randomBytes(32);
-    const { store, raw, path } = await freshStore(key);
-    track(store, raw, path);
+    const { store, raw } = await freshStore(key);
+    track(store, raw);
     const stream = `none-${chance.guid()}`;
 
     await store.commit(stream, [{ name: "Ping", data: { n: 1 } }], {
@@ -170,7 +164,7 @@ describe("SqliteStore pii_encryption", () => {
     const writeKey = randomBytes(32);
     const readKey = randomBytes(32);
     const writer = await freshStore(writeKey);
-    track(writer.store, writer.raw, writer.path);
+    track(writer.store, writer.raw);
     const stream = `wrongkey-${chance.guid()}`;
 
     await writer.store.commit(
@@ -205,8 +199,8 @@ describe("SqliteStore pii_encryption", () => {
 
   it("throws DecryptionError on tampered ciphertext", async () => {
     const key = randomBytes(32);
-    const { store, raw, path } = await freshStore(key);
-    track(store, raw, path);
+    const { store, raw } = await freshStore(key);
+    track(store, raw);
     const stream = `tamper-${chance.guid()}`;
 
     await store.commit(
@@ -239,8 +233,7 @@ describe("SqliteStore pii_encryption", () => {
     // encrypted; old rows stay readable because the type discriminator
     // (string after JSON.parse → ciphertext, object → plaintext)
     // lets both kinds pass through one read path.
-    const path = `/tmp/act-pii-mixed-${randomUUID()}.db`;
-    const url = `file:${path}`;
+    const url = tmp_db_url();
     const plain = new SqliteStore({ url });
     await plain.seed();
     const stream = `mixed-${chance.guid()}`;
@@ -264,14 +257,7 @@ describe("SqliteStore pii_encryption", () => {
         algorithm: "aes-256-gcm",
       },
     });
-    cleanup.push(async () => {
-      await enc.dispose();
-      try {
-        unlinkSync(path);
-      } catch {
-        // best-effort
-      }
-    });
+    cleanup.push(() => enc.dispose());
     await enc.commit(
       stream,
       [
@@ -296,8 +282,8 @@ describe("SqliteStore pii_encryption", () => {
 
   it("encrypts via the restore driver (rebuild path is symmetric)", async () => {
     const key = randomBytes(32);
-    const { store, raw, path } = await freshStore(key);
-    track(store, raw, path);
+    const { store, raw } = await freshStore(key);
+    track(store, raw);
     const stream = `restore-${chance.guid()}`;
 
     await store.restore(async (insert) => {
@@ -343,8 +329,8 @@ describe("SqliteStore pii_encryption", () => {
     // exactly as it does on the plaintext path. `data.at` is the in-row
     // control — it never travels through the envelope.
     const key = randomBytes(32);
-    const { store, raw, path } = await freshStore(key);
-    track(store, raw, path);
+    const { store, raw } = await freshStore(key);
+    track(store, raw);
     const stream = `date-enc-${chance.guid()}`;
     const when = new Date("2024-03-01T10:20:30.000Z");
 

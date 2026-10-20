@@ -1,9 +1,8 @@
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
-const DB_PATH = join(import.meta.dirname, "correlated-migration.db");
+const DB_URL = tmp_db_url();
 
 /**
  * Migrating the correlate checkpoint to its keyed shape (#1532).
@@ -14,18 +13,10 @@ const DB_PATH = join(import.meta.dirname, "correlated-migration.db");
  * as -1 against a large store — flood every subscription with re-marks.
  */
 describe("correlated table migration", () => {
-  afterAll(() => {
-    for (const ext of ["", "-wal", "-shm"]) {
-      try {
-        unlinkSync(DB_PATH + ext);
-      } catch {
-        // file may not exist
-      }
-    }
-  });
+  afterAll(rm_tmp_dbs);
 
   it("rebuilds the older single-row table and keeps its checkpoint", async () => {
-    const store = new SqliteStore({ url: `file:${DB_PATH}` });
+    const store = new SqliteStore({ url: DB_URL });
     await store.drop();
     await store.seed();
 

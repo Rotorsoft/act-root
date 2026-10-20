@@ -5,39 +5,28 @@
  * and never round-trips a date through its ISO form, so it cannot see any of
  * this.
  */
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { act, cache, dispose, sensitive, state, store } from "@rotorsoft/act";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 const actor = { id: "reader", name: "Reader" };
-const paths: string[] = [];
 
-async function open_store(name: string) {
-  const path = join(import.meta.dirname, `test-rsd-${name}.db`);
-  paths.push(path);
-  try {
-    unlinkSync(path);
-  } catch {}
-  store(new SqliteStore({ url: `file:${path}` }));
+async function open_store() {
+  store(new SqliteStore({ url: tmp_db_url() }));
   await store().seed();
   await cache().clear();
 }
 
 afterEach(async () => {
   await dispose()();
-  for (const p of paths.splice(0)) {
-    try {
-      unlinkSync(p);
-    } catch {}
-  }
 });
+afterAll(rm_tmp_dbs);
 
 describe("read schema converts dates without validating", () => {
   it("a required sensitive field lives in `pii`, and reading still works", async () => {
-    await open_store("a");
+    await open_store();
     const Happened = z.object({ at: z.date(), email: sensitive(z.string()) });
     const S = state({ A: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
@@ -80,7 +69,7 @@ describe("read schema converts dates without validating", () => {
   });
 
   it("a disclosed sensitive date reaches the reducer as a Date, like its plain sibling", async () => {
-    await open_store("b");
+    await open_store();
     const seen: Record<string, string> = {};
     const Happened = z.object({ at: z.date(), born: sensitive(z.date()) });
     const S = state({ B: z.object({ n: z.number() }) })
@@ -114,7 +103,7 @@ describe("read schema converts dates without validating", () => {
   });
 
   it("a redacted sensitive date keeps its sentinel instead of becoming a date", async () => {
-    await open_store("c");
+    await open_store();
     const Happened = z.object({ at: z.date(), born: sensitive(z.date()) });
     const S = state({ C: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
@@ -142,7 +131,7 @@ describe("read schema converts dates without validating", () => {
   });
 
   it("revives a date through every wrapper the rebuild knows", async () => {
-    await open_store("d");
+    await open_store();
     const Happened = z.object({
       a: z.date(),
       b: z.date().default(() => new Date(0)),
@@ -200,7 +189,7 @@ describe("read schema converts dates without validating", () => {
   });
 
   it("revives dates in a payload that predates the declaration", async () => {
-    await open_store("f");
+    await open_store();
     const Happened = z.object({ at: z.date(), label: z.string() });
     const S = state({ F: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
@@ -230,7 +219,7 @@ describe("read schema converts dates without validating", () => {
   });
 
   it("hands back what is stored when a date field holds something else", async () => {
-    await open_store("g");
+    await open_store();
     const Happened = z.object({ at: z.date() });
     const S = state({ G: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))
@@ -253,7 +242,7 @@ describe("read schema converts dates without validating", () => {
   });
 
   it("leaves an ISO-shaped z.string() a string", async () => {
-    await open_store("e");
+    await open_store();
     const Happened = z.object({ at: z.date(), created_at: z.string() });
     const S = state({ E: z.object({ n: z.number() }) })
       .init(() => ({ n: 0 }))

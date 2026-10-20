@@ -1,9 +1,8 @@
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { act, state } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
 import { z } from "zod";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 /**
  * #1556 on the second serializing adapter.
@@ -20,7 +19,7 @@ import { SqliteStore } from "../src/index.js";
  * SQLite's JSON storage unguarded against a regression in the event reader.
  */
 
-const DB_PATH = join(import.meta.dirname, "schema-dates.db");
+const DB_URL = tmp_db_url();
 const actor = { id: "a", name: "a" };
 const kind = (v: unknown) => (v instanceof Date ? "Date" : typeof v);
 const LOOKALIKE = "2026-06-06T00:00:00.000Z";
@@ -36,20 +35,12 @@ const Doc = state({
   .build();
 
 describe("schema-driven dates over sqlite", () => {
-  afterAll(() => {
-    for (const ext of ["", "-wal", "-shm"]) {
-      try {
-        unlinkSync(DB_PATH + ext);
-      } catch {
-        // file may not exist
-      }
-    }
-  });
+  afterAll(rm_tmp_dbs);
 
   it("types z.date() and leaves an ISO-shaped z.string() alone", async () => {
     const at = new Date("2026-01-01T00:00:00.000Z");
     const { app, store, cache, dispose } = await sandbox(act().withState(Doc), {
-      store: () => new SqliteStore({ url: `file:${DB_PATH}` }),
+      store: () => new SqliteStore({ url: DB_URL }),
     });
     await app.do("stamp", { stream: "d1", actor }, { at, label: LOOKALIKE });
 

@@ -1,10 +1,9 @@
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { createClient } from "@libsql/client";
 import { act, log, state, ZodEmpty } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";
 import { z } from "zod";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 /**
  * #1577 — a second connection to the same database file.
@@ -23,7 +22,7 @@ import { SqliteStore } from "../src/index.js";
  * prevents the other connection's commit from ever running. See #1577.
  */
 
-const DB_PATH = join(import.meta.dirname, "lease-handback.db");
+const DB_URL = tmp_db_url();
 const actor = { id: "a", name: "a" };
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -34,19 +33,8 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit(() => ["Bumped", {}])
   .build();
 
-const cleanup = () => {
-  for (const ext of ["", "-wal", "-shm"]) {
-    try {
-      unlinkSync(DB_PATH + ext);
-    } catch {
-      // may not exist
-    }
-  }
-};
-
 describe("correlation lease handback under a contended file", () => {
-  beforeAll(cleanup);
-  afterAll(cleanup);
+  afterAll(rm_tmp_dbs);
 
   it("shuts down cleanly and explains the skipped handback", async () => {
     const warnings: string[] = [];
@@ -62,13 +50,13 @@ describe("correlation lease handback under a contended file", () => {
 
     const { app, dispose } = await sandbox(act().withState(Counter), {
       actOptions: { autoSettle: false },
-      store: () => new SqliteStore({ url: `file:${DB_PATH}` }),
+      store: () => new SqliteStore({ url: DB_URL }),
     });
     await app.do("bump", { stream: "c1", actor }, {});
     await app.correlate();
 
     // A second connection takes the write lock and holds it.
-    const other = createClient({ url: `file:${DB_PATH}` });
+    const other = createClient({ url: DB_URL });
     const tx = await other.transaction("write");
     await tx.execute(
       "INSERT INTO events (stream, version, name, data, meta, created) VALUES ('x', 0, 'X', '{}', '{}', '2026-01-01')"
