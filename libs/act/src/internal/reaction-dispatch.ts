@@ -165,13 +165,26 @@ export function build_handle<
         // (exclude from ack via `defer`), don't bump `retry`, and re-visit
         // the stream at the carried due-time. `acked_at` is unused on
         // the defer path — drain never acks a deferred result.
-        if (error instanceof DeferSignal)
-          return {
-            lease,
-            handled,
-            acked_at: at,
-            defer: resolve_defer_at<TEvents>(error.when, event),
-          };
+        if (error instanceof DeferSignal) {
+          let defer: number;
+          try {
+            defer = resolve_defer_at<TEvents>(error.when, event);
+          } catch (invalid) {
+            // A schedule the schema rejects fails this reaction like any
+            // handler error, as the declarative `.defer` path does; thrown
+            // from here it would void the whole drain pass.
+            return finalize(
+              lease,
+              handled,
+              at,
+              invalid as Error,
+              payload.options,
+              logger,
+              event.id
+            );
+          }
+          return { lease, handled, acked_at: at, defer };
+        }
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
         // guard) and hands the target to the orchestrator's on_close.

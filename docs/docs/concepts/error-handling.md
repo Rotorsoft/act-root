@@ -182,7 +182,7 @@ The breaker counts store failures, not errors in your code. When application cod
 - **A resolver throws while the drain matches a leased stream's events.** Only that stream fails, exactly like a failing handler: it retries on the reaction's backoff and blocks once `maxRetries` is spent (with `blockOnError`). A dynamic target without a `source` reads every stream's events, so one bad event fails every such target. Give resolvers a `source` where you can.
 - **A reaction-requested close fails for any reason other than a `StoreError`** (its archive callback throws, say). It is logged once and not retried; close the stream with `app.close(...)` once the cause is fixed.
 
-Reaction handlers were already contained this way: a throwing handler retries and blocks its own stream.
+Reaction handlers were already contained this way: a throwing handler retries and blocks its own stream. That includes a handler that throws a `DeferSignal` whose schedule the schema rejects (`{ after: { minutes: 0 } }`, an invalid `Date`): it fails like any other error instead of deferring.
 
 All the loops share one count of consecutive store failures, and a success from any of them resets it. A store that fails only one kind of call (a single query timing out, say) while the others work can therefore keep the breaker closed. Each failure still logs and emits `error`, so alert on the **rate** of `error` events, broken down by `error.operation`, not on `circuit === "open"` alone.
 

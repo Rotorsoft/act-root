@@ -282,6 +282,41 @@ describe("imperative DeferSignal(when)", () => {
     await app.drain();
     expect(attempts).toBe(1);
   });
+
+  it("an invalid schedule fails its own reaction, never the drain pass", async () => {
+    // The type admits `{ after: { minutes: 0 } }`; the schema rejects it.
+    // That reaction spends its budget and blocks like any handler error,
+    // the other reaction in the same pass acks, and nothing is counted
+    // against the store circuit breaker.
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function healthy() {})
+      .to("defer-ok")
+      .on("ticked")
+      .do(
+        async function bad_schedule() {
+          throw new DeferSignal({ after: { minutes: 0 } });
+        },
+        { maxRetries: 0 }
+      )
+      .to("defer-bad")
+      .build({ autoSettle: false });
+    const acked: string[] = [];
+    const blocked: string[] = [];
+    const errors: unknown[] = [];
+    app.on("acked", (leases) => acked.push(...leases.map((l) => l.stream)));
+    app.on("blocked", (leases) => blocked.push(...leases.map((l) => l.stream)));
+    app.on("error", (e) => errors.push(e));
+
+    await app.do("tick", { stream: "bad-when", actor }, {});
+    await app.correlate();
+    await app.drain();
+
+    expect(acked).toEqual(["defer-ok"]);
+    expect(blocked).toEqual(["defer-bad"]);
+    expect(errors).toEqual([]);
+  });
 });
 
 describe("defer outcome (integration)", () => {
