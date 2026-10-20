@@ -26,6 +26,17 @@
       "label": "Projections"
     }
   ],
+  "slices": [
+    {
+      "id": "slice:GameSlice",
+      "label": "GameSlice",
+      "owns": ["Game"],
+      "registers": ["Game"],
+      "file": "packages/domain/src/game.ts",
+      "line": 625,
+      "description": "The whole game: every action and event of the Game state. The app is built with act().withSlice(GameSlice)."
+    }
+  ],
   "nodes": [
     {
       "id": "actor:creator",
@@ -67,7 +78,8 @@
       "schema": "{ name, turnTimeoutSec? }",
       "file": "packages/domain/src/game.ts",
       "line": 142,
-      "description": "Opens a lobby. The actor becomes the creator."
+      "description": "Opens a lobby. The actor becomes the creator.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:JoinGame",
@@ -81,7 +93,8 @@
       "schema": "{ playerName, color, bot?, avatar? }",
       "file": "packages/domain/src/game.ts",
       "line": 146,
-      "description": "Takes a seat. Also refuses a player who already joined."
+      "description": "Takes a seat. Also refuses a player who already joined.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:StartGame",
@@ -95,7 +108,8 @@
       ],
       "file": "packages/domain/src/game.ts",
       "line": 159,
-      "description": "Shuffles the turn order, deals the 42 territories one army each, and computes each player's setup armies (40 for two players, down to 20 for six)."
+      "description": "Shuffles the turn order, deals the 42 territories one army each, and computes each player's setup armies (40 for two players, down to 20 for six).",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:PlaceArmy",
@@ -109,7 +123,8 @@
       "schema": "{ territory }",
       "file": "packages/domain/src/game.ts",
       "line": 194,
-      "description": "Places one setup army on an owned territory. The last army on the table also emits SetupCompleted."
+      "description": "Places one setup army on an owned territory. The last army on the table also emits SetupCompleted.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:AutoDeploy",
@@ -122,7 +137,8 @@
       ],
       "file": "packages/domain/src/game.ts",
       "line": 557,
-      "description": "Places all of a player's remaining setup armies at once, weakest border territories first. Emits SetupCompleted too when nobody else has armies left."
+      "description": "Places all of a player's remaining setup armies at once, weakest border territories first. Emits SetupCompleted too when nobody else has armies left.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:TradeCards",
@@ -133,7 +149,8 @@
       "schema": "{ cardIndices: [i, j, k] }",
       "file": "packages/domain/src/game.ts",
       "line": 469,
-      "description": "Trades a valid set of three cards for bonus armies (4, 6, 8, 10, 12, 15, then +5 each). Only in reinforce, or in attack with 5+ cards."
+      "description": "Trades a valid set of three cards for bonus armies (4, 6, 8, 10, 12, 15, then +5 each). Only in reinforce, or in attack with 5+ cards.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:Reinforce",
@@ -147,7 +164,8 @@
       "schema": "{ territory, armies }",
       "file": "packages/domain/src/game.ts",
       "line": 220,
-      "description": "Deploys reinforcements. A hand of 5+ cards with a valid set must be traded first. When none remain, the phase moves to attack."
+      "description": "Deploys reinforcements. A hand of 5+ cards with a valid set must be traded first. When none remain, the phase moves to attack.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:Attack",
@@ -161,7 +179,8 @@
       "schema": "{ from, to, attackDice }",
       "file": "packages/domain/src/game.ts",
       "line": 242,
-      "description": "Rolls one round of dice inside the action, so the event records the outcome. Taking a player's last territory also emits PlayerEliminated, and GameWon when one player remains."
+      "description": "Rolls one round of dice inside the action, so the event records the outcome. Taking a player's last territory also emits PlayerEliminated, and GameWon when one player remains.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:BlitzAttack",
@@ -175,7 +194,8 @@
       "schema": "{ from, to, minArmies? }",
       "file": "packages/domain/src/game.ts",
       "line": 335,
-      "description": "Rolls rounds until the territory falls or the attacker is down to minArmies, and records every round in one event. Same elimination and win rules as Attack."
+      "description": "Rolls rounds until the territory falls or the attacker is down to minArmies, and records every round in one event. Same elimination and win rules as Attack.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:ConquestMove",
@@ -189,7 +209,8 @@
       "schema": "{ from, to, armies }",
       "file": "packages/domain/src/game.ts",
       "line": 456,
-      "description": "Moves extra armies into a conquered territory. Attacks, ending the attack and fortifying wait until it is done."
+      "description": "Moves extra armies into a conquered territory. Attacks, ending the attack and fortifying wait until it is done.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:EndAttack",
@@ -202,7 +223,8 @@
       ],
       "file": "packages/domain/src/game.ts",
       "line": 445,
-      "description": "Ends the attack phase and moves to fortify."
+      "description": "Ends the attack phase and moves to fortify.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:Fortify",
@@ -216,7 +238,8 @@
       "schema": "{ from, to, armies }",
       "file": "packages/domain/src/game.ts",
       "line": 495,
-      "description": "Moves armies between two owned territories connected through owned territories, then ends the turn: a card if the player conquered this turn, then TurnStarted for the next player."
+      "description": "Moves armies between two owned territories connected through owned territories, then ends the turn: a card if the player conquered this turn, then TurnStarted for the next player.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:SkipFortify",
@@ -229,7 +252,8 @@
       ],
       "file": "packages/domain/src/game.ts",
       "line": 532,
-      "description": "Ends the turn without moving armies, with the same card and next-turn events as Fortify."
+      "description": "Ends the turn without moving armies, with the same card and next-turn events as Fortify.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:ReplaceWithBot",
@@ -239,7 +263,8 @@
       "schema": "{ playerId }",
       "file": "packages/domain/src/game.ts",
       "line": 615,
-      "description": "Hands a seat to the bot engine. The emit refuses any actor but the system."
+      "description": "Hands a seat to the bot engine. The emit refuses any actor but the system.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "action:DeleteGame",
@@ -249,7 +274,8 @@
       "invariants": ["Only the game creator can start the game"],
       "file": "packages/domain/src/game.ts",
       "line": 607,
-      "description": "Marks the game deleted (it stays in the log). The invariant reuses the creator check, so its message says start."
+      "description": "Marks the game deleted (it stays in the log). The invariant reuses the creator check, so its message says start.",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "state:Game",
@@ -264,133 +290,152 @@
       "lane": "event",
       "label": "GameCreated",
       "col": 0,
-      "schema": "{ name, createdBy, turnTimeoutSec }"
+      "schema": "{ name, createdBy, turnTimeoutSec }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:PlayerJoined",
       "lane": "event",
       "label": "PlayerJoined",
       "col": 1,
-      "schema": "{ playerId, playerName, color, bot, avatar? }"
+      "schema": "{ playerId, playerName, color, bot, avatar? }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:GameStarted",
       "lane": "event",
       "label": "GameStarted",
       "col": 2,
-      "schema": "{ playerOrder, territories, setupArmiesRemaining }"
+      "schema": "{ playerOrder, territories, setupArmiesRemaining }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:ArmyPlaced",
       "lane": "event",
       "label": "ArmyPlaced",
       "col": 3,
-      "schema": "{ playerId, territory }"
+      "schema": "{ playerId, territory }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:SetupCompleted",
       "lane": "event",
       "label": "SetupCompleted",
       "col": 4,
-      "schema": "{}"
+      "schema": "{}",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:AutoDeployed",
       "lane": "event",
       "label": "AutoDeployed",
       "col": 5,
-      "schema": "{ playerId, placements }"
+      "schema": "{ playerId, placements }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:CardsTraded",
       "lane": "event",
       "label": "CardsTraded",
       "col": 6,
-      "schema": "{ playerId, cardIndices, bonusArmies, tradeCount, tradedCards, territoryBonuses }"
+      "schema": "{ playerId, cardIndices, bonusArmies, tradeCount, tradedCards, territoryBonuses }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:Reinforced",
       "lane": "event",
       "label": "Reinforced",
       "col": 7,
-      "schema": "{ territory, armies, remaining }"
+      "schema": "{ territory, armies, remaining }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:Attacked",
       "lane": "event",
       "label": "Attacked",
       "col": 8,
-      "schema": "{ from, to, attackDice, defendDice, attackerLosses, defenderLosses, conquered, fromArmies, toArmies, toOwner }"
+      "schema": "{ from, to, attackDice, defendDice, attackerLosses, defenderLosses, conquered, fromArmies, toArmies, toOwner }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:BlitzAttacked",
       "lane": "event",
       "label": "BlitzAttacked",
       "col": 9,
-      "schema": "{ from, to, rounds, conquered, fromArmies, toArmies, toOwner }"
+      "schema": "{ from, to, rounds, conquered, fromArmies, toArmies, toOwner }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:PlayerEliminated",
       "lane": "event",
       "label": "PlayerEliminated",
       "col": 10,
-      "schema": "{ playerId, conquerorId, transferredCards }"
+      "schema": "{ playerId, conquerorId, transferredCards }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:GameWon",
       "lane": "event",
       "label": "GameWon",
       "col": 11,
-      "schema": "{ winnerId }"
+      "schema": "{ winnerId }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:ConquestMoved",
       "lane": "event",
       "label": "ConquestMoved",
       "col": 12,
-      "schema": "{ from, to, armies }"
+      "schema": "{ from, to, armies }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:AttackPhaseEnded",
       "lane": "event",
       "label": "AttackPhaseEnded",
       "col": 13,
-      "schema": "{}"
+      "schema": "{}",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:Fortified",
       "lane": "event",
       "label": "Fortified",
       "col": 14,
-      "schema": "{ from, to, armies }"
+      "schema": "{ from, to, armies }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:CardEarned",
       "lane": "event",
       "label": "CardEarned",
       "col": 15,
-      "schema": "{ playerId, card }"
+      "schema": "{ playerId, card }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:TurnStarted",
       "lane": "event",
       "label": "TurnStarted",
       "col": 16,
-      "schema": "{ playerId, playerIndex, turnNumber, reinforcements }"
+      "schema": "{ playerId, playerIndex, turnNumber, reinforcements }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:PlayerReplacedByBot",
       "lane": "event",
       "label": "PlayerReplacedByBot",
       "col": 17,
-      "schema": "{ playerId }"
+      "schema": "{ playerId }",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "evt:GameDeleted",
       "lane": "event",
       "label": "GameDeleted",
       "col": 18,
-      "schema": "{}"
+      "schema": "{}",
+      "slice": "slice:GameSlice"
     },
     {
       "id": "proj:games",

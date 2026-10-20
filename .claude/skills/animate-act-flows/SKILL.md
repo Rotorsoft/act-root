@@ -37,6 +37,7 @@ The parser is best-effort. Always read the slice and state files and check each 
 - **Timers.** `.defer(...)`, or a `DeferSignal` thrown in the handler, means the reaction waits. Put `"timer": true` on the `event → reaction` edge and `"badge": "⏱"` on the reaction.
 - **Outside world.** Webhooks, notification services, payment providers and other calls out of the process become `external` nodes with a `reaction → external` edge.
 - **Actors.** The parser has no actors. Read invariants ("Must be the owner") and the app's API to decide who invokes which action. Add `actor` nodes with `"actor": "person"` or `"actor": "automation"` (a cron job, an importer, another system calling the API) and `actor → action` edges. Actions invoked only by reactions get no actor node. Instead, set `"as"` on the reaction to the actor name its `app.do` uses (`"ticket-timers"`, `"assign reaction"`), so the map shows it as an automation.
+- **Slices (boundaries).** Draw only the boundaries the builders declare. A slice **owns** the partial states declared in its own file (their actions and events) and the reactions it declares. Every other partial it lists in `.withState(...)` is a **reference**: its reactions call those actions, but it doesn't own them. The draft sets `slice` on owned nodes and lists `owns` and `registers` per slice, naming partials by file. Replace those with the source variable names (`TicketCreation`, `TicketOperations`). Add a short `description` for each slice. A slice that declares no partial (wolfdesk's timers and webhooks) owns only its reactions. Never invent boundaries the source doesn't declare (phases, inferred contexts). Partials of the same name still merge into one state bar, even when different slices own them. Without slices, the player draws one box per state instead.
 - **State.** Give the state bar a `note` naming the partial states merged into it and a `description`. Actions pass through it on the way to events: that is where invariants are checked and where events patch the state. With several states (the calculator's `Calculator`, `DigitBoard`, `CalculatorResult`), add one bar per state with a `span` over the columns of the actions that load it; each action passes through the bar above its column. A bar too narrow for its `note` drops it from the map (the detail panel still shows it).
 - **Lanes, retries, targets.** Put `.withLane`, backoff and `.to(...)` targets in the node `description` (shown when a box is selected).
 - One node per reaction. When two handlers share a name, keep separate ids.
@@ -45,9 +46,10 @@ The parser is best-effort. Always read the slice and state files and check each 
 
 Time runs left to right. Set `col` (fractions allowed) on every node except the bars (state, projections):
 
+- With slices, lay the columns out slice by slice, in `.withSlice(...)` order. Each slice's actions, events and reactions sit in their own run of columns, and nothing from another slice may sit inside it (`flows.mjs` refuses that). Inside a slice, order by the story.
 - Order actions by the life of the main entity (create, assign, work, escalate, close).
 - An event sits in the column of the action that emits it.
-- A reaction sits under its triggering event. When one event triggers two reactions, put them half a column either side, and space the actions to make room (wolfdesk puts `TicketOpened` at 0.5 with `assign` at 0 and `autoClose` at 1). Reactions must be at least one column apart.
+- A reaction sits under its triggering event when that event is in the same slice (wolfdesk's `assign` under `TicketOpened`). A reaction whose trigger lives in another slice sits in its own slice's columns, and its edge crosses the boundary (wolfdesk's timers). When one event triggers two reactions in the same slice, put them half a column either side. Reactions must be at least one column apart.
 - A projection bar spans the columns of the events it handles, or set `"span": [from, to]`.
 - An external node goes under the reaction that calls it.
 
@@ -116,13 +118,19 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
     { "id": "reaction", "label": "Reactions" },
     { "id": "external", "label": "Outside world" }
   ],
+  "slices": [                              // optional; one per slice() builder
+    { "id": "slice:TicketCreation", "label": "TicketCreationSlice",
+      "owns": ["TicketCreation"],                          // partials declared in the slice's file
+      "registers": ["TicketCreation", "TicketOperations"], // everything in .withState(...)
+      "file": "src/ticket-creation.ts", "line": 80, "description": "Shown when the box is selected." }
+  ],
   "nodes": [
     { "id": "actor:customer", "lane": "actor", "actor": "person", "label": "Customer", "col": 1.5 },
-    { "id": "action:OpenTicket", "lane": "action", "label": "OpenTicket", "col": 0.5,
+    { "id": "action:OpenTicket", "lane": "action", "label": "OpenTicket", "col": 0,
       "invariants": ["..."], "schema": "...", "file": "src/x.ts", "line": 12,
-      "description": "Shown when the box is selected." },
+      "description": "Shown when the box is selected.", "slice": "slice:TicketCreation" },
     { "id": "state:Ticket", "lane": "state", "label": "Ticket", "note": "TicketCreation + TicketOperations" },
-    { "id": "reaction:autoClose", "lane": "reaction", "label": "autoClose", "col": 1, "badge": "⏱", "as": "ticket-timers" },
+    { "id": "reaction:autoClose", "lane": "reaction", "label": "autoClose", "col": 10, "badge": "⏱", "as": "ticket-timers", "slice": "slice:TicketTimers" },
     { "id": "proj:tickets", "lane": "projection", "label": "tickets", "note": "Drizzle table", "span": [0, 11] }
   ],
   "edges": [
@@ -141,6 +149,8 @@ It needs Chrome and ffmpeg, and runs the whole scenario in real time, so record 
   ]
 }
 ```
+
+`slice` goes on actions, events and reactions only. Actors, projections, state bars and outside-world nodes cross boundaries and belong to none.
 
 Lane ids are fixed: `actor`, `action`, `state`, `event`, `projection`, `reaction`, `external`. URL fragments (`#s2`, `#dark`, `#embed`, `#record`, joined with `-`) are documented in the guide.
 

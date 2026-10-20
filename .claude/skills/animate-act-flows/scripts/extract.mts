@@ -127,10 +127,36 @@ for (const s of model.states)
 for (const [name, files] of partials)
   nodes.set(`state:${name}`, { id: `state:${name}`, lane: "state", label: name, note: `${files.size} partial state(s)` });
 
+// slices own the partial states declared in their own file, plus the reactions they declare;
+// the other partials they register are references
+type Slice = { name: string; stateVars: string[]; reactions: { event: string; handlerName: string }[]; file?: string; line?: number };
+const by_var = new Map(model.states.map((s: { varName: string }) => [s.varName, s]));
+const slices = (model.slices as Slice[]).map((sl) => {
+  const registers = sl.stateVars.filter((v) => by_var.has(v));
+  const owns = registers.filter((v) => sl.file && (by_var.get(v) as { file?: string }).file === sl.file);
+  const id = `slice:${sl.name}`;
+  for (const v of owns) {
+    const s = by_var.get(v) as { actions: { name: string }[]; events: { name: string }[] };
+    for (const a of s.actions) nodes.get(`action:${a.name}`)!.slice = id;
+    for (const e of s.events) nodes.get(`evt:${e.name}`)!.slice = id;
+  }
+  for (const r of sl.reactions) {
+    const n = nodes.get(`reaction:${r.handlerName}:${r.event}`);
+    if (n) n.slice = id;
+  }
+  // the parser names partials "Ticket:0"; the file says which one it is
+  const partial = (v: string) => {
+    const s = by_var.get(v) as { name: string; file?: string };
+    return s.file ? `${s.name} (${s.file.split("/").pop()})` : v;
+  };
+  return { id, label: sl.name, owns: owns.map(partial), registers: registers.map(partial), ...(sl.file ? { file: sl.file, line: sl.line } : {}) };
+});
+
 const spec = {
   title: "Act flow",
   subtitle: "",
   source: dir,
+  ...(slices.length ? { slices } : {}),
   lanes: [
     { id: "actor", label: "Actors" },
     { id: "action", label: "Actions" },
