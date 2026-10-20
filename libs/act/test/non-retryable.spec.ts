@@ -102,10 +102,11 @@ describe("NonRetryableError (drain integration)", () => {
     // means the wake keeps retrying until the handler succeeds.
     await app.drain();
     expect(attempts).toBe(1);
-    await sleep(30);
-    expect(attempts).toBe(3);
-    expect(acked).toEqual(["s2"]);
-    expect(blocked).toEqual([]);
+    await vi.waitFor(() => {
+      expect(attempts).toBe(3);
+      expect(acked).toEqual(["s2"]);
+      expect(blocked).toEqual([]);
+    });
   });
 
   it("plain Error keeps consuming retry budget", async () => {

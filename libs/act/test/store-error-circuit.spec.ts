@@ -133,8 +133,9 @@ describe("drain circuit breaker", () => {
 
     // No manual drain: the breaker's own retry (wired to app.drain) fires
     // ~cooldownMs later, re-attempts claim, succeeds, and closes.
-    await new Promise((r) => setTimeout(r, 250));
-    expect(claimSpy.mock.calls.length).toBeGreaterThan(1);
+    await vi.waitFor(() =>
+      expect(claimSpy.mock.calls.length).toBeGreaterThan(1)
+    );
 
     await dispose()();
   });

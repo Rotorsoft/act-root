@@ -352,8 +352,7 @@ describe("correlate: arming lanes", () => {
       // the lane so its worker picks the stream up on the next tick.
       const { subscribed } = await app.correlate();
       expect(subscribed).toBe(1);
-      await sleep(120);
-      expect(seen).toEqual(["o1"]);
+      await vi.waitFor(() => expect(seen).toEqual(["o1"]));
     });
 
     it("processes a first-ever event via the canonical settle wiring", async () => {
@@ -1470,11 +1469,10 @@ describe("correlate: the lease", () => {
       // of a shutdown path. It is deliberately not awaited there either, hence
       // the tick before asserting.
       await expect(a.shutdown()).resolves.toBeUndefined();
-      await new Promise((r) => setTimeout(r, 20));
       // `warn`, not `error` (#1577): nothing is lost and the lease self-heals
       // on expiry, so a clean shutdown must not reach a level operators page
       // on. The cause still rides along in the message.
-      expect(warn).toHaveBeenCalled();
+      await vi.waitFor(() => expect(warn).toHaveBeenCalled());
       expect(String(warn.mock.calls[0][0])).toMatch(/release failed/);
       expect(error).not.toHaveBeenCalled();
       warn.mockRestore();

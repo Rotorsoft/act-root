@@ -391,9 +391,10 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts).toBe(1);
 
     // The wake runs the retry once the backoff window elapses.
-    await sleep(80);
-    expect(attempts).toBe(2);
-    expect(acked).toEqual(["s2"]);
+    await vi.waitFor(() => {
+      expect(attempts).toBe(2);
+      expect(acked).toEqual(["s2"]);
+    });
   });
 
   it("preserves blocking behavior when retries are exhausted", async () => {
@@ -422,9 +423,10 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts).toBe(1);
 
     // The wake runs the retry: retry=1, maxRetries=1 → block
-    await sleep(40);
-    expect(attempts).toBe(2);
-    expect(blocked).toEqual(["s3"]);
+    await vi.waitFor(() => {
+      expect(attempts).toBe(2);
+      expect(blocked).toEqual(["s3"]);
+    });
   });
 
   it("garbage-collects only entries whose window has elapsed", async () => {
@@ -458,19 +460,21 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts.early).toBe(1);
 
     // Commit + correlate + drain "late" 30ms later — entry set at T'+50.
-    // Both entries are now in the map; the earliest timer reschedules.
+    // Both entries are now in the map; the earliest timer reschedules. On a
+    // slow run `early`'s timer can be draining already, and a drain that
+    // finds a pass in flight claims nothing, so drain until `late` ran.
     await sleep(30);
     await app.do("tick", { stream: "late", actor }, {});
     await app.correlate();
-    await app.drain();
-    expect(attempts.late).toBe(1);
+    await vi.waitFor(async () => {
+      await app.drain();
+      expect(attempts.late).toBe(1);
+    });
 
-    // ~25ms more lets `early`'s timer fire (~55ms total from its
-    // failure) while `late` is only ~25ms in. The callback iterates the
-    // map and must delete `early` but keep `late`.
-    await sleep(25);
-    await app.drain();
-    expect(attempts.early).toBe(2);
+    // `early`'s timer fires ~50ms after its failure, while `late` is still
+    // ~20ms short of its window. The callback iterates the map and must
+    // delete `early` but keep `late`.
+    await vi.waitFor(() => expect(attempts.early).toBe(2), { interval: 5 });
     expect(attempts.late).toBe(1);
   });
 

@@ -1,4 +1,4 @@
-import { act, dispose, sleep, state, store, ZodEmpty } from "@rotorsoft/act";
+import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
@@ -73,7 +73,6 @@ describe("PostgresStore — worker clock 800ms ahead of the database", () => {
       .build({ autoSettle: false });
     await app.do("ping", { stream: "b", actor }, {});
     await app.correlate();
-    await sleep(3_000);
-    expect(attempts).toBe(2);
+    await vi.waitFor(() => expect(attempts).toBe(2), { timeout: 5_000 });
   }, 10_000);
 });
