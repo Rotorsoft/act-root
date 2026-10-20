@@ -329,18 +329,28 @@ export function hono<TApp extends ActSurface = ActSurface>(
       // short-circuits with its own 400 + raw body — two statuses and
       // two shapes for the same "malformed input" failure class on one
       // endpoint. The OpenAPI doc only documents the 422/ApiError path.
+      // A JSON body that doesn't parse gets the same envelope: the
+      // validator would throw its own plain-text 400 before the hook runs.
+      async (c, next) => {
+        if (is_json(c.req.header("content-type")))
+          try {
+            await c.req.json();
+          } catch {
+            return c.json(
+              validation_error("Malformed JSON in request body"),
+              422
+            );
+          }
+        await next();
+      },
       zValidator("json", schema as never, (result, c) => {
-        if (!result.success) {
+        if (!result.success)
           // `result.error` is a ZodError; the schema's `never` typing
           // erases its shape, so read `.message` through a narrow cast.
-          const message = (result.error as { message?: string }).message;
-          const body: ApiError = {
-            error: "ValidationError",
-            detail: message,
-            code: "VALIDATION",
-          };
-          return c.json(body, 422);
-        }
+          return c.json(
+            validation_error((result.error as { message?: string }).message),
+            422
+          );
       }),
       async (c) => {
         try {
@@ -429,6 +439,10 @@ export function hono<TApp extends ActSurface = ActSurface>(
  */
 const JSON_CONTENT_TYPE =
   /^application\/([a-z-.]+\+)?json(;\s*[a-zA-Z0-9-]+=([^;]+))*$/i;
+function validation_error(detail: string | undefined): ApiError {
+  return { error: "ValidationError", detail, code: "VALIDATION" };
+}
+
 function is_json(content_type: string | undefined): boolean {
   return !!content_type && JSON_CONTENT_TYPE.test(content_type);
 }
