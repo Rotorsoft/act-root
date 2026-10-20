@@ -15,6 +15,7 @@
 import {
   DEFAULT_BLOCK_ON_ERROR,
   DEFAULT_MAX_RETRIES,
+  resolveLaneConfig,
   resolveReactionConfig,
 } from "../internal/config.js";
 import {
@@ -36,18 +37,29 @@ import { DEFAULT_LANE } from "../types/index.js";
 import { _this_ } from "./merge.js";
 
 /**
- * Validate and register a drain lane: the `"default"` name is
- * reserved and each lane name must be unique. Mutates `lanes` in place; the
- * caller returns its own builder for chaining.
+ * Validate and register a drain lane, the one rule for `withLane` on an Act
+ * or a slice and for the lanes a slice brings to `withSlice`, in any order.
+ * Validating here means a bad lane bag throws at declaration, not by
+ * silently draining nothing. `"default"` is reserved; a name declares one
+ * config, so declaring it again with the same config is a no-op and with a
+ * different one throws. Mutates `lanes` in place.
  *
  * @internal
  */
 export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
+  resolveLaneConfig(config);
   if (config.name === DEFAULT_LANE)
     throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
-  if (lanes.some((l) => l.name === config.name))
-    throw new Error(`Lane "${config.name}" was already declared`);
-  lanes.push(config);
+  const existing = lanes.find((l) => l.name === config.name);
+  if (!existing) return void lanes.push(config);
+  if (
+    existing.leaseMillis !== config.leaseMillis ||
+    existing.streamLimit !== config.streamLimit ||
+    existing.cycleMs !== config.cycleMs
+  )
+    throw new Error(
+      `Lane "${config.name}" was already declared with a different config`
+    );
 }
 
 /**

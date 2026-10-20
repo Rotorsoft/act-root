@@ -55,13 +55,23 @@ describe("lanes", () => {
     ).toThrow(/reserved/);
   });
 
-  it("rejects duplicate lane declarations", () => {
+  it("rejects a lane declared twice with different configs", () => {
     expect(() =>
       act()
         .withState(Counter)
         .withLane({ name: "slow" })
-        .withLane({ name: "slow" as never })
-    ).toThrow(/already declared/);
+        .withLane({ name: "slow" as never, leaseMillis: 30_000 })
+    ).toThrow(/already declared with a different config/);
+  });
+
+  it("accepts a lane declared again with the same config", () => {
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "slow", leaseMillis: 30_000 })
+        .withLane({ name: "slow" as never, leaseMillis: 30_000 })
+        .build()
+    ).not.toThrow();
   });
 
   it("accepts inline .to({lane}) when the lane was declared", () => {
@@ -303,13 +313,23 @@ describe("lanes", () => {
     ).toThrow(/reserved/);
   });
 
-  it("rejects duplicate slice-declared lane names", () => {
+  it("rejects a slice lane declared twice with different configs", () => {
     expect(() =>
       slice<typeof Counter>()
         .withState(Counter)
         .withLane({ name: "slow" })
-        .withLane({ name: "slow" as never })
-    ).toThrow(/already declared/);
+        .withLane({ name: "slow" as never, streamLimit: 2 })
+    ).toThrow(/already declared with a different config/);
+  });
+
+  it("merges a lane the slice and the Act both declare, in either order", () => {
+    const S = slice<typeof Counter>()
+      .withState(Counter)
+      .withLane({ name: "slow", leaseMillis: 30_000 })
+      .build();
+    const lane = { name: "slow", leaseMillis: 30_000 } as const;
+    expect(() => act().withLane(lane).withSlice(S).build()).not.toThrow();
+    expect(() => act().withSlice(S).withLane(lane).build()).not.toThrow();
   });
 
   it("rejects slice/Act lane configs that disagree on timing", () => {

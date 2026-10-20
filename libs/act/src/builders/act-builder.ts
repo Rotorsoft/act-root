@@ -6,7 +6,7 @@
  */
 import { Act } from "../act.js";
 import { synthesize_autoclose_reactions } from "../internal/autoclose-reaction.js";
-import { resolveActConfig, resolveLaneConfig } from "../internal/config.js";
+import { resolveActConfig } from "../internal/config.js";
 import { bare_patch, validating_patch } from "../internal/event-sourcing.js";
 import {
   current_version_of,
@@ -294,22 +294,7 @@ export function act<
         }
         merge_event_register(registry.events, input.events);
         pending_projections.push(...input.projections);
-        for (const slice_lane of input.lanes) {
-          const existing = lanes.find((l) => l.name === slice_lane.name);
-          if (!existing) {
-            lanes.push(slice_lane);
-            continue;
-          }
-          if (
-            existing.leaseMillis !== slice_lane.leaseMillis ||
-            existing.streamLimit !== slice_lane.streamLimit ||
-            existing.cycleMs !== slice_lane.cycleMs
-          ) {
-            throw new Error(
-              `Lane "${slice_lane.name}" was already declared with a different config`
-            );
-          }
-        }
+        for (const lane of input.lanes) register_lane(lane, lanes);
         return builder as never;
       },
       withProjection: (proj) => {
@@ -327,9 +312,7 @@ export function act<
         >,
       withLane: (config) => {
         if (_built) closed("withLane");
-        // Validate the lane bag at declaration (a bad leaseMillis/streamLimit
-        // throws ZodError at build, not on the first cycle).
-        register_lane(resolveLaneConfig(config), lanes);
+        register_lane(config, lanes);
         return builder as never;
       },
       on: <TKey extends keyof TEvents>(event: TKey) => {
