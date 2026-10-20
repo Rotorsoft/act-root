@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.3...@rotorsoft/act-v1.33.4) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act:** shutdown stops the work already in flight ([#2001](https://github.com/Rotorsoft/act-root/issues/2001)) ([d9df52b](https://github.com/Rotorsoft/act-root/commit/d9df52b86c28c75d8400b352b0384ffb531254ba)), closes [#1973](https://github.com/Rotorsoft/act-root/issues/1973) [#1990](https://github.com/Rotorsoft/act-root/issues/1990)
+
 # [@rotorsoft/act-v1.33.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.2...@rotorsoft/act-v1.33.3) (2026-10-20)
 
 # [@rotorsoft/act-v1.33.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.1...@rotorsoft/act-v1.33.2) (2026-10-20)
