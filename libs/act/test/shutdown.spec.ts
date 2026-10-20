@@ -556,3 +556,91 @@ describe("the settle loop stops at shutdown", () => {
     expect(await scenario(10)).toEqual([]);
   });
 });
+
+describe("shutdown stops the work already in flight", () => {
+  // A settle pass whose correlate scan is still running when the grace
+  // budget runs out: the pass must not drain or re-take the lease after.
+  const slow_scan = async (graceMs: number) => {
+    const raw = new InMemoryStore();
+    const query = raw.query.bind(raw);
+    const subscribe = raw.subscribe.bind(raw);
+    let slow = false;
+    let down = false;
+    const leased_after: number[] = [];
+    raw.query = (async (...args: Parameters<typeof raw.query>) => {
+      if (slow) await pause(150);
+      return query(...args);
+    }) as typeof raw.query;
+    raw.subscribe = (async (...args: Parameters<typeof raw.subscribe>) => {
+      const millis = args[2]?.millis;
+      if (down && millis) leased_after.push(millis);
+      return subscribe(...args);
+    }) as typeof raw.subscribe;
+    store(raw);
+    const ran_after: string[] = [];
+    const app = act()
+      .withState(Ticker)
+      .on("Ticked")
+      .do(async function handle(event) {
+        if (down) ran_after.push(event.stream);
+      })
+      .to((event) => ({ target: `t-${event.stream}` }))
+      .build();
+    await pause(30); // the cold-start settle is done
+    slow = true;
+    await app.do("tick", { stream: "x1", actor }, {});
+    await pause(30); // the scheduled pass is in its slow scan
+    await app.shutdown({ graceMs });
+    down = true;
+    await pause(400);
+    return { ran_after, leased_after };
+  };
+
+  it("a pass still scanning when the grace runs out starts nothing after shutdown", async () => {
+    expect(await slow_scan(30)).toEqual({ ran_after: [], leased_after: [] });
+  });
+
+  it("control — a grace the scan fits in also starts nothing after", async () => {
+    expect(await slow_scan(400)).toEqual({ ran_after: [], leased_after: [] });
+  });
+
+  // A pass `do()` scheduled right before `shutdown()`, while the notify
+  // subscription takes its time to come down.
+  const slow_disposal = async (dispose_ms: number) => {
+    const raw = new InMemoryStore();
+    const wrapped = new Proxy(raw, {
+      get(t, p, r) {
+        if (p === "notify")
+          return () =>
+            Promise.resolve(async () => {
+              await pause(dispose_ms);
+            });
+        const v = Reflect.get(t, p, r);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    }) as unknown as Store;
+    store(wrapped);
+    const ran: string[] = [];
+    const app = act()
+      .withState(Ticker)
+      .on("Ticked")
+      .do(async function handle(event) {
+        ran.push(event.stream);
+      })
+      .to((event) => ({ target: `t-${event.stream}` }))
+      .build();
+    await pause(30);
+    await app.do("tick", { stream: "x1", actor }, {});
+    await app.shutdown();
+    await pause(200);
+    return ran;
+  };
+
+  it("a slow notify disposal can't let a scheduled pass run", async () => {
+    expect(await slow_disposal(60)).toEqual([]);
+  });
+
+  it("control — an instant disposal cancels it too", async () => {
+    expect(await slow_disposal(0)).toEqual([]);
+  });
+});

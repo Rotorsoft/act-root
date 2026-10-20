@@ -420,7 +420,7 @@ export class DrainController<
   private readonly _defer = new DeferTimer(() => {
     this._armed = true;
     void this._deps.run_scoped(async () => {
-      while (!this._stopped && (await this.drain()).leased.length > 0);
+      while ((await this.drain()).leased.length > 0);
     });
   });
   private _worker: ReturnType<typeof setTimeout> | undefined;
@@ -488,7 +488,9 @@ export class DrainController<
   }
 
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
-    if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
+    // A stopped controller claims nothing, so a pass shutdown's grace
+    // outlived can't start work after teardown.
+    if (!this._armed || this._stopped) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
