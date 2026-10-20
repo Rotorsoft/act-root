@@ -382,7 +382,7 @@ export class InMemoryStore implements Store {
     let count = 0;
     for (let k = 0; k < hi - lo; k++) {
       const e = this._events[query?.backward ? hi - 1 - k : lo + k];
-      if (query && !this.in_query(query, e)) continue;
+      if (!this.in_query(query ?? {}, e)) continue;
       await Promise.resolve(
         callback(this._with_pii(e as Committed<E, keyof E>, with_pii))
       );
