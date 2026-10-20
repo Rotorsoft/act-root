@@ -8,6 +8,7 @@
  */
 
 import { dispose, store } from "@rotorsoft/act";
+import { Client } from "pg";
 import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
 
@@ -213,5 +214,44 @@ describe("PostgresStore seed-sync contract", () => {
       correlation: "c1",
       causation: { action: { name: "open", stream: "boot-1" } },
     } as never);
+  });
+
+  it("creates the schema on a connection that looked it up before it existed", async () => {
+    // One connection, so the lookup and the seed share a catalog cache.
+    const lone = new PostgresStore({
+      port: PORT,
+      schema: `${SCHEMA}_lone`,
+      table: TABLE,
+      max: 1,
+    });
+    const lone_pool = (lone as unknown as { _pool: any })._pool;
+    // Looking the schema up while it's missing leaves a stale cache entry.
+    await lone_pool.query(`DROP SCHEMA IF EXISTS "${SCHEMA}_lone" CASCADE`);
+    // Another worker takes the schema lock and creates the schema while
+    // this one waits on the lock.
+    const other = new Client({
+      host: "localhost",
+      port: PORT,
+      user: "postgres",
+      password: "postgres",
+      database: "postgres",
+    });
+    await other.connect();
+    try {
+      await other.query("BEGIN");
+      await other.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+        `${SCHEMA}_lone`,
+      ]);
+      await other.query(`CREATE SCHEMA "${SCHEMA}_lone"`);
+      const seeding = lone.seed();
+      await new Promise((r) => setTimeout(r, 100));
+      await other.query("COMMIT");
+      await expect(seeding).resolves.toBeUndefined();
+    } finally {
+      await other.end();
+      await lone.drop();
+      await lone_pool.query(`DROP SCHEMA IF EXISTS "${SCHEMA}_lone" CASCADE`);
+      await lone.dispose();
+    }
   });
 });

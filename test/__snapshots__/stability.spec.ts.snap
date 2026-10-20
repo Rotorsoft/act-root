@@ -22299,6 +22299,12 @@ export class PostgresStore implements Store {
         \`\${this.config.schema}.\${this.config.table}\`,
       ]);
 
+      // Waiting on an advisory lock processes no catalog invalidations, so a
+      // connection that looked the schema up before another worker created
+      // it would trust that stale entry and fail CREATE SCHEMA with 23505.
+      // Reading pg_namespace takes a relation lock, which refreshes it.
+      await client.query("SELECT 1 FROM pg_catalog.pg_namespace LIMIT 1");
+
       // Create schema
       await client.query(
         \`CREATE SCHEMA IF NOT EXISTS "\${this.config.schema}";\`
