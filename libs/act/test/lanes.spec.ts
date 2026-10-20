@@ -407,6 +407,24 @@ describe("lanes", () => {
     );
   });
 
+  it("rejects an empty static lane like any undeclared lane", () => {
+    // A lane name read from config widens the lane type to string, so
+    // `lane: ""` type-checks. No controller claims "", so its reaction
+    // would never run.
+    const name: string = "slow";
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name })
+        .on("Incremented")
+        .do(function never_runs() {
+          return Promise.resolve();
+        })
+        .to({ target: "anywhere", lane: "" })
+        .build()
+    ).toThrow(/undeclared lane ""/);
+  });
+
   it("type-checks dynamic resolvers' lane return against the slice's TLanes", () => {
     // Dynamic resolvers thread the same TLanes generic — the function's
     // return shape is `Resolved<TLanes> | undefined`, so an undeclared
