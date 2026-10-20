@@ -408,6 +408,8 @@ export class DrainController<
   TSchemaReg extends SchemaRegister<TActions>,
 > {
   private _armed = false;
+  /** Counts arms, so an empty claim that one landed during doesn't disarm over it. */
+  private _arms = 0;
   private _ratio = 0.5;
   /**
    * Local wake at the earliest parked (backoff or defer) visit, or at the
@@ -417,7 +419,7 @@ export class DrainController<
    * stays until handled or until a later pass claims nothing.
    */
   private readonly _defer = new DeferTimer(() => {
-    this._armed = true;
+    this.arm();
     void this._deps.run_scoped(async () => {
       while ((await this.drain()).leased.length > 0);
     });
@@ -437,6 +439,7 @@ export class DrainController<
 
   arm(): void {
     this._armed = true;
+    this._arms++;
   }
 
   /** Cold start: re-seed a persisted `deferred_at` into the local wake. */
@@ -514,6 +517,7 @@ export class DrainController<
       const leading = streamLimit - lagging;
 
       const started = Date.now();
+      const arms = this._arms;
       const cycle = await run_drain_cycle(this._deps, {
         lagging,
         leading,
@@ -527,7 +531,9 @@ export class DrainController<
         // Caught up: whatever was due when this pass started has no work.
         this._defer.prune(started);
         this._deps.breaker.passed();
-        this._armed = false;
+        // An arm that landed during the claim (an unblock, a reset) brought
+        // work this claim couldn't see: stay armed for the next pass.
+        if (this._arms === arms) this._armed = false;
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 

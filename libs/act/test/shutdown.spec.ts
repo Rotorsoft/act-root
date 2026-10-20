@@ -400,6 +400,66 @@ describe("shutdown waits for an in-flight settle cycle", () => {
     // The release has to be the last word, or the lease outlives teardown.
     expect(h.correlator_millis.at(-1)).toBe(0);
   });
+
+  /**
+   * The renewal at the top of a scan lands in the store, but its reply is
+   * held until `reply_at` ms. A successor asks for the lease once shutdown
+   * has resolved and the reply has landed.
+   */
+  const late_renewal = async (graceMs: number, reply_at: number) => {
+    const raw = new InMemoryStore();
+    const subscribe = raw.subscribe.bind(raw);
+    let held = false;
+    let down = false;
+    let key: string | undefined;
+    const leased_after: number[] = [];
+    let reply!: () => void;
+    const gate = new Promise<void>((r) => (reply = r));
+    raw.subscribe = (async (...args: Parameters<typeof raw.subscribe>) => {
+      const lease = args[2];
+      if (down && lease?.millis) leased_after.push(lease.millis);
+      const result = await subscribe(...args);
+      if (lease?.millis && args[0].length === 0 && !held) {
+        held = true;
+        key = lease.key;
+        await gate;
+      }
+      return result;
+    }) as typeof raw.subscribe;
+    store(raw);
+    const app = act()
+      .withState(Ticker)
+      .on("Ticked")
+      .do(async function handle() {})
+      .to((event) => ({ target: `t-${event.stream}` }))
+      .build();
+    await app.do("tick", { stream: "x1", actor }, {});
+    await vi.waitFor(() => expect(held).toBe(true));
+    setTimeout(reply, reply_at);
+    await app.shutdown({ graceMs });
+    down = true;
+    await pause(reply_at + 100);
+    const { correlating } = await subscribe([], undefined, {
+      key: key!,
+      by: "successor",
+      millis: 1_000,
+    });
+    return { leased_after, successor: correlating };
+  };
+
+  it("a renewal reply landing after shutdown leaves the lease handed back", async () => {
+    expect(await late_renewal(20, 60)).toEqual({
+      leased_after: [],
+      successor: true,
+    });
+  });
+
+  it("control — a renewal reply landing within the grace", async () => {
+    expect(await late_renewal(400, 60)).toEqual({
+      leased_after: [],
+      successor: true,
+    });
+  });
 });
 
 describe("a notification during shutdown cannot arm a new cycle", () => {

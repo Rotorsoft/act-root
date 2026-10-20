@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   act,
   dispose,
+  InMemoryStore,
   NonRetryableError,
   state,
   store,
@@ -9,7 +10,7 @@ import {
 } from "../src/index.js";
 import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 import { SettleLoop } from "../src/internal/settle.js";
-import type { Drain, Schemas } from "../src/types/index.js";
+import type { Committed, Drain, Query, Schemas } from "../src/types/index.js";
 
 /**
  * SettleLoop.schedule must not drop a wake-up requested while a cycle is
@@ -711,5 +712,132 @@ describe("a local change settles its own reactions", () => {
     await app.do("note", { stream: "p3", actor }, {});
     await new Promise((r) => setTimeout(r, 50));
     expect(settled).not.toHaveBeenCalled();
+  });
+});
+
+describe("a wake that lands during an empty scan or claim is kept", () => {
+  /** Holds the next empty `claim` or full-log `query` until the test lets it go. */
+  class PausingStore extends InMemoryStore {
+    hold: "claim" | "query" | undefined;
+    held?: () => void;
+    go?: () => void;
+    private async _hold() {
+      this.hold = undefined;
+      const gate = new Promise<void>((r) => (this.go = r));
+      this.held?.();
+      await gate;
+    }
+    override async claim(...args: Parameters<InMemoryStore["claim"]>) {
+      const leases = await super.claim(...args);
+      if (this.hold === "claim" && leases.length === 0) await this._hold();
+      return leases;
+    }
+    override async query<E extends Schemas>(
+      callback: (event: Committed<E, keyof E>) => void,
+      query?: Query
+    ) {
+      const n = await super.query(callback, query);
+      if (this.hold === "query" && n === 0 && !query?.stream)
+        await this._hold();
+      return n;
+    }
+  }
+  const Tick = state({ Tick: z.object({ n: z.number() }) })
+    .init(() => ({ n: 0 }))
+    .emits({ Ticked: ZodEmpty })
+    .patch({ Ticked: (_, s) => ({ n: s.n + 1 }) })
+    .on({ tick: ZodEmpty })
+    .emit(() => ["Ticked", {}])
+    .build();
+  const actor = { id: "a", name: "a" };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
+  const unblocked = async (during_claim: boolean) => {
+    const s = new PausingStore();
+    store(s);
+    let fail = true;
+    const ran: number[] = [];
+    const app = act()
+      .withState(Tick)
+      .on("Ticked")
+      .do(async function react(event) {
+        if (fail) throw new NonRetryableError("poison");
+        ran.push(event.id);
+      })
+      .to("target")
+      .build();
+    const blocked = new Promise<void>((r) => app.on("blocked", () => r()));
+    await app.do("tick", { stream: "c", actor }, {});
+    await blocked;
+    await pause(50);
+    fail = false;
+    if (during_claim) {
+      s.hold = "claim";
+      const held = new Promise<void>((r) => (s.held = r));
+      // The blocked target's claim comes back empty and is held in flight.
+      await app.do("tick", { stream: "c", actor }, {});
+      await held;
+      expect(await app.unblock(["target"])).toBe(1);
+      s.go!();
+    } else {
+      await app.do("tick", { stream: "c", actor }, {});
+      await pause(100);
+      expect(await app.unblock(["target"])).toBe(1);
+    }
+    return ran;
+  };
+
+  it("drains a stream unblocked while an empty claim is in flight", async () => {
+    const ran = await unblocked(true);
+    await vi.waitFor(() => expect(ran).toHaveLength(2));
+  });
+
+  it("control — drains a stream unblocked after the pass", async () => {
+    const ran = await unblocked(false);
+    await vi.waitFor(() => expect(ran).toHaveLength(2));
+  });
+
+  const committed = async (during_scan: boolean) => {
+    const s = new PausingStore();
+    store(s);
+    const ran: number[] = [];
+    const app = act()
+      .withState(Tick)
+      .on("Ticked")
+      .do(async function react(event) {
+        ran.push(event.id);
+      })
+      .to("target")
+      .build();
+    await app.do("tick", { stream: "c", actor }, {});
+    await vi.waitFor(() => expect(ran).toHaveLength(1));
+    await pause(50);
+    if (during_scan) {
+      s.hold = "query";
+      const held = new Promise<void>((r) => (s.held = r));
+      await app.do("tick", { stream: "c", actor }, {});
+      // The pass's confirming scan comes back empty and is held in flight.
+      await held;
+      await app.do("tick", { stream: "c", actor }, {});
+      s.go!();
+    } else {
+      await app.do("tick", { stream: "c", actor }, {});
+      await app.do("tick", { stream: "c", actor }, {});
+    }
+    return ran;
+  };
+
+  it("reacts to a commit that lands while an empty scan is in flight", async () => {
+    const ran = await committed(true);
+    await vi.waitFor(() => expect(ran).toHaveLength(3));
+  });
+
+  it("control — reacts to commits that land between passes", async () => {
+    const ran = await committed(false);
+    await vi.waitFor(() => expect(ran).toHaveLength(3));
   });
 });
