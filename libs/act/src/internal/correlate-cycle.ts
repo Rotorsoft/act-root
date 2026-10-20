@@ -166,8 +166,14 @@ export class CorrelateCycle<
   private readonly _key: string;
   /** Local expiry of the held lease (0 = none); stale only costs a duplicate scan. */
   private _lease_until = 0;
-  /** Raised by a commit or notification, lowered by a short page. Starts armed. */
-  private _armed = true;
+  /**
+   * Armed while `_raised` (bumped by a commit or notification) is ahead of
+   * `_lowered` (the raise count the last short page saw). Starts armed.
+   */
+  private _raised = 1;
+  private _lowered = 0;
+  /** Counts releases, so a lease reply that lands after one is dropped. */
+  private _releases = 0;
   private _init_promise: Promise<void> | undefined;
   // Bounded by `maxSubscribedStreams`; static records live apart so eviction
   // never drops their +Infinity floor.
@@ -208,7 +214,7 @@ export class CorrelateCycle<
 
   /** A commit (local or remote) may have produced uncorrelated events. */
   arm(): void {
-    this._armed = true;
+    this._raised++;
   }
 
   async init(): Promise<void> {
@@ -250,7 +256,7 @@ export class CorrelateCycle<
     this._checkpoint = -1;
     this._dynamic_subscriptions.clear();
     this._static_subscriptions.clear();
-    this._armed = true;
+    this._raised++;
   }
 
   /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
@@ -290,7 +296,7 @@ export class CorrelateCycle<
     await this.init();
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
-    if (!this._armed)
+    if (this._raised === this._lowered)
       return {
         subscribed: 0,
         last_id: this._checkpoint,
@@ -298,19 +304,26 @@ export class CorrelateCycle<
         scanned: false,
       };
 
+    const raised = this._raised;
+
     // The lease rides `subscribe` with no streams ("may I scan?"). Its shared
     // checkpoint is ignored: adopting it would skip events this worker never
     // read. Renew at the halfway mark.
     const now = Date.now();
     if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
+      const releases = this._releases;
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
         millis: CORRELATION_LEASE_MS,
       });
-      this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
+      // A release that landed while the call was out (shutdown) stays
+      // released: the reply must not hand the lease back to this worker.
+      const released = this._releases !== releases;
+      if (!released)
+        this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // `undefined` = store without leasing. Refused: stay armed, look again.
-      if (correlating === false)
+      if (correlating === false || released)
         return {
           subscribed: 0,
           last_id: this._checkpoint,
@@ -457,9 +470,11 @@ export class CorrelateCycle<
       }
       return { subscribed, last_id, marked, scanned: true };
     }
-    // Only a short page proves the log is exhausted; resolving nothing does not.
+    // Only a short page proves the log is exhausted; resolving nothing does
+    // not. It lowers only the raises it saw, so one that landed mid-scan
+    // keeps the cycle armed.
     this._checkpoint = last_id;
-    this._armed = stopped || found === query.limit;
+    if (!stopped && found !== query.limit) this._lowered = raised;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 
@@ -507,6 +522,7 @@ export class CorrelateCycle<
   async release_correlation(): Promise<void> {
     try {
       this._lease_until = 0;
+      this._releases++;
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,

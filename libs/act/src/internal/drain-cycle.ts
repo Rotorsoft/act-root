@@ -407,7 +407,13 @@ export class DrainController<
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,
 > {
-  private _armed = false;
+  /**
+   * Armed while `_raised` is ahead of `_lowered` (the raise count the last
+   * empty claim saw), so a claim never lowers over a raise that landed
+   * during it.
+   */
+  private _raised = 0;
+  private _lowered = 0;
   private _ratio = 0.5;
   /**
    * Local wake at the earliest parked (backoff or defer) visit, or at the
@@ -417,7 +423,7 @@ export class DrainController<
    * stays until handled or until a later pass claims nothing.
    */
   private readonly _defer = new DeferTimer(() => {
-    this._armed = true;
+    this.arm();
     void this._deps.run_scoped(async () => {
       while ((await this.drain()).leased.length > 0);
     });
@@ -436,7 +442,7 @@ export class DrainController<
   }
 
   arm(): void {
-    this._armed = true;
+    this._raised++;
   }
 
   /** Cold start: re-seed a persisted `deferred_at` into the local wake. */
@@ -446,7 +452,7 @@ export class DrainController<
   }
 
   get armed(): boolean {
-    return this._armed;
+    return this._raised !== this._lowered;
   }
 
   get inflight(): Promise<void> | undefined {
@@ -468,7 +474,7 @@ export class DrainController<
     // `drain()` never throws.
     const run = this._deps.run_scoped;
     const tick = async () => {
-      if (this._armed) await run(() => this.drain());
+      if (this.armed) await run(() => this.drain());
       if (this._stopped) return;
       this._worker = setTimeout(tick, cycleMs);
       this._worker.unref();
@@ -490,7 +496,7 @@ export class DrainController<
     // A stopped controller claims nothing, so a pass shutdown's grace
     // outlived can't start work after teardown.
     // One pass at a time: a call while one runs claims nothing.
-    if (!this._armed || this._stopped || this._inflight)
+    if (!this.armed || this._stopped || this._inflight)
       return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
@@ -514,6 +520,7 @@ export class DrainController<
       const leading = streamLimit - lagging;
 
       const started = Date.now();
+      const raised = this._raised;
       const cycle = await run_drain_cycle(this._deps, {
         lagging,
         leading,
@@ -527,7 +534,9 @@ export class DrainController<
         // Caught up: whatever was due when this pass started has no work.
         this._defer.prune(started);
         this._deps.breaker.passed();
-        this._armed = false;
+        // Lowers only the raises it saw: one that landed during the claim
+        // (an unblock, a reset) brought work this claim couldn't see.
+        this._lowered = raised;
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
