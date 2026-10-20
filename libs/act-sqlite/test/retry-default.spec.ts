@@ -1,8 +1,7 @@
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { createClient } from "@libsql/client";
 import { afterAll } from "vitest";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 /**
  * ACT-980: the retry-seed fix must take effect on databases created before
@@ -12,12 +11,12 @@ import { SqliteStore } from "../src/index.js";
  * default 0) still gives new subscriptions retry = -1, so their first claim
  * returns retry = 0.
  */
-const DB_PATH = join(import.meta.dirname, "retry-default.db");
+const DB_URL = tmp_db_url();
 
 describe("sqlite retry seed is migration-free", () => {
   it("subscribe seeds retry=-1 even when the column default is 0", async () => {
-    const s = new SqliteStore({ url: `file:${DB_PATH}` });
-    const raw = createClient({ url: `file:${DB_PATH}` });
+    const s = new SqliteStore({ url: DB_URL });
+    const raw = createClient({ url: DB_URL });
     try {
       await s.drop();
       await s.seed();
@@ -49,12 +48,4 @@ describe("sqlite retry seed is migration-free", () => {
   });
 });
 
-afterAll(() => {
-  for (const ext of ["", "-wal", "-shm"]) {
-    try {
-      unlinkSync(DB_PATH + ext);
-    } catch {
-      // file may not exist
-    }
-  }
-});
+afterAll(rm_tmp_dbs);

@@ -1,16 +1,15 @@
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { runStoreTck } from "@rotorsoft/act-tck";
 import { afterAll } from "vitest";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 // Co-locate the SQLite scratch file with the test that owns it so
 // the WAL/SHM sidecars don't leak into the repo root.
-const DB_PATH = join(import.meta.dirname, "tck-store.db");
+const DB_URL = tmp_db_url();
 
 runStoreTck({
   name: "SqliteStore",
-  factory: () => new SqliteStore({ url: `file:${DB_PATH}` }),
+  factory: () => new SqliteStore({ url: DB_URL }),
   // There is no zero-config SqliteStore: a store has to be told where to
   // write, and every in-memory default libSQL can serve is either broken
   // or process-global (#1443). The TCK asserts the refusal is loud.
@@ -24,14 +23,6 @@ runStoreTck({
   },
 });
 
-// The TCK's own `afterAll` only calls `store.dispose()`; the file +
-// WAL/SHM sidecars are the spec file's responsibility to remove.
-afterAll(() => {
-  for (const ext of ["", "-wal", "-shm"]) {
-    try {
-      unlinkSync(DB_PATH + ext);
-    } catch {
-      // file may not exist
-    }
-  }
-});
+// The TCK's own `afterAll` only calls `store.dispose()`; the database
+// files are the spec file's responsibility to remove.
+afterAll(rm_tmp_dbs);

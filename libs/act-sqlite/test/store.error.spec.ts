@@ -1,7 +1,8 @@
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { ConcurrencyError, StoreError, ValidationError } from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
+import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
+
+afterAll(rm_tmp_dbs);
 
 type Stmt = string | { sql: string; args?: unknown[] };
 
@@ -177,8 +178,7 @@ describe("SqliteStore error paths", () => {
     // UNIQUE(stream, version) index — the race PG maps via 23505. The
     // driver raises SQLITE_CONSTRAINT_UNIQUE; the adapter must surface
     // ConcurrencyError, not the raw libsql error.
-    const DB_PATH = join(import.meta.dirname, `collide-${Date.now()}.db`);
-    const real = new SqliteStore({ url: `file:${DB_PATH}` });
+    const real = new SqliteStore({ url: tmp_db_url() });
     await real.seed();
     await real.commit("collide", [{ name: "E", data: {} }], {
       correlation: "",
@@ -215,13 +215,6 @@ describe("SqliteStore error paths", () => {
       .catch((e) => e);
     expect(err).toBeInstanceOf(ConcurrencyError);
     await real.dispose();
-    for (const ext of ["", "-wal", "-shm"]) {
-      try {
-        unlinkSync(DB_PATH + ext);
-      } catch {
-        // file may not exist
-      }
-    }
   });
 
   it("commit: throws ConcurrencyError when expectedVersion mismatches", async () => {
