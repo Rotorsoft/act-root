@@ -111,6 +111,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .legend i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .legend svg { width: 14px; height: 14px; flex: none; }
 .legend .mono { font-family: var(--f-mono); width: 14px; text-align: center; flex: none; }
+.legend i.bx { background: transparent; border: 1.5px dashed var(--k); }
 .ico { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .detail h3 { font: 600 17px var(--f-display); margin: 0 0 2px; overflow-wrap: anywhere; }
 .detail .kind { font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; }
@@ -166,6 +167,18 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .tick { fill: var(--k); }
 .tick.on { animation: tickon .8s ease-out; }
 @keyframes tickon { 0% { r: 7; } 100% { r: 3.2; } }
+/* boundaries the builders declare: one box per state, one per slice */
+.band rect.frame { fill: color-mix(in srgb, var(--k) 4%, transparent); stroke: color-mix(in srgb, var(--k) 50%, transparent); stroke-width: 1.2; stroke-dasharray: 6 4; transition: fill .3s, stroke .3s, stroke-width .3s; }
+.band.on rect.frame { fill: color-mix(in srgb, var(--k) 10%, transparent); stroke: var(--k); stroke-width: 1.8; stroke-dasharray: none; }
+.band.sel rect.frame { stroke: var(--k); stroke-width: 2.2; }
+.band text { font: 600 10.5px var(--f-mono); fill: var(--k); cursor: pointer; }
+.band text tspan.bk { font-weight: 400; fill: var(--muted); }
+.band .pulse { fill: none; stroke: var(--k); opacity: 0; }
+.band.ping .pulse { animation: ping .9s ease-out; }
+.dim .band { opacity: .5; }
+.eg.cross .edge { stroke-width: 1.9; }
+.ring { fill: none; stroke: var(--k); stroke-width: 2.5; animation: ring .9s ease-out forwards; }
+@keyframes ring { 0% { r: 4; opacity: 1; } 100% { r: 22; opacity: 0; } }
 
 /* modes: #record hides interactive chrome, #embed trims for an iframe */
 .record .ctl, .record .win, .embed .brand, .embed .ctl .opt { display: none !important; }
@@ -189,7 +202,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   .panel .pb { max-height: 50vh; }
   .win { position: fixed; }
 }
-@media (prefers-reduced-motion: reduce) { .node.ping .pulse, .timer .hand, .log li.new, .tick.on, .verdict, .state .chg, .recording .rec-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .node.ping .pulse, .band.ping .pulse, .ring, .timer .hand, .log li.new, .tick.on, .verdict, .state .chg, .recording .rec-dot { animation: none; } }
 </style>
 
 <div class="app" id="app">
@@ -297,7 +310,10 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (parent) parent.appendChild(x);
     return x;
   };
-  let nodes, edges, lanes, stateBar, stateBars = [], gFx, stretch = 0, wide = false;
+  let nodes, edges, lanes, stateBar, stateBars = [], bands = [], gFx, stretch = 0, wide = false;
+  const byId = id => nodes.get(id) || bands.find(b => b.id === id);
+  // the boundary a node sits in: actions and events in their state's box, reactions in their slice's box
+  const bandOf = n => n && bands.find(b => b.members.has(n.id));
   // the embedded overview (landing page) fits the whole map on a wide screen
   const minScale = () => (EMBED && !matchMedia("(max-width: 900px)").matches ? 0 : 0.75);
 
@@ -373,7 +389,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const l = laneOf(n.lane);
       const [w, h] = NODE[kindOf(n)] || NODE.action;
       n.h = h;
-      n.cy = l.id === "reaction" ? l.y + Math.max(18 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2;
+      n.cy = l.id === "reaction" ? l.y + Math.max(24 + h / 2, (l.h - busSpace) / 2 + 4) : l.y + l.h / 2;
       if (isBar(n)) {
         const fed = kindOf(n) === "projection" ? edges.filter(e => e.b === n).map(e => e.a.col) : actionCols;
         const span = n.span || [Math.min(...fed), Math.max(...fed)];
@@ -384,6 +400,25 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     }
     stateBars = [...nodes.values()].filter(n => kindOf(n) === "state");
     stateBar = stateBars[0];
+
+    // boundaries: a slice box covers the actions, events and reactions the slice owns, top to bottom;
+    // without slices, a state box covers its merged bar and the actions and events it loads
+    bands = [];
+    const la = laneOf("action"), le = laneOf("event"), lr = laneOf("reaction");
+    if (spec.slices?.length && la) {
+      const foot = lr ? lr.y + lr.h - busSpace - 2 : lanes.filter(l => l.id !== "external").at(-1).y + lanes.filter(l => l.id !== "external").at(-1).h - 4;
+      for (const sl of spec.slices) {
+        const ms = [...nodes.values()].filter(n => n.slice === sl.id);
+        if (!ms.length) continue;
+        const cs = ms.map(n => n.col);
+        bands.push({ id: "band:" + sl.id, kind: "slice", label: sl.label, k: "var(--ink)", ref: sl, members: new Set(ms.map(n => n.id)),
+          x0: X(Math.min(...cs)) - COL_W / 2 + 6, x1: X(Math.max(...cs)) + COL_W / 2 - 6, y0: la.y + 4, y1: foot });
+      }
+    } else if (la && le) for (const s of stateBars) {
+      const members = new Set([s.id, ...[...nodes.values()].filter(n => ["action", "event"].includes(kindOf(n)) && barAt(n.cx) === s).map(n => n.id)]);
+      bands.push({ id: "band:" + s.id, kind: "state", label: s.label, k: "var(--state)", ref: s, members,
+        x0: s.x0 - 4, x1: s.x1 + 4, y0: la.y + 4, y1: le.y + le.h - 4 });
+    }
 
     const inCount = {};
     function route(e, busIndex) {
@@ -406,7 +441,7 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     }
 
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    const gLanes = el("g", {}, svg), gEdges = el("g", {}, svg), gNodes = el("g", {}, svg);
+    const gLanes = el("g", {}, svg), gBands = el("g", {}, svg), gEdges = el("g", {}, svg), gNodes = el("g", {}, svg);
     gFx = el("g", {}, svg);
     lanes.forEach((l, i) => {
       if (i % 2 === 0) el("rect", { x: 0, y: l.y, width: W, height: l.h, class: "lane-bg" }, gLanes);
@@ -414,11 +449,23 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       const t = el("text", { x: 16, y: l.y + 22, class: "lane-label" }, gLanes); t.textContent = l.label;
       if (l.sub) { const s = el("text", { x: 16, y: l.y + 38, class: "lane-sub" }, gLanes); s.textContent = l.sub; }
     });
+    for (const b of bands) {
+      const g = el("g", { class: "band " + b.kind, style: `--k:${b.k}` }, gBands);
+      b.g = g;
+      el("rect", { x: b.x0 - 3, y: b.y0 - 3, width: b.x1 - b.x0 + 6, height: b.y1 - b.y0 + 6, rx: 13, class: "pulse" }, g);
+      el("rect", { x: b.x0, y: b.y0, width: b.x1 - b.x0, height: b.y1 - b.y0, rx: 10, class: "frame" }, g);
+      const t = el("text", { x: b.x0 + 8, y: b.y0 + 12.5, tabindex: 0, role: "button", "aria-label": `${b.kind} ${b.label}` }, g);
+      t.innerHTML = `${esc(b.label)}<tspan class="bk"> · ${b.kind}</tspan>`;
+      t.addEventListener("click", () => select(selected?.id === b.id ? null : b));
+      t.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); select(b); } });
+    }
 
     let bus = 0;
     for (const e of edges) {
       const pts = route(e, kindOf(e.a) === "reaction" && kindOf(e.b) === "action" ? bus++ : 0);
-      const g = el("g", { class: "eg", style: `--k:${color(e.b)}` }, gEdges);
+      const ba = bandOf(e.a), bb = bandOf(e.b);
+      e.cross = ba && bb && ba !== bb ? [ba, bb] : null;
+      const g = el("g", { class: "eg" + (e.cross ? " cross" : ""), style: `--k:${color(e.b)}` }, gEdges);
       e.g = g;
       e.path = el("path", { d: rounded(pts), class: "edge" + (kindOf(e.b) === "projection" || e.dashed ? " dash" : "") }, g);
       if (kindOf(e.b) !== "projection") {
@@ -484,13 +531,13 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         if (inv) el("title", {}, b).textContent = "Checked by the state before it commits:\n" + n.invariants.join("\n");
       }
     }
-    if (selected) { selected = nodes.get(selected.id); selected?.g.classList.add("sel"); }
+    if (selected) { selected = byId(selected.id); selected?.g.classList.add("sel"); }
   }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   let selected = null, playing = false;
   drawMap();
 
   /* ---------- static text ---------- */
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   $("title").textContent = spec.title;
   $("subtitle").textContent = spec.subtitle || "";
   $("subtitle").title = spec.subtitle || "";
@@ -498,11 +545,16 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
-    `<div><span class="mono">◆</span>Checks (invariants)</div><div><span class="mono">⏱</span>Timer (deferred)</div>`;
+    `<div><span class="mono">◆</span>Checks (invariants)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
+    (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
+    (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
     <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the invariants (the ◆ count on an action) and either refuses the action or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
+    ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
+      ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
+      : `A <b style="color:var(--state)">state</b> box holds the actions and events of one state, with partial states of the same name merged into it.`} The boxes on the current step light up, and a token rings where it crosses from one box into another.</p>` : ""}
     <p>Select a box for its contract and source. Keys: space plays or pauses, arrows step.</p>
     <p>Coming from event storming? Actions are its commands, reactions its policies, and projections build its read models.</p>`;
 
@@ -567,12 +619,29 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
       ${outs.length ? `<p class="rel">To: ${outs.map(e => link(e.b)).join(", ")}</p>` : ""}`;
-    $("detail").querySelectorAll("button[data-id]").forEach(b => b.onclick = () => select(nodes.get(b.dataset.id)));
+    $("detail").querySelectorAll("button[data-id]").forEach(b => b.onclick = () => select(byId(b.dataset.id)));
+  }
+  function showBand(b) {
+    const link = x => `<button data-id="${esc(x.id)}">${esc(x.label)}</button>`;
+    const members = [...b.members].map(id => nodes.get(id)).filter(n => n && !isBar(n));
+    const r = b.ref;
+    const owns = r.owns || [], refs = (r.registers || []).filter(s => !owns.includes(s));
+    const inside = b.kind === "state"
+      ? `${r.note ? `<p class="rel">Merges: ${esc(r.note)}</p>` : ""}`
+      : `${owns.length ? `<p class="rel">Owns: ${owns.map(esc).join(", ")}</p>` : ""}${refs.length ? `<p class="rel">References: ${refs.map(esc).join(", ")}</p>` : ""}`;
+    $("detail").innerHTML = `
+      <div class="kind" style="color:${b.k}">${b.kind === "state" ? "State boundary" : "Slice boundary"}</div>
+      <h3>${esc(b.label)}</h3>
+      ${r.file ? `<div class="file">${esc(r.file)}${r.line ? ":" + r.line : ""}</div>` : ""}
+      ${inside}
+      ${r.description ? `<p>${esc(r.description)}</p>` : ""}
+      ${members.length ? `<p class="rel">Inside: ${members.map(link).join(", ")}</p>` : ""}`;
+    $("detail").querySelectorAll("button[data-id]").forEach(x => x.onclick = () => select(byId(x.dataset.id)));
   }
   function select(n) {
     if (selected) selected.g.classList.remove("sel");
     selected = n;
-    if (n) { n.g.classList.add("sel"); showNode(n); nodeWin.hidden = false; } else nodeWin.hidden = true;
+    if (n) { n.g.classList.add("sel"); n.members ? showBand(n) : showNode(n); nodeWin.hidden = false; } else nodeWin.hidden = true;
   }
   function hover(n) {
     if (!n) { svg.classList.remove("dim"); document.querySelectorAll(".hl").forEach(x => x.classList.remove("hl")); return; }
@@ -674,9 +743,15 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (x < sc.scrollLeft + sc.clientWidth * 0.2 || x > sc.scrollLeft + sc.clientWidth * 0.8)
       sc.scrollTo({ left: x - sc.clientWidth / 2, behavior: reduce ? "auto" : "smooth" });
   }
+  // the boxes the step touches light up; the rest stay dashed
+  function lightBands(st) {
+    const ids = st ? [st.at, st.from, st.to].filter(Boolean) : [];
+    for (const b of bands) b.g.classList.toggle("on", ids.some(id => b.members.has(id)));
+  }
   function setNarr(k) {
     const sc = scenarios[cur], st = sc.steps[k - 1];
     follow(st);
+    lightBands(st);
     $("count").textContent = `${String(k).padStart(2, "0")} / ${String(sc.steps.length).padStart(2, "0")}`;
     $("say").innerHTML = k === 0 ? `<b>${esc(sc.title)}.</b> ${md(sc.summary || "Press Play to walk the flow.")}` : md(st.say || "");
     $("prog").style.width = `${(k / sc.steps.length) * 100}%`;
@@ -685,8 +760,23 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     if (st.blocked) return setChip("⛔ target blocked", "var(--bad)");
     if (st.wait) return setChip("⏱ " + st.wait, "var(--reaction)");
     if (st.at) return setChip(st.noop ? "wakes · no-op" : nodes.get(st.at).label, color(nodes.get(st.at)));
-    const n = nodes.get(st.to);
+    const n = nodes.get(st.to), cross = findEdge(st.from, st.to)?.cross;
+    if (cross) return setChip(`${cross[0].label} → ${cross[1].label}`, cross[1].k);
     setChip((KINDS[kindOf(n)]?.tag || "") + " · " + n.label, color(n));
+  }
+  // how far along an edge the token enters the box it is heading into
+  function entryFraction(e, b) {
+    const len = e.path.getTotalLength(), N = 120;
+    const inside = p => p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1;
+    if (inside(e.path.getPointAtLength(0))) return null;
+    for (let i = 1; i <= N; i++) if (inside(e.path.getPointAtLength(len * i / N))) return i / N;
+    return null;
+  }
+  function ring(e, f, b) {
+    const p = e.path.getPointAtLength(e.path.getTotalLength() * f);
+    const r = el("circle", { cx: p.x, cy: p.y, r: 4, class: "ring", style: `--k:${b.k}` }, gFx);
+    setTimeout(() => r.remove(), 1000);
+    b.g.classList.remove("ping"); void b.g.getBBox(); b.g.classList.add("ping");
   }
   function paint(k) {
     edges.forEach(e => e.g.classList.remove("trail", "live"));
@@ -821,6 +911,15 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       }
       if (!(await travel(e, token, 0, 1))) return false;
       setChip(`attempt ${n + 1} succeeded`, "var(--good)");
+    } else if (e.cross) {
+      // the token rings where it crosses into the next box
+      const f = entryFraction(e, e.cross[1]);
+      if (f === null) { if (!(await travel(e, token))) return false; }
+      else {
+        if (!(await travel(e, token, 0, f))) return false;
+        ring(e, f, e.cross[1]);
+        if (!(await travel(e, token, f, 1))) return false;
+      }
     } else if (!(await travel(e, token))) return false;
 
     e.g.classList.remove("live"); e.g.classList.add("trail");

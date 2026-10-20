@@ -34,6 +34,31 @@ export function validate(spec) {
     ids.add(n.id);
     if (!LANES.includes(n.lane)) problems.push(`node ${n.id} has unknown lane ${n.lane}`);
   }
+  // slices come from slice() builders: each owns the actions and events of the partial states it
+  // declares, and the reactions it declares
+  const OWNED = ["action", "event", "reaction"];
+  const slice_ids = new Set();
+  for (const sl of spec.slices ?? []) {
+    if (slice_ids.has(sl.id)) problems.push(`duplicate slice id ${sl.id}`);
+    slice_ids.add(sl.id);
+  }
+  const ranges = new Map();
+  for (const n of spec.nodes ?? []) {
+    if (n.slice === undefined) continue;
+    if (!OWNED.includes(n.lane)) problems.push(`node ${n.id} is in the ${n.lane} lane and can't belong to slice ${n.slice}`);
+    else if (!slice_ids.has(n.slice)) problems.push(`node ${n.id} claims unknown slice ${n.slice}`);
+    else if (typeof n.col !== "number") problems.push(`node ${n.id} is in slice ${n.slice} but has no col`);
+    else {
+      const r = ranges.get(n.slice) ?? [n.col, n.col];
+      ranges.set(n.slice, [Math.min(r[0], n.col), Math.max(r[1], n.col)]);
+    }
+  }
+  // a slice's box spans its columns: nothing owned by another slice, or by none, may sit inside it
+  for (const [id, [lo, hi]] of ranges)
+    for (const n of spec.nodes ?? [])
+      if (OWNED.includes(n.lane) && n.slice !== id && typeof n.col === "number" && n.col >= lo && n.col <= hi)
+        problems.push(`node ${n.id} sits inside slice ${id}'s columns`);
+
   const edge_keys = new Set();
   for (const e of spec.edges ?? []) {
     if (!ids.has(e.from)) problems.push(`edge from unknown node ${e.from}`);
