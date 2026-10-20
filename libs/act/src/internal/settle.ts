@@ -3,7 +3,7 @@
  * and drain: schedule() coalesces rapid callers into a single cycle, then
  * runs correlate+drain in a loop until a pass produces no progress.
  *
- * Owns the debounce timer and the reentrancy flag. Everything else is
+ * Owns the debounce timer and the cycle in flight. Everything else is
  * supplied via the `SettleDeps` callbacks so this module stays free of
  * orchestrator state.
  */
