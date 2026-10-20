@@ -738,7 +738,7 @@ export const S = state({ S: z.object({}) })
     expect(model).toBeDefined();
   });
 
-  // #1391 — the comment pass used to run before the string passes, so a
+  // The comment pass used to run before the string passes, so a
   // `//` inside a URL truncated the literal; the dangling quote then
   // paired with the next quote in the file and blanked every line
   // between. On wolfdesk that erased a whole slice declaration, and

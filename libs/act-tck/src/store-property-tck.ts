@@ -9,7 +9,7 @@ import { mark_all } from "./fixtures/mark-all.js";
  * Property-based contract for the store-level invariants the drain pipeline
  * depends on — commit version monotonicity, claim/lease no-leak, watermark
  * monotonicity, and block exclusion. These ran only against `InMemoryStore`
- * before ACT-982; running them against the durable adapters too is the only
+ * at first; running them against the durable adapters too is the only
  * way to catch a divergence the example-based TCK cases miss.
  *
  * Each predicate resets the store (`drop` + `seed`) so randomized runs are

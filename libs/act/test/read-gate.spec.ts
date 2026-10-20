@@ -25,7 +25,7 @@ const userRegisteredSchema = z.object({
 });
 
 // Owner-or-admin policy — typical real-world shape. The reducer copies
-// both sensitive event fields into state so the load-path mask (#861)
+// both sensitive event fields into state so the load-path mask
 // exercises its multi-match path.
 const User = state({ User: userSchema })
   .init(() => ({}))
@@ -234,7 +234,7 @@ describe("read-path PII gate", () => {
   });
 
   // --- Reducer sees plaintext (deterministic state evolution), but the
-  //     load-path actor mask (#861) substitutes REDACTED for state fields
+  //     load-path actor mask substitutes REDACTED for state fields
   //     whose names match a sensitive event field when the caller isn't
   //     authorized. Best-effort name-match — see `pii_mask_state`.
 
@@ -336,7 +336,7 @@ describe("read-path PII gate", () => {
 
 // --- query / query_array carry no actor → default-deny, mirroring a
 //     bare-string load. The store returns the raw pii column; the gate
-//     lives in the orchestrator (#1277). ---
+//     lives in the orchestrator. ---
 
 describe("query / query_array default-deny PII gate", () => {
   afterEach(async () => {

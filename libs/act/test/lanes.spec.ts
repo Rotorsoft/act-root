@@ -92,7 +92,7 @@ describe("lanes", () => {
     });
   });
 
-  // #1325 — a stream drains on exactly one lane, so lane must agree across
+  // A stream drains on exactly one lane, so lane must agree across
   // EVERY reaction to a target regardless of source. The guard used to key
   // on (target, source), so two static reactions to one target from
   // different sources with different lanes escaped it and the store silently
@@ -137,7 +137,7 @@ describe("lanes", () => {
     expect(app.lanes.map((l) => l.name)).toContain("fast");
   });
 
-  // #1583 — an omitted `lane` and an explicit `"default"` denote the SAME
+  // An omitted `lane` and an explicit `"default"` denote the SAME
   // lane. The agreement guard used to store and compare the raw value, so
   // `undefined` and `"default"` read as a disagreement and the build threw
   // the self-refuting `("default" vs "default")`. Both sides now normalize
@@ -954,7 +954,7 @@ describe("lanes", () => {
     expect(result.acked.length).toBeGreaterThanOrEqual(1);
   });
 
-  // #1545 — the single-lane collapse (`lane: undefined` on the controller,
+  // The single-lane collapse (`lane: undefined` on the controller,
   // so `claim` applies NO lane filter) used to key on the ACTIVE lane set.
   // A worker deployed with `onlyLanes: ["default"]` against an app that
   // declares lanes produced active === ["default"], dropped the filter, and
@@ -1026,7 +1026,7 @@ describe("lanes", () => {
     });
 
     it("a lane's streams are only claimed by the controller carrying its lease budget", async () => {
-      // The aggravating half of #1545: `defaults` is looked up by lane
+      // `defaults` is looked up by lane
       // name and "default" can never carry a LaneConfig (declaring it is
       // rejected as reserved), so the default-lane controller runs on the
       // fallback budget. When it also claimed the slow lane's streams, a

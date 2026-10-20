@@ -12,7 +12,7 @@ import {
 import { run_close_cycle } from "../src/internal/close-cycle.js";
 
 /**
- * Windowed close (#1011): `app.close([{ stream, before }])` prunes the
+ * Windowed close: `app.close([{ stream, before }])` prunes the
  * prefix below the closest safe `__snapshot__` instead of retiring the
  * stream — no tombstone guard, no seed, cache untouched, stream stays
  * live. These exercise the orchestrator branch; the store-level
@@ -281,7 +281,7 @@ describe("windowed close", () => {
   });
 
   it("fires the archive callback at most once when two windowed closes race the same stream", async () => {
-    // Ticket #1222: a manual `app.close([{stream, before}])` racing an
+    // A manual `app.close([{stream, before}])` racing an
     // `.autocloses` windowed close for the same stream both take the
     // guard-free windowed branch, so the archive callback (double S3
     // upload / double JSONL append) fires TWICE for the overlapping
@@ -305,7 +305,7 @@ describe("windowed close", () => {
     expect(archived).toBe(1);
   });
 
-  // #1520 — the prune cap asks each consumer "how far is it safe to prune?",
+  // The prune cap asks each consumer "how far is it safe to prune?",
   // and a watermark alone stopped answering that once correlate became the
   // producer of the work mark. A subscription advances only over events that
   // resolve to it, so a reaction covering a subset of a state's events sits

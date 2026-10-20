@@ -11,7 +11,7 @@
  * schema-wide (`DROP SCHEMA ... CASCADE`) and takes every sibling store with
  * it — a documented test/cleanup helper, not a per-store operation. In
  * `public` it drops only the calling store's three tables, which is where the
- * per-scope isolation of #1484's checkpoint is observable.
+ * per-scope isolation of the correlate checkpoint is observable.
  */
 
 import { afterAll, describe, expect, it } from "vitest";

@@ -300,8 +300,8 @@ describe("per-reaction backoff (integration)", () => {
     // partial progress (handled > 0 AND error AND next_attempt_at set). The
     // finalize must (a) advance the watermark to the FIRST event (so the
     // handled prefix never re-runs on redelivery) AND (b) ride a `due` marker
-    // so the durable, cross-worker backoff window from #1262 is persisted with
-    // the climbing retry. Advance and defer are independent ack legs (#1278).
+    // so the durable, cross-worker backoff window is persisted with
+    // the climbing retry. Advance and defer are independent ack legs.
     let calls = 0;
     const handler = vi.fn().mockImplementation(async () => {
       calls++;

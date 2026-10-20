@@ -14,7 +14,7 @@ const S = state({ PS: z.object({}) })
 
 /**
  * A worker whose clock runs ahead of the database's must still deliver
- * defers and backoff retries (#1753). Both persist an absolute
+ * defers and backoff retries. Both persist an absolute
  * `deferred_at`, which the worker's own timer waits for; Postgres judges it
  * by the claiming worker's clock too, so the wake and the claim agree. Only
  * `Date` is faked, so timers and the database keep real time.

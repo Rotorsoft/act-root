@@ -85,7 +85,7 @@ describe("decompose_event_name", () => {
   it("decomposes _v<digits> suffix", () => {
     expect(decompose_event_name("Foo_v3")).toEqual({ base: "Foo", version: 3 });
   });
-  // #1395 — the framework requires v >= 2 (`event-versions.ts`): the base
+  // The framework requires v >= 2 (`event-versions.ts`): the base
   // `Foo` is implicitly v1, so `Foo_v1` is a literal event name. Stripping
   // it made the CLI call a current, emittable event deprecated.
   it("treats _v1 as a literal name, not a version", () => {
@@ -233,7 +233,7 @@ describe("CATEGORY_KEYWORDS", () => {
   });
 });
 
-// #1393 — the CLI twin of #1310. Event names are per-state-namespaced, so
+// The CLI twin of the formatter's namespacing case. Event names are per-state-namespaced, so
 // two unrelated states may legally share a base name (`register_new_state`
 // only rejects identical names across differently-named states). Pooling
 // them into one global set reported one state's current event as

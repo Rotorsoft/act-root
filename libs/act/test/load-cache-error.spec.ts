@@ -4,7 +4,7 @@ import { sandbox } from "../src/test/index.js";
 import type { CacheEntry, Schema } from "../src/types/index.js";
 
 /**
- * ACT-1206 — load() must not fail a read on a cache-write error.
+ * `load()` must not fail a read on a cache-write error.
  *
  * `load()` computes state correctly, then writes a checkpoint to the
  * cache. That write used to be unguarded (`await cache().set(...)`), so a

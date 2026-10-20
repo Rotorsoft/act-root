@@ -1,5 +1,5 @@
 /**
- * Write-gated procedures (ACT-1131): `prioritize` + the `writeMode`
+ * Write-gated procedures: `prioritize` + the `writeMode`
  * enabled branch + the `audit` capture path.
  *
  * `writeEnabled` is a module-level constant in `router.ts` captured

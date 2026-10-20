@@ -1,5 +1,5 @@
 /**
- * SSE subscription wiring on the auto-generated tRPC router (#846).
+ * SSE subscription wiring on the auto-generated tRPC router.
  * Verifies the per-state subscription is grouped under
  * `router.subscribe.<stateName>`, the yield order (cached `state`
  * first, then `patch` per publication), cap enforcement
@@ -298,7 +298,7 @@ describe("trpc(app, { sse }) — generated subscriptions", () => {
  * The generator implemented steps 2 through 5 — connection cap, cached state
  * frame, patch forwarding, heartbeat — and skipped step 1, so a caller the
  * extractor would have denied got a live subscription and the cached state
- * with it (#1620). Hono never had the gap, because it mounts the extractor as
+ * with it. Hono never had the gap, because it mounts the extractor as
  * middleware across the whole API; tRPC resolves the actor inline, and the
  * subscription path simply had no copy of that block.
  */

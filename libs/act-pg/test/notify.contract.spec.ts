@@ -25,7 +25,7 @@ import { PostgresStore } from "../src/postgres-store.js";
 import { schema } from "./schema.js";
 
 /**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * Correlate's job, done by hand: `claim` follows the work mark,
  * so a test that commits events has to say which of them resolve where.
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.

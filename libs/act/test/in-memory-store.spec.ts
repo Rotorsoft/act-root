@@ -2,7 +2,7 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { dispose, store } from "../src/index.js";
 
 /**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * Correlate's job, done by hand: `claim` follows the work mark,
  * so a test that commits events has to say which of them resolve where.
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
@@ -25,7 +25,7 @@ describe("InMemoryStore (adapter-specific)", () => {
   });
 
   // "claims by exact source and ignores sources with no committed events"
-  // lived here until #1488. `claim` no longer reads the event log, so it has
+  // used to live here. `claim` no longer reads the event log, so it has
   // no source to match — correlate applies the source window when it decides
   // which events may raise a mark, and the coverage moved with it to
   // `correlate.spec.ts`.
@@ -50,11 +50,11 @@ describe("InMemoryStore (adapter-specific)", () => {
     expect(all[0]).toBeGreaterThan(3); // the truncate's tombstone seed
   });
 
-  // ACT-1103 lane contract: every adapter is exercised by `runStoreTck`
+  // The lane contract: every adapter is exercised by `runStoreTck`
   // (see `test/store-tck.spec.ts`). InMemoryStore has no adapter-only
   // lane concern — there's no schema migration to validate.
 
-  // #1446, adapter-specific because this store is the only one whose ids
+  // Adapter-specific because this store is the only one whose ids
   // start at 0 — Postgres and SQLite both start at 1, which masked the
   // same window. While `claim` short-circuited a fresh `at = -1`
   // subscription into "claimable", an event committed between a cycle's

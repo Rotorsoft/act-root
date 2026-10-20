@@ -1,5 +1,5 @@
 /**
- * ACT-102 — priority lanes, framework-level coverage.
+ * Priority lanes, framework-level coverage.
  *
  * Tests the in-memory adapter (claim ordering, subscribe `max()`,
  * `prioritize` filter), the classify max-priority collection,
@@ -17,7 +17,7 @@ import { classify_registry } from "../src/internal/classify.js";
 import { dispose, store } from "../src/ports.js";
 
 /**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * Correlate's job, done by hand: `claim` follows the work mark,
  * so a test that commits events has to say which of them resolve where.
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
@@ -80,7 +80,7 @@ describe("priority lanes — framework", () => {
       // priority-0 lagging stream. The pre-fix lagging selection orders by
       // `priority DESC, at ASC`, so the four lagging slots are always taken
       // by the high-priority streams and the low-priority stream starves
-      // forever. The fairness reserve (ACT-1223) carves one of the four
+      // forever. The fairness reserve carves one of the four
       // slots for pure watermark order, so the most-behind stream — the
       // never-processed low one — is claimed within a bounded window.
       const meta = { correlation: "", causation: {} };

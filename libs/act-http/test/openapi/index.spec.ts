@@ -1,6 +1,6 @@
 /**
- * OpenAPI 3.1 document emitter for `@rotorsoft/act-http/openapi`
- * (#845). Pure-data emit — no live server, no Hono runtime — so
+ * OpenAPI 3.1 document emitter for `@rotorsoft/act-http/openapi`.
+ * Pure-data emit — no live server, no Hono runtime — so
  * tests assert directly on the returned doc structure plus a stable
  * snapshot for diff-based surface-change detection in CI.
  */
@@ -136,7 +136,7 @@ describe("openapi(app, options) — doc emitter", () => {
     expect(idempotency_param).toBeDefined();
     expect(idempotency_param?.in).toBe("header");
     // Required: the route 400s when idempotency is on and the header is absent,
-    // so the doc must not advertise it as optional (#1287).
+    // so the doc must not advertise it as optional.
     expect(idempotency_param?.required).toBe(true);
   });
 
@@ -291,7 +291,7 @@ describe("openapi(app, options) — doc emitter", () => {
   });
 });
 
-// #1228 — action inputs marked `sensitive()` must be flagged in the
+// Action inputs marked `sensitive()` must be flagged in the
 // emitted request schema so codegen / Swagger UI don't echo PII freely.
 const Account = state({
   Account: z.object({ email: z.string(), name: z.string() }),
@@ -332,7 +332,7 @@ describe("openapi — sensitive() request-field marking", () => {
   );
 });
 
-// #1328 — an action input with a Zod type that has no JSON-Schema form
+// An action input with a Zod type that has no JSON-Schema form
 // (z.date/z.bigint/...) must not abort the whole document; hono() serves it.
 const Scheduler = state({ Scheduler: z.object({ at: z.string() }) })
   .init(() => ({ at: "" }))

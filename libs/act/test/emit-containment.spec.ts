@@ -11,7 +11,7 @@ import {
 } from "../src/index.js";
 
 /**
- * #1437 — lifecycle containment belongs to `Act.emit`, not to each call site.
+ * Lifecycle containment belongs to `Act.emit`, not to each call site.
  *
  * Two defects, one root cause. The drain contained `acked` and `blocked`, but
  * `committed`, `forgotten` and `close()`'s `closed` were bare `this.emit(...)`
@@ -19,7 +19,7 @@ import {
  * listener rejected `do()`, `forget()` and `close()` for work that had already
  * succeeded. And even where a call site did wrap, it wrapped the *emit* rather
  * than each *listener*, so the first thrower aborted `EventEmitter.emit` and
- * every later listener on that event was skipped — the same shape as #1423.
+ * every later listener on that event was skipped.
  */
 
 const Counter = state({ Counter: z.object({ n: z.number() }) })

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { readCorrelators } from "../src/server/correlators.js";
 
 /**
- * Reading who is looking for work (#1539).
+ * Reading who is looking for work.
  *
  * This reads the framework's own table directly, because that table is not on
  * the `Store` interface — the same approach the connection probes take.

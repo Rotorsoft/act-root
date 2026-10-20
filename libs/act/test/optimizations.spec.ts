@@ -1,8 +1,8 @@
 /**
- * ACT-1032 — guard the believed framework optimizations so a silent
+ * Guard the believed framework optimizations so a silent
  * regression fails a test instead of slipping through.
  *
- * #1024's lesson: "assume nothing is optimized until a test proves it."
+ * Assume nothing is optimized until a test proves it.
  * Each block here asserts an *observable consequence* of an optimization
  * that lives in `libs/act/src` today, verified by reading the source:
  *
@@ -16,7 +16,7 @@
  *       store with `after` set and replays zero pre-cache rows
  *       (event-sourcing.ts `load()` query options).
  *
- * The EXPLAIN guards for the #1024 partial snapshot index live in the
+ * The EXPLAIN guards for the partial snapshot index live in the
  * adapter packages (act-pg / act-sqlite) — InMemoryStore has no planner.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -169,7 +169,7 @@ describe("optimization guards", () => {
         const warm = await app.load(Counter, stream);
 
         // The optimization: resume strictly after the cached checkpoint.
-        // #1345: the warm path also carries `with_snaps` so a rebaselining
+        // The warm path also carries `with_snaps` so a rebaselining
         // snapshot landing above a stale checkpoint (after a windowed close
         // pruned the events between them) is still folded — `after` and
         // `with_snaps` are independent store conditions. With no snapshot in

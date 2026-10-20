@@ -1,5 +1,5 @@
 /**
- * SSE wiring on the auto-generated Hono surface (#846). Covers the
+ * SSE wiring on the auto-generated Hono surface. Covers the
  * subscription-open / cached-state / patch / disconnect lifecycle
  * plus the error paths the cap counter and missing-stream guard
  * produce. Run end-to-end through `app.request()` so no live server

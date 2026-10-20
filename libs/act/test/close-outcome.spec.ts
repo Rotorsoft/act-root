@@ -10,7 +10,7 @@ import {
 import { CloseSignal } from "../src/internal/reaction-dispatch.js";
 
 /**
- * Part 1 of #1090's autoclose port: the close mechanic. A reaction handler
+ * The close mechanic behind autoclose. A reaction handler
  * throws {@link CloseSignal}; `build_handle` acks the triggering event (so the
  * requesting reaction isn't seen as an in-flight consumer by the close-cycle
  * guard) and yields a `HandleResult.close`; `run_drain_cycle` collects it; the

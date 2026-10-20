@@ -81,7 +81,7 @@ describe("PostgresStore", () => {
 
     it("a notify-side failure aborts the commit statement", async () => {
       // The NOTIFY rides the commit's single autocommit statement as a
-      // CTE (#1178) — a pg_notify failure aborts the whole statement, so
+      // CTE — a pg_notify failure aborts the whole statement, so
       // the insert never becomes visible without its notification.
       const queryMock = vi
         .fn()
@@ -443,7 +443,7 @@ describe("PostgresStore", () => {
       const queryMock = vi
         .fn()
         .mockResolvedValueOnce(undefined) // BEGIN
-        .mockResolvedValueOnce(undefined) // visibility lock (#1178)
+        .mockResolvedValueOnce(undefined) // visibility lock
         .mockResolvedValueOnce({ rows: [boundary] }) // boundary SELECT
         .mockResolvedValueOnce({ rowCount: null }) // prefix DELETE
         .mockResolvedValueOnce(undefined); // COMMIT

@@ -273,7 +273,7 @@ describe("per-action retry policy", () => {
   });
 });
 
-// #1438 — the ConcurrencyError path awaited `cache().invalidate` UNGUARDED,
+// The ConcurrencyError path awaited `cache().invalidate` UNGUARDED,
 // while every other cache write on this path is contained with an explicit
 // "a Redis blip must not fail the operation" justification. A rejecting
 // invalidate therefore replaced the ConcurrencyError with the cache's error,

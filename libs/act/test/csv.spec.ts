@@ -8,11 +8,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 type E = Committed<Schemas, string>;
 
 /**
- * Tests for `CsvFile` (ACT-1128) — single class implementing both
+ * Tests for `CsvFile` — single class implementing both
  * `EventSource` and `EventSink` (and `Disposable`) for CSV files
  * on disk or in-memory CSV blobs. Public surface.
  *
- * The pagination behavior introduced in ACT-1133 lives in `scan`
+ * The pagination behavior lives in `scan`
  * directly (no separate `iterate` helper), so it's covered by the
  * scan tests in `restore.spec.ts` against real adapters.
  */
@@ -22,7 +22,7 @@ const makeEvent = (overrides: Partial<E> = {}): E =>
     id: 1,
     name: "Tick",
     // A Date inside `data` — the fixture could not previously produce
-    // the condition, so the missing reviver was invisible (#1399).
+    // the condition, so the missing reviver was invisible.
     data: { tick: 1, at: new Date("2024-03-04T05:06:07.000Z") },
     stream: "s1",
     version: 0,
@@ -143,7 +143,7 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  // #1399 — the round-trip above verifies CsvFile against itself, which is
+  // The round-trip above verifies CsvFile against itself, which is
   // green whether or not the reviver runs. The contract is that a payload
   // survives the trip through a CSV unchanged, so one end must be a store.
   it("round-trips a Date in data through a store, not just CsvFile", async () => {
@@ -206,7 +206,7 @@ describe("CsvFile (file mode — read + write round trip)", () => {
     expect(back.map((e) => e.id)).toEqual([1, 2, 3]);
     // A Date in `data` must survive as a Date. This round-trip writes and
     // reads through CsvFile on both ends, so serializer and parser share
-    // any defect — the store differential below is the real guard (#1399).
+    // any defect — the store differential below is the real guard.
     expect(typeof (back[0].data as { at: unknown }).at).toBe("string");
     expect(back.map((e) => e.stream)).toEqual(["a", "a", "b"]);
     expect(back.map((e) => e.version)).toEqual([0, 1, 0]);

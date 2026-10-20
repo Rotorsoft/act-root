@@ -6,7 +6,7 @@ import { SqliteStore } from "../src/index.js";
 import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 /**
- * #1577 — a second connection to the same database file.
+ * A second connection to the same database file.
  *
  * `SqliteStore` owns one connection, so writes inside an Act never contend.
  * An application that opens its own `createClient()` on the same path adds a
@@ -19,7 +19,7 @@ import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
  *
  * `busy_timeout` is deliberately left unset. Raising it does not let the
  * write succeed; it blocks the Node event loop for the whole wait, which
- * prevents the other connection's commit from ever running. See #1577.
+ * prevents the other connection's commit from ever running.
  */
 
 const DB_URL = tmp_db_url();

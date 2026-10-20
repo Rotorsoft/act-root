@@ -1,11 +1,11 @@
 /**
- * Slice 1 of the online close-the-books foundation (#837 / epic #802).
+ * The first slice of online close-the-books.
  * Covers the declarator surface (`.autocloses(predicate)` on the state
  * builder), registry lookup (`registry.autoclose_policy(name)`), and
  * the `ActOptions` knob validation that runs at `act().build()`.
  *
  * No execution yet — slices 2-3 wire the cycle. This file proves the
- * shape so the policy-factory subs (#838 / #839 / #840) can be
+ * shape so the policy-factory subs can be
  * authored against a stable surface.
  */
 import { describe, expect, it } from "vitest";

@@ -1,5 +1,5 @@
 /**
- * `runDiscovery` dispatcher tests (ACT-1122).
+ * `runDiscovery` dispatcher tests.
  *
  * The dispatcher's only job is to route by `input.kind`. The
  * underlying probes have their own coverage; here we just verify the

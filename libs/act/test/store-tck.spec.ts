@@ -5,7 +5,7 @@ runStoreTck({
   name: "InMemoryStore",
   factory: () => new InMemoryStore(),
   // InMemoryStore is zero-config by definition — the default is the
-  // only configuration, and it must round-trip (#1443).
+  // only configuration, and it must round-trip.
   default_factory: () => new InMemoryStore(),
   capabilities: {
     restore: true,

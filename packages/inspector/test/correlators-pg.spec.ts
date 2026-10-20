@@ -1,5 +1,5 @@
 /**
- * The Postgres correlators reader (#1554) — TLS, and what an empty panel
+ * The Postgres correlators reader — TLS, and what an empty panel
  * is allowed to mean.
  *
  * The panel reads the framework's `*_correlated` table directly, with its
@@ -117,7 +117,7 @@ describe("what an empty result is allowed to mean", () => {
   });
 
   it("reads the older single-row shape as nothing to show", async () => {
-    // 42703 — the table is there, without the `key` column #1532 added.
+    // 42703 — the table is there, without the `key` column.
     queryFault.error = Object.assign(new Error("column key does not exist"), {
       code: "42703",
     });

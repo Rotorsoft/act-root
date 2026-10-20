@@ -1,4 +1,4 @@
-// ACT-503: test the sandbox + fixture helpers themselves.
+// Test the sandbox + fixture helpers themselves.
 import { z } from "zod";
 import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";

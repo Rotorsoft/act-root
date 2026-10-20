@@ -4,7 +4,7 @@ import { act, projection, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
- * The schema decides which fields are dates (#1556).
+ * The schema decides which fields are dates.
  *
  * JSON has no date type, so a `Date` is stored as a string. An adapter cannot
  * know which strings were dates and used to guess from shape, which revived

@@ -5,7 +5,7 @@ import { SqliteStore } from "../src/index.js";
 import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 
 /**
- * #1556 on the second serializing adapter.
+ * Reading dates back through the schema, on the second serializing adapter.
  *
  * The store TCK already pins what a *store* owes here — lossless recovery of
  * a `Date`, identically in `data` and `pii` — and deliberately allows the

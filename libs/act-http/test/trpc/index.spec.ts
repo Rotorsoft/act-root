@@ -1,5 +1,5 @@
 /**
- * Adapter-generated tRPC router for `@rotorsoft/act-http/trpc` (#843).
+ * Adapter-generated tRPC router for `@rotorsoft/act-http/trpc`.
  *
  * Uses an in-memory `Act` with two states (Calculator + Ticket) so the
  * cross-state action surface is observable: every action lands as a
@@ -169,7 +169,7 @@ describe("trpc(app, options) — generated router", () => {
     // validates in-resolver (not via tRPC's `.input()`, which would hardcode a
     // BAD_REQUEST 400), so the failure routes through `to_trpc_error` as the
     // same ValidationError a malformed `app.do` payload raises → 422, matching
-    // the Hono/OpenAPI transports (#1295).
+    // the Hono/OpenAPI transports.
     try {
       await caller.PressKey({ key: "" });
       throw new Error("expected the malformed body to reject");
@@ -300,7 +300,7 @@ describe("trpc(app, options) — generated router", () => {
   });
 
   // A client speaking both tRPC and Hono/OpenAPI must see the same HTTP status
-  // for the same framework error (#1280). tRPC serializes each mapped code to a
+  // for the same framework error. tRPC serializes each mapped code to a
   // status via getHTTPStatusCodeFromError; assert it equals what Hono/OpenAPI
   // produce through the shared `toApiError` table — the one unavoidable
   // exception is StreamClosedError (410 Gone), which tRPC has no code for and

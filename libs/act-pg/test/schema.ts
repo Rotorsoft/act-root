@@ -1,6 +1,6 @@
 /**
  * Postgres schema names, namespaced to the checkout the suite is running
- * from (#1589).
+ * from.
  *
  * Every worktree of this repo points at the same docker Postgres on 5431,
  * and every adapter suite `drop()`s and `seed()`s its schema in `beforeAll`.

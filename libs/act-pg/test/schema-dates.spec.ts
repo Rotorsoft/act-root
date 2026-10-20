@@ -6,7 +6,7 @@ import { PostgresStore } from "../src/index.js";
 import { schema } from "./schema.js";
 
 /**
- * #1556 on a durable adapter — the path that actually matters.
+ * Reading dates back through the schema, on a durable adapter — the path that actually matters.
  *
  * InMemoryStore holds references, so a `Date` never becomes a string there and
  * revival is a no-op. Postgres serializes, so this is where the schema has to

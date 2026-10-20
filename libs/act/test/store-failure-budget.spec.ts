@@ -133,7 +133,7 @@ describe("a failing store does not quarantine a healthy stream", () => {
  * Per-stream reads already ran per stream, but under one `Promise.all` — so
  * one stream's read failure rejected the whole cycle and every healthy stream
  * leased beside it got nothing. An unreadable `pii` payload on one aggregate
- * stalled unrelated reactions (#1675).
+ * stalled unrelated reactions.
  *
  * Correlate declines the payload it discards, so it reads past such a row.
  * The drain's fetch cannot: handlers receive the payload through their own

@@ -159,7 +159,7 @@ describe("cache integration", () => {
     // Flush the fire-and-forget .catch microtask
     await new Promise((r) => setImmediate(r));
 
-    // `warn`, not `error` (#1579): a cache miss costs a re-fold, nothing
+    // `warn`, not `error`: a cache miss costs a re-fold, nothing
     // more, so it must not reach the level operators page on.
     expect(warnSpy).toHaveBeenCalledWith(setError, expect.any(String));
     expect(errorSpy).not.toHaveBeenCalled();
@@ -170,7 +170,7 @@ describe("cache integration", () => {
 
 /**
  * `snapshot.snaps` counts what THIS load's window carried, not the stream's
- * lifetime total (#1678).
+ * lifetime total.
  *
  * `cache-and-snapshots.md` described it as "cumulative across all loads",
  * which only holds warm: `load()` seeds the counter from the cached

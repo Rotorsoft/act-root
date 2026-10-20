@@ -1,5 +1,5 @@
 /**
- * #1471 — a delete must survive the wire.
+ * A delete must survive the wire.
  *
  * `@rotorsoft/act-patch` treats `undefined` and `null` as the same delete
  * signal, but `JSON.stringify` drops `undefined`-valued keys and every SSE

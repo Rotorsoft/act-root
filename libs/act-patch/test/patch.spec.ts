@@ -321,7 +321,7 @@ describe("patch", () => {
       expect(result.k0).toBe(0);
     });
 
-    // #1318 — the two-pass path must not return a prototype-less object.
+    // The two-pass path must not return a prototype-less object.
     it("returns an ordinary-prototype object (not Object.create(null))", () => {
       const wide: Schema = {};
       for (let i = 0; i < 20; i++) wide[`k${i}`] = i;

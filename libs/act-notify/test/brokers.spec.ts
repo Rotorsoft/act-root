@@ -17,7 +17,7 @@ describe("RedisBroker", () => {
    * `subscribe(channel, listener)` **adds** a listener (multiple allowed per
    * channel), `unsubscribe(channel, listener)` removes only that one, and
    * `unsubscribe(channel)` with no listener removes **all** of them. Modelling
-   * a single overwrite-listener would mask the shared-broker bug (#1279).
+   * a single overwrite-listener would mask the shared-broker bug.
    */
   function fakes() {
     const published: Array<{ channel: string; message: string }> = [];

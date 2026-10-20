@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { dateReviver } from "../src/index.js";
 
 /**
- * The single date reviver every adapter shares (#1198). It lives in core
+ * The single date reviver every adapter shares. It lives in core
  * so PG, SQLite, and any third-party adapter revive dates identically —
  * two hand-synced copies is how `pii` ended up parsing differently from
- * `data` (#1365/#1370).
+ * `data`.
  */
 describe("dateReviver", () => {
   it("returns a Date for a valid ISO-8601 string", () => {

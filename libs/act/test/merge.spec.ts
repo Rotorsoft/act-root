@@ -60,7 +60,7 @@ describe("merge_event_register", () => {
 
 /**
  * `merge_into_existing` spreads `existing` then re-lists what it merges, so a
- * field missing from that list silently kept the first partial's value (#1645).
+ * field missing from that list silently kept the first partial's value.
  * `register_state` is the entry point, so these drive the merge directly and
  * inspect the resulting `State` — including the `.autocloses(...)` triple,
  * whose two day fields are read off the state by the synthesized reaction and

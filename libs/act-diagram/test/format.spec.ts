@@ -176,7 +176,7 @@ describe("format_event", () => {
     expect(out).not.toContain("on state: Same");
   });
 
-  // #1393 — event names are per-state-namespaced, so `AStar.Approved` and
+  // Event names are per-state-namespaced, so `AStar.Approved` and
   // an unrelated `BStar.Approved_v2` are both current. Classifying over a
   // global set told operators to migrate off a current, emittable event,
   // and shipped that status downstream through -m and -j.
@@ -458,7 +458,7 @@ describe("format_state", () => {
     expect(out).toContain("z.object({ id: z.string(), total: z.number() })");
   });
 
-  // #1392 — a state declared across several partials is merged by the
+  // A state declared across several partials is merged by the
   // registry into one. The CLI index collapses the entries to the LAST
   // partial while format_state resolved the FIRST, so the header named a
   // file containing none of the listed members and every other partial's
@@ -549,7 +549,7 @@ describe("format_slice", () => {
   it("shows states, projections, and reactions", () => {
     const out = format_slice(idx, findEntry("slice", "Fulfillment"));
     expect(out).toContain("Fulfillment");
-    // #1396 — `SliceNode.states` holds internal `${name}:${idx}`
+    // `SliceNode.states` holds internal `${name}:${idx}`
     // disambiguator keys. This assertion used to expect the raw key, so it
     // pinned the defect: `Order:0` is not a state, and `act -q Order:0`
     // finds nothing.

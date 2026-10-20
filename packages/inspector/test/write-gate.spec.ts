@@ -1,6 +1,6 @@
 /**
- * Write-mode gate on `transfer` (#1194) + the CORS mutation guard
- * (#1195), exercised with write-mode OFF — the default read-only
+ * Write-mode gate on `transfer` + the CORS mutation guard
+ *, exercised with write-mode OFF — the default read-only
  * inspector. Separate file from security.spec.ts because `writeEnabled`
  * is captured from the env at module import, so a file can only be one
  * or the other. This file leaves ACT_INSPECTOR_WRITE unset.

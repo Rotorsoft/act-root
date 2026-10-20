@@ -11,10 +11,10 @@ import { DEFAULT_BACKOFF } from "../src/internal/config.js";
 import type { CacheEntry } from "../src/types/index.js";
 
 /**
- * ACT-1238 — opt-in `ActOptions.validateFoldedState`.
+ * Opt-in `ActOptions.validateFoldedState`.
  *
  * A reducer that produces schema-violating state (the calculator
- * divide-by-zero NaN class, #1230) is trusted-total today: the framework
+ * divide-by-zero NaN class) is trusted-total today: the framework
  * validates action inputs and emitted events, but never the folded
  * state. With the flag ON, the fold path parses the merged state against
  * its declared Zod schema after every reduction and throws a

@@ -87,8 +87,7 @@ const drive = (logger: Logger): boolean[] => {
 };
 
 /**
- * Cross-implementation differential contract for the {@link Logger} port
- * (#1057).
+ * Cross-implementation differential contract for the {@link Logger} port.
  *
  * A logger has no portable return value to byte-compare — its output
  * format is adapter-specific by design, which is exactly why

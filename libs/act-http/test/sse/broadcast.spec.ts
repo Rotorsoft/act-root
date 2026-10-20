@@ -201,7 +201,7 @@ describe("BroadcastChannel", () => {
   });
 });
 
-// #1423 — two delivery defects on the same fan-out path.
+// Two delivery defects on the same fan-out path.
 describe("subscriber containment and overlay cache misses", () => {
   const st = (v: number, name = "n"): TestState =>
     ({ _v: v, name, count: 1 }) as TestState;
@@ -325,7 +325,7 @@ describe("subscriber containment and overlay cache misses", () => {
 });
 
 /**
- * #1648 — `overlay()` was hardened against a missing baseline (#1423), but
+ * `overlay()` was hardened against a missing baseline, but
  * `publish()` was not: it skipped its overlay carry when the baseline had
  * been evicted and said nothing, so a reconnecting client reseeded without
  * presence a live client was still showing.

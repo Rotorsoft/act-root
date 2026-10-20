@@ -1,14 +1,14 @@
 /**
- * Security regression tests for #1194 / #1195.
+ * Security regression tests for the inspector's `transfer` and connection inputs.
  *
- * #1194 — the `transfer` mutation built `CsvFile` / `SqliteStore`
+ * The `transfer` mutation built `CsvFile` / `SqliteStore`
  * adapters straight from client-supplied file paths with no
  * validation, letting a client read (`/etc/passwd`) or clobber
  * (`~/.bashrc`) arbitrary server-side files, and the destructive
  * transfer path was never gated by write-mode. These tests pin the
  * cwd-relative path guard and the write-mode gate.
  *
- * #1195 — the ssl-option mapping and the bind-host default. Unit-level,
+ * The ssl-option mapping and the bind-host default. Unit-level,
  * exercised through the exported pure helpers so they stay covered
  * without booting the HTTP server.
  *

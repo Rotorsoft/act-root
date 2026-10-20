@@ -77,7 +77,7 @@ describe("Store.reset", () => {
 
     // All events replayed through the projection
     expect(projected).toEqual([{ by: 1 }, { by: 2 }, { by: 3 }]);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -118,7 +118,7 @@ describe("Store.reset", () => {
 
     expect(handler).toHaveBeenCalled();
     expect(result.acked.length).toBeGreaterThan(0);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -157,7 +157,7 @@ describe("Store.reset", () => {
 
     expect(batchFn).toHaveBeenCalled();
     expect(singleHandler).not.toHaveBeenCalled();
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -199,7 +199,7 @@ describe("Store.reset", () => {
 
     expect(firstRun).toEqual(secondRun);
     expect(firstRun).toEqual([10, 20]);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -239,7 +239,7 @@ describe("Store.reset", () => {
 
     expect(projected).toEqual([1, 2]);
     expect(result.acked.length).toBe(1);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -282,7 +282,7 @@ describe("Store.reset", () => {
     });
 
     expect(projected).toEqual([7, 8]);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -299,7 +299,7 @@ describe("Store.reset", () => {
         }
       )._drain_controllers.get("default")!.armed
     ).toBe(false);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();
@@ -320,7 +320,7 @@ describe("Store.reset", () => {
         }
       )._drain_controllers.get("default")!.armed
     ).toBe(false);
-    // Shut the app down so it hands back its correlation lease (#1532).
+    // Shut the app down so it hands back its correlation lease.
     // Several tests here share a registry, so an abandoned Act would hold
     // the lease and the next test's correlate would skip its scan.
     await app.shutdown();

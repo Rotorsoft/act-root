@@ -321,7 +321,7 @@ describe("state projection (.of)", () => {
       });
       await app.do("increment", { stream: "c1", actor }, { by: 4 });
       // Cold engine + cold act cache: the miss-load must take the
-      // snapshot floor (#1024) and fold only the tail on top of it.
+      // snapshot floor and fold only the tail on top of it.
       await cache().invalidate("c1");
       await settle_all(app);
       expect(h.table.get("c1")?.state).toEqual({ count: 7 });

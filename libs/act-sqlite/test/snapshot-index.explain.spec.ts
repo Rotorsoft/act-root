@@ -1,7 +1,7 @@
 /**
- * ACT-1032 — guard the #1024 partial snapshot index (SQLite).
+ * Guard the partial snapshot index (SQLite).
  *
- * #1024 added a partial index over snapshot rows only so the
+ * A partial index covers snapshot rows only, so the
  * `with_snaps` "resume at the latest snapshot" floor —
  *   `SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__'`
  * — is an O(log n) index seek instead of a per-stream table scan. The
@@ -17,7 +17,7 @@
  * a scan and fails here.
  *
  * Runs against a throwaway file database: libSQL's in-memory database is
- * process-wide shared cache (#1443), and this suite bulk-loads 5000 noise
+ * process-wide shared cache, and this suite bulk-loads 5000 noise
  * rows that no other spec should have to see.
  */
 import { SNAP_EVENT } from "@rotorsoft/act";

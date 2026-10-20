@@ -1,6 +1,5 @@
 /**
- * Tests for the declarative `.autocloses({...})` close-policy overload
- * (#838 / epic #802).
+ * Tests for the declarative `.autocloses({...})` close-policy overload.
  *
  * Top-level fields combine with AND. The `or: {...}` block opens an
  * alternative OR path — the policy fires when either the top-level

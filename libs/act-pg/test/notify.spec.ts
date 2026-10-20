@@ -281,11 +281,11 @@ describe("PostgresStore.notify", () => {
 });
 
 /**
- * The user-visible half of #1616: `dispose()` has to resolve. The unit
- * test over a fake pool proves the in-flight open hands its client back;
- * only a real pool shows why that matters, because `pool.end()` waits for
- * every checked-out client and a stranded one keeps a graceful shutdown
- * pending forever.
+ * The user-visible half of handing back an in-flight open: `dispose()`
+ * has to resolve. The unit test over a fake pool proves the in-flight open
+ * hands its client back; only a real pool shows why that matters, because
+ * `pool.end()` waits for every checked-out client and a stranded one keeps
+ * a graceful shutdown pending forever.
  */
 describe("PostgresStore.dispose racing an in-flight re-LISTEN", () => {
   const DISPOSE_SCHEMA = schema("schema_dispose_race");

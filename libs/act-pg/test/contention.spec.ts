@@ -1,6 +1,5 @@
 /**
- * Concurrency-contention stress harness for the SKIP-LOCKED claim path
- * (ACT-1058).
+ * Concurrency-contention stress harness for the SKIP-LOCKED claim path.
  *
  * The competing-consumers model is the load-bearing property of the
  * concurrency design (see `docs/docs/architecture/concurrency-model.md`):
@@ -120,7 +119,7 @@ describe("pg contention — competing consumers over SKIP LOCKED", () => {
    * the set of streams this worker claimed in the step.
    */
   /**
-   * Correlate's job, done by hand (#1488): `claim` follows the work mark, so
+   * Correlate's job, done by hand: `claim` follows the work mark, so
    * a worker only sees what has been marked. Marking to the log head before
    * each step is what the orchestrator's correlate would have done, and
    * keeps this suite about lease exclusivity rather than discovery.

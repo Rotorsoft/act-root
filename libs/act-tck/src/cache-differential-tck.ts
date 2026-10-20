@@ -143,8 +143,7 @@ const snapshot = async (
 };
 
 /**
- * Cross-implementation differential contract for the {@link Cache} port
- * (#1057).
+ * Cross-implementation differential contract for the {@link Cache} port.
  *
  * Where {@link runCacheTck} pins each method's contract against a single
  * implementation, this harness drives a **family of randomized, seeded

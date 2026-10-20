@@ -1,4 +1,4 @@
-// ACT-501: per-Act scoped ports via `ActOptions.scoped` — bag is threaded
+// Per-Act scoped ports via `ActOptions.scoped` — bag is threaded
 // through AsyncLocalStorage so internal `store()`/`cache()` resolve to the
 // per-Act ports transparently. Adapters are unchanged.
 import { z } from "zod";

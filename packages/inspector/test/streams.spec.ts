@@ -1,5 +1,5 @@
 /**
- * Stream-aggregate procedures (ACT-1131).
+ * Stream-aggregate procedures.
  *
  * Covers `streams`, `streamStats`, `schemaEvolution`, and
  * `streamsForEvent`. Fixture seeds multiple streams with a mix of
@@ -138,7 +138,7 @@ describe("streams", () => {
     });
   });
 
-  // Stream lifecycle affordances (#1174): closed / restarted / pruned /
+  // Stream lifecycle affordances: closed / restarted / pruned /
   // close-scheduled, derived from head + tail + the subscriptions table.
   describe("lifecycle flags", () => {
     it("plain streams report every flag false", async () => {

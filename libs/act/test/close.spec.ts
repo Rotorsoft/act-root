@@ -800,7 +800,7 @@ describe("close and reaction subscriptions", () => {
     const result = await app.close([{ stream: "SS" }]);
     expect([...result.truncated.keys()]).toContain("SS");
 
-    // The subscription row survives the close (#1527): `truncate` is
+    // The subscription row survives the close: `truncate` is
     // event-log work only, so it no longer reaches across into the
     // subscriptions table. Reclaiming these rows is an operator job.
     const rows: string[] = [];

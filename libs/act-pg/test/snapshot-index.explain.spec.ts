@@ -1,7 +1,7 @@
 /**
- * ACT-1032 — guard the #1024 partial snapshot index.
+ * Guard the partial snapshot index.
  *
- * #1024 added a partial index over snapshot rows only so the
+ * A partial index covers snapshot rows only, so the
  * `with_snaps` "resume at the latest snapshot" floor —
  *   `SELECT COALESCE(MAX(id), -1) FROM events WHERE stream=? AND name='__snapshot__'`
  * — is an O(log n) index seek instead of a per-stream scan. The index
