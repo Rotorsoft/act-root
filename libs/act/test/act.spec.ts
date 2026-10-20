@@ -156,8 +156,7 @@ describe("act", () => {
     // non-reactive event — drain will be skipped
     await app.do("ignore2", { stream: "s4", actor }, {});
     app.settle({ debounceMs: 1 });
-    await sleep(100);
-    expect(settled).toHaveBeenCalled();
+    await vi.waitFor(() => expect(settled).toHaveBeenCalled());
     app.off("settled", settled);
   });
 
@@ -378,8 +377,7 @@ describe("act", () => {
       await app.do("increment", { stream: "settled-event", actor }, {});
       app.settle({ debounceMs: 5 });
 
-      await sleep(300);
-      expect(settledListener).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(settledListener).toHaveBeenCalledTimes(1));
 
       app.off("settled", settledListener);
     });
@@ -397,8 +395,7 @@ describe("act", () => {
         eventLimit: 5,
       });
 
-      await sleep(300);
-      expect(settledListener).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(settledListener).toHaveBeenCalledTimes(1));
 
       app.off("settled", settledListener);
     });
@@ -432,8 +429,7 @@ describe("act", () => {
       );
       // No debounceMs passed — should use the 5ms default from ActOptions
       customApp.settle();
-      await sleep(150);
-      expect(settledListener).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(settledListener).toHaveBeenCalledTimes(1));
 
       customApp.off("settled", settledListener);
     });
@@ -511,10 +507,11 @@ describe("act", () => {
       app.on("settled", settledListener);
 
       app.settle({ debounceMs: 1 });
-      await sleep(50);
 
       // settle caught the error and surfaced it, without settling.
-      expect(errors.map(String)).toEqual(["Error: settle-error"]);
+      await vi.waitFor(() =>
+        expect(errors.map(String)).toEqual(["Error: settle-error"])
+      );
       expect(settledListener).not.toHaveBeenCalled();
       spy.mockRestore();
       app.off("error", onError);

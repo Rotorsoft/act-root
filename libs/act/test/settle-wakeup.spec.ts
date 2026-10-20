@@ -78,9 +78,8 @@ describe("settle loop wake-up during a running cycle", () => {
     gate_release();
 
     // Give the event loop time to run the re-armed cycle.
-    await new Promise((r) => setTimeout(r, 20));
 
-    expect(drains).toBeGreaterThanOrEqual(2);
+    await vi.waitFor(() => expect(drains).toBeGreaterThanOrEqual(2));
     loop.stop();
   });
 });

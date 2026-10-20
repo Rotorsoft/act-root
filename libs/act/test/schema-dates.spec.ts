@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { event_tags } from "../src/builders/event-builder.js";
-import { act, projection, sleep, state } from "../src/index.js";
+import { act, projection, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
@@ -271,9 +271,10 @@ describe("schema-driven date revival", () => {
     await app.do("stamp", { stream: "d4", actor }, payload);
     await app.correlate();
     await app.drain();
-    await sleep(10);
 
-    expect(seen).toEqual({ at: "Date", label: "string" });
+    await vi.waitFor(() =>
+      expect(seen).toEqual({ at: "Date", label: "string" })
+    );
     await dispose();
   });
 

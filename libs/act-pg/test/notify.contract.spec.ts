@@ -41,19 +41,6 @@ const TABLE = "notify_contract_test";
  * delivery — `pg_notify` round-trips are typically <5 ms but vary under
  * CI load.
  */
-async function waitFor(
-  predicate: () => boolean,
-  { timeout = 1500, interval = 10 } = {}
-): Promise<void> {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeout) {
-      throw new Error(`waitFor timed out after ${timeout}ms`);
-    }
-    await sleep(interval);
-  }
-}
-
 describe("PostgresStore notify contract", () => {
   let a: PostgresStore;
   let b: PostgresStore;
@@ -132,7 +119,9 @@ describe("PostgresStore notify contract", () => {
       causation: {},
     });
 
-    await waitFor(() => seen_by_b.length > 0);
+    await vi.waitFor(() => expect(seen_by_b).not.toHaveLength(0), {
+      timeout: 1_500,
+    });
     expect(seen_by_b[0].stream).toBe("stream-under-cap");
 
     await dispose_b();

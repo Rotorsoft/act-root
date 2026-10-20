@@ -441,8 +441,8 @@ describe("defer outcome (integration)", () => {
 
     const claim = vi.spyOn(store(), "claim");
     await store().defer(["remind-w1"], Date.now() + 120);
-    await sleep(100); // W1 has woken for w1 and claimed nothing
-    expect(claim).toHaveBeenCalled();
+    // W1 wakes for w1 and claims nothing.
+    await vi.waitFor(() => expect(claim).toHaveBeenCalled());
     expect(ran).toEqual([]);
 
     await vi.waitFor(() => {

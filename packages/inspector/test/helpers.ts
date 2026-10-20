@@ -61,20 +61,3 @@ export async function seedSequence(
   }
   return committed;
 }
-
-/**
- * Default `connect` input — every field has a Zod default in the
- * router, so passing `{}` works, but specs sometimes need to override
- * `schema` or `table` for assertion clarity. Tests spread this object
- * and override what they care about.
- */
-export const defaultConnectInput = {
-  host: "localhost",
-  port: 5432,
-  database: "test",
-  user: "test",
-  password: "test",
-  schema: "public",
-  table: "events",
-  ssl: false,
-};

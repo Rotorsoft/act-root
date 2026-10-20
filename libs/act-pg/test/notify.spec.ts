@@ -17,19 +17,6 @@ const TABLE = "notify_test";
  * delivery — `pg_notify` round-trips are typically <5 ms but vary under
  * CI load.
  */
-async function waitFor(
-  predicate: () => boolean,
-  { timeout = 1500, interval = 10 } = {}
-): Promise<void> {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeout) {
-      throw new Error(`waitFor timed out after ${timeout}ms`);
-    }
-    await sleep(interval);
-  }
-}
-
 describe("PostgresStore.notify", () => {
   let writer: PostgresStore;
   let listener: PostgresStore;
@@ -89,7 +76,9 @@ describe("PostgresStore.notify", () => {
       causation: {},
     });
 
-    await waitFor(() => secondSeen.length > 0);
+    await vi.waitFor(() => expect(secondSeen).not.toHaveLength(0), {
+      timeout: 1_500,
+    });
     expect(secondSeen).toHaveLength(1);
     expect(firstSeen).toHaveLength(0);
 
@@ -117,7 +106,9 @@ describe("PostgresStore.notify", () => {
       correlation: "c",
       causation: {},
     });
-    await waitFor(() => received.length > 0);
+    await vi.waitFor(() => expect(received).not.toHaveLength(0), {
+      timeout: 1_500,
+    });
     expect(received).toHaveLength(1);
     expect(received[0].stream).toBe("stream-after-bad");
 
@@ -145,7 +136,9 @@ describe("PostgresStore.notify", () => {
       [{ name: "AfterEmpty", data: {} }],
       { correlation: "c", causation: {} }
     );
-    await waitFor(() => received.length > 0);
+    await vi.waitFor(() => expect(received).not.toHaveLength(0), {
+      timeout: 1_500,
+    });
     expect(received[0].stream).toBe("stream-after-empty");
 
     await dispose();
@@ -190,7 +183,9 @@ describe("PostgresStore.notify", () => {
       [{ name: "AfterBadFields", data: {} }],
       { correlation: "c", causation: {} }
     );
-    await waitFor(() => received.length > 0);
+    await vi.waitFor(() => expect(received).not.toHaveLength(0), {
+      timeout: 1_500,
+    });
     expect(received[0].stream).toBe("stream-after-bad-fields");
 
     await dispose();
@@ -276,7 +271,9 @@ describe("PostgresStore.notify", () => {
       [{ name: "AfterThrow", data: {} }],
       { correlation: "c", causation: {} }
     );
-    await waitFor(() => received.length > 0);
+    await vi.waitFor(() => expect(received).not.toHaveLength(0), {
+      timeout: 1_500,
+    });
     expect(received[0].stream).toBe("stream-after-throw");
 
     await dispose();
@@ -343,7 +340,7 @@ describe("PostgresStore.dispose racing an in-flight re-LISTEN", () => {
 
     // Force the reconnect the way a real blip would.
     inner._listen_client!.emit("error", new Error("simulated blip"));
-    await waitFor(() => parked_once, { timeout: 3_000 });
+    await vi.waitFor(() => expect(parked_once).toBe(true), { timeout: 3_000 });
 
     const started = Date.now();
     const disposing = store.dispose();
