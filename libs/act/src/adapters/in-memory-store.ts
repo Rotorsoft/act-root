@@ -819,33 +819,31 @@ export class InMemoryStore implements Store {
       }
     >();
 
+    // Per target, like the SQL adapters: a later target sees what an
+    // earlier one in the same call already pruned.
     const windowed = targets.filter((t) => t.before !== undefined);
-    if (windowed.length) {
-      const drop = new Set<number>();
-      for (const { stream, before, max_id } of windowed) {
-        let boundary: Committed<Schemas, keyof Schemas> | undefined;
-        for (const e of this._events) {
-          if (
-            e.stream === stream &&
-            e.name === SNAP_EVENT &&
-            e.created < before! &&
-            (max_id === undefined || e.id <= max_id) &&
-            (!boundary || e.id > boundary.id)
-          )
-            boundary = e;
-        }
-        if (!boundary) continue; // no qualifying snapshot → no-op
-        let deleted = 0;
-        for (const e of this._events) {
-          if (e.stream === stream && e.id < boundary.id) {
-            drop.add(e.id);
-            this._pii.get(stream)?.delete(e.id);
-            deleted++;
-          }
-        }
-        result.set(stream, { deleted, committed: boundary, before });
+    for (const { stream, before, max_id } of windowed) {
+      let boundary: Committed<Schemas, keyof Schemas> | undefined;
+      for (const e of this._events) {
+        if (
+          e.stream === stream &&
+          e.name === SNAP_EVENT &&
+          e.created < before! &&
+          (max_id === undefined || e.id <= max_id) &&
+          (!boundary || e.id > boundary.id)
+        )
+          boundary = e;
       }
-      if (drop.size) this._events = this._events.filter((e) => !drop.has(e.id));
+      if (!boundary) continue; // no qualifying snapshot → no-op
+      const below = boundary.id;
+      let deleted = 0;
+      this._events = this._events.filter((e) => {
+        if (e.stream !== stream || e.id >= below) return true;
+        this._pii.get(stream)?.delete(e.id);
+        deleted++;
+        return false;
+      });
+      result.set(stream, { deleted, committed: boundary, before });
     }
 
     const full = targets.filter((t) => t.before === undefined);

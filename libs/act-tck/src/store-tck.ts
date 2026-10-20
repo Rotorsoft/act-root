@@ -3607,6 +3607,29 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(remaining[0].id).toBe(snap_b.id);
         });
 
+        it("prunes two windowed targets for one stream in call order", async () => {
+          const later = `trunc-win-twice-${uid()}`;
+          const a1 = await seed_windowed(later);
+          const before = new Date(Date.now() + 60_000);
+          // The later boundary first: the earlier one is already pruned.
+          const first = await store.truncate([
+            { stream: later, before, max_id: a1.snap_b.id },
+            { stream: later, before, max_id: a1.snap_a.id },
+          ]);
+          expect(first.get(later)?.deleted).toBe(4);
+          expect(first.get(later)?.committed.id).toBe(a1.snap_b.id);
+
+          const earlier = `trunc-win-twice-${uid()}`;
+          const a2 = await seed_windowed(earlier);
+          // The earlier boundary first: each pass counts only its own rows.
+          const second = await store.truncate([
+            { stream: earlier, before, max_id: a2.snap_a.id },
+            { stream: earlier, before, max_id: a2.snap_b.id },
+          ]);
+          expect(second.get(earlier)?.deleted).toBe(2);
+          expect(second.get(earlier)?.committed.id).toBe(a2.snap_b.id);
+        });
+
         it("honors the max_id cap — boundary never rises past a lagging consumer", async () => {
           const s = `trunc-win-cap-${uid()}`;
           const { snap_a, snap_b } = await seed_windowed(s);
