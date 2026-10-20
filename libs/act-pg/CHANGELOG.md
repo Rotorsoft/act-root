@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.21.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.21.1...@rotorsoft/act-pg-v1.21.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act-pg:** seed reads the catalog after its locks, so CREATE SCHEMA can't fail with 23505 ([#2002](https://github.com/Rotorsoft/act-root/issues/2002)) ([b71ac72](https://github.com/Rotorsoft/act-root/commit/b71ac72a1f86bf35e86d89447a049cac60e7186a)), closes [#1991](https://github.com/Rotorsoft/act-root/issues/1991)
+
 # [@rotorsoft/act-pg-v1.21.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.21.0...@rotorsoft/act-pg-v1.21.1) (2026-10-19)
 
 
