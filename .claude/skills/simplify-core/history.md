@@ -523,3 +523,5 @@ Simplifications:
 - P2026-10-20s-7 (c-6). Sweep ticket numbers out of test comments and act-tck comments (332 references in 125 files), keeping the why.
 
 Design findings, not proposed: an explicit `drain()` returns empty when its lane is disarmed or locked, which is why 51 test sites reach into `_drain_controllers`; arming on an explicit call would change behavior. Store.commit returns the stored rows on pg and the input objects on sqlite/InMemory (the framework normalizes them). act-pg's retry-default and retry-overflow specs hard-code schemas, so two worktrees collide. `libs/act/test/calculator.ts` is a drifted copy of the example (core can't import it). backoff.spec "garbage-collects only entries whose window has elapsed" names a map that no longer exists.
+
+Tickets (user: "file the tickets, then fix the bugs first"): #1990 (P2026-10-20-1), #1991 (-2), #1992 (-3), #1993 (-4), #1994 (s-1), #1995 (s-2), #1996 (s-3), #1997 (s-4), #1998 (s-5), #1999 (s-6), #2000 (s-7).
