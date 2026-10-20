@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.5](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.4...@rotorsoft/act-v1.33.5) (2026-10-20)
+
+
+### Bug Fixes
+
+* **act:** one lane-registration rule, whatever the order ([#2004](https://github.com/Rotorsoft/act-root/issues/2004)) ([44f9819](https://github.com/Rotorsoft/act-root/commit/44f98195ace0c46859c2bd7c8b58fd528d638d3b)), closes [#1993](https://github.com/Rotorsoft/act-root/issues/1993)
+
 # [@rotorsoft/act-v1.33.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.3...@rotorsoft/act-v1.33.4) (2026-10-20)
 
 
