@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.20](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.19...@rotorsoft/act-http-v1.10.20) (2026-10-20)
+
+
+### Bug Fixes
+
+* **deps:** update dependency express to ^5.3.0 ([#1987](https://github.com/Rotorsoft/act-root/issues/1987)) ([6d02a50](https://github.com/Rotorsoft/act-root/commit/6d02a50947a795edb954d5c5edd907dce1cd84d8))
+
 # [@rotorsoft/act-http-v1.10.19](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.18...@rotorsoft/act-http-v1.10.19) (2026-10-19)
 
 
