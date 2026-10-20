@@ -166,10 +166,12 @@ export class CorrelateCycle<
   private readonly _key: string;
   /** Local expiry of the held lease (0 = none); stale only costs a duplicate scan. */
   private _lease_until = 0;
-  /** Raised by a commit or notification, lowered by a short page. Starts armed. */
-  private _armed = true;
-  /** Counts arms, so a scan that one landed during doesn't lower the flag over it. */
-  private _arms = 0;
+  /**
+   * Armed while `_arms` (raised by a commit or notification) is ahead of
+   * `_settled` (the count the last short page saw). Starts armed.
+   */
+  private _arms = 1;
+  private _settled = 0;
   /** Counts releases, so a lease reply that lands after one is dropped. */
   private _releases = 0;
   private _init_promise: Promise<void> | undefined;
@@ -212,7 +214,6 @@ export class CorrelateCycle<
 
   /** A commit (local or remote) may have produced uncorrelated events. */
   arm(): void {
-    this._armed = true;
     this._arms++;
   }
 
@@ -255,7 +256,7 @@ export class CorrelateCycle<
     this._checkpoint = -1;
     this._dynamic_subscriptions.clear();
     this._static_subscriptions.clear();
-    this._armed = true;
+    this._arms++;
   }
 
   /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
@@ -295,7 +296,7 @@ export class CorrelateCycle<
     await this.init();
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
-    if (!this._armed)
+    if (this._arms === this._settled)
       return {
         subscribed: 0,
         last_id: this._checkpoint,
@@ -470,10 +471,10 @@ export class CorrelateCycle<
       return { subscribed, last_id, marked, scanned: true };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
-    // not, and neither does a scan that a commit or notification armed while
-    // it ran.
+    // not. It settles only the arms it saw, so one that landed mid-scan
+    // keeps the cycle armed.
     this._checkpoint = last_id;
-    this._armed = stopped || found === query.limit || this._arms !== arms;
+    if (!stopped && found !== query.limit) this._settled = arms;
     return { subscribed: 0, last_id, marked: 0, scanned: true };
   }
 

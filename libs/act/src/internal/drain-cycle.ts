@@ -407,9 +407,12 @@ export class DrainController<
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,
 > {
-  private _armed = false;
-  /** Counts arms, so an empty claim that one landed during doesn't disarm over it. */
+  /**
+   * Armed while `_arms` is ahead of `_settled` (the count the last empty
+   * claim saw), so a claim never disarms over an arm that landed during it.
+   */
   private _arms = 0;
+  private _settled = 0;
   private _ratio = 0.5;
   /**
    * Local wake at the earliest parked (backoff or defer) visit, or at the
@@ -438,7 +441,6 @@ export class DrainController<
   }
 
   arm(): void {
-    this._armed = true;
     this._arms++;
   }
 
@@ -449,7 +451,7 @@ export class DrainController<
   }
 
   get armed(): boolean {
-    return this._armed;
+    return this._arms !== this._settled;
   }
 
   get inflight(): Promise<void> | undefined {
@@ -471,7 +473,7 @@ export class DrainController<
     // `drain()` never throws.
     const run = this._deps.run_scoped;
     const tick = async () => {
-      if (this._armed) await run(() => this.drain());
+      if (this.armed) await run(() => this.drain());
       if (this._stopped) return;
       this._worker = setTimeout(tick, cycleMs);
       this._worker.unref();
@@ -493,7 +495,7 @@ export class DrainController<
     // A stopped controller claims nothing, so a pass shutdown's grace
     // outlived can't start work after teardown.
     // One pass at a time: a call while one runs claims nothing.
-    if (!this._armed || this._stopped || this._inflight)
+    if (!this.armed || this._stopped || this._inflight)
       return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
@@ -531,9 +533,9 @@ export class DrainController<
         // Caught up: whatever was due when this pass started has no work.
         this._defer.prune(started);
         this._deps.breaker.passed();
-        // An arm that landed during the claim (an unblock, a reset) brought
-        // work this claim couldn't see: stay armed for the next pass.
-        if (this._arms === arms) this._armed = false;
+        // Settles only the arms it saw: one that landed during the claim
+        // (an unblock, a reset) brought work this claim couldn't see.
+        this._settled = arms;
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
