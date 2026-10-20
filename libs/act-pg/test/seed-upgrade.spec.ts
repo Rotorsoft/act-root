@@ -113,11 +113,11 @@ describe("PostgresStore seed-sync contract", () => {
     for (const c of ["priority", "lane", "deferred_at"])
       expect(stream_cols).toContain(c);
 
-    // #1190: the legacy `smallint` retry column is widened to `int` so a
+    // The legacy `smallint` retry column is widened to `int` so a
     // poison stream's ever-climbing retry counter never overflows.
     expect(await column_type(`${TABLE}_streams`, "retry")).toBe("integer");
 
-    // #1420: the legacy `varchar(100)` identifier columns are widened to
+    // The legacy `varchar(100)` identifier columns are widened to
     // `text`. The framework DERIVES identifiers from stream names — an
     // `.autocloses` target is `"__autoclose__:" + stream` — so the cap broke
     // framework-generated names, not just user input.
@@ -168,7 +168,7 @@ describe("PostgresStore seed-sync contract", () => {
     ]);
   });
 
-  // #1421 — the advisory lock was keyed `schema.table`, but the statement it
+  // The advisory lock was keyed `schema.table`, but the statement it
   // guards is schema-wide. Stores sharing a schema with DIFFERENT table names
   // hashed to different keys, so their CREATE SCHEMA calls raced the catalog
   // and all but one failed. The existing case below shares a table, which is

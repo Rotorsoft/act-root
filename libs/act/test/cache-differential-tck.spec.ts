@@ -28,7 +28,7 @@ class MapCache implements Cache {
   }
 }
 
-// Cache differential (#1057): drive randomized set/invalidate/clear
+// Cache differential: drive randomized set/invalidate/clear
 // workloads against the LRU-backed InMemoryCache and a plain Map reference,
 // comparing observable get() after every op. This invocation exercises the
 // seed/streams/runs defaults.

@@ -5,7 +5,7 @@ import { rm_tmp_dbs, tmp_db_url } from "./tmp-db.js";
 const DB_URL = tmp_db_url();
 
 /**
- * Migrating the correlate checkpoint to its keyed shape (#1532).
+ * Migrating the correlate checkpoint to its keyed shape.
  *
  * SQLite cannot drop a primary key, so the old single-row table is rebuilt
  * rather than altered. The checkpoint has to survive that: losing it would
@@ -20,7 +20,7 @@ describe("correlated table migration", () => {
     await store.drop();
     await store.seed();
 
-    // Put the old shape back, exactly as an install predating #1532 has it.
+    // Put the old shape back, exactly as an install predating the keyed checkpoint has it.
     const client = (store as unknown as { client: SqliteStore["client"] })
       .client;
     await client.execute("DROP TABLE correlated");

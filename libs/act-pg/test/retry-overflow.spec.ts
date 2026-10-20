@@ -2,14 +2,14 @@ import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
 
 /**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * Correlate's job, done by hand: `claim` follows the work mark,
  * so a test that commits events has to say which of them resolve where.
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
 
 /**
- * #1190: `streams.retry` was `smallint` (max 32767). `claim()` does
+ * `streams.retry` was `smallint` (max 32767). `claim()` does
  * `retry = retry + 1` on every acquisition, and a persistently failing
  * `blockOnError: false` stream is re-claimed forever — so a zero-progress
  * poison stream marches its retry counter toward the smallint ceiling.

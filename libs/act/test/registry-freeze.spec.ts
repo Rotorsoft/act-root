@@ -55,7 +55,7 @@ describe("registry freeze", () => {
    * the containing object does not seal — so `withProjection` quietly mutated
    * an already-classified registry, injecting a reaction that could never run
    * and had never been wrapped with the handler reader that strips
-   * `sensitive()` keys (#1710). The latch closes registration at the API.
+   * `sensitive()` keys. The latch closes registration at the API.
    */
   describe("registration is closed after build", () => {
     const proj = projection("late")

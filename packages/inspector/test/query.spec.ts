@@ -1,5 +1,5 @@
 /**
- * `query`, `stats`, `eventNames`, `backup` (ACT-1131).
+ * `query`, `stats`, `eventNames`, `backup`.
  *
  * Shared fixture: three streams with a mix of event names + one row
  * carrying CSV-hostile characters (commas, quotes, newlines) so the

@@ -1,5 +1,5 @@
 /**
- * An Act's ports are its own, scoped or not (#1597).
+ * An Act's ports are its own, scoped or not.
  *
  * A scoped Act resolves `store()`/`cache()` from an ambient frame. An Act
  * built without `ActOptions.scoped` used to run in whatever frame it was

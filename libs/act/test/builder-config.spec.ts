@@ -23,7 +23,7 @@ const S_cfg = state({ Cfg: z.object({ n: z.number() }) })
 // The single config module (`internal/config.ts`) owns validation for every
 // builder-facing bag. These pin the resolvers directly (unit) and at their
 // declaration/runtime sites (throw), with the `maxRetries` NaN holes — the
-// sibling of the backoff bug — as the headline regressions (#1269).
+// sibling of the backoff bug — as the headline regressions.
 
 describe("resolveReactionConfig", () => {
   it("accepts a valid bag", () => {
@@ -93,7 +93,7 @@ describe("resolveLaneConfig", () => {
    * Both declaration paths must validate, not just `act()`. The slice path
    * used to register the bag raw, and a lane carrying a bad streamLimit
    * drained nothing for the life of the process — silently, with nothing in
-   * `blocked_streams()` to find it by (#1703).
+   * `blocked_streams()` to find it by.
    */
   describe("both declaration paths validate", () => {
     const S = state({ Box: z.object({ n: z.number() }) })
@@ -161,7 +161,7 @@ describe("resolveDrainConfig / resolveSettleConfig", () => {
   /**
    * `Infinity` is what both public doc-comments name as `maxPasses`'s default,
    * and what `settle.ts` destructures to — so the one value the docs advertise
-   * was the one value the schema refused (#1711). Reached by wrapper code
+   * was the one value the schema refused. Reached by wrapper code
    * normalizing an optional cap: `settle({ maxPasses: opts.maxPasses ?? Infinity })`.
    */
   it("accepts maxPasses: Infinity, the documented default", () => {

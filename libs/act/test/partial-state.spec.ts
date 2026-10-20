@@ -15,7 +15,7 @@ describe("partial-state", () => {
     label: z.string(),
   });
 
-  // Cross-slice event schemas are reference-identity checked (ACT-401).
+  // Cross-slice event schemas are reference-identity checked.
   // Hoist any event schema shared between partials to a single instance.
   const Incremented = z.object({ by: z.number() });
 
@@ -592,7 +592,7 @@ describe("partial-state", () => {
 /**
  * `merge_into_existing` spreads `existing` and then re-lists the fields it
  * merges, so anything missing from that list silently kept the FIRST
- * partial's value and discarded the incoming one (#1645). These cover the
+ * partial's value and discarded the incoming one. These cover the
  * fields that were missing: per-action `options`, and the single-declaration
  * policies `disclose` / `autoclose` (+ its day fields) / `archive`.
  */

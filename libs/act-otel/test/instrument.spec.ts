@@ -230,8 +230,8 @@ describe("instrument", () => {
   /**
    * `max(act_streams_blocked) > 0` is a documented page. Publishing `0` when
    * the read failed resolved that page during the very store incident that
-   * broke the read, telling the operator the poison messages had cleared
-   * (#1702). The gauge holds its last good sample instead.
+   * broke the read, telling the operator the poison messages had cleared.
+   * The gauge holds its last good sample instead.
    */
   test("a degraded read keeps the gauge's last value instead of publishing 0", async ({
     app,
@@ -306,7 +306,7 @@ describe("instrument", () => {
     await dispose2();
   });
 
-  // ACT-1313 — the streams_blocked gauge is shared/idempotent across
+  // The streams_blocked gauge is shared/idempotent across
   // bridges on one registry, so its single collect() must sum every live
   // app, not just the first one instrumented.
   test("streams_blocked gauge sums blocked streams across every app on a shared registry", async ({

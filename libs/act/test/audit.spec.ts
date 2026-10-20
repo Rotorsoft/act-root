@@ -12,14 +12,14 @@ import {
 import type { AuditFinding, Store } from "../src/types/index.js";
 
 /**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * Correlate's job, done by hand: `claim` follows the work mark,
  * so a test that commits events has to say which of them resolve where.
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
  */
 
 /**
- * #723 / ACT-708.5 — `app.audit()` smoke tests for slice 1.
+ * `app.audit()` smoke tests for the first slice.
  *
  * Covers the two categories shipped in slice 1:
  *   - `schema` — known/unknown event names + Zod validation
@@ -289,7 +289,7 @@ describe("audit", () => {
       });
     });
 
-    // ACT-1310 — deprecation is classified per-state, never over the
+    // Deprecation is classified per-state, never over the
     // global event-name union. Two unrelated aggregates whose sole events
     // share a `_v<n>` stem must not cross-contaminate the classifier.
     const aStar = state({ AStar: z.object({ n: z.number() }) })
@@ -1198,8 +1198,8 @@ describe("audit", () => {
 
     it("routing-health ignores framework-marker event names in the unrouted scan", async () => {
       // Framework markers must never be flagged as unrouted. __snapshot__
-      // is excluded from the shared stat scan outright (#1374, so heads
-      // stay domain-level); __tombstone__ still reaches the names map and
+      // is excluded from the shared stat scan outright (so heads stay
+      // domain-level); __tombstone__ still reaches the names map and
       // is filtered by the marker guard.
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
@@ -1318,7 +1318,7 @@ describe("audit", () => {
   // never produces a `__snapshot__`. Going through `app.do` does — and the
   // snapshot lands at a higher id than the domain event that triggered it,
   // so it becomes the stream head. The shared stat scan has to exclude it
-  // or every head-gated pass skips the stream (#1374).
+  // or every head-gated pass skips the stream.
   describe("domain head resolution with snapshots present", () => {
     const snapped = state({ Snapped: z.object({ steps: z.number() }) })
       .init(() => ({ steps: 0 }))
@@ -1392,7 +1392,7 @@ describe("audit", () => {
     });
   });
 
-  // #1424 — `sensitive()` keys are split out of `data` into the pii sidecar
+  // `sensitive()` keys are split out of `data` into the pii sidecar
   // at commit. The schema pass reads raw stored rows, so parsing against the
   // full declared schema reported EVERY healthy sensitive event as
   // `schema_validation_failed` — one false positive per event, which buries
@@ -1437,7 +1437,7 @@ describe("audit", () => {
     });
 
     it("skips a union event whose variants carry pii rather than false-flagging", async () => {
-      // Since #1417 a union's variants can declare sensitive fields, but a
+      // A union's variants can declare sensitive fields, but a
       // union has no `.omit()` — the split keys can't be masked off, so any
       // parse here would be a guaranteed false positive.
       const contacted = z.discriminatedUnion("kind", [
@@ -1482,7 +1482,7 @@ describe("audit", () => {
 });
 
 /**
- * One row the store refuses to hand back used to end the whole audit (#1675).
+ * One row the store refuses to hand back used to end the whole audit.
  *
  * The engine locates the row itself: when the scan trips it re-reads the one
  * row with `with_pii: false`, which cannot fail on the same cause and returns

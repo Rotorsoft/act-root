@@ -283,9 +283,9 @@ describe("applyPatchMessage", () => {
   });
 
   // Three bugs have come out of the `_overlay` marker interacting with the
-  // version gate: #1312 (same-version overlay dropped for caught-up
-  // clients), #1346 (genesis version-0 treated as stale), #1419 (overlay at
-  // cachedV + 1 folded as that version's domain patch). They are corners of
+  // version gate: a same-version overlay dropped for caught-up clients, the
+  // genesis version 0 treated as stale, and an overlay at cachedV + 1 folded
+  // as that version's domain patch. They are corners of
   // one state space, so pin the whole matrix rather than a case per bug.
   describe("frame kind × version position", () => {
     const cached = { _v: 4, name: "n", count: 1 } as TestState;

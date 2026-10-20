@@ -1,11 +1,11 @@
 /**
- * Transfer functional paths that write to a `current` target (ACT-1128),
+ * Transfer functional paths that write to a `current` target,
  * relocated here from connection.spec.ts because the write-mode gate
- * (#1194) now refuses these unless ACT_INSPECTOR_WRITE=1. `vi.hoisted`
+ * now refuses these unless ACT_INSPECTOR_WRITE=1. `vi.hoisted`
  * sets the env before the router module reads it at import time.
  *
  * SQLite `connect` file paths use a temp dir under cwd so the path
- * guard (#1194) — which only applies to `transfer` file slots, not the
+ * guard — which only applies to `transfer` file slots, not the
  * connect file — is a non-issue and setup stays self-contained.
  */
 import { mkdtemp, rm } from "node:fs/promises";

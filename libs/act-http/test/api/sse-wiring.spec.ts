@@ -32,7 +32,7 @@ describe("resolveSseConfig", () => {
     expect(cfg.heartbeatMs).toBe(60_000);
   });
 
-  // #1474 — `maxPendingPerConnection` had no test at all, while its two
+  // `maxPendingPerConnection` had no test at all, while its two
   // siblings had nine between them. Neutering the whole Zod field left the
   // suite green, and a `NaN` there makes `pending.length >= NaN` always
   // false: the backlog silently becomes unbounded again, which is the OOM
@@ -72,7 +72,7 @@ describe("resolveSseConfig", () => {
   });
 
   // The docs promised `RangeError`; the code throws `ZodError`, which is the
-  // framework-wide convention. Pinned so the two cannot drift again (#1474).
+  // framework-wide convention. Pinned so the two cannot drift again.
   it("throws ZodError, the documented type, for every out-of-range knob", () => {
     expect(() => resolveSseConfig({ channel, maxConnections: 0 })).toThrow(
       ZodError
@@ -347,7 +347,7 @@ describe("runSseSubscription", () => {
 });
 
 /**
- * #1649 — the per-connection backlog dropped the oldest frame unconditionally,
+ * The per-connection backlog dropped the oldest frame unconditionally,
  * and its doc-comment justified that with "each frame is a full version-keyed
  * patch, so the consumer converges regardless of skips." That is false for
  * `_overlay` and `_resync`: they carry no versions, so a dropped one leaves no

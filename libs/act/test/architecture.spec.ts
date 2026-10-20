@@ -5,7 +5,7 @@ import { join } from "node:path";
  * Architecture harness — layering rules that must fail a build rather than
  * rely on anyone remembering them.
  *
- * Every rule here exists because it was broken. #1541 put an
+ * Every rule here exists because it was broken. One change put an
  * `AsyncLocalStorage` in `internal/`, then a follow-up "fixed" it by moving
  * the declaration one directory over while `internal/` kept importing and
  * reading it — a relocation is not a decoupling, and nothing executable
@@ -59,7 +59,7 @@ describe("architecture: internal/ is stateless", () => {
 
   it("never imports a VALUE from scoped.ts — only types", () => {
     // A type import is erased at runtime and creates no dependency on ambient
-    // state; a value import is exactly the coupling #1541 introduced.
+    // state; a value import is exactly the coupling that once slipped in.
     const offenders = internal_sources
       .filter(({ text }) =>
         /^import\s+(?!type\b)[^;]*from\s+"\.\.\/scoped\.js"/m.test(
@@ -192,7 +192,7 @@ describe("architecture: PII stays inside the modules that own it", () => {
     // `event-builder.ts` composes them into readers at build. A third module
     // reaching for `pii_split` / `pii_strip` / `pii_gate` / `make_gate` means
     // the composition has leaked back out to a caller — which is how it was
-    // spread across act-builder before (#1556).
+    // spread across act-builder before.
     const offenders = ts_files(SRC)
       .filter((p) => p !== SENSITIVE && p !== OWNER)
       .map((path) => ({

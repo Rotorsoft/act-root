@@ -83,7 +83,7 @@ describe("tracing — plain (production) mode", () => {
     expect(traceSpy).toHaveBeenCalledWith(">> correlated fresh-plain");
 
     // Plain-mode cycle trace: lane appended without ANSI when the batch
-    // is in a non-default lane (ACT-1103). Driven via `trace_cycle`
+    // is in a non-default lane. Driven via `trace_cycle`
     // directly so the test stays self-contained (DrainController is the
     // runtime caller, but it's overkill to wire up here).
     const { trace_cycle } = await import("../src/internal/tracing.js");

@@ -95,7 +95,7 @@ describe("pii_fields()", () => {
     expect(pii_fields(schema)).toEqual([]);
   });
 
-  // The def-level marker (#1417) is what survives Zod's clone-on-refinement.
+  // The def-level marker is what survives Zod's clone-on-refinement.
   // If Zod ever moves `_zod.def`, marking degrades gracefully rather than
   // throwing — the instance registry still covers the unchained case.
   it("degrades gracefully when a schema exposes no _zod.def", () => {

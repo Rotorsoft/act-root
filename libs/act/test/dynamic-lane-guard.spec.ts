@@ -3,16 +3,16 @@ import { act, log, type Query, state, ZodEmpty } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
- * The lane guards are the third and fourth members of the #1563 family: a
+ * The lane guards are build-time guards like the others: a
  * build-time check that only ever sees a static `.to({lane})`, because a
- * `.to(fn)` lane is a function until an event arrives (#1564, #1567).
+ * `.to(fn)` lane is a function until an event arrives.
  *
  * Correlate resolves the lane, so correlate is where the same rules apply.
  * Log and continue, never throw — a throw inside correlate pins the
- * checkpoint for the whole app (#1420).
+ * checkpoint for the whole app.
  *
  * On lane *names*, `TLanes` already rejects an undeclared lane at compile
- * time for the static and dynamic forms alike, so #1564 is a backstop for
+ * time for the static and dynamic forms alike, so this guard is a backstop for
  * callers who bypass the types: JavaScript consumers, a cast, or a helper
  * whose return type widens `lane` to `string`. The casts below are how a
  * test reaches that path deliberately — they are not the ordinary shape.
@@ -162,7 +162,7 @@ describe("two dynamic resolutions disagreeing on a target's lane", () => {
 });
 
 /**
- * The dedup key has to name the *declaration*, never the occurrence (#1584).
+ * The dedup key has to name the *declaration*, never the occurrence.
  *
  * The documented per-aggregate reaction shape is `.to(e => ({target:
  * e.stream}))`, which mints one target per aggregate. A key carrying that
@@ -357,9 +357,9 @@ describe("reporting once per declaration, not once per aggregate", () => {
 });
 
 /**
- * An omitted lane *is* `"default"` (#1598).
+ * An omitted lane *is* `"default"`.
  *
- * That is what #1583 settled on the static side, where the build-time guard
+ * The static side already works this way: the build-time guard
  * normalizes both operands before comparing, so `.to({target})` and
  * `.to({target, lane: "slow"})` are rejected as the disagreement they are.
  * The dynamic reporter compared the raw resolutions, so the one shape the

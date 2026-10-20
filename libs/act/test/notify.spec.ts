@@ -211,7 +211,7 @@ describe("Act ↔ Store.notify auto-wiring", () => {
   });
 });
 
-// #1437 — listener containment moved into `Act.emit`, so the try/catch
+// Listener containment moved into `Act.emit`, so the try/catch
 // around the notify handler no longer guards the `notified` emit. It still
 // guards the BOOKKEEPING that follows it (`_arm_for_event_names`,
 // `_settle.schedule`), and that is the part worth pinning: a malformed

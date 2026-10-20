@@ -232,7 +232,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
 });
 
 /**
- * ACT-1309 — SettleLoop must keep paginating while correlate advances its
+ * SettleLoop must keep paginating while correlate advances its
  * checkpoint, even when a window subscribes/drains nothing.
  *
  * The loop used to derive progress solely from subscribe/ack/block counts,
@@ -288,8 +288,8 @@ describe("settle loop paginates past inert windows", () => {
 });
 
 /**
- * #1329 — a settle pass records a circuit-breaker `passed()` only when
- * correlate really probed the store. It always does since #1487: correlate
+ * A settle pass records a circuit-breaker `passed()` only when
+ * correlate really probed the store. It always does: correlate
  * scans for every app, so the pass that used to be a no-op early-return on a
  * static-reaction app (whose fictitious success re-closed an OPEN breaker
  * mid-outage and let the drain hammer the down store) is now a real store
@@ -355,10 +355,10 @@ describe("settle breaker success rides a real correlate probe", () => {
   });
 
   it("leaves the breaker OPEN when correlate was disarmed and read nothing", async () => {
-    // #1510: a disarmed pass returns without touching the store, so it is not
+    // A disarmed pass returns without touching the store, so it is not
     // evidence the store is healthy. Recording it would re-close an OPEN
     // breaker mid-outage and let the drain hammer a store nobody has heard
-    // from — the #1329 bug, reachable again now that correlate can skip.
+    // from, a bug that is reachable again now that correlate can skip.
     const breaker = open_breaker();
     await run_pass(breaker, async () => ({
       subscribed: 0,
@@ -438,7 +438,7 @@ describe("settled payload", () => {
   });
 });
 
-// #1436 — `on_settled` sat inside the IIFE whose `.catch` records
+// `on_settled` sat inside the IIFE whose `.catch` records
 // `breaker.failed()`, and every other statement in that block IS a store op
 // (`init`, `correlate`, `drain` — and `drain` never throws, it catches
 // internally). So a throwing observability listener was indistinguishable

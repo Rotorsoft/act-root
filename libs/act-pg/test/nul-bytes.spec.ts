@@ -4,7 +4,7 @@ import { PostgresStore } from "../src/index.js";
 import { schema } from "./schema.js";
 
 /**
- * #1422 — a NUL byte is legal JSON and a legal JS string, so it passes Zod
+ * A NUL byte is legal JSON and a legal JS string, so it passes Zod
  * and reaches the store. InMemory and SQLite (TEXT) round-trip it; only
  * Postgres refuses, and from two different places — the jsonb parser for
  * `data` / `meta` / `pii`, and the UTF-8 decoder for the text columns.

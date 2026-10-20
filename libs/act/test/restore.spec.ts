@@ -16,7 +16,7 @@ import { sandbox } from "../src/test/index.js";
 import { Calculator } from "./calculator.js";
 
 /**
- * Internal scan helper + orchestrator `Act.restore` (ACT-1125).
+ * Internal scan helper + orchestrator `Act.restore`.
  * Validates each event inline (negative version, malformed `created`)
  * and throws on the first blocker; adapters take the driver and own
  * the transaction wrap.
@@ -37,13 +37,12 @@ const baseEvent = (overrides: Partial<E> = {}): E =>
 
 /**
  * Adapt an event array into the {@link EventSource} contract — the
- * shape `scan` and `Act.restore` consume after the ACT-1128 source
- * abstraction. `await Promise.resolve(callback(e))` mirrors the
- * adapter pattern so async-callback backpressure is exercised even
+ * shape `scan` and `Act.restore` consume.
+ * `await Promise.resolve(callback(e))` mirrors the adapter pattern so async-callback backpressure is exercised even
  * from this synthetic source.
  *
- * Honors `after`/`limit` filters because `scan` paginates
- * (ACT-1133) — it asks for events with `id > after` up to `limit`.
+ * Honors `after`/`limit` filters because `scan` paginates:
+ * it asks for events with `id > after` up to `limit`.
  * Sources that ignore the filter (CsvFile-style) get tested
  * separately in `csv.spec.ts`.
  */

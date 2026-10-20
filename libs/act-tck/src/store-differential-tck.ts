@@ -44,19 +44,19 @@ export type DifferentialStore = {
  */
 export type DifferentialSkips = {
   /**
-   * #1197 — SQLite `LIKE` is ASCII-case-insensitive, so a **mixed-case
+   * SQLite `LIKE` is ASCII-case-insensitive, so a **mixed-case
    * regex pattern** filter overmatches vs PG (`~`) / InMemory (`RegExp`),
    * which are case-sensitive. Skips only the pattern-driven mixed-case
    * assertions; exact-match (`stream_exact`) mixed-case still runs, since
-   * that path is case-exact on every adapter. Un-gate when #1197 lands.
+   * that path is case-exact on every adapter. No in-tree adapter sets it.
    */
   readonly caseInsensitivePatterns?: boolean;
   /**
-   * #1199 — `names: []` and falsy-zero `before`/`after: 0` guards differ
-   * across adapters (`names: []` → PG returns all, InMemory/SQLite return
-   * none; `before: 0` / `after: 0` are dropped by some adapters' truthy
-   * guards). Skips only those specific edge-input query assertions.
-   * Un-gate when #1199 lands.
+   * Skips the edge-input query assertions: `names: []` and the falsy-zero
+   * `before: 0` / `after: 0` bounds. The in-tree adapters agree on the
+   * guards, but `after: 0` is an absolute id bound and stores number events
+   * from different origins (InMemory from 0, Postgres from 1), so the
+   * Postgres differential still sets it.
    */
   readonly queryEdgeInputs?: boolean;
 };
@@ -262,7 +262,7 @@ type Plan = {
  * replayable.
  *
  * Stream names carry **mixed case** so a case-sensitivity divergence in a
- * pattern filter surfaces as a diff (the whole point of #1197's coverage).
+ * pattern filter surfaces as a diff (the whole point of this coverage).
  *
  * Two invariants are pinned regardless of seed so the comparison stays
  * well-defined across adapters:
@@ -285,7 +285,7 @@ const build_plan = (
   const tag = uid();
   // Mixed-case prefixes: an upper-cased segment lands inside every stream
   // and subscription name, so a case-insensitive pattern filter (SQLite
-  // LIKE, #1197) overmatches and diverges from the case-sensitive
+  // LIKE once did) overmatches and diverges from the case-sensitive
   // reference. A lower-only corpus can never surface that class of bug.
   const event_prefix = `Diff-${tag}-Evt-`;
   const sub_prefix = `Diff-${tag}-Sub-`;
@@ -418,7 +418,7 @@ const build_plan = (
   // Query-option matrix compared under a global forward/backward scan.
   // Each case exercises a distinct filter dimension; the normalized event
   // list must match across adapters. Edge-input cases (`names: []`,
-  // falsy-zero bounds) are gated behind #1199 until the guards converge.
+  // falsy-zero bounds) are gated behind `queryEdgeInputs`.
   const query_cases: QueryCase[] = [
     {
       label: "names filter (single event name)",
@@ -444,7 +444,7 @@ const build_plan = (
     // gated falsy-zero cases below compare only the *guard* behavior
     // (filter applied → subset, vs filter dropped → all), which stays a
     // well-defined divergence regardless of the concrete id values.
-    // #1199 edge inputs — opposite semantics across adapters today.
+    // Edge inputs, gated behind `queryEdgeInputs`.
     {
       label: "empty names filter",
       query: { stream: `^${event_prefix}`, names: [] as string[] },
@@ -607,8 +607,8 @@ const apply_plan = async (
 };
 
 /**
- * Cross-adapter differential contract (#1030, fuzz workloads #1057,
- * lease/truncate/pii/query fuzz #1200).
+ * Cross-adapter differential contract: seeded fuzz workloads over commits,
+ * leases, truncates, pii and queries.
  *
  * Adapters can drift in ways per-adapter cases don't catch — event
  * ordering, the `with_snaps` snapshot floor, the exact shape of
@@ -633,7 +633,7 @@ const apply_plan = async (
  * everything that defines correctness (stream, version, name, data,
  * emission order, and the durable subscription state a lease op leaves
  * behind: watermark, retry, blocked, error, priority, lane). Stream names
- * carry mixed case so a case-insensitive pattern filter (#1197) surfaces as
+ * carry mixed case so a case-insensitive pattern filter surfaces as
  * a diff.
  *
  * Wire it with the in-memory store as the reference and one or more
@@ -758,9 +758,9 @@ export const runStoreDifferentialTck = (
           });
         });
 
-        // Query-option matrix (#1200): each filter dimension must select
+        // Query-option matrix: each filter dimension must select
         // the same normalized events on every adapter. Gated edge-input
-        // cases (#1199) are skipped while the matching flag is on.
+        // cases are skipped while the matching flag is on.
         plan.query_cases.forEach((qc) => {
           const gated = qc.gated && skip[qc.gated];
           it.skipIf(gated)(
@@ -852,13 +852,13 @@ export const runStoreDifferentialTck = (
           });
         });
 
-        // Case-sensitivity of the pattern filter (#1197): the subscription
+        // Case-sensitivity of the pattern filter: the subscription
         // streams are mixed-case (`Diff-…-Sub-S{i}`); filtering with the
         // **lower-cased** form of the same pattern must select the *same*
         // set on every adapter. On case-sensitive engines (PG `~`, InMemory
         // `RegExp`) that set is empty — the case doesn't match. SQLite's
         // ASCII-case-insensitive `LIKE` overmatches and returns the whole
-        // family, so the differential goes red until #1197 flips it to a
+        // family, so the differential goes red on an adapter without a
         // case-sensitive matcher. Gated behind `caseInsensitivePatterns`.
         it.skipIf(skip.caseInsensitivePatterns)(
           "matches case-sensitively under a lower-cased pattern filter",
@@ -885,7 +885,7 @@ export const runStoreDifferentialTck = (
                 // overmatched to the full family on SQLite's LIKE. Both
                 // ride in the compared payload so the control proves the
                 // corpus is matchable while the discriminator surfaces
-                // #1197.
+                // a case-insensitive matcher.
                 const matched = await collect_streams(`^${plan.sub_prefix}S`);
                 const lowered = await collect_streams(
                   `^${plan.sub_prefix.toLowerCase()}s`
@@ -912,7 +912,7 @@ export const runStoreDifferentialTck = (
           });
         });
 
-        // forget_pii erasure (#1200): wipe PII on the seeded stream and
+        // forget_pii erasure: wipe PII on the seeded stream and
         // assert every adapter reports the same erased-count and that the
         // reload shows PII gone identically. Only runs when the adapters
         // implement the optional surface.

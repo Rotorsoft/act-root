@@ -3,7 +3,7 @@ import { act, cache, dispose, state, store } from "../src/index.js";
 import { sleep } from "../src/utils.js";
 
 /**
- * Intra-event ack integrity (#1179): one event fans out to one payload
+ * Intra-event ack integrity: one event fans out to one payload
  * per matching reaction, and the watermark may only advance past the
  * event once EVERY reaction on it has run. A mid-group failure must
  * hold the watermark (redelivering the whole group, at-least-once) and

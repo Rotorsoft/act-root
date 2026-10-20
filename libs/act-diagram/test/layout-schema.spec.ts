@@ -3,7 +3,7 @@ import { compute_layout } from "../src/client/lib/layout.js";
 import type { DomainModel } from "../src/client/types/domain-model.js";
 
 /**
- * Coverage for the event_schemas plumbing added in ACT-402: layout must
+ * Coverage for the event_schemas plumbing: layout must
  * forward each event node's captured Zod text so the diagram tooltip
  * surface can render it.
  */

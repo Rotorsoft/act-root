@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { Calculator, DIGITS } from "../src/index.js";
 
-// ACT-1220: the calculator's shipped board reaction sources from a static
+// The calculator's shipped board reaction sources from a static
 // regex — `source: "^(A|B)$"` — so a single projection stream ("Board")
-// consumes DigitPressed from every per-calculator stream. #1215's
-// exact-only claim contract meant `_max_event_id_by_stream.get("^(A|B)$")`
+// consumes DigitPressed from every per-calculator stream. An exact-only
+// claim contract meant `_max_event_id_by_stream.get("^(A|B)$")`
 // was always undefined, so the Board projection was never claimed and
 // silently stopped counting. This end-to-end test drives the real shape:
 // press digits on two source streams, settle, and assert the projection
@@ -77,7 +77,7 @@ describe("calculator board projection (regex claim source)", () => {
     await pump();
 
     // Second wave: press "2" on B. B is matched only by the regex source
-    // `^(A|B)$`. Post-#1215 exact-only claim, the Board reaction's source
+    // `^(A|B)$`. Under an exact-only claim, the Board reaction's source
     // never equals a real stream name, so this event is never claimed and
     // the Board silently stops counting — the shipped-demo regression.
     await app.do("PressKey", { stream: "B", actor }, { key: "2" });

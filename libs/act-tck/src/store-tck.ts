@@ -64,17 +64,17 @@ export type StoreCapabilities = {
   readonly restore?: boolean;
   /**
    * Adapter honours `subscribe`'s optional `correlator` argument and answers
-   * `correlating` (#1532). When `true`, the TCK runs the correlation-lease
+   * `correlating`. When `true`, the TCK runs the correlation-lease
    * suite — exclusive acquisition, renewal by the same holder, re-acquisition
    * after expiry, per-key independence, and the keyed checkpoint.
    *
    * Optional because a store that ignores the argument simply lets every
-   * worker scan, which is the pre-#1532 behaviour and remains correct: the
+   * worker scan, which is how every worker scanned before keyed checkpoints, and remains correct: the
    * marks are idempotent, so the duplication is waste rather than error.
    */
   readonly lease_correlation?: boolean;
   /**
-   * Adapter supports sensitive-data isolation (#566): accepts the
+   * Adapter supports sensitive-data isolation: accepts the
    * optional `pii` field on commit messages, returns it on load
    * outputs, and implements {@link Store.forget_pii}. When `true`,
    * the TCK runs the PII isolation suite — commit-with-pii
@@ -123,8 +123,8 @@ export type StoreCapabilities = {
    */
   readonly rejects_nonportable_claim_source?: boolean;
   /**
-   * Adapter honors the {@link SubscribeInput.correlated_at} **work mark**
-   * (#1485): `subscribe` applies it as `GREATEST(correlated_at, N)` and
+   * Adapter honors the {@link SubscribeInput.correlated_at} **work mark**:
+   * `subscribe` applies it as `GREATEST(correlated_at, N)` and
    * `claim` serves a marked stream from the subscription row alone
    * (`at < correlated_at`) instead of probing the event log. When `true`,
    * the TCK runs the work-set suite — mark-then-claim, monotonicity
@@ -133,7 +133,7 @@ export type StoreCapabilities = {
    * surfaces (`reset`, `unblock`, `defer`, `prioritize`) leaving the mark
    * intact.
    *
-   * @deprecated Ignored since #1488 — the mark is the only eligibility
+   * @deprecated Ignored: the mark is the only eligibility
    * rule, so this suite always runs. The field is kept so an adapter that
    * still passes `work_set: true` keeps compiling.
    */
@@ -170,7 +170,7 @@ export type StoreTckOptions = {
    *    second commit that advances the version.
    * 3. ~~Construction succeeds, `commit` reports success, and the data
    *    is not there.~~ This is the shape the suite exists to catch
-   *    (#1443: a zero-config SQLite store defaulted to a per-connection
+   *    (a zero-config SQLite store once defaulted to a per-connection
    *    private in-memory database, so `seed`'s DDL landed where later
    *    statements could not see it — every write was accepted and lost).
    *
@@ -242,7 +242,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     const is_literal = (source: string) => !/[\]^$.*+?()[{}|\\]/.test(source);
 
     // Stand in for `correlate`, which a store test has no orchestrator to
-    // run. `claim` follows marks since #1488 — committing an event is not
+    // run. `claim` follows marks — committing an event is not
     // enough to make a stream claimable — so a test that expects work to be
     // claimed has to mark it, and mark it *honestly*: the highest event id
     // inside the subscription's own fetch window, which is what correlate
@@ -269,8 +269,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       );
       // Carry the row's own priority and lane back with the mark, the way
       // correlate does: the mark rides `subscribe`, and a subscribe that
-      // outranks the row writes its lane — the trap #1487 hit in the
-      // orchestrator.
+      // outranks the row writes its lane — a trap the orchestrator
+      // once fell into.
       const marks: SubscribeInput[] = [];
       for (const row of rows) {
         let mark = -1;
@@ -304,7 +304,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     // The one suite that does not use the shared `store`: it exercises
-    // whatever the adapter's own defaults produce (#1443).
+    // whatever the adapter's own defaults produce.
     const default_factory = options.default_factory;
     if (default_factory) {
       describe("default configuration", () => {
@@ -402,7 +402,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("checks expectedVersion even when committing no events", async () => {
         // An empty commit writes nothing, but a stale expectedVersion is
-        // still a conflict the caller must hear about (#1784).
+        // still a conflict the caller must hear about.
         const s = `commit-empty-cc-${uid()}`;
         await store.commit<CounterEvents>(
           s,
@@ -635,7 +635,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
       });
 
-      // #1199: `names: []` means "match no event names" on every adapter.
+      // `names: []` means "match no event names" on every adapter.
       // An empty allow-list is an explicit "nothing passes" — the opposite
       // of an omitted `names` (which matches all). PG historically dropped
       // the empty filter (returned ALL); this pins the sane semantics.
@@ -657,7 +657,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(all).toHaveLength(2);
       });
 
-      // #1199: falsy-zero `after`/`before` are honored, not dropped by a
+      // Falsy-zero `after`/`before` are honored, not dropped by a
       // truthy guard. `after: 0` means strictly "id > 0"; `before: 0`
       // means strictly "id < 0" (matches nothing). InMemory ids start at
       // 0, so a truthy `if (after)` guard would leak id 0 on the backward
@@ -736,7 +736,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // directions can disagree. A store may hold `created` at a finer
         // resolution than the `Date` it hands back (Postgres keeps
         // microseconds), and then a row compares as strictly-after its own
-        // truncated timestamp and returns itself (#1595). Millisecond is the
+        // truncated timestamp and returns itself. Millisecond is the
         // resolution the contract is expressed in, since that is all a `Date`
         // carries, so both bounds must exclude the event they name.
         const s = `q-ts-self-${uid()}`;
@@ -951,7 +951,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("treats an empty-string stream filter as a regex that matches everything", async () => {
         // An empty regex matches any string, so `{ stream: "" }` is
-        // match-all on every adapter, never a crash (#1781).
+        // match-all on every adapter, never a crash.
         const tag = uid();
         const a = `empty-${tag}-a`;
         const source = `empty-src-${tag}`;
@@ -1060,7 +1060,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         else expect(count).toBe(1);
       });
 
-      // #1197: stream filters are case-SENSITIVE across every adapter.
+      // Stream filters are case-SENSITIVE across every adapter.
       // PG (`~`) and InMemory (RegExp) are case-sensitive; a store that
       // translates to `LIKE` must not let SQLite's ASCII-insensitive LIKE
       // overmatch a differently-cased sibling. A `^order-` prefix must
@@ -1147,7 +1147,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(10);
       });
 
-      // Claim eligibility for a fresh subscription (#1446). The adapters
+      // Claim eligibility for a fresh subscription. The adapters
       // disagreed here — two short-circuited `at < 0` into "claimable",
       // SQLite did not — and the TCK pinned nothing, so a third-party
       // adapter was free to pick either. The contract is that a claim
@@ -1172,7 +1172,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1)],
           make_meta({ stream: src })
         );
-        // Committing is not enough since #1488: `claim` follows marks, and
+        // Committing is not enough: `claim` follows marks, and
         // only `correlate` raises one. This is that call.
         await store.subscribe([{ stream: s, correlated_at: first.id }]);
         await correlate();
@@ -1194,7 +1194,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
 
       // The max rule holds across the whole number line, not just above
-      // zero (#1445). Every case above uses positive priorities, which is
+      // zero. Every case above uses positive priorities, which is
       // precisely why SQLite's `priority > 0` gate around its merge went
       // unnoticed: with positive values the gate is a no-op.
       it("keeps the maximum for negative and zero priorities too", async () => {
@@ -1230,7 +1230,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       // that may *lower* priority. Because `subscribe` is restart-driven and
       // re-runs for every reaction target on every boot, the declared
       // priority must come back — otherwise an operator's temporary
-      // de-prioritization is sticky forever (#1445).
+      // de-prioritization is sticky forever.
       it("restores the declared priority on the next subscribe after a prioritize() downgrade", async () => {
         const s = `sub-pri-restore-${uid()}`;
         const read = async () => {
@@ -1256,7 +1256,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(await read()).toBe(0);
       });
 
-      // The correlate checkpoint (#1484): how far the log has been READ, as
+      // The correlate checkpoint: how far the log has been READ, as
       // opposed to how far a target has been processed (`at`). Read AND
       // written by `subscribe`, which correlate already calls with the
       // targets each scan discovers — so it costs no round trip of its own,
@@ -1362,7 +1362,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           ]);
           expect(await claimable(s)).toBe(true);
           // Lower, equal, and negative all leave the stored mark alone — the
-          // shape the #1445 priority bug was on. Any of them landing would
+          // shape a past priority bug was on. Any of them landing would
           // drop `at = 5` out of the claimable set.
           await store.subscribe([{ stream: s, correlated_at: 4 }]);
           expect(await claimable(s)).toBe(true);
@@ -1440,7 +1440,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         it("never claims an unmarked stream, however much work the log holds", async () => {
           // NULL is not "no work" and no longer "unknown, go and look" — it
           // is "correlate has not spoken for this row", and `claim` has
-          // nothing else to consult since #1488. The events below are real
+          // nothing else to consult. The events below are real
           // work for this subscription; only the mark makes them claimable.
           const s = `ws-unmarked-${uid()}`;
           const src = `ws-unmarked-src-${uid()}`;
@@ -1459,7 +1459,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // Readers other than `claim` need the same distinction it makes:
           // a watermark below an event id says nothing about pending work,
           // the mark does. The close-cycle safety guard is the first caller
-          // to ask (#1487), and an unmarked row must read as UNKNOWN there
+          // to ask, and an unmarked row must read as UNKNOWN there
           // too — `undefined`, never 0.
           const marked = `ws-pos-${uid()}`;
           const unmarked = `ws-pos-none-${uid()}`;
@@ -1502,8 +1502,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { ...(mine as Lease), at: mine!.at + 1 },
         ]);
         // The returned lease reflects the post-ack row, not the caller's
-        // pre-ack echo — `retry` is the authoritative -1 on every adapter
-        // (#1347), and stream/source/lane carry through from the row.
+        // pre-ack echo — `retry` is the authoritative -1 on every adapter,
+        // and stream/source/lane carry through from the row.
         const ackedMine = acked.find((l) => l.stream === s);
         expect(ackedMine).toBeDefined();
         expect(ackedMine!.retry).toBe(-1);
@@ -1540,8 +1540,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(leasedB.find((l) => l.stream === other)).toBeDefined();
       });
 
-      // The two halves of what happens when a holder overruns its lease
-      // (#1418). Both are load-bearing for the drain: the first is why a
+      // The two halves of what happens when a holder overruns its lease.
+      // Both are load-bearing for the drain: the first is why a
       // slow worker's round of work is discarded, the second is why the
       // budget still accrues so a later holder can act on it.
       it("drops the ack of a holder whose lease was taken, and accrues retry per claim", async () => {
@@ -1609,7 +1609,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // never-processed priority-0 stream. The lagging selection orders
         // by priority DESC, at ASC, so without a fairness reserve the four
         // lagging slots are forever taken by the high-priority streams and
-        // the low one starves. The reserve (ACT-1223) carves one slot for
+        // the low one starves. The reserve carves one slot for
         // pure watermark order, so the most-behind stream is claimed within
         // a bounded window regardless of priority.
         const fresh = await options.factory();
@@ -1741,7 +1741,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // ACT-980: the TCK previously asserted only the *shape* of claim()
+    // The TCK previously asserted only the *shape* of claim()
     // results, letting adapters diverge on `Lease.retry` and `Lease.lagging`
     // — the two signals the drain controller reads to time `blockOnError`
     // and to balance frontiers. These cases pin the *semantics* so every
@@ -1850,7 +1850,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
-      // ACT-1183: a lease timeout is not a free pass. Every claim()
+      // A lease timeout is not a free pass. Every claim()
       // increments the stream's retry counter and only ack resets it, so
       // a stream whose workers keep dying marches toward `blockOnError`
       // exactly like one whose handlers keep throwing — repeated worker
@@ -1889,14 +1889,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
     // A subscription's `source` is the window its FETCH reads — a literal
     // stream name matched by equality, or a portable pattern. It is no
-    // longer anything to `claim`, which since #1488 answers eligibility
+    // longer anything to `claim`, which answers eligibility
     // from the row's mark alone and never reads the event log.
     //
     // The matching itself did not disappear, it moved up a layer: correlate
     // applies it when deciding which events may raise a target's mark
-    // (`_in_fetch_window`, #1487), and the cases that used to live here —
-    // exact names never overmatching a sibling prefix (ACT-1182), pattern
-    // sources claiming only on a real match (ACT-1220) — are now in
+    // (`_in_fetch_window`), and the cases that used to live here —
+    // exact names never overmatching a sibling prefix, pattern
+    // sources claiming only on a real match — are now in
     // `libs/act/test/correlate.spec.ts`. What remains here is
     // what the store still owns: the fetch window, source portability, and
     // lease exclusivity.
@@ -1966,14 +1966,14 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // ACT-1220's pattern-source claim cases are gone with the probe (#1488).
+    // The pattern-source claim cases are gone with the probe.
     // A pattern source (one carrying regex metacharacters, like the
     // calculator's `^(A|B)$`) is still matched as a full RegExp — but by
     // correlate, when it decides which events may raise a target's mark,
     // not by `claim`, which no longer reads the event log. The cases now
     // live in `libs/act/test/correlate.spec.ts`.
 
-    // ACT-1220: adapters that cannot faithfully run an arbitrary regex in
+    // Adapters that cannot faithfully run an arbitrary regex in
     // claim reject a non-portable claim source loudly at subscribe() —
     // failing at registration, not silently never claiming the stream.
     describe.skipIf(!caps.rejects_nonportable_claim_source)(
@@ -1996,7 +1996,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       }
     );
 
-    // ACT-982: competing-consumer correctness was previously proven only by
+    // Competing-consumer correctness was previously proven only by
     // the PG-specific multi-process stress harness. This makes it a portable
     // contract for adapters that support concurrent claimers (gated by
     // `concurrent_claim`): two distinct workers claiming the same candidate
@@ -2049,7 +2049,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         }
       });
 
-      // ACT-1184: lease expiry under competing claimers. An unexpired
+      // Lease expiry under competing claimers. An unexpired
       // lease is invisible to every other worker; an expired one is
       // handed to exactly one of them.
       it("does not hand an unexpired lease to a competing claimer", async () => {
@@ -2091,7 +2091,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           const dead = await fresh.claim(100, 0, `wDead-${uid()}`, 0);
           expect(dead.find((l) => l.stream === s)?.retry).toBe(0);
           // Two workers race for the expired lease — exactly one wins,
-          // and the shared retry counter (ACT-1183) reflects the reclaim
+          // and the shared retry counter reflects the reclaim
           // regardless of which worker performs it.
           const [b, c] = await Promise.all([
             fresh.claim(100, 100, `wB-${uid()}`, 60_000),
@@ -2143,8 +2143,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // leaves the watermark alone — the failing event must be retried,
         // not skipped. So the returned lease must carry the DURABLE `at`.
         // Re-reading via query_streams isn't enough: it reflects the
-        // correct durable value either way, which is how #1347 and #1382
-        // both slipped past this suite.
+        // correct durable value either way, which is how two past bugs
+        // slipped past this suite.
         const s = `block-returns-${uid()}`;
         await store.subscribe([{ stream: s }]);
         await store.commit<CounterEvents>(
@@ -3052,7 +3052,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // ACT-1103: drain lanes. The Store contract now carries lane on
+    // Drain lanes. The Store contract now carries lane on
     // every persisted-and-returned stream surface. Adapters that
     // haven't migrated will fail these cases — the signal is
     // intentional ("the contract changed, your adapter needs to
@@ -3096,7 +3096,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
 
       it("keeps the lane when a lower-priority subscribe re-registers", async () => {
-        // The lane rides the priority max (#1599). Without this, a caller
+        // The lane rides the priority max. Without this, a caller
         // that has forgotten what a stream carries — an evicted LRU
         // record, a fresh process — re-lanes it by resolving to it at a
         // lower priority, and a worker sharded on the declared lane never
@@ -3545,7 +3545,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(result.get(s)?.deleted).toBe(0);
       });
 
-      // Windowed truncation (#1011): a `before` boundary prunes the
+      // Windowed truncation: a `before` boundary prunes the
       // prefix below the closest safe `__snapshot__` — a pure prefix
       // delete behind a real snapshot; no seed, no tombstone.
       describe("windowed (before boundary)", () => {
@@ -3729,7 +3729,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
     describe("query_streams", () => {
       it("keyset pagination visits every stream regardless of name case", async () => {
-        // The `query_streams` twin of #1357. Mixed-case suffixes so the
+        // Mixed-case suffixes so the
         // sort comparator and the `after` cursor must agree: code-unit
         // order is B,C,a,d; a locale sort (a,B,C,d) paired with a
         // code-unit `<=` cursor silently skips Bravo/Charlie.
@@ -4359,7 +4359,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    // Reverse-match probe filter (#1010): restrict to subscriptions whose
+    // Reverse-match probe filter: restrict to subscriptions whose
     // stored `source` pattern matches at least one of the supplied names.
     // Gated — stores that can't express reverse-regex omit it and callers
     // fall back to an unfiltered scan.
@@ -4622,7 +4622,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
         it("answers undefined when no correlator is supplied", async () => {
           // No lease was asked for, so there is no answer — and the caller
-          // scans exactly as every pre-#1532 caller does.
+          // scans exactly as it would with no lease at all.
           expect(await store.subscribe([])).not.toHaveProperty("correlating");
         });
 
@@ -4702,7 +4702,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           expect(first.correlated_at).toBeGreaterThanOrEqual(4_100);
 
           // A key with no row yet inherits how far any correlator has read.
-          // That is the pre-#1532 behaviour — one shared checkpoint, a fresh
+          // That matches the old single shared checkpoint: a fresh
           // worker resuming from it behind the cold-start back-scan — so an
           // upgrade does not re-read history.
           const b = key();
@@ -4830,7 +4830,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // A correlate checkpoint is an event id. Restore renumbers the log
         // from the start, so a checkpoint left at its old value would sit
         // above every restored event and correlate would never resolve
-        // their reactions (#1772). Both the shared checkpoint and a keyed
+        // their reactions. Both the shared checkpoint and a keyed
         // correlator's must start over.
         const correlator = {
           key: `k-${uid()}`,
@@ -5192,7 +5192,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(back.map((e) => e.id)).toEqual(committed.map((c) => c.id));
       });
 
-      // ACT-1125 — compaction toggles + dry-run blocker scan + progress.
+      // Compaction toggles + dry-run blocker scan + progress.
 
       it("drop_snapshots: skips SNAP_EVENT rows and counts them", async () => {
         const s = `restore-drop-snap-${uid()}`;
@@ -5242,7 +5242,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(calls).toEqual([1, 2]);
       });
 
-      // #1258: `created` bounds are pure WHERE filters, never early-breaks.
+      // `created` bounds are pure WHERE filters, never early-breaks.
       // Restore preserves the source `created` verbatim, so a restored
       // dataset whose timestamp order diverges from id order proves the
       // scan must not short-circuit on the first out-of-order event.
@@ -5289,11 +5289,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       // store-level concern. The store applies the resume floor whenever
       // `with_snaps` is set; the orchestrator is the single owner of floor
       // eligibility and never combines `with_snaps` with an `asOf` bound. The
-      // suppression contract (#1261 `created_*`, #1267 `before`, #1274 `limit`)
+      // suppression contract (`created_*`, `before`, `limit`)
       // is now enforced at the orchestrator level in
       // `libs/act/test/time-travel.spec.ts`.
 
-      // #1257: restore must split `pii` into the isolated store so
+      // Restore must split `pii` into the isolated store so
       // `forget_pii` erases it — otherwise restored PII stays inline and
       // erasure silently no-ops. Only meaningful when the adapter also
       // isolates PII, so gate the assertion on that capability.
@@ -5361,7 +5361,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       );
     });
 
-    // PII isolation — sensitive-data epic (#566). Same `skipIf` pattern as
+    // PII isolation — sensitive-data epic. Same `skipIf` pattern as
     // restore: gated on `caps.pii_isolation`, exercises commit-with-pii
     // round-trip, the no-pii passthrough, `forget_pii` happy path +
     // idempotency, and isolation across streams.
@@ -5403,8 +5403,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
        * `with_pii: false` lets a read decline the payload entirely. The
        * engine uses it on scans that discard `pii` — correlate resolves
        * reaction targets from `name`/`stream` and throws the rest away — so
-       * an unreadable payload cannot fail a read that never wanted it
-       * (#1675). Before this, one corrupt row stopped every stream's
+       * an unreadable payload cannot fail a read that never wanted it.
+       * Before this, one corrupt row stopped every stream's
        * reactions, because the correlate scan tripped on it.
        */
       describe("with_pii", () => {
@@ -5498,7 +5498,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // at-rest concern and not a payload-type change.
         //
         // Turning that string back into a `Date` is the framework's job,
-        // driven by the `z.date()` the schema declares (#1556): an adapter
+        // driven by the `z.date()` the schema declares: an adapter
         // cannot know which strings were dates, and guessing from shape
         // revived any ISO-looking string — including fields declared
         // `z.string()`. The same Date in `data` is the in-row control.
@@ -5531,7 +5531,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // one that holds references (InMemory) hands back the `Date` itself.
         // Both are correct at this layer — an adapter cannot know which
         // strings were dates, so typing them is the framework's job, driven
-        // by the declared `z.date()` (#1556). What every adapter owes is that
+        // by the declared `z.date()`. What every adapter owes is that
         // no precision is lost, identically in `data` and `pii`.
         const recovered = (v: unknown) =>
           v instanceof Date ? v.getTime() : new Date(v as string).getTime();
@@ -5720,7 +5720,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     });
 
     if (caps.notify) {
-      // ACT-1184: the notify conformance suite. `factory` must produce
+      // The notify conformance suite. `factory` must produce
       // sibling instances that share one backing store — the TCK's
       // standing pattern (two PostgresStores on the same schema/table,
       // two withBroker decorators on one broker). These cases enforce

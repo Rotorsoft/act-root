@@ -1,6 +1,6 @@
 /**
  * Postgres schema names, namespaced to the checkout the suite is running
- * from (#1589).
+ * from.
  *
  * Mirrors `libs/act-pg/test/schema.ts` — six lines rather than a cross-package
  * deep import into another package's test directory.

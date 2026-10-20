@@ -218,7 +218,7 @@ describe("error class inheritance", () => {
 
 /**
  * The README documents these as public API of the `/webhook` subpath, and
- * for a long time the subpath did not export them (#1621) — they were
+ * for a long time the subpath did not export them — they were
  * reachable only by deep-importing `classify.js`, which is off the
  * stability contract. `webhook()` itself never called `tryOk`, so nothing
  * inside the package noticed.

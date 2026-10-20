@@ -3,7 +3,7 @@ import { act, ConcurrencyError, sleep, state } from "../src/index.js";
 import { sandbox } from "../src/test/index.js";
 
 /**
- * Tests for auto-injection of reactingTo in reaction handlers (#587).
+ * Tests for auto-injection of reactingTo in reaction handlers.
  *
  * When a reaction handler calls app.do() without the reactingTo parameter,
  * the framework auto-injects the triggering event, maintaining the

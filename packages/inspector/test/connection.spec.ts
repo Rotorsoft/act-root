@@ -1,10 +1,10 @@
 /**
- * Connection state machine tests (ACT-1131).
+ * Connection state machine tests.
  *
  * Real InMemoryStore — no mocking. `connect({ adapter: "inmemory" })`
  * constructs a fresh store, `getActiveStore()` returns it so tests can
- * read back the same instance the router holds. ACT-1123 added the
- * SQLite branch — its happy-path / sad-path tests live below and use
+ * read back the same instance the router holds. The SQLite branch's
+ * happy-path / sad-path tests live below and use
  * real `SqliteStore` instances against tempdir files.
  */
 import { mkdtemp, rm } from "node:fs/promises";
@@ -107,7 +107,7 @@ describe("discover", () => {
     // Privileged port — not accepting TCP connections in any reasonable
     // test environment. probePort returns false; discover short-circuits
     // before any PG auth attempt. `kind` defaults to "pg" so the input
-    // shape stays back-compat with the pre-ACT-1122 frontend.
+    // shape stays back-compat with older frontends.
     const result = await caller.discover({
       host: "127.0.0.1",
       portFrom: 1,
@@ -129,7 +129,7 @@ describe("transfer (unified backup / restore / cross-adapter)", () => {
 
   // The `current`-target restore paths (upload → current, the audit
   // capture, the malformed-upload validation error) require write-mode,
-  // which is gated off by default (#1194). They live in
+  // which is gated off by default. They live in
   // transfer-current.spec.ts, which enables ACT_INSPECTOR_WRITE. This
   // file stays read-only so the `writeMode` "read-only" assertion above
   // holds.
@@ -217,5 +217,5 @@ describe("connect (sqlite)", () => {
   });
 
   // The SQLite-backed `current`-target restore round-trip requires
-  // write-mode; it lives in transfer-current.spec.ts (#1194).
+  // write-mode; it lives in transfer-current.spec.ts.
 });

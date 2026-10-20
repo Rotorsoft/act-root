@@ -1,6 +1,6 @@
 /**
- * Adapter-generated Hono REST surface for `@rotorsoft/act-http/hono`
- * (#844). Mirrors the trpc sibling's coverage shape: cross-action
+ * Adapter-generated Hono REST surface for `@rotorsoft/act-http/hono`.
+ * Mirrors the trpc sibling's coverage shape: cross-action
  * emission, the internal actor middleware, stream extraction,
  * expected-version threading, idempotency dedup, error mapping for
  * all known framework errors plus the unknown / non-Error throw

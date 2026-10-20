@@ -1,5 +1,5 @@
 /**
- * Commit-visibility serialization (#1178).
+ * Commit-visibility serialization.
  *
  * `id` is a serial: assigned at INSERT, visible at COMMIT. Watermark
  * consumers (the correlate checkpoint and work marks, fetch's `after`)
@@ -19,7 +19,7 @@ import { PostgresStore } from "../src/index.js";
 import { schema } from "./schema.js";
 
 /**
- * Correlate's job, done by hand: `claim` follows the work mark since #1488,
+ * Correlate's job, done by hand: `claim` follows the work mark,
  * so a test that commits events has to say which of them resolve where.
  * Marks every subscription up to the log head, which is honest for these
  * fixtures — their sources carry the events under test.
@@ -85,7 +85,7 @@ describe("pg commit visibility — append serialization", () => {
         return c;
       });
 
-    // Pre-#1178 this commit would land immediately with id a_id + 1 and
+    // Without the visibility lock this commit would land immediately with id a_id + 1 and
     // become visible while a_id was still in flight — the gap. Now it
     // blocks on the visibility lock.
     await sleep(200);
@@ -200,7 +200,7 @@ describe("pg commit visibility — end-to-end no-loss", () => {
     };
     await consume();
 
-    // The slow writer finishes; B unblocks (post-#1178 it was waiting).
+    // The slow writer finishes; B unblocks (it was waiting on the lock).
     await a.query("COMMIT");
     a.release();
     const [b] = await pending_b;

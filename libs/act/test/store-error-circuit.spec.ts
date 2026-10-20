@@ -5,7 +5,7 @@ import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 import { SettleLoop } from "../src/internal/settle.js";
 
 /**
- * ACT-984: StoreError + orchestrator circuit breaker. The drain loop turns
+ * StoreError + orchestrator circuit breaker. The drain loop turns
  * a degraded store into an `error` lifecycle event and trips a breaker so it
  * stops hammering a down backend, rather than silently returning "no work".
  */

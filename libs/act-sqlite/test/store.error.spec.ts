@@ -110,7 +110,7 @@ describe("SqliteStore error paths", () => {
     expect(s).toBeInstanceOf(SqliteStore);
   });
 
-  // #1443: the zero-config store used to construct happily against a
+  // The zero-config store used to construct happily against a
   // per-connection private in-memory database, accept a commit, and lose
   // it. There is no safe default, so construction refuses instead.
   it("rejects a missing url", () => {

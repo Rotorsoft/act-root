@@ -582,7 +582,7 @@ describe("event-sourcing", () => {
   });
 });
 
-// ACT-1188: during the close guard window (tombstone committed, truncate
+// During the close guard window (tombstone committed, truncate
 // not yet run) a cold cache-miss load replays real events + the tombstone.
 // The buggy path cached an entry at the tombstone's (version, event_id)
 // with no `event` attached, so the next `action()` got a warm hit where

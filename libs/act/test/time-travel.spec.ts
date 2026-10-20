@@ -178,8 +178,8 @@ describe("time-travel load", () => {
   // stream that snapshots on every event, a snapshot always sits ABOVE any
   // early cutoff — so for every `asOf` bound the orchestrator must suppress the
   // floor (drop `with_snaps`) and full-scan under the bound, never jump to a
-  // snapshot outside the window. This one toggle covers all four historical
-  // instances (#1261 created_*, #1267 before, #1270 backward, #1274 limit).
+  // snapshot outside the window. This one toggle covers all four bounds
+  // (`created_*`, `before`, `backward`, `limit`).
   describe("time-travel ignores snapshots outside the cutoff (RFC 1274)", () => {
     // Snapshot after every event → a `__snapshot__` above every early cutoff.
     const SnapEvery = state({ SnapEvery: z.object({ count: z.number() }) })

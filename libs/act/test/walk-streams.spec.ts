@@ -4,7 +4,7 @@ import { walk_streams } from "../src/internal/walk-streams.js";
 
 /**
  * `Store.query_streams` defaults to `limit: 100`, so any caller wanting
- * the whole table has to page. `walk_streams` is that loop (#1371).
+ * the whole table has to page. `walk_streams` is that loop.
  */
 describe("walk_streams", () => {
   const seed = async (count: number) => {

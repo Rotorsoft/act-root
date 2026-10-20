@@ -1,5 +1,5 @@
 /**
- * Reading converts, it never validates (#1594).
+ * Reading converts, it never validates.
  *
  * On a serializing adapter deliberately: InMemory holds the original objects
  * and never round-trips a date through its ISO form, so it cannot see any of

@@ -1,4 +1,4 @@
-// ACT-503: prove the `sandbox` test helper works against a real PG store
+// Prove the `sandbox` test helper works against a real PG store
 // by passing a custom store factory that mints a per-test schema.
 import { act, state } from "@rotorsoft/act";
 import { sandbox } from "@rotorsoft/act/test";

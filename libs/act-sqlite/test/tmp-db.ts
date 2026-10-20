@@ -7,7 +7,7 @@ import { join } from "node:path";
  * store per test.
  *
  * `:memory:` is not that: libSQL only serves an in-memory database
- * through a process-wide shared cache (#1443), so two stores pointed at
+ * through a process-wide shared cache, so two stores pointed at
  * it see each other's schema and rows — and the data outlives
  * `dispose()`. Specs that hand-build a legacy schema, or drop and
  * re-seed, need a genuinely private database, which means a file.

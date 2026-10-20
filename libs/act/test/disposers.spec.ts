@@ -1,5 +1,5 @@
 /**
- * #1441 — the dispose registry was push-only, so every Act ever built stayed
+ * The dispose registry was push-only, so every Act ever built stayed
  * reachable for the process lifetime through the closure it registered.
  *
  * Real garbage collection is not schedulable, so the mechanism is pinned with
@@ -64,8 +64,7 @@ describe("dispose registry", () => {
   });
 
   // The registry is module-level, so without pruning it grows for the whole
-  // process — the secondary half of #1441, which made teardown O(all Acts
-  // ever built).
+  // process, which makes teardown O(all Acts ever built).
   it("prunes dead weak entries when anything else registers", async () => {
     const live = vi.fn(async () => {});
     const dead = vi.fn(async () => {});

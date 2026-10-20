@@ -714,7 +714,7 @@ describe("MODULES", () => {
 });
 
 /**
- * #1394 — the builder surface grew four methods the mocks never learned
+ * The builder surface grew four methods the mocks never learned
  * (`discloses`, `of`/`flush`/`batch`, `defer`, `withLane`). The chain
  * threw mid-declaration, `.build()` never ran, and three of the four
  * dropped their entity from the model with no error at all. On wolfdesk

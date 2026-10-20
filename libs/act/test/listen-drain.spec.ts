@@ -5,7 +5,7 @@ import { act, dispose, state, store, ZodEmpty } from "../src/index.js";
 import type { StoreNotification } from "../src/types/index.js";
 
 /**
- * #803 — ActOptions.listen and ActOptions.drain.
+ * ActOptions.listen and ActOptions.drain.
  *
  * Two orthogonal boolean flags on Act build options that gate the
  * subscription side (`listen`) and the local reaction pipeline

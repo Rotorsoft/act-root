@@ -65,7 +65,7 @@ class StrictLogger implements Logger {
   async dispose() {}
 }
 
-// Logger differential (#1057): drive the identical call surface (every
+// Logger differential: drive the identical call surface (every
 // level, both overloads, null + cyclic payloads, child spawning) against
 // ConsoleLogger and a no-op reference, comparing robustness + structural
 // parity.

@@ -12,7 +12,7 @@ runStoreTck({
   factory: () => new SqliteStore({ url: DB_URL }),
   // There is no zero-config SqliteStore: a store has to be told where to
   // write, and every in-memory default libSQL can serve is either broken
-  // or process-global (#1443). The TCK asserts the refusal is loud.
+  // or process-global. The TCK asserts the refusal is loud.
   default_factory: () => new SqliteStore(undefined as never),
   capabilities: {
     restore: true,

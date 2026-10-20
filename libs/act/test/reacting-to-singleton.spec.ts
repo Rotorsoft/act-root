@@ -2,7 +2,7 @@ import { z } from "zod";
 import { act, dispose, state, store } from "../src/index.js";
 
 /**
- * #1541 on the singleton-port path.
+ * Auto-injected `reactingTo` on the singleton-port path.
  *
  * The sandbox-based cases in `reacting-to.spec.ts` build with
  * `ActOptions.scoped`, which installs the ports AsyncLocalStorage. The

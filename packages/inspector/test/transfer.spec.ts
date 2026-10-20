@@ -1,5 +1,5 @@
 /**
- * Cross-source / cross-target transfer endpoint tests (ACT-1128 + #788).
+ * Cross-source / cross-target transfer endpoint tests.
  *
  * Real adapters, no mocking — each test builds a fresh SQLite or
  * CSV file in a tempdir, seeds it via the framework's own port
@@ -15,8 +15,8 @@ import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Transfers write to a persistent target, so they're gated behind
-// write-mode (#1194). Enable it before the router module reads the env
-// at import time. The path guard (#1194) also rejects paths outside the
+// write-mode. Enable it before the router module reads the env
+// at import time. The path guard also rejects paths outside the
 // inspector cwd, so `dir` is a temp folder created *under* cwd (not
 // `os.tmpdir()`), and every transfer passes cwd-relative paths.
 vi.hoisted(() => {
@@ -62,7 +62,7 @@ async function buildSqliteWithEvents(name: string, n: number): Promise<string> {
     await store.dispose();
   }
   // Return the cwd-relative form — every `transfer` call passes this so
-  // it survives the path guard (#1194).
+  // it survives the path guard.
   return relPath;
 }
 

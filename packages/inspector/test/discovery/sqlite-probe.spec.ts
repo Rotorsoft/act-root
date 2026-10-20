@@ -1,5 +1,5 @@
 /**
- * SQLite discovery probe tests (ACT-1122).
+ * SQLite discovery probe tests.
  *
  * Fixtures: each test builds throwaway SQLite files in a tempdir using
  * the real `SqliteStore` (act-sqlite's `.seed()` creates the events +

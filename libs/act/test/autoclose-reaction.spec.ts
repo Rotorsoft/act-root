@@ -11,7 +11,7 @@ import {
 } from "../src/index.js";
 
 /**
- * Slice 1d Part 2 (#1090): `.autocloses` is a synthesized internal reaction
+ * Slice 1d Part 2: `.autocloses` is a synthesized internal reaction
  * that rides the defer/close mechanic. These exercise the synthesized handler
  * directly against the in-memory store — the off-hours gate, the live-head
  * evaluation (reopen), the immediate-close (`is`), the time-gate park
@@ -104,7 +104,7 @@ describe("autoclose as a synthesized reaction", () => {
     expect(archived).toEqual(["ta"]);
   });
 
-  // #1388 — `on_close` runs the close machinery, not an emit. A StoreError
+  // `on_close` runs the close machinery, not an emit. A StoreError
   // from inside it must reach the breaker; wrapping the whole call in the
   // listener-containment helper meant a real outage produced no `error`
   // event, no cooldown, and a breaker that recorded a SUCCESS for the
@@ -131,7 +131,7 @@ describe("autoclose as a synthesized reaction", () => {
     void real;
   });
 
-  // #1389 — a close writes its tombstone guard first and truncates last.
+  // A close writes its tombstone guard first and truncates last.
   // An archive callback that throws leaves the stream guarded-but-intact,
   // which close-cycle.md documents as a safe state the caller can simply
   // retry. Phase 1 used to drop every tombstone-headed stream, so the
@@ -287,7 +287,7 @@ describe("autoclose as a synthesized reaction", () => {
     expect(closed[0].truncated.has("t4")).toBe(true);
   });
 
-  // #1356: a `__snapshot__` commits at a higher id right after the domain
+  // A `__snapshot__` commits at a higher id right after the domain
   // event that tripped the snap predicate. The terminate-only path must key
   // on the domain head/count, not the trailing snapshot — otherwise `is`
   // never matches and `reaches` counts snapshot events toward the threshold.
@@ -400,7 +400,7 @@ describe("autoclose as a synthesized reaction", () => {
    * and handed by reference to every Act built from the same builder — and
    * the documented multi-tenant shape (`extension-points.md`) is exactly
    * one builder built once per tenant. A window captured at synthesis is
-   * therefore the first-built tenant's window for everyone (#1615).
+   * therefore the first-built tenant's window for everyone.
    *
    * The damaging orientation is the second case: a tenant that restricted
    * closing to a maintenance window gets its streams tombstoned and
@@ -517,7 +517,7 @@ describe("autoclose as a synthesized reaction", () => {
 });
 
 /**
- * Rolling-window retention (#1011): `.autocloses({ keep })` stages
+ * Rolling-window retention: `.autocloses({ keep })` stages
  * *windowed* closes through the same synthesized reaction — prune the
  * prefix older than `now − keep` behind the closest safe snapshot, defer
  * to `tail.created + keep` otherwise. Only Date is faked so the store
@@ -598,10 +598,10 @@ describe("autoclose rolling window (keep)", () => {
   });
 
   /**
-   * The window advances on commits (#1619). A prune has to mark its
+   * The window advances on commits. A prune has to mark its
    * triggering event consumed — otherwise the safety probe, which refuses
    * to delete below the laggiest consumer's watermark, sees this very
-   * reaction lagging and caps the prune short (#1520) — and once it is
+   * reaction lagging and caps the prune short — and once it is
    * consumed there is nothing left to redeliver, so nothing wakes the
    * policy again on its own.
    *

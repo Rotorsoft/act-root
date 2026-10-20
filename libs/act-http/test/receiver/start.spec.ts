@@ -8,7 +8,7 @@ import { sign_request } from "../../src/webhook/sign.js";
 /**
  * Wrap an idempotency store to record how many times each key is
  * committed/released — the route and the mounted `webhookMiddleware`
- * must together finalize a delivery exactly once (#1293).
+ * must together finalize a delivery exactly once.
  */
 function countingStore(inner: IdempotencyStore): {
   store: IdempotencyStore;

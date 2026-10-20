@@ -132,7 +132,7 @@ describe("commit-path PII split", () => {
   });
 });
 
-// #1417 — `sensitive()` registered the schema INSTANCE in a WeakMap, and Zod
+// `sensitive()` registered the schema INSTANCE in a WeakMap, and Zod
 // clones on every refinement, so `sensitive(z.string()).min(1)` silently lost
 // its marker: plaintext into events.data, plaintext out of the default-deny
 // read surface, and forget() reporting eventCount 0 while wiping nothing.

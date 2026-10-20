@@ -1,5 +1,5 @@
 /**
- * `streamMeta` + `drainStatus` (ACT-1131).
+ * `streamMeta` + `drainStatus`.
  *
  * These two procedures both hang off `query_streams`, so they share a
  * fixture that exercises every branch of the drain-status aggregator:
@@ -9,7 +9,7 @@
  * - blocked stream (via `Store.block`)
  * - leased stream (via `Store.claim`)
  * - non-default priority bucket
- * - non-default lane (#1103)
+ * - non-default lane
  */
 import { randomUUID } from "node:crypto";
 import type { InMemoryStore } from "@rotorsoft/act";
@@ -92,7 +92,7 @@ describe("streamMeta", () => {
 });
 
 /**
- * A failure is never data (#1552).
+ * A failure is never data.
  *
  * Both of these read surfaces used to end in a bare catch that answered
  * with a healthy-looking value — a zeroed dashboard, an empty list — so a
@@ -216,7 +216,7 @@ describe("drainStatus", () => {
     expect(status.retiredStreams).toEqual([]);
   });
 
-  // Retired streams (#1535). Since #1527 a full close leaves the
+  // Retired streams. A full close leaves the
   // subscription row in place, so the row keeps showing up here — inert,
   // permanently caught up, and indistinguishable from a live consumer
   // with nothing to do unless we say so.

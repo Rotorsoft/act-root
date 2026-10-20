@@ -1,5 +1,5 @@
 /**
- * Adapter-layer envelope encryption for the `events.pii` column (#921).
+ * Adapter-layer envelope encryption for the `events.pii` column.
  *
  * The framework's `pii_isolation` capability is covered by the shared
  * store TCK; that suite asserts the round-trip of `pii` payloads in the
@@ -412,7 +412,7 @@ describe("PostgresStore pii_encryption", () => {
     // The store returns what it stored, identically in both columns —
     // encryption is an at-rest concern, not a payload-type change. Typing
     // these back to `Date` is the framework's job, from the declared
-    // `z.date()` (#1556).
+    // `z.date()`.
     expect(typeof (rows[0].data as { at: unknown }).at).toBe("string");
     expect(typeof (rows[0].pii as { born: unknown }).born).toBe("string");
     expect((rows[0].pii as { born: string }).born).toBe(when.toISOString());

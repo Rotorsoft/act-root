@@ -1,5 +1,5 @@
 /**
- * Shared test helpers for the inspector test suite (ACT-1131).
+ * Shared test helpers for the inspector test suite.
  *
  * Each spec file declares its own `vi.mock("@rotorsoft/act-pg", …)` and
  * `vi.hoisted(() => …)` block — both must be hoisted to the top of the
@@ -54,7 +54,7 @@ export async function seedSequence(
   // then `i - 1` thereafter as the store's recorded version climbs. The
   // store's check fires only when `expectedVersion` is a number, but we
   // pass the right value anyway so tests that flip on concurrency
-  // detection (#785 / #786) inherit a fixture that already matches.
+  // detection inherit a fixture that already matches.
   for (let i = 0; i < events.length; i++) {
     const e = events[i]!;
     committed.push(await seed(store, stream, e.name, e.data ?? {}, i - 1));

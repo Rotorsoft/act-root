@@ -1,5 +1,5 @@
 /**
- * ACT-403: auto-deprecation of legacy event versions.
+ * Auto-deprecation of legacy event versions.
  *
  * The framework reads the `_v<digits>` versioning convention from the
  * merged event registry. Within a state's events, the highest version is

@@ -411,7 +411,7 @@ describe("correlate: the checkpoint", () => {
       .to((e) => ({ target: `dyn-${e.stream}` }))
       .build({ autoSettle: false });
 
-  /** The checkpoint rides subscribe's return (#1484). */
+  /** The checkpoint rides subscribe's return. */
   const peek = async (s: InMemoryStore) =>
     (await s.subscribe([])).correlated_at;
 
@@ -523,8 +523,7 @@ describe("correlate: the checkpoint", () => {
       const scan = await app.correlate();
 
       // Correlate marks the static target, so it subscribes — and the cursor
-      // rides that same call. Before #1487 correlate returned without reading
-      // anything and the checkpoint stayed at -1.
+      // rides that same call, so the checkpoint moves past -1.
       expect(await peek(raw)).toBe(scan.last_id);
     });
   });
@@ -596,7 +595,7 @@ describe("correlate: cold start", () => {
             { stream: `order-h${i}`, actor },
             { sku: `h${i}` }
           );
-          // Mark the static target by hand rather than correlating (#1488).
+          // Mark the static target by hand rather than correlating.
           // `claim` follows marks now, so a drain-only loop would find nothing
           // — but running correlate here would also discover the dynamic
           // target, which is the very thing this scenario needs left undone.
@@ -639,7 +638,7 @@ describe("correlate: cold start", () => {
   });
 
   /**
-   * #1387 — `init()` latched "already initialized" BEFORE the awaited
+   * `init()` latched "already initialized" BEFORE the awaited
    * `subscribe`, so one transient store failure at cold start left every
    * static target unsubscribed for the process lifetime. Nothing reset the
    * flag, and the failure was invisible afterwards: no subscription row
@@ -812,7 +811,7 @@ describe("correlate: dynamic lanes", () => {
       expect(lane).toBe("slow"); // the winning reaction's lane, not "fast"
     });
 
-    // #1363: the runtime max() invariant must hold ACROSS correlate scans, not
+    // The runtime max() invariant must hold ACROSS correlate scans, not
     // only within one. A dynamic target subscribed at a low priority must be
     // re-subscribed (raising the store's priority) when a later scan resolves a
     // higher one — the `_dynamic_subscriptions` dedup used to freeze it at first discovery.
@@ -902,7 +901,7 @@ describe("correlate: dynamic lanes", () => {
       });
     });
 
-    // #1582: the +Infinity floor that keeps a static target out of the dynamic
+    // The +Infinity floor that keeps a static target out of the dynamic
     // path lives in the `maxSubscribedStreams` LRU, so evicting it hands the
     // next dynamic resolution a blank slate — it re-subscribes the target with
     // its own lane. A static target's lane is owned by the build-time
@@ -1467,9 +1466,9 @@ describe("correlate: the lease", () => {
       // Releasing early is best-effort: the fallback is the expiry that would
       // have applied had the process died, so a failure must not propagate out
       // of a shutdown path. It is deliberately not awaited there either, hence
-      // the tick before asserting.
+      // waiting for the warning.
       await expect(a.shutdown()).resolves.toBeUndefined();
-      // `warn`, not `error` (#1577): nothing is lost and the lease self-heals
+      // `warn`, not `error`: nothing is lost and the lease self-heals
       // on expiry, so a clean shutdown must not reach a level operators page
       // on. The cause still rides along in the message.
       await vi.waitFor(() => expect(warn).toHaveBeenCalled());
@@ -1501,7 +1500,7 @@ describe("correlate: the work mark", () => {
 
   const actor = { id: "a", name: "a" };
 
-  /** Subscription rows by target — `correlated_at` included since #1487. */
+  /** Subscription rows by target, `correlated_at` included. */
   const positions = async (store: Store) => {
     const rows = new Map<string, StreamPosition>();
     await store.query_streams((p) => rows.set(p.stream, p));

@@ -1,5 +1,5 @@
 /**
- * #1189: the dedicated LISTEN client loses node-postgres's idle-error
+ * The dedicated LISTEN client loses node-postgres's idle-error
  * guard on checkout, so a checked-out client that emits `error` (backend
  * restart, failover, network drop) with no listener is an uncaught
  * exception — a process crash. Even surviving that, nothing re-LISTENs,
@@ -222,11 +222,11 @@ describe("PostgresStore LISTEN client resilience", () => {
     await store.dispose();
   });
 
-  // #1231: a node-postgres socket routinely emits `error` more than once on
+  // A node-postgres socket routinely emits `error` more than once on
   // teardown (in-flight LISTEN rejection + socket ECONNRESET/end). The
   // reconnect must never leave the dead client without an `error` listener
   // during the backoff window, or the second emission re-raises as an
-  // uncaught exception — the exact process crash #1189 fixed.
+  // uncaught exception — the exact process crash the dead-client guards prevent.
   it("a SECOND error on the dead client during the backoff window does not crash the process", async () => {
     const { store, pool } = makeStore();
     await store.notify!(() => {});
@@ -317,7 +317,7 @@ describe("PostgresStore LISTEN client resilience", () => {
 });
 
 /**
- * #1616: `_teardown_listen` answers "is there a subscription?" by looking
+ * `_teardown_listen` answers "is there a subscription?" by looking
  * at `_listen_client`, which is `undefined` for the whole duration of an
  * open — between the pool checkout and the assignment. A disposal landing
  * in that window returns early, having released nothing, and then
@@ -325,7 +325,7 @@ describe("PostgresStore LISTEN client resilience", () => {
  * hold. Against a real pool that never resolves: `dispose()` hangs, and
  * the completed open resurrects a LISTEN on a disposed store.
  *
- * The #1189 guards cover the other half of the race — a reconnect still
+ * The dead-client guards cover the other half of the race — a reconnect still
  * *scheduled* when disposal lands — which is why this one survived.
  */
 describe("PostgresStore disposal racing an in-flight re-LISTEN", () => {

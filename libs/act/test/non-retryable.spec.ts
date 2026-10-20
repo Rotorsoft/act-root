@@ -442,11 +442,11 @@ describe("lifecycle listener containment (drain finalize)", () => {
     await app.shutdown();
   });
 
-  // #1390 — a block is terminal: every adapter gates `block` on
+  // A block is terminal: every adapter gates `block` on
   // `blocked = false` and excludes a blocked stream from `claim`, so it
   // never runs again for that stream. Emitting at the end of the cycle
   // meant an `ack` failure in between lost the `blocked` event forever —
-  // the same permanence #1373 was filed for, reached through a store
+  // the same permanent loss a listener throw once caused, reached through a store
   // fault instead of a listener throw.
   it("emits blocked even when the following ack fails", async () => {
     const app = act()
@@ -483,7 +483,7 @@ describe("lifecycle listener containment (drain finalize)", () => {
   });
 });
 
-// #1418 — two failure modes of the same root cause, both driven through
+// Two failure modes of the same root cause, both driven through
 // real lease theft: two `Act` instances over the shared store compete for
 // one stream, the first parks inside its handler until the test releases
 // it, and the lease lapses in between. Nothing about the store is mocked;
@@ -562,7 +562,7 @@ describe("a handler that only ever loses its lease", () => {
     // Budget wide open, so the claim-time guard stays out of the way and
     // the competitor actually runs and acks.
     const w = workers("dropped", 5);
-    // `warn`, not `error` (#1579): the work is redelivered, so this occurrence
+    // `warn`, not `error`: the work is redelivered, so this occurrence
     // needs no operator action. Persistent drops are a sizing problem.
     const logged = vi.spyOn(log(), "warn");
     const errored = vi.spyOn(log(), "error");
