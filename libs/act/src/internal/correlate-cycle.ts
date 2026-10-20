@@ -104,8 +104,8 @@ export type CorrelateCycleDeps<
   declared_lanes: ReadonlySet<string>;
   /** Set when `onlyLanes` leaves a lane out; each shard gets its own lease. */
   shard?: ReadonlyArray<string>;
-  on_init?: () => void;
-  on_init_async?: () => Promise<void>;
+  /** Runs once at the end of init: arms the lanes and re-seeds defer timers across a restart. */
+  on_init?: () => Promise<void>;
 };
 
 /**
@@ -177,9 +177,7 @@ export class CorrelateCycle<
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _cd: DrainOps<TEvents>;
-  private readonly _on_init: (() => void) | undefined;
-  /** Runs once after `on_init`; re-seeds defer timers across a restart. */
-  private readonly _on_init_async: (() => Promise<void>) | undefined;
+  private readonly _on_init: (() => Promise<void>) | undefined;
   private readonly _declared_lanes: ReadonlySet<string>;
   /** Report-once keys; per instance because `internal/` holds no module state. */
   private readonly _reported = new Set<string>();
@@ -192,7 +190,6 @@ export class CorrelateCycle<
     declared_lanes,
     shard,
     on_init,
-    on_init_async,
   }: CorrelateCycleDeps<TSchemaReg, TEvents, TActions>) {
     this._key = shard
       ? `${registry_key(registry.events)}:${[...shard].sort().join(",")}`
@@ -203,7 +200,6 @@ export class CorrelateCycle<
     this._static_targets = static_targets;
     this._cd = cd;
     this._on_init = on_init;
-    this._on_init_async = on_init_async;
   }
 
   get checkpoint(): number {
@@ -236,7 +232,6 @@ export class CorrelateCycle<
       correlated_at >= 0
         ? correlated_at
         : Math.max(-1, watermark - COLD_START_BACK_SCAN);
-    this._on_init?.();
     for (const { stream, priority = 0, lane } of this._static_targets) {
       this._static_subscriptions.set(stream, {
         floor: Number.POSITIVE_INFINITY,
@@ -245,7 +240,7 @@ export class CorrelateCycle<
       });
     }
     // After the static subscribe, so the streams walk sees them.
-    await this._on_init_async?.();
+    await this._on_init?.();
   }
 
   /** After `restore` replaced the log: forget everything and cold-start again. */

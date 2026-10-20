@@ -408,7 +408,6 @@ export class DrainController<
   TSchemaReg extends SchemaRegister<TActions>,
 > {
   private _armed = false;
-  private _locked = false;
   private _ratio = 0.5;
   /**
    * Local wake at the earliest parked (backoff or defer) visit, or at the
@@ -490,8 +489,9 @@ export class DrainController<
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     // A stopped controller claims nothing, so a pass shutdown's grace
     // outlived can't start work after teardown.
-    if (!this._armed || this._stopped) return EMPTY_DRAIN as Drain<TEvents>;
-    if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
+    // One pass at a time: a call while one runs claims nothing.
+    if (!this._armed || this._stopped || this._inflight)
+      return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
     // A lane's own budget wins over caller options.
@@ -507,7 +507,6 @@ export class DrainController<
       return EMPTY_DRAIN as Drain<TEvents>;
 
     try {
-      this._locked = true;
       this._inflight = new Promise<void>((done) => {
         this._inflight_done = done;
       });
@@ -568,7 +567,6 @@ export class DrainController<
     } finally {
       // Re-aim at the earliest stream still parked.
       if (!this._stopped) this._defer.schedule();
-      this._locked = false;
       this._inflight = undefined;
       this._inflight_done?.();
       this._inflight_done = undefined;
