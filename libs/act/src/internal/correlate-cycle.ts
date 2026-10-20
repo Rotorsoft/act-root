@@ -256,7 +256,6 @@ export class CorrelateCycle<
     this._dynamic_subscriptions.clear();
     this._static_subscriptions.clear();
     this._armed = true;
-    this._arms++;
   }
 
   /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
@@ -445,7 +444,6 @@ export class CorrelateCycle<
       // is held: one released mid-scan (shutdown) stays released.
       const held = lease && this._lease_until > 0;
       const renewed_at = Date.now();
-      const releases = this._releases;
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
         last_id,
@@ -453,7 +451,7 @@ export class CorrelateCycle<
           ? { key: this._key, by: this._by, millis: CORRELATION_LEASE_MS }
           : undefined
       );
-      if (held && correlating !== false && this._releases === releases)
+      if (held && correlating !== false)
         this._lease_until = renewed_at + CORRELATION_LEASE_MS;
       // The orchestrator arms on re-marks too, not just new subscriptions.
       const marked = streams.filter(
