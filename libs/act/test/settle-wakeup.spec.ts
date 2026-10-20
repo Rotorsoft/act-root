@@ -627,25 +627,26 @@ describe("a local change settles its own reactions", () => {
   });
 
   it("keeps a caller's settle options while start_correlations polls", async () => {
-    const app = reacting([]);
-    const limits: Array<number | undefined> = [];
-    // The settle loop drains through the internal path, not `app.drain`.
-    const internal = app as unknown as { _drain_all: typeof app.drain };
-    const drain = internal._drain_all.bind(app);
-    vi.spyOn(internal, "_drain_all").mockImplementation((options) => {
-      limits.push(options?.eventLimit);
-      return drain(options);
-    });
-    vi.useFakeTimers();
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track() {})
+      .to("tracker")
+      .build({ autoSettle: false });
+    const acks: string[][] = [];
+    app.on("acked", (leases) => acks.push(leases.map((l) => l.stream)));
+    for (let i = 0; i < 3; i++)
+      await app.do("ping", { stream: "p", actor }, {});
+    app.start_correlations({ limit: 5 }, 5);
     try {
-      app.start_correlations({ limit: 5 }, 5);
-      app.settle({ eventLimit: 77, debounceMs: 60 });
-      // The 5ms tick brings the pass forward; it must keep the caller's options.
-      await vi.advanceTimersByTimeAsync(20);
-      expect(limits[0]).toBe(77);
+      // The 5ms tick brings the pass forward; it must keep the caller's
+      // eventLimit, so the three events ack one per pass.
+      app.settle({ eventLimit: 1, debounceMs: 60 });
+      await vi.waitFor(() =>
+        expect(acks.filter((a) => a.includes("tracker"))).toHaveLength(3)
+      );
     } finally {
       app.stop_correlations();
-      vi.useRealTimers();
     }
   });
 

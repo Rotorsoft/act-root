@@ -450,52 +450,33 @@ describe("act", () => {
     });
 
     it("should keep draining when correlate yields no new subs but drain is still acking", async () => {
-      // Regression: previous behavior broke after one pass when correlate
-      // returned 0 subscriptions, even if drain was still paginating work.
-      // That made settle a no-op for catch-up scenarios (e.g. after reset).
+      // One target, three events, one event per pass: correlate subscribes the
+      // target on the first pass and finds nothing new after that, while drain
+      // still has two events to ack. Settle must keep going until drain is idle.
+      const Pager = state({ Pager: z.object({ n: z.number() }) })
+        .init(() => ({ n: 0 }))
+        .emits({ Paged: ZodEmpty })
+        .patch({ Paged: (_, s) => ({ n: s.n + 1 }) })
+        .on({ page: ZodEmpty })
+        .emit(() => ["Paged", {}])
+        .build();
+      const handled = vi.fn();
+      const paging = act()
+        .withState(Pager)
+        .on("Paged")
+        .do(async function count_page() {
+          handled();
+        })
+        .to("settle-paging")
+        .build({ autoSettle: false });
       const settledListener = vi.fn();
-      app.on("settled", settledListener);
+      paging.on("settled", settledListener);
+      for (let i = 0; i < 3; i++)
+        await paging.do("page", { stream: "settle-paging-src", actor }, {});
 
-      const correlateSpy = vi
-        .spyOn(app, "correlate")
-        .mockResolvedValue({ subscribed: 0, last_id: 0 });
-      // Drain leases and acks on the first 2 passes, then nothing → loop exits.
-      let drainCount = 0;
-      // The settle loop drains through the internal path, not `app.drain`.
-      const drainSpy = vi
-        .spyOn(app as unknown as { _drain_all: typeof app.drain }, "_drain_all")
-        .mockImplementation(() => {
-          drainCount++;
-          const work =
-            drainCount <= 2
-              ? [
-                  {
-                    stream: "x",
-                    source: "x",
-                    at: drainCount,
-                    by: "t",
-                    retry: 0,
-                    lagging: false,
-                  },
-                ]
-              : [];
-          return Promise.resolve({
-            fetched: [],
-            leased: work,
-            acked: work,
-            blocked: [],
-          });
-        });
-
-      app.settle({ debounceMs: 1, maxPasses: 10 });
-      await sleep(300);
-      expect(settledListener).toHaveBeenCalledTimes(1);
-      // 2 productive passes + 1 final empty pass that triggers the exit
-      expect(drainCount).toBe(3);
-
-      correlateSpy.mockRestore();
-      drainSpy.mockRestore();
-      app.off("settled", settledListener);
+      paging.settle({ debounceMs: 1, eventLimit: 1 });
+      await vi.waitFor(() => expect(settledListener).toHaveBeenCalledTimes(1));
+      expect(handled).toHaveBeenCalledTimes(3);
     });
 
     it("should handle errors in settle gracefully", async () => {
