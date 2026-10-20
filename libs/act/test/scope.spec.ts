@@ -458,7 +458,7 @@ describe("singleton backward compat", () => {
   });
 
   it("default Act uses the singletons", async () => {
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     await app.do("increment", { stream: "c-1", actor }, { by: 5 });
 
     const snap = await app.load("Counter", "c-1");

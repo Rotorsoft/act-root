@@ -222,15 +222,19 @@ async function rebuildTicketsProjection() {
   // 1. Truncate the read model.
   await db.delete(tickets);
 
-  // 2. Reset reaction watermarks AND arm the orchestrator's drain flag.
-  //    Note: app.reset(), NOT store().reset() — the latter doesn't arm
-  //    the flag, so a settled app won't pick the work up.
+  // 2. Rewind the projection. app.reset(), NOT store().reset(): the
+  //    app's reset also schedules the replay; the store's leaves a
+  //    settled app idle.
   await app.reset(["tickets"]);
 
-  // 3. Replay in bigger batches; settle() replaces the reset's own pass
-  //    and emits "settled" when caught up.
+  // 3. Replay in bigger batches. settle() joins the pass the reset
+  //    scheduled with these options; "settled" fires when it is caught up.
   await new Promise<void>((resolve) => {
-    app.once("settled", () => resolve());
+    const done = () => {
+      app.off("settled", done);
+      resolve();
+    };
+    app.on("settled", done);
     app.settle({ eventLimit: 1000 });
   });
 }

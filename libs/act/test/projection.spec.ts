@@ -199,8 +199,7 @@ describe("projection", () => {
       act()
         .withState(Counter)
         // @ts-expect-error - ExternalEvent is not in Counter's events
-        .withProjection(ExternalProjection),
-      { actOptions: { autoSettle: false } }
+        .withProjection(ExternalProjection)
     );
 
     // Runtime still works (constraint is compile-time only)
@@ -400,10 +399,7 @@ describe("projection", () => {
       .build();
 
     expect(() =>
-      act()
-        .withSlice(SliceWithProjB)
-        .withProjection(ProjA)
-        .build({ autoSettle: false })
+      act().withSlice(SliceWithProjB).withProjection(ProjA).build()
     ).toThrow(/dup-target-2/);
   });
 

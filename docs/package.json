@@ -9,18 +9,16 @@
     "snippets:extract": "node scripts/check-snippets.mjs",
     "check:snippets": "node scripts/check-snippets.mjs --check",
     "check:snippets:selftest": "node scripts/check-snippets.mjs --self-test",
-    "swizzle": "docusaurus swizzle",
     "clear": "docusaurus clear",
-    "serve": "docusaurus serve",
-    "write-translations": "docusaurus write-translations",
-    "write-heading-ids": "docusaurus write-heading-ids"
+    "swizzle": "docusaurus swizzle",
+    "serve": "docusaurus serve"
   },
   "dependencies": {
     "@mdx-js/react": "^3.1.1",
     "@stackblitz/sdk": "^1.11.1",
     "prism-react-renderer": "^2.4.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@docusaurus/core": "^3.10.2",
@@ -35,9 +33,9 @@
     "docusaurus-plugin-typedoc": "^1.4.3",
     "playwright-core": "^1.64.1",
     "typedoc": "~0.28.20",
-    "typedoc-plugin-markdown": "~4.13.1",
+    "typedoc-plugin-markdown": "~4.14.0",
     "typescript": "~6.0.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "browserslist": {
     "production": [

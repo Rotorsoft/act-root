@@ -476,7 +476,6 @@ describe("autoclose as a synthesized reaction", () => {
         act()
           .withState(ticket({ is: "Resolved" }))
           .build({
-            autoSettle: false,
             autocloseWindow: { start: 99, end: 3 } as never,
           })
       ).toThrow();

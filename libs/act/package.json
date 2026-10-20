@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act",
   "type": "module",
-  "version": "1.33.0",
+  "version": "1.33.1",
   "description": "act core library",
   "keywords": [
     "typescript",
@@ -62,8 +62,8 @@
     "@rotorsoft/act-patch": "workspace:^"
   },
   "peerDependencies": {
-    "zod": "^4.6.5",
-    "vitest": "^5.0.3"
+    "zod": "^4.6.7",
+    "vitest": "^5.0.5"
   },
   "devDependencies": {},
   "peerDependenciesMeta": {

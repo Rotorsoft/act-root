@@ -123,7 +123,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *   a snapshot outside the window. Do not combine `with_snaps`
  *   with `before`/`created_*`/`limit` in a direct `query()` call.
  * @property `with_pii?` - Whether the store should produce the sensitive
- *   payload. Defaults to **true**, which is today's behavior: the store
+ *   payload. Defaults to **true**: the store
  *   decrypts `pii` when `pii_encryption` is configured and attaches it to
  *   every returned event. Set `false` on a read that does not need it and
  *   the store returns `pii: null` **without ever decrypting** — so an
@@ -134,7 +134,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  *
  *   Note the default is the opposite of `with_snaps`: snapshot rows are
  *   excluded until asked for, while the sensitive payload is included until
- *   declined. Anything else would newly reject behavior that works today.
+ *   declined.
  */
 export type Query = z.infer<typeof QuerySchema>;
 

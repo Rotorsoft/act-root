@@ -18,7 +18,7 @@ exports=$(node -e "import('./libs/act/dist/index.js').then(m=>console.log(Object
 iact=$(awk '/^export interface IAct</,/^}/' $SRC/types/action.ts | grep -cE '^  [a-z_]+[<(]' || true)
 act_public=$(grep -E '^  (async )?[a-z][a-z_]*(<[^>]*>)?\(' $SRC/act.ts | grep -cv 'constructor' || true)
 store=$(awk '/^export interface Store/,/^}/' $SRC/types/ports.ts | grep -cE '^  [a-z_]+\??:' || true)
-act_options=$(awk '/^export type ActOptions/,/^};/' $SRC/act.ts | grep -cE '^  (readonly )?[a-zA-Z]+\??:' || true)
+act_options=$(awk '/^export type ActOptions/,/^};/' $SRC/types/act.ts | grep -cE '^  (readonly )?[a-zA-Z]+\??:' || true)
 
 echo "| metric | value |"
 echo "|---|---|"

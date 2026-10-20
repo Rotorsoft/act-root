@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-tck",
   "type": "module",
-  "version": "1.39.0",
+  "version": "1.39.1",
   "description": "Test Compatibility Kit for @rotorsoft/act Store, Cache, and Logger ports",
   "keywords": [
     "typescript",
@@ -50,13 +50,13 @@
   "peerDependencies": {
     "@fast-check/vitest": ">=0.5.0",
     "@rotorsoft/act": "workspace:^",
-    "vitest": ">=5.0.3",
-    "zod": "^4.6.5"
+    "vitest": ">=5.0.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@fast-check/vitest": "^0.5.0",
     "@rotorsoft/act": "workspace:^",
-    "vitest": "^5.0.3",
-    "zod": "^4.6.5"
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
   }
 }

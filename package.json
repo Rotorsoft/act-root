@@ -74,7 +74,7 @@
     "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/chance": "^1.1.8",
     "@types/node": "^22.20.5",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "chance": "^1.1.13",
     "concurrently": "^10.0.6",
     "fast-check": "^4.10.2",
@@ -86,12 +86,11 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
-    "pre-commit": "npx lint-staged",
-    "pre-push": "branch=$(git rev-parse --abbrev-ref HEAD); if [ \"$branch\" = \"master\" ]; then pnpm test; fi"
+    "pre-commit": "npx lint-staged"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,json}": [

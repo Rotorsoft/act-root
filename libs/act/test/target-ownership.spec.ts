@@ -205,22 +205,14 @@ describe("re-registering one projection is idempotent", () => {
   it("accepts the same fold projection registered twice", () => {
     const p = fold("counters");
     expect(() =>
-      act()
-        .withState(Counter)
-        .withProjection(p)
-        .withProjection(p)
-        .build({ autoSettle: false })
+      act().withState(Counter).withProjection(p).withProjection(p).build()
     ).not.toThrow();
   });
 
   it("accepts the same batch projection registered twice", () => {
     const p = batch("sink");
     expect(() =>
-      act()
-        .withState(Counter)
-        .withProjection(p)
-        .withProjection(p)
-        .build({ autoSettle: false })
+      act().withState(Counter).withProjection(p).withProjection(p).build()
     ).not.toThrow();
   });
 });
@@ -237,7 +229,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(batch("tally"))
         .withProjection(other)
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(DUP);
   });
 
@@ -247,7 +239,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(batch("tally"))
         .withProjection(fold("tally"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(DUP);
   });
 
@@ -257,7 +249,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(fold("tally"))
         .withProjection(batch("tally"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(DUP);
   });
 
@@ -267,7 +259,7 @@ describe("one target, one owner", () => {
         .withState(Counter)
         .withProjection(fold("tally"))
         .withProjection(fold("tally"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(DUP);
   });
 
@@ -285,7 +277,7 @@ describe("one target, one owner", () => {
         .withState(Other)
         .withProjection(ping_batch)
         .withProjection(fold("mixed"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(DUP);
   });
 
@@ -339,7 +331,7 @@ describe("a reaction may not target a projection's target", () => {
         .do(async function onPinged() {})
         .to({ target: "counters" })
         .withProjection(fold("counters"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(SERVED);
   });
 
@@ -363,7 +355,7 @@ describe("a reaction may not target a projection's target", () => {
         .on("Pinged")
         .do(async function onPinged() {})
         .to({ target: "elsewhere" })
-        .build({ autoSettle: false })
+        .build()
     ).not.toThrow();
   });
 });
@@ -376,7 +368,7 @@ describe("a per-event projection may not share a served target", () => {
         .withState(Other)
         .withProjection(fold("counters"))
         .withProjection(per_event("counters"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(SERVED);
   });
 
@@ -387,7 +379,7 @@ describe("a per-event projection may not share a served target", () => {
         .withState(Other)
         .withProjection(batch("sink"))
         .withProjection(per_event("sink"))
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(SERVED);
   });
 
@@ -400,9 +392,9 @@ describe("a per-event projection may not share a served target", () => {
       .withState(Other)
       .withProjection(per_event("counters"))
       .build();
-    expect(() =>
-      act().withSlice(folds).withSlice(pings).build({ autoSettle: false })
-    ).toThrow(SERVED);
+    expect(() => act().withSlice(folds).withSlice(pings).build()).toThrow(
+      SERVED
+    );
   });
 
   it("still allows per-event projections to share a target nobody serves", () => {
@@ -416,7 +408,7 @@ describe("a per-event projection may not share a served target", () => {
         .withState(Other)
         .withProjection(counted)
         .withProjection(per_event("feed"))
-        .build({ autoSettle: false })
+        .build()
     ).not.toThrow();
   });
 });

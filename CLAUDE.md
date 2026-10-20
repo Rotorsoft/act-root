@@ -202,7 +202,7 @@ Source-of-truth for what lives where:
 ## Development Workflow
 
 - Strict TypeScript everywhere — type-check before pushing
-- Pre-commit hooks run lint/format; pre-push runs the full test suite (don't bypass with `--no-verify` unless asked)
+- Pre-commit hooks run lint/format, and CI runs the full suite on every push (don't bypass hooks with `--no-verify` unless asked)
 - Use Zod schemas for all runtime validation
 - Never modify event data structures in place — evolve via versioned event names
 - Keep state machines focused; split concerns into separate slices
@@ -270,7 +270,7 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **No manual version bumps.** Semantic-release owns the `version` field in `package.json`. The only manual version event is seeding the baseline `0.0.0` tag when adding a new package. Manual bumps create diffs that conflict with the auto-bump commit.
 - **Don't modify working code without explicit approval.** Propose changes first when the user hasn't asked for code. Refactors-while-you're-here are the most common way to expand the blast radius of a small request.
 - **Conventional-commit subject must be lowercase.** `feat(act): add foo` not `feat(act): Add foo`. The commitlint hook will reject otherwise.
-- **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged; the pre-push hook runs tests on master. Bypassing either ships unverified work. If a hook fails, fix the underlying issue.
+- **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged and the commit-msg hook runs commitlint; bypassing them ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
 ### Naming conventions
 

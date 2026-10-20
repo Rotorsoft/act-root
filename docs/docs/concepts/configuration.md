@@ -137,7 +137,7 @@ const app = act()
 
 - **`maxSubscribedStreams`** (default `1000`) — cap for the LRU tracking what each **dynamically resolved** reaction target was last subscribed at. Apps that mint many dynamic targets (e.g. one stream per user activity) should raise this; for those the LRU is a memory bound, not a correctness mechanism — eviction at most causes a redundant `subscribe()` call, and a target's lane survives being forgotten because the store merges lane with priority rather than overwriting it (#1599). Targets declared statically (`.to({ target, lane, priority })`) are never evicted: they are a bounded, build-time-known list held outside the LRU, so their declared lane and priority stay owned by the build-time subscribe no matter how much dynamic churn passes through (#1582).
 - **`settleDebounceMs`** (default `10`) — debounce window used by `settle()` when no per-call `debounceMs` is given. Coalesces commits in the same tick into a single correlate→drain pass. Lower for tight tests; raise for bursty production traffic.
-- **`autoSettle`** (default `true`) — settle on its own after a change that frees reaction work: a commit, `reset()`, `unblock()`, `restore()` or a notification from another process. Set `false` when you walk the pipeline yourself with `correlate()` / `drain()`, as tests that check its steps do. Timers still run: lanes with `cycleMs`, `start_correlations()`, the circuit breaker's recovery pass after a store failure, and each stream's backoff or defer wake-up. See [Event sourcing § settle()](./event-sourcing.md#settle).
+- **`autoSettle`** (default `true`) — settle on its own after a change that frees reaction work: a commit, `reset()`, `unblock()`, `restore()` or a notification from another process. Set `false` when you walk the pipeline yourself with `correlate()` / `drain()`, as tests that check its steps do. [Event sourcing § settle()](./event-sourcing.md#settle) owns the rule, including the timers that still run.
 - **`onlyLanes`** (default: every declared lane) — restrict this process to a subset of declared drain lanes (ACT-1103). See [Lanes](#lanes) below.
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
 - **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
@@ -228,13 +228,13 @@ Commits from the writer fleet emit notifications (that's part of the store's com
 
 By default, every reaction lives in a single implicit `"default"` lane: one `DrainController` runs the whole pipeline with one timing budget. That works until reactions diverge — a webhook delivery wants `leaseMillis` measured in tens of seconds, a best-effort notification wants short retries, and a long projection replay needs a generous claim budget. Tuning any one of them globally penalises the others.
 
-`.withLane({...})` declares an independent drain lane with its own controller, lease budget, claim limit, and cycle cadence. Reactions opt in via `.to({lane})`; reactions without an explicit lane stay in `"default"`.
+`.withLane({...})` declares an independent drain lane with its own controller, lease budget and claim limit. Reactions opt in via `.to({lane})`; reactions without an explicit lane stay in `"default"`.
 
 ```typescript no-check
 const app = act()
   .withState(Ticket)
-  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5, cycleMs: 500 })
-  .withLane({ name: "best-effort", leaseMillis: 1_000, streamLimit: 20, cycleMs: 50 })
+  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5 })
+  .withLane({ name: "best-effort", leaseMillis: 1_000, streamLimit: 20 })
   .on("OrderConfirmed")
     .do(deliverWebhook)
     .to({ target: "webhooks-out", lane: "webhooks" })
@@ -249,7 +249,7 @@ const app = act()
 - **`name`** — the lane identifier. `"default"` is reserved for the implicit lane; declaring it explicitly throws.
 - **`leaseMillis`** — lease window for `claim()` calls in this lane. Sized to the longest expected handler invocation in the lane plus headroom.
 - **`streamLimit`** — max streams claimed per cycle. Bounds the parallel-handler dispatch budget for the lane.
-- **`cycleMs`** — when set, auto-starts a per-lane `setTimeout` chain that drains the lane at least this often. The timer is `unref()`'d so it doesn't keep the process alive; `app.shutdown()` clears it. It is a floor, not a rate limit: with `autoSettle` on (the default), the settle a commit schedules drains every armed lane, so a slow lane may run sooner when nothing else is waiting. The chain is the extra precaution for when `autoSettle` is off. It only drains work correlation has already marked; with `autoSettle: false`, new commits reach it through `settle()`, `correlate()` or `start_correlations()`.
+- **`cycleMs`** — leave it unset unless the app sets `autoSettle: false`. With auto settle on (the default), the settle a commit schedules already drains every armed lane, so the timer adds nothing. With `autoSettle: false`, it starts a per-lane `setTimeout` chain that drains the lane at least this often: a floor, not a rate limit. It only drains work correlation has already marked; new commits reach it through `settle()`, `correlate()` or `start_correlations()`. The timer is `unref()`'d so it doesn't keep the process alive; `app.shutdown()` clears it.
 
 Each declared lane field overrides caller-passed `DrainOptions` at drain time — `withLane({leaseMillis: 30_000})` would be meaningless if `drain({leaseMillis: 1_000})` could erase it. Caller options only apply when the lane is silent on the field, and only to that one call: the drains Act runs on its own (settle, the defer wake, `cycleMs`, `start_correlations`) pass no options, so they use the lane's value or the default. A handler that needs a longer lease than the default 10 seconds belongs on a named lane with its own `leaseMillis`.
 

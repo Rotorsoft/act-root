@@ -30,7 +30,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow", leaseMillis: 30_000, streamLimit: 5 })
       .withLane({ name: "fast", cycleMs: 50 })
-      .build({ autoSettle: false });
+      .build();
 
     expect(app.lanes).toHaveLength(2);
     expect(app.lanes.map((l) => l.name)).toEqual(["slow", "fast"]);
@@ -73,7 +73,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "slow-target", lane: "slow" })
-      .build({ autoSettle: false });
+      .build();
 
     const reaction = app.registry.events.Incremented.reactions.get("react");
     expect(reaction?.resolver).toEqual({
@@ -104,7 +104,7 @@ describe("lanes", () => {
           return Promise.resolve();
         })
         .to({ target: "shared", source: "sB", priority: 1, lane: "slow" })
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(/conflicting lane assignments/);
   });
 
@@ -122,7 +122,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB", priority: 7, lane: "fast" })
-      .build({ autoSettle: false });
+      .build();
     // Same lane target-wide is fine; the build succeeds.
     expect(app.lanes.map((l) => l.name)).toContain("fast");
   });
@@ -145,7 +145,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared", source: "sB" })
-      .build({ autoSettle: false });
+      .build();
     expect(app.lanes).toEqual([]);
   });
 
@@ -215,7 +215,7 @@ describe("lanes", () => {
           return Promise.resolve();
         })
         .to({ target: "shared", source: "sB" })
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(
       'Stream "shared" has conflicting lane assignments ("slow" vs "default")'
     );
@@ -238,7 +238,7 @@ describe("lanes", () => {
         return Promise.resolve();
       })
       .to({ target: "shared" })
-      .build({ autoSettle: false });
+      .build();
     expect(app.lanes.map((l) => l.name)).toEqual(["slow"]);
   });
 
@@ -323,7 +323,7 @@ describe("lanes", () => {
         .withState(Counter)
         .withLane({ name: "slow", leaseMillis: 60_000 })
         .withSlice(sliceA)
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(/different config/);
   });
 
@@ -337,7 +337,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow", leaseMillis: 30_000 })
       .withSlice(sliceA)
-      .build({ autoSettle: false });
+      .build();
 
     expect(app.lanes).toHaveLength(1);
     expect(app.lanes[0]).toMatchObject({ name: "slow", leaseMillis: 30_000 });
@@ -348,7 +348,7 @@ describe("lanes", () => {
       act()
         .withState(Counter)
         .withLane({ name: "slow" })
-        .build({ autoSettle: false, onlyLanes: ["slow", "ghost" as never] })
+        .build({ onlyLanes: ["slow", "ghost" as never] })
     ).toThrow(/undeclared lane.*ghost/);
   });
 
@@ -362,7 +362,7 @@ describe("lanes", () => {
 
   it("accepts an empty onlyLanes array as a no-op (no validation tripped)", () => {
     expect(() =>
-      act().withState(Counter).build({ autoSettle: false, onlyLanes: [] })
+      act().withState(Counter).build({ onlyLanes: [] })
     ).not.toThrow();
   });
 
@@ -382,7 +382,7 @@ describe("lanes", () => {
       .to({ target: "anywhere", lane: "ghost" as never })
       .build();
 
-    expect(() => act().withSlice(stale).build({ autoSettle: false })).toThrow(
+    expect(() => act().withSlice(stale).build()).toThrow(
       /undeclared lane "ghost"/
     );
   });
@@ -436,7 +436,7 @@ describe("lanes", () => {
         .on("Incremented")
         .do(handlerB)
         .to({ target: "shared", lane: "fast" })
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(/conflicting lane assignments/);
   });
 
@@ -458,7 +458,7 @@ describe("lanes", () => {
         .on("Incremented")
         .do(handlerB)
         .to("shared")
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(/conflicting lane assignments/);
     // Direction B: no-lane-first, then lane (existing.lane undefined, incoming defined)
     function handlerC() {
@@ -477,7 +477,7 @@ describe("lanes", () => {
         .on("Incremented")
         .do(handlerD)
         .to({ target: "shared2", lane: "slow" })
-        .build({ autoSettle: false })
+        .build()
     ).toThrow(/conflicting lane assignments/);
   });
 
@@ -485,7 +485,7 @@ describe("lanes", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "slow", leaseMillis: 30_000, streamLimit: 7 })
-      .build({ autoSettle: false });
+      .build();
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<
@@ -502,7 +502,7 @@ describe("lanes", () => {
   });
 
   it("keeps a single controller with lane=undefined when no lanes are declared", () => {
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { lane: string | undefined }>;
@@ -517,7 +517,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ autoSettle: false, onlyLanes: ["slow"] });
+      .build({ onlyLanes: ["slow"] });
     const controllers = (
       app as unknown as { _drain_controllers: Map<string, unknown> }
     )._drain_controllers;
@@ -530,7 +530,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ autoSettle: false, onlyLanes: ["fast"] });
+      .build({ onlyLanes: ["fast"] });
 
     const advisory = infoSpy.mock.calls.find((c) =>
       String(c[0] ?? "").includes("orphaned lane")
@@ -548,7 +548,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ autoSettle: false, onlyLanes: ["default", "slow", "fast"] });
+      .build({ onlyLanes: ["default", "slow", "fast"] });
 
     const advisory = infoSpy.mock.calls.find((c) =>
       String(c[0] ?? "").includes("orphaned lane")
@@ -563,7 +563,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "slow" })
       .withLane({ name: "fast" })
-      .build({ autoSettle: false });
+      .build();
 
     const advisory = infoSpy.mock.calls.find((c) =>
       String(c[0] ?? "").includes("orphaned lane")
@@ -576,7 +576,7 @@ describe("lanes", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5 })
-      .build({ autoSettle: false });
+      .build();
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<
@@ -620,7 +620,7 @@ describe("lanes", () => {
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5 })
       .withLane({ name: "slow", cycleMs: 1_000 })
-      .build({ autoSettle: false });
+      .build();
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<
@@ -638,7 +638,7 @@ describe("lanes", () => {
   });
 
   it("start() is a no-op after stop() — once stopped, the controller stays stopped", () => {
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -662,7 +662,7 @@ describe("lanes", () => {
     // A timer already queued when `stop()` runs will still fire, so the tick
     // re-checks after draining. Without that check the chain would schedule
     // itself again and keep draining past shutdown.
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -705,7 +705,7 @@ describe("lanes", () => {
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5 })
-      .build({ autoSettle: false });
+      .build();
     const ctrl = (
       app as unknown as {
         _drain_controllers: Map<
@@ -747,7 +747,7 @@ describe("lanes", () => {
       .on("SlowTick")
       .do(async function slowHandler() {})
       .to({ target: "slow-out", lane: "slow" })
-      .build({ autoSettle: false });
+      .build();
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { armed: boolean }>;
@@ -800,7 +800,7 @@ describe("lanes", () => {
       .on("Incremented")
       .do(async function dyn() {})
       .to((event) => ({ target: `dyn-${event.stream}`, lane: "fast" }))
-      .build({ autoSettle: false });
+      .build();
     const controllers = (
       app as unknown as {
         _drain_controllers: Map<string, { armed: boolean }>;

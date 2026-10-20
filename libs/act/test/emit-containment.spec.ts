@@ -54,7 +54,7 @@ describe("lifecycle emits are contained per listener", () => {
   });
 
   it("a throwing committed listener does not fail do() after the commit lands", async () => {
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     app.on("committed", boom);
 
     let thrown: unknown;
@@ -75,7 +75,7 @@ describe("lifecycle emits are contained per listener", () => {
   });
 
   it("a throwing forgotten listener does not fail forget() after the PII is wiped", async () => {
-    const app = act().withState(User).build({ autoSettle: false });
+    const app = act().withState(User).build();
     app.on("forgotten", boom);
 
     await app.do(
@@ -101,7 +101,7 @@ describe("lifecycle emits are contained per listener", () => {
   });
 
   it("a throwing closed listener does not fail close() after the truncate lands", async () => {
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     app.on("closed", boom);
 
     await app.do("tick", { stream: "u3", actor }, {});
@@ -150,7 +150,7 @@ describe("lifecycle emits are contained per listener", () => {
     // Containment must cover observers only. If it started swallowing the
     // operation's own errors, every one of the tests above would pass for
     // the wrong reason.
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     app.on("committed", boom);
     let thrown: unknown;
     // A genuine ConcurrencyError: the stream is at version -1, not 5.
@@ -164,7 +164,7 @@ describe("lifecycle emits are contained per listener", () => {
   });
 
   it("control — emit reports whether the event had listeners", async () => {
-    const app = act().withState(Counter).build({ autoSettle: false });
+    const app = act().withState(Counter).build();
     expect(app.emit("committed", [] as never)).toBe(false);
     app.on("committed", () => {});
     expect(app.emit("committed", [] as never)).toBe(true);

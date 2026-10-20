@@ -39,7 +39,7 @@ describe("circuit breaker config validation", () => {
     expect(() =>
       act()
         .withState(Counter)
-        .build({ autoSettle: false, circuitBreaker: { failureThreshold: 0 } })
+        .build({ circuitBreaker: { failureThreshold: 0 } })
     ).toThrow();
   });
 
@@ -47,7 +47,7 @@ describe("circuit breaker config validation", () => {
     expect(() =>
       act()
         .withState(Counter)
-        .build({ autoSettle: false, circuitBreaker: { cooldownMs: 1 } })
+        .build({ circuitBreaker: { cooldownMs: 1 } })
     ).toThrow();
   });
 });

@@ -40,7 +40,7 @@ type StoreNotification = {
 };
 ```
 
-When present, the orchestrator subscribes once at `build()` time and routes notifications to wake `settle()` automatically. The hook is **opt-in at the adapter level** — `PostgresStore` defaults `notify: false` so single-instance deployments pay zero overhead. Multi-process apps enable it explicitly:
+When present, the orchestrator subscribes once at `build()` time and routes notifications to wake `settle()` automatically (unless the app sets `autoSettle: false`, which still emits `notified` but schedules nothing). The hook is **opt-in at the adapter level** — `PostgresStore` defaults `notify: false` so single-instance deployments pay zero overhead. Multi-process apps enable it explicitly:
 
 ```ts no-check
 store(new PostgresStore({ /* ... */, notify: true }));   // ← opt in
