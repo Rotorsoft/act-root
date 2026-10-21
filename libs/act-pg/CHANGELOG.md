@@ -1,3 +1,12 @@
+# [@rotorsoft/act-pg-v1.21.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.21.2...@rotorsoft/act-pg-v1.21.3) (2026-10-21)
+
+
+### Bug Fixes
+
+* **act-pg,act-sqlite:** truncate wraps driver errors in storeerror like every other write ([#2031](https://github.com/Rotorsoft/act-root/issues/2031)) ([43e4b8c](https://github.com/Rotorsoft/act-root/commit/43e4b8cc8382e23f170a7b2ff33b87aa8ef3a810)), closes [#2018](https://github.com/Rotorsoft/act-root/issues/2018)
+* **act-pg:** bind the query_stats limit as a parameter, and document limit as a non-negative integer ([#2030](https://github.com/Rotorsoft/act-root/issues/2030)) ([84b825c](https://github.com/Rotorsoft/act-root/commit/84b825c28dddf9e97933ee8de1381b4ce003697a)), closes [#2023](https://github.com/Rotorsoft/act-root/issues/2023)
+* **act:** query with no query object leaves snapshot rows out on every adapter ([#2027](https://github.com/Rotorsoft/act-root/issues/2027)) ([326ff1c](https://github.com/Rotorsoft/act-root/commit/326ff1c40ad682ddcb78ec413930bff867897c59)), closes [#2021](https://github.com/Rotorsoft/act-root/issues/2021)
+
 # [@rotorsoft/act-pg-v1.21.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.21.1...@rotorsoft/act-pg-v1.21.2) (2026-10-20)
 
 
