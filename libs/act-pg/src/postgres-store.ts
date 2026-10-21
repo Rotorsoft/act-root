@@ -2175,7 +2175,7 @@ export class PostgresStore implements Store {
       return result;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      throw error;
+      throw new StoreError("truncate", { cause: error });
     } finally {
       client.release();
     }
