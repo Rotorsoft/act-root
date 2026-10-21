@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.21.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.21.2...@rotorsoft/act-sqlite-v1.21.3) (2026-10-21)
+
+
+### Bug Fixes
+
+* **act-pg,act-sqlite:** truncate wraps driver errors in storeerror like every other write ([#2031](https://github.com/Rotorsoft/act-root/issues/2031)) ([43e4b8c](https://github.com/Rotorsoft/act-root/commit/43e4b8cc8382e23f170a7b2ff33b87aa8ef3a810)), closes [#2018](https://github.com/Rotorsoft/act-root/issues/2018)
+
 # [@rotorsoft/act-sqlite-v1.21.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.21.1...@rotorsoft/act-sqlite-v1.21.2) (2026-10-20)
 
 # [@rotorsoft/act-sqlite-v1.21.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.21.0...@rotorsoft/act-sqlite-v1.21.1) (2026-10-19)
