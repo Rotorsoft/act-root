@@ -1,3 +1,11 @@
+# [@rotorsoft/act-tck-v1.39.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.39.1...@rotorsoft/act-tck-v1.39.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **act:** in-memory store prunes windowed truncate targets one at a time, like the sql adapters ([#2028](https://github.com/Rotorsoft/act-root/issues/2028)) ([e6f6f40](https://github.com/Rotorsoft/act-root/commit/e6f6f40070f4300b22ea377bcb63bf7633726299)), closes [#2022](https://github.com/Rotorsoft/act-root/issues/2022)
+* **act:** query with no query object leaves snapshot rows out on every adapter ([#2027](https://github.com/Rotorsoft/act-root/issues/2027)) ([326ff1c](https://github.com/Rotorsoft/act-root/commit/326ff1c40ad682ddcb78ec413930bff867897c59)), closes [#2021](https://github.com/Rotorsoft/act-root/issues/2021)
+
 # [@rotorsoft/act-tck-v1.39.1](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.39.0...@rotorsoft/act-tck-v1.39.1) (2026-10-19)
 
 
