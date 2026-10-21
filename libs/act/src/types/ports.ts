@@ -272,7 +272,7 @@ export type StreamPosition = {
  *   `stream > after` (lexicographic). Pass the last seen `stream` to fetch
  *   the next page.
  * @property limit - Max rows to return (default: 100). A bound, applied
- *   before a row is emitted: `limit: 0` returns none.
+ *   before a row is emitted: `limit: 0` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
  */
 export type QueryStreams = {
   readonly stream?: string;
@@ -433,7 +433,7 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   which defaults to 100. Omitting it preserves the historical
  *   "return everything" behavior; set it (with `after`) to page through
  *   large stream sets a bounded chunk at a time. A bound, applied before a
- *   stream is added to the result: `limit: 0` returns none.
+ *   stream is added to the result: `limit: 0` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;

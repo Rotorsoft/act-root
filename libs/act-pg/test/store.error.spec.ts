@@ -164,6 +164,26 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("query_stats", () => {
+    it("binds the limit as a parameter on both the heads and full-scan paths", async () => {
+      const querySpy = vi
+        .spyOn(pg.Pool.prototype, "query")
+        // @ts-expect-error mock
+        .mockResolvedValue({ rows: [], rowCount: 0 });
+      await store.query_stats(["s"], { limit: 7, tail: true });
+      await store.query_stats(["s"], { limit: 7, count: true });
+      expect(querySpy).toHaveBeenCalledTimes(3);
+      for (const [sql, params] of querySpy.mock.calls as unknown as [
+        string,
+        unknown[],
+      ][]) {
+        expect(sql).not.toMatch(/LIMIT 7/);
+        expect(sql).toMatch(/LIMIT \$\d+/);
+        expect(params.at(-1)).toBe(7);
+      }
+    });
+  });
+
   describe("claim", () => {
     it("wraps a DB error in StoreError (preserving the cause)", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
