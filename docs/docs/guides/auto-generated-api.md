@@ -130,7 +130,7 @@ serve({ fetch: api.fetch, port: 4000 });
 // POST /api/actions/OpenTicket  body: { title }  → 200 Snapshot[] | 4xx ApiError
 ```
 
-The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; a body-schema failure short-circuits with `422 / VALIDATION` and the shared `ApiError` envelope — the same status and shape a `ValidationError` thrown inside `app.do` maps to, so a client parsing `ApiError` sees one shape for both. Errors map through `toApiError` to `412 / CONCURRENCY`, `409 / INVARIANT`, `422 / VALIDATION`, `410 / STREAM_CLOSED`, `400 / NON_RETRYABLE`, and `500 / INTERNAL` for unknown throws.
+The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; a body-schema failure, or a JSON body that doesn't parse, short-circuits with `422 / VALIDATION` and the shared `ApiError` envelope — the same status and shape a `ValidationError` thrown inside `app.do` maps to, so a client parsing `ApiError` sees one shape for both. Errors map through `toApiError` to `412 / CONCURRENCY`, `409 / INVARIANT`, `422 / VALIDATION`, `410 / STREAM_CLOSED`, `400 / NON_RETRYABLE`, and `500 / INTERNAL` for unknown throws.
 
 Edge-runtime ready — Hono runs unchanged on Node, Bun, Cloudflare Workers, Vercel Edge, AWS Lambda, Deno. If you wire `idempotency`, verify the `IdempotencyStore` is edge-compatible: in-memory works per worker, cross-worker requires a distributed store.
 

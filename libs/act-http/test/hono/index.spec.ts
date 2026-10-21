@@ -153,6 +153,23 @@ describe("hono(app, options) — generated REST surface", () => {
     expect(typeof body.detail).toBe("string");
   });
 
+  test("a JSON body that doesn't parse gets the same 422 ApiError envelope", async ({
+    app,
+  }) => {
+    const api = hono(app as never, default_options());
+    const res = await api.request("/api/actions/PressKey", {
+      method: "POST",
+      headers: make_headers(),
+      body: "{bad",
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; code?: string };
+    expect(body).toMatchObject({
+      error: "ValidationError",
+      code: "VALIDATION",
+    });
+  });
+
   describe("expectedVersion (optimistic concurrency)", () => {
     test("threads the resolved value through Target.expectedVersion", async ({
       app,
