@@ -1737,17 +1737,18 @@ export class PostgresStore implements Store {
     // per stream in stream-name order, so a trailing LIMIT caps the number
     // of streams returned. The head and tail queries share the same
     // ordering, so the same LIMIT selects the identical first-N streams.
+    const args = stats_limit !== undefined ? [...params, stats_limit] : params;
     const limit_clause =
-      stats_limit !== undefined ? ` LIMIT ${stats_limit}` : "";
+      stats_limit !== undefined ? ` LIMIT $${args.length}` : "";
     const head_sql = `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version DESC${limit_clause}`;
     const tail_sql = want_tail
       ? `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version ASC${limit_clause}`
       : null;
 
     const [headRes, tailRes] = await Promise.all([
-      this._pool.query<Committed<E, keyof E>>(head_sql, params),
+      this._pool.query<Committed<E, keyof E>>(head_sql, args),
       tail_sql
-        ? this._pool.query<Committed<E, keyof E>>(tail_sql, params)
+        ? this._pool.query<Committed<E, keyof E>>(tail_sql, args)
         : Promise.resolve(null),
     ]);
 
@@ -1821,7 +1822,7 @@ export class PostgresStore implements Store {
       LEFT JOIN agg a ON a.stream = h.stream
       ${tail_join}
       ORDER BY h.stream
-      ${stats_limit !== undefined ? `LIMIT ${stats_limit}` : ""}
+      ${stats_limit !== undefined ? `LIMIT $${params.length + 1}` : ""}
     `;
 
     const res = await this._pool.query<
@@ -1836,7 +1837,7 @@ export class PostgresStore implements Store {
         t_created?: Date;
         t_meta?: object;
       }
-    >(sql, params);
+    >(sql, stats_limit !== undefined ? [...params, stats_limit] : params);
 
     const out = new Map<string, StreamStats<E>>();
     for (const row of res.rows) {

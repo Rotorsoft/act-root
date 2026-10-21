@@ -104,7 +104,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  * @property `names?` - Filter by event names. An **empty array matches no events** (an explicit empty allow-list) — the opposite of omitting `names`, which matches all. All adapters honor this identically.
  * @property `before?` - Filter events strictly before this id (`id < before`). Honored even when `0` (`before: 0` matches nothing).
  * @property `after?` - Filter events strictly after this id (`id > after`). Honored even when `0` (`after: 0` excludes an id-0 event on adapters whose ids start at 0).
- * @property `limit?` - Limit the number of events to return
+ * @property `limit?` - Limit the number of events to return; `0` means no limit. A non-negative integer: other values aren't validated, and adapters treat them differently.
  * @property `created_before?` - Filter events created before this date/time
  * @property `created_after?` - Filter events created after this date/time
  * @property `backward?` - Order descending when true
