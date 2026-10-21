@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v1.33.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.9...@rotorsoft/act-v1.33.10) (2026-10-21)
+
+
+### Bug Fixes
+
+* **act-pg:** bind the query_stats limit as a parameter, and document limit as a non-negative integer ([#2030](https://github.com/Rotorsoft/act-root/issues/2030)) ([84b825c](https://github.com/Rotorsoft/act-root/commit/84b825c28dddf9e97933ee8de1381b4ce003697a)), closes [#2023](https://github.com/Rotorsoft/act-root/issues/2023)
+* **act:** in-memory store prunes windowed truncate targets one at a time, like the sql adapters ([#2028](https://github.com/Rotorsoft/act-root/issues/2028)) ([e6f6f40](https://github.com/Rotorsoft/act-root/commit/e6f6f40070f4300b22ea377bcb63bf7633726299)), closes [#2022](https://github.com/Rotorsoft/act-root/issues/2022)
+* **act:** query with no query object leaves snapshot rows out on every adapter ([#2027](https://github.com/Rotorsoft/act-root/issues/2027)) ([326ff1c](https://github.com/Rotorsoft/act-root/commit/326ff1c40ad682ddcb78ec413930bff867897c59)), closes [#2021](https://github.com/Rotorsoft/act-root/issues/2021)
+
 # [@rotorsoft/act-v1.33.9](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.8...@rotorsoft/act-v1.33.9) (2026-10-20)
 
 
