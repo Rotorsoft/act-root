@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.10.21](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.20...@rotorsoft/act-http-v1.10.21) (2026-10-21)
+
+
+### Bug Fixes
+
+* **act-http:** hono answers json that doesn't parse with the 422 apierror envelope ([#2029](https://github.com/Rotorsoft/act-root/issues/2029)) ([49ef518](https://github.com/Rotorsoft/act-root/commit/49ef518bdb1007c507d202e14e306e0ffbf05159)), closes [#2020](https://github.com/Rotorsoft/act-root/issues/2020)
+
 # [@rotorsoft/act-http-v1.10.20](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-http-v1.10.19...@rotorsoft/act-http-v1.10.20) (2026-10-20)
 
 
