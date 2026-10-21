@@ -322,12 +322,13 @@ describe("SqliteStore error paths", () => {
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
-  it("truncate: rolls back and rethrows on DELETE failure", async () => {
+  it("truncate: rolls back and surfaces a DELETE failure as a StoreError", async () => {
     const client = mockClientFailOn("DELETE FROM events");
     (db as unknown as { client: unknown }).client = client;
-    await expect(db.truncate([{ stream: "x" }])).rejects.toThrow(
-      /DELETE FROM events/
-    );
+    const error = await db.truncate([{ stream: "x" }]).catch((e) => e);
+    expect(error).toBeInstanceOf(StoreError);
+    expect(error.operation).toBe("truncate");
+    expect(String(error.cause)).toMatch(/DELETE FROM events/);
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 

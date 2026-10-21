@@ -1665,7 +1665,7 @@ export class SqliteStore implements Store {
       await tx.commit();
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("truncate", { cause: e });
     }
 
     return result;

@@ -530,7 +530,7 @@ describe("PostgresStore", () => {
   });
 
   describe("truncate (full)", () => {
-    it("surfaces a DELETE error", async () => {
+    it("surfaces a DELETE error as a StoreError that keeps the cause", async () => {
       const queryMock = vi.fn((sql: string) =>
         sql.includes("DELETE")
           ? Promise.reject(new Error("mocked DELETE error"))
@@ -540,9 +540,10 @@ describe("PostgresStore", () => {
         // @ts-expect-error mock
         makeClient(queryMock)
       );
-      await expect(store.truncate([{ stream: "x" }])).rejects.toThrow(
-        "mocked DELETE error"
-      );
+      const error = await store.truncate([{ stream: "x" }]).catch((e) => e);
+      expect(error).toBeInstanceOf(StoreError);
+      expect(error.operation).toBe("truncate");
+      expect(String(error.cause)).toMatch(/mocked DELETE error/);
     });
 
     it("reports 0 deleted when the DELETE rowCount is null (defensive)", async () => {
