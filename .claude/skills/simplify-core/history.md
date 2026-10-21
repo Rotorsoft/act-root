@@ -560,3 +560,4 @@ Simplifications:
 
 Design findings, not proposed: shutdown hands the lease back twice (`stop_correlations()` plus the final awaited release; harmless); deriving settle's `_pending` from the armed counters would loop a worker refused the lease; `query_streams` defaults `limit` to 100 and `query_stats` to unbounded (documented in three places, kept in one by s4); migrating-to-1.x.md promises "export removal forces 2.0" while #1959 removed exports in a minor (the user's call). Two narrower restore windows remain unprobed (a `restart()` during init; one while the scan's subscribe is out).
 
+Tickets (user: "create the tickets"): #2033 (P2026-10-20r2-1), #2034 (-2), #2035 (s1), #2036 (s2), #2037 (s3), #2038 (s4), #2039 (s5), #2040 (s6), #2041 (s7).
