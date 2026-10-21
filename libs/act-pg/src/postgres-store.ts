@@ -829,13 +829,11 @@ export class PostgresStore implements Store {
         values.push(correlation);
         conditions.push(`meta->>'correlation'=$${values.length}`);
       }
-      if (!with_snaps) {
-        conditions.push(`name <> '${SNAP_EVENT}'`);
-      }
     }
-    if (conditions.length) {
-      sql += " WHERE " + conditions.join(" AND ");
+    if (!with_snaps) {
+      conditions.push(`name <> '${SNAP_EVENT}'`);
     }
+    sql += " WHERE " + conditions.join(" AND ");
     sql += ` ORDER BY id ${backward ? "DESC" : "ASC"}`;
     if (limit) {
       values.push(limit);

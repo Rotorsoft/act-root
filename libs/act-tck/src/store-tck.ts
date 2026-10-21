@@ -472,6 +472,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(limited).toHaveLength(2);
       });
 
+      it("excludes snapshots when called with no query object", async () => {
+        const s = `q-nofilter-${uid()}`;
+        await store.commit(
+          s,
+          [{ name: SNAP_EVENT, data: { count: 0 } }],
+          make_meta({ stream: s })
+        );
+        const names: string[] = [];
+        await store.query((e) => {
+          names.push(e.name as string);
+        });
+        expect(names).not.toContain(SNAP_EVENT);
+      });
+
       it("with_snaps resumes from the latest snapshot per stream", async () => {
         const s = `q-snap-${uid()}`;
         // 2 pre-snapshot domain events ...
