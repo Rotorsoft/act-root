@@ -42,7 +42,7 @@ If a Store/Cache/Logger port method changed in `libs/act/src/types/ports.ts`:
 
 ## 4. Naming conventions
 
-Apply `CONTRIBUTING.md` § "Naming conventions": anything reachable from a package's `index.ts` is camelCase (fields, options, exported functions), internal identifiers are short snake_case, types are PascalCase. Match existing analogs over inventing new patterns: if the project already names something `app.reset(input)`, a new sibling should be `app.unblock(input)`, not `app.recoverStreams(...)`.
+Apply `.claude/rules/naming.md`: anything reachable from a package's `index.ts` is camelCase (fields, options, exported functions), internal identifiers are short snake_case, types are PascalCase. Match existing analogs over inventing new patterns: if the project already names something `app.reset(input)`, a new sibling should be `app.unblock(input)`, not `app.recoverStreams(...)`.
 
 ## 5. Doc debt
 

@@ -24,7 +24,7 @@ import {
  * validated at transport-function construction; out-of-range values
  * throw `ZodError` immediately so misconfiguration surfaces at startup
  * instead of at first connection (the framework-wide convention for
- * config bags — see CONTRIBUTING.md § Config-validation schemas).
+ * config bags — see .claude/rules/config-validation.md).
  */
 export type SseOptions = {
   /**
