@@ -583,6 +583,22 @@ describe("a local change settles its own reactions", () => {
     await vi.waitFor(() => expect(ran).toEqual(["p1"]));
   });
 
+  it("ignores a caller's correlate.after: every pass scans from the checkpoint", async () => {
+    const ran: string[] = [];
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track(event) {
+        ran.push(event.stream);
+      })
+      .to("tracker")
+      .build({ autoSettle: false });
+    await app.do("ping", { stream: "a1", actor }, {});
+    // An `after` past every event would skip the commit if settle used it.
+    app.settle({ correlate: { after: 1e9 }, debounceMs: 0 });
+    await vi.waitFor(() => expect(ran).toEqual(["a1"]));
+  });
+
   it("runs nothing on its own with autoSettle: false, until the caller walks the pipeline", async () => {
     const ran: string[] = [];
     const app = act()

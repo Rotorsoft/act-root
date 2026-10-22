@@ -388,7 +388,8 @@ export type Drain<TEvents extends Schemas> = {
  *
  * @property debounceMs - Debounce window in milliseconds (default: 10). A
  *   pass already scheduled keeps its time unless this is shorter.
- * @property correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
+ * @property correlate - Query for each correlation scan (default `limit`: 100).
+ *   Every pass scans from correlation's own checkpoint, so `after` is ignored.
  * @property maxPasses - Cap on correlate→drain loops (default: `Infinity`).
  *   Settle exits early as soon as a pass makes no progress (no new
  *   subscriptions, no events read, no streams leased), so the cap only matters in
