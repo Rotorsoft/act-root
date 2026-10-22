@@ -3314,9 +3314,9 @@ export declare class InMemoryStore implements Store {
         at: number;
         by: string;
         retry: number;
-        error: string;
         lagging: boolean;
         lane: string;
+        error: string;
     }[]>;
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
     /** De-duplicated like the SQL \`stream = ANY(...)\`; unknown names skipped. */

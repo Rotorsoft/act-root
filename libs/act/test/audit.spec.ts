@@ -599,8 +599,7 @@ describe("audit", () => {
         meta
       );
       await store().subscribe([{ stream: "w1", source: "w1" }]);
-      // InMemoryStream exposes `retry` as a getter on `_retry`.
-      // Reach in to bump _retry directly for the test setup.
+      // Reach in to bump retry directly for the test setup.
       const s = (
         store() as unknown as {
           _streams: Map<string, { _retry: number }>;
