@@ -160,7 +160,6 @@ export class CorrelateCycle<
   TActions extends Schemas,
 > {
   private _checkpoint = -1;
-  private _initialized = false;
   /** Lease holder id; per instance, so a restart never inherits a stale claim. */
   private readonly _by = randomUUID();
   private readonly _key: string;
@@ -220,17 +219,13 @@ export class CorrelateCycle<
     this._raised++;
   }
 
-  async init(): Promise<void> {
-    if (this._initialized) return;
+  private async _init(): Promise<void> {
     // Single-flight, but a failure clears the promise so the next call retries.
-    if (!this._init_promise) {
-      this._init_promise = this._run_init().catch((error) => {
-        this._init_promise = undefined;
-        throw error;
-      });
-    }
+    this._init_promise ??= this._run_init().catch((error) => {
+      this._init_promise = undefined;
+      throw error;
+    });
     await this._init_promise;
-    this._initialized = true;
   }
 
   private async _run_init(): Promise<void> {
@@ -254,7 +249,6 @@ export class CorrelateCycle<
 
   /** After `restore` replaced the log: forget everything and cold-start again. */
   restart(): void {
-    this._initialized = false;
     this._init_promise = undefined;
     this._checkpoint = -1;
     this._dynamic_subscriptions.clear();
@@ -285,7 +279,7 @@ export class CorrelateCycle<
 
   /** Scan past the checkpoint, subscribe new targets and raise their work marks. */
   async correlate(
-    query: Query = { after: -1, limit: 10 },
+    query: Query,
     /**
      * Honour the correlation lease. Only the settle loop and poller do; an
      * explicit `app.correlate()` scans now, since `close` loops on it.
@@ -294,14 +288,17 @@ export class CorrelateCycle<
   ): Promise<{
     subscribed: number;
     last_id: number;
+    /** It read events: settle's progress signal. */
+    read: boolean;
     marked: number;
     scanned: boolean;
   }> {
-    await this.init();
+    await this._init();
     const epoch = this._epoch;
     const idle = () => ({
       subscribed: 0,
       last_id: this._checkpoint,
+      read: false,
       marked: 0,
       scanned: false,
     });
@@ -423,6 +420,7 @@ export class CorrelateCycle<
     );
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
+    const read = last_id > after;
 
     // Released or restarted while the scan was out: what it read belongs to
     // a lease this worker gave up, or to the log a restore replaced. Writing
@@ -468,14 +466,14 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id, marked, scanned: true };
+      return { subscribed, last_id, read, marked, scanned: true };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
     // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
     if (!stopped && found !== query.limit) this._lowered = raised;
-    return { subscribed: 0, last_id, marked: 0, scanned: true };
+    return { subscribed: 0, last_id, read, marked: 0, scanned: true };
   }
 
   /**

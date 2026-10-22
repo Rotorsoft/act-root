@@ -30,6 +30,7 @@ import {
   DrainController,
   type Handle,
   type HandleBatch,
+  merge_drains,
 } from "./internal/drain-cycle.js";
 import type { DrainOps } from "./internal/drain-ops.js";
 import { bare_patch, type EsOps, scan } from "./internal/event-sourcing.js";
@@ -66,7 +67,6 @@ import type {
   AuditFinding,
   AuditOptions,
   BatchHandler,
-  BlockedLease,
   CloseResult,
   CloseTarget,
   Committed,
@@ -78,7 +78,6 @@ import type {
   EventSource,
   IAct,
   LaneConfig,
-  Lease,
   LoadTarget,
   Logger,
   PatchFn,
@@ -491,8 +490,6 @@ export class Act<
   private _build_settle(options: ActOptions): SettleLoop<TEvents> {
     return new SettleLoop<TEvents>(
       {
-        init: () => this._scoped(() => this._correlate.init()),
-        checkpoint: () => this._correlate.checkpoint,
         correlate: (q) =>
           this._correlate_scanned(
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
@@ -955,29 +952,22 @@ export class Act<
 
   /** In parallel, so a slow lane never holds up a fast one. */
   private async _drain_all(options: DrainOptions): Promise<Drain<TEvents>> {
-    const results = await Promise.all(
-      [...this._drain_controllers.values()].map((c) => c.drain(options))
+    const merged = merge_drains(
+      await Promise.all(
+        [...this._drain_controllers.values()].map((c) => c.drain(options))
+      )
     );
-    const fetched: Drain<TEvents>["fetched"] = [];
-    const leased: Lease[] = [];
-    const acked: Lease[] = [];
-    const blocked: BlockedLease[] = [];
-    for (const r of results) {
-      // Actor-less like `query`/`query_array`, so default-deny.
-      // Handlers are unaffected — they read through their own strip.
-      fetched.push(
-        ...r.fetched.map((f) => ({
-          ...f,
-          events: f.events.map((e) =>
-            this.registry.query_gate(e.name as string)(e)
-          ),
-        }))
-      );
-      leased.push(...r.leased);
-      acked.push(...r.acked);
-      blocked.push(...r.blocked);
-    }
-    return { fetched, leased, acked, blocked };
+    // Actor-less like `query`/`query_array`, so default-deny.
+    // Handlers are unaffected — they read through their own strip.
+    return {
+      ...merged,
+      fetched: merged.fetched.map((f) => ({
+        ...f,
+        events: f.events.map((e) =>
+          this.registry.query_gate(e.name as string)(e)
+        ),
+      })),
+    };
   }
 
   /**
@@ -1008,15 +998,21 @@ export class Act<
     query: Query,
     /** Honour the correlation lease — settle and the poller only. */
     lease = false
-  ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
+  ): Promise<{
+    subscribed: number;
+    last_id: number;
+    read: boolean;
+    scanned: boolean;
+  }> {
     // Writer-only instances don't correlate.
-    if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
+    if (!this._drain)
+      return { subscribed: 0, last_id: -1, read: false, scanned: false };
     return this._scoped(async () => {
-      const { subscribed, last_id, marked, scanned } =
+      const { subscribed, last_id, read, marked, scanned } =
         await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
       if (subscribed > 0 || marked > 0) this._arm_all();
-      return { subscribed, last_id, scanned };
+      return { subscribed, last_id, read, scanned };
     });
   }
 

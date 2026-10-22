@@ -153,8 +153,6 @@ describe("settle loop store-error handling", () => {
         );
         const loop = new SettleLoop(
           {
-            init: async () => {},
-            checkpoint: () => -1,
             correlate: () => Promise.reject(new StoreError("subscribe")),
             drain: async () => ({
               fetched: [],
@@ -173,6 +171,41 @@ describe("settle loop store-error handling", () => {
     const e = await errored;
     expect(e.error).toBeInstanceOf(StoreError);
     expect(e.circuit).toBe("closed"); // 1 failure < threshold 5
+  });
+});
+
+// A settle whose scan was refused the correlation lease (another worker
+// holds it) read nothing, so it is no evidence the store is healthy: it
+// must leave an OPEN breaker open, like a disarmed pass.
+describe("a settle refused the correlation lease", () => {
+  it("leaves the breaker OPEN", async () => {
+    const s = new InMemoryStore();
+    store(s);
+    const real_subscribe = s.subscribe.bind(s);
+    s.subscribe = (async (...args: Parameters<typeof real_subscribe>) => {
+      const result = await real_subscribe(...args);
+      return args[2] ? { ...result, correlating: false } : result;
+    }) as typeof real_subscribe;
+    const app = act()
+      .withState(Counter)
+      .on("Bumped")
+      .do(async function react() {})
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 },
+      });
+    const breaker = (app as unknown as { _breaker: CircuitBreaker })._breaker;
+    try {
+      await app.do("bump", { stream: nextStream(), actor }, {});
+      breaker.failed(Date.now(), new Error("store down"));
+      expect(breaker.state(Date.now())).toBe("open");
+      const settled = new Promise((r) => app.on("settled", r));
+      app.settle({ debounceMs: 0 });
+      await settled;
+      expect(breaker.state(Date.now())).toBe("open");
+    } finally {
+      await dispose()();
+    }
   });
 });
 

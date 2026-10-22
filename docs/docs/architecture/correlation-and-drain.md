@@ -25,7 +25,7 @@ A reaction is registered against an event name with a *resolver* and a handler:
 
 The resolver answers "for this event, which target stream processes the reaction?" Two kinds:
 
-- **Static**: a constant target (string). Known at build time. Subscribed once during `correlate.init()`. Doesn't need event-by-event scanning.
+- **Static**: a constant target (string). Known at build time. Subscribed once during correlate's startup. Doesn't need event-by-event scanning.
 - **Dynamic**: a function `(event) => ({ target, source? })`. Target depends on event content. Discovered lazily by `correlate()`.
 
 :::caution Resolvers must be pure
@@ -186,15 +186,13 @@ Each controller is armed on its own. `do()` and a notification from another proc
                                                   reentrancy guard
                                                               │
                                                               ▼
-                                                  await correlate.init()
-                                                              │
-                                                              ▼
                                                   loop until no progress:
-                                                    correlate({ after: checkpoint })
+                                                    correlate(query)   (starts up and scans
+                                                                        from its own checkpoint)
                                                     drain(options)
                                                     progress = subscribed > 0 ||
                                                                leased.length > 0 ||
-                                                               checkpoint moved
+                                                               it read events
                                                               │
                                                               ▼
                                                   emit "settled" with every pass's drain
