@@ -10,6 +10,7 @@ This file is auto-loaded into context — that is not the same as having read it
 2. **Development Workflow** — the "Changing a port interface" rule, the "Pre-handoff workflow," the doc audit step. If a slice touches `libs/act/src/types/ports.ts`, updating `libs/act-tck/src/` is part of the same slice, not a follow-up.
 3. **Rules for contributing to this repo** — durable workflow rules (100% coverage gate, naming, no manual version bumps, integration helpers in separate packages, no `--no-verify`).
 4. **Safety-critical one-liners** — load-bearing per-feature gotchas. Re-skim the ones relevant to the file you're about to change.
+5. **Code rules in `.claude/rules/`** — [`naming.md`](.claude/rules/naming.md) and [`config-validation.md`](.claude/rules/config-validation.md) load on their own once you read or edit a matching file. Before creating a new file under `libs/`, `packages/`, `recipes/` or `test/`, read them first: a path rule loads only after a matching file is touched.
 
 Skipping this checklist is how duplicated work (per-adapter tests that should have lived in the TCK), master-branch edits, and unnecessary major bumps slip in. Read the rules first; they answer most "should I…?" questions before they reach the user.
 
@@ -26,18 +27,20 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-pg` — PostgreSQL adapter (production)
   - `@rotorsoft/act-sqlite` — SQLite/libSQL adapter (embedded/single-node)
   - `@rotorsoft/act-patch` — immutable deep-merge patch utility
-  - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, the `sse` subpath for incremental state broadcast (the surface once published standalone as the now-removed `@rotorsoft/act-sse`), plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
+  - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, the `sse` subpath for incremental state broadcast (formerly `@rotorsoft/act-sse`; status in [STABILITY.md § Deprecation policy](STABILITY.md#deprecation-policy)), plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
   - `@rotorsoft/act-notify` — hybrid notify-broker decorator: `withBroker(store, broker)` delegates every durable Store method and rides an external broker (Redis implemented, Kafka scaffolded, Loopback for tests) for cross-process wakeups only — lifts the LISTEN/NOTIFY fanout ceiling without touching durability. TCK-proven over PostgresStore
   - `@rotorsoft/act-otel` — Prometheus metrics bridge: `instrument(app)` maintains the metric set listed in its README (and the observability guide) off the lifecycle events. Leaf package — core stays metrics-free by design
   - `@rotorsoft/act-crypto` — authenticated envelope encryption (AES-256-GCM + versioned wire format) for adapters that want column-level encryption with operator-controlled keys. Leaf package — adapters depend on it, core does not.
   - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
   - `@rotorsoft/act-tck` — Test Compatibility Kit for Store/Cache/Logger ports
+  - `@rotorsoft/act-diagram` — domain-model diagram (React UI) plus the `act` contracts CLI
 
 - **`/packages`** — example applications
   - `calculator` — simple state machine; rebuild and close demos
   - `wolfdesk` — complex ticketing (from "Learning Domain-Driven Design")
   - `server`, `client` — tRPC + React example
+  - `inspector` — `@rotorsoft/act-inspector`, an observatory to inspect, query and visualize the events in an Act store
 
 ## Common Commands
 
@@ -229,30 +232,7 @@ Source-of-truth for what lives where:
 
 ### Pre-handoff workflow (mandatory before "ready for review" / PR)
 
-Branch work isn't done until `/release-check` passes cleanly. Per-slice `pnpm test -F <pkg>` during development is fine; the final gate is **not optional**.
-
-Sequence at the end of a feature branch:
-
-1. `/release-check` — runs typecheck + tests + 100% coverage + lint + build + charter-diff in parallel. See [.claude/commands/release-check.md](.claude/commands/release-check.md).
-2. If coverage < 100% on any metric: `/release-check` prints the uncovered lines; write the fault-injection test or restructure the code to remove the branch. See `feedback_full_coverage.md` in memory and the patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`.
-3. **Learnings.** If the change taught something that `.claude/skills/simplify-core/learnings.md` doesn't already say, add one entry there: the rule in one line, then the ticket as evidence. Most PRs add nothing.
-4. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** Run the stale-reference grep:
-   ```bash
-   grep -rln "<old-name-or-shape>" docs/docs CLAUDE.md STABILITY.md libs/*/README.md
-   ```
-   Hits get fixed inline; **do not** leave them for a "follow-up PR." Specifically:
-   - **Port changes** (`Store` / `Cache` / `Logger`) → check `docs/docs/architecture/extension-points.md` and the matching `docs/docs/guides/writing-a-{store,cache,logger}.md`. The method-list snippet in extension-points goes stale every time the interface gains, loses, or renames a method.
-   - **Orchestrator / `Act` API changes** → check `docs/docs/concepts/` (especially `event-sourcing.md`, `error-handling.md`, `state-management.md`).
-   - **Internal subsystem refactors** (close-cycle, drain, settle, correlate) → check the matching `docs/docs/architecture/` page. Pseudocode and ASCII pipeline diagrams there often spell out the *old* shape ("Phase X: query backward, limit:1") — grep for the literal description, not just the method name.
-   - **Lifecycle event additions/changes** → check `docs/docs/concepts/error-handling.md` and `docs/docs/guides/production-checklist.md`.
-   The pattern that catches this: the PR's commit message says "we changed X" — every place that *describes* X in the docs needs the same update. Treat the docs as part of the public surface.
-
-   **A doc claim about runtime behavior ships with its test.** Any sentence in `docs/docs/**` or a public port/`Act` doc-comment that asserts a concrete runtime guarantee ("`with_snaps` resumes from the latest snapshot", "the cache is invalidated only on `ConcurrencyError`") must have a TCK or unit test that fails if the claim stops holding, and a row in the [behavior-contract checklist](docs/docs/architecture/behavior-contracts.md): a one-line claim, a link to the doc section that explains it, and the exact test names. No rationale or ticket numbers in the row. `pnpm check:contracts` (run in CI) fails when a cited test doesn't exist, so a test rename updates its row in the same PR.
-5. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
-
-**Don't invent ad-hoc gates.** Running `pnpm typecheck` or eyeballing `pnpm test` output once doesn't substitute for the gate. Reach for the slash command first; narrow to ad-hoc tooling only for targeted debugging mid-development.
-
-Each step closes a failure mode that has actually shipped: per-slice test runs missed what the full gate catches, and PRs that changed described behavior left the docs describing the old shape.
+Run `/release-check` before calling a branch ready: it runs the snapshot, doc-audit and lint steps CI can't decide, then waits until every CI check on the PR has passed or was rightly skipped. A local test run doesn't substitute for reading CI. In the same PR, fix every doc that describes what changed (grep for the old name or shape; never a follow-up PR), give every new runtime claim in the docs a test and a [behavior-contract](docs/docs/architecture/behavior-contracts.md) row, and add a `learnings.md` entry only when the change taught something new. Steps and the doc-audit checklist: [CONTRIBUTING.md § Pre-handoff workflow](CONTRIBUTING.md#pre-handoff-workflow).
 
 ### Documentation discipline
 
@@ -273,48 +253,14 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **Conventional-commit subject starts lowercase; identifiers after the first word keep their case.** `feat(act): add foo` not `feat(act): Add foo`, and `fix(act): make InMemoryStore drop ...` keeps the type name as written. The commitlint hook rejects only a capitalized first word, so never start the subject with a type name.
 - **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged and the commit-msg hook runs commitlint; bypassing them ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
+
 ### Naming conventions
 
-The codebase uses two distinct casings. Which one you pick is determined by **whether the identifier is on the public surface or not** — there is no third "shifting style by context" option.
-
-**Public — camelCase. This is the convention, not a legacy carve-out.**
-
-Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `act-http`/`act-ops`) is camelCase:
-
-- Exported functions: `verifyWebhook`, `applyPatchMessage`, `withIdempotency`, `runStoreTck`, `webhookMiddleware`, `minSafeTtl`, `extractIdempotencyKey`, `checkWebhook`.
-- Public type fields: `IAct.forget` return `{eventCount}`, `forgotten` event `eventCount`, `StateNode.varName`, `EventNode.hasCustomPatch`, `WebhookConfig.timeoutMs`/`idempotencyKey`, `HttpDeliveryErrorInit.responseBody`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`, `Projection.batchHandler`, `QueryStreamsResult.maxEventId`, `InMemoryIdempotencyStore` options `ttlMs`/`maxEntries`/`retryProfile`.
-- ActOptions / RetryOptions / ReactionOptions / Backoff / DrainOptions / SettleOptions / LaneConfig fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`, `expectedVersion`, `reactingTo`, `asOf`, `maxSize`.
-- Builder methods: `withState`, `withProjection`, `withReaction`, `withActor`, `withLane`, `withSlice`.
-- Top-level factories: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`.
-- Public class names + types — PascalCase always: `StateNode`, `BroadcastChannel`, `InMemoryStore`, `ConsoleLogger`, `RetryProfile`, `WebhookConfig`, `IdempotencyStore`. Suffix with `XxxOptions` / `XxxResult` / `XxxConfig` when applicable.
-
-**Internal — short snake_case, no exceptions:**
-
-- Internal helper functions: `run_close_cycle`, `classify_registry`, `compute_backoff_delay`, `build_handle`, `merge_event_register`, `current_version_of`.
-- Local variables: `event_to_state`, `last_event_name`, `stream_info`, `raw_body`, `headers_bag`.
-- Function parameters: TS doesn't enforce parameter names as part of the public contract (callers pass positional args), so parameters are snake_case even on public method signatures — `event_name`, `state_name`, `skip_validation`.
-- Private/protected class fields and methods: `_snake_case` with underscore prefix — `_drain_controllers`, `_event_to_lanes`, `_arm_all`, `_wire_notify`, `_max_event_id_by_stream`.
-- Internal type fields (types not re-exported through any `src/index.ts`): `Classification.static_targets`, `HandleResult.next_attempt_at`, `AuditPass.on_event`, `SettleDeps.on_settled`.
-- Grouping prefixes/postfixes when several related identifiers share a structural role: `pii_*`, `make_*`, `is_*`, `compute_*`, `*_by_stream`.
-
-**Parameter properties are banned** by `erasableSyntaxOnly`: declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
-
-**The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. One spec, `test/stability.spec.ts` (at the repo root, so a snapshot change never releases a package), discovers every `@rotorsoft/*` package under `libs/` and snapshots the published declarations (`dist/@types`) of each entry point declared in its `exports`, following its relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR; an implementation change doesn't. New packages and subpaths are picked up automatically. It reads `dist/`, so it runs after `pnpm build` as `pnpm check:stability` (`-u` to regenerate), not in `pnpm test`.
+Anything reachable from a package's `src/index.ts` (or a subpath `index.ts`) is camelCase; top-level factories are short single-word lowercase (`act`, `state`, `webhook`) and types are PascalCase (`XxxOptions` / `XxxResult` / `XxxConfig`). Everything internal is short snake_case, including function parameters, with `_snake_case` for private fields. **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field and assign it in the constructor. `pnpm check:stability` snapshots the public declarations, so a rename shows up as a diff. Examples: [`.claude/rules/naming.md`](.claude/rules/naming.md).
 
 ### Config-validation schemas
 
-Any options bag that ships to `act().build()` / `openapi(app, ...)` / similar entry points is validated with Zod, not hand-written `if (x < min) throw` ladders. Out-of-range values throw `ZodError` at the entry point so misconfiguration surfaces at startup, not on the first cycle tick. The standard:
-
-| Element | Convention |
-|---|---|
-| Schema name | `<Type>OptionsSchema` — `AutocloseOptionsSchema`, `SseOptionsSchema`, `OpenAPIOptionsSchema` |
-| Schema visibility | Internal `const`, never re-exported. The public surface is the type + resolver, not the schema itself. |
-| Config type | Internal: `type <Type>Config = z.infer<typeof <Type>OptionsSchema>`. Public: written out in `types/`, and the schema ends in `satisfies z.ZodType<…>`, so a schema whose output stops fitting the type fails to compile (a field added to the type but not the schema still compiles, and parsing drops it: add both together). |
-| Resolver | `resolve<Type>Config(options: <Type>Options): <Type>Config` — camelCase, parses + applies defaults in one call |
-| Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth; a public default lives in `types/act.ts` |
-| Custom error messages | `{ message: "..." }` on the individual constraint when callers depend on the wording (test assertions, structured logs). Don't override Zod's default for shape errors callers don't read. |
-
-**Single home:** every builder-facing act-core config bag (schema + resolver + private `DEFAULT_*`) lives in **`libs/act/src/internal/config.ts`**; a resolver that is public (`resolveAutocloseConfig`) is a one-line wrapper in the public `config.ts` — one discoverable module, one section per bag (`Backoff`, `Reaction`, `Action`, `Lane`, `Drain`/`Settle`, `Act`, `Autoclose`, `CircuitBreaker`, `Fold`). Feature logic (the `CircuitBreaker` state machine, the fold engine, the autoclose window math in `autoclose-window.ts`) imports its resolved-config type from there. A new config bag adds a section to `config.ts` and wires its `resolve<Type>Config` at the declaration/runtime site (`.on(...)` / `.do(...)` / `.withLane(...)` / `act().build(...)` / `drain(...)` / `settle(...)`) — never a hand-rolled range check. Validation is fail-closed but non-tightening: reject `NaN`/`±Infinity`/nonsensical-negatives, never newly reject a value that works today. The sibling env/package config (`config()`) stays in the public `libs/act/src/config.ts`; `@rotorsoft/act-http` transport bags (`sse-wiring.ts`, `openapi/index.ts`) stay in that package. Never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
+Every options bag an entry point takes (`act().build()`, `openapi(app, ...)`, ...) is validated with Zod, never with hand-written range checks: an internal `<Type>OptionsSchema`, a `resolve<Type>Config` resolver, `DEFAULT_*` constants. Act-core bags live in `libs/act/src/internal/config.ts`. Validation rejects `NaN`/`±Infinity`/nonsense but never newly rejects a value that works today. The full table: [`.claude/rules/config-validation.md`](.claude/rules/config-validation.md).
 
 ## Troubleshooting
 
@@ -328,7 +274,7 @@ This repo uses Claude Code's hooks, slash commands, subagents and skills, all co
 
 Quick reference:
 
-- **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
+- **Hooks** auto-typecheck files you edit and inject branch/dirty-file context on every prompt.
 - **Slash commands**: `/pr`, `/release-check`, `/scaffold-package`.
 - **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
 - **Skills**: `scaffold-act-app` (build an app on Act), `simplify-core` (the simplicity review), `debug_wave` (adversarial bug hunting), `animate-act-flows` (animated flow map of an app).

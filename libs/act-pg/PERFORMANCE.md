@@ -343,6 +343,8 @@ as a bare `pool.query`. Operators can tune `batch_size` per
 
 ## ACT-1031 — per-adapter perf regression gate
 
+> The gate now runs weekly in `conformance.yml` (and on demand), with the other benchmarks, not per PR.
+
 The core framework's in-memory gate (since retired) ran against
 `InMemoryStore` — the fastest possible read/write path, with no SQL
 planner, indexes, locks, or connection pool. Adapter-level regressions

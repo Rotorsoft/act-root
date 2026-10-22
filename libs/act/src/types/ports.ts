@@ -428,12 +428,10 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream name from the previous page to fetch the next. Pairs with
  *   `limit`; the result `Map` preserves stream-name order so the next
  *   cursor is `[...result.keys()].at(-1)`.
- * @property limit - Maximum number of streams to return. **Defaults to
- *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
- *   which defaults to 100. Omitting it preserves the historical
- *   "return everything" behavior; set it (with `after`) to page through
- *   large stream sets a bounded chunk at a time. A bound, applied before a
- *   stream is added to the result: `limit: 0` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
+ * @property limit - Maximum number of streams to return; omitted, every
+ *   matching stream (see the writing-a-store guide § Paginating
+ *   `query_stats`). A bound, applied before a stream is added to the
+ *   result: `limit: 0` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;

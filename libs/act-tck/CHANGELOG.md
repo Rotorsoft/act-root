@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.40.0](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.39.2...@rotorsoft/act-tck-v1.40.0) (2026-10-22)
+
+
+### Features
+
+* **act-tck:** snapshot the published declarations, not the source ([#2045](https://github.com/Rotorsoft/act-root/issues/2045)) ([4e7a654](https://github.com/Rotorsoft/act-root/commit/4e7a654915a04e42da07e679bcf1ae110337dcbd)), closes [#2035](https://github.com/Rotorsoft/act-root/issues/2035)
+
 # [@rotorsoft/act-tck-v1.39.2](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.39.1...@rotorsoft/act-tck-v1.39.2) (2026-10-21)
 
 

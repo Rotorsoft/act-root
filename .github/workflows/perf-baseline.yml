@@ -1,7 +1,7 @@
 name: Perf Baseline
 
 # Run by hand: regenerates the adapter perf baselines on a CI runner, so the
-# ci-cd perf gate compares like-for-like hardware. Commit the artifact's
+# weekly perf gate (conformance.yml) compares like-for-like hardware. Commit the artifact's
 # perf-baseline.json files.
 on:
   workflow_dispatch:
