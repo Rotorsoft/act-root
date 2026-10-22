@@ -4,7 +4,7 @@ The rules [CLAUDE.md](CLAUDE.md) states in one line each are spelled out here: t
 
 ## Pre-handoff workflow
 
-Branch work isn't done until `/release-check` passes cleanly and every CI check on the PR is green. Per-slice `pnpm test -F <pkg>` during development is fine; CI is the final gate, and master requires it.
+Branch work isn't done until `/release-check` passes cleanly and every CI check on the PR is green. Per-slice `pnpm test -F <pkg>` during development is fine; CI is the final gate. GitHub doesn't block merging a red PR, so read every check before merging.
 
 Sequence at the end of a feature branch:
 
