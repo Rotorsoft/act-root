@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`declaration entry — public API stability > stable public surface for /types 1`] = `
+"// === index.d.ts ===
+export { shout } from "./shout.js";
+export declare const answer: number;
+
+// === shout.d.ts ===
+/** Upper-cases the text. */
+export declare const shout: (text: string) => string;
+"
+`;
+
+exports[`source entry — public API stability > stable public surface for (root) 1`] = `
+"// === index.ts ===
+import { helper } from "./helper.js";
+
+export { loud } from "./loud.js";
+export { shout } from "./shout.js";
+export const answer = helper();
+
+// === loud.ts ===
+export { shout as loud } from "./shout.js";
+
+// === shout.ts ===
+export const shout = (text: string): string => text.toUpperCase();
+"
+`;
