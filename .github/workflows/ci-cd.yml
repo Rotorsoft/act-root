@@ -129,6 +129,9 @@ jobs:
           cache: "pnpm"
 
       - run: pnpm install
+      # Biome lint + format check over the whole repo. The pre-commit hook
+      # only checks staged files, so this is the one place it all runs.
+      - run: pnpm lint
       # Fail fast if a package added/removed/renamed a subpath `export`
       # without regenerating the workspace `paths` map.
       # `pnpm paths:sync` rewrites tsconfig.workspace.json from the
