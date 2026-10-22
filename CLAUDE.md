@@ -232,7 +232,7 @@ Source-of-truth for what lives where:
 
 ### Pre-handoff workflow (mandatory before "ready for review" / PR)
 
-Run `/release-check` and get it clean before calling a branch ready; per-slice `pnpm test -F <pkg>` runs and ad-hoc checks don't substitute for it. In the same PR, fix every doc that describes what changed (grep for the old name or shape; never a follow-up PR), give every new runtime claim in the docs a test and a [behavior-contract](docs/docs/architecture/behavior-contracts.md) row, and add a `learnings.md` entry only when the change taught something new. Steps and the doc-audit checklist: [CONTRIBUTING.md § Pre-handoff workflow](CONTRIBUTING.md#pre-handoff-workflow).
+Run `/release-check` before calling a branch ready: it runs the snapshot, doc-audit and lint steps CI can't decide, then waits until every CI check on the PR has passed or was rightly skipped. A local test run doesn't substitute for reading CI. In the same PR, fix every doc that describes what changed (grep for the old name or shape; never a follow-up PR), give every new runtime claim in the docs a test and a [behavior-contract](docs/docs/architecture/behavior-contracts.md) row, and add a `learnings.md` entry only when the change taught something new. Steps and the doc-audit checklist: [CONTRIBUTING.md § Pre-handoff workflow](CONTRIBUTING.md#pre-handoff-workflow).
 
 ### Documentation discipline
 
@@ -274,7 +274,7 @@ This repo uses Claude Code's hooks, slash commands, subagents and skills, all co
 
 Quick reference:
 
-- **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
+- **Hooks** auto-typecheck files you edit and inject branch/dirty-file context on every prompt.
 - **Slash commands**: `/pr`, `/release-check`, `/scaffold-package`.
 - **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
 - **Skills**: `scaffold-act-app` (build an app on Act), `simplify-core` (the simplicity review), `debug_wave` (adversarial bug hunting), `animate-act-flows` (animated flow map of an app).

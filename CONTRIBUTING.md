@@ -4,14 +4,13 @@ The rules [CLAUDE.md](CLAUDE.md) states in one line each are spelled out here (t
 
 ## Pre-handoff workflow
 
-Branch work isn't done until `/release-check` passes cleanly. Per-slice `pnpm test -F <pkg>` during development is fine; the final gate is **not optional**.
+Branch work isn't done until `/release-check` passes cleanly and every CI check on the PR is green. Per-slice `pnpm test -F <pkg>` during development is fine; CI is the final gate. GitHub doesn't block merging a red PR, so read every check before merging.
 
 Sequence at the end of a feature branch:
 
-1. `/release-check` — runs typecheck + tests + 100% coverage + lint + build + charter-diff in parallel. See [.claude/commands/release-check.md](.claude/commands/release-check.md).
-2. If coverage < 100% on any metric: `/release-check` prints the uncovered lines; write the fault-injection test or restructure the code to remove the branch. See the patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`.
-3. **Learnings.** If the change taught something that `.claude/skills/simplify-core/learnings.md` doesn't already say, add one entry there: the rule in one line, then the ticket as evidence. Most PRs add nothing.
-4. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** Run the stale-reference grep:
+1. `/release-check` — regenerates and classifies the stability snapshot, runs the doc audit (step 3) and lint, then pushes and reads every CI check (typecheck, lint, tests with 100% coverage, build, stability and the repo checks). A coverage gap fails CI; write the fault-injection test or remove the branch (patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`). See [.claude/commands/release-check.md](.claude/commands/release-check.md).
+2. **Learnings.** If the change taught something that `.claude/skills/simplify-core/learnings.md` doesn't already say, add one entry there: the rule in one line, then the ticket as evidence. Most PRs add nothing.
+3. **Doc audit — any PR that changes a public surface, renames a method, migrates a callsite to a new primitive, or alters described semantics must update the relevant docs in the same PR.** Run the stale-reference grep:
    ```bash
    grep -rln "<old-name-or-shape>" docs/docs CLAUDE.md STABILITY.md libs/*/README.md
    ```
@@ -23,9 +22,9 @@ Sequence at the end of a feature branch:
    The pattern that catches this: the PR's commit message says "we changed X" — every place that *describes* X in the docs needs the same update. Treat the docs as part of the public surface.
 
    **A doc claim about runtime behavior ships with its test.** Any sentence in `docs/docs/**` or a public port/`Act` doc-comment that asserts a concrete runtime guarantee ("`with_snaps` resumes from the latest snapshot", "the cache is invalidated only on `ConcurrencyError`") must have a TCK or unit test that fails if the claim stops holding, and a row in the [behavior-contract checklist](docs/docs/architecture/behavior-contracts.md): a one-line claim, a link to the doc section that explains it, and the exact test names. No rationale or ticket numbers in the row. `pnpm check:contracts` (run in CI) fails when a cited test doesn't exist, so a test rename updates its row in the same PR.
-5. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
+4. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
 
-**Don't invent ad-hoc gates.** Running `pnpm typecheck` or eyeballing `pnpm test` output once doesn't substitute for the gate. Reach for the slash command first; narrow to ad-hoc tooling only for targeted debugging mid-development.
+**Don't invent ad-hoc gates.** A local `pnpm typecheck` or a glance at `pnpm test` doesn't substitute for CI's result. Narrow to ad-hoc tooling only for targeted debugging mid-development.
 
 Each step closes a failure mode that has actually shipped: per-slice test runs missed what the full gate catches, and PRs that changed described behavior left the docs describing the old shape.
 
