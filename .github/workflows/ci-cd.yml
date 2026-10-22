@@ -18,15 +18,11 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # One paths-filter pass produces three signals:
+  # One paths-filter pass produces two signals:
   #   - `src-changed`: anything that can change typecheck/build/test results
   #     → run `ci`. Pure docs/CHANGELOG/PERFORMANCE updates
   #     inside a lib don't trip this; dependency, lockfile, test and
   #     toolchain changes do.
-  #   - `perf-changed`: a perf-critical hot path or a benchmark file changed
-  #     → run the real-adapter perf gates on top of unit tests. Most PRs and most master pushes
-  #     skip this. A perf-affecting change that doesn't touch the filter's
-  #     paths goes uncaught; refresh `perf-baseline.json` when that bites.
   #   - `libs`: which lib directories changed at all → CD matrix entries.
   #     semantic-release still has the final say (a `docs:` commit produces
   #     no release), so this is just an upper bound on which jobs to spin up.
@@ -34,7 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       src-changed: ${{ steps.src.outputs.src }}
-      perf-changed: ${{ steps.perf.outputs.perf }}
       libs: ${{ steps.libs.outputs.changes }}
     steps:
       - uses: actions/checkout@v7
@@ -46,9 +41,9 @@ jobs:
               # Every file `pnpm typecheck` or `pnpm lint` reads, wherever it
               # lives (bench/, scripts/, docs config, root configs), so a
               # change to one never skips the checks that cover it. This only
-              # type-checks and lints bench files: the benchmarks run on the
-              # weekly schedule, and the per-PR perf gate keeps its own
-              # `perf-changed` filter below.
+              # type-checks and lints bench files: every benchmark, the adapter
+              # perf gate included, runs on the weekly schedule
+              # (conformance.yml).
               - '**/*.ts'
               - '**/*.tsx'
               - '**/*.json'
@@ -72,30 +67,6 @@ jobs:
               - 'vite.config.ts'
               - 'biome.json'
               - '.github/workflows/ci-cd.yml'
-      - uses: dorny/paths-filter@v4
-        id: perf
-        with:
-          # Hot paths are enforced by directory convention, not an
-          # explicit file list:
-          #   - `libs/*/src/internal/**` — non-public pipeline code
-          #     (drain, correlate, settle, close, event-sourcing,
-          #     lru-map, etc.). The right home for perf-sensitive
-          #     helpers that aren't public API.
-          #   - `libs/*/src/adapters/**` — Store/Cache/Logger impls.
-          #   - `libs/*/scripts/**` — the bench-runner scripts the
-          #     per-PR gates run (scenario benches run weekly).
-          #   - `libs/*/perf-baseline.json` — baseline refreshes.
-          # Code that doesn't fit a convention either lives in
-          # `internal/` (the right place for perf-sensitive helpers)
-          # or accepts that it won't be auto-bench-validated. The
-          # convention is the contract; expand it by moving files
-          # into one of these dirs, not by amending the workflow.
-          filters: |
-            perf:
-              - 'libs/*/src/internal/**'
-              - 'libs/*/src/adapters/**'
-              - 'libs/*/scripts/**'
-              - 'libs/*/perf-baseline.json'
       - uses: dorny/paths-filter@v4
         id: libs
         with:
@@ -237,58 +208,6 @@ jobs:
             ].join("\n");
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
           '
-
-      # Per-adapter perf gate on REAL adapters, only when a perf-critical
-      # file changed (the `perf` filter above). These run against the docker
-      # Postgres on 5431 and a real on-disk SQLite — the only place adapter-level
-      # regressions (a lost index, a reintroduced N+1, a snapshot-floor
-      # read that scans the whole stream) actually surface.
-      #
-      # Budgets: p50 ≤ 2.0× baseline for act-pg (wide noise band on a real
-      # DB), p50 ≤ 1.5× for act-sqlite (embedded, tighter). Both skip the
-      # ratio check when the baseline p50 is below a 1.0 ms absolute floor
-      # (sub-ms ops are noise-dominated). See each package's perf-check.ts.
-      #
-      # BLOCKING: a budget breach fails the PR. Baselines come from this CI
-      # runner (perf-baseline.yml), so they match the hardware the gate runs
-      # on, and the 2.0×/1.5× tolerances + the 1.0 ms floor absorb
-      # run-to-run variance. If a scenario proves noisy,
-      # refresh the baseline (re-run perf-baseline.yml) or widen its budget —
-      # don't silence the gate. The pg connection needs no extra env:
-      # PostgresStore defaults (host/db/user/password = postgres) match the
-      # docker service.
-      - name: act-pg perf gate
-        if: needs.changes.outputs.perf-changed == 'true'
-        run: |
-          set -o pipefail
-          pnpm -F @rotorsoft/act-pg bench:run
-          pnpm -F @rotorsoft/act-pg bench:check 2>&1 | tee bench-pg.log
-      - name: act-sqlite perf gate
-        if: needs.changes.outputs.perf-changed == 'true'
-        run: |
-          set -o pipefail
-          pnpm -F @rotorsoft/act-sqlite bench:run
-          pnpm -F @rotorsoft/act-sqlite bench:check 2>&1 | tee bench-sqlite.log
-      - name: Append adapter perf results to step summary
-        if: |
-          always() &&
-          needs.changes.outputs.perf-changed == 'true'
-        run: |
-          {
-            echo "## Adapter perf gate"
-            echo ""
-            echo "Real-adapter p50 regression budgets — act-pg 2.0×, act-sqlite"
-            echo "1.5×, both with a 1.0 ms absolute floor. A breach fails the PR."
-            echo ""
-            echo "### act-pg"
-            echo '```'
-            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-pg.log 2>/dev/null || echo "(no act-pg output)"
-            echo '```'
-            echo "### act-sqlite"
-            echo '```'
-            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-sqlite.log 2>/dev/null || echo "(no act-sqlite output)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
 
       # Coveralls upload is best-effort: a coveralls outage must not block a
       # release.

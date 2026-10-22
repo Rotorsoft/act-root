@@ -8,7 +8,7 @@ All PostgreSQL benchmarks run against a local instance on port 5431. Each benchm
 
 ## CI regression guard
 
-Per-PR perf gates run on the real adapters only, when a hot path or bench file changes: `libs/act-pg` and `libs/act-sqlite` each compare a fresh run with a baseline generated on the CI runner (see their PERFORMANCE.md). The scenario benches (`pnpm bench:scenarios`, each with its own regression bound) run weekly in the conformance workflow and on demand. In-memory numbers are never the primary number, so there is no in-memory gate.
+Benchmarks run weekly in the conformance workflow (and on demand), not per PR: PR merges gate on functionality and compatibility. The adapter perf gates run on the real adapters only: `libs/act-pg` and `libs/act-sqlite` each compare a fresh run with a baseline generated on the CI runner (see their PERFORMANCE.md). The scenario benches (`pnpm bench:scenarios`) each carry their own regression bound. In-memory numbers are never the primary number, so there is no in-memory gate.
 
 ### Current scenarios + numbers (InMemoryStore, NODE_ENV=test)
 
