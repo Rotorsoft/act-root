@@ -21,7 +21,10 @@ import {
   resolveSettleConfig,
   resolveShutdownConfig,
 } from "./internal/config.js";
-import { CorrelateCycle } from "./internal/correlate-cycle.js";
+import {
+  CorrelateCycle,
+  type CorrelateOptions,
+} from "./internal/correlate-cycle.js";
 import {
   close_correlation,
   default_correlator,
@@ -576,17 +579,16 @@ export class Act<
     if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running, !!settling);
     if (grace <= 0) return;
-    const inflight: Array<Promise<unknown> | undefined> = running.map(
-      (c) => c.inflight
-    );
-    if (settling) inflight.push(settling);
     let timer!: ReturnType<typeof setTimeout>;
     const budget = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, grace);
       timer.unref();
     });
     try {
-      await Promise.race([Promise.all(inflight), budget]);
+      await Promise.race([
+        Promise.all([...running.map((c) => c.inflight), settling]),
+        budget,
+      ]);
     } finally {
       // Don't leave the budget timer pending when the cycles won the race.
       clearTimeout(timer);
@@ -1003,9 +1005,7 @@ export class Act<
   /** One correlate pass; arms the lanes when it found work. */
   private async _correlate_pass(
     query: Query,
-    options?: Parameters<
-      CorrelateCycle<TSchemaReg, TEvents, TActions>["correlate"]
-    >[1]
+    options?: CorrelateOptions
   ): Promise<{ subscribed: number; read: boolean }> {
     // Writer-only instances don't correlate.
     if (!this._drain) return { subscribed: 0, read: false };
@@ -1342,8 +1342,8 @@ export class Act<
       catch_up_correlation: (until) =>
         catch_up_correlation(
           this._correlate,
-          // The drain pass or `app.close()` running this close records its
-          // outcome, so the catch-up doesn't.
+          // Records nothing: the drain pass running a reaction-requested
+          // close records a failure once; `app.close()` just rejects.
           (limit) => this._correlate_pass({ limit }, { record: false }),
           until
         ),

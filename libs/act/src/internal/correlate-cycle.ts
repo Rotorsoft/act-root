@@ -72,6 +72,22 @@ const IDLE: CorrelateResult = {
   marked: 0,
 };
 
+/** How {@link CorrelateCycle.correlate} runs one pass. */
+export type CorrelateOptions = {
+  /**
+   * Honour the correlation lease. Only the settle loop and the poller do; an
+   * explicit `app.correlate()` and a close's catch-up scan now.
+   */
+  readonly lease?: boolean;
+  /**
+   * Record the outcome on the breaker (default true). A close's catch-up
+   * scan doesn't: the drain pass running a reaction-requested close records
+   * a failure once, and an explicit `app.close()` rejects and records
+   * nothing.
+   */
+  readonly record?: boolean;
+};
+
 /** Bound on compiled pattern sources; guards a resolver that mints one per event. */
 const PATTERN_CACHE_SIZE = 32;
 
@@ -310,21 +326,7 @@ export class CorrelateCycle<
    */
   async correlate(
     query: Query,
-    {
-      lease = false,
-      record = true,
-    }: {
-      /**
-       * Honour the correlation lease. Only the settle loop and poller do; an
-       * explicit `app.correlate()` scans now, since `close` loops on it.
-       */
-      readonly lease?: boolean;
-      /**
-       * Record the outcome on the breaker. A close's catch-up scan doesn't:
-       * the drain pass running the close records it, once.
-       */
-      readonly record?: boolean;
-    } = {}
+    { lease = false, record = true }: CorrelateOptions = {}
   ): Promise<CorrelateResult> {
     try {
       const result = await this._scan(query, lease);
