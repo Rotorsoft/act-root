@@ -203,8 +203,8 @@ describe("correlate circuit breaker", () => {
   it("leaves the breaker OPEN when correlate was disarmed and read nothing", async () => {
     const { app, breaker, open } = build(1);
     await app.do("bump", { stream: nextStream(), actor }, {});
-    // The first pass marks work (which arms correlate again), the second
-    // reads nothing and disarms it.
+    // Correlate stays armed after the first pass, which marked work; the
+    // second reads nothing and disarms it.
     await app.correlate();
     await app.correlate();
     open();

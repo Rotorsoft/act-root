@@ -1007,8 +1007,10 @@ export class Act<
         query,
         lease
       );
-      // Also re-arms correlate, so a backlog scan keeps going.
-      if (subscribed > 0 || marked > 0) this._arm_all();
+      // Arms the lanes only: correlate stays armed after a pass that marked
+      // work, and disarms itself only on a short page that marked nothing.
+      if (subscribed > 0 || marked > 0)
+        for (const c of this._drain_controllers.values()) c.arm();
       return { subscribed, read };
     });
   }
