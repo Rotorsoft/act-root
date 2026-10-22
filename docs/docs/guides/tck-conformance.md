@@ -106,7 +106,7 @@ Green means your adapter honors every behavior the orchestrator depends on. Dial
 
 ## Guarding your own public surface
 
-The TCK proves you honor _Act's_ contract. A second, smaller kit — `runStabilityTck` — guards _your own_ surface from accidental drift. It snapshots the source text of every entry point you declare (plus everything it re-exports through relative imports) and fails when a rename, a removed export, or a changed signature shows up unannounced. It is the same gate every in-tree package uses on itself.
+The TCK proves you honor _Act's_ contract. A second, smaller kit — `runStabilityTck` — guards _your own_ surface from accidental drift. It snapshots every entry point you declare (plus everything it re-exports through relative imports) and fails when a rename, a removed export, or a changed signature shows up unannounced. It is the same gate every in-tree package uses on itself.
 
 ```ts
 // test/stability.spec.ts
@@ -119,7 +119,7 @@ runStabilityTck({
 });
 ```
 
-The first run writes a snapshot; commit it. From then on, any change to your public exports surfaces as a snapshot diff in the PR — you either accept it deliberately (`vitest -u`) or push back. It reads `.ts` source directly, so no build step is required before it runs.
+The first run writes a snapshot; commit it. From then on, any change to your public exports surfaces as a snapshot diff in the PR — you either accept it deliberately (`vitest -u`) or push back. Point it at source (`.ts`, as above) and it needs no build, but the snapshot also moves with every implementation change. Point it at your built declarations (`dist/index.d.ts`) and it records the surface alone, doc comments included; run it after your build. Act's own gate does the second.
 
 ## The conformance badge
 

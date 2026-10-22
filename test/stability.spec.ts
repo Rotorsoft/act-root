@@ -1,13 +1,19 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runStabilityTck } from "@rotorsoft/act-tck";
 
 /**
  * Workspace-level stability gate. Auto-discovers every `@rotorsoft/*`
- * package under `libs/` and runs `runStabilityTck` against each entry
- * point declared in the package's `exports` field. New packages and new
- * subpath exports get picked up automatically — no per-package wiring.
+ * package under `libs/` and runs `runStabilityTck` against the published
+ * declarations (`types`) of each entry point in the package's `exports`
+ * field, so the snapshot records the surface and not the implementation.
+ * New packages and new subpath exports get picked up automatically — no
+ * per-package wiring.
+ *
+ * It reads `dist/`, so it runs after `pnpm build` (`pnpm check:stability`)
+ * and stays out of the default `pnpm test` run, where a stale build would
+ * give a wrong answer.
  *
  * Snapshots live next to this file (`__snapshots__/stability.spec.ts.snap`).
  * One snapshot key per `package + subpath` pair; a public-surface change
@@ -22,7 +28,7 @@ const libs_dir = path.resolve(
   "libs"
 );
 
-type ExportMap = Record<string, string | { import?: string }>;
+type ExportMap = Record<string, string | { types?: string }>;
 type Pkg = { name: string; entry_points: Record<string, string> };
 
 // act-diagram is mostly a UI tool (React components, `.tsx`). The
@@ -46,16 +52,15 @@ function discover_packages(): Pkg[] {
     const exports = manifest.exports ?? {};
     const entry_points: Record<string, string> = {};
     for (const [subpath, mapping] of Object.entries(exports)) {
-      const import_path =
-        typeof mapping === "string" ? mapping : mapping?.import;
-      if (!import_path?.endsWith(".js")) continue;
-      // ./dist/api/index.js → src/api/index.ts
-      const rel = import_path
-        .replace(/^\.\/dist\//, "")
-        .replace(/\.js$/, ".ts");
-      const abs_src = path.join(libs_dir, dir, "src", rel);
+      const types = typeof mapping === "string" ? undefined : mapping?.types;
+      if (!types?.endsWith(".d.ts")) continue;
+      const abs_types = path.join(libs_dir, dir, types);
+      if (!existsSync(abs_types))
+        throw new Error(
+          `${manifest.name}: ${types} is missing. Run \`pnpm build\` before \`pnpm check:stability\`.`
+        );
       const key = subpath === "." ? "" : subpath;
-      entry_points[key] = abs_src;
+      entry_points[key] = abs_types;
     }
     if (Object.keys(entry_points).length > 0) {
       packages.push({ name: manifest.name, entry_points });

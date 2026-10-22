@@ -45,6 +45,7 @@ pnpm monorepo with two main sections:
 pnpm install          # install
 pnpm build            # build all packages
 pnpm test             # run all tests with coverage
+pnpm check:stability  # public-surface snapshot (after pnpm build; -u to update)
 pnpm typecheck        # tsc --noEmit
 pnpm lint / lint:fix  # biome
 pnpm clean            # remove build artifacts
@@ -298,7 +299,7 @@ Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `a
 
 **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
 
-**The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. One spec, `test/stability.spec.ts` (at the repo root, so a snapshot change never releases a package), discovers every `@rotorsoft/*` package under `libs/` and snapshots the source text of each entry point declared in its `exports`, following its relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR. New packages and subpaths are picked up automatically.
+**The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. One spec, `test/stability.spec.ts` (at the repo root, so a snapshot change never releases a package), discovers every `@rotorsoft/*` package under `libs/` and snapshots the published declarations (`dist/@types`) of each entry point declared in its `exports`, following its relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR; an implementation change doesn't. New packages and subpaths are picked up automatically. It reads `dist/`, so it runs after `pnpm build` as `pnpm check:stability` (`-u` to regenerate), not in `pnpm test`.
 
 ### Config-validation schemas
 
