@@ -10,6 +10,7 @@ This file is auto-loaded into context — that is not the same as having read it
 2. **Development Workflow** — the "Changing a port interface" rule, the "Pre-handoff workflow," the doc audit step. If a slice touches `libs/act/src/types/ports.ts`, updating `libs/act-tck/src/` is part of the same slice, not a follow-up.
 3. **Rules for contributing to this repo** — durable workflow rules (100% coverage gate, naming, no manual version bumps, integration helpers in separate packages, no `--no-verify`).
 4. **Safety-critical one-liners** — load-bearing per-feature gotchas. Re-skim the ones relevant to the file you're about to change.
+5. **Code rules in `.claude/rules/`** — [`naming.md`](.claude/rules/naming.md) and [`config-validation.md`](.claude/rules/config-validation.md) load on their own once you read or edit a matching file. Before creating a new file under `libs/`, `packages/`, `recipes/` or `test/`, read them first: a path rule loads only after a matching file is touched.
 
 Skipping this checklist is how duplicated work (per-adapter tests that should have lived in the TCK), master-branch edits, and unnecessary major bumps slip in. Read the rules first; they answer most "should I…?" questions before they reach the user.
 
@@ -255,11 +256,11 @@ Durable workflow rules the AI assistant follows when working on the framework it
 
 ### Naming conventions
 
-Anything reachable from a package's `src/index.ts` (or a subpath `index.ts`) is camelCase; top-level factories are short single-word lowercase (`act`, `state`, `webhook`) and types are PascalCase (`XxxOptions` / `XxxResult` / `XxxConfig`). Everything internal is short snake_case, including function parameters, with `_snake_case` for private fields. **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field and assign it in the constructor. `pnpm check:stability` snapshots the public declarations, so a rename shows up as a diff. Examples: [CONTRIBUTING.md § Naming conventions](CONTRIBUTING.md#naming-conventions).
+Anything reachable from a package's `src/index.ts` (or a subpath `index.ts`) is camelCase; top-level factories are short single-word lowercase (`act`, `state`, `webhook`) and types are PascalCase (`XxxOptions` / `XxxResult` / `XxxConfig`). Everything internal is short snake_case, including function parameters, with `_snake_case` for private fields. **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field and assign it in the constructor. `pnpm check:stability` snapshots the public declarations, so a rename shows up as a diff. Examples: [`.claude/rules/naming.md`](.claude/rules/naming.md).
 
 ### Config-validation schemas
 
-Every options bag an entry point takes (`act().build()`, `openapi(app, ...)`, ...) is validated with Zod, never with hand-written range checks: an internal `<Type>OptionsSchema`, a `resolve<Type>Config` resolver, `DEFAULT_*` constants. Act-core bags live in `libs/act/src/internal/config.ts`. Validation rejects `NaN`/`±Infinity`/nonsense but never newly rejects a value that works today. The full table: [CONTRIBUTING.md § Config-validation schemas](CONTRIBUTING.md#config-validation-schemas).
+Every options bag an entry point takes (`act().build()`, `openapi(app, ...)`, ...) is validated with Zod, never with hand-written range checks: an internal `<Type>OptionsSchema`, a `resolve<Type>Config` resolver, `DEFAULT_*` constants. Act-core bags live in `libs/act/src/internal/config.ts`. Validation rejects `NaN`/`±Infinity`/nonsense but never newly rejects a value that works today. The full table: [`.claude/rules/config-validation.md`](.claude/rules/config-validation.md).
 
 ## Troubleshooting
 
