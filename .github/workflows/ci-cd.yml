@@ -41,9 +41,9 @@ jobs:
               # Every file `pnpm typecheck` or `pnpm lint` reads, wherever it
               # lives (bench/, scripts/, docs config, root configs), so a
               # change to one never skips the checks that cover it. This only
-              # type-checks and lints bench files: the benchmarks run on the
-              # weekly schedule, and the per-PR perf gate keeps its own
-              # `perf-changed` filter below.
+              # type-checks and lints bench files: every benchmark, the adapter
+              # perf gate included, runs on the weekly schedule
+              # (conformance.yml).
               - '**/*.ts'
               - '**/*.tsx'
               - '**/*.json'
