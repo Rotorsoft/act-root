@@ -85,17 +85,6 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/stop-summary.sh",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
