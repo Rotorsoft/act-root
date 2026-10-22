@@ -16,6 +16,7 @@ import type {
   SettleOptions,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import type { CorrelatePass } from "./correlate-cycle.js";
 import { merge_drains } from "./drain-cycle.js";
 
 /**
@@ -25,9 +26,7 @@ import { merge_drains } from "./drain-cycle.js";
  */
 export type SettleDeps<TEvents extends Schemas> = {
   /** Scans from its own checkpoint; `read` is true when it read events. */
-  readonly correlate: (
-    query: Query
-  ) => Promise<{ subscribed: number; read: boolean; scanned?: boolean }>;
+  readonly correlate: (query: Query) => Promise<CorrelatePass>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
   /**
@@ -114,13 +113,11 @@ export class SettleLoop<TEvents extends Schemas> {
         // `maxPasses` caps runtime in pathological cases.
         // Shutdown waits for the pass in flight, not for the loop.
         for (let i = 0; i < maxPasses && !this._stopped; i++) {
-          const { subscribed, read, scanned } =
-            await this._deps.correlate(correlate_query);
-          // A scan that reached the store and came back is a real health
-          // signal; a disarmed pass that returned without touching it is not.
-          // Recording the latter would re-close an OPEN breaker mid-outage and
-          // let the drain below hammer a store nobody has heard from — so the
-          // question is asked per pass.
+          const pass = await this._deps.correlate(correlate_query);
+          // Only a pass that read the log is evidence the store is up.
+          // Recording an idle one would re-close an OPEN breaker mid-outage
+          // and let the drain below hammer a store nobody has heard from.
+          const scanned = pass.kind === "scanned";
           if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
           passes.push(drain);
@@ -130,7 +127,8 @@ export class SettleLoop<TEvents extends Schemas> {
           // leaves the claimable set (acked, blocked, scheduled); a zero
           // backoff keeps it claimable until it blocks or succeeds.
           const made_progress =
-            subscribed > 0 || drain.leased.length > 0 || read;
+            drain.leased.length > 0 ||
+            (scanned && (pass.subscribed > 0 || pass.read));
           if (!made_progress) break;
         }
         // `Act.emit` contains listener throws, so the store-failure catch

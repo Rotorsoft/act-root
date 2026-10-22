@@ -181,6 +181,7 @@ describe("a settle refused the correlation lease", () => {
   it("leaves the breaker OPEN", async () => {
     const s = new InMemoryStore();
     store(s);
+    // Another worker holds the lease: every "may I scan?" is refused.
     const real_subscribe = s.subscribe.bind(s);
     s.subscribe = (async (...args: Parameters<typeof real_subscribe>) => {
       const result = await real_subscribe(...args);
@@ -194,15 +195,27 @@ describe("a settle refused the correlation lease", () => {
         autoSettle: false,
         circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 },
       });
-    const breaker = (app as unknown as { _breaker: CircuitBreaker })._breaker;
     try {
+      const errors: { circuit: string }[] = [];
+      app.on("error", (e) => errors.push(e));
       await app.do("bump", { stream: nextStream(), actor }, {});
-      breaker.failed(Date.now(), new Error("store down"));
-      expect(breaker.state(Date.now())).toBe("open");
+      await app.correlate();
+      // One failed claim opens the breaker (threshold 1).
+      const claim = vi
+        .spyOn(s, "claim")
+        .mockRejectedValueOnce(new StoreError("claim"));
+      await app.drain();
+      expect(errors.at(-1)?.circuit).toBe("open");
+
+      // Still open throughout: the lane is armed (its claim failed), yet
+      // neither the settle's drain nor a later one touches the store. A
+      // closed breaker would claim.
+      const claims = claim.mock.calls.length;
       const settled = new Promise((r) => app.on("settled", r));
       app.settle({ debounceMs: 0 });
       await settled;
-      expect(breaker.state(Date.now())).toBe("open");
+      await app.drain();
+      expect(claim.mock.calls.length).toBe(claims);
     } finally {
       await dispose()();
     }
