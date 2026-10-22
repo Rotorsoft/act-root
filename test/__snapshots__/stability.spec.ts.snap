@@ -948,9 +948,10 @@ export class Act<
   private _shutdown_promise: Promise<void> | undefined;
 
   /**
-   * Per-instance teardown: stops scheduling, gives the cycles in flight up
-   * to \`graceMs\` to reach their \`ack\` (an abandoned handler holds its lease
-   * until it expires), then removes listeners and the notify subscription.
+   * Per-instance teardown: stops scheduling, removes the notify
+   * subscription, gives the cycles in flight up to \`graceMs\` to reach their
+   * \`ack\` (an abandoned handler holds its lease until it expires), then
+   * hands back the correlation lease and removes listeners.
    * The budget is a ceiling, not a delay.
    *
    * Idempotent: repeated calls return the same promise, with the first
