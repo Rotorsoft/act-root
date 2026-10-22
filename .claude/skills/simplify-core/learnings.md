@@ -20,6 +20,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A wakeup is a hint, never the truth: decorators that carry notifications must pass the full Store TCK unchanged. (#987)
 - A field with two owners shows up as a rule in one layer and a guard in another that cancels it, and if the guard lives in a bounded memory, eviction breaks the rule. Before removing either owner, find why each exists: the store's re-lane on equal priority is how a restart applies an edited lane. (#1876, 2026-10-10)
 - Probe every claim in a proposal, not only bug claims: of four interaction findings, one was a real bug, one proposed fix was wrong, and one count was off (9 → 7). (2026-10-10)
+- Re-running a specialist's probe is not checking it: read its setup. A defer probe that "lost" 5 of 15 streams had only correlated 10 events, since one `app.correlate()` reads 10. (2026-10-11)
 - A shared lease is sound only between interchangeable workers. Anything that narrows what a worker runs (`onlyLanes`) belongs in the lease key, or the holder does work for a lane it can't drain and the lane's own worker never wakes. (2026-10-10 review)
 - Contain an error where it is raised, not where it lands. Classifying app errors at the breaker needed a new error class and a second breaker; a try/catch at each place app code runs (resolvers, archive callbacks) needed neither, and left the breaker untouched. When the new failure path needs a decision that already exists (retry or block), call it; #1913 copied `finalize` a third time. (#1913)
 
@@ -104,6 +105,8 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A change to a default or a timing breaks what nothing in CI runs. #1872 made a no-backoff retry wait 10 s; the gate passed, and the Prometheus recipe silently stopped blocking its poison stream, while three doc passages kept the old timing. Grep and run recipes and examples for the old behavior in the same PR. (2026-10-11 review)
 - A test snapshot inside a published package releases that package on every change to it: 94 of 137 act-tck releases published identical code. Keep repo-wide gates out of published packages. (2026-10-10 review)
 - When a mechanism is removed, grep for its name in comments, capability flags and docs in the same PR. Two months after `claim` stopped probing the event log (#1511), 14 comments still described the probe and the TCK still carried a flag that gated nothing. (#1864)
+- A public method's inferred return type follows the private helpers it calls, so a return annotation on a module-private helper can loosen the public surface. Typing `InMemoryStream._lease` as `Lease` made `InMemoryStore.ack` return `lane?: string`; only the declaration snapshot showed it. (#2037)
+- A getter over a private field is not trivial when it makes state read-only: TypeScript has no public-read, private-write field, so the getter is how a state-machine class keeps its state changed only through its methods. Don't propose stripping those getters as "guarding nothing"; follow standard TypeScript rules over line counts. (#2037)
 
 - Process steps are a cost on every change; each must have caught something to keep its place. Per-ticket narrative essays were dropped for this file. (2026-10)
 - Ticket numbers belong in git and here, not in code comments or test names.

@@ -567,10 +567,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * A local change that frees reaction work (a commit, \`reset()\`,
      * \`unblock()\`, \`restore()\`) schedules this on its own unless the app
      * sets \`autoSettle: false\`. Call it at startup, to run what was pending
-     * before a restart, or with options for the next pass. A pass already
-     * scheduled is never put off: calls before it runs join it (a shorter
-     * \`debounceMs\` brings it forward), and a call during a running cycle
-     * queues one more pass after it. Runs correlate→drain in a loop until a pass makes no
+     * before a restart, or with options for the next pass; the scheduling
+     * rule is in the event-sourcing docs (§ settle). Runs correlate→drain in a loop until a pass makes no
      * progress — no new subscriptions, no events read, no streams leased —
      * then emits the \`"settled"\` lifecycle event, so one call fully catches
      * up paginated streams without forcing callers to loop.
@@ -3317,9 +3315,9 @@ export declare class InMemoryStore implements Store {
         at: number;
         by: string;
         retry: number;
-        error: string;
         lagging: boolean;
         lane: string;
+        error: string;
     }[]>;
     defer(input: string[] | StreamFilter, deferred_at: number): Promise<number>;
     /** De-duplicated like the SQL \`stream = ANY(...)\`; unknown names skipped. */
@@ -3988,12 +3986,10 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream name from the previous page to fetch the next. Pairs with
  *   \`limit\`; the result \`Map\` preserves stream-name order so the next
  *   cursor is \`[...result.keys()].at(-1)\`.
- * @property limit - Maximum number of streams to return. **Defaults to
- *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
- *   which defaults to 100. Omitting it preserves the historical
- *   "return everything" behavior; set it (with \`after\`) to page through
- *   large stream sets a bounded chunk at a time. A bound, applied before a
- *   stream is added to the result: \`limit: 0\` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
+ * @property limit - Maximum number of streams to return; omitted, every
+ *   matching stream (see the writing-a-store guide § Paginating
+ *   \`query_stats\`). A bound, applied before a stream is added to the
+ *   result: \`limit: 0\` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
     readonly tail?: boolean;
@@ -8883,12 +8879,10 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream name from the previous page to fetch the next. Pairs with
  *   \`limit\`; the result \`Map\` preserves stream-name order so the next
  *   cursor is \`[...result.keys()].at(-1)\`.
- * @property limit - Maximum number of streams to return. **Defaults to
- *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
- *   which defaults to 100. Omitting it preserves the historical
- *   "return everything" behavior; set it (with \`after\`) to page through
- *   large stream sets a bounded chunk at a time. A bound, applied before a
- *   stream is added to the result: \`limit: 0\` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
+ * @property limit - Maximum number of streams to return; omitted, every
+ *   matching stream (see the writing-a-store guide § Paginating
+ *   \`query_stats\`). A bound, applied before a stream is added to the
+ *   result: \`limit: 0\` returns none. A non-negative integer: other values aren't validated, and adapters treat them differently.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
     readonly tail?: boolean;
@@ -10845,7 +10839,7 @@ import { type BroadcastState } from "../sse/types.js";
  * validated at transport-function construction; out-of-range values
  * throw \`ZodError\` immediately so misconfiguration surfaces at startup
  * instead of at first connection (the framework-wide convention for
- * config bags — see CLAUDE.md § Config-validation schemas).
+ * config bags — see .claude/rules/config-validation.md).
  */
 export type SseOptions = {
     /**

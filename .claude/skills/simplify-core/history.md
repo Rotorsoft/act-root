@@ -371,6 +371,8 @@ Proposals (pending), ranked. Defects first:
 
 Tickets (user: "open tickets for all of them, and take care of the regression in master"): #1889 (b-1, fixed in #1891), #1890 (a-1), #1882 (a-3 + b-2 + b-4), #1883 (d-1), #1884 (c-1), #1885 (b-3), #1886 (a-4 + a-2), #1887 (c-2 + c-3), #1888 (d-2).
 
+Correction (while fixing #1890): the second defer-wake probe (15 due streams, 10 run) was wrong, and the main loop's check repeated its setup instead of questioning it. One `app.correlate()` reads 10 events by default, so 5 of the 15 targets were never subscribed. With all 15 correlated, every stream runs with or without the fix. Only the in-flight-drain case was a bug.
+
 ### 2026-10-15 — full run (four specialists: feature interactions + concepts, reading path + file budget + public surface, source of truth + examples, process + packages + core or decorator + infra)
 
 | metric | 2026-10-11 | now | why |

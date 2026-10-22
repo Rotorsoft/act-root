@@ -1,8 +1,9 @@
 name: Store Conformance Matrix
 
 # Weekly (and on demand): the Store TCK against every supported backend
-# version, the full suite on the older supported Node lines, the scenario
-# benchmarks, plus the multi-process Postgres stress harness. Catches
+# version, the full suite on the older supported Node lines, the adapter
+# perf gates, the scenario benchmarks, plus the multi-process Postgres
+# stress harness. Catches
 # dialect-specific regressions (PG SKIP LOCKED behavior across majors,
 # libSQL release bumps) and lease/commit/drain races that single-process
 # tests cannot. ci-cd.yml already runs the full TCK against PG 18 and the
@@ -195,6 +196,82 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
+  # Per-adapter perf gate on REAL adapters: the docker Postgres on 5431 and a
+  # real on-disk SQLite, the only place adapter-level regressions (a lost
+  # index, a reintroduced N+1, a snapshot-floor read that scans the whole
+  # stream) actually surface. Weekly, like every benchmark: PR merges gate
+  # on functionality and compatibility, and benchmarks keep their own pace.
+  #
+  # Budgets: p50 ≤ 2.0× baseline for act-pg (wide noise band on a real
+  # DB), p50 ≤ 1.5× for act-sqlite (embedded, tighter). Both skip the
+  # ratio check when the baseline p50 is below a 1.0 ms absolute floor
+  # (sub-ms ops are noise-dominated). See each package's perf-check.ts.
+  #
+  # A budget breach fails this job. Baselines come from a CI runner
+  # (perf-baseline.yml), so they match the hardware the gate runs on, and
+  # the 2.0×/1.5× tolerances + the 1.0 ms floor absorb run-to-run variance.
+  # If a scenario proves noisy, refresh the baseline (re-run
+  # perf-baseline.yml) or widen its budget — don't silence the gate. The pg
+  # connection needs no extra env: PostgresStore defaults
+  # (host/db/user/password = postgres) match the docker service.
+  perf:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.11.1
+          cache: "pnpm"
+      - run: pnpm install
+      # The bench scripts import `@rotorsoft/act` by package name, which
+      # resolves to its built `dist/`.
+      - run: pnpm build
+      - name: act-pg perf gate
+        run: |
+          set -o pipefail
+          pnpm -F @rotorsoft/act-pg bench:run
+          pnpm -F @rotorsoft/act-pg bench:check 2>&1 | tee bench-pg.log
+      - name: act-sqlite perf gate
+        # Runs even when the pg gate fails, so one breach doesn't hide the other.
+        if: always()
+        run: |
+          set -o pipefail
+          pnpm -F @rotorsoft/act-sqlite bench:run
+          pnpm -F @rotorsoft/act-sqlite bench:check 2>&1 | tee bench-sqlite.log
+      - name: Append adapter perf results to step summary
+        if: always()
+        run: |
+          {
+            echo "## Adapter perf gate"
+            echo ""
+            echo "Real-adapter p50 regression budgets — act-pg 2.0×, act-sqlite"
+            echo "1.5×, both with a 1.0 ms absolute floor. A breach fails the job."
+            echo ""
+            echo "### act-pg"
+            echo '```'
+            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-pg.log 2>/dev/null || echo "(no act-pg output)"
+            echo '```'
+            echo "### act-sqlite"
+            echo '```'
+            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-sqlite.log 2>/dev/null || echo "(no act-sqlite output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Scenario benchmarks, each with a built-in regression bound. Weekly
   # rather than per PR: in about 70 per-PR runs they caught no regression,
   # and they were the slowest job on a core PR. They run on the real
@@ -270,7 +347,7 @@ jobs:
     # fails. `if: always()` is required because the matrix jobs' failure
     # would otherwise mark this dependency as skipped.
     if: always()
-    needs: [pg, sqlite, node-compat, scenarios]
+    needs: [pg, sqlite, node-compat, perf, scenarios]
     runs-on: ubuntu-latest
     steps:
       - name: Compose conformance table
@@ -293,6 +370,7 @@ jobs:
             echo "| PostgreSQL | 14, 15, 16, 17 | $(status ${{ needs.pg.result }}) |"
             echo "| libSQL | latest | $(status ${{ needs.sqlite.result }}) |"
             echo "| Node | 22, 24 | $(status ${{ needs.node-compat.result }}) |"
+            echo "| Adapter perf gate | PG 18, SQLite | $(status ${{ needs.perf.result }}) |"
             echo "| Scenario benches | PG 18 | $(status ${{ needs.scenarios.result }}) |"
             echo ""
             echo "Per-version detail in the [run page](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."

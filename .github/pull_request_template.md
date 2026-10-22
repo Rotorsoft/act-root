@@ -10,9 +10,7 @@ Use `Closes #N` with the GitHub issue number (not the project key).
 
 ## Test plan
 
-- [ ] `pnpm typecheck`
-- [ ] `pnpm test` (100% statements / branches / functions / lines)
-- [ ] `pnpm lint`
+<!-- CI checks typecheck, lint, tests with 100% coverage, build and the stability snapshot. List only what you checked beyond that (a manual run, a probe, a docs build). -->
 
 ## Stability charter impact
 

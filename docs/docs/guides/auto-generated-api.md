@@ -95,7 +95,7 @@ await client.OpenTicket.mutate({ title: "support" });
 
 The router is **flat by design**. State-name grouping (e.g. `client.Tickets.OpenTicket`) was considered and dropped — action names are unique across a registry (the framework enforces no duplicates at build), and the extra nesting was overhead that bought nothing.
 
-Errors map through `toApiError(...)` from `@rotorsoft/act-http/api` **by error identity**, so the tRPC wire status matches the Hono/OpenAPI status for the same framework error: `ConcurrencyError → PRECONDITION_FAILED` (412), `InvariantError → CONFLICT` (409), `ValidationError → UNPROCESSABLE_CONTENT` (422), `NonRetryableError → BAD_REQUEST` (400), anything else → `INTERNAL_SERVER_ERROR` (500). The one unavoidable difference is `StreamClosedError`: it's HTTP **410 Gone** on REST, but tRPC has no 410 code, so it maps to `NOT_FOUND` (**404**) — the closest "the resource is gone" semantics (#1280). Mapping by identity rather than by round-tripping the HTTP status is what keeps the two transports in agreement.
+Errors map through `toApiError(...)` from `@rotorsoft/act-http/api` **by error identity**, so the tRPC wire status matches the Hono/OpenAPI status for the same framework error ([the table](#apierror-envelope--error_map--toapierror)). The one unavoidable difference is `StreamClosedError`: tRPC has no 410 code, so it maps to `NOT_FOUND` (404), the closest "the resource is gone" semantics. Mapping by identity rather than by round-tripping the HTTP status is what keeps the two transports in agreement.
 
 A **malformed request body** takes the same route: the generator validates the payload inside the resolver (not via tRPC's `.input()`, whose Zod failure is a hardcoded `BAD_REQUEST`/400 that never reaches `toApiError`), so a body that fails an action's Zod schema surfaces as the same `ValidationError → UNPROCESSABLE_CONTENT` (422) a malformed `app.do` payload raises — matching Hono's `422 / VALIDATION` for the same input ([#1295](https://github.com/Rotorsoft/act-root/issues/1295)).
 
@@ -130,7 +130,7 @@ serve({ fetch: api.fetch, port: 4000 });
 // POST /api/actions/OpenTicket  body: { title }  → 200 Snapshot[] | 4xx ApiError
 ```
 
-The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; a body-schema failure, or a JSON body that doesn't parse, short-circuits with `422 / VALIDATION` and the shared `ApiError` envelope — the same status and shape a `ValidationError` thrown inside `app.do` maps to, so a client parsing `ApiError` sees one shape for both. Errors map through `toApiError` to `412 / CONCURRENCY`, `409 / INVARIANT`, `422 / VALIDATION`, `410 / STREAM_CLOSED`, `400 / NON_RETRYABLE`, and `500 / INTERNAL` for unknown throws.
+The generator registers one `POST /actions/<actionName>` per action under `basePath` (default `/api`). `@hono/zod-validator` runs each action's registered Zod schema against the request body; a body-schema failure, or a JSON body that doesn't parse, short-circuits with `422 / VALIDATION` and the shared `ApiError` envelope — the same status and shape a `ValidationError` thrown inside `app.do` maps to, so a client parsing `ApiError` sees one shape for both. Other errors map through `toApiError` ([the table](#apierror-envelope--error_map--toapierror)).
 
 Edge-runtime ready — Hono runs unchanged on Node, Bun, Cloudflare Workers, Vercel Edge, AWS Lambda, Deno. If you wire `idempotency`, verify the `IdempotencyStore` is edge-compatible: in-memory works per worker, cross-worker requires a distributed store.
 
@@ -204,7 +204,17 @@ type ApiError = {
 };
 ```
 
-`ERROR_MAP` is an `as const` table from framework error class to `{ status, code }`. The transports never define their own mapping — they all call `toApiError(err)` at their error boundary and forward `{ status, body }` to the wire. Operators wanting different mappings wrap the transport instead of mutating the table; consistency is the load-bearing property, not the specific status codes.
+`ERROR_MAP` is an `as const` table from framework error class to `{ status, code }`:
+
+| Error | HTTP status / `code` | tRPC code |
+|---|---|---|
+| `ValidationError` | 422 / `VALIDATION` | `UNPROCESSABLE_CONTENT` |
+| `InvariantError` | 409 / `INVARIANT` | `CONFLICT` |
+| `ConcurrencyError` | 412 / `CONCURRENCY` | `PRECONDITION_FAILED` |
+| `StreamClosedError` | 410 / `STREAM_CLOSED` | `NOT_FOUND` (404): tRPC has no 410 |
+| `NonRetryableError` | 400 / `NON_RETRYABLE` | `BAD_REQUEST` |
+| anything else | 500 / `INTERNAL` | `INTERNAL_SERVER_ERROR` |
+ The transports never define their own mapping — they all call `toApiError(err)` at their error boundary and forward `{ status, body }` to the wire. Operators wanting different mappings wrap the transport instead of mutating the table; consistency is the load-bearing property, not the specific status codes.
 
 ### `withIdempotency`
 

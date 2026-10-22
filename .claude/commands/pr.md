@@ -15,7 +15,7 @@ Open a pull request for the current branch following the Act project conventions
    - **Title** — under 70 chars, conventional-commits format matching the dominant commit type on the branch.
    - **Summary** — `Closes #N.` if applicable, then a one-paragraph "what shipped + why" in plain prose.
    - **Sections per concern** — each major change gets its own `##` section with the rationale, not just the diff.
-   - **Test plan** — Markdown checkbox list. Pre-tick items already verified locally (typecheck, test, lint, coverage). Leave CI/review boxes unchecked.
+   - **Test plan** — what was checked beyond CI (CI runs typecheck, lint, tests with 100% coverage, build and the stability snapshot): manual runs, probes, a docs build. Don't restate CI's checks.
    - **Stability charter impact** — call out additive vs. breaking with files touched. Skip the section only if no charter-covered files changed.
 
      If the PR adds public surface (new export, builder method, port method, lifecycle event, new field on an exported type), link its `rfcs/NNNN-*.md` here.

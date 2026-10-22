@@ -41,7 +41,7 @@ There is nothing to wire. A commit whose events have a reaction in this app sche
 
 `settle()` is debounced (default 10ms) and non-blocking. Multiple commits inside the debounce window collapse into a single `correlate → drain` pass. Listen for the `"settled"` event when you need to know the framework is idle.
 
-Raise the debounce via `act().build({ settleDebounceMs: 25 })` if commits come in tight bursts: fewer, larger batches. A pass a commit schedules is never put off by later commits, so steady writes can't starve it.
+Raise the debounce via `act().build({ settleDebounceMs: 25 })` if commits come in tight bursts: fewer, larger batches.
 
 A process that only writes (an API pod in a writer/worker split, a seed or migration script, an admin CLI) should build with `drain: false`, or it runs reactions too.
 

@@ -1382,10 +1382,8 @@ export class Act<
    * A local change that frees reaction work (a commit, `reset()`,
    * `unblock()`, `restore()`) schedules this on its own unless the app
    * sets `autoSettle: false`. Call it at startup, to run what was pending
-   * before a restart, or with options for the next pass. A pass already
-   * scheduled is never put off: calls before it runs join it (a shorter
-   * `debounceMs` brings it forward), and a call during a running cycle
-   * queues one more pass after it. Runs correlate→drain in a loop until a pass makes no
+   * before a restart, or with options for the next pass; the scheduling
+   * rule is in the event-sourcing docs (§ settle). Runs correlate→drain in a loop until a pass makes no
    * progress — no new subscriptions, no events read, no streams leased —
    * then emits the `"settled"` lifecycle event, so one call fully catches
    * up paginated streams without forcing callers to loop.
