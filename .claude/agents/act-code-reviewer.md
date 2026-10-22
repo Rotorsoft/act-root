@@ -42,13 +42,13 @@ If a Store/Cache/Logger port method changed in `libs/act/src/types/ports.ts`:
 
 ## 4. Naming conventions
 
-Apply `CLAUDE.md` § "Naming conventions": anything reachable from a package's `index.ts` is camelCase (fields, options, exported functions), internal identifiers are short snake_case, types are PascalCase. Match existing analogs over inventing new patterns: if the project already names something `app.reset(input)`, a new sibling should be `app.unblock(input)`, not `app.recoverStreams(...)`.
+Apply `CONTRIBUTING.md` § "Naming conventions": anything reachable from a package's `index.ts` is camelCase (fields, options, exported functions), internal identifiers are short snake_case, types are PascalCase. Match existing analogs over inventing new patterns: if the project already names something `app.reset(input)`, a new sibling should be `app.unblock(input)`, not `app.recoverStreams(...)`.
 
 ## 5. Doc debt
 
 - Touching `libs/act/src/types/ports.ts` → check whether `docs/docs/architecture/extension-points.md` needs an update.
 - Touching reaction/drain semantics → check `docs/docs/concepts/error-handling.md`.
-- A doc sentence that promises runtime behavior needs a test and a row in `docs/docs/architecture/behavior-contracts.md` (`CLAUDE.md` § Pre-handoff workflow).
+- A doc sentence that promises runtime behavior needs a test and a row in `docs/docs/architecture/behavior-contracts.md` (`CONTRIBUTING.md` § Pre-handoff workflow).
 - A change that taught something → check for one entry in `.claude/skills/simplify-core/learnings.md`.
 - Verify cross-references from CLAUDE.md "Where to find what" cover any new doc pages.
 

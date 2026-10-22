@@ -5,7 +5,7 @@
  * `resolve<Type>Config`, so misconfiguration throws a `ZodError` at the
  * entry point. Validation rejects only what is broken (`NaN`, `±Infinity`,
  * nonsensical negatives) and never newly rejects a value that works. The
- * rules are in CLAUDE.md § Config-validation schemas.
+ * rules are in CONTRIBUTING.md § Config-validation schemas.
  */
 
 import { z } from "zod";

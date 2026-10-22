@@ -12,7 +12,7 @@ Verify the current branch is mergeable. Run **every gate in parallel** and surfa
 3. **Lint** — `pnpm lint`. Warnings are fine; errors fail the gate.
 4. **Build** — `pnpm build`. Must complete without TS errors.
 5. **Charter-covered diff** — once the build gate finishes (the snapshot reads `dist/`), regenerate the stability snapshot (`pnpm check:stability -u`), then `git diff master --stat -- test/__snapshots__/stability.spec.ts.snap`. The snapshot records the published declarations of every entry point and what they re-export, so it covers the public surface wherever a file moves, and an implementation-only change leaves it alone. If it changed, explicitly note "charter surface modified — categorize as additive/breaking before merging."
-6. **Doc-staleness audit** — run the doc-grep recipe from CLAUDE.md "Pre-handoff workflow → Doc audit":
+6. **Doc-staleness audit** — run the doc-grep recipe from CONTRIBUTING.md "Pre-handoff workflow → Doc audit":
    ```bash
    # Identify renamed/removed identifiers in this PR
    git diff master --diff-filter=D --name-only -- libs/act/src/ libs/act-*/src/

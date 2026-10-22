@@ -27,7 +27,7 @@ Enumerate every new entry on the public surface this introduces — the things
 - **Public types** — new exported types, or new fields on existing exported types.
 
 For each, give the final name and signature. Naming follows the conventions in
-[CLAUDE.md § Naming conventions](../CLAUDE.md#naming-conventions).
+[CONTRIBUTING.md § Naming conventions](../CONTRIBUTING.md#naming-conventions).
 
 ## Alternatives considered
 
