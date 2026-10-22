@@ -510,12 +510,9 @@ describe("defer outcome (integration)", () => {
     await app.correlate();
     await app.drain(); // both parked
 
-    const breaker = (
-      app as unknown as {
-        _breaker: { failed(at: number, error: unknown): void };
-      }
-    )._breaker;
-    breaker.failed(Date.now(), new Error("store down"));
+    // One failed claim opens the breaker (threshold 1).
+    vi.spyOn(store(), "claim").mockRejectedValueOnce(new StoreError("claim"));
+    await app.drain();
     await sleep(100); // w1's wake fired while open
     expect(ran).toEqual([]);
     await vi.waitFor(() => expect(ran).toEqual(["w1", "w2"]), {

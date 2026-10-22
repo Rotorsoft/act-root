@@ -53,6 +53,24 @@ const registry_key = <TEvents extends Schemas>(
     .slice(0, 32);
 };
 
+/**
+ * One correlate pass. An `idle` pass read nothing it keeps (it was
+ * disarmed, refused the lease, or discarded its read), so it is no
+ * evidence the store is up; a `scanned` pass read the log.
+ */
+export type CorrelatePass =
+  | { readonly kind: "idle"; readonly last_id: number }
+  | {
+      readonly kind: "scanned";
+      readonly last_id: number;
+      /** Targets newly subscribed. */
+      readonly subscribed: number;
+      /** Targets whose work mark was raised. */
+      readonly marked: number;
+      /** It read events: settle's progress signal. */
+      readonly read: boolean;
+    };
+
 /** Bound on compiled pattern sources; guards a resolver that mints one per event. */
 const PATTERN_CACHE_SIZE = 32;
 
@@ -285,22 +303,12 @@ export class CorrelateCycle<
      * explicit `app.correlate()` scans now, since `close` loops on it.
      */
     lease = false
-  ): Promise<{
-    subscribed: number;
-    last_id: number;
-    /** It read events: settle's progress signal. */
-    read: boolean;
-    marked: number;
-    scanned: boolean;
-  }> {
+  ): Promise<CorrelatePass> {
     await this._init();
     const epoch = this._epoch;
-    const idle = () => ({
-      subscribed: 0,
+    const idle = (): CorrelatePass => ({
+      kind: "idle",
       last_id: this._checkpoint,
-      read: false,
-      marked: 0,
-      scanned: false,
     });
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
@@ -466,14 +474,14 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id, read, marked, scanned: true };
+      return { kind: "scanned", last_id, subscribed, marked, read };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
     // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
     if (!stopped && found !== query.limit) this._lowered = raised;
-    return { subscribed: 0, last_id, read, marked: 0, scanned: true };
+    return { kind: "scanned", last_id, subscribed: 0, marked: 0, read };
   }
 
   /**

@@ -9,6 +9,7 @@ import {
   ZodEmpty,
 } from "../src/index.js";
 import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
+import type { CorrelatePass } from "../src/internal/correlate-cycle.js";
 import { SettleLoop } from "../src/internal/settle.js";
 import type { Committed, Drain, Query, Schemas } from "../src/types/index.js";
 
@@ -26,6 +27,9 @@ const empty_drain = (): Drain<Schemas> => ({
   acked: [],
   blocked: [],
 });
+
+/** A correlate pass that found nothing to scan. */
+const idle_pass: CorrelatePass = { kind: "idle", last_id: -1 };
 
 describe("settle loop wake-up during a running cycle", () => {
   it("runs a cycle for a schedule() that fires while a cycle is in flight", async () => {
@@ -46,7 +50,7 @@ describe("settle loop wake-up during a running cycle", () => {
 
     const loop = new SettleLoop<Schemas>(
       {
-        correlate: async () => ({ subscribed: 0, read: false }),
+        correlate: async () => idle_pass,
         drain: async () => {
           drains++;
           if (drains === 1) {
@@ -103,7 +107,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     });
     const loop = new SettleLoop<Schemas>(
       {
-        correlate: async () => ({ subscribed: 0, read: false }),
+        correlate: async () => idle_pass,
         drain: async (options) => {
           seen.push(options.eventLimit);
           if (seen.length === 1) {
@@ -132,7 +136,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     const drain = vi.fn(async () => empty_drain());
     const loop = new SettleLoop<Schemas>(
       {
-        correlate: async () => ({ subscribed: 0, read: false }),
+        correlate: async () => idle_pass,
         drain,
         on_settled: () => {},
         breaker: breaker(),
@@ -160,7 +164,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     });
     const loop = new SettleLoop<Schemas>(
       {
-        correlate: async () => ({ subscribed: 0, read: false }),
+        correlate: async () => idle_pass,
         drain,
         on_settled: () => {},
         breaker: breaker(),
@@ -181,7 +185,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     const drain = vi.fn(async () => empty_drain());
     const loop = new SettleLoop<Schemas>(
       {
-        correlate: async () => ({ subscribed: 0, read: false }),
+        correlate: async () => idle_pass,
         drain,
         on_settled: () => {},
         breaker: breaker(),
@@ -200,7 +204,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     const seen: Array<number | undefined> = [];
     const loop = new SettleLoop<Schemas>(
       {
-        correlate: async () => ({ subscribed: 0, read: false }),
+        correlate: async () => idle_pass,
         drain: async (options) => {
           seen.push(options.eventLimit);
           return empty_drain();
@@ -254,7 +258,13 @@ describe("settle loop paginates past inert windows", () => {
           const next = Math.min(checkpoint + (limit ?? 2), MAX);
           const read = next > checkpoint;
           checkpoint = next;
-          return { subscribed: 0, read };
+          return {
+            kind: "scanned",
+            last_id: next,
+            subscribed: 0,
+            marked: 0,
+            read,
+          };
         },
         drain: async () => empty_drain(),
         on_settled: () => settled_signal(),
@@ -296,11 +306,7 @@ describe("settle breaker success rides a real correlate probe", () => {
   /** Runs one pass, resolving whichever way the pass ends. */
   const run_pass = async (
     breaker: CircuitBreaker,
-    correlate: () => Promise<{
-      subscribed: number;
-      read: boolean;
-      scanned?: boolean;
-    }>
+    correlate: () => Promise<CorrelatePass>
   ) => {
     let done!: () => void;
     const finished = new Promise<void>((r) => {
@@ -332,9 +338,11 @@ describe("settle breaker success rides a real correlate probe", () => {
   it("closes the breaker when the scan returns (control)", async () => {
     const breaker = open_breaker();
     await run_pass(breaker, async () => ({
+      kind: "scanned",
+      last_id: 5,
       subscribed: 0,
+      marked: 0,
       read: false,
-      scanned: true,
     }));
     expect(breaker.state(1000)).toBe("closed");
   });
@@ -345,11 +353,7 @@ describe("settle breaker success rides a real correlate probe", () => {
     // breaker mid-outage and let the drain hammer a store nobody has heard
     // from, a bug that is reachable again now that correlate can skip.
     const breaker = open_breaker();
-    await run_pass(breaker, async () => ({
-      subscribed: 0,
-      read: false,
-      scanned: false,
-    }));
+    await run_pass(breaker, async () => ({ kind: "idle", last_id: 5 }));
     expect(breaker.state(1000)).toBe("open");
   });
 
@@ -653,15 +657,20 @@ describe("a local change settles its own reactions", () => {
 
   it("scans with the poll's limit only while the poll runs", async () => {
     const app = reacting([]);
-    const scanned = vi.spyOn(app as never, "_correlate_scanned") as unknown as {
-      mock: { calls: Array<[{ limit?: number }]> };
-    };
-    const limit = () => scanned.mock.calls.at(-1)?.[0].limit;
+    // Correlate's event reads are the actor-less ones (`with_pii: false`).
+    const query = vi.spyOn(store(), "query");
+    const limit = () =>
+      query.mock.calls.filter(([, q]) => q?.with_pii === false).at(-1)?.[1]
+        ?.limit;
     app.start_correlations({ limit: 5 }, 5);
     await vi.waitFor(() => expect(limit()).toBe(5));
     app.stop_correlations();
+    // A commit gives each settle something to scan, and its options join
+    // the pass the commit scheduled.
+    await app.do("ping", { stream: "l1", actor }, {});
     app.settle({ correlate: { limit: 7 } });
     await vi.waitFor(() => expect(limit()).toBe(7));
+    await app.do("ping", { stream: "l2", actor }, {});
     app.settle();
     await vi.waitFor(() => expect(limit()).toBe(100));
   });

@@ -21,7 +21,10 @@ import {
   resolveSettleConfig,
   resolveShutdownConfig,
 } from "./internal/config.js";
-import { CorrelateCycle } from "./internal/correlate-cycle.js";
+import {
+  CorrelateCycle,
+  type CorrelatePass,
+} from "./internal/correlate-cycle.js";
 import {
   close_correlation,
   default_correlator,
@@ -491,7 +494,7 @@ export class Act<
     return new SettleLoop<TEvents>(
       {
         correlate: (q) =>
-          this._correlate_scanned(
+          this._correlate_pass(
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
             true
           ),
@@ -571,15 +574,16 @@ export class Act<
     if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running, !!settling);
     if (grace <= 0) return;
-    const inflight = running.map((c) => c.inflight);
-    if (settling) inflight.push(settling);
     let timer!: ReturnType<typeof setTimeout>;
     const budget = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, grace);
       timer.unref();
     });
     try {
-      await Promise.race([Promise.all(inflight), budget]);
+      await Promise.race([
+        Promise.all([...running.map((c) => c.inflight), settling]),
+        budget,
+      ]);
     } finally {
       // Don't leave the budget timer pending when the cycles won the race.
       clearTimeout(timer);
@@ -989,30 +993,27 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    const { subscribed, last_id } = await this._correlate_scanned(query);
-    return { subscribed, last_id };
+    const pass = await this._correlate_pass(query);
+    return {
+      subscribed: pass.kind === "scanned" ? pass.subscribed : 0,
+      last_id: pass.last_id,
+    };
   }
 
-  /** `correlate` plus `scanned`, which settle needs for the breaker. */
-  private async _correlate_scanned(
+  /** One correlate pass; arms every lane when it found work. */
+  private async _correlate_pass(
     query: Query,
     /** Honour the correlation lease — settle and the poller only. */
     lease = false
-  ): Promise<{
-    subscribed: number;
-    last_id: number;
-    read: boolean;
-    scanned: boolean;
-  }> {
+  ): Promise<CorrelatePass> {
     // Writer-only instances don't correlate.
-    if (!this._drain)
-      return { subscribed: 0, last_id: -1, read: false, scanned: false };
+    if (!this._drain) return { kind: "idle", last_id: -1 };
     return this._scoped(async () => {
-      const { subscribed, last_id, read, marked, scanned } =
-        await this._correlate.correlate(query, lease);
+      const pass = await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
-      if (subscribed > 0 || marked > 0) this._arm_all();
-      return { subscribed, last_id, read, scanned };
+      if (pass.kind === "scanned" && (pass.subscribed > 0 || pass.marked > 0))
+        this._arm_all();
+      return pass;
     });
   }
 

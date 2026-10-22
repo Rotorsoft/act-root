@@ -444,7 +444,7 @@ export class DrainController<
   private readonly _misrouted = new Set<string>();
   private _stopped = false;
   /** The pass in flight. Never rejects; graceful shutdown waits on it. */
-  private _inflight: Promise<unknown> | undefined;
+  private _inflight: Promise<Drain<TEvents>> | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
 
@@ -466,7 +466,7 @@ export class DrainController<
     return this._raised !== this._lowered;
   }
 
-  get inflight(): Promise<unknown> | undefined {
+  get inflight(): Promise<Drain<TEvents>> | undefined {
     return this._inflight;
   }
 
