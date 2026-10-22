@@ -65,7 +65,7 @@ Targets the retrospective tracks (adjust them only with the user):
 ```
 ### P<run date>-<n>. <one-line title>
 Kind: internal | docs | tests | infra
-Removes: <exports / methods / options / concepts / files / tests / ~lines, with numbers>
+Removes: <exports / methods / options / concepts / files / tests / ~lines, with numbers measured after `biome check --write`>
 Evidence: <file:line, usage counts, what a reader must hold in their head today>
 Proposal: <the change, concretely; a before/after sketch if it helps>
 Risk: <what could break; which tests, TCK cases and contract rows prove it doesn't>
