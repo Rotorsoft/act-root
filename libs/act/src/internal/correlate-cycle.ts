@@ -172,8 +172,11 @@ export class CorrelateCycle<
    */
   private _raised = 1;
   private _lowered = 0;
-  /** Counts releases, so a lease reply that lands after one is dropped. */
-  private _releases = 0;
+  /**
+   * Bumped by a release (shutdown) and a restart (restore), so a scan or
+   * lease reply that was out across one writes nothing.
+   */
+  private _epoch = 0;
   private _init_promise: Promise<void> | undefined;
   // Bounded by `maxSubscribedStreams`; static records live apart so eviction
   // never drops their +Infinity floor.
@@ -257,6 +260,7 @@ export class CorrelateCycle<
     this._dynamic_subscriptions.clear();
     this._static_subscriptions.clear();
     this._raised++;
+    this._epoch++;
   }
 
   /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
@@ -294,15 +298,16 @@ export class CorrelateCycle<
     scanned: boolean;
   }> {
     await this.init();
+    const epoch = this._epoch;
+    const idle = () => ({
+      subscribed: 0,
+      last_id: this._checkpoint,
+      marked: 0,
+      scanned: false,
+    });
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
-    if (this._raised === this._lowered)
-      return {
-        subscribed: 0,
-        last_id: this._checkpoint,
-        marked: 0,
-        scanned: false,
-      };
+    if (this._raised === this._lowered) return idle();
 
     const raised = this._raised;
 
@@ -311,7 +316,6 @@ export class CorrelateCycle<
     // read. Renew at the halfway mark.
     const now = Date.now();
     if (lease && now >= this._lease_until - CORRELATION_LEASE_MS / 2) {
-      const releases = this._releases;
       const { correlating } = await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,
@@ -319,17 +323,10 @@ export class CorrelateCycle<
       });
       // A release that landed while the call was out (shutdown) stays
       // released: the reply must not hand the lease back to this worker.
-      const released = this._releases !== releases;
-      if (!released)
-        this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
+      if (this._epoch !== epoch) return idle();
+      this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // `undefined` = store without leasing. Refused: stay armed, look again.
-      if (correlating === false || released)
-        return {
-          subscribed: 0,
-          last_id: this._checkpoint,
-          marked: 0,
-          scanned: false,
-        };
+      if (correlating === false) return idle();
     }
 
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -427,6 +424,11 @@ export class CorrelateCycle<
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
 
+    // Released or restarted while the scan was out: what it read belongs to
+    // a lease this worker gave up, or to the log a restore replaced. Writing
+    // it would hand back the lease, or mark the restored log with old ids.
+    if (this._epoch !== epoch) return idle();
+
     // Only targets with a mark to raise or priority/lane to register.
     const streams: SubscribeInput[] = [];
     for (const [stream, entry] of correlated) {
@@ -441,18 +443,16 @@ export class CorrelateCycle<
     }
 
     if (streams.length) {
-      // Leasing renews for free on the same call, but only while the lease
-      // is held: one released mid-scan (shutdown) stays released.
-      const held = lease && this._lease_until > 0;
+      // Leasing renews for free on the same call.
       const renewed_at = Date.now();
       const { subscribed, correlating } = await this._cd.subscribe(
         streams,
         last_id,
-        held
+        lease
           ? { key: this._key, by: this._by, millis: CORRELATION_LEASE_MS }
           : undefined
       );
-      if (held && correlating !== false)
+      if (lease && correlating !== false)
         this._lease_until = renewed_at + CORRELATION_LEASE_MS;
       // The orchestrator arms on re-marks too, not just new subscriptions.
       const marked = streams.filter(
@@ -522,7 +522,7 @@ export class CorrelateCycle<
   async release_correlation(): Promise<void> {
     try {
       this._lease_until = 0;
-      this._releases++;
+      this._epoch++;
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,

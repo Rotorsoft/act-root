@@ -3,6 +3,7 @@ import {
   type Committed,
   type EventSource,
   InMemoryStore,
+  type Query,
   type ScanOptions,
   type Schemas,
   type Store,
@@ -790,6 +791,57 @@ describe("restore into a store that already correlated", () => {
     await done();
     // 3 restored + 3 new, all reached their reaction
     expect(seen).toBe(6);
+  });
+
+  it("delivers restored events when the restore lands during a correlate scan", async () => {
+    let seen = 0;
+    let hold: Promise<void> | undefined;
+    let held: () => void = () => {};
+    let release: () => void = () => {};
+    // Holds the reply of the first scan that carries events, until released.
+    class HoldingStore extends InMemoryStore {
+      override async query<E extends Schemas>(
+        callback: (event: Committed<E, keyof E>) => void,
+        query?: Query
+      ) {
+        const count = await super.query(callback, query);
+        if (count > 0 && !hold) {
+          hold = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          held();
+          await hold;
+        }
+        return count;
+      }
+    }
+    const { app, dispose: done } = await sandbox(
+      act()
+        .withState(Tick)
+        .on("Ticked")
+        .do(async function count() {
+          seen++;
+        })
+        .to((e) => ({ target: `count-${e.stream}` })),
+      { store: () => new HoldingStore(), actOptions: { autoSettle: false } }
+    );
+    for (let i = 0; i < 10; i++)
+      await app.do("tick", { stream: "before", actor: who }, {});
+    const scanning = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const in_flight = app.correlate();
+    await scanning;
+    await app.restore(await backup(), {});
+    release();
+    await in_flight;
+    for (let i = 0; i < 4; i++) {
+      await app.correlate();
+      await app.drain();
+    }
+    await done();
+    // only the 3 restored events, the 10 before were replaced
+    expect(seen).toBe(3);
   });
 
   it("settles the restored events' reactions with no settle call", async () => {
