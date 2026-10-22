@@ -9,23 +9,23 @@ Least recently run goes next. A lens with no accepted proposal in its last three
 | lens | last run | runs | accepted | status |
 |---|---|---|---|---|
 | Public surface | 2026-10-20 | 5 | 1 | active (no proposal: 51 exports and 20 methods unchanged; internal callers of public methods not worth one) |
-| Dead code (tool) | 2026-10-20 | 5 | 2 | active (construction-only Act fields, a duplicate drain flag; knip's new false positives listed in lenses.md) |
+| Dead code (tool) | 2026-10-22 | 6 | 2 | active (`LruSet`, used only by its own spec; two act-pg bench scripts nothing cites) |
 | Hotspots (tool) | 2026-10-20 | 5 | 1 | retired 2026-10-20: two runs with no proposal; every branch in the hot functions (correlate, action, drain) is a separate rule |
 | File budget | 2026-10-20 | 6 | 1 | active (InMemoryStream's getters, −67 in the largest adapter file) |
-| Comment noise | 2026-10-20 | 5 | 3 | active (no proposal: internal/ 29%, adapters/ 12%, both under the bar) |
+| Comment noise | 2026-10-22 | 6 | 3 | active (internal/ reached 30%: eight comments that contradict the code, essays; the cut takes it to 28.7%) |
 | Concepts and options | 2026-10-20 | 6 | 1 | active (found the restore × in-flight scan bug #2025 left) |
 | Core or decorator? | 2026-10-15 | 3 | 0 | retired 2026-10-15: three runs, findings only (PII, audit, breaker, lanes stay; priority is a major-version question) |
-| DRY across adapters and builders | 2026-10-20 | 5 | 1 | active (found the lane-merge asymmetry and SqliteStore's four row mappers) |
+| DRY across adapters and builders | 2026-10-22 | 6 | 1 | active (PostgresStore's pii codec and row copies, four receiver idempotency objects; found the generators' lost doc comments) |
 | Reading path | 2026-10-20 | 5 | 3 | active (13 runtime files, ~31 names; settle restates correlate's init and checkpoint) |
 | Newcomer test (quarterly) | 2026-10-17 | 2 | 0 | active (21 concepts, 3 imports; a package.json without name/version crashes) |
-| Tests by concept | 2026-10-20 | 5 | 3 | active (found the auto-settle test race #1976 widened and the act-pg seed race) |
+| Tests by concept | 2026-10-22 | 6 | 3 | active (private reach-ins in audit, defer and lanes specs; schema dates repeated in two adapters) |
 | Mutation evidence (monthly, CI) | never | 0 | 0 | retired: setup removed (#1805), see baselines below |
 | Packages earn their place | 2026-10-15 | 4 | 0 | retired 2026-10-15: four runs, no proposal (removal is ruled out; act-tck churn is the snapshot, now P2026-10-15p-1) |
 | Infra | 2026-10-20 | 6 | 1 | active (check:readmes never failed in 680 runs; an 831 MB pre-PG18 data dir) |
 | One source of truth | 2026-10-20 | 6 | 5 | active (act-sse's status worded seven ways) |
 | Examples | 2026-10-20 | 5 | 2 | active (133 API snippets type-checked: `error.version`, the calculator's `leaseMillis`, a `broadcast` import) |
 | Process | 2026-10-20 | 5 | 7 | active (the stability snapshot changed in 25 of 49 commits, 1 with new surface) |
-| Feature interactions | 2026-10-20 | 5 | 7 | active (found two shutdown bugs #1973 left) |
+| Feature interactions | 2026-10-22 | 6 | 7 | active (found the restore overlaps #2043 left) |
 
 ## Interaction register
 
@@ -52,11 +52,14 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | settle loop, shutdown | a stopped drain claims nothing and a released lease stays released (#2001); a late renewal reply is dropped (#2025) | resolved | #2001, #2025 |
 | notify disposal, shutdown order | shutdown stops every scheduler before awaiting the disposer | resolved | #2001 |
 | armed flags, in-flight scan or claim | an empty result lowers only the raises it saw (`_raised`/`_lowered`) | resolved | #2025 |
-| restore (`restart()`), in-flight correlate scan | a scan reply that lands after `restart()` writes the old checkpoint and old `correlated_at` marks into the restored store; the restored events never reach their reactions | accidental, and a bug | P2026-10-20r2-1 (probed: 0 of 3; control 3 of 3) |
+| restore (`restart()`), in-flight correlate scan | #2043's epoch covers a reply that lands after the whole restore. Still open: a reply released while the restore runs (0 of 3, control 3 of 3, reproduced in the main loop), a scan whose final `subscribe` was sent before the restore and lands after it (InMemory 0 of 3; real Postgres 0 of 3 on three runs), a pass that starts during the restore (10 of 20), and a `restart()` during init when the restored log runs past the old checkpoint (10 of 20) | accidental, and a bug | P2026-10-22-1; goes when the restore waits for passes in flight |
 | `start_correlations` tick, lane arming | the tick arms every lane (#1973): one empty claim per active lane per tick on an idle app (12 per 205 ms at 10 ms, 0 for `drain: false`, only owned lanes under `onlyLanes`) | justified | the cost of reclaiming a dead worker's expired lease |
 | `autoSettle`, `cycleMs` | with `autoSettle` on, a lane's `cycleMs` tick finds nothing settle hasn't drained (52 vs 53 ms, 0 extra claims) | justified only with `autoSettle: false` | P2026-10-18s-2 (docs); the option is published and stays |
 | `autoSettle`, `maxPasses` | each reaction commit schedules a new pass with no options, so `maxPasses` doesn't cap a chain that keeps committing | resolved (documented) | #1973 |
 | writer-only app, notify | `_wake` arms lanes on a `drain: false` instance too; nothing there reads the armed flag | shared primitive | #1978; harmless (probed) |
+| restore, other workers on the store | another process keeps the correlation lease and scans from its old checkpoint: 10 of 20 restored events run (control, one worker: 20 of 20) | justified, documented | the `Store.restore` port doc says to restart other processes; the user docs don't yet (P2026-10-22-2) |
+| restore, drain in flight | the in-flight `ack` writes nothing into the restored store | harmless | InMemory probe 3 of 3; Postgres not probed |
+| correlate outcome, lane arming / settle progress | Act arms on `subscribed > 0 \|\| marked > 0` and settle counts `subscribed > 0 \|\| read`; `marked` and `read` already decide both | accidental restatement | #2069 (P2026-10-22f-2), −2 lines |
 
 ## Mutation baselines
 
@@ -96,6 +99,8 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Resolved by #1959 (P2026-10-17d-2 → #1949): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
 
 ## Self-changes
+
+- 2026-10-22: three smells added to `lenses.md` from how the user reshaped the previous run's proposals: removing a check as a duplicate (s7: `check:readmes` and the snippet self-test kept), stripping accessors that make state read-only (s3: encapsulation kept), and a cleanup step that moves a responsibility between features (s2: #2046 grew to +44 before review trimmed it). learnings.md gains the interleaving lesson from P2026-10-22-1 and the cleanup-growth and duplicate-check lessons.
 
 - 2026-10-20 (second run): the proposal template's "Removes" numbers are measured after `biome check --write`. P2026-10-20s-5 promised −11 from an unformatted simulation and shipped +15.
 - 2026-10-20: retired Hotspots (two runs with no proposal). The Dead code lens lists knip's newer false positives (the evidence scripts, the k6 script, the webhook-receiver demo, the act-pg stress worker, skill scripts, docs and recipes dependencies). A smell added: a "does nothing" claim checked by reading the call site. #1976 judged tests by their body and dropped `autoSettle: false` from 17 tests whose helper walks the pipeline; making the public `drain()` throw under auto settle found all 28 such tests in one run.
@@ -563,3 +568,36 @@ Simplifications:
 Design findings, not proposed: shutdown hands the lease back twice (`stop_correlations()` plus the final awaited release; harmless); deriving settle's `_pending` from the armed counters would loop a worker refused the lease; `query_streams` defaults `limit` to 100 and `query_stats` to unbounded (documented in three places, kept in one by s4); migrating-to-1.x.md promises "export removal forces 2.0" while #1959 removed exports in a minor (the user's call). Two narrower restore windows remain unprobed (a `restart()` during init; one while the scan's subscribe is out).
 
 Tickets (user: "create the tickets"): #2033 (P2026-10-20r2-1), #2034 (-2), #2035 (s1), #2036 (s2), #2037 (s3), #2038 (s4), #2039 (s5), #2040 (s6), #2041 (s7).
+
+### 2026-10-22 — full run (four specialists: dead code + comment noise, DRY across adapters and builders, tests by concept, feature interactions + field)
+
+| metric | 2026-10-20 (second) | now | why |
+|---|---|---|---|
+| core lines (libs/act/src) | 17713 | 17714 | flat: #2043 (0), #2046 (+5), #2047 (−8), #2055 (+7) |
+| comments in internal/ | 29% | 30% (1935 / 6445) | doc comments from #2046 and #2055; reaches the bar |
+| spec files / test lines | 216 / 59736 | 217 / 59867 | red tests for #2043, #2046, #2055 and act-tck's own stability spec (#2045) |
+| CI workflows / lines | 5 / 812 | 5 / 825 | #2050 (lint in `ci`, the filter covers every typecheck/lint input), #2052 (perf gate moved to the weekly workflow) |
+| docs lines / CLAUDE.md | 9387 / 38 KB | 9346 / 30 KB | #2048 (one owner each), #2049 (three sections to CONTRIBUTING.md and `.claude/rules/`) |
+| everything else | | unchanged | 51 exports, 8 / 20 / 18 / 11, 9 files touching 5+ features, 17 / 9 files over 300, 0 ticket refs |
+
+Audit: 13 PRs since the last run, #2042–#2055, all the previous run's tickets plus three follow-ups the user asked for (#2052 perf gate weekly, #2053 recovered two lost skill commits, #2055 the #2054 tidy). No fix-on-fix chain across PRs. One inside a PR: #2046, a cleanup ticket, grew from −2 to +44 source lines while it accepted review suggestions that moved breaker bookkeeping into correlate; that move caused a double count whose fix needed a flag. A fresh review recommended reverting the additions and it shipped at +5. This run then found that #2043, the assistant's own fix from the previous run, covered only one interleaving of a restore and a scan (P2026-10-22-1).
+
+Decisions on P2026-10-20r2*: all accepted and shipped, three reshaped by the user. -1 → #2033 / #2043; -2 → #2034 / #2044; s1 → #2035 / #2045; s2 → #2036 / #2046 (trimmed back to the ticket's scope after review; follow-up #2054 / #2055); s3 → #2037 / #2047 reshaped: the user wanted standard TypeScript encapsulation, so the getters stayed and the store's two outside writes became methods; s4 → #2038 / #2048; s5 → #2039 / #2049, plus path-scoped `.claude/rules/` files so Claude still sees the moved rules while writing code; s6 → #2040 / #2050, plus lint added to CI and the `ci` filter widened, so no check is lost; a required status check was declined ("overcomplicating things"); s7 → #2041 / #2051 reshaped: `check:readmes` and ci-cd's snippet self-test kept ("make sure we are not losing checks and validations"; docs-build doesn't run on lockfile or TypeScript bumps); `.postgres/` and the coverage dirs deleted.
+
+Promises kept: r2-1 promised +18/−26 → 26/26 (0 net, one concept fewer); s1 ~−21,000 snapshot lines → −19,162; s2 −10 source → +5 (the ticket's own commit was −2; `merge_drains` and the `last_id` passthrough cost the rest); s3 −67 → −8 (the user kept encapsulation); s4 → −41 docs lines; s5 −10 KB → −8 KB; s6 → +13 workflow lines (lint added) and −46 (Stop hook); s7 −113 → −1 (both checks kept by the user).
+
+Verified in the main loop before ranking: a restore released while a held scan reply is still out leaves 0 of 3 restored events reaching their reaction, on 3 of 3 runs (control, #2043's order: 3 of 3); `LruSet` has no caller outside `lru-map.spec.ts` and appears in no `dist` JS; nothing cites the two act-pg bench scripts; the published `trpc()`, `hono()` and `openapi()` declarations carry no doc comment (a type sits between the JSDoc and the function); CLAUDE.md says `.emits({})` takes one key, but only `state({})` and a projection's `.on({})` do (wolfdesk passes several events); `DrainController.start` has one caller, at construction, so its re-entry guard never fires.
+
+Proposals (pending), ranked. Defects first (outside the cap):
+- P2026-10-22-1 (fi-1). A restore runs with no correlate pass in flight: `restart` sets a restoring flag, waits for the passes in flight (tracked by correlate), runs the store restore, then cold-starts; a pass started meanwhile returns idle. The field answers it the same way (Axon resets a processor only while it's shut down, Marten stops a shard before a rebuild, KurrentDB restores offline). +23 source lines, a defect fix; restart's epoch bump and `_raised++` go. Simulated: 2,524 tests green; the probes (InMemory and real Postgres) become tests under row 106. Behavior: a correlate pass made during a restore returns idle.
+- P2026-10-22-2 (d-3 part, comments-1, fi-3, d notes). Docs and comments that contradict the code: the generators' JSDoc sits above a type, so the published `trpc()`, `hono()`, `openapi()` have none (move the types above the docs); CLAUDE.md's single-key line names `.emits({})` instead of a projection's `.on({})`; eight internal comments (pii.ts's missing `_pii_split` and `build_handle` callers, close-cycle's "filters in the callback" and "filtered out", defer-config's unshipped `every` and CLAUDE.md pointer, autoclose-policy's CLAUDE.md pointer, tracing's "historical" note); the receiver header's "land in #744" and "two primitives"; sqlite's `parse_json` doc (it doesn't revive dates); the user docs and `Act.restore` JSDoc say other processes on the store must restart after a restore (the port doc already does).
+Simplifications:
+- P2026-10-22s-1 (dead-1). Delete `LruSet` and its spec block (−73), and correct `lru-map.ts`'s header, which names a field that no longer exists.
+- P2026-10-22s-2 (comments-2 + comments-3). Cut internal essays to their why: report-once's 41 comment lines over a 6-line function, pii.ts's three gate descriptions, date-reviver and correlation-id headers, settle's and close-cycle's dependency docs that repeat the functions they wire (−93 comment lines; with -2's comment fixes, internal/ goes 30% → 28.7%).
+- P2026-10-22s-3 (t-2). defer.spec's cold-start seeding asserts on claims instead of the DeferTimer's private map: 7 cases → 5, 8 reach-ins → 0 (−156; four mutations of the seeding code all caught; row 108 re-cites).
+- P2026-10-22s-4 (t-3). lanes.spec's per-lane worker: one public test ("drains on its own timer"), four private-field tests and the unreachable `start` guard go (−126 test lines, −1 source line, two fixed sleeps).
+- P2026-10-22s-5 (t-1). audit.spec: one module-level `meta` (35 copies), one `collect` helper (48 loops), and public `block`/`ack`/`subscribe` calls instead of three `_streams` reach-ins; two stale headers go (−111).
+- P2026-10-22s-6 (d-2). PostgresStore gets one pii codec (`_encode_pii` / `_decode_pii`, as SqliteStore has) and one `to_committed(row, prefix)` for the full-scan stats (−24; pg TCK, differential and property TCK green).
+- P2026-10-22s-7 (d-1). The four webhook receiver adapters build their `idempotency` object with one internal `make_idempotency(store, result)` (−22 net; act-http 412/412, no snapshot change).
+
+Tickets (user: "file all tickets that you consider provable and real"): #2057 (P2026-10-22-1), #2058 (-2), #2059 (s-1), #2060 (s-2), #2061 (s-3), #2062 (s-4), #2063 (s-5), #2064 (s-6), #2065 (s-7). The six this run sent to the backlog were filed too (user: "nothing is risky if it's a real issue"): #2066 (t-4), #2067 (d-3), #2068 (d-4), #2069 (f-2), #2070 (t-5), #2071 (x-2).
