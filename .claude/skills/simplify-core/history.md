@@ -605,3 +605,5 @@ Simplifications:
 - P2026-10-22s-5 (t-1). audit.spec: one module-level `meta` (35 copies), one `collect` helper (48 loops), and public `block`/`ack`/`subscribe` calls instead of three `_streams` reach-ins; two stale headers go (−111).
 - P2026-10-22s-6 (d-2). PostgresStore gets one pii codec (`_encode_pii` / `_decode_pii`, as SqliteStore has) and one `to_committed(row, prefix)` for the full-scan stats (−24; pg TCK, differential and property TCK green).
 - P2026-10-22s-7 (d-1). The four webhook receiver adapters build their `idempotency` object with one internal `make_idempotency(store, result)` (−22 net; act-http 412/412, no snapshot change).
+
+Tickets (user: "file all tickets that you consider provable and real"): #2057 (P2026-10-22-1), #2058 (-2), #2059 (s-1), #2060 (s-2), #2061 (s-3), #2062 (s-4), #2063 (s-5), #2064 (s-6), #2065 (s-7). Backlog items not filed.
