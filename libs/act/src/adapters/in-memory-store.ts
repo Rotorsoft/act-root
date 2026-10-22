@@ -32,18 +32,19 @@ import { sleep } from "../utils.js";
 class InMemoryStream {
   readonly stream: string;
   readonly source: string | undefined;
-  private _at = -1;
-  private _retry = -1;
-  private _blocked = false;
-  private _error = "";
-  private _leased_by: string | undefined = undefined;
-  private _leased_until: Date | undefined = undefined;
-  private _priority = 0;
-  private _lane: string = DEFAULT_LANE;
+  at = -1;
+  retry = -1;
+  blocked = false;
+  error = "";
+  leased_by: string | undefined = undefined;
+  leased_until: Date | undefined = undefined;
+  priority: number;
+  /** Replaced on every subscribe, so the current config wins on restart. */
+  lane: string;
   // While in the future, the stream is held out of `claim`.
-  private _deferred_at: number | undefined = undefined;
+  deferred_at: number | undefined = undefined;
   // Work mark; `undefined` = never correlated, so `claim` skips it.
-  private _correlated_at: number | undefined = undefined;
+  correlated_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -53,171 +54,106 @@ class InMemoryStream {
   ) {
     this.stream = stream;
     this.source = source;
-    this._priority = priority;
-    this._lane = lane;
-  }
-
-  get priority() {
-    return this._priority;
-  }
-
-  get lane() {
-    return this._lane;
-  }
-
-  /** Replaced on every subscribe, so the current config wins on restart. */
-  set lane(value: string) {
-    this._lane = value;
+    this.priority = priority;
+    this.lane = lane;
   }
 
   bump_priority(priority: number) {
-    if (priority > this._priority) this._priority = priority;
-  }
-
-  get correlated_at() {
-    return this._correlated_at;
+    if (priority > this.priority) this.priority = priority;
   }
 
   /** A mark never regresses, including at zero and negatives. */
   mark(correlated_at: number) {
-    if (
-      this._correlated_at === undefined ||
-      correlated_at > this._correlated_at
-    )
-      this._correlated_at = correlated_at;
-  }
-
-  /** Operator override; ignores the subscribe-time `max()`. */
-  set_priority(priority: number) {
-    this._priority = priority;
+    if (this.correlated_at === undefined || correlated_at > this.correlated_at)
+      this.correlated_at = correlated_at;
   }
 
   get is_available() {
     return (
-      !this._blocked &&
-      (!this._leased_until || this._leased_until <= new Date()) &&
-      (!this._deferred_at || this._deferred_at <= Date.now())
+      !this.blocked &&
+      (!this.leased_until || this.leased_until <= new Date()) &&
+      (!this.deferred_at || this.deferred_at <= Date.now())
     );
   }
 
   defer(deferred_at: number) {
-    this._deferred_at = deferred_at;
+    this.deferred_at = deferred_at;
     // A defer is not a failure, so the redelivery is a fresh attempt.
-    this._retry = -1;
+    this.retry = -1;
   }
 
-  get at() {
-    return this._at;
-  }
-
-  get retry() {
-    return this._retry;
-  }
-
-  get blocked() {
-    return this._blocked;
-  }
-
-  get error() {
-    return this._error;
-  }
-
-  get leased_by() {
-    return this._leased_by;
-  }
-
-  get leased_until() {
-    return this._leased_until;
-  }
-
-  get deferred_at() {
-    return this._deferred_at;
+  /** The lease this row hands back, at the given watermark. */
+  private _lease(lease: Lease, at: number) {
+    return {
+      stream: this.stream,
+      source: this.source,
+      at,
+      by: lease.by,
+      retry: this.retry,
+      lagging: lease.lagging,
+      lane: this.lane,
+    };
   }
 
   lease(lease: Lease, millis: number): Lease {
     // The holder is recorded even at zero `millis`: `ack` is gated on it,
     // so a lease with no holder would drop every ack.
-    this._leased_by = lease.by;
-    this._leased_until = new Date(Date.now() + millis);
-    this._retry = this._retry + 1;
-    return {
-      stream: this.stream,
-      source: this.source,
-      at: lease.at,
-      by: lease.by,
-      retry: this._retry,
-      lagging: lease.lagging,
-      lane: this._lane,
-    };
+    this.leased_by = lease.by;
+    this.leased_until = new Date(Date.now() + millis);
+    this.retry = this.retry + 1;
+    return this._lease(lease, lease.at);
   }
 
   /** Ack, or with `due`, also persist the schedule. See {@link Store.ack}. */
   ack(lease: Lease) {
-    if (this._leased_by === lease.by) {
-      this._leased_by = undefined;
-      this._leased_until = undefined;
+    if (this.leased_by === lease.by) {
+      this.leased_by = undefined;
+      this.leased_until = undefined;
       if (lease.due !== undefined) {
         // Advance past the handled prefix and schedule the re-visit with the
         // caller's retry (-1 for a defer, the climbing count for a backoff).
-        this._at = lease.at;
-        this._retry = lease.retry;
-        this._deferred_at = lease.due;
+        this.at = lease.at;
+        this.retry = lease.retry;
+        this.deferred_at = lease.due;
         return undefined;
       }
-      this._retry = -1;
-      this._at = lease.at;
-      this._deferred_at = undefined;
-      return {
-        stream: this.stream,
-        source: this.source,
-        at: this._at,
-        by: lease.by,
-        retry: this._retry,
-        lagging: lease.lagging,
-        lane: this._lane,
-      };
+      this.retry = -1;
+      this.at = lease.at;
+      this.deferred_at = undefined;
+      return this._lease(lease, this.at);
     }
   }
 
   block(lease: Lease, error: string) {
     // Re-blocking is a no-op, like the SQL `AND blocked = false` guard.
-    if (this._leased_by === lease.by && !this._blocked) {
-      this._blocked = true;
-      this._error = error;
-      this._deferred_at = undefined;
-      return {
-        stream: this.stream,
-        source: this.source,
-        at: this._at,
-        by: this._leased_by,
-        retry: this._retry,
-        error: this._error,
-        lagging: lease.lagging,
-        lane: this._lane,
-      };
+    if (this.leased_by === lease.by && !this.blocked) {
+      this.blocked = true;
+      this.error = error;
+      this.deferred_at = undefined;
+      return { ...this._lease(lease, this.at), error };
     }
+  }
+
+  /** Clears the block, the lease and the schedule; retry back to -1. */
+  private _release() {
+    this.retry = -1;
+    this.blocked = false;
+    this.error = "";
+    this.leased_by = undefined;
+    this.leased_until = undefined;
+    this.deferred_at = undefined;
   }
 
   /** Retry resets to -1 (released); the next claim makes it 0. */
   reset() {
-    this._at = -1;
-    this._retry = -1;
-    this._blocked = false;
-    this._error = "";
-    this._leased_by = undefined;
-    this._leased_until = undefined;
-    this._deferred_at = undefined;
+    this.at = -1;
+    this._release();
   }
 
   /** True only when the stream was blocked. */
   unblock(): boolean {
-    if (!this._blocked) return false;
-    this._blocked = false;
-    this._retry = -1;
-    this._error = "";
-    this._leased_by = undefined;
-    this._leased_until = undefined;
-    this._deferred_at = undefined;
+    if (!this.blocked) return false;
+    this._release();
     return true;
   }
 }
@@ -657,7 +593,8 @@ export class InMemoryStore implements Store {
   async prioritize(filter: StreamFilter, priority: number) {
     await sleep();
     const changed = this._select(filter).filter((s) => s.priority !== priority);
-    for (const s of changed) s.set_priority(priority);
+    // Operator override; ignores the subscribe-time `max()`.
+    for (const s of changed) s.priority = priority;
     return changed.length;
   }
 
