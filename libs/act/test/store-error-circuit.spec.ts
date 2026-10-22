@@ -212,6 +212,38 @@ describe("correlate circuit breaker", () => {
     expect(breaker.state(Date.now())).toBe("open");
   });
 
+  it("leaves the breaker OPEN when the correlation lease is refused", async () => {
+    const { app, breaker, open } = build(1);
+    const s = store();
+    const real_subscribe = s.subscribe.bind(s);
+    s.subscribe = (async (...args: Parameters<typeof real_subscribe>) => {
+      const result = await real_subscribe(...args);
+      // Another worker holds the lease: "may I scan?" is refused.
+      return args[2] ? { ...result, correlating: false } : result;
+    }) as typeof real_subscribe;
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    open();
+    await (
+      app as unknown as {
+        _correlate_pass: (q: object, o: object) => Promise<unknown>;
+      }
+    )._correlate_pass({ limit: 10 }, { lease: true });
+    expect(breaker.state(Date.now())).toBe("open");
+  });
+
+  it("a failed catch-up inside app.close() rejects and records nothing", async () => {
+    const { app, breaker, fail } = build(5);
+    const errors: unknown[] = [];
+    app.on("error", (e) => errors.push(e));
+    const stream = nextStream();
+    // Uncorrelated, so the close has to catch correlation up first.
+    await app.do("bump", { stream, actor }, {});
+    fail(true);
+    await expect(app.close([{ stream }])).rejects.toBeInstanceOf(StoreError);
+    expect(errors).toHaveLength(0);
+    expect((breaker as unknown as { _failures: number })._failures).toBe(0);
+  });
+
   it("leaves the breaker OPEN when the scan fails against a down store", async () => {
     const { app, breaker, open, fail } = build(1);
     app.on("error", () => {});

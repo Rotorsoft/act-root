@@ -62,8 +62,9 @@ type CorrelateResult = {
 };
 
 /**
- * A pass that never reached the store, or whose read was discarded. Only a
- * pass that returns something else counts as a store success.
+ * A pass that read nothing it keeps: disarmed, refused the lease, or
+ * discarded its read. Only a pass that read the log counts as a store
+ * success; this one records nothing.
  */
 const IDLE: CorrelateResult = {
   subscribed: 0,
@@ -242,7 +243,7 @@ export class CorrelateCycle<
     this._raised++;
   }
 
-  async init(): Promise<void> {
+  private async _init(): Promise<void> {
     // Single-flight, but a failure clears the promise so the next call retries.
     this._init_promise ??= this._run_init().catch((error) => {
       this._init_promise = undefined;
@@ -302,31 +303,41 @@ export class CorrelateCycle<
 
   /**
    * Scan past the checkpoint, subscribe new targets and raise their work
-   * marks. Records the store outcome on the breaker: a scan that came back
-   * is a success, a throw is a failure (and still throws). A pass that
-   * never reached the store records nothing, so it can't re-close an open
-   * breaker mid-outage.
+   * marks. Records the store outcome on the breaker: a pass that read the
+   * log is a success, a throw is a failure (and still throws). A pass that
+   * was disarmed, refused the lease or discarded its read records nothing,
+   * so it can't re-close an open breaker mid-outage.
    */
   async correlate(
-    query: Query = { after: -1, limit: 10 },
-    /**
-     * Honour the correlation lease. Only the settle loop and poller do; an
-     * explicit `app.correlate()` scans now, since `close` loops on it.
-     */
-    lease = false
+    query: Query,
+    {
+      lease = false,
+      record = true,
+    }: {
+      /**
+       * Honour the correlation lease. Only the settle loop and poller do; an
+       * explicit `app.correlate()` scans now, since `close` loops on it.
+       */
+      readonly lease?: boolean;
+      /**
+       * Record the outcome on the breaker. A close's catch-up scan doesn't:
+       * the drain pass running the close records it, once.
+       */
+      readonly record?: boolean;
+    } = {}
   ): Promise<CorrelateResult> {
     try {
       const result = await this._scan(query, lease);
-      if (result !== IDLE) this._breaker.passed();
+      if (record && result !== IDLE) this._breaker.passed();
       return result;
     } catch (error) {
-      this._breaker.failed(Date.now(), error);
+      if (record) this._breaker.failed(Date.now(), error);
       throw error;
     }
   }
 
   private async _scan(query: Query, lease: boolean): Promise<CorrelateResult> {
-    await this.init();
+    await this._init();
     const epoch = this._epoch;
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
@@ -344,8 +355,9 @@ export class CorrelateCycle<
         by: this._by,
         millis: CORRELATION_LEASE_MS,
       });
-      // A release that landed while the call was out (shutdown) stays
-      // released: the reply must not hand the lease back to this worker.
+      // A release that landed while the call was out (shutdown,
+      // `stop_correlations`) stays released: the reply must not hand the
+      // lease back to this worker.
       if (this._epoch !== epoch) return IDLE;
       this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // `undefined` = store without leasing. Refused: stay armed, look again.
@@ -541,11 +553,19 @@ export class CorrelateCycle<
     );
   }
 
+  /**
+   * Give the lease up locally, at once: a scan or lease reply still out
+   * writes nothing when it lands. No store call.
+   */
+  drop_lease(): void {
+    this._lease_until = 0;
+    this._epoch++;
+  }
+
   /** Release the lease early by re-acquiring it for zero ms. Best-effort. */
   async release_correlation(): Promise<void> {
     try {
-      this._lease_until = 0;
-      this._epoch++;
+      this.drop_lease();
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,

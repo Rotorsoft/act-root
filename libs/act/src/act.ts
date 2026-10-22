@@ -342,7 +342,7 @@ export class Act<
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
-  /** Shared by drain, settle and autoclose; bad knobs throw at build. */
+  /** Shared by correlate, drain and autoclose; bad knobs throw at build. */
   private _build_breaker(options: ActOptions): CircuitBreaker {
     return new CircuitBreaker(
       resolveCircuitBreakerConfig(options.circuitBreaker),
@@ -491,10 +491,12 @@ export class Act<
   private _build_settle(options: ActOptions): SettleLoop<TEvents> {
     return new SettleLoop<TEvents>(
       {
-        correlate: (q) =>
+        // Every pass scans from correlation's own checkpoint, so a caller's
+        // `after` is dropped.
+        correlate: ({ after: _, ...q }) =>
           this._correlate_pass(
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
-            true
+            { lease: true }
           ),
         // `settle()` validated the options, and `_schedule` skips writer-only
         // instances, so the loop drains through the internal path.
@@ -526,9 +528,11 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         // Stop every scheduler before awaiting anything slow, so nothing
-        // starts while the notify subscription comes down. The lease is
-        // handed back once, at the end.
+        // starts while the notify subscription comes down. Dropping the
+        // lease locally makes a scan still out write nothing; the store
+        // hears of it once, at the end.
         this._stop_poll();
+        this._correlate.drop_lease();
         this._settle.stop(true);
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
@@ -572,7 +576,9 @@ export class Act<
     if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running, !!settling);
     if (grace <= 0) return;
-    const inflight = running.map((c) => c.inflight);
+    const inflight: Array<Promise<unknown> | undefined> = running.map(
+      (c) => c.inflight
+    );
     if (settling) inflight.push(settling);
     let timer!: ReturnType<typeof setTimeout>;
     const budget = new Promise<void>((resolve) => {
@@ -997,15 +1003,16 @@ export class Act<
   /** One correlate pass; arms the lanes when it found work. */
   private async _correlate_pass(
     query: Query,
-    /** Honour the correlation lease — settle and the poller only. */
-    lease = false
+    options?: Parameters<
+      CorrelateCycle<TSchemaReg, TEvents, TActions>["correlate"]
+    >[1]
   ): Promise<{ subscribed: number; read: boolean }> {
     // Writer-only instances don't correlate.
     if (!this._drain) return { subscribed: 0, read: false };
     return this._scoped(async () => {
       const { subscribed, read, marked } = await this._correlate.correlate(
         query,
-        lease
+        options
       );
       // Arms the lanes only: correlate stays armed after a pass that marked
       // work, and disarms itself only on a short page that marked nothing.
@@ -1057,8 +1064,8 @@ export class Act<
   }
 
   /**
-   * Stops the poll started by {@link start_correlations}. Idempotent, and
-   * called by `shutdown()`.
+   * Stops the poll started by {@link start_correlations} and hands the
+   * correlation lease back. Idempotent; `shutdown()` stops the poll too.
    *
    * @see {@link start_correlations}
    */
@@ -1335,7 +1342,9 @@ export class Act<
       catch_up_correlation: (until) =>
         catch_up_correlation(
           this._correlate,
-          (limit) => this.correlate({ limit }),
+          // The drain pass or `app.close()` running this close records its
+          // outcome, so the catch-up doesn't.
+          (limit) => this._correlate_pass({ limit }, { record: false }),
           until
         ),
       event_to_state: this._event_to_state,

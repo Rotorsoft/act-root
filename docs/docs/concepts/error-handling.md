@@ -152,7 +152,7 @@ Adapters throw `StoreError` from `claim` / `ack` / `block` / `subscribe` (and th
 
 ## Store failures and the circuit breaker
 
-Correlate, drain and autoclose all hit the store, whether settle, the poller or a direct `app.correlate()` / `app.drain()` runs them. When it goes down, every attempt throws a `StoreError`. Rather than hammer a dead database, each `Act` owns a **circuit breaker** they share, and each records its own outcome on it: a correlate scan or drain pass that came back is a success, a throw is a failure. A correlate pass with nothing to scan never reaches the store, so it records nothing and can't close an open breaker mid-outage.
+Correlate, drain and autoclose all hit the store, whether settle, the poller or a direct `app.correlate()` / `app.drain()` runs them. When it goes down, every attempt throws a `StoreError`. Rather than hammer a dead database, each `Act` owns a **circuit breaker** they share, and each records its own outcome on it: a correlate scan or drain pass that came back is a success, a throw is a failure. A correlate pass that was disarmed, refused the lease or discarded its read records nothing, so it can't close an open breaker mid-outage. A close's own catch-up scan records nothing either: the drain pass or `app.close()` running the close reports its outcome, once.
 
 - **closed** → normal; consecutive failures are counted.
 - **open** → after `failureThreshold` consecutive failures, drain and autoclose *skip* the store while open. Correlate keeps scanning, and a scan that comes back closes the breaker.

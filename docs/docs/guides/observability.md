@@ -147,7 +147,7 @@ The `act-inspector` workspace package is **incident forensics, not continuous mo
 | Signal | Severity | Rationale |
 |---|---|---|
 | `act_streams_blocked > 0` for more than a minute | **Page** | A blocked stream means a reaction has stopped making progress and will not self-heal — every minute widens the gap between the event log and its consumers. Recovery is a human decision (`unblock` vs fix-then-unblock). |
-| `act_errors_total{circuit="open"}` growing | **Page** | The store behind the drain, settle and autoclose loops is down and the orchestrator has backed off. Commits may still be failing at the edge too. |
+| `act_errors_total{circuit="open"}` growing | **Page** | The store behind correlate, drain and autoclose is down and the orchestrator has backed off. Commits may still be failing at the edge too. |
 | `act_errors_total` growing for 10+ minutes, whatever `circuit` says | **Page** | A store that fails only one kind of call can keep the breaker closed while every failure still emits `error` — see [What the breaker does not detect](../concepts/error-handling.md#store-failures-only). |
 | `act_commit_concurrency_errors_total` (hand-wired) rate sustained above ~1% of commits | Dashboard, ticket | Occasional conflicts are optimistic concurrency working as designed. A sustained rate means contention on hot streams — an aggregate-boundary design question, not an outage. |
 | `act_settle_duration_ms` (hand-wired) p99 above your lag tolerance | Dashboard, ticket | Reactions are falling behind. Look at lane sizing and handler latency before anything else. |

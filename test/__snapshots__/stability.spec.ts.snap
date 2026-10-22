@@ -114,7 +114,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
     get lanes(): ReadonlyArray<LaneConfig>;
     /** Use the {@link act} builder rather than constructing directly. */
     constructor(registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>, states?: Map<string, State<any, any, any>>, batch_handlers?: Map<string, BatchHandler<any>>, options?: ActOptions, lanes?: ReadonlyArray<LaneConfig>, patch_fn?: PatchFn);
-    /** Shared by drain, settle and autoclose; bad knobs throw at build. */
+    /** Shared by correlate, drain and autoclose; bad knobs throw at build. */
     private _build_breaker;
     /** Apps that declare no lanes pass no lane filter to \`claim\`. */
     private _build_drain_controllers;
@@ -376,8 +376,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      */
     start_correlations(query?: Query, frequency?: number): boolean;
     /**
-     * Stops the poll started by {@link start_correlations}. Idempotent, and
-     * called by \`shutdown()\`.
+     * Stops the poll started by {@link start_correlations} and hands the
+     * correlation lease back. Idempotent; \`shutdown()\` stops the poll too.
      *
      * @see {@link start_correlations}
      */

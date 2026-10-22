@@ -21,7 +21,7 @@ import type { CircuitBreakerConfig } from "./config.js";
 
 /**
  * Side-effect hooks the orchestrator wires into the breaker so consumers
- * (drain / settle / autoclose) don't each thread their own callbacks.
+ * (correlate / drain / autoclose) don't each thread their own callbacks.
  */
 export type CircuitBreakerHooks = {
   /** Invoked on every {@link CircuitBreaker.failed} with the error and state. */

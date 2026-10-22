@@ -92,8 +92,7 @@ export class SettleLoop<TEvents extends Schemas> {
       this._timer = undefined;
       const {
         debounceMs: _,
-        // Every pass scans from correlation's own checkpoint.
-        correlate: { after: _after, ...correlate_query } = {},
+        correlate: correlate_query = {},
         maxPasses = Infinity,
         ...drain_options
       } = this._next ?? {};
@@ -122,11 +121,10 @@ export class SettleLoop<TEvents extends Schemas> {
             subscribed > 0 || drain.leased.length > 0 || read;
           if (!made_progress) break;
         }
-        // `Act.emit` contains listener throws, so the store-failure catch
-        // below never sees one.
         if (passes.length) this._deps.on_settled(merge_drains(passes));
       })()
-        // Only correlate throws (a store failure), and it already recorded
+        // Only correlate throws (a store failure): drain never does, and
+        // `Act.emit` contains listener throws. Correlate already recorded
         // the failure on the breaker, whose recovery pass settles again.
         .catch(() => {})
         .finally(() => {
