@@ -55,6 +55,8 @@ adapters.
 
 ## ACT-1031 — per-adapter perf regression gate
 
+> The gate now runs weekly in `conformance.yml` (and on demand), with the other benchmarks, not per PR.
+
 The core framework's in-memory gate (since retired) ran against
 `InMemoryStore` — the fastest possible read/write path, with no SQL
 planner, indexes, or prepared-statement cache. Adapter-level regressions
