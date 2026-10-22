@@ -8,6 +8,7 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
+import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 import { SettleLoop } from "../src/internal/settle.js";
 import type { Committed, Drain, Query, Schemas } from "../src/types/index.js";
 
@@ -28,6 +29,11 @@ const empty_drain = (): Drain<Schemas> => ({
 
 describe("settle loop wake-up during a running cycle", () => {
   it("runs a cycle for a schedule() that fires while a cycle is in flight", async () => {
+    const breaker = new CircuitBreaker({
+      failureThreshold: 5,
+      cooldownMs: 1000,
+    });
+
     let drains = 0;
     let started_signal!: () => void;
     const started = new Promise<void>((r) => {
@@ -52,6 +58,7 @@ describe("settle loop wake-up during a running cycle", () => {
           return empty_drain();
         },
         on_settled: () => {},
+        breaker,
       },
       0
     );
@@ -77,6 +84,9 @@ describe("settle loop wake-up during a running cycle", () => {
 });
 
 describe("a scheduled settle pass is never reset or replaced", () => {
+  const breaker = () =>
+    new CircuitBreaker({ failureThreshold: 5, cooldownMs: 1000 });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -103,6 +113,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
           return empty_drain();
         },
         on_settled: () => {},
+        breaker: breaker(),
       },
       0
     );
@@ -124,6 +135,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
         correlate: async () => ({ subscribed: 0, read: false }),
         drain,
         on_settled: () => {},
+        breaker: breaker(),
       },
       10
     );
@@ -151,6 +163,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
         correlate: async () => ({ subscribed: 0, read: false }),
         drain,
         on_settled: () => {},
+        breaker: breaker(),
       },
       1000
     );
@@ -171,6 +184,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
         correlate: async () => ({ subscribed: 0, read: false }),
         drain,
         on_settled: () => {},
+        breaker: breaker(),
       },
       10
     );
@@ -192,6 +206,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
           return empty_drain();
         },
         on_settled: () => {},
+        breaker: breaker(),
       },
       10
     );
@@ -217,6 +232,11 @@ describe("a scheduled settle pass is never reset or replaced", () => {
  */
 describe("settle loop paginates past inert windows", () => {
   it("keeps correlating while last_id advances, though nothing subscribes or drains", async () => {
+    const breaker = new CircuitBreaker({
+      failureThreshold: 5,
+      cooldownMs: 1000,
+    });
+
     const MAX = 4; // inert events exist at ids 0..4
     let checkpoint = -1;
     let correlate_calls = 0;
@@ -238,6 +258,7 @@ describe("settle loop paginates past inert windows", () => {
         },
         drain: async () => empty_drain(),
         on_settled: () => settled_signal(),
+        breaker,
       },
       0
     );
@@ -250,6 +271,94 @@ describe("settle loop paginates past inert windows", () => {
     expect(correlate_calls).toBe(4);
     expect(checkpoint).toBe(MAX);
     loop.stop();
+  });
+});
+
+/**
+ * A settle pass records a circuit-breaker `passed()` only when
+ * correlate really probed the store. It always does: correlate
+ * scans for every app, so the pass that used to be a no-op early-return on a
+ * static-reaction app (whose fictitious success re-closed an OPEN breaker
+ * mid-outage and let the drain hammer the down store) is now a real store
+ * query that fails when the store is down.
+ */
+describe("settle breaker success rides a real correlate probe", () => {
+  const open_breaker = () => {
+    const breaker = new CircuitBreaker({
+      failureThreshold: 1,
+      cooldownMs: 60_000,
+    });
+    breaker.failed(1000, new Error("store down"));
+    expect(breaker.state(1000)).toBe("open");
+    return breaker;
+  };
+
+  /** Runs one pass, resolving whichever way the pass ends. */
+  const run_pass = async (
+    breaker: CircuitBreaker,
+    correlate: () => Promise<{
+      subscribed: number;
+      read: boolean;
+      scanned?: boolean;
+    }>
+  ) => {
+    let done!: () => void;
+    const finished = new Promise<void>((r) => {
+      done = r;
+    });
+    const loop = new SettleLoop<Schemas>(
+      {
+        correlate: async (q) => {
+          try {
+            return await correlate();
+          } finally {
+            // The failing arm never reaches on_settled — release here so the
+            // assertion runs either way. `q` keeps the signature honest.
+            void q;
+            setTimeout(done, 0);
+          }
+        },
+        drain: async () => empty_drain(),
+        on_settled: () => done(),
+        breaker,
+      },
+      0
+    );
+    loop.schedule({ debounceMs: 0 });
+    await finished;
+    loop.stop();
+  };
+
+  it("closes the breaker when the scan returns (control)", async () => {
+    const breaker = open_breaker();
+    await run_pass(breaker, async () => ({
+      subscribed: 0,
+      read: false,
+      scanned: true,
+    }));
+    expect(breaker.state(1000)).toBe("closed");
+  });
+
+  it("leaves the breaker OPEN when correlate was disarmed and read nothing", async () => {
+    // A disarmed pass returns without touching the store, so it is not
+    // evidence the store is healthy. Recording it would re-close an OPEN
+    // breaker mid-outage and let the drain hammer a store nobody has heard
+    // from, a bug that is reachable again now that correlate can skip.
+    const breaker = open_breaker();
+    await run_pass(breaker, async () => ({
+      subscribed: 0,
+      read: false,
+      scanned: false,
+    }));
+    expect(breaker.state(1000)).toBe("open");
+  });
+
+  it("leaves the breaker OPEN when the scan fails against a down store", async () => {
+    const breaker = open_breaker();
+    await run_pass(breaker, async () => {
+      throw new Error("store down");
+    });
+    expect(breaker.state(1000)).toBe("open");
   });
 });
 
@@ -314,11 +423,14 @@ describe("settled payload", () => {
   });
 });
 
-// A throwing `settled` listener must not look like the store going away:
-// that would be a spurious `error` event on every settle, and at
-// `failureThreshold: 1` an OPEN breaker that returned EMPTY_DRAIN for the
-// whole cooldown, re-tripping on each half-open recovery, so a broken
-// metrics bridge would stall the reaction pipeline indefinitely.
+// `on_settled` sat inside the IIFE whose `.catch` records
+// `breaker.failed()`, and every other statement in that block IS a store op
+// (`init`, `correlate`, `drain` — and `drain` never throws, it catches
+// internally). So a throwing observability listener was indistinguishable
+// from the store going away: a spurious `error` event on every settle, and
+// at `failureThreshold: 1` an OPEN breaker that returned EMPTY_DRAIN for the
+// whole cooldown, re-tripping on each half-open recovery. A broken metrics
+// bridge stalled the reaction pipeline indefinitely.
 describe("a throwing settled listener is contained", () => {
   const Counter = state({ Counter: z.object({ n: z.number() }) })
     .init(() => ({ n: 0 }))
@@ -525,7 +637,7 @@ describe("a local change settles its own reactions", () => {
 
   it("scans with the poll's limit only while the poll runs", async () => {
     const app = reacting([]);
-    const scanned = vi.spyOn(app as never, "_correlate_pass") as unknown as {
+    const scanned = vi.spyOn(app as never, "_correlate_scanned") as unknown as {
       mock: { calls: Array<[{ limit?: number }]> };
     };
     const limit = () => scanned.mock.calls.at(-1)?.[0].limit;

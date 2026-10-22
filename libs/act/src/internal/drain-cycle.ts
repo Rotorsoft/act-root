@@ -444,7 +444,7 @@ export class DrainController<
   private readonly _misrouted = new Set<string>();
   private _stopped = false;
   /** The pass in flight. Never rejects; graceful shutdown waits on it. */
-  private _inflight: Promise<Drain<TEvents>> | undefined;
+  private _inflight: Promise<unknown> | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
 
@@ -466,7 +466,7 @@ export class DrainController<
     return this._raised !== this._lowered;
   }
 
-  get inflight(): Promise<Drain<TEvents>> | undefined {
+  get inflight(): Promise<unknown> | undefined {
     return this._inflight;
   }
 
@@ -523,7 +523,11 @@ export class DrainController<
     if (this._deps.breaker.state(Date.now()) === "open")
       return EMPTY_DRAIN as Drain<TEvents>;
 
-    const pass = this._pass(streamLimit, eventLimit, leaseMillis);
+    const pass = this._pass(streamLimit, eventLimit, leaseMillis).finally(
+      () => {
+        this._inflight = undefined;
+      }
+    );
     this._inflight = pass;
     return pass;
   }
@@ -595,7 +599,6 @@ export class DrainController<
     } finally {
       // Re-aim at the earliest stream still parked.
       if (!this._stopped) this._defer.schedule();
-      this._inflight = undefined;
     }
   }
 }

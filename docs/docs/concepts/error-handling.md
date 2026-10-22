@@ -152,10 +152,10 @@ Adapters throw `StoreError` from `claim` / `ack` / `block` / `subscribe` (and th
 
 ## Store failures and the circuit breaker
 
-Correlate, drain and autoclose all hit the store, whether settle, the poller or a direct `app.correlate()` / `app.drain()` runs them. When it goes down, every attempt throws a `StoreError`. Rather than hammer a dead database, each `Act` owns a **circuit breaker** they share, and each records its own outcome on it: a correlate scan or drain pass that came back is a success, a throw is a failure. A correlate pass that was disarmed, refused the lease or discarded its read records nothing, so it can't close an open breaker mid-outage. A close's own catch-up scan records nothing either: a failed catch-up inside a reaction-requested close is recorded once, by the drain pass running it, and an explicit `app.close()` rejects and records nothing.
+The drain, settle, and autoclose loops all hit the store. When it goes down, every attempt throws a `StoreError`. Rather than hammer a dead database, each `Act` owns a **circuit breaker** shared by those loops:
 
 - **closed** → normal; consecutive failures are counted.
-- **open** → after `failureThreshold` consecutive failures, drain and autoclose *skip* the store while open. Correlate keeps scanning, and a scan that comes back closes the breaker.
+- **open** → after `failureThreshold` consecutive failures, any drain/settle/autoclose attempt *skips* the store while open.
 - **half-open** → once `cooldownMs` has passed, the next attempt is a trial; a pass closes the breaker, a failure re-opens it.
 
 After **every** store failure, open or not, the breaker schedules one **retry** (a settle) `cooldownMs` later (plus the settle debounce, `settleDebounceMs`), so recovery is **automatic**: you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; the retry re-trials it and the breaker closes as soon as the store is healthy again. A failed drain pass also keeps its controller armed and retries on its own, never before the leases it took expire, since only then can another pass claim those streams.

@@ -18,7 +18,6 @@ import type {
 } from "../types/index.js";
 import { DEFAULT_LANE } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
-import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -52,40 +51,6 @@ const registry_key = <TEvents extends Schemas>(
     .update(JSON.stringify(shape))
     .digest("hex")
     .slice(0, 32);
-};
-
-/** What one correlate pass did. `read` is true when it read events. */
-type CorrelateResult = {
-  readonly subscribed: number;
-  readonly read: boolean;
-  readonly marked: number;
-};
-
-/**
- * A pass that read nothing it keeps: disarmed, refused the lease, or
- * discarded its read. Only a pass that read the log counts as a store
- * success; this one records nothing.
- */
-const IDLE: CorrelateResult = {
-  subscribed: 0,
-  read: false,
-  marked: 0,
-};
-
-/** How {@link CorrelateCycle.correlate} runs one pass. */
-export type CorrelateOptions = {
-  /**
-   * Honour the correlation lease. Only the settle loop and the poller do; an
-   * explicit `app.correlate()` and a close's catch-up scan now.
-   */
-  readonly lease?: boolean;
-  /**
-   * Record the outcome on the breaker (default true). A close's catch-up
-   * scan doesn't: the drain pass running a reaction-requested close records
-   * a failure once, and an explicit `app.close()` rejects and records
-   * nothing.
-   */
-  readonly record?: boolean;
 };
 
 /** Bound on compiled pattern sources; guards a resolver that mints one per event. */
@@ -134,8 +99,6 @@ export type CorrelateCycleDeps<
   registry: Registry<TSchemaReg, TEvents, TActions>;
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
-  /** Records each scan's store outcome, like the drain controllers do. */
-  breaker: CircuitBreaker;
   max_subscribed_streams: number;
   /** Every lane a controller exists for; others are rerouted to default. */
   declared_lanes: ReadonlySet<string>;
@@ -222,7 +185,6 @@ export class CorrelateCycle<
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _cd: DrainOps<TEvents>;
-  private readonly _breaker: CircuitBreaker;
   private readonly _on_init: (() => Promise<void>) | undefined;
   private readonly _declared_lanes: ReadonlySet<string>;
   /** Report-once keys; per instance because `internal/` holds no module state. */
@@ -232,7 +194,6 @@ export class CorrelateCycle<
     registry,
     static_targets,
     cd,
-    breaker,
     max_subscribed_streams,
     declared_lanes,
     shard,
@@ -246,7 +207,6 @@ export class CorrelateCycle<
     this._declared_lanes = declared_lanes;
     this._static_targets = static_targets;
     this._cd = cd;
-    this._breaker = breaker;
     this._on_init = on_init;
   }
 
@@ -317,33 +277,34 @@ export class CorrelateCycle<
     return pattern.test(stream);
   }
 
-  /**
-   * Scan past the checkpoint, subscribe new targets and raise their work
-   * marks. Records the store outcome on the breaker: a pass that read the
-   * log is a success, a throw is a failure (and still throws). A pass that
-   * was disarmed, refused the lease or discarded its read records nothing,
-   * so it can't re-close an open breaker mid-outage.
-   */
+  /** Scan past the checkpoint, subscribe new targets and raise their work marks. */
   async correlate(
     query: Query,
-    { lease = false, record = true }: CorrelateOptions = {}
-  ): Promise<CorrelateResult> {
-    try {
-      const result = await this._scan(query, lease);
-      if (record && result !== IDLE) this._breaker.passed();
-      return result;
-    } catch (error) {
-      if (record) this._breaker.failed(Date.now(), error);
-      throw error;
-    }
-  }
-
-  private async _scan(query: Query, lease: boolean): Promise<CorrelateResult> {
+    /**
+     * Honour the correlation lease. Only the settle loop and poller do; an
+     * explicit `app.correlate()` scans now, since `close` loops on it.
+     */
+    lease = false
+  ): Promise<{
+    subscribed: number;
+    last_id: number;
+    /** It read events: settle's progress signal. */
+    read: boolean;
+    marked: number;
+    scanned: boolean;
+  }> {
     await this._init();
     const epoch = this._epoch;
+    const idle = () => ({
+      subscribed: 0,
+      last_id: this._checkpoint,
+      read: false,
+      marked: 0,
+      scanned: false,
+    });
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
-    if (this._raised === this._lowered) return IDLE;
+    if (this._raised === this._lowered) return idle();
 
     const raised = this._raised;
 
@@ -357,13 +318,12 @@ export class CorrelateCycle<
         by: this._by,
         millis: CORRELATION_LEASE_MS,
       });
-      // A release that landed while the call was out (shutdown,
-      // `stop_correlations`) stays released: the reply must not hand the
-      // lease back to this worker.
-      if (this._epoch !== epoch) return IDLE;
+      // A release that landed while the call was out (shutdown) stays
+      // released: the reply must not hand the lease back to this worker.
+      if (this._epoch !== epoch) return idle();
       this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // `undefined` = store without leasing. Refused: stay armed, look again.
-      if (correlating === false) return IDLE;
+      if (correlating === false) return idle();
     }
 
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -460,11 +420,12 @@ export class CorrelateCycle<
     );
 
     if (this._declared_lanes.size > 1) await this._recall(correlated);
+    const read = last_id > after;
 
     // Released or restarted while the scan was out: what it read belongs to
     // a lease this worker gave up, or to the log a restore replaced. Writing
     // it would hand back the lease, or mark the restored log with old ids.
-    if (this._epoch !== epoch) return IDLE;
+    if (this._epoch !== epoch) return idle();
 
     // Only targets with a mark to raise or priority/lane to register.
     const streams: SubscribeInput[] = [];
@@ -505,14 +466,14 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, read: last_id > after, marked };
+      return { subscribed, last_id, read, marked, scanned: true };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
     // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
     if (!stopped && found !== query.limit) this._lowered = raised;
-    return { subscribed: 0, read: last_id > after, marked: 0 };
+    return { subscribed: 0, last_id, read, marked: 0, scanned: true };
   }
 
   /**
@@ -555,19 +516,11 @@ export class CorrelateCycle<
     );
   }
 
-  /**
-   * Give the lease up locally, at once: a scan or lease reply still out
-   * writes nothing when it lands. No store call.
-   */
-  drop_lease(): void {
-    this._lease_until = 0;
-    this._epoch++;
-  }
-
   /** Release the lease early by re-acquiring it for zero ms. Best-effort. */
   async release_correlation(): Promise<void> {
     try {
-      this.drop_lease();
+      this._lease_until = 0;
+      this._epoch++;
       await this._cd.subscribe([], undefined, {
         key: this._key,
         by: this._by,

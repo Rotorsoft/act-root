@@ -131,39 +131,6 @@ describe("autoclose as a synthesized reaction", () => {
     void real;
   });
 
-  // The close's catch-up scan records nothing itself: the drain pass that
-  // ran the close records the failure once. Recording in both counted one
-  // outage twice, emitted two `error` events, and opened the breaker at
-  // half its threshold.
-  it("counts a failed catch-up scan inside a close once", async () => {
-    const errors: unknown[] = [];
-    const app = act()
-      .withState(ticket({ is: "Resolved" }))
-      .build({ autoSettle: false });
-    app.on("error", (e) => errors.push(e));
-    const breaker = (app as unknown as { _breaker: { _failures: number } })
-      ._breaker;
-
-    await app.do("open", { stream: "t-once", actor }, {});
-    await app.do("resolve", { stream: "t-once", actor }, {});
-    await app.correlate();
-    // A later event leaves the checkpoint below the stream's head, so the
-    // close has to catch correlation up first.
-    await app.do("resolve", { stream: "t-once", actor }, {});
-    const real = store().query.bind(store());
-    const spy = vi
-      .spyOn(store(), "query")
-      .mockImplementation(((...args: Parameters<typeof real>) =>
-        args[1]?.with_pii === false
-          ? Promise.reject(new StoreError("query"))
-          : real(...args)) as typeof real);
-    await app.drain();
-    spy.mockRestore();
-
-    expect(errors).toHaveLength(1);
-    expect(breaker._failures).toBe(1);
-  });
-
   // A close writes its tombstone guard first and truncates last.
   // An archive callback that throws leaves the stream guarded-but-intact,
   // which close-cycle.md documents as a safe state the caller can simply

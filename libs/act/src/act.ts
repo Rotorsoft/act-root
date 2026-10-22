@@ -21,10 +21,7 @@ import {
   resolveSettleConfig,
   resolveShutdownConfig,
 } from "./internal/config.js";
-import {
-  CorrelateCycle,
-  type CorrelateOptions,
-} from "./internal/correlate-cycle.js";
+import { CorrelateCycle } from "./internal/correlate-cycle.js";
 import {
   close_correlation,
   default_correlator,
@@ -345,7 +342,7 @@ export class Act<
     register_weak_disposer(new WeakRef(this), (self) => self.shutdown());
   }
 
-  /** Shared by correlate, drain and autoclose; bad knobs throw at build. */
+  /** Shared by drain, settle and autoclose; bad knobs throw at build. */
   private _build_breaker(options: ActOptions): CircuitBreaker {
     return new CircuitBreaker(
       resolveCircuitBreakerConfig(options.circuitBreaker),
@@ -461,7 +458,6 @@ export class Act<
       registry: this.registry,
       static_targets: classification.static_targets,
       cd: this._cd,
-      breaker: this._breaker,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
       // Declared lanes (not active ones): a lane another process claims is
@@ -494,17 +490,16 @@ export class Act<
   private _build_settle(options: ActOptions): SettleLoop<TEvents> {
     return new SettleLoop<TEvents>(
       {
-        // Every pass scans from correlation's own checkpoint, so a caller's
-        // `after` is dropped.
-        correlate: ({ after: _, ...q }) =>
-          this._correlate_pass(
+        correlate: (q) =>
+          this._correlate_scanned(
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
-            { lease: true }
+            true
           ),
         // `settle()` validated the options, and `_schedule` skips writer-only
         // instances, so the loop drains through the internal path.
         drain: (o) => this._scoped(() => this._drain_all(o)),
         on_settled: (drain) => this.emit("settled", drain),
+        breaker: this._breaker,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -531,11 +526,8 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         // Stop every scheduler before awaiting anything slow, so nothing
-        // starts while the notify subscription comes down. Dropping the
-        // lease locally makes a scan still out write nothing; the store
-        // hears of it once, at the end.
-        this._stop_poll();
-        this._correlate.drop_lease();
+        // starts while the notify subscription comes down.
+        this.stop_correlations();
         this._settle.stop(true);
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
@@ -579,16 +571,15 @@ export class Act<
     if (running.length === 0 && !settling) return;
     const grace = grace_ms ?? this._derive_grace_ms(running, !!settling);
     if (grace <= 0) return;
+    const inflight = running.map((c) => c.inflight);
+    if (settling) inflight.push(settling);
     let timer!: ReturnType<typeof setTimeout>;
     const budget = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, grace);
       timer.unref();
     });
     try {
-      await Promise.race([
-        Promise.all([...running.map((c) => c.inflight), settling]),
-        budget,
-      ]);
+      await Promise.race([Promise.all(inflight), budget]);
     } finally {
       // Don't leave the budget timer pending when the cycles won the race.
       clearTimeout(timer);
@@ -998,27 +989,30 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    const { subscribed } = await this._correlate_pass(query);
-    return { subscribed, last_id: this._correlate.checkpoint };
+    const { subscribed, last_id } = await this._correlate_scanned(query);
+    return { subscribed, last_id };
   }
 
-  /** One correlate pass; arms the lanes when it found work. */
-  private async _correlate_pass(
+  /** `correlate` plus `scanned`, which settle needs for the breaker. */
+  private async _correlate_scanned(
     query: Query,
-    options?: CorrelateOptions
-  ): Promise<{ subscribed: number; read: boolean }> {
+    /** Honour the correlation lease — settle and the poller only. */
+    lease = false
+  ): Promise<{
+    subscribed: number;
+    last_id: number;
+    read: boolean;
+    scanned: boolean;
+  }> {
     // Writer-only instances don't correlate.
-    if (!this._drain) return { subscribed: 0, read: false };
+    if (!this._drain)
+      return { subscribed: 0, last_id: -1, read: false, scanned: false };
     return this._scoped(async () => {
-      const { subscribed, read, marked } = await this._correlate.correlate(
-        query,
-        options
-      );
-      // Arms the lanes only: correlate stays armed after a pass that marked
-      // work, and disarms itself only on a short page that marked nothing.
-      if (subscribed > 0 || marked > 0)
-        for (const c of this._drain_controllers.values()) c.arm();
-      return { subscribed, read };
+      const { subscribed, last_id, read, marked, scanned } =
+        await this._correlate.correlate(query, lease);
+      // Also re-arms correlate, so a backlog scan keeps going.
+      if (subscribed > 0 || marked > 0) this._arm_all();
+      return { subscribed, last_id, read, scanned };
     });
   }
 
@@ -1064,24 +1058,20 @@ export class Act<
   }
 
   /**
-   * Stops the poll started by {@link start_correlations} and hands the
-   * correlation lease back. Idempotent; `shutdown()` stops the poll too.
+   * Stops the poll started by {@link start_correlations}. Idempotent, and
+   * called by `shutdown()`.
    *
    * @see {@link start_correlations}
    */
   stop_correlations() {
-    this._stop_poll();
-    // Hand the correlation lease back, best-effort and not awaited (this
-    // method is synchronous; the lease would expire anyway).
-    void this._scoped(() => this._correlate.release_correlation());
-  }
-
-  private _stop_poll(): void {
     if (this._poll) {
       clearInterval(this._poll);
       this._poll = undefined;
       this._poll_limit = undefined;
     }
+    // Hand the correlation lease back, best-effort and not awaited (this
+    // method is synchronous; the lease would expire anyway).
+    void this._scoped(() => this._correlate.release_correlation());
   }
 
   /**
@@ -1342,9 +1332,7 @@ export class Act<
       catch_up_correlation: (until) =>
         catch_up_correlation(
           this._correlate,
-          // Records nothing: the drain pass running a reaction-requested
-          // close records a failure once; `app.close()` just rejects.
-          (limit) => this._correlate_pass({ limit }, { record: false }),
+          (limit) => this.correlate({ limit }),
           until
         ),
       event_to_state: this._event_to_state,
