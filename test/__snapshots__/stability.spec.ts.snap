@@ -344,8 +344,8 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
         subscribed: number;
         last_id: number;
     }>;
-    /** \`correlate\` plus \`scanned\`, which settle needs for the breaker. */
-    private _correlate_scanned;
+    /** One correlate pass; arms the lanes when it found work. */
+    private _correlate_pass;
     /**
      * Starts a background poll that settles on a timer: each tick looks for
      * new events, subscribes the streams their reactions target, and drains
@@ -382,6 +382,7 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * @see {@link start_correlations}
      */
     stop_correlations(): void;
+    private _stop_poll;
     /**
      * Drops the settle pass scheduled but not yet started. A cycle already
      * running finishes; later changes schedule new passes.
