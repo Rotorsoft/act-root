@@ -20,7 +20,7 @@ Run these checks in order. For each finding, output severity (`blocker` / `conce
 
 ## 1. Charter compliance
 
-For every declaration that changed in the stability snapshot (`git diff master -- test/__snapshots__/stability.spec.ts.snap`; it copies every published entry point of every package, so it follows a file wherever it moves):
+For every declaration that changed in the stability snapshot (`git diff master -- test/__snapshots__/stability.spec.ts.snap`; it records the published declarations of every entry point of every package, so it follows a file wherever it moves and ignores implementation):
 
 - Classify each change as **additive** (new optional method/field/type, widened input union) or **breaking** (rename, removal, narrowed type, changed semantics).
 - Breaking changes require a `BREAKING CHANGE:` commit footer and a written migration note.

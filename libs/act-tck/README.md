@@ -139,7 +139,7 @@ runLoggerDifferentialTck({
 
 ### `runStabilityTck`
 
-Walks the source of every declared entry point, follows relative re-exports recursively, and snapshots the concatenated text via Vitest. Any rename, removed export, or signature change to the public surface shows up as a snapshot diff in the PR — reviewers either accept the change (re-run with `-u`) or push back. Stops at non-relative imports (other packages, `node:*`); each package owns its own snapshot.
+Walks every declared entry point, follows relative re-exports recursively, and snapshots the concatenated text via Vitest. Any rename, removed export, or signature change to the public surface shows up as a snapshot diff in the PR — reviewers either accept the change (re-run with `-u`) or push back. Stops at non-relative imports (other packages, `node:*`); each package owns its own snapshot.
 
 ```ts
 // libs/act-mysql/test/stability.spec.ts
@@ -155,7 +155,7 @@ runStabilityTck({
 });
 ```
 
-The TCK reads source (`.ts`) rather than built `.d.ts` — no prior `pnpm build` required, and the snapshot text matches what reviewers actually read.
+An entry can be source (`.ts`, as above: no build needed, but the snapshot moves with every implementation change) or a built declaration (`.d.ts`: the surface alone, doc comments included, after a build). From a `.d.ts` entry, `./x.js` re-exports resolve to `x.d.ts`. Act's own gate snapshots each package's `dist/@types`.
 
 ## Common patterns
 

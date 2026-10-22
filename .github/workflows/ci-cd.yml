@@ -148,6 +148,8 @@ jobs:
       # keep declaration-emit / tsup coverage on PRs.
       - run: pnpm build
       - run: pnpm test
+      # Reads the declarations the build just wrote.
+      - run: pnpm check:stability
 
       # Browser-safety gate. A published subpath that client code imports
       # (`@rotorsoft/act-http/sse`) must not statically reach a Node API: one

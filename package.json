@@ -36,6 +36,7 @@
     "build": "pnpm -r build",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/act-typecheck.tsbuildinfo --project tsconfig.workspace.json --jsx react-jsx",
     "test": "vitest run --coverage",
+    "check:stability": "vitest run --config vitest.stability.config.ts",
     "bench:micro": "vitest bench --run --config vitest.bench.config.ts",
     "bench:scenarios": "vitest run --config vitest.bench.config.ts",
     "lint": "biome check .",

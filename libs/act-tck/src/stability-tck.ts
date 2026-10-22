@@ -8,7 +8,8 @@ import { describe, expect, it } from "vitest";
  * @property name - Display name for the snapshot suite (e.g., the package
  *   name). Used as the `describe` block label so failing snapshots are
  *   attributable at a glance.
- * @property entryPoints - Map of subpath → entry source file. The TCK
+ * @property entryPoints - Map of subpath → entry file, either source
+ *   (`.ts`) or a published declaration (`.d.ts`). The TCK
  *   reads each entry, follows its relative re-exports recursively, and
  *   snapshots the resulting surface text. Empty-string subpaths label
  *   the root entry; everything else is rendered with its key (e.g.
@@ -20,8 +21,8 @@ export type StabilityTckOptions = {
 };
 
 /**
- * Snapshot-based public-API stability check. Walks each entry's source
- * file plus everything it re-exports through relative imports, and
+ * Snapshot-based public-API stability check. Walks each entry file plus
+ * everything it re-exports through relative imports, and
  * compares the concatenated text against a committed Vitest snapshot.
  *
  * Catches accidental rename / removal / signature drift on the public
@@ -29,9 +30,13 @@ export type StabilityTckOptions = {
  * shows up as a snapshot diff in the PR; reviewers either accept the
  * change (update the snapshot deliberately) or push back.
  *
- * The TCK reads source (`.ts`) rather than built declarations so it
- * doesn't need a prior `pnpm build`. It follows `from "./relative.js"`
- * re-exports transitively; non-relative paths (other packages, `node:`)
+ * Point it at the built declarations (`.d.ts`) to record the surface
+ * alone: a change to implementation then leaves the snapshot alone, and
+ * doc comments still show. That needs a build first. Point it at source
+ * (`.ts`) to skip the build, at the cost of a snapshot that also moves
+ * with every implementation change. It follows `from "./relative.js"`
+ * re-exports transitively, to `.d.ts` from a declaration and to `.ts`
+ * from source; non-relative paths (other packages, `node:`)
  * stop the walk — drift in another package's surface is that package's
  * stability TCK to catch.
  *
@@ -66,7 +71,7 @@ export function runStabilityTck(options: StabilityTckOptions): void {
 }
 
 /**
- * Load and concatenate the public surface of an entry source file.
+ * Load and concatenate the public surface of an entry file.
  * Recursively walks relative re-exports, deduplicating visited files
  * and sorting visited paths so cosmetic file-order changes don't shift
  * the snapshot.
@@ -85,8 +90,9 @@ async function load_surface(entry: string): Promise<string> {
     // a plain `import` is implementation, not surface. Anchoring on the line
     // start keeps JSDoc strings and example code in comments out of the walk.
     const re_export = /^\s*export\b[^"';]*\bfrom\s+["'](\.[^"']+)["']/gm;
+    const ext = abs.endsWith(".d.ts") ? ".d.ts" : ".ts";
     for (const m of content.matchAll(re_export)) {
-      const rel = m[1].replace(/\.js$/, ".ts");
+      const rel = m[1].replace(/\.js$/, ext);
       const target = path.resolve(path.dirname(abs), rel);
       await walk(target);
     }

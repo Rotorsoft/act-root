@@ -70,7 +70,7 @@ These are load-bearing facts about the framework. A red test that only "works" b
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.
 - **`store(adapter)` and `cache(adapter)` are ignored once a singleton is set.** A probe that injects a decorated store in a second test without `await dispose()()` first silently runs against the FIRST test's store, and a red case reads as green. Cost the lead a false "not reproduced" on #1743. Dispose between tests, or use `sandbox`/`fixture`.
 - Vitest ignores specs outside the project root — a probe in `/tmp` or the scratchpad reports `No test files found`. Write probes into the package's `test/` dir, run, delete.
-- Any *real* fix that changes source text of a public export (adapters, `runStoreTck`) shifts the stability snapshots. Regenerate them **after** biome formats the source (`npx biome check --write` then `vitest -u` on the stability spec).
+- A fix that changes a public declaration or its doc comment (adapters, `runStoreTck`) shifts the stability snapshot; a change inside a function body doesn't. Regenerate it **after** biome formats the source and the build runs (`npx biome check --write`, `pnpm build`, then `pnpm check:stability -u`).
 
 ### The retry budget is spent on the error path only (#1418)
 

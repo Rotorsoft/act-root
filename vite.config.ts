@@ -68,7 +68,14 @@ export default defineConfig({
     // repo; without this exclude, a bare `vitest run` discovers their
     // spec copies too — duplicated suites and contention on shared
     // resources (the docker postgres) make runs fail spuriously.
-    exclude: [...configDefaults.exclude, "**/.claude/**"],
+    //
+    // The stability spec reads `dist/`, so it runs after a build through
+    // `pnpm check:stability` (vitest.stability.config.ts), not here.
+    exclude: [
+      ...configDefaults.exclude,
+      "**/.claude/**",
+      "test/stability.spec.ts",
+    ],
     // picocolors enables color emission when `CI` is set in env, which
     // wraps act-diagram CLI output in ANSI escapes and breaks
     // plain-text `toContain` assertions in format.spec/repl.spec. Force
