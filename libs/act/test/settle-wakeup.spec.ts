@@ -46,9 +46,7 @@ describe("settle loop wake-up during a running cycle", () => {
 
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => -1,
-        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        correlate: async () => ({ subscribed: 0, read: false }),
         drain: async () => {
           drains++;
           if (drains === 1) {
@@ -105,9 +103,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     });
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => -1,
-        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        correlate: async () => ({ subscribed: 0, read: false }),
         drain: async (options) => {
           seen.push(options.eventLimit);
           if (seen.length === 1) {
@@ -136,9 +132,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     const drain = vi.fn(async () => empty_drain());
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => -1,
-        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        correlate: async () => ({ subscribed: 0, read: false }),
         drain,
         on_settled: () => {},
         breaker: breaker(),
@@ -166,9 +160,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     });
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => -1,
-        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        correlate: async () => ({ subscribed: 0, read: false }),
         drain,
         on_settled: () => {},
         breaker: breaker(),
@@ -189,9 +181,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     const drain = vi.fn(async () => empty_drain());
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => -1,
-        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        correlate: async () => ({ subscribed: 0, read: false }),
         drain,
         on_settled: () => {},
         breaker: breaker(),
@@ -210,9 +200,7 @@ describe("a scheduled settle pass is never reset or replaced", () => {
     const seen: Array<number | undefined> = [];
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => -1,
-        correlate: async () => ({ subscribed: 0, last_id: -1 }),
+        correlate: async () => ({ subscribed: 0, read: false }),
         drain: async (options) => {
           seen.push(options.eventLimit);
           return empty_drain();
@@ -236,10 +224,10 @@ describe("a scheduled settle pass is never reset or replaced", () => {
  * checkpoint, even when a window subscribes/drains nothing.
  *
  * The loop used to derive progress solely from subscribe/ack/block counts,
- * discarding correlate's `last_id`. A bounded correlate window (`limit`)
+ * discarding how far correlate read. A bounded correlate window (`limit`)
  * full of globally-inert events advanced the checkpoint but registered "no
  * progress", so the loop broke before the next window — holding a reactive
- * event — was ever scanned. Counting `last_id > after_before` as progress
+ * event — was ever scanned. Counting a pass that read events as progress
  * fixes it; it terminates because ids are monotonic and finite.
  */
 describe("settle loop paginates past inert windows", () => {
@@ -259,15 +247,14 @@ describe("settle loop paginates past inert windows", () => {
 
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => checkpoint,
-        correlate: async ({ after, limit }) => {
+        correlate: async ({ limit }) => {
           correlate_calls++;
-          // Scan a `limit`-sized window and advance the checkpoint, like the
+          // Scan a `limit`-sized window past its own checkpoint, like the
           // real CorrelateCycle — but subscribe nothing (all events inert).
-          const next = Math.min((after ?? -1) + (limit ?? 2), MAX);
+          const next = Math.min(checkpoint + (limit ?? 2), MAX);
+          const read = next > checkpoint;
           checkpoint = next;
-          return { subscribed: 0, last_id: next };
+          return { subscribed: 0, read };
         },
         drain: async () => empty_drain(),
         on_settled: () => settled_signal(),
@@ -311,7 +298,7 @@ describe("settle breaker success rides a real correlate probe", () => {
     breaker: CircuitBreaker,
     correlate: () => Promise<{
       subscribed: number;
-      last_id: number;
+      read: boolean;
       scanned?: boolean;
     }>
   ) => {
@@ -321,8 +308,6 @@ describe("settle breaker success rides a real correlate probe", () => {
     });
     const loop = new SettleLoop<Schemas>(
       {
-        init: async () => {},
-        checkpoint: () => 5,
         correlate: async (q) => {
           try {
             return await correlate();
@@ -348,7 +333,7 @@ describe("settle breaker success rides a real correlate probe", () => {
     const breaker = open_breaker();
     await run_pass(breaker, async () => ({
       subscribed: 0,
-      last_id: 5,
+      read: false,
       scanned: true,
     }));
     expect(breaker.state(1000)).toBe("closed");
@@ -362,7 +347,7 @@ describe("settle breaker success rides a real correlate probe", () => {
     const breaker = open_breaker();
     await run_pass(breaker, async () => ({
       subscribed: 0,
-      last_id: 5,
+      read: false,
       scanned: false,
     }));
     expect(breaker.state(1000)).toBe("open");

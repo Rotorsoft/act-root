@@ -23,11 +23,10 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
  * independently testable.
  */
 export type SettleDeps<TEvents extends Schemas> = {
-  readonly init: () => Promise<void>;
-  readonly checkpoint: () => number;
+  /** Scans from its own checkpoint; `read` is true when it read events. */
   readonly correlate: (
     query: Query
-  ) => Promise<{ subscribed: number; last_id: number; scanned?: boolean }>;
+  ) => Promise<{ subscribed: number; read: boolean; scanned?: boolean }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
   /**
@@ -97,14 +96,14 @@ export class SettleLoop<TEvents extends Schemas> {
       this._timer = undefined;
       const {
         debounceMs: _,
-        correlate: correlate_query = {},
+        // Every pass scans from correlation's own checkpoint.
+        correlate: { after: _after, ...correlate_query } = {},
         maxPasses = Infinity,
         ...drain_options
       } = this._next ?? {};
       this._next = undefined;
 
       this._inflight = (async () => {
-        await this._deps.init();
         // Accumulated across every pass, so `settled` reports what the whole
         // settle did; its last pass made no progress and is always empty.
         let settled_drain: Drain<TEvents> | undefined;
@@ -114,11 +113,8 @@ export class SettleLoop<TEvents extends Schemas> {
         // `maxPasses` caps runtime in pathological cases.
         // Shutdown waits for the pass in flight, not for the loop.
         for (let i = 0; i < maxPasses && !this._stopped; i++) {
-          const after_before = this._deps.checkpoint();
-          const { subscribed, last_id, scanned } = await this._deps.correlate({
-            ...correlate_query,
-            after: after_before,
-          });
+          const { subscribed, read, scanned } =
+            await this._deps.correlate(correlate_query);
           // A scan that reached the store and came back is a real health
           // signal; a disarmed pass that returned without touching it is not.
           // Recording the latter would re-close an OPEN breaker mid-outage and
@@ -140,7 +136,7 @@ export class SettleLoop<TEvents extends Schemas> {
           // leaves the claimable set (acked, blocked, scheduled); a zero
           // backoff keeps it claimable until it blocks or succeeds.
           const made_progress =
-            subscribed > 0 || drain.leased.length > 0 || last_id > after_before;
+            subscribed > 0 || drain.leased.length > 0 || read;
           if (!made_progress) break;
         }
         // `Act.emit` contains listener throws, so the store-failure catch

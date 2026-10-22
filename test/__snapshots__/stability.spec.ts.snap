@@ -928,8 +928,6 @@ export class Act<
   private _build_settle(options: ActOptions): SettleLoop<TEvents> {
     return new SettleLoop<TEvents>(
       {
-        init: () => this._scoped(() => this._correlate.init()),
-        checkpoint: () => this._correlate.checkpoint,
         correlate: (q) =>
           this._correlate_scanned(
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
@@ -1436,8 +1434,8 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    const { subscribed, last_id } = await this._correlate_scanned(query);
-    return { subscribed, last_id };
+    const { subscribed } = await this._correlate_scanned(query);
+    return { subscribed, last_id: this._correlate.checkpoint };
   }
 
   /** \`correlate\` plus \`scanned\`, which settle needs for the breaker. */
@@ -1445,15 +1443,15 @@ export class Act<
     query: Query,
     /** Honour the correlation lease — settle and the poller only. */
     lease = false
-  ): Promise<{ subscribed: number; last_id: number; scanned: boolean }> {
+  ): Promise<{ subscribed: number; read: boolean; scanned: boolean }> {
     // Writer-only instances don't correlate.
-    if (!this._drain) return { subscribed: 0, last_id: -1, scanned: false };
+    if (!this._drain) return { subscribed: 0, read: false, scanned: false };
     return this._scoped(async () => {
-      const { subscribed, last_id, marked, scanned } =
+      const { subscribed, read, marked, scanned } =
         await this._correlate.correlate(query, lease);
       // Also re-arms correlate, so a backlog scan keeps going.
       if (subscribed > 0 || marked > 0) this._arm_all();
-      return { subscribed, last_id, scanned };
+      return { subscribed, read, scanned };
     });
   }
 

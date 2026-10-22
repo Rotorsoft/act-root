@@ -53,6 +53,22 @@ const registry_key = <TEvents extends Schemas>(
     .slice(0, 32);
 };
 
+/** What one correlate pass did. `read` is true when it read events. */
+type CorrelateResult = {
+  readonly subscribed: number;
+  readonly read: boolean;
+  readonly marked: number;
+  readonly scanned: boolean;
+};
+
+/** A pass that never reached the store, or whose read was discarded. */
+const IDLE: CorrelateResult = {
+  subscribed: 0,
+  read: false,
+  marked: 0,
+  scanned: false,
+};
+
 /** Bound on compiled pattern sources; guards a resolver that mints one per event. */
 const PATTERN_CACHE_SIZE = 32;
 
@@ -160,7 +176,6 @@ export class CorrelateCycle<
   TActions extends Schemas,
 > {
   private _checkpoint = -1;
-  private _initialized = false;
   /** Lease holder id; per instance, so a restart never inherits a stale claim. */
   private readonly _by = randomUUID();
   private readonly _key: string;
@@ -221,16 +236,12 @@ export class CorrelateCycle<
   }
 
   async init(): Promise<void> {
-    if (this._initialized) return;
     // Single-flight, but a failure clears the promise so the next call retries.
-    if (!this._init_promise) {
-      this._init_promise = this._run_init().catch((error) => {
-        this._init_promise = undefined;
-        throw error;
-      });
-    }
+    this._init_promise ??= this._run_init().catch((error) => {
+      this._init_promise = undefined;
+      throw error;
+    });
     await this._init_promise;
-    this._initialized = true;
   }
 
   private async _run_init(): Promise<void> {
@@ -254,7 +265,6 @@ export class CorrelateCycle<
 
   /** After `restore` replaced the log: forget everything and cold-start again. */
   restart(): void {
-    this._initialized = false;
     this._init_promise = undefined;
     this._checkpoint = -1;
     this._dynamic_subscriptions.clear();
@@ -291,23 +301,12 @@ export class CorrelateCycle<
      * explicit `app.correlate()` scans now, since `close` loops on it.
      */
     lease = false
-  ): Promise<{
-    subscribed: number;
-    last_id: number;
-    marked: number;
-    scanned: boolean;
-  }> {
+  ): Promise<CorrelateResult> {
     await this.init();
     const epoch = this._epoch;
-    const idle = () => ({
-      subscribed: 0,
-      last_id: this._checkpoint,
-      marked: 0,
-      scanned: false,
-    });
 
     // A remote writer without notify leaves this disarmed; the poller re-arms.
-    if (this._raised === this._lowered) return idle();
+    if (this._raised === this._lowered) return IDLE;
 
     const raised = this._raised;
 
@@ -323,10 +322,10 @@ export class CorrelateCycle<
       });
       // A release that landed while the call was out (shutdown) stays
       // released: the reply must not hand the lease back to this worker.
-      if (this._epoch !== epoch) return idle();
+      if (this._epoch !== epoch) return IDLE;
       this._lease_until = correlating ? now + CORRELATION_LEASE_MS : 0;
       // `undefined` = store without leasing. Refused: stay armed, look again.
-      if (correlating === false) return idle();
+      if (correlating === false) return IDLE;
     }
 
     const after = Math.max(this._checkpoint, query.after || -1);
@@ -427,7 +426,7 @@ export class CorrelateCycle<
     // Released or restarted while the scan was out: what it read belongs to
     // a lease this worker gave up, or to the log a restore replaced. Writing
     // it would hand back the lease, or mark the restored log with old ids.
-    if (this._epoch !== epoch) return idle();
+    if (this._epoch !== epoch) return IDLE;
 
     // Only targets with a mark to raise or priority/lane to register.
     const streams: SubscribeInput[] = [];
@@ -468,14 +467,14 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, last_id, marked, scanned: true };
+      return { subscribed, read: last_id > after, marked, scanned: true };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
     // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
     if (!stopped && found !== query.limit) this._lowered = raised;
-    return { subscribed: 0, last_id, marked: 0, scanned: true };
+    return { subscribed: 0, read: last_id > after, marked: 0, scanned: true };
   }
 
   /**

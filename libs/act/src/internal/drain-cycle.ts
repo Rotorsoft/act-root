@@ -431,9 +431,8 @@ export class DrainController<
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private readonly _misrouted = new Set<string>();
   private _stopped = false;
-  /** Never rejects; graceful shutdown waits on it. */
-  private _inflight: Promise<void> | undefined;
-  private _inflight_done: (() => void) | undefined;
+  /** The pass in flight. Never rejects; graceful shutdown waits on it. */
+  private _inflight: Promise<unknown> | undefined;
 
   private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
 
@@ -455,7 +454,7 @@ export class DrainController<
     return this._raised !== this._lowered;
   }
 
-  get inflight(): Promise<void> | undefined {
+  get inflight(): Promise<unknown> | undefined {
     return this._inflight;
   }
 
@@ -512,10 +511,18 @@ export class DrainController<
     if (this._deps.breaker.state(Date.now()) === "open")
       return EMPTY_DRAIN as Drain<TEvents>;
 
+    const pass = this._pass(streamLimit, eventLimit, leaseMillis);
+    this._inflight = pass;
+    return pass;
+  }
+
+  /** One claim → fetch → handle → ack pass. Never throws. */
+  private async _pass(
+    streamLimit: number,
+    eventLimit: number,
+    leaseMillis: number
+  ): Promise<Drain<TEvents>> {
     try {
-      this._inflight = new Promise<void>((done) => {
-        this._inflight_done = done;
-      });
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
@@ -577,8 +584,6 @@ export class DrainController<
       // Re-aim at the earliest stream still parked.
       if (!this._stopped) this._defer.schedule();
       this._inflight = undefined;
-      this._inflight_done?.();
-      this._inflight_done = undefined;
     }
   }
 }

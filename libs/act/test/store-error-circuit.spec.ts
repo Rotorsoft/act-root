@@ -153,8 +153,6 @@ describe("settle loop store-error handling", () => {
         );
         const loop = new SettleLoop(
           {
-            init: async () => {},
-            checkpoint: () => -1,
             correlate: () => Promise.reject(new StoreError("subscribe")),
             drain: async () => ({
               fetched: [],
