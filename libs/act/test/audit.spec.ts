@@ -562,12 +562,12 @@ describe("audit", () => {
       await store().subscribe([{ stream: "w1", source: "w1" }]);
       const s = (
         store() as unknown as {
-          _streams: Map<string, { blocked: boolean; error: string }>;
+          _streams: Map<string, { _blocked: boolean; _error: string }>;
         }
       )._streams.get("w1");
       if (s) {
-        s.blocked = true;
-        s.error = "";
+        s._blocked = true;
+        s._error = "";
       }
 
       const findings: AuditFinding[] = [];
@@ -602,10 +602,10 @@ describe("audit", () => {
       // Reach in to bump retry directly for the test setup.
       const s = (
         store() as unknown as {
-          _streams: Map<string, { retry: number }>;
+          _streams: Map<string, { _retry: number }>;
         }
       )._streams.get("w1");
-      if (s) s.retry = 5;
+      if (s) s._retry = 5;
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["reaction-health"], {
@@ -1160,10 +1160,10 @@ describe("audit", () => {
       // rows with empty lane after manual ops.
       const s = (
         store() as unknown as {
-          _streams: Map<string, { lane: string }>;
+          _streams: Map<string, { _lane: string }>;
         }
       )._streams.get("nolane");
-      if (s) s.lane = "";
+      if (s) s._lane = "";
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["routing-health"])) findings.push(f);
