@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, StoreError, state, store } from "../src/index.js";
-import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
-import { SettleLoop } from "../src/internal/settle.js";
+import type { CircuitBreaker } from "../src/internal/circuit-breaker.js";
 
 /**
  * StoreError + orchestrator circuit breaker. The drain loop turns
@@ -141,36 +140,86 @@ describe("drain circuit breaker", () => {
   });
 });
 
-describe("settle loop store-error handling", () => {
+/**
+ * Correlate records its own store outcome on the shared breaker, like the
+ * drain controllers: a scan that came back is a success, a throw is a
+ * failure. A pass that never reached the store records nothing, so it can't
+ * re-close an OPEN breaker mid-outage and let the drain hammer a store
+ * nobody has heard from.
+ */
+describe("correlate circuit breaker", () => {
+  const build = (failureThreshold: number) => {
+    const s = new InMemoryStore();
+    store(s);
+    const app = act()
+      .withState(Counter)
+      .on("Bumped")
+      .do(async function react() {})
+      .build({
+        autoSettle: false,
+        circuitBreaker: { failureThreshold, cooldownMs: 60_000 },
+      });
+    const breaker = (app as unknown as { _breaker: CircuitBreaker })._breaker;
+    const real_query = s.query.bind(s);
+    let failing = false;
+    s.query = ((...args: unknown[]) =>
+      failing
+        ? Promise.reject(new StoreError("query"))
+        : (real_query as (...a: unknown[]) => unknown)(...args)) as never;
+    const open = () => {
+      breaker.failed(Date.now(), new Error("store down"));
+      expect(breaker.state(Date.now())).toBe("open");
+    };
+    const fail = (on: boolean) => {
+      failing = on;
+    };
+    return { app, breaker, open, fail };
+  };
+
+  afterEach(async () => {
+    await dispose()();
+  });
+
   it("records a failing correlate on the breaker, which surfaces the error", async () => {
-    const errored = new Promise<{ error: unknown; circuit: string }>(
-      (resolve) => {
-        // The breaker owns the error callback now; the settle loop just
-        // calls failed(now, err) on a failed correlate.
-        const breaker = new CircuitBreaker(
-          { failureThreshold: 5, cooldownMs: 1000 },
-          { on_error: (error, circuit) => resolve({ error, circuit }) }
-        );
-        const loop = new SettleLoop(
-          {
-            correlate: () => Promise.reject(new StoreError("subscribe")),
-            drain: async () => ({
-              fetched: [],
-              leased: [],
-              acked: [],
-              blocked: [],
-            }),
-            on_settled: () => {},
-            breaker,
-          },
-          0
-        );
-        loop.schedule({ debounceMs: 0 });
-      }
-    );
-    const e = await errored;
-    expect(e.error).toBeInstanceOf(StoreError);
-    expect(e.circuit).toBe("closed"); // 1 failure < threshold 5
+    const { app, fail } = build(5);
+    const errors: { error: unknown; circuit: string }[] = [];
+    app.on("error", (e) => errors.push(e));
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    fail(true);
+    await expect(app.correlate()).rejects.toBeInstanceOf(StoreError);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toBeInstanceOf(StoreError);
+    expect(errors[0].circuit).toBe("closed"); // 1 failure < threshold 5
+  });
+
+  it("closes the breaker when the scan returns (control)", async () => {
+    const { app, breaker, open } = build(1);
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    open();
+    await app.correlate();
+    expect(breaker.state(Date.now())).toBe("closed");
+  });
+
+  it("leaves the breaker OPEN when correlate was disarmed and read nothing", async () => {
+    const { app, breaker, open } = build(1);
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    // The first pass marks work (which arms correlate again), the second
+    // reads nothing and disarms it.
+    await app.correlate();
+    await app.correlate();
+    open();
+    await app.correlate();
+    expect(breaker.state(Date.now())).toBe("open");
+  });
+
+  it("leaves the breaker OPEN when the scan fails against a down store", async () => {
+    const { app, breaker, open, fail } = build(1);
+    app.on("error", () => {});
+    await app.do("bump", { stream: nextStream(), actor }, {});
+    open();
+    fail(true);
+    await expect(app.correlate()).rejects.toBeInstanceOf(StoreError);
+    expect(breaker.state(Date.now())).toBe("open");
   });
 });
 

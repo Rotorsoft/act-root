@@ -18,6 +18,7 @@ import type {
 } from "../types/index.js";
 import { DEFAULT_LANE } from "../types/index.js";
 import { is_literal_source } from "../utils.js";
+import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { DrainOps } from "./drain-ops.js";
 import { LruMap } from "./lru-map.js";
 import { report_once } from "./report-once.js";
@@ -58,15 +59,16 @@ type CorrelateResult = {
   readonly subscribed: number;
   readonly read: boolean;
   readonly marked: number;
-  readonly scanned: boolean;
 };
 
-/** A pass that never reached the store, or whose read was discarded. */
+/**
+ * A pass that never reached the store, or whose read was discarded. Only a
+ * pass that returns something else counts as a store success.
+ */
 const IDLE: CorrelateResult = {
   subscribed: 0,
   read: false,
   marked: 0,
-  scanned: false,
 };
 
 /** Bound on compiled pattern sources; guards a resolver that mints one per event. */
@@ -115,6 +117,8 @@ export type CorrelateCycleDeps<
   registry: Registry<TSchemaReg, TEvents, TActions>;
   static_targets: ReadonlyArray<StaticTarget>;
   cd: DrainOps<TEvents>;
+  /** Records each scan's store outcome, like the drain controllers do. */
+  breaker: CircuitBreaker;
   max_subscribed_streams: number;
   /** Every lane a controller exists for; others are rerouted to default. */
   declared_lanes: ReadonlySet<string>;
@@ -201,6 +205,7 @@ export class CorrelateCycle<
   private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
   private readonly _static_targets: ReadonlyArray<StaticTarget>;
   private readonly _cd: DrainOps<TEvents>;
+  private readonly _breaker: CircuitBreaker;
   private readonly _on_init: (() => Promise<void>) | undefined;
   private readonly _declared_lanes: ReadonlySet<string>;
   /** Report-once keys; per instance because `internal/` holds no module state. */
@@ -210,6 +215,7 @@ export class CorrelateCycle<
     registry,
     static_targets,
     cd,
+    breaker,
     max_subscribed_streams,
     declared_lanes,
     shard,
@@ -223,6 +229,7 @@ export class CorrelateCycle<
     this._declared_lanes = declared_lanes;
     this._static_targets = static_targets;
     this._cd = cd;
+    this._breaker = breaker;
     this._on_init = on_init;
   }
 
@@ -293,7 +300,13 @@ export class CorrelateCycle<
     return pattern.test(stream);
   }
 
-  /** Scan past the checkpoint, subscribe new targets and raise their work marks. */
+  /**
+   * Scan past the checkpoint, subscribe new targets and raise their work
+   * marks. Records the store outcome on the breaker: a scan that came back
+   * is a success, a throw is a failure (and still throws). A pass that
+   * never reached the store records nothing, so it can't re-close an open
+   * breaker mid-outage.
+   */
   async correlate(
     query: Query = { after: -1, limit: 10 },
     /**
@@ -302,6 +315,17 @@ export class CorrelateCycle<
      */
     lease = false
   ): Promise<CorrelateResult> {
+    try {
+      const result = await this._scan(query, lease);
+      if (result !== IDLE) this._breaker.passed();
+      return result;
+    } catch (error) {
+      this._breaker.failed(Date.now(), error);
+      throw error;
+    }
+  }
+
+  private async _scan(query: Query, lease: boolean): Promise<CorrelateResult> {
     await this.init();
     const epoch = this._epoch;
 
@@ -467,14 +491,14 @@ export class CorrelateCycle<
             lane,
           });
       }
-      return { subscribed, read: last_id > after, marked, scanned: true };
+      return { subscribed, read: last_id > after, marked };
     }
     // Only a short page proves the log is exhausted; resolving nothing does
     // not. It lowers only the raises it saw, so one that landed mid-scan
     // keeps the cycle armed.
     this._checkpoint = last_id;
     if (!stopped && found !== query.limit) this._lowered = raised;
-    return { subscribed: 0, read: last_id > after, marked: 0, scanned: true };
+    return { subscribed: 0, read: last_id > after, marked: 0 };
   }
 
   /**

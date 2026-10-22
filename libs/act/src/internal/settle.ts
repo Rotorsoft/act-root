@@ -15,7 +15,7 @@ import type {
   Schemas,
   SettleOptions,
 } from "../types/index.js";
-import type { CircuitBreaker } from "./circuit-breaker.js";
+import { merge_drains } from "./drain-cycle.js";
 
 /**
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
@@ -23,20 +23,16 @@ import type { CircuitBreaker } from "./circuit-breaker.js";
  * independently testable.
  */
 export type SettleDeps<TEvents extends Schemas> = {
-  /** Scans from its own checkpoint; `read` is true when it read events. */
+  /**
+   * Scans from its own checkpoint; `read` is true when it read events.
+   * Records its own store outcome on the breaker, and throws on a failure.
+   */
   readonly correlate: (
     query: Query
-  ) => Promise<{ subscribed: number; read: boolean; scanned?: boolean }>;
+  ) => Promise<{ subscribed: number; read: boolean }>;
+  /** Records its own store outcome on the breaker, and never throws. */
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
-  /**
-   * Shared orchestrator circuit breaker. The settle loop's
-   * `correlate` (subscribe + query) is a store consumer too: a successful
-   * pass records `passed()`, a failed one `failed(now, err)` — feeding the
-   * same breaker that paces the drain loop, which also surfaces the failure
-   * to the `error` lifecycle event.
-   */
-  readonly breaker: CircuitBreaker;
 };
 
 /**
@@ -104,32 +100,19 @@ export class SettleLoop<TEvents extends Schemas> {
       this._next = undefined;
 
       this._inflight = (async () => {
-        // Accumulated across every pass, so `settled` reports what the whole
-        // settle did; its last pass made no progress and is always empty.
-        let settled_drain: Drain<TEvents> | undefined;
+        // Every pass, so `settled` reports what the whole settle did; its
+        // last pass made no progress and is always empty.
+        const passes: Drain<TEvents>[] = [];
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
         // projection) without forcing callers to roll their own loop.
         // `maxPasses` caps runtime in pathological cases.
         // Shutdown waits for the pass in flight, not for the loop.
         for (let i = 0; i < maxPasses && !this._stopped; i++) {
-          const { subscribed, read, scanned } =
+          const { subscribed, read } =
             await this._deps.correlate(correlate_query);
-          // A scan that reached the store and came back is a real health
-          // signal; a disarmed pass that returned without touching it is not.
-          // Recording the latter would re-close an OPEN breaker mid-outage and
-          // let the drain below hammer a store nobody has heard from — so the
-          // question is asked per pass.
-          if (scanned) this._deps.breaker.passed();
           const drain = await this._deps.drain(drain_options);
-          settled_drain = settled_drain
-            ? {
-                fetched: [...settled_drain.fetched, ...drain.fetched],
-                leased: [...settled_drain.leased, ...drain.leased],
-                acked: [...settled_drain.acked, ...drain.acked],
-                blocked: [...settled_drain.blocked, ...drain.blocked],
-              }
-            : drain;
+          passes.push(drain);
           // Only a pass that read no events and leased nothing is idle: a
           // leased stream that deferred or failed may leave work behind. It
           // ends because ids are finite and a leased stream advances or
@@ -141,14 +124,11 @@ export class SettleLoop<TEvents extends Schemas> {
         }
         // `Act.emit` contains listener throws, so the store-failure catch
         // below never sees one.
-        if (settled_drain) this._deps.on_settled(settled_drain);
+        if (passes.length) this._deps.on_settled(merge_drains(passes));
       })()
-        .catch((err) => {
-          // correlate / init failed (a store op). Record on the shared
-          // breaker, which logs it and surfaces the `error` event; the
-          // drain loop reads the same breaker to pace itself.
-          this._deps.breaker.failed(Date.now(), err);
-        })
+        // Only correlate throws (a store failure), and it already recorded
+        // the failure on the breaker, whose recovery pass settles again.
+        .catch(() => {})
         .finally(() => {
           this._inflight = undefined;
           // A wake-up arrived mid-cycle: run one more pass so it isn't lost.

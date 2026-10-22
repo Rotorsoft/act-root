@@ -26,7 +26,7 @@ Register listeners with `app.on(name, listener)`. The payloads below are the act
 | `closed` | `CloseResult` — `{ truncated, skipped }` | A close-the-books run finishes |
 | `notified` | `StoreNotification` — `{ stream, events: [{ id, name }] }` | A **different process** commits to the same store |
 | `forgotten` | `{ stream, at: Date, eventCount }` | `app.forget(stream)` wipes a stream's sensitive payloads |
-| `error` | `{ error, circuit }` | A store operation fails during the drain, settle or autoclose loop (circuit-breaker state attached) |
+| `error` | `{ error, circuit }` | A store operation fails in correlate, drain or autoclose, whether a loop or a direct `app.correlate()` / `app.drain()` ran it (circuit-breaker state attached) |
 
 Two things to know before wiring:
 

@@ -372,6 +372,18 @@ const EMPTY_DRAIN: Drain<Schemas> = {
   blocked: [],
 };
 
+/** One drain made of several: every lane of a pass, or every pass of a settle. */
+export function merge_drains<TEvents extends Schemas>(
+  drains: ReadonlyArray<Drain<TEvents>>
+): Drain<TEvents> {
+  return {
+    fetched: drains.flatMap((d) => d.fetched),
+    leased: drains.flatMap((d) => d.leased),
+    acked: drains.flatMap((d) => d.acked),
+    blocked: drains.flatMap((d) => d.blocked),
+  };
+}
+
 export type DrainControllerDeps<
   TEvents extends Schemas,
   TActions extends Schemas,

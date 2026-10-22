@@ -30,6 +30,7 @@ import {
   DrainController,
   type Handle,
   type HandleBatch,
+  merge_drains,
 } from "./internal/drain-cycle.js";
 import type { DrainOps } from "./internal/drain-ops.js";
 import { bare_patch, type EsOps, scan } from "./internal/event-sourcing.js";
@@ -459,6 +460,7 @@ export class Act<
       registry: this.registry,
       static_targets: classification.static_targets,
       cd: this._cd,
+      breaker: this._breaker,
       max_subscribed_streams:
         options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
       // Declared lanes (not active ones): a lane another process claims is
@@ -492,7 +494,7 @@ export class Act<
     return new SettleLoop<TEvents>(
       {
         correlate: (q) =>
-          this._correlate_scanned(
+          this._correlate_pass(
             { ...q, limit: q.limit ?? this._poll_limit ?? 100 },
             true
           ),
@@ -500,7 +502,6 @@ export class Act<
         // instances, so the loop drains through the internal path.
         drain: (o) => this._scoped(() => this._drain_all(o)),
         on_settled: (drain) => this.emit("settled", drain),
-        breaker: this._breaker,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -527,8 +528,9 @@ export class Act<
       resolveShutdownConfig(options);
       this._shutdown_promise = (async () => {
         // Stop every scheduler before awaiting anything slow, so nothing
-        // starts while the notify subscription comes down.
-        this.stop_correlations();
+        // starts while the notify subscription comes down. The lease is
+        // handed back once, at the end.
+        this._stop_poll();
         this._settle.stop(true);
         this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
@@ -953,29 +955,22 @@ export class Act<
 
   /** In parallel, so a slow lane never holds up a fast one. */
   private async _drain_all(options: DrainOptions): Promise<Drain<TEvents>> {
-    const results = await Promise.all(
-      [...this._drain_controllers.values()].map((c) => c.drain(options))
+    const merged = merge_drains(
+      await Promise.all(
+        [...this._drain_controllers.values()].map((c) => c.drain(options))
+      )
     );
-    const fetched: Drain<TEvents>["fetched"] = [];
-    const leased: Lease[] = [];
-    const acked: Lease[] = [];
-    const blocked: BlockedLease[] = [];
-    for (const r of results) {
-      // Actor-less like `query`/`query_array`, so default-deny.
-      // Handlers are unaffected — they read through their own strip.
-      fetched.push(
-        ...r.fetched.map((f) => ({
-          ...f,
-          events: f.events.map((e) =>
-            this.registry.query_gate(e.name as string)(e)
-          ),
-        }))
-      );
-      leased.push(...r.leased);
-      acked.push(...r.acked);
-      blocked.push(...r.blocked);
-    }
-    return { fetched, leased, acked, blocked };
+    // Actor-less like `query`/`query_array`, so default-deny.
+    // Handlers are unaffected — they read through their own strip.
+    return {
+      ...merged,
+      fetched: merged.fetched.map((f) => ({
+        ...f,
+        events: f.events.map((e) =>
+          this.registry.query_gate(e.name as string)(e)
+        ),
+      })),
+    };
   }
 
   /**
@@ -997,24 +992,26 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    const { subscribed } = await this._correlate_scanned(query);
+    const { subscribed } = await this._correlate_pass(query);
     return { subscribed, last_id: this._correlate.checkpoint };
   }
 
-  /** `correlate` plus `scanned`, which settle needs for the breaker. */
-  private async _correlate_scanned(
+  /** One correlate pass; arms the lanes when it found work. */
+  private async _correlate_pass(
     query: Query,
     /** Honour the correlation lease — settle and the poller only. */
     lease = false
-  ): Promise<{ subscribed: number; read: boolean; scanned: boolean }> {
+  ): Promise<{ subscribed: number; read: boolean }> {
     // Writer-only instances don't correlate.
-    if (!this._drain) return { subscribed: 0, read: false, scanned: false };
+    if (!this._drain) return { subscribed: 0, read: false };
     return this._scoped(async () => {
-      const { subscribed, read, marked, scanned } =
-        await this._correlate.correlate(query, lease);
+      const { subscribed, read, marked } = await this._correlate.correlate(
+        query,
+        lease
+      );
       // Also re-arms correlate, so a backlog scan keeps going.
       if (subscribed > 0 || marked > 0) this._arm_all();
-      return { subscribed, read, scanned };
+      return { subscribed, read };
     });
   }
 
@@ -1066,14 +1063,18 @@ export class Act<
    * @see {@link start_correlations}
    */
   stop_correlations() {
+    this._stop_poll();
+    // Hand the correlation lease back, best-effort and not awaited (this
+    // method is synchronous; the lease would expire anyway).
+    void this._scoped(() => this._correlate.release_correlation());
+  }
+
+  private _stop_poll(): void {
     if (this._poll) {
       clearInterval(this._poll);
       this._poll = undefined;
       this._poll_limit = undefined;
     }
-    // Hand the correlation lease back, best-effort and not awaited (this
-    // method is synchronous; the lease would expire anyway).
-    void this._scoped(() => this._correlate.release_correlation());
   }
 
   /**
