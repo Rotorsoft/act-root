@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.11](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.10...@rotorsoft/act-v1.33.11) (2026-10-22)
+
+
+### Bug Fixes
+
+* **act:** a restore during an in-flight correlate scan no longer loses the restored events ([#2043](https://github.com/Rotorsoft/act-root/issues/2043)) ([4a3e18a](https://github.com/Rotorsoft/act-root/commit/4a3e18ab49b97b1aa3e1a7f445dc7e440a9042a8)), closes [#2033](https://github.com/Rotorsoft/act-root/issues/2033)
+
 # [@rotorsoft/act-v1.33.10](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.9...@rotorsoft/act-v1.33.10) (2026-10-21)
 
 

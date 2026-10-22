@@ -203,7 +203,7 @@ Source-of-truth for what lives where:
 ## Development Workflow
 
 - Strict TypeScript everywhere — type-check before pushing
-- Pre-commit hooks run lint/format, and CI runs the full suite on every push (don't bypass hooks with `--no-verify` unless asked)
+- Pre-commit hooks run lint/format, and CI runs the full suite on every push (never bypass hooks with `--no-verify`)
 - Use Zod schemas for all runtime validation
 - Never modify event data structures in place — evolve via versioned event names
 - Keep state machines focused; split concerns into separate slices
@@ -270,7 +270,7 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **Integration helpers live in separate packages, never in core.** HTTP delivery, message-bus forwarders, webhook signers, etc. go in their own `@rotorsoft/act-*` package (precedent: `act-http`, `act-pino`, `act-pg`, `act-sqlite`, `act-tck`, `act-patch`). Core stays governed by `STABILITY.md`.
 - **No manual version bumps.** Semantic-release owns the `version` field in `package.json`. The only manual version event is seeding the baseline `0.0.0` tag when adding a new package. Manual bumps create diffs that conflict with the auto-bump commit.
 - **Don't modify working code without explicit approval.** Propose changes first when the user hasn't asked for code. Refactors-while-you're-here are the most common way to expand the blast radius of a small request.
-- **Conventional-commit subject must be lowercase.** `feat(act): add foo` not `feat(act): Add foo`. The commitlint hook will reject otherwise.
+- **Conventional-commit subject starts lowercase; identifiers after the first word keep their case.** `feat(act): add foo` not `feat(act): Add foo`, and `fix(act): make InMemoryStore drop ...` keeps the type name as written. The commitlint hook rejects only a capitalized first word, so never start the subject with a type name.
 - **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged and the commit-msg hook runs commitlint; bypassing them ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
 ### Naming conventions
@@ -285,7 +285,7 @@ Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `a
 - Public type fields: `IAct.forget` return `{eventCount}`, `forgotten` event `eventCount`, `StateNode.varName`, `EventNode.hasCustomPatch`, `WebhookConfig.timeoutMs`/`idempotencyKey`, `HttpDeliveryErrorInit.responseBody`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`, `Projection.batchHandler`, `QueryStreamsResult.maxEventId`, `InMemoryIdempotencyStore` options `ttlMs`/`maxEntries`/`retryProfile`.
 - ActOptions / RetryOptions / ReactionOptions / Backoff / DrainOptions / SettleOptions / LaneConfig fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`, `expectedVersion`, `reactingTo`, `asOf`, `maxSize`.
 - Builder methods: `withState`, `withProjection`, `withReaction`, `withActor`, `withLane`, `withSlice`.
-- Top-level factories: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`, `broadcast`.
+- Top-level factories: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`.
 - Public class names + types — PascalCase always: `StateNode`, `BroadcastChannel`, `InMemoryStore`, `ConsoleLogger`, `RetryProfile`, `WebhookConfig`, `IdempotencyStore`. Suffix with `XxxOptions` / `XxxResult` / `XxxConfig` when applicable.
 
 **Internal — short snake_case, no exceptions:**

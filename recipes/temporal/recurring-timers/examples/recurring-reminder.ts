@@ -13,7 +13,7 @@
  * pass `{ after: { hours: 24 } }` for a daily nudge, or a function of the tick
  * event for a widening backoff (see the sibling scenarios in the README).
  *
- * Run:  pnpm tsx recipes/temporal/recurring-timers/examples/recurring-reminder.ts
+ * Run:  npx vitest run recipes/temporal/recurring-timers/examples/recurring-reminder.spec.ts
  */
 
 import {
