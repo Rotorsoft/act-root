@@ -59,7 +59,7 @@ Where two features meet, and why. The Feature interactions lens reads this first
 | writer-only app, notify | `_wake` arms lanes on a `drain: false` instance too; nothing there reads the armed flag | shared primitive | #1978; harmless (probed) |
 | restore, other workers on the store | another process keeps the correlation lease and scans from its old checkpoint: 10 of 20 restored events run (control, one worker: 20 of 20) | justified, documented | the `Store.restore` port doc says to restart other processes; the user docs don't yet (P2026-10-22-2) |
 | restore, drain in flight | the in-flight `ack` writes nothing into the restored store | harmless | InMemory probe 3 of 3; Postgres not probed |
-| correlate outcome, lane arming / settle progress | Act arms on `subscribed > 0 \|\| marked > 0` and settle counts `subscribed > 0 \|\| read`; `marked` and `read` already decide both | accidental restatement | backlog (fi-2), −2 lines |
+| correlate outcome, lane arming / settle progress | Act arms on `subscribed > 0 \|\| marked > 0` and settle counts `subscribed > 0 \|\| read`; `marked` and `read` already decide both | accidental restatement | #2069 (P2026-10-22f-2), −2 lines |
 
 ## Mutation baselines
 
@@ -97,12 +97,6 @@ Sound proposals that missed a run's cut. The next run ranks these before looking
 - Four published exports tagged `@internal` (re-checked 2026-10-15, unchanged), plus act.ts:99-104 pointing operators at a deprecated constant. (P2026-10-15r-5)
 - Design finding: the defer wake's "drain until a pass leases nothing" loop repeats settle's loop without correlate (the background-copies-foreground smell); routing it through settle adds `settled` events and a correlate per wake, so it doesn't subtract today.
 - Resolved by #1959 (P2026-10-17d-2 → #1949): a local `do()` arms lanes but schedules nothing, while a remote commit (`_wire_notify`) already schedules settle; 22 copies of `app.on("committed", () => app.settle())` in 17 files exist only to close that gap, and no framework in the field asks for it (Marten, Emmett, Axon, Propulsion run processors on their own). Changing it changes what apps observe.
-- Schema-driven dates on read become one TCK case (`describe("schema-driven dates on read")`, 4 plain + 3 pii cases), and three adapter specs go (act-sqlite `read-schema-dates`, act-sqlite and act-pg `schema-dates`): −178 net, simulated over InMemory, sqlite, pg and notify. It releases act-tck and adds cases third-party adapters run. (P2026-10-22t-4)
-- act-http's trpc and hono share one `ActSurface` and one dispatch step (target, `expectedVersion`, the idempotency claim): −27 source, 8 fewer branches; the error-parity path, so medium risk. The lost generator docs it found are fixed separately (P2026-10-22-2). (P2026-10-22d-3)
-- InMemoryStore spells stream and source matching once (`name_test(pattern, exact)`, compiled once per query): −12, and an invalid pattern on an empty log now throws like Postgres. (P2026-10-22d-4)
-- Lane arming and settle progress stop reading `subscribed` (`marked` and `read` already decide): −2; the first-event edge (a resolver that throws after another resolved) needs one test. (P2026-10-22f-2)
-- Two breaker tests repeat others (the `SettleLoop` unit "records a failing correlate…" and "leaves the breaker OPEN when the scan fails…"): −43, no row cites them. Keep "a settle refused the correlation lease": it alone catches dropping the refused-lease return. (P2026-10-22t-5)
-- act-pg `scripts/drain-contention.ts` and `scripts/watermark-claim.ts` (225 lines): nothing cites them (no package script, workflow or PERFORMANCE.md line), and one describes a mutex that no longer exists. The user may run them by hand. (P2026-10-22x-2)
 
 ## Self-changes
 
@@ -606,4 +600,4 @@ Simplifications:
 - P2026-10-22s-6 (d-2). PostgresStore gets one pii codec (`_encode_pii` / `_decode_pii`, as SqliteStore has) and one `to_committed(row, prefix)` for the full-scan stats (−24; pg TCK, differential and property TCK green).
 - P2026-10-22s-7 (d-1). The four webhook receiver adapters build their `idempotency` object with one internal `make_idempotency(store, result)` (−22 net; act-http 412/412, no snapshot change).
 
-Tickets (user: "file all tickets that you consider provable and real"): #2057 (P2026-10-22-1), #2058 (-2), #2059 (s-1), #2060 (s-2), #2061 (s-3), #2062 (s-4), #2063 (s-5), #2064 (s-6), #2065 (s-7). Backlog items not filed.
+Tickets (user: "file all tickets that you consider provable and real"): #2057 (P2026-10-22-1), #2058 (-2), #2059 (s-1), #2060 (s-2), #2061 (s-3), #2062 (s-4), #2063 (s-5), #2064 (s-6), #2065 (s-7). The six this run sent to the backlog were filed too (user: "nothing is risky if it's a real issue"): #2066 (t-4), #2067 (d-3), #2068 (d-4), #2069 (f-2), #2070 (t-5), #2071 (x-2).
