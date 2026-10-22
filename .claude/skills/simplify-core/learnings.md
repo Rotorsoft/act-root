@@ -20,6 +20,7 @@ What building Act has taught, as rules to check a design or a fix against. Read 
 - A wakeup is a hint, never the truth: decorators that carry notifications must pass the full Store TCK unchanged. (#987)
 - A field with two owners shows up as a rule in one layer and a guard in another that cancels it, and if the guard lives in a bounded memory, eviction breaks the rule. Before removing either owner, find why each exists: the store's re-lane on equal priority is how a restart applies an edited lane. (#1876, 2026-10-10)
 - Probe every claim in a proposal, not only bug claims: of four interaction findings, one was a real bug, one proposed fix was wrong, and one count was off (9 → 7). (2026-10-10)
+- Re-running a specialist's probe is not checking it: read its setup. A defer probe that "lost" 5 of 15 streams had only correlated 10 events, since one `app.correlate()` reads 10. (2026-10-11)
 - A shared lease is sound only between interchangeable workers. Anything that narrows what a worker runs (`onlyLanes`) belongs in the lease key, or the holder does work for a lane it can't drain and the lane's own worker never wakes. (2026-10-10 review)
 - Contain an error where it is raised, not where it lands. Classifying app errors at the breaker needed a new error class and a second breaker; a try/catch at each place app code runs (resolvers, archive callbacks) needed neither, and left the breaker untouched. When the new failure path needs a decision that already exists (retry or block), call it; #1913 copied `finalize` a third time. (#1913)
 

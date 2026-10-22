@@ -590,3 +590,26 @@ Filed:
 
 **Leads not finished:** hono malformed JSON with a JSON content type returns a plain 400, not the ApiError 422 envelope (pre-existing, noted in #1777); Express/Fastify/tRPC receiver middlewares don't track in-flight claims (doc check); the `stuck-backoff` audit can't see a stream parked on a far `deferred_at` since backoff became persisted; the cast-only reverse-order `merge_projection` PII path; a `MaxListenersExceededWarning` (>10 `uncaughtException` listeners) in the test run on Node 22 and 26.
 
+### Wave 28 (2026-10-20 — lenses: auto-settle loop, shutdown/teardown, failure accounting, lanes + act-pg seed, store divergence)
+
+**Nine tickets filed (#2015-#2023). Six reproduced independently in the main loop (#2015, #2016 site B, #2017, #2019, #2020, #2021); #2018 by code reading plus the hunter's real-Postgres probe; #2022 and #2023 are hunter-verified cross-adapter comparisons.** All five hunters died at once on the account's weekly limit about a minute in, before writing anything. They were resumed by message after the reset and all delivered full reports, with notes and probe copies in `scratchpad/wave28/`. Excluded up front: everything in that day's open PRs (#2005, #2007-#2014).
+
+Filed:
+
+- **#2015** (HIGH) — an imperative `DeferSignal` with an invalid `when` throws a `ZodError` out of the dispatcher's `catch`: the whole drain pass is voided, the error counts as a store failure, the breaker opens, and unrelated streams are never acked. Control: the declarative `.defer(fn)` with the same bad `when` stays per-stream.
+- **#2016** (MED) — a wake that lands while a correlate scan or drain claim is in flight is erased when that call comes back empty (`correlate-cycle.ts:467`, `drain-cycle.ts:531`). `unblock`/`reset`/`restore` can leave work undrained until the next commit. The race form of #1669/#1670.
+- **#2017** (MED) — a late lease-renewal reply re-takes the correlation lease after `shutdown()` resolves (`correlate-cycle.ts:316`). The path #2001 didn't guard.
+- **#2018** (MED) — a real Postgres fault in a reaction-requested close is treated as app code, because `truncate` doesn't wrap driver errors in `StoreError`. No `error` event, and the breaker records a success.
+- **#2019-#2023** (LOW) — a static `lane: ""` passes the build guard and silently never runs; Hono malformed JSON returns a text 400, not the ApiError envelope; `Store.query(cb)` with no query returns snapshots on InMemory and Postgres; InMemory's result for two windowed truncate targets on one stream; out-of-range `limit` values give three answers, and PG `query_stats` pastes the limit into its SQL.
+
+**Swept clean / ruled out this wave:**
+- **Settle loop:** caller options carry through internal wake-ups; a pass that throws mid-loop resets `_inflight` and keeps `_pending`; `stop_settling`/shutdown mid-pass, poll ticks with `autoSettle: false` and the breaker's recovery pass under `autoSettle: false` are documented. `maxPasses: 0` emits no `settled` (awareness only).
+- **Shutdown:** every timer (cycleMs worker, defer timer, breaker wake, grace budget) is unref'd; the breaker re-arming after stop and `seed_defer` racing shutdown are harmless no-ops; `do`/`reset`/`unblock`/notify after shutdown schedule nothing (contract row 74); a drain outliving the grace is the documented #1442 abandonment; double `shutdown()` is memoized.
+- **Lanes:** `register_lane` compares every `LaneConfig` field and every declaration order behaves as `configuration.md` says; slice-only lanes drain under `onlyLanes`; a projection-only app is reactive; cycleMs timers are not started when `drain: false`.
+- **act-pg seed (#2002):** 10 concurrent stores over 3 tables on a fresh custom schema (6 rounds), and 6 concurrent upgrades from the oldest shape (4 rounds), with no errors and the checkpoint kept. The schema lock serializes every seed in a schema, so the comment about per-table DDL staying concurrent is stale (harmless).
+- **Batch duplicates:** `defer`/`reset`/`unblock`/`prioritize` dedupe on every adapter; `subscribe`/`ack`/`block` duplicates are documented preconditions; the SQLite subscribe lane/priority merge matches the `p >= old` rule; GLOB translation agrees with regex on portable patterns.
+- **act-http receivers:** not tracking in-flight claims is documented in the README's two-phase dedup section (docs nit: its own express/fastify/trpc examples answer `deduped` with success, the pattern that section warns against).
+
+**Fixed:** #2015 → #2024, #2016 + #2017 → #2025, #2018 → #2031, #2019 → #2026, #2020 → #2029, #2021 → #2027, #2022 → #2028, #2023 → #2030.
+
+**Noted, not filed:** act-pg `drop()` on a non-public schema runs `DROP SCHEMA … CASCADE` and takes sibling stores' tables with it. That's intended per `scope-isolation.spec.ts`, but `Store.drop`'s doc says only "Drops all data from the store" (docs gap). PG `query_streams` runs two `client.query` calls concurrently on one client via `Promise.all`; pg already warns this is deprecated and will be removed in pg@9 (latent break on upgrade).

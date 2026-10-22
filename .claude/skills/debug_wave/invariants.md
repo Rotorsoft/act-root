@@ -65,6 +65,11 @@ These are load-bearing facts about the framework. A red test that only "works" b
 - **Every early return in the drain finalize must still answer "does this stream block?".** The fetch-error branch returned before `budget_exhausted` (#1774), the same way #1418's lease-lost path never consulted the budget. When auditing a drain path, check that every way an attempt can fail spends the retry budget.
 - **Verify the build artifact, not just the source.** CI ran the `act` CLI through tsx on `src/` and never the `dist/` consumers install, so a double shebang shipped for four releases (#1775). And check that the CI job you rely on actually ran: a path filter skipped `ci` and the new `node-compat` on a dependency-only PR (#1778).
 
+- **A write after an await must check that nothing changed during the await.** Wave 28 found the shape twice: a renewal reply overwrote a shutdown's lease release (#2017), and an empty scan or claim lowered the armed flag over a wake that landed mid-call (#2016). When code sets process state from a store reply, ask what else may have written that state while the call was out, and guard with a generation counter rather than the result alone.
+- **Anything that can throw inside a dispatcher's `catch` escapes per-stream accounting.** #2015: parsing a `DeferSignal`'s schedule in the `catch` let a `ZodError` void the whole drain pass and count as a store failure. Every branch of that `catch` must end in a per-stream result (`finalize`), never a throw.
+- **A truthy check on an optional string treats `""` as absent.** #2019: `resolver.lane && …` let `lane: ""` skip the undeclared-lane guard, while the dynamic path's `!== undefined` caught it. Same family as the `?? 0` rule: when two paths check one field, they must use the same test.
+- **Breaker classification depends on adapter wrapping, so a mock that rejects with `StoreError` proves nothing.** #2018: act-pg's `truncate` re-throws raw driver errors, so a real timeout in a reaction-requested close was logged as app code, while the test behind the claim mocked a `StoreError` the adapter never produces. Prove error classification with a real fault (a lock plus `statement_timeout`), not a constructed error.
+
 ## Mechanics that bit us
 
 - Postgres test DB is on **5431** (not 5432): `postgres://postgres:postgres@localhost:5431`. `docker ps` shows container `act-pg`.
