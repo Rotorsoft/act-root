@@ -6,7 +6,7 @@
 
 _HTTP integrations for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) — outbound webhooks and incremental state broadcast over Server-Sent Events._
 
-> **Note.** This package consolidates the SSE integration that previously shipped as standalone `@rotorsoft/act-sse`. New projects should install this umbrella and import from the `/sse` subpath; existing `@rotorsoft/act-sse` users can migrate with a one-import change. See [@rotorsoft/act-sse](https://www.npmjs.com/package/@rotorsoft/act-sse) for the deprecation note + migration steps.
+> **Note.** The `/sse` subpath is the home of the surface once published as `@rotorsoft/act-sse`. That package's status is in the [deprecation policy](../../STABILITY.md#deprecation-policy).
 
 ## Why this package
 
@@ -180,7 +180,7 @@ api.get("/openapi.json", (c) =>
 );
 ```
 
-Framework errors share one envelope (`{ error, detail?, code? }`) and one status table: `ValidationError` → 422, `InvariantError` → 409, `ConcurrencyError` → 412, `StreamClosedError` → 410, `NonRetryableError` → 400, anything else → 500. tRPC has no 410, so `StreamClosedError` is `NOT_FOUND` there. Optimistic concurrency (`expectedVersion`), `Idempotency-Key` handling, SSE subscriptions (`sse: { channel }`), auth composition and deployment recipes are in the [auto-generated API guide](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api).
+Framework errors share one envelope (`{ error, detail?, code? }`) and [one status table](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api#apierror-envelope--error_map--toapierror). Optimistic concurrency (`expectedVersion`), `Idempotency-Key` handling, SSE subscriptions (`sse: { channel }`), auth composition and deployment recipes are in the [auto-generated API guide](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api).
 
 ### `sse` — live state broadcast
 
@@ -348,12 +348,12 @@ For the recommended receiver-side idempotency contract that pairs with `webhook`
 
 ## Stability
 
-Public API governed by the [Act Stability Charter](../../STABILITY.md). Both subpaths (`@rotorsoft/act-http/webhook` and `@rotorsoft/act-http/sse`) are covered by the charter. The `sse` subpath hosts the surface formerly published as `@rotorsoft/act-sse`, now deprecated. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
+Public API governed by the [Act Stability Charter](../../STABILITY.md). Both subpaths (`@rotorsoft/act-http/webhook` and `@rotorsoft/act-http/sse`) are covered by the charter. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
 ## Related packages
 
 - **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — core framework. `webhook` composes with `.do(handler, { backoff })`; `BroadcastChannel` publishes from `app.do()` snapshots.
-- **[@rotorsoft/act-sse](https://www.npmjs.com/package/@rotorsoft/act-sse)** — predecessor of the `/sse` subpath here. Being deprecated; migrate to `@rotorsoft/act-http/sse`.
+- **[@rotorsoft/act-sse](https://www.npmjs.com/package/@rotorsoft/act-sse)** — predecessor of the `/sse` subpath here; its status is in the [deprecation policy](../../STABILITY.md#deprecation-policy).
 - **[@rotorsoft/act-patch](https://www.npmjs.com/package/@rotorsoft/act-patch)** — the immutable patch utility that powers the SSE state merge.
 - **[@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg)** / **[@rotorsoft/act-sqlite](https://www.npmjs.com/package/@rotorsoft/act-sqlite)** — store adapters. `webhook` reactions persist their watermarks through whichever store you've wired.
 

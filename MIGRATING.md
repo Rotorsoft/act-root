@@ -24,7 +24,7 @@ guide stays pinned next to the API reference it describes:
 
 | From → To | Guide | Highlights |
 |---|---|---|
-| → `1.x` | [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md) | First stable line. No breaking changes to migrate — the page documents the upgrade-within-major policy, how the docs are versioned, and proves this template end to end. |
+| → `1.x` | [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md) | First stable line. No breaking changes to migrate — the page gives the upgrade command and links the charter. |
 
 ## Writing a migration guide (the convention)
 

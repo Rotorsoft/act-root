@@ -13,7 +13,7 @@ title: Real-Time with SSE
 npm install @rotorsoft/act-http
 ```
 
-> **Migrating from `@rotorsoft/act-sse`?** That standalone package is deprecated on npm and no longer published from this repo — `@rotorsoft/act-http/sse` is the only home. The surface is identical; swap the import specifier and you're done. Versions already installed keep working. See the [1.x migration guide](../guides/migrating-to-1.x.md).
+> **Coming from `@rotorsoft/act-sse`?** Import from `@rotorsoft/act-http/sse` instead. That package's status is in the [deprecation policy](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#deprecation-policy).
 
 
 ### Clearing a field
