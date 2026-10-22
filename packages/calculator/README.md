@@ -185,7 +185,7 @@ Run with `pnpm test` from the root, or `pnpm -F calculator test` for this packag
 import { store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 
-store(new PostgresStore({ schema: "act", table: "calculator", leaseMillis: 30_000 }));
+store(new PostgresStore({ schema: "act", table: "calculator" }));
 await store().drop();
 await store().seed();
 ```

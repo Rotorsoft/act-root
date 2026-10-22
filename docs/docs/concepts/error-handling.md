@@ -55,7 +55,7 @@ try {
   await app.do("increment", target, { by: 1 });
 } catch (error) {
   if (error instanceof ConcurrencyError) {
-    console.error(`Stream ${error.stream}: expected v${error.expectedVersion}, found v${error.version}`);
+    console.error(`Stream ${error.stream}: expected v${error.expectedVersion}, found v${error.lastVersion}`);
   }
 }
 ```

@@ -161,22 +161,19 @@ clamped to [0.2, 0.8]
 
 If lagging streams produced more work this cycle, the next cycle leans toward lagging (fast-forward streams that have fallen behind). If leading streams produced more, lean toward leading (keep up with active streams). The clamp prevents starvation in either direction.
 
-### The `_armed` skip flag
+### Armed and idle controllers
 
-A naive drain would query the store on every call. For apps where most actions don't have reactions, that's wasted I/O. The framework keeps an `_armed` boolean on `DrainController`:
+A naive drain would query the store on every call. For apps where most actions don't have reactions, that's wasted I/O. So each `DrainController` is either armed or idle, and only an armed one drains. The next section lists what arms a controller.
 
-- `do()` sets `_armed = true` on the lanes whose reactions match a committed event (`event_to_lanes`)
-- `reset()` sets `_armed = true` on every lane when it reset any stream and the app has reactions
-- `correlate.init()` sets `_armed = true` on cold start (might have historical reactive events to process)
-- `drain()` clears `_armed` only when `claim()` returned no leases. A pass that leased streams is never idle, even if every one of them deferred, backed off or failed: more marked streams may be waiting behind the claim's budget. A pass whose store call fails stays armed and retries after the breaker's `cooldownMs` (never before its leases expire), so an idle app recovers without waiting for the breaker to open
+- `drain()` goes idle only when `claim()` returned no leases. A pass that leased streams is never idle, even if every one of them deferred, backed off or failed: more marked streams may be waiting behind the claim's budget. A pass whose store call fails stays armed and retries after the breaker's `cooldownMs` (never before its leases expire), so an idle app recovers without waiting for the breaker to open
 
-When `_armed` is false, `drain()` returns immediately without issuing `claim`. Three round trips saved per call (`claim`, `query`, `ack`). Cold start: armed by `correlate.init()` so historical events are picked up on first drain.
+When the controller is idle, `drain()` returns immediately without issuing `claim`. Three round trips saved per call (`claim`, `query`, `ack`).
 
 ### One controller per lane
 
 The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drain_all` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
 
-The `_armed` flag is per-controller. `do()` and a notification from another process arm only the lanes their events react on; `reset()`, `unblock()`, `restore()`, a `start_correlations` tick and the cold-start path arm every controller via `Act._arm_all`. A lane's `cycleMs` adds a timer that drains it at least that often, which only matters with `autoSettle: false` (see [configuration § `LaneConfig` fields](../concepts/configuration.md#laneconfig-fields)). Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
+Each controller is armed on its own. `do()` and a notification from another process arm only the lanes their events react on; `reset()`, `unblock()`, `restore()`, a `start_correlations` tick and cold start (through correlation's `on_init`, so events committed before the boot are picked up on the first drain) arm every controller via `Act._arm_all`. A lane's `cycleMs` adds a timer that drains it at least that often, which only matters with `autoSettle: false` (see [configuration § `LaneConfig` fields](../concepts/configuration.md#laneconfig-fields)). Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
 
 ## Settle — the catch-up loop
 

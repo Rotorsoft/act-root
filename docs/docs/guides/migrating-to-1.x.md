@@ -46,15 +46,7 @@ None. The `1.x` line introduces no breaking change to migrate away from — it i
 
 A deprecation is the charter's early-warning system: a surface keeps working, is marked deprecated in its release notes and doc-comment, and is removed no earlier than the next major — so anything you depend on survives at least until a major boundary you opt into.
 
-One such marker is live in the `1.x` line. `@rotorsoft/act-sse` has moved to `@rotorsoft/act-http/sse`; the old package is now a thin re-export shim that receives bug fixes only and is scheduled for removal in a future major. Migrating off it is a one-line import change, and there is no rush — it will keep working across the whole `1.x` line.
-
-```ts no-check
-// before — deprecated package
-import { broadcast } from "@rotorsoft/act-sse";
-
-// after — canonical home, identical surface
-import { broadcast } from "@rotorsoft/act-http/sse";
-```
+None are live in the `1.x` line right now. The one there was, the `@rotorsoft/act-sse` re-export shim, has been removed: its surface lives at `@rotorsoft/act-http/sse`, so an import from the old package moves to the new path with no other change.
 
 On the data plane, the `_v<n>` versioned-event-name convention is the parallel mechanism for evolving event shapes without ever rewriting history; it is not an API migration and is covered in [Event Schema Evolution](../architecture/event-schema-evolution.md).
 
