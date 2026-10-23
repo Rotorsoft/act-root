@@ -140,8 +140,8 @@ const resolve_url = (url: unknown): string => {
 };
 
 /**
- * Parse a JSON-encoded TEXT column, reviving ISO-date strings to `Date`
- * for cross-adapter payload parity.
+ * Parse a JSON-encoded TEXT column. Dates stay ISO strings: the framework
+ * revives them from the declared schema.
  * @internal
  */
 const parse_json = (raw: string): unknown => JSON.parse(raw);
@@ -350,9 +350,8 @@ export class SqliteStore implements Store {
     raw: unknown
   ): Promise<Record<string, unknown> | null> {
     if (raw == null) return null;
-    // Revive dates like `data`/`meta` do. Base64 ciphertext
-    // Dates are resolved from the declared schema by the framework, so the
-    // store returns exactly what it stored — plaintext or decrypted alike.
+    // The framework revives dates from the declared schema, so the store
+    // returns exactly what it stored, plaintext or decrypted alike.
     const parsed = parse_json(raw as string);
     if (this._resolve_pii_key && typeof parsed === "string") {
       return (await decrypt(parsed, this._resolve_pii_key)) as Record<

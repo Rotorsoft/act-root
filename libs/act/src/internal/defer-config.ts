@@ -12,9 +12,9 @@
  * same due-time, which is what makes a defer correct across restarts and
  * competing workers.
  *
- * Validation follows the config-schema standard (CLAUDE.md): an internal
- * `*OptionsSchema` const, a public inferred type, and a resolver. Slice 2
- * ships `after` / `at`; recurrence (`every`) extends this in Slice 3.
+ * Validation follows the config-schema standard
+ * (`.claude/rules/config-validation.md`): an internal `*OptionsSchema`
+ * const, a public inferred type, and a resolver.
  */
 
 import { z } from "zod";

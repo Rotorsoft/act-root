@@ -112,8 +112,8 @@ const OrBlockSchema = z
 
 /**
  * Zod schema for the declarative {@link AutoclosePolicy} bag.
- * Internal `const` per the config-validation-schema standard (CLAUDE.md
- * "Config-validation schemas") — the public surface is the inferred
+ * Internal `const` per the config-validation standard
+ * (`.claude/rules/config-validation.md`) — the public surface is the inferred
  * {@link AutoclosePolicy} type and the `.autocloses({...})` overload,
  * never this schema. `.strict()` rejects unknown keys so typos surface
  * at build instead of being silently ignored.

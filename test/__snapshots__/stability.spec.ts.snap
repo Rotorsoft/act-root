@@ -11138,6 +11138,24 @@ export declare function authenticated(extractor: ActorExtractor): MiddlewareHand
     Variables: ActMiddlewareVariables;
 }>;
 /**
+ * Structural shape of the Act surface this generator walks at
+ * runtime — the registry's action-name → owning-state map plus the
+ * \`do(...)\` dispatch. Letting TApp infer to the caller's concrete
+ * \`Act<...>\` against this structural bound keeps nested variance
+ * out of the signature and avoids \`any\` in either direction.
+ *
+ * @internal
+ */
+type ActSurface = {
+    readonly registry: {
+        actions: Record<string, {
+            readonly name: string;
+            readonly actions: Record<string, unknown>;
+        }>;
+    };
+    do(action: string, target: Target, payload: unknown): Promise<unknown>;
+};
+/**
  * Build a typed Hono REST surface from a built \`Act\` instance.
  *
  * Walks \`app.registry.actions\` once and emits one
@@ -11169,24 +11187,6 @@ export declare function authenticated(extractor: ActorExtractor): MiddlewareHand
  * @returns A Hono app covering every registered action under
  *   \`<basePath>/actions/<name>\`.
  */
-/**
- * Structural shape of the Act surface this generator walks at
- * runtime — the registry's action-name → owning-state map plus the
- * \`do(...)\` dispatch. Letting TApp infer to the caller's concrete
- * \`Act<...>\` against this structural bound keeps nested variance
- * out of the signature and avoids \`any\` in either direction.
- *
- * @internal
- */
-type ActSurface = {
-    readonly registry: {
-        actions: Record<string, {
-            readonly name: string;
-            readonly actions: Record<string, unknown>;
-        }>;
-    };
-    do(action: string, target: Target, payload: unknown): Promise<unknown>;
-};
 export declare function hono<TApp extends ActSurface = ActSurface>(app: TApp, options: HonoOptions): Hono<{
     Variables: ActMiddlewareVariables;
 }>;
@@ -11302,6 +11302,23 @@ export type OpenAPIComponents = {
     readonly responses: Record<string, OpenAPIResponse>;
 };
 /**
+ * Structural shape of the Act surface this emitter walks. Letting
+ * TApp infer to the caller's concrete \`Act<TSchemaReg, ...>\` instead
+ * of forcing it to fit a narrow framework-typed upper bound keeps
+ * the caller's variance from leaking — and avoids \`any\` in the
+ * signature.
+ *
+ * @internal
+ */
+type ActRegistryView = {
+    readonly registry: {
+        actions: Record<string, {
+            readonly name: string;
+            readonly actions: Record<string, unknown>;
+        }>;
+    };
+};
+/**
  * Build an OpenAPI 3.1 document describing a built \`Act\` instance's
  * action surface.
  *
@@ -11326,23 +11343,6 @@ export type OpenAPIComponents = {
  *   empty, or if any \`servers[].url\` fails URL parsing after
  *   \`{variable}\` substitution.
  */
-/**
- * Structural shape of the Act surface this emitter walks. Letting
- * TApp infer to the caller's concrete \`Act<TSchemaReg, ...>\` instead
- * of forcing it to fit a narrow framework-typed upper bound keeps
- * the caller's variance from leaking — and avoids \`any\` in the
- * signature.
- *
- * @internal
- */
-type ActRegistryView = {
-    readonly registry: {
-        actions: Record<string, {
-            readonly name: string;
-            readonly actions: Record<string, unknown>;
-        }>;
-    };
-};
 export declare function openapi<TApp extends ActRegistryView>(app: TApp, options: OpenAPIOptions): OpenAPIDocument;
 export {};
 //# sourceMappingURL=index.d.ts.map"
@@ -11453,7 +11453,7 @@ export declare function extractIdempotencyKey(headers: Record<string, string | s
  * Server-side helpers for the inbound HTTP role — the receiver that
  * sits on the other end of an \`@rotorsoft/act-http/webhook\` POST.
  *
- * The subpath hosts two primitives today:
+ * The subpath exports:
  *
  * - {@link extractIdempotencyKey} — case-insensitive
  *   \`Idempotency-Key\` parser; pair with \`IdempotencyStore.claim\`
@@ -11462,10 +11462,14 @@ export declare function extractIdempotencyKey(headers: Record<string, string | s
  *   verifier; pair with \`webhook({ secret })\` from
  *   \`@rotorsoft/act-http/webhook\` for authenticated, replay-resistant
  *   delivery.
+ * - {@link checkWebhook} — the framework-agnostic check for one request:
+ *   verify the signature, then extract and claim the key.
+ * - {@link receiver} — the recommended factory: a fluent builder for a
+ *   receiving server.
  *
- * The framework-agnostic middleware that wires these into request
- * handlers, plus per-framework adapters (tRPC / Express / Fastify /
- * Hono), lands in #744 (ACT-1116).
+ * Per-framework adapters live in their own subpaths
+ * (\`./receiver/express\`, \`./receiver/fastify\`, \`./receiver/hono\`,
+ * \`./receiver/trpc\`).
  *
  * Sibling subpaths in the same package:
  *
@@ -12344,44 +12348,6 @@ export type TrpcOptions<Ctx> = {
  */
 export declare function authenticated(extractor: ActorExtractor): AnyTRPCMiddlewareFunction;
 /**
- * Build a typed tRPC router from a built \`Act\` instance.
- *
- * Walks \`app.registry.actions\` once and emits one flat mutation per
- * action under \`router.<actionName>\`. The framework already enforces
- * no duplicate action names across states, so a flat tier reads
- * cleanly at the client and matches the hand-written router shape
- * adopters already have. Each mutation:
- *
- * 1. Runs the internal {@link authenticated} — \`options.actor\`
- *    resolves the {@link Actor} once and injects it onto
- *    \`ctx.actor\`.
- * 2. Resolves the target stream via \`options.stream(name, input, ctx)\`.
- * 3. (Optionally) claims the \`Idempotency-Key\` via
- *    {@link withIdempotency} — throws \`CONFLICT\` on a duplicate of a
- *    committed key, \`SERVICE_UNAVAILABLE\` on one still in flight.
- * 4. Calls \`app.do(name, { stream, actor: ctx.actor }, input)\`.
- * 5. Maps any thrown framework error onto a \`TRPCError\` via
- *    {@link toApiError}.
- *
- * The returned router's procedure inputs come straight from each
- * action's Zod schema; outputs are the framework's
- * \`Snapshot<TState, TEvents>[]\` shape. Strong typing flows
- * end-to-end via tRPC's normal inference path — the client sees
- * \`appRouter.Calculator.PressKey.mutate({ key: "5" })\` as a typed
- * call without any codegen.
- *
- * @template Ctx The tRPC context shape the host's runtime feeds in.
- *   Flows through \`actor\`, \`stream\`, and \`idempotency.keyFrom\` so
- *   the operator's existing context types just work. The internal
- *   middleware augments \`Ctx\` with \`{ actor: Actor }\` on the
- *   downstream procedure context.
- *
- * @param app A built \`Act\` orchestrator.
- * @param options Auth, stream, and (optional) idempotency seams.
- * @returns A tRPC router covering every registered action, grouped
- *   by owning state.
- */
-/**
  * Structural shape of the Act surface this generator walks at
  * runtime — the registry's action-name → owning-state map plus the
  * \`do(...)\` dispatch. Letting TApp infer to the caller's concrete
@@ -12419,6 +12385,44 @@ type GeneratedRouter<TApp> = TRPCBuiltRouter<AnyTRPCRootTypes, TApp extends {
 } ? {
     [K in keyof TActions]: AnyTRPCMutationProcedure;
 } : Record<string, AnyTRPCMutationProcedure>>;
+/**
+ * Build a typed tRPC router from a built \`Act\` instance.
+ *
+ * Walks \`app.registry.actions\` once and emits one flat mutation per
+ * action under \`router.<actionName>\`. The framework already enforces
+ * no duplicate action names across states, so a flat tier reads
+ * cleanly at the client and matches the hand-written router shape
+ * adopters already have. Each mutation:
+ *
+ * 1. Runs the internal {@link authenticated} — \`options.actor\`
+ *    resolves the {@link Actor} once and injects it onto
+ *    \`ctx.actor\`.
+ * 2. Resolves the target stream via \`options.stream(name, input, ctx)\`.
+ * 3. (Optionally) claims the \`Idempotency-Key\` via
+ *    {@link withIdempotency} — throws \`CONFLICT\` on a duplicate of a
+ *    committed key, \`SERVICE_UNAVAILABLE\` on one still in flight.
+ * 4. Calls \`app.do(name, { stream, actor: ctx.actor }, input)\`.
+ * 5. Maps any thrown framework error onto a \`TRPCError\` via
+ *    {@link toApiError}.
+ *
+ * The returned router's procedure inputs come straight from each
+ * action's Zod schema; outputs are the framework's
+ * \`Snapshot<TState, TEvents>[]\` shape. Strong typing flows
+ * end-to-end via tRPC's normal inference path — the client sees
+ * \`appRouter.Calculator.PressKey.mutate({ key: "5" })\` as a typed
+ * call without any codegen.
+ *
+ * @template Ctx The tRPC context shape the host's runtime feeds in.
+ *   Flows through \`actor\`, \`stream\`, and \`idempotency.keyFrom\` so
+ *   the operator's existing context types just work. The internal
+ *   middleware augments \`Ctx\` with \`{ actor: Actor }\` on the
+ *   downstream procedure context.
+ *
+ * @param app A built \`Act\` orchestrator.
+ * @param options Auth, stream, and (optional) idempotency seams.
+ * @returns A tRPC router covering every registered action, grouped
+ *   by owning state.
+ */
 export declare function trpc<Ctx extends object = object, TApp extends ActSurface = ActSurface>(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<TApp>;
 export {};
 //# sourceMappingURL=index.d.ts.map"

@@ -5,7 +5,7 @@
  * Server-side helpers for the inbound HTTP role — the receiver that
  * sits on the other end of an `@rotorsoft/act-http/webhook` POST.
  *
- * The subpath hosts two primitives today:
+ * The subpath exports:
  *
  * - {@link extractIdempotencyKey} — case-insensitive
  *   `Idempotency-Key` parser; pair with `IdempotencyStore.claim`
@@ -14,10 +14,14 @@
  *   verifier; pair with `webhook({ secret })` from
  *   `@rotorsoft/act-http/webhook` for authenticated, replay-resistant
  *   delivery.
+ * - {@link checkWebhook} — the framework-agnostic check for one request:
+ *   verify the signature, then extract and claim the key.
+ * - {@link receiver} — the recommended factory: a fluent builder for a
+ *   receiving server.
  *
- * The framework-agnostic middleware that wires these into request
- * handlers, plus per-framework adapters (tRPC / Express / Fastify /
- * Hono), lands in #744 (ACT-1116).
+ * Per-framework adapters live in their own subpaths
+ * (`./receiver/express`, `./receiver/fastify`, `./receiver/hono`,
+ * `./receiver/trpc`).
  *
  * Sibling subpaths in the same package:
  *

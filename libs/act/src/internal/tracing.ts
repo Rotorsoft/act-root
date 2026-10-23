@@ -4,9 +4,8 @@
  * Trace decorators wrap a bare implementation with `logger.trace(...)` calls
  * at well-defined moments — entry points for {@link "event-sourcing"} (`load`,
  * `snap`, `action`) and exit points for the {@link "drain"} pipeline (`claim`,
- * `fetch`, `ack`, `block`, `subscribe`). `action` carries both an entry log
- * and a post-commit log to preserve the diagnostic value of the historical
- * mid-function trace points.
+ * `fetch`, `ack`, `block`, `subscribe`). `action` logs both on entry and
+ * after its commit.
  *
  * Output styles:
  * - **Pretty mode** (`config().env !== "production"`) — event-sourcing logs

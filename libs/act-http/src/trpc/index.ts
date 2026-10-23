@@ -250,44 +250,6 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
 }
 
 /**
- * Build a typed tRPC router from a built `Act` instance.
- *
- * Walks `app.registry.actions` once and emits one flat mutation per
- * action under `router.<actionName>`. The framework already enforces
- * no duplicate action names across states, so a flat tier reads
- * cleanly at the client and matches the hand-written router shape
- * adopters already have. Each mutation:
- *
- * 1. Runs the internal {@link authenticated} — `options.actor`
- *    resolves the {@link Actor} once and injects it onto
- *    `ctx.actor`.
- * 2. Resolves the target stream via `options.stream(name, input, ctx)`.
- * 3. (Optionally) claims the `Idempotency-Key` via
- *    {@link withIdempotency} — throws `CONFLICT` on a duplicate of a
- *    committed key, `SERVICE_UNAVAILABLE` on one still in flight.
- * 4. Calls `app.do(name, { stream, actor: ctx.actor }, input)`.
- * 5. Maps any thrown framework error onto a `TRPCError` via
- *    {@link toApiError}.
- *
- * The returned router's procedure inputs come straight from each
- * action's Zod schema; outputs are the framework's
- * `Snapshot<TState, TEvents>[]` shape. Strong typing flows
- * end-to-end via tRPC's normal inference path — the client sees
- * `appRouter.Calculator.PressKey.mutate({ key: "5" })` as a typed
- * call without any codegen.
- *
- * @template Ctx The tRPC context shape the host's runtime feeds in.
- *   Flows through `actor`, `stream`, and `idempotency.keyFrom` so
- *   the operator's existing context types just work. The internal
- *   middleware augments `Ctx` with `{ actor: Actor }` on the
- *   downstream procedure context.
- *
- * @param app A built `Act` orchestrator.
- * @param options Auth, stream, and (optional) idempotency seams.
- * @returns A tRPC router covering every registered action, grouped
- *   by owning state.
- */
-/**
  * Structural shape of the Act surface this generator walks at
  * runtime — the registry's action-name → owning-state map plus the
  * `do(...)` dispatch. Letting TApp infer to the caller's concrete
@@ -329,6 +291,44 @@ type GeneratedRouter<TApp> = TRPCBuiltRouter<
     : Record<string, AnyTRPCMutationProcedure>
 >;
 
+/**
+ * Build a typed tRPC router from a built `Act` instance.
+ *
+ * Walks `app.registry.actions` once and emits one flat mutation per
+ * action under `router.<actionName>`. The framework already enforces
+ * no duplicate action names across states, so a flat tier reads
+ * cleanly at the client and matches the hand-written router shape
+ * adopters already have. Each mutation:
+ *
+ * 1. Runs the internal {@link authenticated} — `options.actor`
+ *    resolves the {@link Actor} once and injects it onto
+ *    `ctx.actor`.
+ * 2. Resolves the target stream via `options.stream(name, input, ctx)`.
+ * 3. (Optionally) claims the `Idempotency-Key` via
+ *    {@link withIdempotency} — throws `CONFLICT` on a duplicate of a
+ *    committed key, `SERVICE_UNAVAILABLE` on one still in flight.
+ * 4. Calls `app.do(name, { stream, actor: ctx.actor }, input)`.
+ * 5. Maps any thrown framework error onto a `TRPCError` via
+ *    {@link toApiError}.
+ *
+ * The returned router's procedure inputs come straight from each
+ * action's Zod schema; outputs are the framework's
+ * `Snapshot<TState, TEvents>[]` shape. Strong typing flows
+ * end-to-end via tRPC's normal inference path — the client sees
+ * `appRouter.Calculator.PressKey.mutate({ key: "5" })` as a typed
+ * call without any codegen.
+ *
+ * @template Ctx The tRPC context shape the host's runtime feeds in.
+ *   Flows through `actor`, `stream`, and `idempotency.keyFrom` so
+ *   the operator's existing context types just work. The internal
+ *   middleware augments `Ctx` with `{ actor: Actor }` on the
+ *   downstream procedure context.
+ *
+ * @param app A built `Act` orchestrator.
+ * @param options Auth, stream, and (optional) idempotency seams.
+ * @returns A tRPC router covering every registered action, grouped
+ *   by owning state.
+ */
 export function trpc<
   Ctx extends object = object,
   TApp extends ActSurface = ActSurface,
