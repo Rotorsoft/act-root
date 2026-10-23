@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.16](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.15...@rotorsoft/act-v1.33.16) (2026-10-23)
+
+
+### Bug Fixes
+
+* **act:** a live restore waits for correlate passes in flight ([#2072](https://github.com/Rotorsoft/act-root/issues/2072)) ([2b4e3d8](https://github.com/Rotorsoft/act-root/commit/2b4e3d8970dd781e62bcbbf211b0c30c2fdd2da8)), closes [#2057](https://github.com/Rotorsoft/act-root/issues/2057)
+
 # [@rotorsoft/act-v1.33.15](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.14...@rotorsoft/act-v1.33.15) (2026-10-23)
 
 # [@rotorsoft/act-v1.33.14](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.13...@rotorsoft/act-v1.33.14) (2026-10-22)
