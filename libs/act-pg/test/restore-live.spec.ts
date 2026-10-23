@@ -72,6 +72,7 @@ async function gated_source(gate: Promise<void>): Promise<EventSource> {
 describe("a restore into a live app on Postgres", () => {
   const run = async (scan_in_flight: boolean) => {
     const store = new HoldingStore({
+      port: 5431,
       schema: schema(scan_in_flight ? "restore_live" : "restore_idle"),
       table: "events",
     });
