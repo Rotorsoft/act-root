@@ -50,7 +50,7 @@
  * transports never sees two error shapes for the same framework
  * error.
  */
-import { type Actor, type Target, validate } from "@rotorsoft/act";
+import { type Actor, validate } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import {
   type AnyTRPCMiddlewareFunction,
@@ -61,7 +61,7 @@ import {
   TRPCError,
 } from "@trpc/server";
 import { z } from "zod";
-import { track_in_flight } from "../api/in-flight.js";
+import { type ActSurface, make_dispatch } from "../api/dispatch.js";
 import {
   type ActorExtractor,
   resolveSseConfig,
@@ -69,7 +69,6 @@ import {
   SseConnectionCounter,
   type SseOptions,
   toApiError,
-  withIdempotency,
 } from "../api/index.js";
 
 /**
@@ -250,30 +249,6 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
 }
 
 /**
- * Structural shape of the Act surface this generator walks at
- * runtime — the registry's action-name → owning-state map plus the
- * `do(...)` dispatch. Letting TApp infer to the caller's concrete
- * `Act<...>` against this structural bound (instead of forcing it
- * to fit a narrow framework-typed upper bound) keeps the variance
- * of nested types like `PatchHandler` from leaking — and avoids
- * `any` in the signature.
- *
- * @internal
- */
-type ActSurface = {
-  readonly registry: {
-    actions: Record<
-      string,
-      {
-        readonly name: string;
-        readonly actions: Record<string, unknown>;
-      }
-    >;
-  };
-  do(action: string, target: Target, payload: unknown): Promise<unknown>;
-};
-
-/**
  * Generated router type — one mutation procedure per action name in
  * `TApp`'s registry. Mapped over the concrete action keys so
  * `createTRPCReact<typeof router>()` sees specific procedure names
@@ -334,11 +309,7 @@ export function trpc<
   TApp extends ActSurface = ActSurface,
 >(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<TApp> {
   const t = initTRPC.context<Ctx>().create();
-  // Counts claims per key so a duplicate of a still-running action can be
-  // told apart from a duplicate of a committed one (see `track_in_flight`).
-  const tracker = options.idempotency
-    ? track_in_flight(options.idempotency.store)
-    : undefined;
+  const dispatch = make_dispatch<Ctx>(app, options, options.idempotency?.store);
 
   // Resolve the actor inline per mutation instead of via
   // `t.procedure.use(authenticated(...))`. The middleware path threads
@@ -403,47 +374,29 @@ export function trpc<
             input as never,
             action_schema as never
           );
-          const stream = await options.stream(action_name, validated, host_ctx);
-          const expected_version = options.expectedVersion
-            ? await options.expectedVersion(action_name, validated, host_ctx)
-            : undefined;
-          const target =
-            expected_version === undefined
-              ? { stream, actor }
-              : { stream, actor, expectedVersion: expected_version };
-
-          if (options.idempotency) {
-            const key = options.idempotency.keyFrom(host_ctx);
-            if (!key) {
-              throw new TRPCError({
-                code: "BAD_REQUEST",
-                message: "Idempotency-Key required",
-              });
-            }
-            const outcome = await withIdempotency(tracker!.store, key, () =>
-              app.do(action_name as never, target as never, input as never)
-            );
-            if (outcome.deduped && tracker!.in_flight(key)) {
-              throw new TRPCError({
-                code: "SERVICE_UNAVAILABLE",
-                message:
-                  "Idempotency-Key in flight; the original request has not finished, retry later",
-              });
-            }
-            if (outcome.deduped) {
-              throw new TRPCError({
-                code: "CONFLICT",
-                message:
-                  "Idempotency-Key already used; original result not cached",
-              });
-            }
-            return outcome.result;
-          }
-
-          return await app.do(
-            action_name as never,
-            target as never,
-            input as never
+          const outcome = await dispatch(
+            action_name,
+            validated,
+            input,
+            host_ctx,
+            actor,
+            () => options.idempotency?.keyFrom(host_ctx)
+          );
+          if (outcome.kind === "done") return outcome.result;
+          throw new TRPCError(
+            outcome.kind === "missing-key"
+              ? { code: "BAD_REQUEST", message: "Idempotency-Key required" }
+              : outcome.kind === "in-flight"
+                ? {
+                    code: "SERVICE_UNAVAILABLE",
+                    message:
+                      "Idempotency-Key in flight; the original request has not finished, retry later",
+                  }
+                : {
+                    code: "CONFLICT",
+                    message:
+                      "Idempotency-Key already used; original result not cached",
+                  }
           );
         } catch (err) {
           if (err instanceof TRPCError) throw err;
@@ -462,10 +415,9 @@ export function trpc<
       );
     const sse_config = resolveSseConfig(options.sse);
     const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
-    const state_names = new Set<string>();
-    for (const action of Object.values(app.registry.actions)) {
-      state_names.add(action.name);
-    }
+    const state_names = new Set(
+      Object.values(app.registry.actions).map((a) => a.name)
+    );
     const sse_handlers: Record<string, unknown> = {};
     for (const state_name of state_names) {
       sse_handlers[state_name] = t.procedure
