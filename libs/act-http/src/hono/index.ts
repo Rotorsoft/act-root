@@ -183,6 +183,28 @@ const default_key_from = (c: Context): string | undefined =>
   c.req.header("idempotency-key");
 
 /**
+ * Structural shape of the Act surface this generator walks at
+ * runtime — the registry's action-name → owning-state map plus the
+ * `do(...)` dispatch. Letting TApp infer to the caller's concrete
+ * `Act<...>` against this structural bound keeps nested variance
+ * out of the signature and avoids `any` in either direction.
+ *
+ * @internal
+ */
+type ActSurface = {
+  readonly registry: {
+    actions: Record<
+      string,
+      {
+        readonly name: string;
+        readonly actions: Record<string, unknown>;
+      }
+    >;
+  };
+  do(action: string, target: Target, payload: unknown): Promise<unknown>;
+};
+
+/**
  * Build a typed Hono REST surface from a built `Act` instance.
  *
  * Walks `app.registry.actions` once and emits one
@@ -214,28 +236,6 @@ const default_key_from = (c: Context): string | undefined =>
  * @returns A Hono app covering every registered action under
  *   `<basePath>/actions/<name>`.
  */
-/**
- * Structural shape of the Act surface this generator walks at
- * runtime — the registry's action-name → owning-state map plus the
- * `do(...)` dispatch. Letting TApp infer to the caller's concrete
- * `Act<...>` against this structural bound keeps nested variance
- * out of the signature and avoids `any` in either direction.
- *
- * @internal
- */
-type ActSurface = {
-  readonly registry: {
-    actions: Record<
-      string,
-      {
-        readonly name: string;
-        readonly actions: Record<string, unknown>;
-      }
-    >;
-  };
-  do(action: string, target: Target, payload: unknown): Promise<unknown>;
-};
-
 export function hono<TApp extends ActSurface = ActSurface>(
   app: TApp,
   options: HonoOptions

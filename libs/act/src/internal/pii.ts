@@ -9,13 +9,9 @@ import { REDACTED, SHREDDED } from "../types/schemas.js";
 
 /**
  * Split an emitted event's `data` into `data` (non-sensitive) + `pii`
- * (sensitive) using the field list precomputed at build time. Used by the
- * State's `_pii_split` decorator just before `Store.commit`.
- *
- * Single forward pass over `Object.keys(validated)` — same shape as the
- * spread-and-delete-free implementation in slice 3, just hoisted out of the
- * orchestrator hot path so it's only invoked when the State actually has a
- * sensitive event.
+ * (sensitive) using the field list precomputed at build time. Called by the
+ * state's `message` hook (`event-builder.ts`) on the way to `Store.commit`,
+ * and only for events that declare sensitive fields.
  */
 export function pii_split<TName, TData extends Record<string, unknown>>(
   emitted: { name: TName; data: TData },
@@ -57,11 +53,10 @@ function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
   const data = event.data as Record<string, unknown>;
-  // The external view NEVER carries the isolated `pii` sidecar — dropping it
-  // is the whole point of the gate. Keeping it (an earlier `...event` spread)
-  // leaked plaintext PII on every gated read surface (`load`, `query`,
-  // `query_array`) even while `data` was correctly redacted. Strip it
-  // once here; the plaintext lives in `data` only on the authorized path.
+  // The external view never carries the isolated `pii` sidecar: keeping it
+  // would leak plaintext on every gated read (`load`, `query`,
+  // `query_array`) even while `data` is redacted. The plaintext lives in
+  // `data` only on the authorized path.
   const { pii, ...rest } = event as Committed<TEvents, TKey> & {
     pii?: Record<string, unknown> | null;
   };
@@ -154,8 +149,8 @@ export function pii_strip<
   event: Committed<TEvents, TKey>,
   fields: readonly string[]
 ): Committed<TEvents, TKey> {
-  // Contract: `fields` is non-empty. `build_handle` / `build_handle_batch`
-  // filter on `fields.length > 0` before invocation.
+  // Contract: `fields` is non-empty. The event gate (`event-builder.ts`) and
+  // the projection fold (`projection-fold.ts`) call it only when it is.
   const data = event.data as Record<string, unknown>;
   const stripped: Record<string, unknown> = {};
   for (const k of Object.keys(data)) {

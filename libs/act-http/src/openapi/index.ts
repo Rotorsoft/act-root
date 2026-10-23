@@ -413,6 +413,27 @@ function build_operation(
 }
 
 /**
+ * Structural shape of the Act surface this emitter walks. Letting
+ * TApp infer to the caller's concrete `Act<TSchemaReg, ...>` instead
+ * of forcing it to fit a narrow framework-typed upper bound keeps
+ * the caller's variance from leaking — and avoids `any` in the
+ * signature.
+ *
+ * @internal
+ */
+type ActRegistryView = {
+  readonly registry: {
+    actions: Record<
+      string,
+      {
+        readonly name: string;
+        readonly actions: Record<string, unknown>;
+      }
+    >;
+  };
+};
+
+/**
  * Build an OpenAPI 3.1 document describing a built `Act` instance's
  * action surface.
  *
@@ -437,27 +458,6 @@ function build_operation(
  *   empty, or if any `servers[].url` fails URL parsing after
  *   `{variable}` substitution.
  */
-/**
- * Structural shape of the Act surface this emitter walks. Letting
- * TApp infer to the caller's concrete `Act<TSchemaReg, ...>` instead
- * of forcing it to fit a narrow framework-typed upper bound keeps
- * the caller's variance from leaking — and avoids `any` in the
- * signature.
- *
- * @internal
- */
-type ActRegistryView = {
-  readonly registry: {
-    actions: Record<
-      string,
-      {
-        readonly name: string;
-        readonly actions: Record<string, unknown>;
-      }
-    >;
-  };
-};
-
 export function openapi<TApp extends ActRegistryView>(
   app: TApp,
   options: OpenAPIOptions

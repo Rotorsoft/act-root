@@ -143,10 +143,10 @@ export class CloseLock {
 const SAFETY_PROBE_PAGE_SIZE = 1000;
 
 /**
- * Per-stream scan result: latest non-tombstone domain event metadata.
- * `last_event_name` is always defined — the scan filters tombstones in the
- * callback and queries without `with_snaps`, so any event reaching the
- * callback is a domain event whose name we capture alongside id/version.
+ * Per-stream scan result: the latest domain event's metadata. The scan
+ * reads `query_stats` heads with snapshots and tombstones excluded, so
+ * `last_event_name` is always a domain event's name; `resumed_guard` marks
+ * a stream whose real head is a tombstone from an interrupted close.
  */
 type StreamHead = {
   readonly max_id: number;
@@ -479,11 +479,8 @@ function source_matcher(): (
 async function scan_stream_heads(
   streams: string[]
 ): Promise<Map<string, StreamHead>> {
-  // query_stats returns the latest non-snap event per stream (heads-only
-  // cheap path, indexed). Streams whose latest non-snap event is a tombstone
-  // are filtered out in the loop — we don't want to re-tombstone an
-  // already-closed stream. Streams with no events (or only snap/tombstone
-  // events filtered out) are absent from the result map entirely.
+  // The latest non-snapshot event per stream (heads-only, indexed): a
+  // tombstone here marks a close that was interrupted after its guard.
   const stats = await store().query_stats(streams, {
     exclude: [SNAP_EVENT],
   });
