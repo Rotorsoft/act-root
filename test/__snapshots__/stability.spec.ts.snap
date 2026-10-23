@@ -448,6 +448,12 @@ export declare class Act<TSchemaReg extends SchemaRegister<TActions>, TEvents ex
      * adapter's {@link Store.restore} driver supplies the transaction
      * lifecycle and per-event insert.
      *
+     * Safe in a live process: restoring into this Act's own store waits
+     * for its correlate passes in flight, replaces the log, then restarts
+     * correlation and settles. A correlate pass that starts meanwhile
+     * reads nothing. Other processes on the same store keep their
+     * correlation state and must be restarted.
+     *
      * Throws if the adapter has no restore capability. Throws on the
      * first invalid event (negative version, malformed \`created\`) with
      * the running index in the message; atomic transaction rollback in
