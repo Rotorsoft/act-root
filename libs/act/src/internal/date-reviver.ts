@@ -1,21 +1,11 @@
 /**
  * Turning stored text back into `Date`s, driven by the declared schema.
  *
- * JSON has no date type, so a `Date` is stored as its ISO form and something
- * has to revive it on the way out. Which fields those are is a property of the
- * Zod schema, so working it out is a Zod concern rather than an event one —
- * this module knows nothing about events, states or PII. It takes a declared
- * schema and returns the schema that revives its dates, or `undefined` when
- * there are none to revive.
- *
- * Sits beside the other schema utilities rather than inside the event builder,
- * which composes it: `event_tags` asks for one reviver for an event's `data`
- * and another for the sensitive fields held in its `pii` sidecar. One function
- * is the whole interface — how a Zod schema is taken apart stays in here.
- *
- * The shape-based {@link dateReviver} in `utils.ts` is the predecessor this
- * replaced — it revived anything ISO-8601-looking, including fields declared
- * `z.string()`.
+ * JSON has no date type, so a `Date` is stored as its ISO form. Which fields
+ * to revive is a property of the Zod schema, so this module takes a schema
+ * and returns one that revives its dates (or `undefined` when there are
+ * none); it knows nothing about events. A field declared `z.string()` stays
+ * a string even when it looks like an ISO date.
  */
 
 import { z } from "zod";
