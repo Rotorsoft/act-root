@@ -13695,6 +13695,18 @@ export declare class PostgresStore implements Store {
     /** Caches the key on first use; rotating it takes a restart. */
     private readonly _resolve_pii_key;
     constructor(config?: Partial<Config>);
+    /**
+     * The \`pii\` column's text for a write: encrypted when \`pii_encryption\` is
+     * set, JSON either way (an encrypted value casts to a jsonb string), and
+     * \`null\` kept so \`forget_pii\` semantics hold.
+     */
+    private _encode_pii;
+    /**
+     * Decrypts a row's \`pii\` in place when it was stored encrypted (a jsonb
+     * string). Plaintext rows, including ones written before encryption was
+     * enabled, pass through, so mixed-data rollouts read cleanly.
+     */
+    private _decode_pii;
     /** A saturated pool fails here as a {@link StoreError} naming the operation. */
     private _client;
     dispose(): Promise<void>;
