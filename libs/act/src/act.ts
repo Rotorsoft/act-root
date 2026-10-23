@@ -1167,6 +1167,12 @@ export class Act<
    * adapter's {@link Store.restore} driver supplies the transaction
    * lifecycle and per-event insert.
    *
+   * Safe in a live process: restoring into this Act's own store waits
+   * for its correlate passes in flight, replaces the log, then restarts
+   * correlation and settles. A correlate pass that starts meanwhile
+   * reads nothing. Other processes on the same store keep their
+   * correlation state and must be restarted.
+   *
    * Throws if the adapter has no restore capability. Throws on the
    * first invalid event (negative version, malformed `created`) with
    * the running index in the message; atomic transaction rollback in
@@ -1217,16 +1223,18 @@ export class Act<
       let kept = 0;
       let migrated = 0;
       let dropped = { closed_streams: 0, snapshots: 0 };
-      await target.restore(async (callback) => {
-        const partial = await scan(source, opts, callback);
-        kept = partial.kept;
-        migrated = partial.migrated;
-        dropped = partial.dropped;
-      });
-      // Restoring into this app's own store replaced its log (new ids, no
-      // subscription rows): restart correlation from cold and arm the drain.
-      if (!sink) {
-        this._correlate.restart();
+      const run = () =>
+        target.restore(async (callback) => {
+          const partial = await scan(source, opts, callback);
+          kept = partial.kept;
+          migrated = partial.migrated;
+          dropped = partial.dropped;
+        });
+      if (sink) await run();
+      else {
+        // Restoring into this app's own store replaces its log (new ids, no
+        // subscription rows): restart correlation from cold and arm the drain.
+        await this._correlate.restart(run);
         this._wake();
       }
       return { kept, migrated, dropped, duration_ms: Date.now() - started };
