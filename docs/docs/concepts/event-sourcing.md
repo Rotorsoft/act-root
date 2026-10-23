@@ -379,6 +379,7 @@ await app.reset({ stream: "^proj-" });
 - **It preserves `created`** verbatim from the source — distinct from `commit`, which always stamps `now()`. Cross-adapter restores keep the original event timestamps.
 - **It renumbers `id`** densely (PG `RESTART IDENTITY`, SQLite `sqlite_sequence` reset, InMemory `0..N-1`). The framework rewrites `meta.causation.event.id` through a per-call `old → new` map so causation chains survive the renumber. Original ids never persist.
 - **It is not** a disaster-recovery primitive. `pg_dump` / `pg_restore` and SQLite file copies are still the right tool for backups you'll need to recover from in a hurry — they preserve every byte and run at the storage layer. `app.restore` is for content-level operations: cross-adapter migration, compaction, validated re-imports.
+- **It is** safe in the process that runs it: the restore waits for that app's correlate passes in flight, replaces the log, then restarts correlation from the restored log and settles its reactions. A correlate pass that starts while the restore runs (an explicit `app.correlate()` included) reads nothing and returns `{ subscribed: 0 }`. **Other processes** on the same store keep their correlation state and must be restarted, as the `Store.restore` port contract says.
 - **It is not** transparent to the cache. The cache is a separate port; restore does not call `cache().clear()`. After a destructive restore the cache holds entries that no longer match the rebuilt store. Clearing it is the caller's job.
 
 ### Source and sink
