@@ -3,6 +3,7 @@ import {
   ConcurrencyError,
   InMemoryCache,
   SNAP_EVENT,
+  sensitive,
   sleep,
   state,
   TOMBSTONE_EVENT,
@@ -15,7 +16,9 @@ import type {
   Lease,
   ScanOptions,
   ScanResult,
+  Schema,
   Schemas,
+  State,
   Store,
   StoreNotification,
   StreamPosition,
@@ -4547,6 +4550,228 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         expect(maxEventId).toBeGreaterThanOrEqual(0);
         expect(positions).toEqual([s]);
+      });
+    });
+
+    // JSON has no date type, so a serializing adapter stores a `Date` as an
+    // ISO string. The framework revives exactly the fields the schema
+    // declares `z.date()`: reading converts, it never validates.
+    describe("schema-driven dates on read", () => {
+      const actor = { id: "reader", name: "Reader" };
+      const reader = <T extends z.ZodRawShape>(shape: T) => {
+        const Happened = z.object(shape);
+        return state({ Reader: z.object({ n: z.number() }) })
+          .init(() => ({ n: 0 }))
+          .emits({ Happened })
+          .patch({ Happened: (_, s) => ({ n: s.n + 1 }) })
+          .on({ Do: Happened })
+          .emit((p) => ["Happened", p])
+          .build();
+      };
+      /** An app over a fresh instance; `read` returns the stream's first payload. */
+      const over = async <
+        TState extends Schema,
+        TEvents extends Schemas,
+        TActions extends Schemas,
+        TName extends string,
+      >(
+        S: State<TState, TEvents, TActions, TName>
+      ) => {
+        const fresh = await options.factory();
+        await fresh.seed();
+        const cache = new InMemoryCache();
+        const app = act()
+          .withState(S)
+          .build({ scoped: { store: fresh, cache } });
+        const stream = `dt-${uid()}`;
+        const read = async () =>
+          (await app.query_array({ stream, stream_exact: true }))[0]!
+            .data as Record<string, any>;
+        const done = async () => {
+          await app.shutdown();
+          await cache.dispose();
+          await fresh.dispose();
+        };
+        return { app, fresh, cache, stream, read, done };
+      };
+      const raw = { correlation: "c", causation: {} };
+
+      it("types z.date() and leaves an ISO-shaped z.string() alone, warm and cold", async () => {
+        const at = new Date("2026-01-01T00:00:00.000Z");
+        const label = "2026-06-06T00:00:00.000Z";
+        const S = reader({ at: z.date(), label: z.string() });
+        const t = await over(S);
+        try {
+          await t.app.do("Do", { stream: t.stream, actor }, { at, label });
+          const warm = await t.read();
+          await t.cache.clear();
+          const cold = await t.read();
+          for (const d of [warm, cold]) {
+            expect(d.at).toBeInstanceOf(Date);
+            expect(d.at.getTime()).toBe(at.getTime());
+            expect(d.label).toBe(label);
+          }
+        } finally {
+          await t.done();
+        }
+      });
+
+      it("revives a date through every wrapper the rebuild knows", async () => {
+        const S = reader({
+          a: z.date(),
+          b: z.date().default(new Date(0)),
+          t: z.tuple([z.date(), z.string()]),
+          td: z.tuple([z.string(), z.string()]),
+          r: z.date().readonly(),
+          c: z.date().catch(new Date(0)),
+          n: z.date().optional().nonoptional(),
+          p: z.date().prefault(new Date(0)),
+          u: z.union([z.date(), z.string()]),
+          l: z.array(z.date()),
+          m: z.record(z.string(), z.date()),
+          o: z.object({ deep: z.date() }),
+          x: z.date().nullable(),
+        });
+        const t = await over(S);
+        try {
+          const when = new Date("2022-01-01");
+          await t.app.do(
+            "Do",
+            { stream: t.stream, actor },
+            {
+              a: new Date("2020-01-01"),
+              b: new Date("2021-01-01"),
+              t: [when, "x"],
+              td: ["no", "dates"],
+              r: when,
+              c: when,
+              n: when,
+              p: when,
+              u: when,
+              l: [when],
+              m: { k: when },
+              o: { deep: when },
+              x: null,
+            }
+          );
+          const d = await t.read();
+          for (const key of ["a", "b", "r", "c", "n", "p", "u"])
+            expect(d[key], key).toBeInstanceOf(Date);
+          expect(d.t[0]).toBeInstanceOf(Date);
+          expect(d.t[1]).toBe("x");
+          expect(d.td).toEqual(["no", "dates"]);
+          expect(d.l[0]).toBeInstanceOf(Date);
+          expect(d.m.k).toBeInstanceOf(Date);
+          expect(d.o.deep).toBeInstanceOf(Date);
+          expect(d.x).toBeNull();
+        } finally {
+          await t.done();
+        }
+      });
+
+      it("revives dates in a payload that predates the declaration", async () => {
+        const S = reader({ at: z.date(), label: z.string() });
+        const t = await over(S);
+        try {
+          // written before `label` was added to the declaration
+          await t.fresh.commit(
+            t.stream,
+            [{ name: "Happened", data: { at: new Date("2020-01-01") } }],
+            raw,
+            -1
+          );
+          const d = await t.read();
+          expect(d.label).toBeUndefined();
+          expect(d.at).toBeInstanceOf(Date);
+        } finally {
+          await t.done();
+        }
+      });
+
+      it("hands back what is stored when a date field holds something else", async () => {
+        const S = reader({ at: z.date() });
+        const t = await over(S);
+        try {
+          await t.fresh.commit(
+            t.stream,
+            [{ name: "Happened", data: { at: "not a date" } }],
+            raw,
+            -1
+          );
+          expect((await t.read()).at).toBe("not a date");
+        } finally {
+          await t.done();
+        }
+      });
+
+      describe.skipIf(!caps.pii_isolation)("with sensitive fields", () => {
+        it("reads a redacted payload whose required sensitive field lives in pii", async () => {
+          const S = reader({ at: z.date(), email: sensitive(z.string()) });
+          const t = await over(S);
+          try {
+            const target = { stream: t.stream, actor };
+            await t.app.do("Do", target, { at: new Date(0), email: "u@x.io" });
+            const d = await t.read();
+            expect(d.at).toBeInstanceOf(Date);
+            expect(d.email).toBe("[REDACTED]");
+            expect((await t.app.load(S, t.stream)).state.n).toBe(1);
+            await t.app.do("Do", target, { at: new Date(1), email: "v@x.io" });
+          } finally {
+            await t.done();
+          }
+        });
+
+        it("keeps a redacted sensitive date's sentinel", async () => {
+          const S = reader({ at: z.date(), born: sensitive(z.date()) });
+          const t = await over(S);
+          try {
+            await t.app.do(
+              "Do",
+              { stream: t.stream, actor },
+              { at: new Date(0), born: new Date(1) }
+            );
+            const d = await t.read();
+            expect(d.at).toBeInstanceOf(Date);
+            expect(d.born).toBe("[REDACTED]");
+          } finally {
+            await t.done();
+          }
+        });
+
+        it("hands a disclosed sensitive date to the reducer as a Date", async () => {
+          const seen: Record<string, boolean> = {};
+          const Happened = z.object({
+            at: z.date(),
+            born: sensitive(z.date()),
+          });
+          const S = state({ Disclosed: z.object({ n: z.number() }) })
+            .init(() => ({ n: 0 }))
+            .emits({ Happened })
+            .patch({
+              Happened: ({ data }, s) => {
+                seen.at = data.at instanceof Date;
+                seen.born = data.born instanceof Date;
+                return { n: s.n + 1 };
+              },
+            })
+            .on({ Do: Happened })
+            .emit((p) => ["Happened", p])
+            .discloses(() => true)
+            .build();
+          const t = await over(S);
+          try {
+            await t.app.do(
+              "Do",
+              { stream: t.stream, actor },
+              { at: new Date(0), born: new Date(1) }
+            );
+            await t.cache.clear(); // fold cold, from the store
+            await t.app.load(S, { stream: t.stream, actor });
+            expect(seen).toEqual({ at: true, born: true });
+          } finally {
+            await t.done();
+          }
+        });
       });
     });
 
