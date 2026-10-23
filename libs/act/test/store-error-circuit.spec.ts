@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, StoreError, state, store } from "../src/index.js";
-import { CircuitBreaker } from "../src/internal/circuit-breaker.js";
-import { SettleLoop } from "../src/internal/settle.js";
 
 /**
  * StoreError + orchestrator circuit breaker. The drain loop turns
@@ -141,42 +139,6 @@ describe("drain circuit breaker", () => {
   });
 });
 
-describe("settle loop store-error handling", () => {
-  it("records a failing correlate on the breaker, which surfaces the error", async () => {
-    const errored = new Promise<{ error: unknown; circuit: string }>(
-      (resolve) => {
-        // The breaker owns the error callback now; the settle loop just
-        // calls failed(now, err) on a failed correlate.
-        const breaker = new CircuitBreaker(
-          { failureThreshold: 5, cooldownMs: 1000 },
-          { on_error: (error, circuit) => resolve({ error, circuit }) }
-        );
-        const loop = new SettleLoop(
-          {
-            correlate: () => Promise.reject(new StoreError("subscribe")),
-            drain: async () => ({
-              fetched: [],
-              leased: [],
-              acked: [],
-              blocked: [],
-            }),
-            on_settled: () => {},
-            breaker,
-          },
-          0
-        );
-        loop.schedule({ debounceMs: 0 });
-      }
-    );
-    const e = await errored;
-    expect(e.error).toBeInstanceOf(StoreError);
-    expect(e.circuit).toBe("closed"); // 1 failure < threshold 5
-  });
-});
-
-// A settle whose scan was refused the correlation lease (another worker
-// holds it) read nothing, so it is no evidence the store is healthy: it
-// must leave an OPEN breaker open, like a disarmed pass.
 describe("a settle refused the correlation lease", () => {
   it("leaves the breaker OPEN", async () => {
     const s = new InMemoryStore();

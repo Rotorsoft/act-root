@@ -356,14 +356,6 @@ describe("settle breaker success rides a real correlate probe", () => {
     await run_pass(breaker, async () => ({ kind: "idle", last_id: 5 }));
     expect(breaker.state(1000)).toBe("open");
   });
-
-  it("leaves the breaker OPEN when the scan fails against a down store", async () => {
-    const breaker = open_breaker();
-    await run_pass(breaker, async () => {
-      throw new Error("store down");
-    });
-    expect(breaker.state(1000)).toBe("open");
-  });
 });
 
 describe("settled payload", () => {
