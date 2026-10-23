@@ -49,7 +49,7 @@
  */
 import type { MiddlewareHandler } from "hono";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
-import { make_finalizers } from "../finalize.js";
+import { make_idempotency } from "../finalize.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
@@ -86,28 +86,19 @@ export function webhookMiddleware(
     if (!result.ok) {
       return c.json({ error: result.reason }, result.status);
     }
-    const { commit, release } = make_finalizers(
-      options.store,
-      result.key,
-      result.deduped
-    );
-    c.set("idempotency", {
-      key: result.key,
-      deduped: result.deduped,
-      commit,
-      release,
-    });
+    const idempotency = make_idempotency(options.store, result);
+    c.set("idempotency", idempotency);
     try {
       await next();
     } catch (err) {
-      await release();
+      await idempotency.release();
       throw err;
     }
     // Commit only a genuine success (2xx/3xx); release on any 4xx/5xx so a
     // failed delivery's corrected same-key retry re-processes instead of being
     // deduped into a silent success (#1364).
-    if (c.res.status >= 400) await release();
-    else await commit();
+    if (c.res.status >= 400) await idempotency.release();
+    else await idempotency.commit();
   };
 }
 

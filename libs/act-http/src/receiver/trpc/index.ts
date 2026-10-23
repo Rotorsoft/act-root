@@ -47,7 +47,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { type CheckWebhookOptions, checkWebhook } from "../check.js";
-import { make_finalizers } from "../finalize.js";
+import { make_idempotency } from "../finalize.js";
 
 /**
  * Build a tRPC middleware that verifies the request signature (when
@@ -83,28 +83,19 @@ export function webhookMiddleware(options: CheckWebhookOptions): any {
         message: result.reason,
       });
     }
-    const { commit, release } = make_finalizers(
-      options.store,
-      result.key,
-      result.deduped
-    );
+    const idempotency = make_idempotency(options.store, result);
     let outcome: unknown;
     try {
       outcome = await opts.next({
         ctx: {
           ...opts.ctx,
-          idempotency: {
-            key: result.key,
-            deduped: result.deduped,
-            commit,
-            release,
-          },
+          idempotency,
         },
       });
     } catch (err) {
       // Resolver threw — release the tentative claim so a retry
       // re-processes instead of being deduped into a silent success.
-      await release();
+      await idempotency.release();
       throw err;
     }
     // tRPC middleware results carry `{ ok: boolean }`; an `ok: false`
@@ -115,9 +106,9 @@ export function webhookMiddleware(options: CheckWebhookOptions): any {
       "ok" in outcome &&
       (outcome as { ok: unknown }).ok === false
     ) {
-      await release();
+      await idempotency.release();
     } else {
-      await commit();
+      await idempotency.commit();
     }
     return outcome;
   };
