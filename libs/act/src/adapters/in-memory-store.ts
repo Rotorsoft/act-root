@@ -218,6 +218,19 @@ class InMemoryStream {
 }
 
 /**
+ * Tests a name against a stream or source filter: exact, or a regex
+ * compiled once.
+ */
+const name_test = (
+  pattern: string,
+  exact?: boolean
+): ((name: string) => boolean) => {
+  if (exact) return (name) => name === pattern;
+  const re = new RegExp(pattern);
+  return (name) => re.test(name);
+};
+
+/**
  * In-memory event store: the default when no other store is injected.
  * For development, tests and examples; all data is lost when the process
  * exits. Use {@link PostgresStore} in production.
@@ -321,27 +334,25 @@ export class InMemoryStore implements Store {
     this._streams = new Map();
   }
 
-  private in_query<E extends Schemas>(
-    query: Query,
-    e: Committed<E, keyof E>
-  ): boolean {
-    if (query.stream && !this._stream_matches(query.stream, query, e.stream))
-      return false;
-    if (query.names && !query.names.includes(e.name as string)) return false;
-    if (query.correlation && e.meta?.correlation !== query.correlation)
-      return false;
-    if (e.name === SNAP_EVENT && !query.with_snaps) return false;
-    // `created` is not monotonic with `id` (restore keeps it), so time
-    // bounds filter; they never end the scan.
-    if (query.created_after && e.created <= query.created_after) return false;
-    if (query.created_before && e.created >= query.created_before) return false;
-    return true;
-  }
-
-  private _stream_matches(pattern: string, query: Query, stream: string) {
-    return query.stream_exact
-      ? stream === pattern
-      : RegExp(pattern).test(stream);
+  private _in_query(
+    query: Query
+  ): (e: Committed<Schemas, keyof Schemas>) => boolean {
+    const stream_ok = query.stream
+      ? name_test(query.stream, query.stream_exact)
+      : undefined;
+    return (e) => {
+      if (stream_ok && !stream_ok(e.stream)) return false;
+      if (query.names && !query.names.includes(e.name as string)) return false;
+      if (query.correlation && e.meta?.correlation !== query.correlation)
+        return false;
+      if (e.name === SNAP_EVENT && !query.with_snaps) return false;
+      // `created` is not monotonic with `id` (restore keeps it), so time
+      // bounds filter; they never end the scan.
+      if (query.created_after && e.created <= query.created_after) return false;
+      if (query.created_before && e.created >= query.created_before)
+        return false;
+      return true;
+    };
   }
 
   /** Index of the stream's latest snapshot, or -1; an explicit `after` wins. */
@@ -374,10 +385,11 @@ export class InMemoryStore implements Store {
         ? this._first_index_after(query.before - 1)
         : this._events.length;
     const with_pii = query?.with_pii !== false;
+    const in_query = this._in_query(query ?? {});
     let count = 0;
     for (let k = 0; k < hi - lo; k++) {
       const e = this._events[query?.backward ? hi - 1 - k : lo + k];
-      if (!this.in_query(query ?? {}, e)) continue;
+      if (!in_query(e)) continue;
       await Promise.resolve(
         callback(this._with_pii(e as Committed<E, keyof E>, with_pii))
       );
@@ -591,32 +603,18 @@ export class InMemoryStore implements Store {
   private _filter_predicate(
     filter: StreamFilter
   ): (s: InMemoryStream) => boolean {
-    const stream_re =
-      filter.stream !== undefined && !filter.stream_exact
-        ? new RegExp(filter.stream)
+    const stream_ok =
+      filter.stream !== undefined
+        ? name_test(filter.stream, filter.stream_exact)
         : undefined;
-    const source_re =
-      filter.source !== undefined && !filter.source_exact
-        ? new RegExp(filter.source)
+    const source_ok =
+      filter.source !== undefined
+        ? name_test(filter.source, filter.source_exact)
         : undefined;
     return (s) => {
-      if (filter.stream !== undefined) {
-        if (
-          filter.stream_exact
-            ? s.stream !== filter.stream
-            : !stream_re!.test(s.stream)
-        )
-          return false;
-      }
-      if (filter.source !== undefined) {
-        if (s.source === undefined) return false;
-        if (
-          filter.source_exact
-            ? s.source !== filter.source
-            : !source_re!.test(s.source)
-        )
-          return false;
-      }
+      if (stream_ok && !stream_ok(s.stream)) return false;
+      if (source_ok && (s.source === undefined || !source_ok(s.source)))
+        return false;
       if (filter.blocked !== undefined && s.blocked !== filter.blocked)
         return false;
       if (filter.lane !== undefined && s.lane !== filter.lane) return false;
@@ -722,25 +720,18 @@ export class InMemoryStore implements Store {
     const limit = options?.limit;
 
     const array_targets = Array.isArray(input) ? new Set(input) : null;
-    const filter = Array.isArray(input) ? null : input;
-    const stream_re =
-      filter?.stream !== undefined && !filter.stream_exact
-        ? new RegExp(filter.stream)
+    const stream_ok =
+      !Array.isArray(input) && input.stream !== undefined
+        ? name_test(input.stream, input.stream_exact)
         : undefined;
 
     const scope_cache = new Map<string, boolean>();
     const in_scope = (stream: string): boolean => {
       const cached = scope_cache.get(stream);
       if (cached !== undefined) return cached;
-      let ok = true;
-      if (array_targets) {
-        ok = array_targets.has(stream);
-      } else if (filter?.stream !== undefined) {
-        ok = filter.stream_exact
-          ? stream === filter.stream
-          : // stream_re set when stream is regex
-            stream_re!.test(stream);
-      }
+      const ok = array_targets
+        ? array_targets.has(stream)
+        : (stream_ok?.(stream) ?? true);
       scope_cache.set(stream, ok);
       return ok;
     };
