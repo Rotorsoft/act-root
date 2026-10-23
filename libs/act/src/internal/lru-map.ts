@@ -1,13 +1,13 @@
 /**
- * Tiny bounded LRU map / set built on insertion-ordered `Map`. Used to cap
- * memory in long-running orchestrators that mint large numbers of keys —
- * notably:
+ * Tiny bounded LRU map built on insertion-ordered `Map`. Caps memory in
+ * long-running orchestrators that mint large numbers of keys:
  *
  * - {@link InMemoryCache}: stream → state checkpoint
- * - `Act._subscribed_streams`: stream → presence (LruSet)
+ * - correlate's dynamic subscriptions (stream → priority and lane) and its
+ *   compiled source patterns
  *
  * Apps with millions of dynamic streams (one target per aggregate) can't
- * afford an unbounded `Set<string>` — eviction is required.
+ * afford an unbounded map: eviction is required.
  */
 
 /**
@@ -56,38 +56,5 @@ export class LruMap<K, V> {
 
   get size(): number {
     return this._entries.size;
-  }
-}
-
-/**
- * Bounded LRU set built on top of {@link LruMap}. `has()` does not promote;
- * `add()` does (re-inserting if already present, evicting the oldest at
- * capacity).
- */
-export class LruSet<T> {
-  private readonly _map: LruMap<T, true>;
-
-  constructor(maxSize: number) {
-    this._map = new LruMap(maxSize);
-  }
-
-  has(value: T): boolean {
-    return this._map.has(value);
-  }
-
-  add(value: T): void {
-    this._map.set(value, true);
-  }
-
-  delete(value: T): boolean {
-    return this._map.delete(value);
-  }
-
-  clear(): void {
-    this._map.clear();
-  }
-
-  get size(): number {
-    return this._map.size;
   }
 }
