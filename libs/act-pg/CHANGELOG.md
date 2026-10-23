@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.21.4](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.21.3...@rotorsoft/act-pg-v1.21.4) (2026-10-23)
+
+
+### Bug Fixes
+
+* **act:** a live restore waits for correlate passes in flight ([#2072](https://github.com/Rotorsoft/act-root/issues/2072)) ([2b4e3d8](https://github.com/Rotorsoft/act-root/commit/2b4e3d8970dd781e62bcbbf211b0c30c2fdd2da8)), closes [#2057](https://github.com/Rotorsoft/act-root/issues/2057)
+
 # [@rotorsoft/act-pg-v1.21.3](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.21.2...@rotorsoft/act-pg-v1.21.3) (2026-10-21)
 
 
