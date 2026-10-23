@@ -45,23 +45,9 @@ export type CloseCycleDeps = {
    * it, tests set a small value to exercise the multi-page path.
    */
   readonly probe_page_size?: number;
-  /**
-   * Advance correlation to at least `until` (an event id) and return how
-   * far it actually got.
-   *
-   * The safety probe can only judge events correlate has resolved (an
-   * uncorrelated event has raised no mark and may not even have created its
-   * subscription yet). An autoclose fires from its own, often uncorrelated,
-   * trigger, so the cycle correlates the tail first; anything still above
-   * the cursor is held back as pending.
-   */
+  /** See {@link catch_up_correlation}. */
   readonly catch_up_correlation: (until: number) => Promise<number>;
-  /**
-   * Per-stream critical section, so two closers of one stream (a manual
-   * close has no drain lease to exclude an autoclose) never archive the same
-   * prefix, and a second full closer never mistakes the first one's
-   * tombstone for an interrupted close. Identity when run in isolation.
-   */
+  /** See {@link CloseLock}; identity when run in isolation. */
   readonly with_stream_lock?: <T>(
     stream: string,
     work: () => Promise<T>
@@ -87,7 +73,9 @@ const CLOSE_CATCH_UP_PASSES = 20;
 /**
  * Advance correlation until the read cursor reaches `until`, and report
  * where it landed. The safety probe cannot judge a subscription's pending
- * work over events correlate has not resolved yet.
+ * work over events correlate has not resolved yet, and an autoclose often
+ * fires from an uncorrelated trigger; anything still above the cursor is
+ * held back as pending.
  *
  * Stops as soon as a pass makes no progress (the log has no more to give),
  * and after {@link CLOSE_CATCH_UP_PASSES} windows.
@@ -113,8 +101,10 @@ export async function catch_up_correlation(
 
 /**
  * Per-stream serialization for close critical sections: two closers of the
- * same stream never prune or archive concurrently, while different streams
- * proceed in parallel. One instance per Act.
+ * same stream never prune or archive concurrently (a manual close has no
+ * drain lease to exclude an autoclose), and a second full closer never
+ * mistakes the first one's tombstone for an interrupted close. Different
+ * streams proceed in parallel. One instance per Act.
  */
 export class CloseLock {
   private readonly _tails = new Map<string, Promise<unknown>>();

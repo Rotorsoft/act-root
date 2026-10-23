@@ -190,10 +190,13 @@ export class CorrelateCycle<
   private _raised = 1;
   private _lowered = 0;
   /**
-   * Bumped by a release (shutdown) and a restart (restore), so a scan or
-   * lease reply that was out across one writes nothing.
+   * Bumped by a release (shutdown), so a scan or lease reply that was out
+   * across one writes nothing.
    */
   private _epoch = 0;
+  /** Passes in flight: a restore waits for them, and refuses new ones. */
+  private readonly _passes = new Set<Promise<CorrelatePass>>();
+  private _restoring = false;
   private _init_promise: Promise<void> | undefined;
   // Bounded by `maxSubscribedStreams`; static records live apart so eviction
   // never drops their +Infinity floor.
@@ -265,14 +268,22 @@ export class CorrelateCycle<
     await this._on_init?.();
   }
 
-  /** After `restore` replaced the log: forget everything and cold-start again. */
-  restart(): void {
+  /**
+   * Replace the log with no pass in flight, then cold-start: a pass that
+   * read the old log writes before the restore, never into the new one.
+   */
+  async restart(restore: () => Promise<void>): Promise<void> {
+    this._restoring = true;
+    try {
+      await Promise.allSettled(this._passes);
+      await restore();
+    } finally {
+      this._restoring = false;
+    }
     this._init_promise = undefined;
     this._checkpoint = -1;
     this._dynamic_subscriptions.clear();
     this._static_subscriptions.clear();
-    this._raised++;
-    this._epoch++;
   }
 
   /** Forget dynamic targets whose rows a full close deleted, so they re-subscribe. */
@@ -304,6 +315,17 @@ export class CorrelateCycle<
      */
     lease = false
   ): Promise<CorrelatePass> {
+    if (this._restoring) return { kind: "idle", last_id: this._checkpoint };
+    const pass = this._scan(query, lease);
+    this._passes.add(pass);
+    try {
+      return await pass;
+    } finally {
+      this._passes.delete(pass);
+    }
+  }
+
+  private async _scan(query: Query, lease: boolean): Promise<CorrelatePass> {
     await this._init();
     const epoch = this._epoch;
     const idle = (): CorrelatePass => ({
@@ -430,9 +452,8 @@ export class CorrelateCycle<
     if (this._declared_lanes.size > 1) await this._recall(correlated);
     const read = last_id > after;
 
-    // Released or restarted while the scan was out: what it read belongs to
-    // a lease this worker gave up, or to the log a restore replaced. Writing
-    // it would hand back the lease, or mark the restored log with old ids.
+    // Released while the scan was out: what it read belongs to a lease this
+    // worker gave up, and writing it would take the lease back.
     if (this._epoch !== epoch) return idle();
 
     // Only targets with a mark to raise or priority/lane to register.

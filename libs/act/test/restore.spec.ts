@@ -2,11 +2,14 @@ import {
   act,
   type Committed,
   type EventSource,
+  InMemoryCache,
   InMemoryStore,
   type Query,
   type ScanOptions,
   type Schemas,
   type Store,
+  type SubscribeInput,
+  sleep,
   state,
   ZodEmpty,
 } from "@rotorsoft/act";
@@ -832,8 +835,11 @@ describe("restore into a store that already correlated", () => {
     });
     const in_flight = app.correlate();
     await scanning;
-    await app.restore(await backup(), {});
+    // The restore starts while the scan's reply is still out, and waits
+    // for that pass before it replaces the log.
+    const restoring = app.restore(await backup(), {});
     release();
+    await restoring;
     await in_flight;
     for (let i = 0; i < 4; i++) {
       await app.correlate();
@@ -842,6 +848,193 @@ describe("restore into a store that already correlated", () => {
     await done();
     // only the 3 restored events, the 10 before were replaced
     expect(seen).toBe(3);
+  });
+
+  /** A backup of `n` events, one stream each. */
+  async function backup_of(n: number, src = new InMemoryStore()) {
+    for (let i = 0; i < n; i++)
+      await src.commit(`restored-${i}`, [{ name: "Ticked", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+    return src;
+  }
+
+  /** A gate a test opens by hand, and a signal that something reached it. */
+  function gate() {
+    let reached: () => void = () => {};
+    let open: () => void = () => {};
+    const at = new Promise<void>((r) => {
+      reached = r;
+    });
+    const opened = new Promise<void>((r) => {
+      open = r;
+    });
+    return { at, reached, opened, open };
+  }
+
+  it("delivers restored events when the scan's last write lands after the restore starts", async () => {
+    let seen = 0;
+    const g = gate();
+    let held = false;
+    // Holds the scan's mark write (sent before the restore) until released.
+    class HoldingWriteStore extends InMemoryStore {
+      override async subscribe(
+        streams: SubscribeInput[],
+        correlated_at?: number,
+        correlator?: { key: string; by: string; millis: number }
+      ) {
+        if (!held && correlated_at !== undefined && streams.length > 0) {
+          held = true;
+          g.reached();
+          await g.opened;
+        }
+        return super.subscribe(streams, correlated_at, correlator);
+      }
+    }
+    const { app, dispose: done } = await sandbox(
+      act()
+        .withState(Tick)
+        .on("Ticked")
+        .do(async function count() {
+          seen++;
+        })
+        .to((e) => ({ target: `count-${e.stream}` })),
+      {
+        store: () => new HoldingWriteStore(),
+        actOptions: { autoSettle: false },
+      }
+    );
+    for (let i = 0; i < 10; i++)
+      await app.do("tick", { stream: "before", actor: who }, {});
+    const in_flight = app.correlate();
+    await g.at;
+    const restoring = app.restore(await backup(), {});
+    g.open();
+    await restoring;
+    await in_flight;
+    for (let i = 0; i < 4; i++) {
+      await app.correlate();
+      await app.drain();
+    }
+    await done();
+    expect(seen).toBe(3);
+  });
+
+  it("a correlate pass that starts during the restore reads nothing, and loses nothing", async () => {
+    let seen = 0;
+    const { app, dispose: done } = await sandbox(
+      act()
+        .withState(Tick)
+        .on("Ticked")
+        .do(async function count() {
+          seen++;
+        })
+        .to((e) => ({ target: `count-${e.stream}` })),
+      { actOptions: { autoSettle: false } }
+    );
+    for (let i = 0; i < 10; i++)
+      await app.do("tick", { stream: "before", actor: who }, {});
+    await app.correlate();
+    await app.drain();
+    seen = 0;
+    // Pauses the restore after 15 of its 20 events.
+    const g = gate();
+    class GatedSource extends InMemoryStore {
+      gated = false;
+      override async query<E extends Schemas>(
+        callback: (event: Committed<E, keyof E>) => void,
+        query?: Query
+      ) {
+        let n = 0;
+        return super.query<E>(async (event) => {
+          if (this.gated && ++n === 15) {
+            g.reached();
+            await g.opened;
+          }
+          callback(event);
+        }, query);
+      }
+    }
+    const source = (await backup_of(20, new GatedSource())) as GatedSource;
+    source.gated = true;
+    const restoring = app.restore(source, {});
+    await g.at;
+    expect(await app.correlate()).toEqual({ subscribed: 0, last_id: 9 });
+    g.open();
+    await restoring;
+    for (let i = 0; i < 6; i++) {
+      await app.correlate();
+      await app.drain();
+    }
+    await done();
+    expect(seen).toBe(20);
+  });
+
+  it("delivers restored events when the restore lands during correlate's startup", async () => {
+    // A process boots on a store another one correlated up to id 9, and the
+    // restore lands while its startup read is still out.
+    let seen = 0;
+    const g = gate();
+    let hold = false;
+    class HoldingInitStore extends InMemoryStore {
+      override async subscribe(
+        streams: SubscribeInput[],
+        correlated_at?: number,
+        correlator?: { key: string; by: string; millis: number }
+      ) {
+        const result = await super.subscribe(
+          streams,
+          correlated_at,
+          correlator
+        );
+        if (hold && correlated_at === undefined && correlator === undefined) {
+          hold = false;
+          g.reached();
+          await g.opened;
+        }
+        return result;
+      }
+    }
+    const s = new HoldingInitStore();
+    await s.seed();
+    const build = () =>
+      act()
+        .withState(Tick)
+        .on("Ticked")
+        .do(async function count() {
+          seen++;
+        })
+        .to((e) => ({ target: `count-${e.stream}` }))
+        .build({
+          scoped: { store: s, cache: new InMemoryCache() },
+          autoSettle: false,
+        });
+    const first = build();
+    for (let i = 0; i < 10; i++)
+      await first.do("tick", { stream: "before", actor: who }, {});
+    await first.correlate();
+    await first.drain();
+    await first.shutdown();
+    seen = 0;
+
+    const app = build();
+    hold = true;
+    const in_flight = app.correlate();
+    await g.at;
+    const restoring = app.restore(await backup_of(20), {});
+    // Release the startup read only once the restore had its chance to
+    // finish: one that doesn't wait for the pass completes first.
+    await Promise.race([restoring, sleep(50)]);
+    g.open();
+    await restoring;
+    await in_flight;
+    for (let i = 0; i < 6; i++) {
+      await app.correlate();
+      await app.drain();
+    }
+    await app.shutdown();
+    expect(seen).toBe(20);
   });
 
   it("settles the restored events' reactions with no settle call", async () => {

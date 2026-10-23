@@ -1,4 +1,4 @@
-import { LruMap, LruSet } from "../src/internal/lru-map.js";
+import { LruMap } from "../src/internal/lru-map.js";
 
 describe("LruMap", () => {
   it("returns undefined for missing keys", () => {
@@ -68,39 +68,5 @@ describe("LruMap", () => {
     expect(m.size).toBe(1);
     m.clear();
     expect(m.size).toBe(0);
-  });
-});
-
-describe("LruSet", () => {
-  it("tracks presence with bounded capacity", () => {
-    const s = new LruSet<string>(2);
-    s.add("a");
-    s.add("b");
-    s.add("c"); // evicts "a"
-    expect(s.has("a")).toBe(false);
-    expect(s.has("b")).toBe(true);
-    expect(s.has("c")).toBe(true);
-    expect(s.size).toBe(2);
-  });
-
-  it("re-adding promotes the entry", () => {
-    const s = new LruSet<string>(2);
-    s.add("a");
-    s.add("b");
-    s.add("a"); // promote a; b is oldest
-    s.add("c"); // evicts b
-    expect(s.has("a")).toBe(true);
-    expect(s.has("b")).toBe(false);
-    expect(s.has("c")).toBe(true);
-  });
-
-  it("supports delete and clear", () => {
-    const s = new LruSet<string>(3);
-    s.add("a");
-    s.add("b");
-    expect(s.delete("a")).toBe(true);
-    expect(s.has("a")).toBe(false);
-    s.clear();
-    expect(s.size).toBe(0);
   });
 });

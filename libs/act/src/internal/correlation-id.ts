@@ -1,13 +1,6 @@
 /**
- * Correlation-id generator and the default implementation.
- *
- * The default produces a readable, time-monotonic-within-window, lowercase
- * id like `coun-incr-lwxk9p3a` — short enough to scan in logs, structured
- * enough to identify the originating state/action, and well-distributed
- * enough that competing-consumer workers don't collide.
- *
- * Apps override via {@link ActOptions.correlator} to plug in any scheme
- * (tenant-prefixed, trace-id-propagated, DB-sequence-backed, etc.).
+ * The default correlation-id generator. Apps plug in their own scheme
+ * through {@link ActOptions.correlator}.
  */
 
 import { randomInt } from "node:crypto";

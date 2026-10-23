@@ -25,17 +25,11 @@ import { merge_drains } from "./drain-cycle.js";
  * independently testable.
  */
 export type SettleDeps<TEvents extends Schemas> = {
-  /** Scans from its own checkpoint; `read` is true when it read events. */
+  /** Scans from correlation's own checkpoint. */
   readonly correlate: (query: Query) => Promise<CorrelatePass>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
-  /**
-   * Shared orchestrator circuit breaker. The settle loop's
-   * `correlate` (subscribe + query) is a store consumer too: a successful
-   * pass records `passed()`, a failed one `failed(now, err)` — feeding the
-   * same breaker that paces the drain loop, which also surfaces the failure
-   * to the `error` lifecycle event.
-   */
+  /** The shared breaker: settle records correlate's store outcome on it. */
   readonly breaker: CircuitBreaker;
 };
 
@@ -107,11 +101,9 @@ export class SettleLoop<TEvents extends Schemas> {
         // Every pass, so `settled` reports what the whole settle did; its
         // last pass made no progress and is always empty.
         const passes: Drain<TEvents>[] = [];
-        // Loop correlate→drain until a pass produces no work — this fully
-        // catches up paginated streams (e.g. after `reset()` on a long
-        // projection) without forcing callers to roll their own loop.
-        // `maxPasses` caps runtime in pathological cases.
-        // Shutdown waits for the pass in flight, not for the loop.
+        // Loop until a pass produces no work, so one settle catches up a
+        // paginated backlog. Shutdown waits for the pass in flight, not the
+        // loop.
         for (let i = 0; i < maxPasses && !this._stopped; i++) {
           const pass = await this._deps.correlate(correlate_query);
           // Only a pass that read the log is evidence the store is up.
