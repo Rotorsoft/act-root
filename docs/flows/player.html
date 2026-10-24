@@ -164,10 +164,16 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
 .verdict text { font: 600 11px var(--f-mono); fill: var(--k); }
 .verdict { animation: pop .25s ease-out; }
 .checks rect.card { fill: var(--surface); stroke: var(--state); stroke-width: 1.4; }
-.checks text { font: 500 12.5px var(--f-mono); fill: var(--muted); }
+.checks text { font: 500 12.5px var(--f-mono); }
 .checks .row { animation: pop .25s ease-out; }
-.checks .row.pass text { fill: var(--good); }
-.checks .row.fail text { fill: var(--bad); font-weight: 600; }
+/* one color per layer: invariants are rules on the state, preconditions rules on the payload */
+.checks .inv, .node .badge .inv, .legend .inv, .read .inv, .detail .inv { fill: var(--state); color: var(--state); }
+.checks .pre, .node .badge .pre, .legend .pre, .read .pre, .detail .pre { fill: var(--action); color: var(--action); }
+.checks .emit { fill: var(--muted); }
+.checks .mark { fill: var(--muted); }
+.checks .row.pass .mark { fill: var(--good); }
+.checks .row.fail .mark { fill: var(--bad); }
+.checks .row.fail .lbl { font-weight: 600; }
 @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .tick { fill: var(--k); }
 .tick.on { animation: tickon .8s ease-out; }
@@ -528,12 +534,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
         glyph("automation", n.cx - tw / 2 + 5, ty - 3.4, g, 0.62);
         const t = el("text", { x: n.cx - tw / 2 + 12, y: ty, class: "as" }, g); t.textContent = n.as;
       }
-      const checks = checksOf(n), inv = checks.length;
-      // ◆ n checks: the invariants, then the preconditions, the state tests before this action commits
-      const badge = [n.badge, inv ? `◆ ${inv} ${inv > 1 ? "checks" : "check"}` : ""].filter(Boolean).join(" ");
-      if (badge) {
-        const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g); b.textContent = badge;
-        if (inv) el("title", {}, b).textContent = "Checked by the state before it commits:\n" + checks.join("\n");
+      // ◆ invariants (rules on the state) and ▲ preconditions (rules on the payload), with their counts
+      const inv = (n.invariants || []).length, pre = (n.preconditions || []).length;
+      if (n.badge || inv || pre) {
+        const b = el("text", { x: n.right - 8, y: n.top + 12, "text-anchor": "end", class: "badge" }, g);
+        const part = (text, cls) => { const t = el("tspan", cls ? { class: cls } : {}, b); t.textContent = text; };
+        if (n.badge) part(n.badge + (inv || pre ? " " : ""));
+        if (inv) part(`◆ ${inv}`, "inv");
+        if (inv && pre) part(" ");
+        if (pre) part(`▲ ${pre}`, "pre");
+        if (inv || pre) el("title", {}, b).textContent = "Checked by the state before it commits:\n" +
+          checksOf(n).map(r => `${r.k === "inv" ? "◆ invariant" : "▲ precondition"}: ${r.t}`).join("\n");
       }
     }
     if (selected) { selected = byId(selected.id); selected?.g.classList.add("sel"); }
@@ -550,12 +561,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
   $("legend").innerHTML = Object.entries(KINDS).filter(([k]) => used.has(k))
     .map(([k, v]) => `<div><i style="background:var(${v.color})"></i>${v.name}</div>`).join("") +
     `<div>${svgIcon("person")}Person</div><div>${svgIcon("automation")}Automation</div>` +
-    `<div><span class="mono">◆</span>Checks (invariants, preconditions)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
+    `<div><span class="mono inv">◆</span>Invariant (rule on the state)</div><div><span class="mono pre">▲</span>Precondition (rule on the payload)</div><div><span class="mono">⏱</span>Timer (deferred)</div>` +
     (bands.some(b => b.kind === "state") ? `<div><i class="bx" style="--k:var(--state)"></i>State boundary</div>` : "") +
     (bands.some(b => b.kind === "slice") ? `<div><i class="bx" style="--k:var(--ink)"></i>Slice boundary</div>` : "");
   $("read").innerHTML = `
     <p>Time runs left to right. An <b style="color:var(--actor)">actor</b>, a person or an automation, invokes an <b style="color:var(--action)">action</b>.</p>
-    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's rules (the ◆ count) one by one: its invariants, then its preconditions, which also read the payload, each in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
+    <p>The <b style="color:var(--state)">state</b> loads from the stream, checks the action's rules one by one: its <b class="inv">◆ invariants</b> (rules on the state), then its <b class="pre">▲ preconditions</b> (rules that also read the payload), each in the order the action declares them. It either refuses the action at the first rule that fails or commits <b style="color:var(--event)">events</b>. Events patch the state, and <b style="color:var(--projection)">projections</b> fold them into read models such as tables and caches.</p>
     <p><b style="color:var(--reaction)">Reactions</b> pick events up after the commit and act as automations: they invoke new actions or call the <b style="color:var(--external)">outside world</b>. A clock marks a reaction that waits for a timestamp.</p>
     ${bands.length ? `<p>Dashed boxes are the boundaries the builders declare. ${bands[0].kind === "slice"
       ? "A <b>slice</b> box holds the actions and events of the partial states the slice declares, and the reactions it declares. Partial states of the same name still merge into one state bar."
@@ -620,8 +631,8 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
       ${n.file ? `<div class="file">${esc(n.file)}${n.line ? ":" + n.line : ""}</div>` : ""}
       ${n.note ? `<p class="rel">${esc(n.note)}</p>` : ""}
       ${n.description ? `<p>${esc(n.description)}</p>` : ""}
-      ${(n.invariants || []).length ? `<p class="rel">Invariants</p><ul>${n.invariants.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
-      ${(n.preconditions || []).length ? `<p class="rel">Preconditions</p><ul>${n.preconditions.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+      ${(n.invariants || []).length ? `<p class="rel"><span class="inv">◆</span> Invariants</p><ul>${n.invariants.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+      ${(n.preconditions || []).length ? `<p class="rel"><span class="pre">▲</span> Preconditions</p><ul>${n.preconditions.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
       ${n.schema ? `<pre>${esc(n.schema)}</pre>` : ""}
       ${ins.length ? `<p class="rel">From: ${ins.map(e => link(e.a)).join(", ")}</p>` : ""}
       ${outs.length ? `<p class="rel">To: ${outs.map(e => link(e.b)).join(", ")}</p>` : ""}`;
@@ -845,14 +856,17 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     return g;
   }
   // an action's rules in the order the state runs them: invariants, then preconditions
-  function checksOf(n) { return [...(n.invariants || []), ...(n.preconditions || [])]; }
+  function checksOf(n) {
+    return [...(n.invariants || []).map(t => ({ t, k: "inv" })), ...(n.preconditions || []).map(t => ({ t, k: "pre" }))];
+  }
   // the action's checks, listed in the order the state runs them: each row gets a ✓ as it passes,
   // and a refusal stops on the failing row with ✕. A reason that is not an invariant comes from
   // .emit(), which runs after every invariant passed, so it is the last row.
   async function checklist(x, y, rules, reject, token) {
-    const rows = reject && !rules.includes(reject) ? [...rules, reject] : rules;
-    const fail = reject ? rows.indexOf(reject) : -1;
-    const RH = 22, w = Math.max(...rows.map(r => r.length)) * 7.5 + 42, h = rows.length * RH + 10;
+    const rows = reject && !rules.some(r => r.t === reject) ? [...rules, { t: reject, k: "emit" }] : rules;
+    const fail = reject ? rows.findIndex(r => r.t === reject) : -1;
+    const ICON = { inv: "◆", pre: "▲", emit: "·" };
+    const RH = 22, w = Math.max(...rows.map(r => r.t.length)) * 7.5 + 58, h = rows.length * RH + 10;
     const left = x + 14 + w > svg.viewBox.baseVal.width ? x - 14 - w : x + 14;
     const g = el("g", { class: "checks" }, gFx);
     el("rect", { x: left, y: y - h / 2, width: w, height: h, rx: 9, class: "card" }, g);
@@ -860,10 +874,12 @@ button:focus-visible, select:focus-visible, .node:focus-visible { outline: 2px s
     for (let i = 0; i < rows.length && ok; i++) {
       const r = el("g", { class: "row" }, g);
       const t = el("text", { x: left + 11, y: y - h / 2 + 5 + RH * i + 15 }, r);
-      t.textContent = "○ " + rows[i];
+      const mark = el("tspan", { class: "mark" }, t); mark.textContent = "○ ";
+      const icon = el("tspan", { class: rows[i].k }, t); icon.textContent = ICON[rows[i].k] + " ";
+      const lbl = el("tspan", { class: `lbl ${rows[i].k}` }, t); lbl.textContent = rows[i].t;
       if (!(ok = await wait(380, token))) break;
       r.classList.add(i === fail ? "fail" : "pass");
-      t.textContent = (i === fail ? "✕ " : "✓ ") + rows[i];
+      mark.textContent = i === fail ? "✕ " : "✓ ";
       if (i === fail) break;
       ok = await wait(220, token);
     }
