@@ -67,15 +67,22 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 
 `Invariant<S>` requires `{ description: string; valid: (state: Readonly<S>, actor?: Actor) => boolean }`. Type `S` with minimal fields (contravariance allows assignment to subtypes).
 
-**When the rule depends on the action payload — throw inside `.emit()`.** Invariants see only `(state, actor)`, so rules combining state with the incoming action data (e.g., "amount + current ≤ cap", "entries non-empty", "rate > 0") can't be expressed as invariants. Throw inside the emit handler instead — the action aborts and no event is committed:
+**When the rule depends on the action payload — a precondition with `.requires()`.** Invariants see only `(state, actor)`. A rule that combines the state with the incoming action data (e.g., "amount + current ≤ cap") is a `Precondition`, declared after `.given()`. It runs after the invariants, and the first that doesn't hold refuses the action with an `InvariantError` (message "failed precondition"). No event is committed, and the CLI, diagram and flow animation list it by name:
 
 ```typescript
+import { type Precondition } from "@rotorsoft/act";
+
+export const withinCap: Precondition<{ contributed: number; cap: number }, { amount: number }> = {
+  description: "Contribution must stay within the cap",
+  holds: ({ amount }, state) => state.contributed + amount <= state.cap,
+};
+
 .on({ AddContribution })
-.emit((data, { state }) => {
-  if (state.contributed + data.amount > state.cap) throw new Error("Exceeds cap");
-  return ["ContributionAdded", data];
-})
+.requires([withinCap])
+.emit("ContributionAdded")
 ```
+
+Keep a `throw` inside `.emit()` only for rules that don't fit a predicate: a rule that branches on the state, or one that needs an app-specific error type.
 
 Keep this validation in the aggregate, not the router. The aggregate is the system of record for its rules — router-level checks are invisible to other callers (CLI, reactions, replays) and let bad events sneak in via internal `app.do()` calls.
 
@@ -105,7 +112,7 @@ export const Item = state({ Item: ItemState })
   .build();
 ```
 
-**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → `.given([])` → `.emit(handler | "EventName")` → `.build()`
+**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → optional `.given([])` → optional `.requires([])` → `.emit(handler | "EventName")` → `.build()`
 
 **Passthrough defaults**: `.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom logic. Use `.emit("EventName")` when the action payload maps directly to event data.
 

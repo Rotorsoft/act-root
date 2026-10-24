@@ -157,6 +157,18 @@ describe("ticket invariants", () => {
     });
   });
 
+  it("refuses an ack from anyone but the receiver, as a precondition", async () => {
+    const t = target();
+    await openTicket(t, "ack test", "only the receiver acks");
+    const [added] = await addMessage(t, "hello"); // sent to someone else
+    const { messageId } = added.event!.data as { messageId: string };
+    await expect(acknowledgeMessage(t, messageId)).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      message:
+        "AcknowledgeMessage failed precondition: Must be receiver to ack",
+    });
+  });
+
   it("should throw when resolving empty or closed ticket", async () => {
     const t = target();
     await expect(markTicketResolved(t)).rejects.toMatchObject({

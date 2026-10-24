@@ -47,7 +47,8 @@ Specs use varied terminology. Map to framework concepts:
 | Domain Event, Fact, State Change | Event | `.emits({ Event: schema })` + optional `.patch({})` for custom reducers |
 | Read Model, View, Query Model, Projection | Projection | `projection("target").on({ Event }).do(handler)` |
 | Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().withState(State).on("Event").do(handler)` |
-| Invariant, Guard, Business Rule, Precondition, Constraint | Invariant | `.given([{ description, valid }])` |
+| Invariant, Guard, Business Rule, Constraint (state and actor only) | Invariant | `.given([{ description, valid }])` |
+| Precondition, a rule on the command's data plus the state | Precondition | `.requires([{ description, holds }])` |
 | Specification, Acceptance Criteria, Given-When-Then, Scenario | Test case | `describe / it` block |
 | Screen, UI, View, Page | Client component | tRPC procedure + React component |
 | Bounded Context, Module, Feature, Slice | Slice | `slice().withState(State)` |

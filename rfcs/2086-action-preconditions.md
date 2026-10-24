@@ -1,6 +1,6 @@
 # RFC 2086: named preconditions with `.requires(...)`
 
-- **Status:** draft
+- **Status:** accepted
 - **Issue:** #2086
 - **Author:** Claude, for rotorsoft
 - **Created:** 2026-10-24
@@ -196,7 +196,7 @@ Act already declares invariants, where other frameworks don't, so `.requires` ex
 
 ## Stability / charter impact
 
-All additive: one builder method on the state action chain and one public type (`Precondition`). No new error class or export beyond `Precondition`. Nothing is renamed or removed, and plain throws in `.emit` keep working. No port changes, so no TCK change. The parser, CLI, diagram and flow player gain a field. The docs and the book chapters that teach the two-layer split (ch. 3, ch. 12, appendix A, the scaffold skill's `domain.md` and `act-api.md`, `state-management.md`, `error-handling.md`) are updated together, keeping the invariant/precondition distinction.
+All additive: one builder method on the state action chain (`.requires`), two public types (`Precondition`, and `RequiresHandlers` beside the existing `GivenHandlers`), the optional `requires` field on `State`, and an optional last constructor argument on `InvariantError` (`rule: "invariant" | "precondition"`, default `"invariant"`) that names the layer in the message. No new error class. Existing code compiles and behaves as before, so this ships as a minor release. Nothing is renamed or removed, and plain throws in `.emit` keep working. No port changes, so no TCK change. The parser, CLI, diagram and flow player gain a field. The repo's docs that teach the layers (`state-management.md`, `error-handling.md`, the scaffold skill's `domain.md`, `act-api.md` and `SKILL.md`, STABILITY.md) change with the code. The book's ch. 3, ch. 12 and appendix A live in their own repo and follow separately.
 
 ## Postconditions
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { InvariantError, slice, state } from "@rotorsoft/act";
+import { slice, state } from "@rotorsoft/act";
 import * as errors from "./errors.js";
 import {
   AcknowledgeMessage,
@@ -11,7 +11,11 @@ import {
   TicketMessagingState,
 } from "./schemas/ticket.schemas.js";
 import { deliverMessage } from "./services/notification.js";
-import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
+import {
+  mustBeOpen,
+  mustBeReceiver,
+  mustBeUserOrAgent,
+} from "./ticket-invariants.js";
 
 // --- State ---
 export const TicketMessaging = state({ Ticket: TicketMessagingState })
@@ -54,18 +58,10 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
 
   .on({ AcknowledgeMessage })
   .given([mustBeOpen])
-  .emit((data, snapshot, { stream, actor }) => {
-    const msg = snapshot.state.messages[data.messageId];
-    if (!msg) throw new errors.MessageNotFoundError(data.messageId);
-
-    if (msg.to !== actor?.id)
-      throw new InvariantError(
-        "AcknowledgeMessage",
-        data,
-        { stream, actor },
-        snapshot,
-        "Must be receiver to ack"
-      );
+  .requires([mustBeReceiver])
+  .emit((data, snapshot) => {
+    if (!snapshot.state.messages[data.messageId])
+      throw new errors.MessageNotFoundError(data.messageId);
     return ["MessageRead", data];
   })
 

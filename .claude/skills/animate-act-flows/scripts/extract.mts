@@ -48,6 +48,7 @@ for (const s of model.states) {
       label: a.name,
       state: s.name,
       invariants: a.invariants,
+      ...(a.preconditions?.length ? { preconditions: a.preconditions } : {}),
       ...(s.file ? { file: s.file, line: a.line } : {}),
     });
     emits.set(a.name, a.emits);

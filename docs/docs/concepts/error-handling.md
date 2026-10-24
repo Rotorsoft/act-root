@@ -27,7 +27,7 @@ try {
 
 ## InvariantError
 
-Thrown when a business rule defined via `.given()` is violated before events are emitted.
+Thrown when a business rule refuses an action before events are emitted: an invariant from `.given()`, or a precondition from `.requires()`. The message says which (`"CloseTicket failed invariant: ..."` or `"... failed precondition: ..."`), and `description` carries the rule's description.
 
 ```typescript no-check
 import { InvariantError } from "@rotorsoft/act";
