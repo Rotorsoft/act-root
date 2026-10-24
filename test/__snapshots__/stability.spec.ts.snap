@@ -3288,8 +3288,7 @@ export declare class InMemoryStore implements Store {
     dispose(): Promise<void>;
     seed(): Promise<void>;
     drop(): Promise<void>;
-    private in_query;
-    private _stream_matches;
+    private _in_query;
     /** Index of the stream's latest snapshot, or -1; an explicit \`after\` wins. */
     private _snap_floor;
     query<E extends Schemas>(callback: (event: Committed<E, keyof E>) => void, query?: Query): Promise<number>;

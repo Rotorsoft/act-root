@@ -1,13 +1,6 @@
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { dispose, store } from "../src/index.js";
 
-/**
- * Correlate's job, done by hand: `claim` follows the work mark,
- * so a test that commits events has to say which of them resolve where.
- * Marks every subscription up to the log head, which is honest for these
- * fixtures — their sources carry the events under test.
- */
-
 // Contract-level cases live in `in-memory-store-tck.spec.ts` (via the
 // shared Store TCK in `@rotorsoft/act-tck`). This file only covers
 // InMemory-specific implementation details that aren't part of the
@@ -22,6 +15,12 @@ describe("InMemoryStore (adapter-specific)", () => {
   afterEach(async () => {
     await store().drop();
     await dispose()();
+  });
+
+  it("rejects an invalid stream pattern even on an empty log, like Postgres", async () => {
+    await expect(store().query(() => {}, { stream: "(" })).rejects.toThrow(
+      SyntaxError
+    );
   });
 
   // "claims by exact source and ignores sources with no committed events"
