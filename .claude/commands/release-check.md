@@ -8,17 +8,12 @@ Verify the current branch is mergeable. CI (`ci-cd.yml` → `ci` job) runs typec
 ## Local steps
 
 1. **Charter-covered diff.** Run `pnpm build`, then regenerate the stability snapshot (`pnpm check:stability -u`; it reads `dist/`, so the build comes first and biome must already have formatted the source), then `git diff master --stat -- test/__snapshots__/stability.spec.ts.snap`. The snapshot records the published declarations of every entry point and what they re-export, so an implementation-only change leaves it alone. If it changed, classify it (see below). Commit the regenerated snapshot: CI fails on a stale one.
-2. **Doc-staleness audit.** Run the doc-grep recipe from CONTRIBUTING.md "Pre-handoff workflow → Doc audit":
-   ```bash
-   # Identify renamed/removed identifiers in this PR
-   git diff master --diff-filter=D --name-only -- libs/act/src/ libs/act-*/src/
-   # For each renamed/removed symbol, grep for it in docs
-   grep -rln "<old-name-or-shape>" docs/docs CLAUDE.md libs/*/README.md
-   ```
-   When the PR migrates a callsite to a new primitive (e.g., `query` → `query_stats`), also grep for the old behavioral description in the `docs/docs/architecture/` Mermaid diagrams and the scenes in `docs/src/scenes/`. Report hits — they must be updated in this PR, not a follow-up. Skip cleanly when this is a no-public-surface PR (deps bump, internal refactor).
+2. **Doc-staleness audit.** Run the audit in [CONTRIBUTING.md § Pre-handoff workflow](../../CONTRIBUTING.md#pre-handoff-workflow), step 3: its grep covers every place docs live. Report hits; they're fixed in this PR, not a follow-up.
 3. **Lint** (`pnpm lint`) — it takes a second, and fixing a lint error before the push saves a CI round trip. CI runs it too.
 
 ## Then push and read CI
+
+Before pushing to a branch that already has a PR, check the PR is still open (`gh pr view <pr> --json state`). A push to a merged PR's branch succeeds and lands nowhere: the branch was deleted at merge, so the push re-creates it with no PR. If it merged, branch from master, cherry-pick, and open a new PR.
 
 Push the branch (open the PR with `/pr` if there isn't one), then wait for every check on it: `gh pr checks <pr> --watch`. List each check by name with its result. A check that was skipped is fine only when its paths didn't change (the `ci` job skips a docs-only PR; `docs-build` runs only for `docs/**`). A missing check is not a pass: say which one is missing.
 

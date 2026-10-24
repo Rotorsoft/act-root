@@ -332,8 +332,6 @@ export const app = appBuilder.build();
 
 **Export the builder for tests**: `fixture()` / `sandbox()` need the *unbuilt* builder (they call `.build()` with a scoped store/cache themselves). Export `appBuilder` alongside the built `app` so tests get their own isolated Act per run.
 
-> **Note:** commits settle their own reactions. Tests that walk the pipeline build with `autoSettle: false` and call `correlate()` before `drain()`; see [act-api.md](act-api.md) §7.
-
 ## Tests
 
 **What to test and what not to:** Test domain behavior — actions produce correct events, invariants reject invalid state transitions, reactions trigger expected downstream actions, projections build correct read models. Do NOT test framework internals (event storage, cache behavior, version numbering). Trust the framework for infrastructure; verify your business logic.
