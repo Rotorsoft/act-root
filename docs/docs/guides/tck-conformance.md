@@ -15,7 +15,7 @@ This guide is the advertised path for a **third-party adapter living in its own 
 
 A standalone adapter is a small package. Strip away the dialect-specific glue and the skeleton is the same whichever port you implement:
 
-```
+```text
 my-act-redis-cache/
 ├── package.json
 ├── tsconfig.json

@@ -52,7 +52,7 @@ It deliberately does **not** assert on what gets written — that's adapter-spec
 
 ## Scaffolding `@rotorsoft/act-winston` (sketch)
 
-```
+```text
 libs/act-winston/
 ├── package.json
 ├── tsconfig.json

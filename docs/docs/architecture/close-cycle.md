@@ -13,60 +13,19 @@ Targets carrying a `before` cutoff never enter this pipeline. `run_close_cycle` 
 
 ## Phase diagram
 
-```
-            close(targets)
-                  │
-                  ▼
-          ┌───────────────────────────┐
-          │ Phase 1: Scan stream heads│  For each target, find the latest non-tombstone event in
-          │   query_stats             │  a single indexed round trip; snapshots filtered out.
-          └───────────┬───────────────┘
-                      │
-                      ▼
-          ┌───────────────────────────┐
-          │ Phase 2: Safety partition │ Skip any stream whose subscribed reactions are still
-          │   query_streams           │ behind the head. Those go into `skipped`.
-          └───────────┬───────────────┘
-                      │
-                      ▼
-          ┌───────────────────────────┐
-          │ Phase 3: Guard with       │ Commit `__tombstone__` with expectedVersion. If the
-          │   tombstones (parallel)   │ stream advanced past our scan (concurrent writer),
-          │                           │ we get ConcurrencyError → that stream goes to skipped.
-          └───────────┬───────────────┘
-                      │
-                      ▼
-          ┌───────────────────────────┐
-          │ Phase 4: Load restart     │ For targets with `restart: true`, load the final state
-          │   seeds (parallel)        │ NOW, while the stream is guarded. The owning state is
-          │                           │ derived from the last event's name → registered state.
-          └───────────┬───────────────┘
-                      │
-                      ▼
-          ┌───────────────────────────┐
-          │ Phase 5: Run archive      │ User callback per stream. Sequential: callbacks may
-          │   callbacks (sequential)  │ share resources (S3 client, etc). A failure here
-          │                           │ propagates to the caller; streams remain guarded.
-          └───────────┬───────────────┘
-                      │
-                      ▼
-          ┌───────────────────────────┐
-          │ Phase 5b: Re-check head   │ Truncate only streams whose head is still this
-          │                           │ close's guard; the rest land in `skipped`.
-          └───────────┬───────────────┘
-                      │
-                      ▼
-          ┌───────────────────────────┐
-          │ Phase 6: Truncate + seed  │ Atomic per-store transaction: delete every event for
-          │   (atomic per stream)     │ the stream, insert a single seed (`__snapshot__` for
-          │                           │ restart, `__tombstone__` for tombstone-only).
-          └───────────┬───────────────┘
-                      │
-                      ▼
-                 Cache update
-                      │
-                      ▼
-                 emit("closed", result)
+```mermaid
+flowchart TD
+  start(["close(targets)"]):::action --> P1["<b>1. Scan stream heads</b><br/>query_stats: the latest event per stream, tombstones and snapshots left out"]:::store
+  P1 --> P2{"<b>2. Safety partition</b><br/>reactions caught up?"}
+  P2 -- "behind (query_streams)" --> SK["skipped"]:::bad
+  P2 -- "caught up" --> P3{"<b>3. Guard</b><br/>commit a tombstone"}
+  P3 -- "ConcurrencyError:<br/>a writer got in" --> SK
+  P3 -- "guarded at expectedVersion" --> P4["<b>4. Load restart seeds</b><br/>restart targets only, in parallel, while guarded"]:::state
+  P4 --> P5["<b>5. Archive callbacks</b><br/>one at a time; a throw reaches the caller and the streams stay guarded"]:::external
+  P5 --> P5b{"<b>5b. Re-check</b><br/>head still our guard?"}
+  P5b -- no --> SK
+  P5b -- yes --> P6["<b>6. Truncate and seed</b><br/>one transaction per stream: __snapshot__ to restart, __tombstone__ to retire"]:::store
+  P6 --> CU["update the cache"]:::state --> EM(["emit closed"]):::good
 ```
 
 ## Phase-by-phase failure semantics
@@ -244,32 +203,22 @@ At build time (`act().build()` synthesizes the reaction once the registry is ful
 
 The subtle part is *where* the reaction runs. It runs on a **synthetic per-aggregate stream**: `target = __autoclose__:<stream>`, `source = <stream>`. Keeping the autoclose lease off the aggregate's own watermark is load-bearing — if it shared a watermark with the aggregate's other reactions, an autoclose deferral would hold all of them back too (a deferral parks the whole stream). The synthetic target isolates the autoclose lease so it can defer freely; the close still *targets* the aggregate.
 
-```
-            aggregate commits event e
-                       │
-                       ▼  (synthetic stream __autoclose__:<e.stream>, source = e.stream)
-          ┌────────────────────────────────────────────┐
-          │ off-hours window check                      │  outside the window →
-          │   in_autoclose_window(autocloseWindow, now) │  DeferSignal(now + cycleMinutes)
-          └───────────────────┬────────────────────────┘
-                              │ in window
-                              ▼
-          ┌────────────────────────────────────────────┐
-          │ query_stats([aggregate], {count,            │  no live (non-tombstone)
-          │   exclude:[TOMBSTONE_EVENT]})               │  head → return (already closed)
-          └───────────────────┬────────────────────────┘
-                              │ live head + count
-                              ▼
-          ┌────────────────────────────────────────────┐
-          │ policy(aggregate, head, count) ?            │
-          └───────┬───────────────────────┬────────────┘
-            true  │                        │ false
-                  ▼                        ▼
-       CloseSignal({ stream,    policy has a time gate (after) ?
-         archive, at: head.id })   yes → DeferSignal(head.created + min after)
-                  │                  no  → ack, wait for the next event
-                  ▼
-       DrainController.on_close → run_close_cycle(targets) → emit("closed")
+```mermaid
+flowchart TD
+  E["the aggregate commits an event"]:::event -- "reaction on<br/>__autoclose__:‹stream›" --> W{"in the off-hours<br/>window?"}
+  W -- no --> D1["defer until the window opens"]:::reaction
+  W -- yes --> Q{"a live domain head?"}
+  Q -- "no: already closed" --> R1["return"]
+  Q -- "head and count (query_stats,<br/>tombstones and snapshots left out)" --> P{"policy holds?"}
+  P -- "policy(aggregate, head, count)" --> C1["CloseSignal: close the stream"]:::good
+  P -- false --> K{"keep: oldest event<br/>past the cutoff?"}
+  K -- yes --> C2["CloseSignal with before:<br/>prune behind a snapshot"]:::good
+  K -- "no, or no keep" --> F{"a future<br/>due time?"}
+  F -- yes --> D2["defer until the earliest: the after cooldown or the keep age-out"]:::reaction
+  F -- no --> A["ack: the next event re-triggers"]
+  C1 --> RC["the drain runs the close cycle"]:::store
+  C2 --> RC
+  RC --> EM(["emit closed"]):::good
 ```
 
 Because the policy is re-evaluated against the live head on every visit, a **reopened** stream re-evaluates correctly: a ticket resolved and then reopened has `Opened` at head, so an `is: "Resolved"` policy no longer holds and the stream is not closed. The handler runs with `blockOnError: false` and `maxRetries: 3` — a transient `query_stats`/store error retries rather than quarantining the synthetic stream, and a stream that vanishes mid-cycle (a competing worker truncated it) yields an empty `query_stats` result and the handler simply returns.

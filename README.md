@@ -21,12 +21,11 @@
 
 Act is an event-sourcing framework for TypeScript built on three primitives: actions, state, and reactions. An action commits events, state folds them, and reactions run on what was committed. Pick a store at bootstrap (Postgres for production, SQLite for embedded, in-memory for tests); the application code stays the same.
 
-```
-   ┌─────────────┐    action     ┌─────────────────┐    reaction      ┌──────────────┐
-   │             │ ────────────► │       Act       │ ───────────────► │              │
-   │   client    │               │  events, state, │                  │  downstream  │
-   │             │ ◄──────────── │  drain, recover │                  │              │
-   └─────────────┘    load()     └─────────────────┘                  └──────────────┘
+```mermaid
+flowchart LR
+  client([client]):::actor -- "action: app.do()" --> act["<b>Act</b><br/>events, state, drain, recover"]:::action
+  act -- "load()" --> client
+  act -- reaction --> downstream([downstream]):::external
 ```
 
 The primitives:

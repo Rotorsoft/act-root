@@ -50,7 +50,7 @@ Adapter-specific behavior — LRU ordering, TTL, size limits, network reconnect 
 
 ## Scaffolding `@rotorsoft/act-redis` (sketch)
 
-```
+```text
 libs/act-redis/
 ├── package.json
 ├── tsconfig.json

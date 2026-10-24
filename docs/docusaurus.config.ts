@@ -41,6 +41,7 @@ const config: Config = {
 
   onBrokenLinks: "warn",
   markdown: {
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: "warn",
     },
@@ -115,6 +116,8 @@ const config: Config = {
     },
   ],
 
+  themes: ["@docusaurus/theme-mermaid"],
+
   presets: [
     [
       "classic",
@@ -149,6 +152,15 @@ const config: Config = {
     colorMode: {
       defaultMode: "dark",
       respectPrefersColorScheme: true,
+    },
+    // Diagram colors per concept live in src/css/custom.css (the --dg-* tokens).
+    mermaid: {
+      theme: { light: "neutral", dark: "dark" },
+      options: {
+        fontFamily: "Inter, system-ui, sans-serif",
+        flowchart: { curve: "basis", padding: 14, wrappingWidth: 320 },
+        sequence: { mirrorActors: false },
+      },
     },
     metadata: [
       {

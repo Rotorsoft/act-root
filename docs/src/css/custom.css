@@ -567,3 +567,73 @@ hr {
 @media (prefers-reduced-motion: reduce) {
   .navbar-book:hover .book-thumb { transform: none; }
 }
+
+/* ===================== Diagrams =====================
+ * One color per concept for every diagram in the docs: the Mermaid diagrams
+ * (a node takes a concept with `:::action`, `:::store`, ...) and the animated
+ * <Scene> sequences. The values match the flow animations' palette.
+ */
+:root {
+  --dg-actor: #4f5d75;
+  --dg-action: #2b5fd0;
+  --dg-state: #a87d00;
+  --dg-event: #d96a14;
+  --dg-projection: #17875c;
+  --dg-reaction: #7f4cc7;
+  --dg-external: #c8336f;
+  --dg-store: #3f6b7a;
+  --dg-good: #17875c;
+  --dg-bad: #c62828;
+  --dg-line: #5d6574;
+  --dg-note: #8a93a3;
+}
+[data-theme="dark"] {
+  --dg-actor: #aab6cc;
+  --dg-action: #6e9cff;
+  --dg-state: #e9b931;
+  --dg-event: #ff9548;
+  --dg-projection: #3ccf92;
+  --dg-reaction: #b38bff;
+  --dg-external: #ff6ca8;
+  --dg-store: #7fb2c4;
+  --dg-good: #3ccf92;
+  --dg-bad: #ff6b6b;
+  --dg-line: #99a2b3;
+  --dg-note: #6b7486;
+}
+
+.docusaurus-mermaid-container {
+  margin: 1.5rem 0;
+  padding: 16px 8px;
+  border: 1px solid var(--act-border-strong);
+  border-radius: 12px;
+  background: var(--act-surface-1);
+  text-align: center;
+}
+/* Mermaid scopes its own styles by id, so a concept's colors need !important */
+.docusaurus-mermaid-container .node.actor { --k: var(--dg-actor); }
+.docusaurus-mermaid-container .node.action { --k: var(--dg-action); }
+.docusaurus-mermaid-container .node.state { --k: var(--dg-state); }
+.docusaurus-mermaid-container .node.event { --k: var(--dg-event); }
+.docusaurus-mermaid-container .node.projection { --k: var(--dg-projection); }
+.docusaurus-mermaid-container .node.reaction { --k: var(--dg-reaction); }
+.docusaurus-mermaid-container .node.external { --k: var(--dg-external); }
+.docusaurus-mermaid-container .node.store { --k: var(--dg-store); }
+.docusaurus-mermaid-container .node.good { --k: var(--dg-good); }
+.docusaurus-mermaid-container .node.bad { --k: var(--dg-bad); }
+.docusaurus-mermaid-container .node:is(.actor, .action, .state, .event, .projection, .reaction, .external, .store, .good, .bad) :is(rect, polygon, circle, ellipse, path) {
+  fill: color-mix(in srgb, var(--k) 13%, var(--act-surface-1)) !important;
+  stroke: var(--k) !important;
+  stroke-width: 1.5px !important;
+}
+.docusaurus-mermaid-container .edgeLabel,
+.docusaurus-mermaid-container .edgeLabel p,
+.docusaurus-mermaid-container .edgeLabel rect {
+  background: var(--act-surface-1) !important;
+  fill: var(--act-surface-1) !important;
+  color: var(--act-text-muted) !important;
+  font-size: 13px;
+}
+.docusaurus-mermaid-container .node:is(.good, .bad) .nodeLabel {
+  color: var(--k) !important;
+}

@@ -24,29 +24,18 @@ A long stream needs to be replayed *somewhere*. The cheapest place is RAM (cache
 
 ## Read path — `load()`
 
-```
-                  load(state, stream, asOf?)
-                                │
-              ┌─────────────────┴─────────────────┐
-              │                                   │
-          asOf set?                        cache.get(stream)
-        (time-travel)                             │
-              │                       ┌───────────┴───────────┐
-              │                       │                       │
-              │                      hit                     miss
-              ▼                       ▼                       ▼
-          skip cache              cached.state            init state
-        with_snaps:true          cached.event_id         with_snaps:true
-        scan from asOf           query after             scan from start
-              │                  cached.event_id         (snap if any)
-              │                       │                       │
-              └───────────────────────┼───────────────────────┘
-                                      ▼
-                                replay events
-                                      │
-                                      ▼
-                        (write cache if replayed > 0
-                         and not time-travel)
+```mermaid
+flowchart TD
+  L["load(state, stream, asOf?)"]:::action --> T{asOf set?}
+  T -- "yes: time travel" --> TT["skip the cache<br/>scan from the start with snapshots,<br/>filtered by asOf"]:::store
+  T -- no --> C{"cache.get(stream)"}
+  C -- hit --> H["start from the cached state<br/>query after cached.event_id,<br/>with snapshots"]:::store
+  C -- miss --> M["start from the init state<br/>scan from the start,<br/>with snapshots"]:::store
+  TT --> R["replay the events<br/>(a snapshot resets the state)"]:::state
+  H --> R
+  M --> R
+  R --> W{"replayed any,<br/>and not time travel?"}
+  W -- yes --> S["cache.set, fire and forget"]:::state
 ```
 
 Three distinct entry conditions, three different store-query shapes:

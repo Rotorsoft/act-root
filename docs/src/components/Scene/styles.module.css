@@ -1,0 +1,162 @@
+.scene {
+  margin: 1.5rem 0;
+  border: 1px solid var(--act-border-strong);
+  border-radius: 12px;
+  background: var(--act-surface-1);
+  overflow: hidden;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 12px 8px 4px;
+  font-family: var(--ifm-font-family-base);
+}
+
+.participant[data-kind="actor"] { --k: var(--dg-actor); }
+.participant[data-kind="action"] { --k: var(--dg-action); }
+.participant[data-kind="state"] { --k: var(--dg-state); }
+.participant[data-kind="event"] { --k: var(--dg-event); }
+.participant[data-kind="projection"] { --k: var(--dg-projection); }
+.participant[data-kind="reaction"] { --k: var(--dg-reaction); }
+.participant[data-kind="external"] { --k: var(--dg-external); }
+.participant[data-kind="store"] { --k: var(--dg-store); }
+
+.participant rect {
+  fill: color-mix(in srgb, var(--k) 14%, var(--act-surface-1));
+  stroke: var(--k);
+  stroke-width: 1.5;
+}
+.participant text {
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+  fill: var(--ifm-font-color-base);
+}
+.life {
+  stroke: var(--act-border-strong);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+}
+
+.message { --k: var(--dg-line); }
+.message[data-tone="good"], .note[data-tone="good"] { --k: var(--dg-good); }
+.message[data-tone="bad"], .note[data-tone="bad"] { --k: var(--dg-bad); }
+.message[data-tone="muted"], .note[data-tone="muted"] { --k: var(--act-text-muted); }
+
+.message line {
+  stroke: var(--k);
+  stroke-width: 1.6;
+}
+.message .head {
+  fill: var(--k);
+}
+.now.message .head {
+  animation: appear 0.3s ease-out 0.6s backwards;
+}
+.message text {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 11.5px;
+  text-anchor: middle;
+  fill: var(--k);
+}
+.note { --k: var(--dg-note); }
+.note rect {
+  fill: color-mix(in srgb, var(--k) 10%, var(--act-surface-1));
+  stroke: color-mix(in srgb, var(--k) 70%, transparent);
+  stroke-width: 1.2;
+}
+.note text {
+  font-size: 12px;
+  text-anchor: middle;
+  fill: var(--ifm-font-color-base);
+}
+.note[data-tone] text { fill: var(--k); font-weight: 600; }
+
+.token {
+  fill: var(--k);
+  stroke: var(--act-surface-1);
+  stroke-width: 2;
+  animation: travel 0.75s ease-in-out forwards;
+}
+
+/* the step being played draws in; earlier steps fade back */
+.now.message line {
+  stroke-dasharray: 1;
+  animation: draw 0.75s ease-in-out forwards;
+}
+.now.message text,
+.now.note {
+  animation: appear 0.45s ease-out;
+}
+.past {
+  opacity: 0.5;
+  transition: opacity 0.3s;
+}
+
+@keyframes draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes travel {
+  to { transform: translateX(var(--dx)); opacity: 0; }
+}
+@keyframes appear {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.caption {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--act-border);
+  background: var(--act-surface-2);
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.controls button {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--act-border-strong);
+  border-radius: 8px;
+  background: var(--act-surface-1);
+  color: var(--ifm-font-color-base);
+  font: 500 13px var(--ifm-font-family-base);
+  cursor: pointer;
+}
+.controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.controls .play {
+  min-width: 70px;
+}
+.count {
+  font: 500 12px var(--ifm-font-family-monospace);
+  color: var(--act-text-muted);
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.say {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  min-height: 3em;
+}
+
+@media (max-width: 600px) {
+  .caption { flex-direction: column; align-items: stretch; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .token { display: none; }
+  .now.message line, .now.message text, .now.note { animation: none; }
+}
