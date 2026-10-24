@@ -69,7 +69,15 @@ pnpm -F docs flows:video wolfdesk --scenario 2 --out escalation.mp4
 | `--size WxH` | `1920x1080` | Video size |
 | `--theme dark\|light` | `dark` | Color theme |
 | `--speed x` | `1` | Playback speed |
-| `--out file` | `<app>[-n].mp4` | Output path |
+| `--out file` | `<app>[-n].mp4` | Output path. A `.gif` path writes an animated GIF for READMEs, which can't embed video |
+| `--fps n` | `12` | GIF frame rate |
+| `--gif-width px` | half the video width | GIF width |
+
+The repo README's animation is a GIF made this way, in each theme:
+
+```bash
+pnpm -F docs flows:video calculator --scenario 1 --size 1440x810 --speed 1.8 --gif-width 960 --theme dark --out ../assets/flow-dark.gif
+```
 
 It drives Chrome through `playwright-core`, captures every frame the page paints and encodes H.264 with `ffmpeg`. You need Chrome and `ffmpeg` installed.
 

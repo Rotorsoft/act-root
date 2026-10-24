@@ -5,8 +5,9 @@
  *
  *   node scripts/flows.mjs build                       every spec -> static/flows/<name>.html + index.html
  *   node scripts/flows.mjs render <spec> <out.html> [--standalone]
- *   node scripts/flows.mjs video <name> [--scenario n] [--out file.mp4]
+ *   node scripts/flows.mjs video <name> [--scenario n] [--out file.mp4|file.gif]
  *                                [--size 1920x1080] [--theme dark|light] [--speed 1]
+ *                                [--fps 12] [--gif-width <half the width>]   (GIF only)
  *
  * `build` runs before every docs build, so a spec merged to master is live on
  * the docs site after the next deploy. `render` without --standalone writes
@@ -200,9 +201,17 @@ async function video(args) {
       .map((f, i) => `file '${f.file}'\nduration ${Math.max(1 / 60, (frames[i + 1]?.t ?? f.t + 1) - f.t).toFixed(4)}`)
       .join("\n");
     writeFileSync(join(work, "frames.txt"), `${list}\nfile '${frames.at(-1).file}'\n`);
-    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", join(work, "frames.txt"),
-      "-vf", `fps=30,scale=${width}:${height}:flags=lanczos,format=yuv420p`, "-c:v", "libx264", "-preset", "slow", "-crf", "18",
-      "-movflags", "+faststart", out], { stdio: "inherit" });
+    const input = ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", join(work, "frames.txt")];
+    if (out.endsWith(".gif")) {
+      // a GIF for READMEs, which can't embed video: fewer frames, half size, one shared palette
+      const gif_width = Number(arg(args, "gif-width", String(Math.round(width / 2))));
+      execFileSync("ffmpeg", [...input, "-vf",
+        `fps=${arg(args, "fps", "12")},scale=${gif_width}:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`,
+        "-loop", "0", out], { stdio: "inherit" });
+    } else
+      execFileSync("ffmpeg", [...input,
+        "-vf", `fps=30,scale=${width}:${height}:flags=lanczos,format=yuv420p`, "-c:v", "libx264", "-preset", "slow", "-crf", "18",
+        "-movflags", "+faststart", out], { stdio: "inherit" });
     console.log(`video: ${out} (${frames.length} frames, ${(frames.at(-1).t - frames[0].t).toFixed(1)} s)`);
   } finally {
     await browser.close();
