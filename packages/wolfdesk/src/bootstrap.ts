@@ -8,7 +8,6 @@ import {
 } from "./ticket.js";
 import { TicketProjection } from "./ticket-projections.js";
 
-export * from "./errors.js";
 export * from "./ticket.js";
 
 /**

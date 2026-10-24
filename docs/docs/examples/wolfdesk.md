@@ -5,7 +5,7 @@ title: WolfDesk
 
 # WolfDesk Example
 
-A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, invariants with actor context, and deferred-reaction timers.
+A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, business rules as named invariants and preconditions, and deferred-reaction timers.
 
 Inspired by the ticketing system from "Learning Domain-Driven Design" by Vlad Khononov.
 
@@ -22,7 +22,7 @@ ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
 ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
-ticket-invariants.ts  → Business rules
+ticket-invariants.ts  → Business rules (invariants and preconditions)
 schemas/              → Zod schemas for actions, events, state
 services/             → External service stubs (agent assignment, notifications)
 ```
@@ -124,6 +124,36 @@ export const mustBeUserOrAgent: Invariant<
   .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
 ```
 
+### Preconditions
+
+Every business rule in wolfdesk is declared, none is thrown from a handler, so the `act` CLI, the diagram and the flow animation list them all. A rule that reads the action's payload is a precondition, declared with `.requires(...)` after the invariants:
+
+```typescript no-check
+export const messageExists: Precondition<
+  { messages: Record<string, unknown> },
+  { messageId: string }
+> = {
+  description: "Message must exist",
+  holds: ({ messageId }, state) => !!state.messages[messageId],
+};
+
+export const mustBeReceiver: Precondition<
+  { messages: Record<string, { to?: string }> },
+  { messageId: string }
+> = {
+  description: "Must be receiver to ack",
+  holds: ({ messageId }, state, actor) =>
+    state.messages[messageId]?.to === actor?.id,
+};
+
+.on({ AcknowledgeMessage })
+  .given([mustBeOpen])
+  .requires([messageExists, mustBeReceiver])
+  .emit("MessageRead")
+```
+
+A refused action throws `InvariantError`. Its message says which layer refused (`"AcknowledgeMessage failed precondition: Must be receiver to ack"`), and its `description` names the rule.
+
 ### Projections (Read Models)
 
 A standalone projection maintains a read model across all ticket events:
@@ -176,18 +206,6 @@ export const app = act()
   .withSlice(TicketTimersSlice)
   .withProjection(TicketProjection)
   .build();
-```
-
-### Custom Error Types
-
-Domain-specific errors for business logic:
-
-```typescript
-export class TicketCannotOpenTwiceError extends Error {
-  constructor(stream: string) {
-    super(`Ticket ${stream} is already open`);
-  }
-}
 ```
 
 ## Running

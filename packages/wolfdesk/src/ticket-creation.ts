@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import * as errors from "./errors.js";
 import {
   CloseTicket,
   MarkTicketResolved,
@@ -12,7 +11,11 @@ import {
   TicketResolved,
 } from "./schemas/ticket.schemas.js";
 import { assignAgent } from "./services/agent.js";
-import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
+import {
+  mustBeOpen,
+  mustBeUserOrAgent,
+  mustNotBeOpen,
+} from "./ticket-invariants.js";
 import { TicketOperations } from "./ticket-operations.js";
 
 // --- State ---
@@ -45,8 +48,8 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
   })
 
   .on({ OpenTicket })
-  .emit((data, { state }, { stream, actor }) => {
-    if (state.productId) throw new errors.TicketCannotOpenTwiceError(stream);
+  .given([mustNotBeOpen])
+  .emit((data, _, { actor }) => {
     return [
       "TicketOpened",
       { ...data, userId: actor.id, messageId: randomUUID() },
