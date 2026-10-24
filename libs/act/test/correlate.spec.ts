@@ -550,7 +550,7 @@ describe("correlate: the checkpoint", () => {
       }
     );
 
-    it("ignores a filter in settle({ correlate }), losing no reaction", async () => {
+    it("ignores a filter in settle's correlate option, losing no reaction", async () => {
       expect(
         await run(async (app) => {
           const settled = new Promise((resolve) => app.on("settled", resolve));
