@@ -165,8 +165,13 @@ import { hono } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
 import { trpc } from "@rotorsoft/act-http/trpc";
 
-const router = trpc(app, {
-  actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
+type Ctx = { user: { id: string; name: string }; tenant: string };
+
+const router = trpc<Ctx, typeof app>(app, {
+  actor: (ctx) => {
+    const { user } = ctx as Ctx; // the extractor receives `unknown`
+    return { id: user.id, name: user.name };
+  },
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
 });
 

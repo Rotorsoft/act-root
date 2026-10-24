@@ -181,7 +181,7 @@ export const cache = ((adapter?: Cache): Cache => {
  * resolvers rather than the public `store()`/`cache()`, which consult the
  * frame this bag *is* and would recurse.
  *
- * @internal
+ * Published for adapter and decorator authors, not for apps.
  */
 export const default_scope = (): Scoped => DEFAULT_SCOPE;
 

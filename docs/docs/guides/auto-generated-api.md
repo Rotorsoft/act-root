@@ -56,8 +56,10 @@ import { Calculator } from "./calculator.js";
 const app = act().withState(Calculator).build();
 
 // 2. Generate a tRPC router. Use `typeof tRouter` for a typed client.
-const tRouter = trpc(app, {
-  actor: (ctx) => resolveActorFromJwt(ctx),
+//    Name your context type, and `typeof app` so the router keeps its actions.
+type Ctx = { tenant: string };
+const tRouter = trpc<Ctx, typeof app>(app, {
+  actor: (ctx) => resolveActorFromJwt(ctx), // ctx arrives as `unknown`
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
 });
 
@@ -83,8 +85,14 @@ That's it — three transports against one registry. Add an action to the Calcul
 The generator emits a flat router — one mutation per registered action, keyed by the action name:
 
 ```ts no-check
-const router = trpc(app, {
-  actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
+type Ctx = { user: { id: string; name: string }; tenant: string };
+
+const router = trpc<Ctx, typeof app>(app, {
+  // The actor extractor receives the context as `unknown`; narrow it.
+  actor: (ctx) => {
+    const { user } = ctx as Ctx;
+    return { id: user.id, name: user.name };
+  },
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
   expectedVersion: (action, input, ctx) => readIfMatchHeader(ctx),
 });
@@ -481,8 +489,10 @@ export const router = t.router({
 // After
 import { trpc } from "@rotorsoft/act-http/trpc";
 
-export const router = trpc(app, {
-  actor: (ctx) => ctx.user,
+type Ctx = { user: { id: string; name: string }; tenantId: string };
+
+export const router = trpc<Ctx, typeof app>(app, {
+  actor: (ctx) => (ctx as Ctx).user,
   stream: (action, input, ctx) => `ticket-${ctx.tenantId}`,
 });
 ```

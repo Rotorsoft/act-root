@@ -23,8 +23,8 @@ import {
 import { extend } from "./utils.js";
 
 /**
- * Zod schema for validating package.json metadata.
- * @internal
+ * Zod schema for the package.json fields {@link config} validates. Published
+ * for tooling that reads the same file, not for apps.
  */
 export const PackageSchema = z.object({
   name: z.string().min(1),

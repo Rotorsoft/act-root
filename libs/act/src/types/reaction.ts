@@ -393,8 +393,8 @@ export type Drain<TEvents extends Schemas> = {
  *   correlation checkpoint, which every reaction shares, so filters and
  *   `after` are ignored.
  * @property maxPasses - Cap on correlate→drain loops (default: `Infinity`).
- *   Settle exits early as soon as a pass makes no progress (no new
- *   subscriptions, no events read, no streams leased), so the cap only matters in
+ *   Settle exits early as soon as a pass makes no progress (it read no
+ *   events and leased no streams), so the cap only matters in
  *   pathological cases. It caps one settle: a reaction chain that keeps
  *   committing schedules new passes of its own, which `maxPasses` doesn't
  *   cover. `shutdown()` stops any of them after the pass in flight.
@@ -431,8 +431,8 @@ export type ShutdownOptions = {
 
 /**
  * Name of the implicit lane every reaction lands in unless its `.to({lane})`
- * declaration says otherwise. Acts that don't call
- * `.withLane(...)` see only this lane,.
+ * declaration says otherwise. An Act that never calls `.withLane(...)` has
+ * only this lane.
  *
  * Persisted on `streams.lane` and threaded as the strict-typed default in
  * builder generics — `lane?: TLanes` always includes `"default"`.

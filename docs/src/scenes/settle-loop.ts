@@ -20,7 +20,7 @@ const scene: SceneSpec = {
       ],
     },
     {
-      say: "The debounce folds them into one cycle: the timer restarts on each call and fires once, `debounceMs` after the last.",
+      say: "The debounce folds them into one cycle. The first call sets when the pass runs; later calls join it and never put it off, and a shorter `debounceMs` would only bring it forward.",
       notes: [{ at: "settle", text: "one cycle" }],
     },
     {
@@ -61,7 +61,7 @@ const scene: SceneSpec = {
       ],
     },
     {
-      say: "Pass 3 reads no events, subscribes nothing and leases nothing. That's the only kind of pass that ends the loop.",
+      say: "Pass 3 reads no events and leases nothing. That's the only kind of pass that ends the loop.",
       messages: [
         { from: "settle", to: "correlate", label: "correlate()" },
         { from: "settle", to: "drain", label: "drain()" },

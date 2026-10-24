@@ -65,6 +65,8 @@ Their names and payload shapes are stable. Adding new optional fields to a paylo
 
 Everything exported from `@rotorsoft/act` and `@rotorsoft/act/types`. If you can `import { Foo } from "@rotorsoft/act"` (or `/types`), the shape of `Foo` is covered.
 
+Two runtime exports are there for adapter and tooling authors, not for apps: `default_scope` (the ports bag an Act without `ActOptions.scoped` runs in) and `PackageSchema` (the package.json fields `config()` validates). They're covered like every other export.
+
 ## Not covered
 
 These may change in **any** release, including patches. Don't depend on them in user code.

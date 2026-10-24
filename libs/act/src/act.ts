@@ -1189,8 +1189,8 @@ export class Act<
    *   `__snapshot__` events (counted in the result); `on_progress`
    *   fires once per event.
    * @param sink - Where the events land. Defaults to this Act's store.
-   * @returns {@link ScanResult} with `kept`, `duration_ms`, and
-   *   `dropped` per-category counters.
+   * @returns The {@link ScanResult}: what was kept, migrated and dropped,
+   *   and how long it took.
    *
    * @example Restore a CSV backup into the connected store
    * ```typescript
@@ -1391,7 +1391,7 @@ export class Act<
    * sets `autoSettle: false`. Call it at startup, to run what was pending
    * before a restart, or with options for the next pass; the scheduling
    * rule is in the event-sourcing docs (§ settle). Runs correlate→drain in a loop until a pass makes no
-   * progress — no new subscriptions, no events read, no streams leased —
+   * progress — it read no events and leased no streams —
    * then emits the `"settled"` lifecycle event, so one call fully catches
    * up paginated streams without forcing callers to loop.
    *
