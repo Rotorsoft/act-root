@@ -193,7 +193,7 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 | Error | Cause | Resolution |
 |---|---|---|
 | `ValidationError` | Payload fails Zod validation | Fix payload to match schema |
-| `InvariantError` | Business rule failed in `.given()` | Check preconditions |
+| `InvariantError` | Business rule failed in `.given()` or `.requires()` (the message says which) | Check the rule's description |
 | `ConcurrencyError` | Stream version mismatch | Retry: reload state and re-dispatch |
 
 For production deployment (PostgresStore, background processing, automated jobs), see [server.md](server.md).

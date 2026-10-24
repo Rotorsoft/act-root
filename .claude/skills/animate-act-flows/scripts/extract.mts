@@ -4,7 +4,7 @@
  *   npx tsx .claude/skills/animate-act-flows/scripts/extract.mts <dir> > flow.json
  *
  * Reuses the act-diagram parser, so it sees what `pnpm act` sees: states,
- * actions (with invariants and emitted events), slices, reactions (with the
+ * actions (with invariants, preconditions and emitted events), slices, reactions (with the
  * actions they invoke through `app.do`) and projections. The draft is a
  * starting point. The parser is best-effort, so the skill asks you to read the
  * source and fill what it misses (actions invoked inside helpers, webhooks, timers,

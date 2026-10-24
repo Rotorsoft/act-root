@@ -382,4 +382,6 @@ test("processes reactions and projections", async ({ app }) => {
 });
 ```
 
+To test a precondition or an invariant by name, assert on the rule's description: `rejects.toMatchObject({ description: "Contribution must stay within the cap" })`.
+
 **Test isolation**: `fixture(appBuilder)` gives each test a fresh, auto-seeded store + cache and disposes them automatically — no `store().seed()` / `dispose()()` boilerplate. Reach for `sandbox(appBuilder)` when you need `beforeAll`-shared setup, multiple Acts in one test, or direct `store`/`cache` handles. In-memory projections live outside the store, so still call `clear*()` at the start of any test that asserts on them. Legacy `store().seed()` + `dispose()()` stays valid only for tests that exercise the singleton port mechanism itself.

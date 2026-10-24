@@ -26,7 +26,7 @@ User-facing guide: `docs/docs/guides/flow-animations.md`. Keep it in step when t
 npx tsx .claude/skills/animate-act-flows/scripts/extract.mts <app-src-dir> > <scratch>/draft.json
 ```
 
-It reuses the `act-diagram` parser (the one behind `pnpm act`): states, actions with invariants and emitted events, reactions with the actions they invoke, and projections. The draft has nodes, edges, one state bar per state name and rough columns.
+It reuses the `act-diagram` parser (the one behind `pnpm act`): states, actions with their invariants, preconditions and emitted events, reactions with the actions they invoke, and projections. The draft has nodes, edges, one state bar per state name and rough columns.
 
 ### 2. Read the source and fill what the parser misses
 
@@ -57,7 +57,7 @@ Time runs left to right. Set `col` (fractions allowed) on every node except the 
 
 Each scenario is one believable story, with a real-looking stream name (`"stream": "ticket-4821"`) and names for people. Together the scenarios must walk **every edge**: `flows.mjs` warns about any edge no scenario walks, and the job isn't done until that warning is gone. Also cover these when the app has them:
 
-- **Refused actions.** Each invariant and each `throw` in an `.emit(...)` that a caller can actually hit.
+- **Refused actions.** Each invariant, each precondition and each `throw` in an `.emit(...)` that a caller can actually hit.
 - **Retries.** Reactions with `maxRetries`/`backoff`, and outside calls that can fail.
 - **Blocking.** A target that runs out of retries. Say whether it is shared (a constant `.to({ target })`) and how to recover (`app.unblock`).
 - **Timers that wake and do nothing.** The guard that ends a deferred chain.
