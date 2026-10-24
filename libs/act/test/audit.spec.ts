@@ -11,22 +11,25 @@ import {
 } from "../src/index.js";
 import type { AuditFinding, Store } from "../src/types/index.js";
 
-/**
- * Correlate's job, done by hand: `claim` follows the work mark,
- * so a test that commits events has to say which of them resolve where.
- * Marks every subscription up to the log head, which is honest for these
- * fixtures — their sources carry the events under test.
- */
+const meta = { correlation: "test-corr", causation: {} };
 
-/**
- * `app.audit()` smoke tests for the first slice.
- *
- * Covers the two categories shipped in slice 1:
- *   - `schema` — known/unknown event names + Zod validation
- *   - `deprecated-load` — `_v<digits>` rule + workspace aggregation
- *
- * Subsequent slices add tests as their categories land.
- */
+/** Commits one event to `stream`, subscribes it marked, and leases it. */
+const claimed = async (stream: string) => {
+  const [e] = await store().commit(
+    stream,
+    [{ name: "Repriced", data: { price: 1 } }],
+    meta
+  );
+  await store().subscribe([{ stream, source: stream, correlated_at: e.id }]);
+  return store().claim(1, 1, "audit-test", 60_000);
+};
+
+const collect = async (findings: AsyncIterable<AuditFinding>) => {
+  const all: AuditFinding[] = [];
+  for await (const f of findings) all.push(f);
+  return all;
+};
+
 describe("audit", () => {
   // Two-version event family: `Renamed` (deprecated) → `Renamed_v2`.
   // Other event has no version family — should classify as "active",
@@ -88,15 +91,13 @@ describe("audit", () => {
 
   it("yields no findings on an empty store", async () => {
     const app = act().withState(widget).build();
-    const findings: AuditFinding[] = [];
-    for await (const f of app.audit()) findings.push(f);
+    const findings = await collect(app.audit());
     expect(findings).toEqual([]);
   });
 
   describe("schema category", () => {
     it("flags events whose name is unknown to the registry", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await app.do(
         "rename",
         { stream: "w1", actor: { id: "u", name: "u" } },
@@ -110,8 +111,7 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["schema"])) findings.push(f);
+      const findings = await collect(app.audit(["schema"]));
 
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
@@ -124,7 +124,6 @@ describe("audit", () => {
 
     it("flags events that fail their current Zod schema", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Commit a Renamed_v2 event with the WRONG shape — missing
       // the `reason` field the current schema requires. Bypass
       // `.do()` so we don't get blocked by client-side validation.
@@ -134,8 +133,7 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["schema"])) findings.push(f);
+      const findings = await collect(app.audit(["schema"]));
 
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
@@ -149,7 +147,6 @@ describe("audit", () => {
 
     it("skips framework-internal events (__snapshot__, __tombstone__)", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "w3",
         [
@@ -159,8 +156,7 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["schema"])) findings.push(f);
+      const findings = await collect(app.audit(["schema"]));
 
       // Should NOT flag the framework markers as unknown.
       expect(findings).toEqual([]);
@@ -170,7 +166,6 @@ describe("audit", () => {
   describe("deprecated-load category", () => {
     it("flags deprecated event load above the share threshold", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
 
       // Seed 12 deprecated `Renamed` events across 3 streams + 2
       // current `Renamed_v2`. Deprecated share = 12/14 ≈ 86%, well
@@ -195,8 +190,7 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"])) findings.push(f);
+      const findings = await collect(app.audit(["deprecated-load"]));
 
       expect(findings).toHaveLength(1);
       const f = findings[0];
@@ -220,7 +214,6 @@ describe("audit", () => {
 
     it("suppresses findings below the share threshold", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Heavy `Repriced` load (the active event) plus a single
       // deprecated `Renamed`. Deprecated share = 1/101 ≈ 1%,
       // below the default 10% threshold.
@@ -237,8 +230,7 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"])) findings.push(f);
+      const findings = await collect(app.audit(["deprecated-load"]));
       expect(findings).toEqual([]);
     });
 
@@ -248,21 +240,18 @@ describe("audit", () => {
       // deprecated-load pass should classify Renamed as deprecated
       // via the registry rule, see count=0, and silently skip.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "s1",
         [{ name: "Repriced", data: { price: 1 } }],
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"])) findings.push(f);
+      const findings = await collect(app.audit(["deprecated-load"]));
       expect(findings).toEqual([]);
     });
 
     it("respects operator-supplied deprecated_min", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 100; i++) {
         await store().commit(
           "s1",
@@ -276,12 +265,11 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"], {
-        thresholds: { deprecated_min: 0.005 }, // 0.5%
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["deprecated-load"], {
+          thresholds: { deprecated_min: 0.005 }, // 0.5%
+        })
+      );
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "deprecated-load",
@@ -309,14 +297,12 @@ describe("audit", () => {
 
     it("does not flag a sole-version event deprecated by a same-stem event in another state", async () => {
       const app = act().withState(aStar).withState(bStar).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Approved is the ONLY version of its family within AStar.
       expect([...app.registry.deprecated_events("AStar")]).toEqual([]);
       for (let i = 0; i < 10; i++) {
         await store().commit("a1", [{ name: "Approved", data: {} }], meta);
       }
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"])) findings.push(f);
+      const findings = await collect(app.audit(["deprecated-load"]));
       // No cross-state deprecation finding — Approved is current in AStar.
       expect(findings).toEqual([]);
     });
@@ -338,7 +324,6 @@ describe("audit", () => {
         .build();
       // Each state is valid in isolation, so build() accepts both.
       const app = act().withState(cStar).withState(dStar).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit("c1", [{ name: "Gadget_v2", data: {} }], meta);
       // The global set {Gadget_v2, Gadget_v02} would trip the collision
       // guard; per-state classification never sees both together.
@@ -356,7 +341,6 @@ describe("audit", () => {
   describe("dispatcher", () => {
     it("runs only the requested categories", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Seed both a schema violation AND deprecated load.
       await store().commit("w1", [{ name: "Vanished", data: {} }], meta);
       for (let i = 0; i < 5; i++) {
@@ -367,10 +351,8 @@ describe("audit", () => {
         );
       }
 
-      const onlySchema: AuditFinding[] = [];
-      for await (const f of app.audit(["schema"])) onlySchema.push(f);
-      const onlyDep: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"])) onlyDep.push(f);
+      const onlySchema = await collect(app.audit(["schema"]));
+      const onlyDep = await collect(app.audit(["deprecated-load"]));
       expect(onlySchema.every((f) => f.category === "schema")).toBe(true);
       expect(onlyDep.every((f) => f.category === "deprecated-load")).toBe(true);
       // Selective runs DO NOT include findings from other categories.
@@ -382,7 +364,6 @@ describe("audit", () => {
 
     it("supports early break", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Two unrelated unknown-name events — iterator should yield
       // findings one at a time, and `break` should stop cleanly.
       await store().commit("s1", [{ name: "Vanished", data: {} }], meta);
@@ -400,7 +381,6 @@ describe("audit", () => {
   describe("close-candidate category", () => {
     it("flags streams whose head event is in the operator's terminal list", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "o1",
         [{ name: "OrderPlaced", data: { items: 3 } }],
@@ -414,12 +394,11 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["close-candidate"], {
-        thresholds: { terminal_events: ["OrderShipped"], idle_days: 10_000 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["close-candidate"], {
+          thresholds: { terminal_events: ["OrderShipped"], idle_days: 10_000 },
+        })
+      );
 
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
@@ -433,7 +412,6 @@ describe("audit", () => {
 
     it("flags idle streams when the head event is older than idle_days", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "o1",
         [{ name: "OrderPlaced", data: { items: 2 } }],
@@ -444,12 +422,11 @@ describe("audit", () => {
       // clocks.
       await sleep(20);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["close-candidate"], {
-        thresholds: { idle_days: 0 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["close-candidate"], {
+          thresholds: { idle_days: 0 },
+        })
+      );
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "close-candidate",
@@ -462,19 +439,17 @@ describe("audit", () => {
       // widget has no .snap() declared. An idle widget stream should
       // surface as a close-candidate with restart_supported: false.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 9 } }],
         meta
       );
       await sleep(20);
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["close-candidate"], {
-        thresholds: { idle_days: 0 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["close-candidate"], {
+          thresholds: { idle_days: 0 },
+        })
+      );
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         stream: "w1",
@@ -485,7 +460,6 @@ describe("audit", () => {
 
     it("skips framework-marker heads (tombstoned / snapshot)", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "o1",
         [
@@ -495,12 +469,11 @@ describe("audit", () => {
         meta
       );
       await sleep(20);
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["close-candidate"], {
-        thresholds: { idle_days: 0 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["close-candidate"], {
+          thresholds: { idle_days: 0 },
+        })
+      );
       // Stream's head is __tombstone__ → already closed → not a candidate.
       expect(findings).toEqual([]);
     });
@@ -509,32 +482,13 @@ describe("audit", () => {
   describe("reaction-health category", () => {
     it("flags blocked streams", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
-      const [e] = await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
-        meta
-      );
-      // Subscribe + block manually so the streams table has a
-      // blocked entry for the audit to find. The framework's
-      // drain machinery normally drives blocking; for tests we
-      // hit the store directly.
-      await store().subscribe([
-        { stream: "w1", source: "w1", correlated_at: e.id },
-      ]);
-      const claimed = await store().claim(1, 1, "audit-test", 60_000);
-      if (claimed.length > 0) {
-        await store().block([
-          {
-            ...claimed[0],
-            at: 1,
-            error: "audit test block",
-          },
-        ]);
-      }
+      // Block through the store so the streams table has a blocked entry
+      // for the audit to find; the drain normally does this.
+      const leases = await claimed("w1");
+      expect(leases).toHaveLength(1);
+      await store().block([{ ...leases[0], at: 1, error: "audit test block" }]);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["reaction-health"])) findings.push(f);
+      const findings = await collect(app.audit(["reaction-health"]));
       const blockedFinding = findings.find(
         (f) => f.category === "reaction-health" && f.status === "blocked"
       );
@@ -553,25 +507,10 @@ describe("audit", () => {
       // intervention). The audit should still flag it — with a
       // generic reason — rather than emitting an empty string.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
-      await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
-        meta
-      );
-      await store().subscribe([{ stream: "w1", source: "w1" }]);
-      const s = (
-        store() as unknown as {
-          _streams: Map<string, { _blocked: boolean; _error: string }>;
-        }
-      )._streams.get("w1");
-      if (s) {
-        s._blocked = true;
-        s._error = "";
-      }
+      const leases = await claimed("w1");
+      await store().block(leases.map((l) => ({ ...l, error: "" })));
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["reaction-health"])) findings.push(f);
+      const findings = await collect(app.audit(["reaction-health"]));
       const blockedFinding = findings.find(
         (f) => f.category === "reaction-health" && f.status === "blocked"
       );
@@ -585,34 +524,18 @@ describe("audit", () => {
     });
 
     it("flags near-block streams when retry >= near_block", async () => {
-      // Driving retry counts to >= threshold via public APIs
-      // requires the drain machinery (failing reactions). For a
-      // unit-level audit smoke test, reach into the in-memory
-      // store's `_streams` map directly to set a retry count.
-      // The audit reads `StreamPosition.retry` straight from
-      // `query_streams`, so any value > threshold flags.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
-      await store().commit(
-        "w1",
-        [{ name: "Repriced", data: { price: 1 } }],
-        meta
+      // A backoff schedule persists the climbing retry count.
+      const leases = await claimed("w1");
+      await store().ack(
+        leases.map((l) => ({ ...l, retry: 5, due: Date.now() + 60_000 }))
       );
-      await store().subscribe([{ stream: "w1", source: "w1" }]);
-      // Reach in to bump retry directly for the test setup.
-      const s = (
-        store() as unknown as {
-          _streams: Map<string, { _retry: number }>;
-        }
-      )._streams.get("w1");
-      if (s) s._retry = 5;
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["reaction-health"], {
-        thresholds: { near_block: 3 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["reaction-health"], {
+          thresholds: { near_block: 3 },
+        })
+      );
       const nearBlock = findings.find(
         (f) => f.category === "reaction-health" && f.status === "near-block"
       );
@@ -626,7 +549,6 @@ describe("audit", () => {
 
     it("flags stuck-backoff for expired leases that weren't released", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       const [e] = await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 1 } }],
@@ -641,13 +563,12 @@ describe("audit", () => {
       await store().claim(1, 1, "audit-stuck-test", 5);
       await sleep(20);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["reaction-health"], {
-        // stuck_minutes: 0 makes any expired lease count.
-        thresholds: { stuck_minutes: 0 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["reaction-health"], {
+          // stuck_minutes: 0 makes any expired lease count.
+          thresholds: { stuck_minutes: 0 },
+        })
+      );
       const stuck = findings.find(
         (f) => f.category === "reaction-health" && f.status === "stuck-backoff"
       );
@@ -658,7 +579,6 @@ describe("audit", () => {
   describe("snapshot-drift category", () => {
     it("flags streams above driftMin without any snapshots", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 30; i++) {
         await store().commit(
           "big",
@@ -667,12 +587,11 @@ describe("audit", () => {
         );
       }
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { drift_min: 20 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 20 },
+        })
+      );
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "snapshot-drift",
@@ -684,7 +603,6 @@ describe("audit", () => {
 
     it("counts only events after the last __snapshot__ when one exists", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Sandwich: 5 events, 1 snapshot, 15 events.
       for (let i = 0; i < 5; i++) {
         await store().commit(
@@ -702,12 +620,11 @@ describe("audit", () => {
         );
       }
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { drift_min: 10 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 10 },
+        })
+      );
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "snapshot-drift",
@@ -721,7 +638,6 @@ describe("audit", () => {
       // widget doesn't declare .snap() — snapshot drift isn't a
       // meaningful signal there because snapshots would never fire.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 30; i++) {
         await store().commit(
           "w1",
@@ -729,12 +645,11 @@ describe("audit", () => {
           meta
         );
       }
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { drift_min: 10 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 10 },
+        })
+      );
       expect(findings).toEqual([]);
     });
   });
@@ -742,7 +657,6 @@ describe("audit", () => {
   describe("restart-candidate category", () => {
     it("flags streams above the event-count threshold when state has .snap()", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 25; i++) {
         await store().commit(
           "big",
@@ -757,12 +671,11 @@ describe("audit", () => {
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { restart_min: 20 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["restart-candidate"], {
+          thresholds: { restart_min: 20 },
+        })
+      );
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "restart-candidate",
@@ -776,7 +689,6 @@ describe("audit", () => {
       // widget doesn't declare .snap() — restart wouldn't work,
       // so the audit silently skips it for restart-candidate.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 25; i++) {
         await store().commit(
           "big",
@@ -784,12 +696,11 @@ describe("audit", () => {
           meta
         );
       }
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { restart_min: 20 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["restart-candidate"], {
+          thresholds: { restart_min: 20 },
+        })
+      );
       expect(findings).toEqual([]);
     });
   });
@@ -804,8 +715,7 @@ describe("audit", () => {
         { stream: "w1", source: "w1", lane: "deprecated-lane" },
       ]);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       const unknownLane = findings.find(
         (f) => f.category === "routing-health" && f.reason === "unknown-lane"
       );
@@ -831,8 +741,7 @@ describe("audit", () => {
         .build({ onlyLanes: ["fast"] });
       await store().subscribe([{ stream: "w1", source: "w1", lane: "slow" }]);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       const unknownLane = findings.filter(
         (f) => f.category === "routing-health" && f.reason === "unknown-lane"
       );
@@ -843,15 +752,13 @@ describe("audit", () => {
       // widget declares events but no reactions — every event name
       // is "unrouted" from a reaction perspective.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 1 } }],
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       const unrouted = findings.filter(
         (f) => f.category === "routing-health" && f.reason === "unrouted"
       );
@@ -874,8 +781,7 @@ describe("audit", () => {
         causation: { event: { id: 999, stream: "fake", name: "fake" } },
       } as unknown as { correlation: string; causation: object });
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["correlation-gaps"])) findings.push(f);
+      const findings = await collect(app.audit(["correlation-gaps"]));
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "correlation-gaps",
@@ -893,8 +799,7 @@ describe("audit", () => {
           meta
         );
       }
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["correlation-gaps"])) findings.push(f);
+      const findings = await collect(app.audit(["correlation-gaps"]));
       expect(findings).toEqual([]);
     });
   });
@@ -914,8 +819,7 @@ describe("audit", () => {
         [{ name: "Repriced", data: { price: 2 } }],
         meta
       );
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["clock-anomalies"])) findings.push(f);
+      const findings = await collect(app.audit(["clock-anomalies"]));
       expect(findings).toEqual([]);
     });
 
@@ -939,8 +843,7 @@ describe("audit", () => {
         e.created = new Date(Date.now() + 60 * 60 * 1000);
       }
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["clock-anomalies"])) findings.push(f);
+      const findings = await collect(app.audit(["clock-anomalies"]));
       const future = findings.find(
         (f) => f.category === "clock-anomalies" && f.reason === "future-created"
       );
@@ -972,8 +875,7 @@ describe("audit", () => {
       onW1[0].created = new Date(Date.now() - 5 * 60 * 1000);
       onW1[1].created = new Date(Date.now() - 15 * 60 * 1000);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["clock-anomalies"])) findings.push(f);
+      const findings = await collect(app.audit(["clock-anomalies"]));
       const ooo = findings.find(
         (f) => f.category === "clock-anomalies" && f.reason === "out-of-order"
       );
@@ -1015,7 +917,6 @@ describe("audit", () => {
 
     it("sorts multiple deprecated event families by descending count", async () => {
       const app = act().withState(twoDeprecated).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Beta has more events than Alpha — both deprecated.
       for (let i = 0; i < 3; i++) {
         await store().commit("s", [{ name: "Alpha", data: { a: i } }], meta);
@@ -1024,12 +925,11 @@ describe("audit", () => {
         await store().commit("s", [{ name: "Beta", data: { b: i } }], meta);
       }
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["deprecated-load"], {
-        thresholds: { deprecated_min: 0.1 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["deprecated-load"], {
+          thresholds: { deprecated_min: 0.1 },
+        })
+      );
       // Both deprecated event families surface, Beta first (higher count).
       const names = findings.map((f) => (f as { name: string }).name);
       expect(names).toEqual(["Beta", "Alpha"]);
@@ -1038,7 +938,6 @@ describe("audit", () => {
     it("restart-candidate skips streams whose head is a framework marker", async () => {
       // count > threshold AND head is __tombstone__ → skip.
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 25; i++) {
         await store().commit(
           "tomb",
@@ -1048,12 +947,11 @@ describe("audit", () => {
       }
       await store().commit("tomb", [{ name: "__tombstone__", data: {} }], meta);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { restart_min: 20 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["restart-candidate"], {
+          thresholds: { restart_min: 20 },
+        })
+      );
       expect(findings).toEqual([]);
     });
 
@@ -1062,7 +960,6 @@ describe("audit", () => {
       // visits the row via query_streams and yields no finding.
       // Exercises the "all checks fail" path through on_stream.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "healthy",
         [{ name: "Repriced", data: { price: 1 } }],
@@ -1070,14 +967,12 @@ describe("audit", () => {
       );
       await store().subscribe([{ stream: "healthy", source: "healthy" }]);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["reaction-health"])) findings.push(f);
+      const findings = await collect(app.audit(["reaction-health"]));
       expect(findings).toEqual([]);
     });
 
     it("snapshot-drift skips streams whose head is a framework marker", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 30; i++) {
         await store().commit(
           "tomb",
@@ -1087,12 +982,11 @@ describe("audit", () => {
       }
       await store().commit("tomb", [{ name: "__tombstone__", data: {} }], meta);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { drift_min: 20 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 20 },
+        })
+      );
       expect(findings).toEqual([]);
     });
 
@@ -1100,7 +994,6 @@ describe("audit", () => {
       // Stream with snap state but only a handful of events → not
       // worth a drift finding.
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 3; i++) {
         await store().commit(
           "tiny",
@@ -1108,18 +1001,16 @@ describe("audit", () => {
           meta
         );
       }
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { drift_min: 20 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 20 },
+        })
+      );
       expect(findings).toEqual([]);
     });
 
     it("snapshot-drift skips streams whose post-snapshot count is below driftMin", async () => {
       const app = act().withState(order).build();
-      const meta = { correlation: "test-corr", causation: {} };
       // Total events ≥ driftMin to enter the candidate set, but
       // post-snapshot count is below threshold.
       for (let i = 0; i < 15; i++) {
@@ -1138,35 +1029,27 @@ describe("audit", () => {
           meta
         );
       }
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { drift_min: 10 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["snapshot-drift"], {
+          thresholds: { drift_min: 10 },
+        })
+      );
       expect(findings).toEqual([]);
     });
 
     it("routing-health ignores streams subscribed without a lane string", async () => {
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "nolane",
         [{ name: "Repriced", data: { price: 1 } }],
         meta
       );
-      await store().subscribe([{ stream: "nolane", source: "nolane" }]);
-      // Force-empty the stream's lane field — adapters can land
-      // rows with empty lane after manual ops.
-      const s = (
-        store() as unknown as {
-          _streams: Map<string, { _lane: string }>;
-        }
-      )._streams.get("nolane");
-      if (s) s._lane = "";
+      // Adapters can land rows with an empty lane after manual ops.
+      await store().subscribe([
+        { stream: "nolane", source: "nolane", lane: "" },
+      ]);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       const unknownLane = findings.filter(
         (f) => f.category === "routing-health" && f.reason === "unknown-lane"
       );
@@ -1177,7 +1060,6 @@ describe("audit", () => {
       // Default lane is always declared — subscribe without specifying
       // a lane lands on the default and should NOT be flagged.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "defaultlane",
         [{ name: "Repriced", data: { price: 1 } }],
@@ -1187,8 +1069,7 @@ describe("audit", () => {
         { stream: "defaultlane", source: "defaultlane" },
       ]);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       const unknownLane = findings.filter(
         (f) => f.category === "routing-health" && f.reason === "unknown-lane"
       );
@@ -1201,12 +1082,10 @@ describe("audit", () => {
       // domain-level); __tombstone__ still reaches the names map and
       // is filtered by the marker guard.
       const app = act().withState(widget).build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit("w1", [{ name: "__snapshot__", data: {} }], meta);
       await store().commit("w2", [{ name: "__tombstone__", data: {} }], meta);
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       const unrouted = findings.filter(
         (f) => f.category === "routing-health" && f.reason === "unrouted"
       );
@@ -1242,15 +1121,13 @@ describe("audit", () => {
         .withState(sender)
         .withProjection(tracked)
         .build();
-      const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 1 } }],
         meta
       );
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const findings = await collect(app.audit(["routing-health"]));
       // Repriced was routed; should NOT appear as unrouted.
       const repricedUnrouted = findings.find(
         (f) =>
@@ -1281,8 +1158,7 @@ describe("audit", () => {
         },
       } as unknown as { correlation: string; causation: object });
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["correlation-gaps"])) findings.push(f);
+      const findings = await collect(app.audit(["correlation-gaps"]));
       expect(findings).toEqual([]);
     });
   });
@@ -1347,12 +1223,11 @@ describe("audit", () => {
       const raw = await store().query_stats({ stream: "sn1" }, { count: true });
       expect(String(raw.get("sn1")?.head.name)).toBe("__snapshot__");
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["close-candidate"], {
-        thresholds: { terminal_events: ["Finished"], idle_days: 10_000 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["close-candidate"], {
+          thresholds: { terminal_events: ["Finished"], idle_days: 10_000 },
+        })
+      );
 
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
@@ -1369,12 +1244,11 @@ describe("audit", () => {
       await app.do("start", { stream: "sn2", actor: snap_actor }, {});
       await app.do("finish", { stream: "sn2", actor: snap_actor }, {});
 
-      const findings: AuditFinding[] = [];
-      for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { restart_min: 2 },
-      })) {
-        findings.push(f);
-      }
+      const findings = await collect(
+        app.audit(["restart-candidate"], {
+          thresholds: { restart_min: 2 },
+        })
+      );
 
       // Two domain events — the snapshot must not pad the count, and the
       // stream must not be skipped for having a marker head.
@@ -1420,9 +1294,9 @@ describe("audit", () => {
         { stream: `s-${mark}`, actor: sens_actor },
         { email: "alice@example.com", plan: "pro" }
       );
-      const out: string[] = [];
-      for await (const f of app.audit(["schema"]))
-        out.push((f as { reason?: string }).reason ?? "?");
+      const out = (await collect(app.audit(["schema"]))).map(
+        (f) => (f as { reason?: string }).reason ?? "?"
+      );
       await app.shutdown();
       return out;
     };
@@ -1455,9 +1329,9 @@ describe("audit", () => {
         kind: "email",
         email: "alice@example.com",
       } as never);
-      const out: string[] = [];
-      for await (const f of app.audit(["schema"]))
-        out.push((f as { reason?: string }).reason ?? "?");
+      const out = (await collect(app.audit(["schema"]))).map(
+        (f) => (f as { reason?: string }).reason ?? "?"
+      );
       expect(out).toEqual([]);
       await app.shutdown();
     });
@@ -1471,9 +1345,9 @@ describe("audit", () => {
         [{ name: "SRegistered", data: { plan: 42 } }] as never,
         { correlation: "c", causation: {}, stream: "s-bad" } as never
       );
-      const out: string[] = [];
-      for await (const f of app.audit(["schema"]))
-        out.push((f as { reason?: string }).reason ?? "?");
+      const out = (await collect(app.audit(["schema"]))).map(
+        (f) => (f as { reason?: string }).reason ?? "?"
+      );
       expect(out).toContain("schema_validation_failed");
       await app.shutdown();
     });
@@ -1560,8 +1434,7 @@ describe("unreadable-events category", () => {
         scoped: { store: poison(store(), 1), cache: new InMemoryCache() },
       });
 
-    const findings: AuditFinding[] = [];
-    for await (const f of scoped.audit()) findings.push(f);
+    const findings = await collect(scoped.audit());
 
     expect(findings).toContainEqual({
       category: "unreadable-events",
@@ -1591,9 +1464,9 @@ describe("unreadable-events category", () => {
         scoped: { store: poison(store(), 1), cache: new InMemoryCache() },
       });
 
-    const findings: AuditFinding[] = [];
-    for await (const f of scoped.audit(undefined, { query: { limit: 2 } }))
-      findings.push(f);
+    const findings = await collect(
+      scoped.audit(undefined, { query: { limit: 2 } })
+    );
 
     expect(
       findings.filter((f) => f.category === "unreadable-events")
@@ -1699,8 +1572,7 @@ describe("unreadable-events category", () => {
       { name: "a" }
     );
 
-    const findings: AuditFinding[] = [];
-    for await (const f of app.audit()) findings.push(f);
+    const findings = await collect(app.audit());
     expect(
       findings.filter((f) => f.category === "unreadable-events")
     ).toHaveLength(0);
