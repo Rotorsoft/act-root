@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.33.20](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.19...@rotorsoft/act-v1.33.20) (2026-10-24)
+
+
+### Bug Fixes
+
+* **act:** a drain pass skips empty block and ack calls; benches run without synchronous commit ([#2117](https://github.com/Rotorsoft/act-root/issues/2117)) ([8d487a3](https://github.com/Rotorsoft/act-root/commit/8d487a30f0008c9dd457a3e7e10d02c30c182ead))
+
 # [@rotorsoft/act-v1.33.19](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.18...@rotorsoft/act-v1.33.19) (2026-10-24)
 
 # [@rotorsoft/act-v1.33.18](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v1.33.17...@rotorsoft/act-v1.33.18) (2026-10-24)
