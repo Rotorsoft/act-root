@@ -268,6 +268,19 @@ jobs:
           node-version: 26.11.1
           cache: "pnpm"
       - run: pnpm install
+      # The scenario benches measure wake-up and reaction latency, not the
+      # runner's disk. GitHub runners intermittently stall WAL flushes for
+      # ~100 ms, which turned every write (mark, lease, ack) into a stall and
+      # failed the notify bench on the same code that passes the next run.
+      # Async commit takes the flush off the request path for this throwaway
+      # database only; the perf job keeps the default its baselines assume.
+      - name: Postgres without synchronous commit (benches only)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -p 5431 -U postgres -c "ALTER SYSTEM SET synchronous_commit = off"
+          psql -h localhost -p 5431 -U postgres -c "SELECT pg_reload_conf()"
+          psql -h localhost -p 5431 -U postgres -tc "SHOW synchronous_commit"
       # Scenario benchmarks (Shape C). Each one has a built-in
       # regression assertion, so a real perf regression breaks the
       # build. The captured stdout ends up in the workflow's step

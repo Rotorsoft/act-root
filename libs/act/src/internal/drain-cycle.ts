@@ -329,11 +329,12 @@ async function run_drain_cycle<
   // `block` before `ack`: block needs the lease, ack releases it. A
   // partial-progress block goes to both. Deferred and backing-off entries
   // carry `due`, so one `ack` also persists the schedule (defer: retry -1).
-  const blocked = await ops.block(
-    handled
-      .filter(({ block }) => block)
-      .map(({ lease, error }) => ({ ...lease, error: error! }))
-  );
+  // Most passes block nothing; an empty call would still cost the store a
+  // write transaction.
+  const to_block = handled
+    .filter(({ block }) => block)
+    .map(({ lease, error }) => ({ ...lease, error: error! }));
+  const blocked = to_block.length ? await ops.block(to_block) : [];
 
   // Before the `ack`, so an ack failure can't lose the terminal event.
   if (blocked.length) deps.on_blocked(blocked);
@@ -348,7 +349,7 @@ async function run_drain_cycle<
           ? { ...h.lease, at: h.acked_at }
           : [];
   });
-  const acked = await ops.ack(submitted);
+  const acked = submitted.length ? await ops.ack(submitted) : [];
 
   // `ack` drops entries whose lease another worker took (deferred entries
   // are never returned).

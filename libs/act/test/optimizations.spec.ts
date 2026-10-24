@@ -15,6 +15,9 @@
  *   (c) cache `after: cached.event_id` — a cache-warm load queries the
  *       store with `after` set and replays zero pre-cache rows
  *       (event-sourcing.ts `load()` query options).
+ *   (d) a drain pass calls `Store.block` only when a stream must block:
+ *       an empty call still costs the SQL adapters a write transaction
+ *       (internal/drain-cycle.ts).
  *
  * The EXPLAIN guards for the partial snapshot index live in the
  * adapter packages (act-pg / act-sqlite) — InMemoryStore has no planner.
@@ -198,6 +201,45 @@ describe("optimization guards", () => {
         expect(coldOptions).toMatchObject({ with_snaps: true });
         expect(cold.cache_hit).toBe(false);
         expect(cold.replayed).toBe(5);
+      } finally {
+        await dispose();
+      }
+    });
+  });
+
+  describe("(d) a drain pass calls block only when a stream must block", () => {
+    it("acks a healthy pass without calling block, and blocks a failing one", async () => {
+      let fail = false;
+      const { app, store, dispose } = await sandbox(
+        act()
+          .withState(Counter)
+          .on("Incremented")
+          .do(
+            async function count() {
+              if (fail) throw new Error("boom");
+            },
+            { maxRetries: 0, blockOnError: true }
+          )
+          .to("counted"),
+        { actOptions: { autoSettle: false } }
+      );
+      try {
+        const block = vi.spyOn(store, "block");
+        const ack = vi.spyOn(store, "ack");
+        await app.do("increment", { stream: "c1", actor }, { by: 1 });
+        await app.correlate();
+        const healthy = await app.drain();
+        expect(healthy.acked.map((l) => l.stream)).toEqual(["counted"]);
+        expect(ack).toHaveBeenCalledTimes(1);
+        expect(block).not.toHaveBeenCalled();
+
+        // Control: a stream that must block still reaches the store.
+        fail = true;
+        await app.do("increment", { stream: "c1", actor }, { by: 1 });
+        await app.correlate();
+        const failing = await app.drain();
+        expect(failing.blocked.map((l) => l.stream)).toEqual(["counted"]);
+        expect(block).toHaveBeenCalledTimes(1);
       } finally {
         await dispose();
       }
