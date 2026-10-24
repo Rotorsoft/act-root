@@ -479,9 +479,11 @@ export class DrainController<
     return this._deps.lane;
   }
 
-  /** Drains every `cycleMs` while armed; the unref'd timer never holds the process. */
+  /**
+   * Drains every `cycleMs` while armed; the unref'd timer never holds the
+   * process. Called once, when the controller is built.
+   */
   start(cycleMs: number): void {
-    if (this._worker || this._stopped) return;
     // `drain()` never throws.
     const run = this._deps.run_scoped;
     const tick = async () => {

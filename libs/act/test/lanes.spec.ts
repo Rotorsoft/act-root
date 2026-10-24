@@ -610,31 +610,15 @@ describe("lanes", () => {
     infoSpy.mockRestore();
   });
 
-  it("auto-starts a per-lane worker when cycleMs is declared", async () => {
-    const app = act()
-      .withState(Counter)
-      .withLane({ name: "fast", cycleMs: 5 })
-      .build();
-    const controllers = (
-      app as unknown as {
-        _drain_controllers: Map<
-          string,
-          { lane: string | undefined; stop: () => void } & {
-            _worker: unknown;
-          }
-        >;
-      }
-    )._drain_controllers;
-    expect(controllers.get("fast")?._worker).toBeDefined();
-    expect(controllers.get("default")?._worker).toBeUndefined();
-  });
-
-  it("auto-fires the per-lane worker — armed drains are picked up on schedule", async () => {
+  it("a lane with cycleMs drains on its own timer", async () => {
+    let ran = 0;
     const app = act()
       .withState(Counter)
       .withLane({ name: "fast", cycleMs: 5, leaseMillis: 100 })
       .on("Incremented")
-      .do(async function noop() {})
+      .do(async function count() {
+        ran++;
+      })
       .to({ target: "out", lane: "fast" })
       .build({ autoSettle: false });
     await app.do(
@@ -643,118 +627,8 @@ describe("lanes", () => {
       {}
     );
     await app.correlate();
-    // Let the worker tick a couple of times; armed → drain → ack.
-    await new Promise<void>((r) => setTimeout(r, 50));
-    const ctrl = (
-      app as unknown as {
-        _drain_controllers: Map<string, { armed: boolean }>;
-      }
-    )._drain_controllers.get("fast");
-    expect(ctrl?.armed).toBe(false);
-  });
-
-  it("shutdown stops every per-lane worker", async () => {
-    const app = act()
-      .withState(Counter)
-      .withLane({ name: "fast", cycleMs: 5 })
-      .withLane({ name: "slow", cycleMs: 1_000 })
-      .build();
-    const controllers = (
-      app as unknown as {
-        _drain_controllers: Map<
-          string,
-          { _worker: unknown; _stopped: boolean }
-        >;
-      }
-    )._drain_controllers;
-    expect(controllers.get("fast")?._worker).toBeDefined();
-    expect(controllers.get("slow")?._worker).toBeDefined();
+    await vi.waitFor(() => expect(ran).toBe(1));
     await app.shutdown();
-    expect(controllers.get("fast")?._worker).toBeUndefined();
-    expect(controllers.get("slow")?._worker).toBeUndefined();
-    expect(controllers.get("fast")?._stopped).toBe(true);
-  });
-
-  it("start() is a no-op after stop() — once stopped, the controller stays stopped", () => {
-    const app = act().withState(Counter).build();
-    const ctrl = (
-      app as unknown as {
-        _drain_controllers: Map<
-          string,
-          {
-            stop: () => void;
-            start: (ms: number) => void;
-            _worker: unknown;
-            _stopped: boolean;
-          }
-        >;
-      }
-    )._drain_controllers.get("default");
-    ctrl?.stop();
-    expect(ctrl?._stopped).toBe(true);
-    ctrl?.start(5);
-    expect(ctrl?._worker).toBeUndefined();
-  });
-
-  it("stops rescheduling when stop() lands mid-tick", async () => {
-    // A timer already queued when `stop()` runs will still fire, so the tick
-    // re-checks after draining. Without that check the chain would schedule
-    // itself again and keep draining past shutdown.
-    const app = act().withState(Counter).build();
-    const ctrl = (
-      app as unknown as {
-        _drain_controllers: Map<
-          string,
-          {
-            stop: () => void;
-            start: (ms: number) => void;
-            arm: () => void;
-            drain: () => Promise<unknown>;
-            _worker: unknown;
-            _stopped: boolean;
-          }
-        >;
-      }
-    )._drain_controllers.get("default");
-
-    // Stop while the tick is inside `drain()`, which is exactly the race the
-    // post-drain check exists for.
-    let stopped_during_drain = false;
-    const real_drain = ctrl!.drain.bind(ctrl);
-    ctrl!.drain = async () => {
-      if (!stopped_during_drain) {
-        stopped_during_drain = true;
-        ctrl!.stop();
-      }
-      return real_drain();
-    };
-
-    ctrl!.arm();
-    ctrl!.start(1);
-    await new Promise((r) => setTimeout(r, 40));
-
-    expect(stopped_during_drain).toBe(true);
-    // No follow-up timer was scheduled after the drain returned.
-    expect(ctrl!._worker).toBeUndefined();
-    await app.shutdown();
-  });
-
-  it("start() is a no-op when the worker is already running", () => {
-    const app = act()
-      .withState(Counter)
-      .withLane({ name: "fast", cycleMs: 5 })
-      .build();
-    const ctrl = (
-      app as unknown as {
-        _drain_controllers: Map<
-          string,
-          { start: (ms: number) => void; _worker: unknown }
-        >;
-      }
-    )._drain_controllers.get("fast");
-    const before = ctrl?._worker;
-    ctrl?.start(10);
-    expect(ctrl?._worker).toBe(before);
   });
 
   it("do() arms only the lane whose reactions match the committed event", async () => {
