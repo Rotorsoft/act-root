@@ -70,10 +70,17 @@ describe("recurring reminder timer recipe", () => {
     // the clock past it once (only `Date` is faked, and it keeps moving).
     // The loop drives a drain after the jump, since the real-time wake for
     // the expired lease would not fire inside the test.
+    // It drives passes until four ticks are in, not for a fixed number of
+    // passes: how many ticks fit in a time budget depends on the machine.
     vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     let jumped = false;
+    const committed = async () =>
+      (await app.query_array({ stream: "reminders:t3" }))
+        .filter((e) => e.name === "Reminded")
+        .map((e) => (e.data as { nth: number }).nth);
     await startReminders(app, "t3");
-    for (let i = 0; i < 10; i++) {
+    let ticks: number[] = [];
+    for (let i = 0; i < 100 && ticks.length < 4; i++) {
       await app.correlate();
       await app.drain();
       await sleep(STEP + 20);
@@ -81,12 +88,9 @@ describe("recurring reminder timer recipe", () => {
         jumped = true;
         vi.setSystemTime(Date.now() + 10_001);
       }
+      ticks = await committed();
     }
     vi.useRealTimers();
-
-    const ticks = (await app.query_array({ stream: "reminders:t3" }))
-      .filter((e) => e.name === "Reminded")
-      .map((e) => (e.data as { nth: number }).nth);
     // Each tick committed exactly once: the redelivered tick 1 did not start
     // a second chain (a fork shows up as 1, 2, 2, 3, 3, ...). Only tick 1's
     // nudge repeated, once (at-least-once).
