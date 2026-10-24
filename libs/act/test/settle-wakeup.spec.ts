@@ -684,7 +684,16 @@ describe("a local change settles its own reactions", () => {
   });
 
   it("scans with the poll's limit only while the poll runs", async () => {
-    const app = reacting([]);
+    // No auto settle: a commit arms correlate but schedules nothing, so the
+    // only pass that can read each commit is the settle() call after it. With
+    // auto settle, a runner stalled past the commit's own 10 ms pass lets that
+    // pass read the event at the default limit first.
+    const app = act()
+      .withState(Ping)
+      .on("Pinged")
+      .do(async function track() {})
+      .to("tracker")
+      .build({ autoSettle: false });
     // Correlate's event reads are the actor-less ones (`with_pii: false`).
     const query = vi.spyOn(store(), "query");
     const limit = () =>
@@ -693,8 +702,10 @@ describe("a local change settles its own reactions", () => {
     app.start_correlations({ limit: 5 }, 5);
     await vi.waitFor(() => expect(limit()).toBe(5));
     app.stop_correlations();
-    // A commit gives each settle something to scan, and its options join
-    // the pass the commit scheduled.
+    // The poll's last tick may have scheduled a pass that runs after the
+    // commit below and reads it at the default limit; drop it.
+    app.stop_settling();
+    // A commit gives each settle something to scan.
     await app.do("ping", { stream: "l1", actor }, {});
     app.settle({ correlate: { limit: 7 } });
     await vi.waitFor(() => expect(limit()).toBe(7));
