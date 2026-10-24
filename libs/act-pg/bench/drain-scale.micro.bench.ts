@@ -1,13 +1,20 @@
 /**
- * Scale benchmark: drain cycle throughput under concurrent worker load.
+ * Scale benchmark: how long one worker, or several competing workers, take to
+ * drain a full backlog of N streams.
  *
- * Tests atomic claim vs two-phase poll→lease at scale with multiple
- * concurrent drain workers competing for streams.
+ * Each worker is its own Act: one Act runs one drain at a time, so only
+ * separate instances compete for streams through FOR UPDATE SKIP LOCKED.
+ * Before every timed round, `reset` rewinds each stream's watermark to -1
+ * (the work mark stays), so every round claims, fetches, handles and acks
+ * the whole backlog again instead of timing an empty drain. A worker drains
+ * until a claim comes back empty, and every round must ack every stream. The
+ * apps don't auto-settle, so nothing drains the backlog behind the bench's
+ * back.
  *
  * Run: pnpm bench:micro libs/act-pg/bench/drain-scale.micro.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { PostgresStore } from "../src/postgres-store.js";
 
@@ -19,7 +26,8 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit(() => ["Incremented", {}])
   .build();
 
-const actor = { id: "a", name: "a" };
+const EVENTS_PER_STREAM = 5;
+const ROUNDS = 10;
 
 function pgStore() {
   return new PostgresStore({
@@ -29,84 +37,79 @@ function pgStore() {
   });
 }
 
-const handler = vi.fn().mockResolvedValue(undefined);
+const worker = () =>
+  act()
+    .withState(Counter)
+    .on("Incremented")
+    .do(async function handle() {})
+    .build({ autoSettle: false });
 
-async function seedStreams(n: number) {
+/** N streams of EVENTS_PER_STREAM events each, correlated so they carry a work mark. */
+async function seed(n: number) {
+  await dispose()();
   store(pgStore());
   await store().drop();
   await store().seed();
-
-  const app_ = act().withState(Counter).on("Incremented").do(handler).build();
-
-  // Create N streams with 5 events each
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < 5; j++) {
-      await app_.do("increment", { stream: `s-${i}`, actor }, {});
-    }
-  }
-  await app_.correlate({ limit: n * 2 });
-  return app_;
+  const streams = Array.from({ length: n }, (_, i) => `s-${i}`);
+  const events = Array.from({ length: EVENTS_PER_STREAM }, () => ({
+    name: "Incremented",
+    data: {},
+  }));
+  for (const stream of streams)
+    await store().commit(stream, events, { correlation: "", causation: {} });
+  await worker().correlate({ limit: n * EVENTS_PER_STREAM + 1 });
+  return streams;
 }
 
-// --- Single worker benchmarks (stream scaling) ---
-
-for (const streams of [50, 200, 500, 1000]) {
-  describe(`1 worker × ${streams} streams`, () => {
-    let app_: Awaited<ReturnType<typeof seedStreams>>;
-
-    it("compares implementations", async ({ bench }) => {
+for (const [workers, streams] of [
+  [1, 50],
+  [1, 200],
+  [1, 500],
+  [1, 1000],
+  [3, 100],
+  [3, 500],
+  [5, 100],
+  [5, 500],
+] as const) {
+  describe(`${workers} worker${workers > 1 ? "s" : ""} × ${streams} streams`, () => {
+    it("drains the whole backlog", async ({ bench }) => {
+      const names = await seed(streams);
+      const apps = Array.from({ length: workers }, worker);
+      const limit = Math.ceil(streams / workers);
+      const short: number[] = [];
       await bench(
-        `drain ${streams}`,
+        `drain ${streams} streams with ${workers} worker${workers > 1 ? "s" : ""}`,
         {
-          async beforeAll() {
-            await dispose()();
-            handler.mockClear();
-            app_ = await seedStreams(streams);
+          // reset arms each app's drain, and only that app's
+          async beforeEach() {
+            await Promise.all(apps.map((app) => app.reset(names)));
           },
         },
         async () => {
-          await app_.drain({
-            streamLimit: streams,
-            eventLimit: 50,
-            leaseMillis: 1,
-          });
+          const acked = new Set<string>();
+          await Promise.all(
+            apps.map(async (app) => {
+              for (;;) {
+                const d = await app.drain({
+                  streamLimit: limit,
+                  eventLimit: EVENTS_PER_STREAM,
+                  leaseMillis: 10_000,
+                });
+                if (!d.leased.length) return;
+                for (const lease of d.acked) acked.add(lease.stream);
+              }
+            })
+          );
+          if (acked.size < streams) short.push(acked.size);
         }
-      ).run();
+      ).run({
+        iterations: ROUNDS,
+        time: 0,
+        warmupIterations: 2,
+        warmupTime: 0,
+      });
+      // every round drained the whole backlog
+      expect(short).toEqual([]);
     });
   });
-}
-
-// --- Concurrent worker benchmarks (contention) ---
-
-for (const workers of [3, 5]) {
-  for (const streams of [100, 500]) {
-    describe(`${workers} workers × ${streams} streams`, () => {
-      let app_: Awaited<ReturnType<typeof seedStreams>>;
-
-      it("compares implementations", async ({ bench }) => {
-        await bench(
-          `drain ${streams} with ${workers} concurrent workers`,
-          {
-            async beforeAll() {
-              await dispose()();
-              handler.mockClear();
-              app_ = await seedStreams(streams);
-            },
-          },
-          async () => {
-            const limit = Math.ceil(streams / workers);
-            await Promise.all(
-              Array.from({ length: workers }, () =>
-                app_.drain({
-                  streamLimit: limit,
-                  eventLimit: 50,
-                  leaseMillis: 1,
-                })
-              )
-            );
-          }
-        ).run();
-      });
-    });
-  }
 }
