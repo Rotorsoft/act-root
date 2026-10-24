@@ -12,7 +12,6 @@ describe("wolfdesk broken import", () => {
 
   const baseFiles = () => [
     readFile("schemas/ticket.schemas.ts"),
-    readFile("errors.ts"),
     readFile("services/agent.ts"),
     readFile("services/notification.ts"),
     readFile("ticket-invariants.ts"),

@@ -14,7 +14,7 @@ A larger Act example — a help-desk ticketing system adapted from *Learning Dom
   - `TicketOpsSlice` — on `TicketEscalationRequested`, dispatches `EscalateTicket`
 - **Standalone projection** — `TicketProjection` writes a denormalized read model into a Drizzle/SQLite `tickets` table
 - **Deferred-reaction timers** — escalate, reassign, and close-on-inactivity run as `.defer`-based reactions that sleep until each ticket's deadline and act when they wake, with no polling loop and no read-model scan
-- **Invariants shared across slices** — `mustBeOpen`, `mustBeUser`, `mustBeUserOrAgent`
+- **Every business rule declared** — invariants in `.given` (`mustBeOpen`, `mustBeUser`, the escalation and reassignment rules) and preconditions in `.requires` (`messageExists`, `mustBeReceiver`), shared across slices
 - **Correlation tracing** — the demo prints causation chains across reactions
 - **PostgreSQL event store** — uses `@rotorsoft/act-pg` for events, SQLite (libSQL via Drizzle) for the read model
 
@@ -45,11 +45,10 @@ packages/wolfdesk/
 │   ├── ticket-creation.ts       # TicketCreation partial + TicketCreationSlice (Open / Close / Resolve + auto-assign reaction)
 │   ├── ticket-messaging.ts      # TicketMessaging partial + TicketMessagingSlice (Add/Deliver/Ack + delivery reaction)
 │   ├── ticket-operations.ts     # TicketOperations partial + TicketOpsSlice (Assign / Escalate / Reassign + escalate reaction)
-│   ├── ticket-invariants.ts     # mustBeOpen, mustBeUser, mustBeUserOrAgent
+│   ├── ticket-invariants.ts     # Invariants and preconditions
 │   ├── ticket-projections.ts    # TicketProjection — Drizzle/SQLite read model updater
 │   ├── bootstrap.ts             # Composes act() with the slices + the projection
 │   ├── ticket-timers.ts         # TicketTimersSlice — deferred escalate / reassign / close timers
-│   ├── errors.ts                # Domain errors
 │   ├── main.ts                  # Demo entrypoint
 │   ├── schemas/                 # Zod schemas (events, actions, partial state shapes)
 │   ├── services/                # External integrations (agent assignment, notifications)
@@ -59,7 +58,7 @@ packages/wolfdesk/
     ├── actions.ts               # Helpers for action dispatch in tests
     ├── ticket.spec.ts           # Single-ticket happy paths
     ├── tickets.spec.ts          # Multi-ticket scenarios + projection asserts + deferred timers
-    └── invariants.spec.ts       # Invariant + error coverage
+    └── invariants.spec.ts       # Every rule's refusal
 ```
 
 ## Vertical slice architecture
@@ -162,7 +161,7 @@ pnpm -F wolfdesk test
 
 - `ticket.spec.ts` — single ticket open/assign/message/close happy path
 - `tickets.spec.ts` — multi-ticket flows, projection assertions, and defer-driven escalation/reassignment/close (set a due-now deadline, then `correlate` + `drain` to settle the deferred reactions)
-- `invariants.spec.ts` — invariant violations and domain errors
+- `invariants.spec.ts` — every invariant and precondition refusing its action
 
 Tests use the InMemoryStore for events and a freshly initialized SQLite file for the projection (`init_tickets_db()` in `beforeAll`).
 
