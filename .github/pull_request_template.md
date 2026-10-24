@@ -1,6 +1,6 @@
 <!--
 Follow the canonical body shape in .claude/commands/pr.md:
-Summary → sections per concern → Test plan → Stability charter impact → Follow-ups.
+Summary → sections per concern → Test plan → Stability charter impact.
 Use `Closes #N` with the GitHub issue number (not the project key).
 -->
 

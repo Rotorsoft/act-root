@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook — fired before the model sees a new prompt.
 #
-# Injects lightweight operational context: current branch, uncommitted
-# file count, open-PR-on-this-branch hint. This is the closest thing to
-# "ambient awareness" — Claude can tell whether you're mid-PR or fresh
-# on master without asking.
+# Injects lightweight operational context: the current branch and the
+# uncommitted file count, so Claude can tell whether you're mid-change or
+# fresh on master without asking.
 #
 # Cheap (no network calls); times out at 5s in settings.
 set -o pipefail

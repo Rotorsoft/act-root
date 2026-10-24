@@ -39,7 +39,7 @@ Write in plain language: short sentences, common words, and the effect described
 
 - Audience is someone reading source code. Assume they can read TypeScript.
 - Cross-reference file paths with line numbers when calling out load-bearing code.
-- Diagrams (ASCII art is fine) for state machines, lease lifecycles, drain cycles.
+- Diagrams for state machines, lease lifecycles and drain cycles: a Mermaid block, or an animated scene for things that happen at once. Never ASCII art. See `docs/docs/guides/diagrams.md`.
 - Be honest about "this is best-effort" boundaries — `act-diagram`'s parser is best-effort; `webhook`'s 4xx blocking depends on the receiver dedup'ing.
 
 ## How-to guide
