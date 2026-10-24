@@ -150,6 +150,24 @@ const swallow_error = (): void => {};
 function notify_channel(schema: string, table: string): string {
   return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
 }
+/**
+ * The event columns of a row; `prefix` reads the `t_` tail columns of a
+ * `query_stats` row.
+ */
+const to_committed = <E extends Schemas>(
+  row: Record<string, unknown>,
+  prefix = ""
+) =>
+  ({
+    id: row[`${prefix}id`],
+    stream: row[`${prefix}stream`],
+    version: row[`${prefix}version`],
+    name: row[`${prefix}name`],
+    data: row[`${prefix}data`],
+    created: row[`${prefix}created`],
+    meta: row[`${prefix}meta`],
+  }) as Committed<E, keyof E>;
+
 function assert_safe_identifier(value: string, label: string) {
   if (!SAFE_IDENTIFIER.test(value))
     throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
@@ -355,6 +373,30 @@ export class PostgresStore implements Store {
     this._resolve_pii_key = this.config.pii_encryption
       ? makeKeyResolver(this.config.pii_encryption)
       : undefined;
+  }
+
+  /**
+   * The `pii` column's text for a write: encrypted when `pii_encryption` is
+   * set, JSON either way (an encrypted value casts to a jsonb string), and
+   * `null` kept so `forget_pii` semantics hold.
+   */
+  private async _encode_pii(
+    pii: Readonly<Record<string, unknown>> | null | undefined
+  ): Promise<string | null> {
+    if (pii == null) return null;
+    return JSON.stringify(
+      this._resolve_pii_key ? await encrypt(pii, this._resolve_pii_key) : pii
+    );
+  }
+
+  /**
+   * Decrypts a row's `pii` in place when it was stored encrypted (a jsonb
+   * string). Plaintext rows, including ones written before encryption was
+   * enabled, pass through, so mixed-data rollouts read cleanly.
+   */
+  private async _decode_pii(row: { pii?: unknown }): Promise<void> {
+    if (this._resolve_pii_key && typeof row.pii === "string")
+      row.pii = await decrypt(row.pii, this._resolve_pii_key);
   }
 
   /** A saturated pool fails here as a {@link StoreError} naming the operation. */
@@ -842,25 +884,13 @@ export class PostgresStore implements Store {
 
     const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
     for (const row of result.rows) {
-      // Decrypt the pii column when encryption is configured and the
-      // stored value is a string (encrypted writes land as JSONB
-      // strings; plaintext rows land as JSONB objects, including
-      // legacy data committed before encryption was enabled). The
-      // type-based discriminator means mixed-data rollouts read
-      // through transparently. The cast is local — `Committed.pii`
-      // is `readonly` on the public type, but rows materialized from
-      // the driver are mutable in-flight before they cross back to
-      // the framework.
       if (query?.with_pii === false) {
         // The caller declined the payload, so never decrypt it — an
         // unreadable row cannot fail a read that did not ask for it. `null`
         // rather than the stored ciphertext: `pii_gate` treats any non-null
         // `pii` as discloseable and would merge base64 into `data`.
         (row as { pii: unknown }).pii = null;
-      } else if (this._resolve_pii_key && typeof row.pii === "string") {
-        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
-        (row as { pii: unknown }).pii = decrypted;
-      }
+      } else await this._decode_pii(row);
       await Promise.resolve(callback(row));
     }
 
@@ -914,13 +944,8 @@ export class PostgresStore implements Store {
         );
       if (msgs.length === 0) return [];
 
-      // Encrypt the pii payloads when encryption is configured and
-      // there's anything to encrypt — `null` passes through verbatim so
-      // `forget_pii` semantics survive intact (a NULL stays NULL).
-      // Encrypted output is `JSON.stringify`-ed so the bare base64
-      // string casts to jsonb as a JSON string literal. Data/pii travel
-      // as text[] and cast to jsonb in SQL — the pg driver can't
-      // serialize object elements inside a jsonb[] parameter.
+      // Data/pii travel as text[] and cast to jsonb in SQL — the pg driver
+      // can't serialize object elements inside a jsonb[] parameter.
       const base_version = version;
       const names: string[] = [];
       const datas: string[] = [];
@@ -930,13 +955,7 @@ export class PostgresStore implements Store {
         version++;
         names.push(name as string);
         datas.push(JSON.stringify(data));
-        piis.push(
-          this._resolve_pii_key && pii != null
-            ? JSON.stringify(await encrypt(pii, this._resolve_pii_key))
-            : pii != null
-              ? JSON.stringify(pii)
-              : null
-        );
+        piis.push(await this._encode_pii(pii));
         versions.push(version);
       }
 
@@ -1000,14 +1019,7 @@ export class PostgresStore implements Store {
         // (the reducer chain runs against `event.pii`). The encrypted
         // value only lives at rest in the column; never in memory past
         // this point.
-        if (this._resolve_pii_key) {
-          for (const row of rows) {
-            if (typeof row.pii === "string") {
-              const decrypted = await decrypt(row.pii, this._resolve_pii_key);
-              (row as { pii: unknown }).pii = decrypted;
-            }
-          }
-        }
+        for (const row of rows) await this._decode_pii(row);
         return rows;
       } catch (error) {
         // PG unique-violation on (stream, version) — a concurrent commit
@@ -1826,16 +1838,10 @@ export class PostgresStore implements Store {
     `;
 
     const res = await this._pool.query<
-      Committed<E, keyof E> & {
+      Record<string, unknown> & {
+        stream: string;
         agg_count: number;
         agg_names: Record<string, number> | null;
-        t_id?: number;
-        t_stream?: string;
-        t_version?: number;
-        t_name?: string;
-        t_data?: object;
-        t_created?: Date;
-        t_meta?: object;
       }
     >(sql, stats_limit !== undefined ? [...params, stats_limit] : params);
 
@@ -1847,27 +1853,10 @@ export class PostgresStore implements Store {
         count?: number;
         names?: Record<string, number>;
       } = {
-        head: {
-          id: row.id,
-          stream: row.stream,
-          version: row.version,
-          name: row.name,
-          data: row.data,
-          created: row.created,
-          meta: row.meta,
-        } as Committed<E, keyof E>,
+        head: to_committed<E>(row),
       };
-      if (want_tail && row.t_id !== undefined && row.t_id !== null) {
-        stats.tail = {
-          id: row.t_id,
-          stream: row.t_stream,
-          version: row.t_version,
-          name: row.t_name,
-          data: row.t_data,
-          created: row.t_created,
-          meta: row.t_meta,
-        } as unknown as Committed<E, keyof E>;
-      }
+      if (want_tail && row.t_id !== undefined && row.t_id !== null)
+        stats.tail = to_committed<E>(row, "t_");
       if (want_count) stats.count = row.agg_count;
       // `agg_names` is non-null when this row exists: heads and agg are
       // both built from the same `ef` CTE, so any stream in heads has
@@ -2201,24 +2190,14 @@ export class PostgresStore implements Store {
       // reactions. Correlator leases are kept.
       await client.query(`UPDATE ${this._fqc} SET at = -1`);
       await driver(async (event) => {
-        // Restore mirrors commit: encrypt the pii payload when
-        // encryption is configured. The source iterator yields
-        // plaintext events (restore is the rebuild path — the driver
-        // already presents data in the framework's native shape),
-        // so this is symmetric with the commit-path call above —
-        // including the JSON.stringify wrapper that turns the bare
-        // base64 string into a jsonb-acceptable JSON string literal.
-        const pii_for_write =
-          this._resolve_pii_key && event.pii != null
-            ? JSON.stringify(await encrypt(event.pii, this._resolve_pii_key))
-            : (event.pii ?? null);
+        // The source yields plaintext events; encode them like commit.
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO ${this._fqt}(name, data, pii, stream, version, created, meta)
            VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
           [
             event.name,
             event.data,
-            pii_for_write,
+            await this._encode_pii(event.pii),
             event.stream,
             event.version,
             event.created,
