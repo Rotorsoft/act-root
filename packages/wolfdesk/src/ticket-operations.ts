@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import * as errors from "./errors.js";
 import {
   AssignTicket,
   EscalateTicket,
@@ -12,7 +11,15 @@ import {
   TicketOperationsState,
   TicketReassigned,
 } from "./schemas/ticket.schemas.js";
-import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
+import {
+  mustBeDueForEscalation,
+  mustBeDueForReassignment,
+  mustBeEscalated,
+  mustBeOpen,
+  mustBeUser,
+  mustNotBeAcknowledgedByAgent,
+  mustNotBeEscalated,
+} from "./ticket-invariants.js";
 
 // --- State ---
 export const TicketOperations = state({ Ticket: TicketOperationsState })
@@ -33,14 +40,8 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   .emit("TicketAssigned")
 
   .on({ RequestTicketEscalation })
-  .given([mustBeOpen, mustBeUser])
-  .emit((_, { state }, { stream, actor }) => {
-    if (state.escalateAfter && state.escalateAfter > new Date())
-      throw new errors.TicketEscalationError(
-        stream,
-        actor?.id || "",
-        "Cannot escalate before due date"
-      );
+  .given([mustBeOpen, mustBeUser, mustBeDueForEscalation])
+  .emit((_, __, { actor }) => {
     return [
       "TicketEscalationRequested",
       {
@@ -51,43 +52,17 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
   })
 
   .on({ EscalateTicket })
-  .given([mustBeOpen])
-  .emit((data, { state }, { stream, actor }) => {
-    if (state.escalationId)
-      throw new errors.TicketEscalationError(
-        stream,
-        actor?.id || "",
-        "Cannot escalate more than once"
-      );
-    return ["TicketEscalated", { ...data, escalationId: randomUUID() }];
-  })
+  .given([mustBeOpen, mustNotBeEscalated])
+  .emit((data) => ["TicketEscalated", { ...data, escalationId: randomUUID() }])
 
   .on({ ReassignTicket })
-  .given([mustBeOpen])
-  .emit((data, { state }, { stream, actor }) => {
-    if (!state.escalationId)
-      throw new errors.TicketEscalationError(
-        stream,
-        actor?.id || "",
-        "Cannot reassign without escalation"
-      );
-    if (state.reassignAfter && state.reassignAfter > new Date())
-      throw new errors.TicketReassingmentError(
-        stream,
-        actor?.id || "",
-        "Cannot reassign before due date"
-      );
-    const ackedByAgent = Object.values(state.messages).filter(
-      (msg) => msg.wasRead && msg.from === state.userId
-    ).length;
-    if (ackedByAgent)
-      throw new errors.TicketReassingmentError(
-        stream,
-        actor?.id || "",
-        "Cannot reassign after agent acknowledged"
-      );
-    return ["TicketReassigned", data];
-  })
+  .given([
+    mustBeOpen,
+    mustBeEscalated,
+    mustBeDueForReassignment,
+    mustNotBeAcknowledgedByAgent,
+  ])
+  .emit("TicketReassigned")
 
   .build();
 

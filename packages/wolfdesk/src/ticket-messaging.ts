@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import * as errors from "./errors.js";
 import {
   AcknowledgeMessage,
   AddMessage,
@@ -12,6 +11,7 @@ import {
 } from "./schemas/ticket.schemas.js";
 import { deliverMessage } from "./services/notification.js";
 import {
+  messageExists,
   mustBeOpen,
   mustBeReceiver,
   mustBeUserOrAgent,
@@ -50,20 +50,13 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
 
   .on({ MarkMessageDelivered })
   .given([mustBeOpen])
-  .emit((data, { state }) => {
-    if (!state.messages[data.messageId])
-      throw new errors.MessageNotFoundError(data.messageId);
-    return ["MessageDelivered", data];
-  })
+  .requires([messageExists])
+  .emit("MessageDelivered")
 
   .on({ AcknowledgeMessage })
   .given([mustBeOpen])
-  .requires([mustBeReceiver])
-  .emit((data, snapshot) => {
-    if (!snapshot.state.messages[data.messageId])
-      throw new errors.MessageNotFoundError(data.messageId);
-    return ["MessageRead", data];
-  })
+  .requires([messageExists, mustBeReceiver])
+  .emit("MessageRead")
 
   .build();
 

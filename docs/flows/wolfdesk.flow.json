@@ -104,7 +104,8 @@
       "label": "OpenTicket",
       "file": "packages/wolfdesk/src/ticket-creation.ts",
       "col": 0,
-      "slice": "slice:TicketCreation"
+      "slice": "slice:TicketCreation",
+      "invariants": ["Cannot open twice"]
     },
     {
       "id": "evt:TicketOpened",
@@ -158,7 +159,8 @@
       "invariants": ["Ticket must be open"],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 4,
-      "slice": "slice:TicketMessaging"
+      "slice": "slice:TicketMessaging",
+      "preconditions": ["Message must exist"]
     },
     {
       "id": "evt:MessageDelivered",
@@ -174,7 +176,7 @@
       "lane": "action",
       "label": "AcknowledgeMessage",
       "invariants": ["Ticket must be open"],
-      "preconditions": ["Must be receiver to ack"],
+      "preconditions": ["Message must exist", "Must be receiver to ack"],
       "file": "packages/wolfdesk/src/ticket-messaging.ts",
       "col": 5,
       "slice": "slice:TicketMessaging"
@@ -192,7 +194,11 @@
       "id": "action:RequestTicketEscalation",
       "lane": "action",
       "label": "RequestTicketEscalation",
-      "invariants": ["Ticket must be open", "Must be the owner"],
+      "invariants": [
+        "Ticket must be open",
+        "Must be the owner",
+        "Cannot escalate before due date"
+      ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 7,
       "slice": "slice:TicketOps"
@@ -210,7 +216,7 @@
       "id": "action:EscalateTicket",
       "lane": "action",
       "label": "EscalateTicket",
-      "invariants": ["Ticket must be open"],
+      "invariants": ["Ticket must be open", "Cannot escalate more than once"],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 8,
       "slice": "slice:TicketOps"
@@ -228,7 +234,12 @@
       "id": "action:ReassignTicket",
       "lane": "action",
       "label": "ReassignTicket",
-      "invariants": ["Ticket must be open"],
+      "invariants": [
+        "Ticket must be open",
+        "Cannot reassign without escalation",
+        "Cannot reassign before due date",
+        "Cannot reassign after agent acknowledged"
+      ],
       "file": "packages/wolfdesk/src/ticket-operations.ts",
       "col": 9,
       "slice": "slice:TicketOps"
@@ -1227,8 +1238,8 @@
         {
           "from": "action:OpenTicket",
           "to": "evt:TicketOpened",
-          "say": "The state already has a product, so the emit throws **TicketCannotOpenTwiceError**.",
-          "reject": "TicketCannotOpenTwice"
+          "say": "The state already has a product, so the invariant **Cannot open twice** refuses it.",
+          "reject": "Cannot open twice"
         },
         {
           "from": "actor:customer",

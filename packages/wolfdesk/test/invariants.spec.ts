@@ -1,10 +1,6 @@
 import { sandbox } from "@rotorsoft/act/test";
 import { Chance } from "chance";
 import { builder, tenantCorrelator } from "../src/bootstrap.js";
-import {
-  MessageNotFoundError,
-  TicketCannotOpenTwiceError,
-} from "../src/errors.js";
 import { type Actions, makeActions, target } from "./actions.js";
 
 const chance = new Chance();
@@ -13,6 +9,7 @@ describe("ticket invariants", () => {
   // Per-suite isolated Act (fresh InMemoryStore + InMemoryCache) built from
   // the shared wolfdesk builder — no singleton port, auto disposed below.
   let dispose: () => Promise<void>;
+  let app: Parameters<typeof makeActions>[0];
   let acknowledgeMessage: Actions["acknowledgeMessage"];
   let addMessage: Actions["addMessage"];
   let assignTicket: Actions["assignTicket"];
@@ -29,6 +26,7 @@ describe("ticket invariants", () => {
       actOptions: { correlator: tenantCorrelator },
     });
     dispose = ctx.dispose;
+    app = ctx.app;
     ({
       acknowledgeMessage,
       addMessage,
@@ -52,7 +50,10 @@ describe("ticket invariants", () => {
     await openTicket(t, "opening once", "the first opening");
     await expect(
       openTicket(t, "opening twice", "the second opening")
-    ).rejects.toThrow(TicketCannotOpenTwiceError);
+    ).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      description: "Cannot open twice",
+    });
   });
 
   it("should throw when trying to close twice or empty", async () => {
@@ -133,9 +134,10 @@ describe("ticket invariants", () => {
       name: "ERR_INVARIANT",
     });
     await openTicket(t, "opening once", "the first opening");
-    await expect(markMessageDelivered(t, chance.guid())).rejects.toThrow(
-      MessageNotFoundError
-    );
+    await expect(markMessageDelivered(t, chance.guid())).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      message: "MarkMessageDelivered failed precondition: Message must exist",
+    });
     await closeTicket(t);
     await expect(markMessageDelivered(t, chance.guid())).rejects.toMatchObject({
       name: "ERR_INVARIANT",
@@ -148,9 +150,10 @@ describe("ticket invariants", () => {
       name: "ERR_INVARIANT",
     });
     await openTicket(t, "opening once", "the first opening");
-    await expect(acknowledgeMessage(t, chance.guid())).rejects.toThrow(
-      MessageNotFoundError
-    );
+    await expect(acknowledgeMessage(t, chance.guid())).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      message: "AcknowledgeMessage failed precondition: Message must exist",
+    });
     await closeTicket(t);
     await expect(acknowledgeMessage(t, chance.guid())).rejects.toMatchObject({
       name: "ERR_INVARIANT",
@@ -166,6 +169,63 @@ describe("ticket invariants", () => {
       name: "ERR_INVARIANT",
       message:
         "AcknowledgeMessage failed precondition: Must be receiver to ack",
+    });
+  });
+
+  it("refuses an escalation before its due date, and a second escalation", async () => {
+    const t = target();
+    await openTicket(t, "escalation", "not yet");
+    await assignTicket(t); // escalateAfter one day out
+    await expect(requestTicketEscalation(t)).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      description: "Cannot escalate before due date",
+    });
+    await escalateTicket(t);
+    await expect(escalateTicket(t)).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      description: "Cannot escalate more than once",
+    });
+  });
+
+  it("refuses a reassignment without escalation, and before its due date", async () => {
+    const t = target();
+    await openTicket(t, "reassignment", "not yet");
+    await expect(reassignTicket(t)).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      description: "Cannot reassign without escalation",
+    });
+    await assignTicket(t); // reassignAfter one day out
+    await escalateTicket(t);
+    await expect(reassignTicket(t)).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      description: "Cannot reassign before due date",
+    });
+  });
+
+  it("refuses a reassignment after the agent acknowledged the customer", async () => {
+    const t = target();
+    const agent = chance.guid();
+    // The app's own reactions (auto-assign, delivery) commit to the same
+    // stream, so wait for each before the next action.
+    const ticket = async () => (await app.load("Ticket", t.stream)).state;
+    await openTicket(t, "acknowledged", "the agent read it");
+    await vi.waitFor(async () =>
+      expect((await ticket()).agentId).toBeDefined()
+    );
+    await assignTicket(t, agent, new Date(), new Date());
+    const [added] = await addMessage(t, "please help", agent);
+    const { messageId } = added.event!.data as { messageId: string };
+    await vi.waitFor(async () =>
+      expect((await ticket()).messages[messageId]?.wasDelivered).toBe(true)
+    );
+    await acknowledgeMessage(target(agent, t.stream), messageId);
+    await requestTicketEscalation(t);
+    await escalateTicket(t);
+    await expect(
+      reassignTicket(t, chance.guid(), new Date(), new Date())
+    ).rejects.toMatchObject({
+      name: "ERR_INVARIANT",
+      description: "Cannot reassign after agent acknowledged",
     });
   });
 
